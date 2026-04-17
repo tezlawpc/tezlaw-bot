@@ -1,0 +1,17 @@
+{
+  "name": "tezlaw-bot",
+  "version": "1.0.0",
+  "description": "Tez Law P.C. — Zara AI Assistant (All Channels)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "express": "^4.18.0",
+    "form-data": "^4.0.0",
+    "pg": "^8.11.0",
+    "xml2js": "^0.6.0",
+    "openai": "^4.0.0"
+  }
+}
