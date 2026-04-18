@@ -120,29 +120,125 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       messages.push({ role: "user", content: userMessage });
     }
 
-    // 8. Call Claude
-    const resp = await axios.post(
-      "https://api.anthropic.com/v1/messages",
-      {
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        system: personalizedSystem,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages,
-      },
-      {
-        headers: {
-          "x-api-key": ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "Content-Type": "application/json",
-          "anthropic-beta": "interleaved-thinking-2025-05-14"
+    // 8. Call Claude — with tool_use loop for web search + action tools
+    //
+    //  When Claude uses web_search, stop_reason="tool_use" and we must:
+    //    1. Append the assistant's tool_use turn to messages
+    //    2. Append tool_result(s) as a user turn
+    //    3. Re-call the API until stop_reason="end_turn"
+    //  Without this loop, research requests silently fail.
+    //
+    const allTools = [
+      { type: "web_search_20250305", name: "web_search" },
+      ...(options.extraTools || [])  // action tools when JJ is messaging
+    ];
+
+    let loopMessages = [...messages];
+    let reply = "";
+    const MAX_LOOPS = 5;
+
+    for (let loop = 0; loop < MAX_LOOPS; loop++) {
+      let respData;
+      try {
+        const resp = await axios.post(
+          "https://api.anthropic.com/v1/messages",
+          {
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1024,
+            system: personalizedSystem,
+            tools: allTools,
+            messages: loopMessages,
+          },
+          {
+            headers: {
+              "x-api-key": ANTHROPIC_API_KEY,
+              "anthropic-version": "2023-06-01",
+              "Content-Type": "application/json"
+            },
+            timeout: 25000
+          }
+        );
+        respData = resp.data;
+      } catch (apiErr) {
+        // Detailed error logging so Render logs show exactly what failed
+        const status  = apiErr.response?.status;
+        const errBody = apiErr.response?.data;
+        console.error(`[askClaude] ❌ API call loop=${loop} FAILED`);
+        console.error(`[askClaude]   HTTP Status : ${status || "no response"}`);
+        console.error(`[askClaude]   Error       : ${apiErr.message}`);
+        console.error(`[askClaude]   Body        : ${JSON.stringify(errBody)}`);
+        console.error(`[askClaude]   Timeout?    : ${apiErr.code === "ECONNABORTED"}`);
+        console.error(`[askClaude]   Platform    : ${platform} | User: ${platformId}`);
+        console.error(`[askClaude]   Message     : ${userMessage.substring(0, 100)}`);
+
+        // Surface a descriptive error to the user
+        if (apiErr.code === "ECONNABORTED") {
+          throw new Error("⏱️ That request took too long — try a more specific question, or call us at 626-678-8677.");
+        } else if (status === 529 || status === 503) {
+          throw new Error("🔄 AI service is temporarily busy. Please try again in a moment, or call 626-678-8677.");
+        } else if (status === 401) {
+          throw new Error("🔑 Configuration error. Please contact jj@tezlawfirm.com.");
+        } else {
+          throw new Error(`❌ Technical error (${status || apiErr.message}). Please try again or call 626-678-8677.`);
         }
       }
-    );
 
-    const reply = resp.data.content
-      .filter(b => b.type === "text").map(b => b.text).join("").trim()
-      || "I'm sorry, I didn't catch that. Could you rephrase?";
+      console.log(`[askClaude] loop=${loop} stop_reason=${respData.stop_reason} blocks=${respData.content?.length}`);
+
+      // Final text response — done
+      if (respData.stop_reason === "end_turn") {
+        reply = respData.content
+          .filter(b => b.type === "text").map(b => b.text).join("").trim();
+        if (!reply) {
+          console.error(`[askClaude] ❌ end_turn but no text block. Content: ${JSON.stringify(respData.content)}`);
+          reply = "I'm sorry, I didn't catch that. Could you rephrase?";
+        }
+        break;
+      }
+
+      // Tool use — loop back with results
+      if (respData.stop_reason === "tool_use") {
+        const toolUseBlocks = respData.content.filter(b => b.type === "tool_use");
+        console.log(`[askClaude] tool_use blocks: ${toolUseBlocks.map(b => b.name).join(", ")}`);
+
+        // Append assistant turn
+        loopMessages.push({ role: "assistant", content: respData.content });
+
+        // Build tool results
+        const toolResults = [];
+        for (const toolUse of toolUseBlocks) {
+          if (toolUse.name === "web_search") {
+            // Web search is handled server-side by Anthropic — just acknowledge
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: toolUse.id,
+              content: "Search completed. Please synthesize the results."
+            });
+          } else if (options.executeAction) {
+            // Action tools (calendar, email, etc.) — delegated to caller
+            try {
+              const result = await options.executeAction(toolUse.name, toolUse.input);
+              toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
+            } catch (actionErr) {
+              console.error(`[askClaude] Action ${toolUse.name} failed: ${actionErr.message}`);
+              toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: `Error: ${actionErr.message}`, is_error: true });
+            }
+          } else {
+            toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: "Action not available." });
+          }
+        }
+
+        loopMessages.push({ role: "user", content: toolResults });
+        continue;
+      }
+
+      // Unexpected stop reason
+      console.error(`[askClaude] ❌ Unexpected stop_reason: ${respData.stop_reason}`);
+      reply = "I'm sorry, I didn't catch that. Could you rephrase?";
+      break;
+    }
+
+    if (!reply) reply = "I'm sorry, I didn't catch that. Could you rephrase?";
 
     // 9. Save reply + auto-summarize
     await db.saveMessage(platform, platformId, "assistant", reply);
