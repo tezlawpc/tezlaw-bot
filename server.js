@@ -424,20 +424,7 @@ async function getWeChatToken() {
   return wcToken;
 }
 
-async function wcSend(openId, text) {
-  const token = await getWeChatToken();
-  const chunks = [];
-  for (let i = 0; i < text.length; i += 1900) chunks.push(text.slice(i, i+1900));
-  for (const chunk of chunks) {
-    const r = await axios.post(
-      `https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token=${token}`,
-      { touser: openId, msgtype: "text", text: { content: chunk } }
-    );
-    if (r.data.errcode && r.data.errcode !== 0) {
-      console.error("wcSend error:", JSON.stringify(r.data));
-    }
-  }
-}
+// wcSend removed — using direct XML reply instead
 
 async function wcDownloadMedia(mediaId) {
   const token = await getWeChatToken();
@@ -462,40 +449,79 @@ async function handleWeChatMsg(req, res) {
       res.type("application/xml").send(wcXmlReply(from, to, WELCOME_MESSAGE)); return;
     }
     if (type === "text") {
-      res.send("success");
+      // Direct XML reply — no IP whitelist needed
       try {
-        await processMessage("wechat", from, msg.Content?.trim() || "", (t) => wcSend(from, t));
+        const userText = msg.Content?.trim() || "";
+        console.log(`WeChat text from ${from}: "${userText.substring(0, 50)}"`);
+        // Race Claude against 4.5s timeout to stay within WeChat's 5s window
+        const reply = await Promise.race([
+          (async () => {
+            const lowerText = userText.toLowerCase().trim();
+            if (["hi","hello","hey","hola","start","你好"].includes(lowerText)) {
+              await clearHistory("wechat", from);
+              return WELCOME_MESSAGE;
+            }
+            if (["contact","team","contacto"].includes(lowerText)) return CONTACT_MESSAGE;
+            if (lowerText === "reset") { await clearHistory("wechat", from); return "Fresh start! What can I help you with? 😊"; }
+            const r = await askClaudeWithMemory("wechat", from, userText, SYSTEM_PROMPT);
+            const urgency = detectDistress(userText);
+            if (urgency !== "none") notifyDistress(from, userText, urgency, "WeChat").catch(()=>{});
+            notifyLead(from, userText, "WeChat").catch(()=>{});
+            return r;
+          })(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4500))
+        ]);
+        res.type("application/xml").send(wcXmlReply(from, to, reply.substring(0, 600)));
       } catch(err) {
-        console.error("WeChat processMessage error:", err.message);
-        try { await wcSend(from, "Sorry, something went wrong. Please call us at 626-678-8677."); } catch(e) {}
+        if (err.message === "timeout") {
+          console.log("WeChat response timeout — sending fallback");
+          res.type("application/xml").send(wcXmlReply(from, to, "Processing your request... please send your message again in a moment. 😊"));
+        } else {
+          console.error("WeChat text error:", err.message);
+          res.type("application/xml").send(wcXmlReply(from, to, "Sorry, something went wrong. Please call us at 626-678-8677."));
+        }
       }
       return;
     }
     if (type === "voice") {
-      res.send("success");
       try {
-        const text = msg.Recognition || (await (async () => {
+        let text = msg.Recognition;
+        if (!text) {
           const { buffer } = await wcDownloadMedia(msg.MediaId);
-          return await transcribeAudio(buffer, "voice.amr");
-        })());
-        if (!text) { await wcSend(from, "Sorry, I couldn't make out that voice message. Please type instead."); return; }
-        await processMessage("wechat", from, text, (t) => wcSend(from, t));
+          text = await transcribeAudio(buffer, "voice.amr");
+        }
+        if (!text) { res.type("application/xml").send(wcXmlReply(from, to, "Sorry, I couldn\'t make out that voice message. Please type your question instead.")); return; }
+        const reply = await Promise.race([
+          askClaudeWithMemory("wechat", from, text, SYSTEM_PROMPT),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000))
+        ]);
+        res.type("application/xml").send(wcXmlReply(from, to, `🎤 I heard: "${text}"\n\n${reply}`.substring(0, 600)));
       } catch(err) {
-        console.error("WeChat voice error:", err.message);
-        try { await wcSend(from, "I had trouble with that voice message. Please type instead."); } catch(e) {}
+        if (err.message === "timeout") {
+          res.type("application/xml").send(wcXmlReply(from, to, "Processing your voice message... please send it again in a moment. 😊"));
+        } else {
+          console.error("WeChat voice error:", err.message);
+          res.type("application/xml").send(wcXmlReply(from, to, "I had trouble with that voice message. Please type instead."));
+        }
       }
       return;
     }
     if (type === "image") {
-      res.send("success");
       try {
         const imgResp = await axios.get(msg.PicUrl, { responseType: "arraybuffer" });
         const mimeType = imgResp.headers["content-type"] || "image/jpeg";
-        const reply = await askClaudeWithMemory("wechat", from, "Analyze this image.", SYSTEM_PROMPT, { isImage:true, imageData:Buffer.from(imgResp.data).toString("base64"), imageMediaType:mimeType });
-        await wcSend(from, reply);
+        const reply = await Promise.race([
+          askClaudeWithMemory("wechat", from, "Analyze this image. If it's a legal document, explain what it is.", SYSTEM_PROMPT, { isImage:true, imageData:Buffer.from(imgResp.data).toString("base64"), imageMediaType:mimeType }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000))
+        ]);
+        res.type("application/xml").send(wcXmlReply(from, to, reply.substring(0, 600)));
       } catch(err) {
-        console.error("WeChat image error:", err.message);
-        try { await wcSend(from, "I had trouble reading that image. Please describe what you need help with."); } catch(e) {}
+        if (err.message === "timeout") {
+          res.type("application/xml").send(wcXmlReply(from, to, "Processing your image... please send it again in a moment. 😊"));
+        } else {
+          console.error("WeChat image error:", err.message);
+          res.type("application/xml").send(wcXmlReply(from, to, "I had trouble reading that image. Please describe what you need help with."));
+        }
       }
       return;
     }
