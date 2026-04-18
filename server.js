@@ -12,6 +12,7 @@ const fs       = require("fs");
 const { initDB, clearHistory }    = require("./db");
 const { askClaudeWithMemory }     = require("./askClaude-memory");
 const { transcribeAudio }         = require("./whisper");
+const { sendVoiceReply }          = require("./voice");
 
 const app = express();
 app.use(express.json());
@@ -356,12 +357,22 @@ app.post("/telegram", async (req, res) => {
       } catch(e) {}
     }, 5000);
 
-    await processMessage("telegram", chatId, text, (t) => tgSend(chatId, t));
+    let lastTgReply = null;
+    await processMessage("telegram", chatId, text, async (t) => {
+      lastTgReply = t;
+      await tgSend(chatId, t);
+    });
     clearTimeout(thinkingTimer);
 
     // Delete the thinking message once real reply is sent
     if (thinkingMsg) {
       axios.post(`${TELEGRAM_API}/deleteMessage`, { chat_id: chatId, message_id: thinkingMsg }).catch(() => {});
+    }
+
+    // Send voice reply if JJ is authenticated
+    const { isJJAuthenticated } = require("./jj-mode");
+    if (lastTgReply && isJJAuthenticated("telegram", chatId)) {
+      sendVoiceReply("telegram", chatId, lastTgReply).catch(() => {});
     }
   } catch(err) {
     console.error("Telegram error:", err.message);
