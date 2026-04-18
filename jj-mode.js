@@ -72,9 +72,10 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
     return await handleJJSession(platform, userId, userMessage, options);
   }
 
-  // Awaiting password
+  // Awaiting password — normalize by removing all spaces/punctuation for flexible input
   if (isAwaitingPassword(platform, userId)) {
-    if (userMessage.trim() === JJ_PASSWORD) {
+    const normalize = (s) => s.toLowerCase().replace(/[\s\-_.,!?]+/g, "");
+    if (normalize(userMessage) === normalize(JJ_PASSWORD)) {
       jjSessions[key] = "authenticated";
       const memory = await getJJMemorySummary();
       return {
