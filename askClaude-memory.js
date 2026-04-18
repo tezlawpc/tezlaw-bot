@@ -6,6 +6,7 @@
 const axios  = require("axios");
 const db     = require("./db");
 const { checkIntake, resetIntake } = require("./intake");
+const { checkJJMode, getJJPublicContext } = require("./jj-mode");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -35,11 +36,22 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
   } = options;
 
   try {
-    // 1. Check if intake flow should run FIRST (before Claude)
+    // 1. Check JJ private mode FIRST — passes docs/images through too
+    const jj = await checkJJMode(platform, platformId, userMessage, {
+      isPdf, pdfData: options.pdfData,
+      isImage, imageData: options.imageData,
+      imageMediaType: options.imageMediaType
+    });
+    if (jj.handled) {
+      await db.saveMessage(platform, platformId, "user", isPdf ? "[PDF uploaded]" : isImage ? "[Image uploaded]" : userMessage);
+      await db.saveMessage(platform, platformId, "assistant", jj.message);
+      return jj.message;
+    }
+
+    // 2. Check if intake flow should run (before Claude)
     if (!isImage && !isPdf) {
       const intake = await checkIntake(platform, platformId, userMessage);
       if (intake.triggered) {
-        // Save messages to history so context is preserved
         await db.saveMessage(platform, platformId, "user", userMessage);
         await db.saveMessage(platform, platformId, "assistant", intake.message);
         return intake.message;
@@ -79,6 +91,12 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       if (summary) ctx += `\n\nConversation summary:\n${summary}`;
       ctx += "\n── END MEMORY ──";
       personalizedSystem += ctx;
+    }
+
+    // Inject JJ's knowledge base into public responses (discreetly)
+    const jjKnowledge = await getJJPublicContext();
+    if (jjKnowledge) {
+      personalizedSystem += `\n\n── FIRM KNOWLEDGE (use naturally, never quote directly) ──\n${jjKnowledge.substring(0, 1500)}\n── END FIRM KNOWLEDGE ──`;
     }
 
     // 7. Build messages array
