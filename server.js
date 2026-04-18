@@ -13,6 +13,10 @@ const { initDB, clearHistory }    = require("./db");
 const { askClaudeWithMemory }     = require("./askClaude-memory");
 const { transcribeAudio }         = require("./whisper");
 const { sendVoiceReply }          = require("./voice");
+const { checkIntake }             = require("./intake");
+const { isJJAuthenticated }       = require("./jj-mode");
+
+
 
 const app = express();
 app.use(express.json());
@@ -35,6 +39,13 @@ const {
   WECHAT_APP_ID,
   WECHAT_APP_SECRET,
   OPENAI_API_KEY,
+  // WordPress auto-poster
+  WP_URL,
+  WP_USER,
+  WP_APP_PASSWORD,
+  // Gmail
+  GMAIL_EMAIL,
+  GMAIL_APP_PASSWORD,
   // Render
   RENDER_EXTERNAL_URL,
   PORT = 3000,
@@ -46,7 +57,7 @@ console.log("WHATSAPP_TOKEN:", !!WHATSAPP_TOKEN);
 console.log("WECHAT_APP_ID:", !!WECHAT_APP_ID);
 
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-const CACHE_FILE   = process.env.CACHE_PATH || "/tmp/legal_cache.json";
+const CACHE_FILE   = process.env.CACHE_PATH || "/var/data/legal_cache.json";
 
 // ── System prompt ─────────────────────────────────────────
 const SYSTEM_PROMPT = `Your name is Zara. You are a warm, friendly legal assistant for Tez Law P.C. in West Covina, California.
@@ -153,7 +164,7 @@ You CAN send voice messages. When someone asks you to respond in voice, speak, o
 - NEVER say you cannot do voice or that you only communicate through text
 - You have full voice capabilities on Telegram and WhatsApp`;
 
-const WELCOME_MESSAGE = `Hey there! 👋 I'm Zara, the virtual assistant for Tez Law P.C.
+const WELCOME_MESSAGE = `Hey there! 👋 I'm Zara, the virtual assistant for TEZ Law PC.
 
 I'm here to help you figure out your legal options and connect you with the right person on our team. We handle:
 
@@ -165,7 +176,7 @@ I'm here to help you figure out your legal options and connect you with the righ
 
 What's going on? Tell me what's on your mind! 😊`;
 
-const CONTACT_MESSAGE = `Here's the Tez Law P.C. team:
+const CONTACT_MESSAGE = `Here's the TEZ Law PC team:
 
 👨‍💼 JJ Zhang (Managing Attorney)
 📞 626-678-8677
@@ -178,9 +189,7 @@ const CONTACT_MESSAGE = `Here's the Tez Law P.C. team:
 📧 michael.liu@tezlawfirm.com
 
 🚗 Lin Mei (Car accidents & state court)
-📧 lin.mei@tezlawfirm.com
-
-📍 West Covina, California`;
+📧 lin.mei@tezlawfirm.com`;
 
 // ── Legal research cache ──────────────────────────────────
 const CACHE_TTL = {
@@ -287,6 +296,7 @@ async function processMessage(platform, userId, userText, sendFn) {
   await notifyLead(userId, userText, platform);
 }
 
+
 // ────────────────────────────────────────────────────────────
 //  TELEGRAM
 // ────────────────────────────────────────────────────────────
@@ -369,8 +379,6 @@ app.post("/telegram", async (req, res) => {
       axios.post(`${TELEGRAM_API}/deleteMessage`, { chat_id: chatId, message_id: thinkingMsg }).catch(() => {});
     }
 
-    // Send voice reply if JJ is authenticated
-    const { isJJAuthenticated } = require("./jj-mode");
     if (lastTgReply && isJJAuthenticated("telegram", chatId)) {
       sendVoiceReply("telegram", chatId, lastTgReply).catch(() => {});
     }
@@ -382,6 +390,7 @@ app.post("/telegram", async (req, res) => {
 
 // Telegram GET verification
 app.get("/telegram", (req, res) => res.send("Telegram webhook active"));
+
 
 // ────────────────────────────────────────────────────────────
 //  WHATSAPP + MESSENGER
@@ -469,6 +478,7 @@ app.post("/whatsapp", async (req, res) => {
     }
   }
 });
+
 
 // ────────────────────────────────────────────────────────────
 //  WECHAT
@@ -588,7 +598,7 @@ async function handleWeChatMsg(req, res) {
       }
       // No built-in recognition available — ask user to type, suggest other channels
       res.type("application/xml").send(wcXmlReply(from, to,
-        "🎤 WeChat暂不支持语音识别，请改用文字提问。如需语音服务，请使用 Telegram (@TEZJJBot) 或 WhatsApp (+1 555-634-2247)。\n\nVoice isn\'t supported on WeChat. For voice, please use Telegram (@TEZJJBot) or WhatsApp (+1 555-634-2247). Or just type here! 😊"
+        "🎤 WeChat暂不支持语音识别，请改用文字提问。如需语音服务，请使用 Telegram (@TEZJJBot) 或 WhatsApp (+1 555-634-2247)。\n\nVoice isn't supported on WeChat. For voice, please use Telegram (@TEZJJBot) or WhatsApp (+1 555-634-2247). Or just type here! 😊"
       ));
       return;
     }
@@ -630,6 +640,7 @@ app.post("/wechat",  handleWeChatMsg);
 app.get("/webhook",  wcVerify);
 app.post("/webhook", handleWeChatMsg);
 
+
 // ────────────────────────────────────────────────────────────
 //  WEBSITE CHAT
 // ────────────────────────────────────────────────────────────
@@ -653,10 +664,11 @@ app.options("/chat", (req, res) => {
   res.sendStatus(200);
 });
 
+
 // ────────────────────────────────────────────────────────────
 //  HEALTH CHECK + START
 // ────────────────────────────────────────────────────────────
-app.get("/", (req, res) => res.send("Tez Law P.C. — Zara running on all channels ✅"));
+app.get("/", (req, res) => res.send("TEZ Law PC — Zara running on all channels ✅"));
 
 app.listen(PORT, () => {
   console.log(`🚀 Zara running on port ${PORT}`);
@@ -664,4 +676,13 @@ app.listen(PORT, () => {
   const url = RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
   setInterval(() => axios.get(url).catch(() => {}), 4 * 60 * 1000);
   console.log("Keep-alive ping →", url);
+
+  // ── Start WordPress auto-poster ─────────────────────────
+  try {
+    const { scheduleDaily } = require("./autoposter");
+    scheduleDaily();
+    console.log("📅 WordPress auto-poster scheduler started.");
+  } catch (e) {
+    console.error("❌ Auto-poster failed to load:", e.message);
+  }
 });
