@@ -426,6 +426,26 @@ async function getWeChatToken() {
 
 // wcSend removed — using direct XML reply instead
 
+// wcSendDirect — used for async responses AFTER initial XML reply (voice messages)
+async function wcSendDirect(openId, text) {
+  try {
+    const token = await getWeChatToken();
+    const chunks = [];
+    for (let i = 0; i < text.length; i += 1900) chunks.push(text.slice(i, i + 1900));
+    for (const chunk of chunks) {
+      const r = await axios.post(
+        `https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token=${token}`,
+        { touser: openId, msgtype: "text", text: { content: chunk } }
+      );
+      if (r.data.errcode && r.data.errcode !== 0) {
+        console.error("wcSendDirect error:", JSON.stringify(r.data));
+      }
+    }
+  } catch(err) {
+    console.error("wcSendDirect error:", err.message);
+  }
+}
+
 async function wcDownloadMedia(mediaId) {
   const token = await getWeChatToken();
   const resp = await axios.get(`https://api.weixin.qq.com/cgi-bin/media/get?access_token=${token}&media_id=${mediaId}`, { responseType: "arraybuffer" });
@@ -485,24 +505,42 @@ async function handleWeChatMsg(req, res) {
     }
     if (type === "voice") {
       try {
-        let text = msg.Recognition;
-        if (!text) {
-          const { buffer } = await wcDownloadMedia(msg.MediaId);
-          text = await transcribeAudio(buffer, "voice.amr");
+        // Use WeChat built-in recognition if available (Chinese)
+        if (msg.Recognition) {
+          const text = msg.Recognition;
+          const reply = await Promise.race([
+            askClaudeWithMemory("wechat", from, text, SYSTEM_PROMPT),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000))
+          ]);
+          res.type("application/xml").send(wcXmlReply(from, to,
+            `🎤 I heard: "${text}"\n\n${reply}`.substring(0, 600)
+          ));
+          return;
         }
-        if (!text) { res.type("application/xml").send(wcXmlReply(from, to, "Sorry, I couldn\'t make out that voice message. Please type your question instead.")); return; }
-        const reply = await Promise.race([
-          askClaudeWithMemory("wechat", from, text, SYSTEM_PROMPT),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000))
-        ]);
-        res.type("application/xml").send(wcXmlReply(from, to, `🎤 I heard: "${text}"\n\n${reply}`.substring(0, 600)));
+        // No built-in recognition — download AMR and use Whisper asynchronously
+        // Acknowledge immediately within 5s, then process
+        res.type("application/xml").send(wcXmlReply(from, to,
+          "🎤 Processing your voice message... I\'ll respond in a moment!"
+        ));
+        // Process async after responding
+        setImmediate(async () => {
+          try {
+            const { buffer } = await wcDownloadMedia(msg.MediaId);
+            const text = await transcribeAudio(buffer, "voice.amr");
+            if (!text) {
+              await wcSendDirect(from, "Sorry, I couldn\'t transcribe that voice message. Please type instead.");
+              return;
+            }
+            const reply = await askClaudeWithMemory("wechat", from, text, SYSTEM_PROMPT);
+            await wcSendDirect(from, `🎤 I heard: "${text}"\n\n${reply}`);
+          } catch(err) {
+            console.error("WeChat async voice error:", err.message);
+            await wcSendDirect(from, "I had trouble with that voice message. Please type instead, or call us at 626-678-8677.");
+          }
+        });
       } catch(err) {
-        if (err.message === "timeout") {
-          res.type("application/xml").send(wcXmlReply(from, to, "Processing your voice message... please send it again in a moment. 😊"));
-        } else {
-          console.error("WeChat voice error:", err.message);
-          res.type("application/xml").send(wcXmlReply(from, to, "I had trouble with that voice message. Please type instead."));
-        }
+        console.error("WeChat voice error:", err.message);
+        res.type("application/xml").send(wcXmlReply(from, to, "I had trouble with that voice message. Please type instead."));
       }
       return;
     }
