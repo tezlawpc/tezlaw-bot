@@ -14,14 +14,43 @@ const jjSessions = {};
 const JJ_PASSWORD = process.env.JJ_PASSWORD || "tezlaw2026jj";
 
 // ── Trigger phrases ───────────────────────────────────────
-const JJ_TRIGGERS = [
-  "i am jj zhang", "i'm jj zhang", "im jj zhang",
-  "this is jj zhang", "this is jj", "jj zhang here",
-  "我是张律师", "我是JJ", "我是jj zhang",
-];
+const JJ_TRIGGERS_KEYWORDS = ["jj", "zhang", "private", "switch",
+  "private channel", "private mode", "attorney mode", "jj mode",
+  "我是jj", "我是张", "张律师", "切换", "私人", "private chat", "secure mode"];
 
-function isJJTrigger(message) {
-  return JJ_TRIGGERS.some(t => message.toLowerCase().includes(t));
+async function isJJTrigger(message) {
+  const lower = message.toLowerCase();
+
+  // Quick keyword pre-check to avoid unnecessary API calls
+  const hasKeyword = JJ_TRIGGERS_KEYWORDS.some(k => lower.includes(k));
+  if (!hasKeyword) return false;
+
+  // Use Claude Haiku to intelligently detect intent
+  try {
+    const resp = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      {
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 10,
+        messages: [{
+          role: "user",
+          content: `Does this message indicate someone identifying as "JJ Zhang" or requesting to switch to a private/attorney/secure mode? Answer only YES or NO.\n\nMessage: "${message}"`
+        }]
+      },
+      {
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    const answer = resp.data.content[0]?.text?.trim().toUpperCase();
+    return answer === "YES";
+  } catch(e) {
+    // Fallback if API call fails
+    return lower.includes("jj zhang") || lower.includes("jj mode") || lower.includes("private channel");
+  }
 }
 
 function isJJAuthenticated(platform, userId) {
@@ -62,12 +91,12 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
     }
   }
 
-  // Trigger phrase detected
-  if (isJJTrigger(userMessage)) {
+  // Intelligent trigger detection
+  if (await isJJTrigger(userMessage)) {
     jjSessions[key] = "awaiting_password";
     return {
       handled: true,
-      message: "🔐 Please enter your password to access JJ private mode."
+      message: "🔐 Hey JJ! Please enter your password to switch to private mode."
     };
   }
 
