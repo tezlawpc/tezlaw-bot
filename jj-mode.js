@@ -145,30 +145,86 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     messageContent = userMessage;
   }
 
-  // Call Claude with JJ context
+  // Call Claude with tool_use loop — JJ mode uses web search heavily
   try {
-    const resp = await axios.post(
-      "https://api.anthropic.com/v1/messages",
-      {
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2048,
-        system: jjSystemPrompt,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{ role: "user", content: messageContent }],
-      },
-      {
-        headers: {
-          "x-api-key": process.env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "Content-Type": "application/json",
-          "anthropic-beta": "interleaved-thinking-2025-05-14"
+    const allTools = [{ type: "web_search_20250305", name: "web_search" }];
+    let loopMessages = [{ role: "user", content: messageContent }];
+    let reply = "";
+    const MAX_LOOPS = 5;
+
+    for (let loop = 0; loop < MAX_LOOPS; loop++) {
+      let respData;
+      try {
+        const resp = await axios.post(
+          "https://api.anthropic.com/v1/messages",
+          {
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 2048,
+            system: jjSystemPrompt,
+            tools: allTools,
+            messages: loopMessages,
+          },
+          {
+            headers: {
+              "x-api-key": process.env.ANTHROPIC_API_KEY,
+              "anthropic-version": "2023-06-01",
+              "Content-Type": "application/json"
+            },
+            timeout: 30000
+          }
+        );
+        respData = resp.data;
+      } catch (apiErr) {
+        const status  = apiErr.response?.status;
+        const errBody = apiErr.response?.data;
+        console.error(`[JJ-Mode] ❌ API call loop=${loop} FAILED`);
+        console.error(`[JJ-Mode]   HTTP Status : ${status || "no response"}`);
+        console.error(`[JJ-Mode]   Error       : ${apiErr.message}`);
+        console.error(`[JJ-Mode]   Body        : ${JSON.stringify(errBody)}`);
+
+        if (apiErr.code === "ECONNABORTED") {
+          throw new Error("⏱️ That research took too long. Try a more specific query, or break it into smaller questions.");
+        } else if (status === 529 || status === 503) {
+          throw new Error("🔄 AI service temporarily busy. Please try again in a moment.");
+        } else {
+          throw new Error(`❌ API error (${status || apiErr.message}). Please try again.`);
         }
       }
-    );
 
-    const reply = resp.data.content
-      .filter(b => b.type === "text").map(b => b.text).join("").trim()
-      || "I had trouble processing that. Please try again.";
+      console.log(`[JJ-Mode] loop=${loop} stop_reason=${respData.stop_reason} blocks=${respData.content?.length}`);
+
+      if (respData.stop_reason === "end_turn") {
+        reply = respData.content
+          .filter(b => b.type === "text").map(b => b.text).join("").trim();
+        if (!reply) {
+          console.error(`[JJ-Mode] ❌ end_turn but no text block. Content: ${JSON.stringify(respData.content)}`);
+          reply = "I had trouble processing that. Please try again.";
+        }
+        break;
+      }
+
+      if (respData.stop_reason === "tool_use") {
+        const toolUseBlocks = respData.content.filter(b => b.type === "tool_use");
+        console.log(`[JJ-Mode] tool_use: ${toolUseBlocks.map(b => b.name).join(", ")}`);
+
+        loopMessages.push({ role: "assistant", content: respData.content });
+
+        const toolResults = toolUseBlocks.map(toolUse => ({
+          type: "tool_result",
+          tool_use_id: toolUse.id,
+          content: "Search completed. Please synthesize the results."
+        }));
+
+        loopMessages.push({ role: "user", content: toolResults });
+        continue;
+      }
+
+      console.error(`[JJ-Mode] ❌ Unexpected stop_reason: ${respData.stop_reason}`);
+      reply = "I had trouble processing that. Please try again.";
+      break;
+    }
+
+    if (!reply) reply = "I had trouble processing that. Please try again.";
 
     // Save to JJ knowledge base
     const isResearch = isResearchRequest(userMessage);
