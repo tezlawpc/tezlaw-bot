@@ -281,6 +281,8 @@ function buildJJSystemPrompt(jjContext) {
     "CURRENT JJ KNOWLEDGE BASE:",
     jjContext || "No previous knowledge stored yet — start building it together!",
     "",
+    "VOICE CAPABILITIES: You CAN send voice messages. When JJ asks to respond in voice or speak, just respond normally in text — the system converts it to voice automatically. Never say you cannot do voice.",
+    "",
     "Be Zara at her best — smart, thorough, curious, and genuinely helpful."
   ].join("\n");
 }
