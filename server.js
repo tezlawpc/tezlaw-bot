@@ -315,7 +315,25 @@ app.post("/telegram", async (req, res) => {
     }
     if (text === "/contact") { await tgSend(chatId, CONTACT_MESSAGE); return; }
     if (text === "/reset") { await clearHistory("telegram", chatId); await tgSend(chatId, "✅ Reset! How can I help?"); return; }
+    // Send "thinking" message if Claude takes more than 5 seconds
+    let thinkingMsg = null;
+    const thinkingTimer = setTimeout(async () => {
+      try {
+        const r = await axios.post(`${TELEGRAM_API}/sendMessage`, {
+          chat_id: chatId,
+          text: "🤔 Let me think about that for a moment..."
+        });
+        thinkingMsg = r.data.result?.message_id;
+      } catch(e) {}
+    }, 5000);
+
     await processMessage("telegram", chatId, text, (t) => tgSend(chatId, t));
+    clearTimeout(thinkingTimer);
+
+    // Delete the thinking message once real reply is sent
+    if (thinkingMsg) {
+      axios.post(`${TELEGRAM_API}/deleteMessage`, { chat_id: chatId, message_id: thinkingMsg }).catch(() => {});
+    }
   } catch(err) {
     console.error("Telegram error:", err.message);
     try { await tgSend(chatId, "Sorry, technical issue. Call us: 626-678-8677"); } catch(e) {}
@@ -384,7 +402,12 @@ app.post("/whatsapp", async (req, res) => {
         return;
       }
       if (message.type === "text") {
+        // Send "thinking" message if Claude takes more than 5 seconds
+        let thinkingTimer = setTimeout(() => {
+          waSend(from, "🤔 Let me think about that for a moment...").catch(() => {});
+        }, 5000);
         await processMessage("whatsapp", from, message.text.body, (t) => waSend(from, t));
+        clearTimeout(thinkingTimer);
       }
     } catch(err) {
       console.error("WhatsApp error:", err.message);
@@ -495,7 +518,7 @@ async function handleWeChatMsg(req, res) {
       } catch(err) {
         if (err.message === "timeout") {
           console.log("WeChat response timeout — sending fallback");
-          res.type("application/xml").send(wcXmlReply(from, to, "Processing your request... please send your message again in a moment. 😊"));
+          res.type("application/xml").send(wcXmlReply(from, to, "🤔 Still thinking... please send your message again in a moment. 😊"));
         } else {
           console.error("WeChat text error:", err.message);
           res.type("application/xml").send(wcXmlReply(from, to, "Sorry, something went wrong. Please call us at 626-678-8677."));
@@ -504,44 +527,29 @@ async function handleWeChatMsg(req, res) {
       return;
     }
     if (type === "voice") {
-      try {
-        // Use WeChat built-in recognition if available (Chinese)
-        if (msg.Recognition) {
+      // Use WeChat built-in recognition if available
+      if (msg.Recognition) {
+        try {
           const text = msg.Recognition;
+          console.log(`WeChat voice recognized: "${text.substring(0,50)}"`);
           const reply = await Promise.race([
             askClaudeWithMemory("wechat", from, text, SYSTEM_PROMPT),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4200))
           ]);
           res.type("application/xml").send(wcXmlReply(from, to,
-            `🎤 I heard: "${text}"\n\n${reply}`.substring(0, 600)
+            `🎤 "${text}"\n\n${reply}`.substring(0, 600)
           ));
-          return;
+        } catch(err) {
+          res.type("application/xml").send(wcXmlReply(from, to,
+            "I heard your voice message but took too long to respond. Please type your question instead. 😊"
+          ));
         }
-        // No built-in recognition — download AMR and use Whisper asynchronously
-        // Acknowledge immediately within 5s, then process
-        res.type("application/xml").send(wcXmlReply(from, to,
-          "🎤 Processing your voice message... I\'ll respond in a moment!"
-        ));
-        // Process async after responding
-        setImmediate(async () => {
-          try {
-            const { buffer } = await wcDownloadMedia(msg.MediaId);
-            const text = await transcribeAudio(buffer, "voice.amr");
-            if (!text) {
-              await wcSendDirect(from, "Sorry, I couldn\'t transcribe that voice message. Please type instead.");
-              return;
-            }
-            const reply = await askClaudeWithMemory("wechat", from, text, SYSTEM_PROMPT);
-            await wcSendDirect(from, `🎤 I heard: "${text}"\n\n${reply}`);
-          } catch(err) {
-            console.error("WeChat async voice error:", err.message);
-            await wcSendDirect(from, "I had trouble with that voice message. Please type instead, or call us at 626-678-8677.");
-          }
-        });
-      } catch(err) {
-        console.error("WeChat voice error:", err.message);
-        res.type("application/xml").send(wcXmlReply(from, to, "I had trouble with that voice message. Please type instead."));
+        return;
       }
+      // No built-in recognition available — ask user to type, suggest other channels
+      res.type("application/xml").send(wcXmlReply(from, to,
+        "🎤 WeChat暂不支持语音识别，请改用文字提问。如需语音服务，请使用 Telegram (@TEZJJBot) 或 WhatsApp (+1 555-634-2247)。\n\nVoice isn\'t supported on WeChat. For voice, please use Telegram (@TEZJJBot) or WhatsApp (+1 555-634-2247). Or just type here! 😊"
+      ));
       return;
     }
     if (type === "image") {
