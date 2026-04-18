@@ -206,10 +206,30 @@ function isLegalResearchQuestion(m) {
 // ── Distress detection ────────────────────────────────────
 function detectDistress(msg) {
   msg = msg.toLowerCase();
-  const high = ["ice","detained","arrested","deportation","deported","removal","notice to appear","nta","they took","raid","emergency","accident just happened","injured","hospital","bleeding","scared","please help","don't know what to do","help me","court tomorrow","hearing tomorrow","sign anything","拘留","被抓","遣返","紧急","帮我","害怕","detenido","arrestado","deportación","ayúdame","miedo"];
-  const med  = ["visa expired","status expired","out of status","denied","lost my job","fired","separated","family separated","worried","desperate","no options"];
-  if (high.some(k => msg.includes(k))) return "high";
-  if (med.some(k => msg.includes(k)))  return "medium";
+
+  // Whole-word match for short/ambiguous keywords to avoid false positives
+  // e.g. "ice" in "voice" or "service", "nta" in "want a", "raid" in "afraid"
+  const wholeWordMatch = (word) => {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?<![a-z])${escaped}(?![a-z])`).test(msg);
+  };
+
+  // Keywords requiring whole-word match (short, common substrings)
+  const highWholeWord = ["ice", "nta", "raid"];
+  // Keywords safe to use as substrings (longer, unambiguous)
+  const highSubstring = ["detained","arrested","deportation","deported","removal",
+    "notice to appear","they took","emergency","accident just happened","injured",
+    "hospital","bleeding","scared","please help","don't know what to do","help me",
+    "court tomorrow","hearing tomorrow","sign anything",
+    "拘留","被抓","遣返","紧急","帮我","害怕",
+    "detenido","arrestado","deportación","ayúdame","miedo"];
+
+  const med = ["visa expired","status expired","out of status","denied",
+    "lost my job","fired","separated","family separated","worried","desperate","no options"];
+
+  if (highWholeWord.some(k => wholeWordMatch(k))) return "high";
+  if (highSubstring.some(k => msg.includes(k))) return "high";
+  if (med.some(k => msg.includes(k))) return "medium";
   return "none";
 }
 
