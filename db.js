@@ -79,6 +79,16 @@ async function initDB() {
       ALTER TABLE clients ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
     `).catch(() => {});
 
+    // ── JJ Zhang private knowledge base (never deleted) ──
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS jj_memory (
+        id SERIAL PRIMARY KEY,
+        timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        jj_said TEXT,
+        zara_said TEXT
+      );
+    `);
+
     console.log("✅ DB tables ready");
   } catch (err) {
     console.error("❌ DB init error:", err.message);
@@ -244,8 +254,34 @@ async function maybeAutoSummarize(platform, platformId, anthropicApiKey) {
   }
 }
 
+// ── Save a JJ memory entry (never deleted) ──────────────
+async function saveJJMemory(entry) {
+  try {
+    await getPool().query(
+      `INSERT INTO jj_memory (timestamp, jj_said, zara_said) VALUES ($1, $2, $3)`,
+      [entry.timestamp, entry.jj_said, entry.zara_said]
+    );
+  } catch (err) {
+    console.error("saveJJMemory error:", err.message);
+  }
+}
+
+// ── Get JJ memories (most recent first) ─────────────────
+async function getJJMemories(limit = 50) {
+  try {
+    const res = await getPool().query(
+      `SELECT id, timestamp, jj_said, zara_said FROM jj_memory ORDER BY timestamp DESC LIMIT $1`,
+      [limit]
+    );
+    return res.rows;
+  } catch (err) {
+    console.error("getJJMemories error:", err.message);
+    return [];
+  }
+}
+
 module.exports = {
   initDB, getOrCreateClient, updateClient, saveMessage,
   getHistory, getClientContext, saveSummary, clearHistory,
-  saveIntake, maybeAutoSummarize,
+  saveIntake, maybeAutoSummarize, saveJJMemory, getJJMemories,
 };
