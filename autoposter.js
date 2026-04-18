@@ -118,13 +118,23 @@ function saveSources(sources) {
 }
 
 // ── Claude API ────────────────────────────────────────────────
-async function askClaude(prompt, useWebSearch = false) {
+async function askClaude(prompt, useWebSearch = false, retries = 3) {
   const body = { model: "claude-sonnet-4-20250514", max_tokens: 4096, messages: [{ role: "user", content: prompt }] };
   if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
-  const response = await axios.post("https://api.anthropic.com/v1/messages", body, {
-    headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" }
-  });
-  return response.data.content.filter(b => b.type === "text").map(b => b.text).join("");
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await axios.post("https://api.anthropic.com/v1/messages", body, {
+        headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" }
+      });
+      return response.data.content.filter(b => b.type === "text").map(b => b.text).join("");
+    } catch (e) {
+      if (e.response?.status === 429 && attempt < retries) {
+        const wait = attempt * 30000; // 30s, 60s backoff
+        console.log(`⏳ Rate limited. Waiting ${wait/1000}s before retry ${attempt}/${retries}...`);
+        await new Promise(r => setTimeout(r, wait));
+      } else { throw e; }
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -648,7 +658,7 @@ async function runDailyScheduler() {
 function scheduleDaily() {
   // Run immediately on startup to catch missed posts
   console.log("🚀 Running auto-poster on startup...");
-  setTimeout(async () => { await runDailyScheduler(); }, 10000);
+  setTimeout(async () => { await runDailyScheduler(); }, 30000);
 
   // Schedule daily at 15:00 UTC (8 AM Pacific)
   function scheduleNext() {
