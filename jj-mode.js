@@ -4,8 +4,9 @@
 //  that also enriches public responses
 // ============================================================
 
-const axios = require("axios");
-const db    = require("./db");
+const axios              = require("axios");
+const db                 = require("./db");
+const { sendVoiceReply } = require("./voice");
 
 // ── JJ Session state (per platform:userId) ────────────────
 const jjSessions = {};
@@ -48,7 +49,6 @@ async function isJJTrigger(message) {
     const answer = resp.data.content[0]?.text?.trim().toUpperCase();
     return answer === "YES";
   } catch(e) {
-    // Fallback if API call fails
     return lower.includes("jj zhang") || lower.includes("jj mode") || lower.includes("private channel");
   }
 }
@@ -62,8 +62,6 @@ function isAwaitingPassword(platform, userId) {
 }
 
 // ── Main JJ mode handler ──────────────────────────────────
-// Returns { handled: true, message } if JJ mode intercepts
-// Returns { handled: false } to let normal flow continue
 async function checkJJMode(platform, userId, userMessage, options = {}) {
   const key = `${platform}:${userId}`;
 
@@ -78,12 +76,12 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
     if (normalize(userMessage) === normalize(JJ_PASSWORD)) {
       jjSessions[key] = "authenticated";
       const memory = await getJJMemorySummary();
-      return {
-        handled: true,
-        message: `✅ Welcome back, JJ! You're now in private mode.\n\n${memory ? `📚 Here's what I remember from our previous sessions:\n\n${memory}\n\nWhat would you like to work on today?` : "This appears to be our first session. What would you like to teach me or work on today?"}`
-      };
+      const welcomeMsg = memory
+        ? `✅ Welcome back, JJ! You're now in private mode.\n\n📚 Here's what I remember:\n\n${memory}\n\nWhat would you like to work on today?`
+        : "✅ Welcome back, JJ! You're in private mode. What would you like to work on today?";
+      sendVoiceReply(platform, userId, "Welcome back JJ! You're now in private mode. How can I help you today?").catch(() => {});
+      return { handled: true, message: welcomeMsg };
     } else {
-      // Wrong password — clear state
       delete jjSessions[key];
       return {
         handled: true,
@@ -239,6 +237,9 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       : isResearch ? "🔍 Research complete and saved to your knowledge base.\n\n"
       : "";
 
+    // Send voice reply async — non-blocking, text already returned
+    sendVoiceReply(platform, userId, reply).catch(() => {});
+
     return { handled: true, message: `🔒 [JJ Mode]\n\n${docNote}${reply}` };
   } catch (err) {
     console.error("JJ mode Claude error:", err.message);
@@ -297,7 +298,7 @@ async function extractAndSaveJJKnowledge(userMessage, zaraReply, label = null) {
 // ── Get JJ context for system prompt ─────────────────────
 async function getJJContext() {
   try {
-    const memories = await db.getJJMemories(50); // last 50 entries
+    const memories = await db.getJJMemories(50);
     if (!memories || memories.length === 0) return null;
     return memories
       .map(m => `[${new Date(m.timestamp).toLocaleDateString()}] JJ: ${m.jj_said}\nZara: ${m.zara_said}`)
@@ -322,13 +323,10 @@ async function getJJMemorySummary() {
 }
 
 // ── Get JJ knowledge for enriching PUBLIC responses ──────
-// Called by askClaude-memory.js to add JJ's insights to public answers
 async function getJJPublicContext() {
   try {
     const memories = await db.getJJMemories(30);
     if (!memories || memories.length === 0) return null;
-
-    // Return a condensed version for public use
     return memories
       .map(m => `${m.jj_said.substring(0, 150)}`)
       .join(" | ");
