@@ -10,9 +10,14 @@ const xml2js   = require("xml2js");
 const FormData = require("form-data");
 const fs       = require("fs");
 const { initDB, clearHistory }    = require("./db");
-const cookieParser = require("cookie-parser");
+const { scheduleWeeklyAnalytics, runWeeklyAnalysis } = require("./analytics");
 const { askClaudeWithMemory }     = require("./askClaude-memory");
 const { transcribeAudio }         = require("./whisper");
+const { sendVoiceReply }          = require("./voice");
+const { checkIntake, initIntakeTable } = require("./intake");
+const { isJJAuthenticated }       = require("./jj-mode");
+const { router: adminRouter, handleAdminCallback, initPromptTable, getSavedPrompt } = require("./admin");
+const cookieParser = require("cookie-parser");
 
 const app = express();
 app.use(express.json());
