@@ -9,16 +9,10 @@ const crypto   = require("crypto");
 const xml2js   = require("xml2js");
 const FormData = require("form-data");
 const fs       = require("fs");
-const cookieParser = require("cookie-parser");
 const { initDB, clearHistory }    = require("./db");
-const { scheduleWeeklyAnalytics, runWeeklyAnalysis } = require("./analytics");
+const cookieParser = require("cookie-parser");
 const { askClaudeWithMemory }     = require("./askClaude-memory");
 const { transcribeAudio }         = require("./whisper");
-const { sendVoiceReply }          = require("./voice");
-const { checkIntake, initIntakeTable } = require("./intake");
-const { isJJAuthenticated }       = require("./jj-mode");
-const { router: adminRouter, handleAdminCallback, initPromptTable, getSavedPrompt } = require("./admin");
-
 
 const app = express();
 app.use(express.json());
@@ -63,10 +57,10 @@ console.log("WHATSAPP_TOKEN:", !!WHATSAPP_TOKEN);
 console.log("WECHAT_APP_ID:", !!WECHAT_APP_ID);
 
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-const CACHE_FILE   = process.env.CACHE_PATH || "/var/data/legal_cache.json";
+const CACHE_FILE   = process.env.CACHE_PATH || "/tmp/legal_cache.json";
 
 // ── System prompt ─────────────────────────────────────────
-const SYSTEM_PROMPT = `Your name is Zara. You are a warm, friendly legal assistant for TEZ Law PC.
+const SYSTEM_PROMPT = `Your name is Zara. You are a warm, friendly legal assistant for Tez Law P.C. in West Covina, California.
 
 ============================
 THE TEAM
@@ -159,18 +153,9 @@ DISTRESS DETECTION — CRITICAL
 HIGH URGENCY: ICE, detained, arrested, deportation, NTA, accident just happened, injured, scared, please help, court tomorrow
 MEDIUM URGENCY: visa expired, out of status, denied, worried, desperate
 
-For HIGH URGENCY: acknowledge warmly, give 626-678-8677, tell them NOT to sign anything.
+For HIGH URGENCY: acknowledge warmly, give 626-678-8677, tell them NOT to sign anything.`;
 
-============================
-VOICE CAPABILITIES
-============================
-You CAN send voice messages. When someone asks you to respond in voice, speak, or send audio:
-- Just respond normally in text as usual
-- The system automatically converts your text reply into a voice message and sends it
-- NEVER say you cannot do voice or that you only communicate through text
-- You have full voice capabilities on Telegram and WhatsApp`;
-
-const WELCOME_MESSAGE = `Hey there! 👋 I'm Zara, the virtual assistant for TEZ Law PC.
+const WELCOME_MESSAGE = `Hey there! 👋 I'm Zara, the virtual assistant for Tez Law P.C.
 
 I'm here to help you figure out your legal options and connect you with the right person on our team. We handle:
 
@@ -182,7 +167,7 @@ I'm here to help you figure out your legal options and connect you with the righ
 
 What's going on? Tell me what's on your mind! 😊`;
 
-const CONTACT_MESSAGE = `Here's the TEZ Law PC team:
+const CONTACT_MESSAGE = `Here's the Tez Law P.C. team:
 
 👨‍💼 JJ Zhang (Managing Attorney)
 📞 626-678-8677
@@ -195,7 +180,9 @@ const CONTACT_MESSAGE = `Here's the TEZ Law PC team:
 📧 michael.liu@tezlawfirm.com
 
 🚗 Lin Mei (Car accidents & state court)
-📧 lin.mei@tezlawfirm.com`;
+📧 lin.mei@tezlawfirm.com
+
+📍 West Covina, California`;
 
 // ── Legal research cache ──────────────────────────────────
 const CACHE_TTL = {
@@ -231,27 +218,17 @@ function isLegalResearchQuestion(m) {
 // ── Distress detection ────────────────────────────────────
 function detectDistress(msg) {
   msg = msg.toLowerCase();
-  const wholeWordMatch = (word) => {
-    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(?<![a-z])${escaped}(?![a-z])`).test(msg);
-  };
-  const highWholeWord = ["ice", "nta", "raid"];
-  const highSubstring = ["detained","arrested","deportation","deported","removal",
-    "notice to appear","they took","emergency","accident just happened","injured",
-    "hospital","bleeding","scared","please help","don't know what to do","help me",
-    "court tomorrow","hearing tomorrow","sign anything",
-    "拘留","被抓","遣返","紧急","帮我","害怕",
-    "detenido","arrestado","deportación","ayúdame","miedo"];
-  const med = ["visa expired","status expired","out of status","denied",
-    "lost my job","fired","separated","family separated","worried","desperate","no options"];
-  if (highWholeWord.some(k => wholeWordMatch(k))) return "high";
-  if (highSubstring.some(k => msg.includes(k))) return "high";
-  if (med.some(k => msg.includes(k))) return "medium";
+  const high = ["ice","detained","arrested","deportation","deported","removal","notice to appear","nta","they took","raid","emergency","accident just happened","injured","hospital","bleeding","scared","please help","don't know what to do","help me","court tomorrow","hearing tomorrow","sign anything","拘留","被抓","遣返","紧急","帮我","害怕","detenido","arrestado","deportación","ayúdame","miedo"];
+  const med  = ["visa expired","status expired","out of status","denied","lost my job","fired","separated","family separated","worried","desperate","no options"];
+  if (high.some(k => msg.includes(k))) return "high";
+  if (med.some(k => msg.includes(k)))  return "medium";
   return "none";
 }
 
 async function notifyDistress(userId, message, urgency, platform) {
   if (!TEAM_TELEGRAM_CHAT_ID || !TELEGRAM_TOKEN) return;
+  // Never forward JJ's private messages to the team
+  if (isJJAuthenticated(platform, userId)) return;
   const emoji = urgency === "high" ? "🚨" : "⚠️";
   try {
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
@@ -263,6 +240,8 @@ async function notifyDistress(userId, message, urgency, platform) {
 
 async function notifyLead(userId, message, platform) {
   if (!TEAM_TELEGRAM_CHAT_ID || !TELEGRAM_TOKEN) return;
+  // Never forward JJ's private messages to the team
+  if (isJJAuthenticated(platform, userId)) return;
   const phoneMatch = message.match(/(\+?1?\s?)?(\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})/);
   const emailMatch = message.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
   if (!phoneMatch && !emailMatch) return;
@@ -277,37 +256,34 @@ async function notifyLead(userId, message, platform) {
 // ── Shared message processor ──────────────────────────────
 async function processMessage(platform, userId, userText, sendFn) {
   const lower = userText.toLowerCase().trim();
-  if (["hi","hello","hey","hola","start","你好"].includes(lower)) {
-    await sendFn(WELCOME_MESSAGE); return;
-  }
-  if (["contact","team","contacto"].includes(lower)) {
-    await sendFn(CONTACT_MESSAGE); return;
-  }
-  if (lower === "reset") {
-    await clearHistory(platform, userId);
-    await sendFn("Fresh start! What can I help you with? 😊"); return;
-  }
 
-  // ── Intake flow — intercept if in progress or legal intent detected ──
-  const intake = await checkIntake(platform, userId, userText);
-  if (intake.handled) {
-    await sendFn(intake.reply);
-    if (intake.reply.includes("feel free to keep asking")) {
-      // Intake complete — Claude's context updated, conversation continues naturally
-      await askClaudeWithMemory(platform, userId, userText, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT);
+  // ── OWNER CHECK: never treat JJ as a client ──────────────
+  // When JJ is authenticated, skip ALL client shortcuts and notifications.
+  // Every message goes straight to askClaudeWithMemory → checkJJMode.
+  if (!isJJAuthenticated(platform, userId)) {
+    if (["hi","hello","hey","hola","start","你好"].includes(lower)) {
+      await sendFn(WELCOME_MESSAGE); return;
     }
-    return;
+    if (["contact","team","contacto"].includes(lower)) {
+      await sendFn(CONTACT_MESSAGE); return;
+    }
+    if (lower === "reset") {
+      await clearHistory(platform, userId);
+      await sendFn("Fresh start! What can I help you with? 😊"); return;
+    }
   }
 
-  // ── Normal Claude response ────────────────────────────
   const livePrompt = app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT;
   const reply = await askClaudeWithMemory(platform, userId, userText, livePrompt);
   await sendFn(reply);
+
+  // ── PRIVACY: never forward JJ's messages to the team group ──
+  if (isJJAuthenticated(platform, userId)) return;
+
   const urgency = detectDistress(userText);
   if (urgency !== "none") await notifyDistress(userId, userText, urgency, platform);
   await notifyLead(userId, userText, platform);
 }
-
 
 // ────────────────────────────────────────────────────────────
 //  TELEGRAM
@@ -383,7 +359,7 @@ app.post("/telegram", async (req, res) => {
     }
     if (text === "/contact") { await tgSend(chatId, CONTACT_MESSAGE); return; }
     if (text === "/reset") { await clearHistory("telegram", chatId); await tgSend(chatId, "✅ Reset! How can I help?"); return; }
-
+    // Send "thinking" message if Claude takes more than 5 seconds
     let thinkingMsg = null;
     const thinkingTimer = setTimeout(async () => {
       try {
@@ -395,13 +371,10 @@ app.post("/telegram", async (req, res) => {
       } catch(e) {}
     }, 5000);
 
-    let lastTgReply = null;
-    await processMessage("telegram", chatId, text, async (t) => {
-      lastTgReply = t;
-      await tgSend(chatId, t);
-    });
+    await processMessage("telegram", chatId, text, (t) => tgSend(chatId, t));
     clearTimeout(thinkingTimer);
 
+    // Delete the thinking message once real reply is sent
     if (thinkingMsg) {
       axios.post(`${TELEGRAM_API}/deleteMessage`, { chat_id: chatId, message_id: thinkingMsg }).catch(() => {});
     }
@@ -414,22 +387,16 @@ app.post("/telegram", async (req, res) => {
   }
 });
 
+// Telegram GET verification
 app.get("/telegram", (req, res) => res.send("Telegram webhook active"));
-
 
 // ────────────────────────────────────────────────────────────
 //  WHATSAPP + MESSENGER
 // ────────────────────────────────────────────────────────────
 async function waSend(to, text) {
-  try {
-    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
-      messaging_product: "whatsapp", to, type: "text", text: { body: text }
-    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, "Content-Type": "application/json" } });
-  } catch(e) {
-    // 400 = invalid recipient or status webhook — ignore silently
-    if (e.response?.status === 400) return;
-    throw e;
-  }
+  await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
+    messaging_product: "whatsapp", to, type: "text", text: { body: text }
+  }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, "Content-Type": "application/json" } });
 }
 async function msgrSend(recipientId, text) {
   await axios.post(`https://graph.facebook.com/v18.0/${PAGE_ID}/messages`, {
@@ -442,6 +409,7 @@ async function waDownloadMedia(mediaId) {
   return { buffer: Buffer.from(file.data), mimeType: meta.data.mime_type };
 }
 
+// WhatsApp verification
 app.get("/whatsapp", (req, res) => {
   if (req.query["hub.verify_token"] === VERIFY_TOKEN && req.query["hub.challenge"]) {
     res.send(req.query["hub.challenge"]);
@@ -452,14 +420,10 @@ app.post("/whatsapp", async (req, res) => {
   res.sendStatus(200);
   const body = req.body;
 
+  // WhatsApp
   if (body.object === "whatsapp_business_account") {
-    const value = body.entry?.[0]?.changes?.[0]?.value;
-    // Ignore status updates (delivered, read, sent) — these are not messages
-    if (!value || value?.statuses || !value?.messages) return;
-    const message = value.messages[0];
+    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message) return;
-    // Only process text, image, audio, document — ignore everything else silently
-    if (!["text","image","audio","document"].includes(message.type)) return;
     const from = message.from;
     try {
       if (message.type === "image") {
@@ -485,6 +449,7 @@ app.post("/whatsapp", async (req, res) => {
         return;
       }
       if (message.type === "text") {
+        // Send "thinking" message if Claude takes more than 5 seconds
         let thinkingTimer = setTimeout(() => {
           waSend(from, "🤔 Let me think about that for a moment...").catch(() => {});
         }, 5000);
@@ -498,6 +463,7 @@ app.post("/whatsapp", async (req, res) => {
     return;
   }
 
+  // Facebook Messenger
   if (body.object === "page") {
     const event = body.entry?.[0]?.messaging?.[0];
     if (!event?.message?.text) return;
@@ -510,7 +476,6 @@ app.post("/whatsapp", async (req, res) => {
     }
   }
 });
-
 
 // ────────────────────────────────────────────────────────────
 //  WECHAT
@@ -574,9 +539,11 @@ async function handleWeChatMsg(req, res) {
       res.type("application/xml").send(wcXmlReply(from, to, WELCOME_MESSAGE)); return;
     }
     if (type === "text") {
+      // Direct XML reply — no IP whitelist needed
       try {
         const userText = msg.Content?.trim() || "";
         console.log(`WeChat text from ${from}: "${userText.substring(0, 50)}"`);
+        // Race Claude against 4.5s timeout to stay within WeChat's 5s window
         const reply = await Promise.race([
           (async () => {
             const lowerText = userText.toLowerCase().trim();
@@ -587,9 +554,11 @@ async function handleWeChatMsg(req, res) {
             if (["contact","team","contacto"].includes(lowerText)) return CONTACT_MESSAGE;
             if (lowerText === "reset") { await clearHistory("wechat", from); return "Fresh start! What can I help you with? 😊"; }
             const r = await askClaudeWithMemory("wechat", from, userText, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT);
-            const urgency = detectDistress(userText);
-            if (urgency !== "none") notifyDistress(from, userText, urgency, "WeChat").catch(()=>{});
-            notifyLead(from, userText, "WeChat").catch(()=>{});
+            if (!isJJAuthenticated("wechat", from)) {
+              const urgency = detectDistress(userText);
+              if (urgency !== "none") notifyDistress(from, userText, urgency, "WeChat").catch(()=>{});
+              notifyLead(from, userText, "WeChat").catch(()=>{});
+            }
             return r;
           })(),
           new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4500))
@@ -607,6 +576,7 @@ async function handleWeChatMsg(req, res) {
       return;
     }
     if (type === "voice") {
+      // Use WeChat built-in recognition if available
       if (msg.Recognition) {
         try {
           const text = msg.Recognition;
@@ -625,8 +595,9 @@ async function handleWeChatMsg(req, res) {
         }
         return;
       }
+      // No built-in recognition available — ask user to type, suggest other channels
       res.type("application/xml").send(wcXmlReply(from, to,
-        "🎤 WeChat暂不支持语音识别，请改用文字提问。如需语音服务，请使用 Telegram (@TEZJJBot) 或 WhatsApp (+1 555-634-2247)。\n\nVoice isn't supported on WeChat. For voice, please use Telegram (@TEZJJBot) or WhatsApp (+1 555-634-2247). Or just type here! 😊"
+        "🎤 WeChat暂不支持语音识别，请改用文字提问。如需语音服务，请使用 Telegram (@TEZJJBot) 或 WhatsApp (+1 555-634-2247)。\n\nVoice isn\'t supported on WeChat. For voice, please use Telegram (@TEZJJBot) or WhatsApp (+1 555-634-2247). Or just type here! 😊"
       ));
       return;
     }
@@ -668,7 +639,6 @@ app.post("/wechat",  handleWeChatMsg);
 app.get("/webhook",  wcVerify);
 app.post("/webhook", handleWeChatMsg);
 
-
 // ────────────────────────────────────────────────────────────
 //  WEBSITE CHAT
 // ────────────────────────────────────────────────────────────
@@ -692,23 +662,10 @@ app.options("/chat", (req, res) => {
   res.sendStatus(200);
 });
 
-
-// ────────────────────────────────────────────────────────────
-//  ANALYTICS — Manual trigger endpoint
-// ────────────────────────────────────────────────────────────
-app.get("/analytics/run", async (req, res) => {
-  if (req.query.token !== process.env.ANALYTICS_SECRET) {
-    return res.status(403).json({ error: "Unauthorized" });
-  }
-  res.json({ status: "started", message: "Analytics running — check jj@tezlawfirm.com in ~2 minutes." });
-  runWeeklyAnalysis(true).catch(err => console.error("Manual analytics error:", err.message));
-});
-
-
 // ────────────────────────────────────────────────────────────
 //  HEALTH CHECK + START
 // ────────────────────────────────────────────────────────────
-app.get("/", (req, res) => res.send("TEZ Law PC — Zara running on all channels ✅"));
+app.get("/", (req, res) => res.send("Tez Law P.C. — Zara running on all channels ✅"));
 
 app.listen(PORT, () => {
   console.log(`🚀 Zara running on port ${PORT}`);
