@@ -206,31 +206,7 @@ router.post("/api/logout", requireAuth, (req, res) => {
 
 // ── Protected API routes ──────────────────────────────────
 
-// Get prompt version history
-router.get("/api/prompt/history", requireAuth, async (req, res) => {
-  try {
-    const r = await getPool().query(
-      `SELECT id, prompt, updated_at, updated_by FROM system_prompts ORDER BY id DESC LIMIT 50`
-    );
-    res.json(r.rows);
-  } catch(e) { res.status(500).json({error:e.message}); }
-});
 
-// Rollback to a previous prompt version
-router.post("/api/prompt/rollback/:id", requireAuth, async (req, res) => {
-  try {
-    const old = await getPool().query(`SELECT prompt FROM system_prompts WHERE id=$1`, [req.params.id]);
-    if (!old.rows[0]) return res.status(404).json({error:"Version not found"});
-    const prompt = old.rows[0].prompt;
-    await getPool().query(
-      `INSERT INTO system_prompts (prompt, updated_at, updated_by) VALUES ($1, NOW(), 'rollback')`,
-      [prompt]
-    );
-    req.app.locals.SYSTEM_PROMPT = prompt;
-    audit(req, "prompt_rollback", "system_prompt", null, "rolled back to version " + req.params.id);
-    res.json({ ok: true, prompt });
-  } catch(e) { res.status(500).json({error:e.message}); }
-});
 
 // Get current system prompt
 router.get("/api/prompt", requireAuth, async (req, res) => {
@@ -553,6 +529,36 @@ router.post("/api/autoposter/run", requireAuth, (req, res) => {
   runDailyScheduler().catch(err => console.error("Admin autoposter error:", err.message));
 });
 
+// ── One-time migration endpoint ──────────────────────────
+router.post("/api/migrate-wave2", requireAuth, async (req, res) => {
+  try {
+    const pool = getPool();
+    await pool.query(`CREATE TABLE IF NOT EXISTS conversation_scores (
+      id SERIAL PRIMARY KEY, platform VARCHAR(50), platform_id VARCHAR(200),
+      session_start TIMESTAMP, session_end TIMESTAMP, message_count INT,
+      score_accuracy INT, score_tone INT, score_disclaimer INT, score_upl_risk INT,
+      score_overall INT, needs_review BOOLEAN DEFAULT FALSE, review_notes TEXT,
+      summary TEXT, created_at TIMESTAMP DEFAULT NOW())`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS sol_deadlines (
+      id SERIAL PRIMARY KEY, platform_id VARCHAR(200), client_name VARCHAR(200),
+      case_type VARCHAR(100), incident_date DATE, deadline_date DATE, notes TEXT,
+      alerted_90 BOOLEAN DEFAULT FALSE, alerted_30 BOOLEAN DEFAULT FALSE,
+      alerted_7 BOOLEAN DEFAULT FALSE, alerted_1 BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW())`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS drip_campaigns (
+      id SERIAL PRIMARY KEY, platform VARCHAR(50), platform_id VARCHAR(200),
+      intake_id INT, client_name VARCHAR(200), case_type VARCHAR(100),
+      status VARCHAR(50) DEFAULT 'active', started_at TIMESTAMP DEFAULT NOW(),
+      stopped_at TIMESTAMP, stop_reason VARCHAR(100))`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS drip_messages (
+      id SERIAL PRIMARY KEY, campaign_id INT REFERENCES drip_campaigns(id),
+      delay_hours INT, message_text TEXT, sent_at TIMESTAMP,
+      status VARCHAR(50) DEFAULT 'pending')`);
+    console.log("✅ Wave 2 tables migrated via admin endpoint");
+    res.json({ ok: true, message: "Wave 2 tables created successfully" });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // Main admin dashboard
 router.get("/", requireAuth, (req, res) => {
   res.send(dashboardHtml());
@@ -561,112 +567,6 @@ router.get("/", requireAuth, (req, res) => {
 // ── HTML Templates ────────────────────────────────────────
 
 function loginPageHtml() {
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Zara Admin — Login</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, sans-serif; background: #0C1C36; min-height: 100vh;
-           display: flex; align-items: center; justify-content: center; }
-    .card { background: #fff; border-radius: 12px; padding: 40px; width: 100%; max-width: 400px;
-            text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
-    .logo { font-size: 36px; margin-bottom: 8px; }
-    h1 { color: #0C1C36; font-size: 22px; margin-bottom: 4px; }
-    .sub { color: #666; font-size: 13px; margin-bottom: 32px; }
-    .btn { background: #B79C62; color: #0C1C36; border: none; border-radius: 8px;
-           padding: 14px 28px; font-size: 15px; font-weight: bold; cursor: pointer;
-           width: 100%; transition: opacity .2s; }
-    .btn:hover { opacity: .85; }
-    .btn:disabled { opacity: .5; cursor: not-allowed; }
-    .status { margin-top: 20px; padding: 12px; border-radius: 8px; font-size: 14px;
-              display: none; }
-    .status.info { background: #e8f4ff; color: #0066cc; display: block; }
-    .status.error { background: #fff0f0; color: #cc0000; display: block; }
-    .status.success { background: #f0fff4; color: #006600; display: block; }
-    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #B79C62;
-               border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite;
-               vertical-align: middle; margin-right: 6px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <img src="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png" alt="TEZ Law" style="width:100px;height:auto;margin-bottom:12px">
-    <h1>Zara Admin Panel</h1>
-    <p class="sub">TEZ Law P.C. — Authorized Access Only</p>
-    <button class="btn" id="loginBtn" onclick="requestLogin()">
-      📱 Login via Telegram
-    </button>
-    <div class="status" id="status"></div>
-  </div>
-
-  <script>
-    let pollInterval = null;
-
-    async function requestLogin() {
-      const btn = document.getElementById('loginBtn');
-      const status = document.getElementById('status');
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner"></span> Sending request...';
-      status.className = 'status';
-
-      try {
-        const res = await fetch('/admin/api/auth/request', { method: 'POST' });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-
-        status.className = 'status info';
-        status.innerHTML = '📱 Check your Telegram — tap <strong>Approve</strong> to log in.<br><small>Request expires in 5 minutes.</small>';
-        btn.innerHTML = '<span class="spinner"></span> Waiting for approval...';
-
-        // Poll for approval
-        pollInterval = setInterval(() => pollStatus(data.requestId), 2000);
-      } catch (err) {
-        status.className = 'status error';
-        status.textContent = '❌ ' + err.message;
-        btn.disabled = false;
-        btn.textContent = '📱 Login via Telegram';
-      }
-    }
-
-    async function pollStatus(requestId) {
-      try {
-        const res = await fetch('/admin/api/auth/status/' + requestId);
-        const data = await res.json();
-        const status = document.getElementById('status');
-        const btn = document.getElementById('loginBtn');
-
-        if (data.status === 'approved') {
-          clearInterval(pollInterval);
-          // Store token in cookie
-          document.cookie = 'admin_token=' + data.token + '; path=/; max-age=28800; SameSite=Strict';
-          status.className = 'status success';
-          status.textContent = '✅ Approved! Redirecting...';
-          setTimeout(() => window.location.href = '/admin/', 800);
-        } else if (data.status === 'denied') {
-          clearInterval(pollInterval);
-          status.className = 'status error';
-          status.textContent = '❌ Access denied by JJ.';
-          btn.disabled = false;
-          btn.textContent = '📱 Login via Telegram';
-        } else if (data.status === 'expired') {
-          clearInterval(pollInterval);
-          status.className = 'status error';
-          status.textContent = '⏱️ Request expired. Please try again.';
-          btn.disabled = false;
-          btn.textContent = '📱 Login via Telegram';
-        }
-      } catch {}
-    }
-  </script>
-</body>
-</html>`;
-}
-
-function dashboardHtml() {
   return `<!DOCTYPE html>
 <html>
 <head>
