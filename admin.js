@@ -952,12 +952,22 @@ function dashboardHtml() {
   }
 
   async function api(path, options = {}) {
-    const res = await fetch('/admin' + path, {
-      ...options,
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': TOKEN, ...options.headers }
-    });
-    if (res.status === 401) { window.location.href = '/admin/login'; return null; }
-    return res.json();
+    try {
+      const res = await fetch('/admin' + path, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': TOKEN, ...options.headers }
+      });
+      if (res.status === 401) { window.location.href = '/admin/login'; return null; }
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('API error ' + res.status + ' on ' + path + ':', text.substring(0, 200));
+        return null;
+      }
+      return res.json();
+    } catch (err) {
+      console.error('API fetch error on ' + path + ':', err.message);
+      return null;
+    }
   }
 
   function platBadge(p) {
@@ -987,7 +997,12 @@ function dashboardHtml() {
   // Dashboard
   async function loadDashboard() {
     const data = await api('/api/stats');
-    if (!data) return;
+    if (!data) {
+      document.getElementById('statsGrid').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">&#10060; Failed to load stats — check Render logs for errors. Open browser console for details.</p>';
+      document.getElementById('platformBar').innerHTML = '';
+      document.getElementById('caseTypeBar').innerHTML = '';
+      return;
+    }
 
     document.getElementById('statsGrid').innerHTML = \`
       <div class="stat-card"><div class="stat-num">\${data.totalMessages.toLocaleString()}</div><div class="stat-label">Total Messages</div></div>
