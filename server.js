@@ -9,6 +9,7 @@ const crypto   = require("crypto");
 const xml2js   = require("xml2js");
 const FormData = require("form-data");
 const fs       = require("fs");
+const cookieParser = require("cookie-parser");
 const { initDB, clearHistory }    = require("./db");
 const { scheduleWeeklyAnalytics, runWeeklyAnalysis } = require("./analytics");
 const { askClaudeWithMemory }     = require("./askClaude-memory");
@@ -16,12 +17,16 @@ const { transcribeAudio }         = require("./whisper");
 const { sendVoiceReply }          = require("./voice");
 const { checkIntake, initIntakeTable } = require("./intake");
 const { isJJAuthenticated }       = require("./jj-mode");
-
+const { router: adminRouter, handleAdminCallback, initPromptTable, getSavedPrompt } = require("./admin");
 
 
 const app = express();
 app.use(express.json());
 app.use(express.text({ type: "text/xml" }));
+app.use(cookieParser());
+
+// ── Admin panel ───────────────────────────────────────────
+app.use("/admin", adminRouter);
 
 // ── Environment variables ─────────────────────────────────
 const {
@@ -226,27 +231,19 @@ function isLegalResearchQuestion(m) {
 // ── Distress detection ────────────────────────────────────
 function detectDistress(msg) {
   msg = msg.toLowerCase();
-
-  // Whole-word match for short/ambiguous keywords to avoid false positives
-  // e.g. "ice" in "voice" or "service", "nta" in "want a", "raid" in "afraid"
   const wholeWordMatch = (word) => {
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return new RegExp(`(?<![a-z])${escaped}(?![a-z])`).test(msg);
   };
-
-  // Keywords requiring whole-word match (short, common substrings)
   const highWholeWord = ["ice", "nta", "raid"];
-  // Keywords safe to use as substrings (longer, unambiguous)
   const highSubstring = ["detained","arrested","deportation","deported","removal",
     "notice to appear","they took","emergency","accident just happened","injured",
     "hospital","bleeding","scared","please help","don't know what to do","help me",
     "court tomorrow","hearing tomorrow","sign anything",
     "拘留","被抓","遣返","紧急","帮我","害怕",
     "detenido","arrestado","deportación","ayúdame","miedo"];
-
   const med = ["visa expired","status expired","out of status","denied",
     "lost my job","fired","separated","family separated","worried","desperate","no options"];
-
   if (highWholeWord.some(k => wholeWordMatch(k))) return "high";
   if (highSubstring.some(k => msg.includes(k))) return "high";
   if (med.some(k => msg.includes(k))) return "medium";
@@ -295,18 +292,16 @@ async function processMessage(platform, userId, userText, sendFn) {
   const intake = await checkIntake(platform, userId, userText);
   if (intake.handled) {
     await sendFn(intake.reply);
-    // If intake just completed (contact step), also let Claude respond
-    // normally so the conversation continues naturally after intake
     if (intake.reply.includes("feel free to keep asking")) {
-      const reply = await askClaudeWithMemory(platform, userId, userText, SYSTEM_PROMPT);
-      // Don't send a second message — intake completion message is enough
-      // Claude's context is updated so she remembers this for next message
+      // Intake complete — Claude's context updated, conversation continues naturally
+      await askClaudeWithMemory(platform, userId, userText, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT);
     }
     return;
   }
 
   // ── Normal Claude response ────────────────────────────
-  const reply = await askClaudeWithMemory(platform, userId, userText, SYSTEM_PROMPT);
+  const livePrompt = app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT;
+  const reply = await askClaudeWithMemory(platform, userId, userText, livePrompt);
   await sendFn(reply);
   const urgency = detectDistress(userText);
   if (urgency !== "none") await notifyDistress(userId, userText, urgency, platform);
@@ -330,6 +325,22 @@ async function tgDownloadFile(fileId) {
 app.post("/telegram", async (req, res) => {
   res.sendStatus(200);
   const update = req.body;
+
+  // ── Admin panel auth callback ─────────────────────────
+  if (update.callback_query) {
+    const cb = update.callback_query;
+    if (cb.data?.startsWith("admin_")) {
+      const result = handleAdminCallback(cb.data, cb.id);
+      if (result) {
+        axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
+          callback_query_id: cb.id,
+          text: result.answer,
+        }).catch(() => {});
+      }
+      return;
+    }
+  }
+
   if (!update.message) return;
   const msg = update.message;
   const chatId = String(msg.chat.id);
@@ -341,14 +352,14 @@ app.post("/telegram", async (req, res) => {
       const best = msg.photo[msg.photo.length-1];
       const { buffer, extension } = await tgDownloadFile(best.file_id);
       const mimeMap = { jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", gif:"image/gif", webp:"image/webp" };
-      const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "Analyze this image.", SYSTEM_PROMPT, { isImage:true, imageData:buffer.toString("base64"), imageMediaType:mimeMap[extension]||"image/jpeg" });
+      const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "Analyze this image.", app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT, { isImage:true, imageData:buffer.toString("base64"), imageMediaType:mimeMap[extension]||"image/jpeg" });
       await tgSend(chatId, reply); return;
     }
     if (msg.document) {
       await axios.post(`${TELEGRAM_API}/sendChatAction`, { chat_id: chatId, action: "typing" });
       const { buffer } = await tgDownloadFile(msg.document.file_id);
       if (msg.document.mime_type === "application/pdf") {
-        const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "Analyze this PDF.", SYSTEM_PROMPT, { isPdf:true, pdfData:buffer.toString("base64") });
+        const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "Analyze this PDF.", app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT, { isPdf:true, pdfData:buffer.toString("base64") });
         await tgSend(chatId, reply);
       } else {
         await tgSend(chatId, "I can read images and PDFs. Please resend in one of those formats.");
@@ -372,7 +383,7 @@ app.post("/telegram", async (req, res) => {
     }
     if (text === "/contact") { await tgSend(chatId, CONTACT_MESSAGE); return; }
     if (text === "/reset") { await clearHistory("telegram", chatId); await tgSend(chatId, "✅ Reset! How can I help?"); return; }
-    // Send "thinking" message if Claude takes more than 5 seconds
+
     let thinkingMsg = null;
     const thinkingTimer = setTimeout(async () => {
       try {
@@ -391,11 +402,9 @@ app.post("/telegram", async (req, res) => {
     });
     clearTimeout(thinkingTimer);
 
-    // Delete the thinking message once real reply is sent
     if (thinkingMsg) {
       axios.post(`${TELEGRAM_API}/deleteMessage`, { chat_id: chatId, message_id: thinkingMsg }).catch(() => {});
     }
-
     if (lastTgReply && isJJAuthenticated("telegram", chatId)) {
       sendVoiceReply("telegram", chatId, lastTgReply).catch(() => {});
     }
@@ -405,7 +414,6 @@ app.post("/telegram", async (req, res) => {
   }
 });
 
-// Telegram GET verification
 app.get("/telegram", (req, res) => res.send("Telegram webhook active"));
 
 
@@ -434,7 +442,6 @@ async function waDownloadMedia(mediaId) {
   return { buffer: Buffer.from(file.data), mimeType: meta.data.mime_type };
 }
 
-// WhatsApp verification
 app.get("/whatsapp", (req, res) => {
   if (req.query["hub.verify_token"] === VERIFY_TOKEN && req.query["hub.challenge"]) {
     res.send(req.query["hub.challenge"]);
@@ -445,7 +452,6 @@ app.post("/whatsapp", async (req, res) => {
   res.sendStatus(200);
   const body = req.body;
 
-  // WhatsApp
   if (body.object === "whatsapp_business_account") {
     const value = body.entry?.[0]?.changes?.[0]?.value;
     // Ignore status updates (delivered, read, sent) — these are not messages
@@ -458,13 +464,13 @@ app.post("/whatsapp", async (req, res) => {
     try {
       if (message.type === "image") {
         const { buffer, mimeType } = await waDownloadMedia(message.image.id);
-        const reply = await askClaudeWithMemory("whatsapp", from, message.image.caption || "Analyze this image.", SYSTEM_PROMPT, { isImage:true, imageData:buffer.toString("base64"), imageMediaType:mimeType });
+        const reply = await askClaudeWithMemory("whatsapp", from, message.image.caption || "Analyze this image.", app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT, { isImage:true, imageData:buffer.toString("base64"), imageMediaType:mimeType });
         await waSend(from, reply); return;
       }
       if (message.type === "document") {
         const { buffer, mimeType } = await waDownloadMedia(message.document.id);
         if (mimeType === "application/pdf") {
-          const reply = await askClaudeWithMemory("whatsapp", from, message.document.caption || "Analyze this PDF.", SYSTEM_PROMPT, { isPdf:true, pdfData:buffer.toString("base64") });
+          const reply = await askClaudeWithMemory("whatsapp", from, message.document.caption || "Analyze this PDF.", app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT, { isPdf:true, pdfData:buffer.toString("base64") });
           await waSend(from, reply);
         } else { await waSend(from, "I can read images and PDFs. Please resend in one of those formats."); }
         return;
@@ -479,7 +485,6 @@ app.post("/whatsapp", async (req, res) => {
         return;
       }
       if (message.type === "text") {
-        // Send "thinking" message if Claude takes more than 5 seconds
         let thinkingTimer = setTimeout(() => {
           waSend(from, "🤔 Let me think about that for a moment...").catch(() => {});
         }, 5000);
@@ -493,7 +498,6 @@ app.post("/whatsapp", async (req, res) => {
     return;
   }
 
-  // Facebook Messenger
   if (body.object === "page") {
     const event = body.entry?.[0]?.messaging?.[0];
     if (!event?.message?.text) return;
@@ -570,11 +574,9 @@ async function handleWeChatMsg(req, res) {
       res.type("application/xml").send(wcXmlReply(from, to, WELCOME_MESSAGE)); return;
     }
     if (type === "text") {
-      // Direct XML reply — no IP whitelist needed
       try {
         const userText = msg.Content?.trim() || "";
         console.log(`WeChat text from ${from}: "${userText.substring(0, 50)}"`);
-        // Race Claude against 4.5s timeout to stay within WeChat's 5s window
         const reply = await Promise.race([
           (async () => {
             const lowerText = userText.toLowerCase().trim();
@@ -584,7 +586,7 @@ async function handleWeChatMsg(req, res) {
             }
             if (["contact","team","contacto"].includes(lowerText)) return CONTACT_MESSAGE;
             if (lowerText === "reset") { await clearHistory("wechat", from); return "Fresh start! What can I help you with? 😊"; }
-            const r = await askClaudeWithMemory("wechat", from, userText, SYSTEM_PROMPT);
+            const r = await askClaudeWithMemory("wechat", from, userText, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT);
             const urgency = detectDistress(userText);
             if (urgency !== "none") notifyDistress(from, userText, urgency, "WeChat").catch(()=>{});
             notifyLead(from, userText, "WeChat").catch(()=>{});
@@ -605,13 +607,12 @@ async function handleWeChatMsg(req, res) {
       return;
     }
     if (type === "voice") {
-      // Use WeChat built-in recognition if available
       if (msg.Recognition) {
         try {
           const text = msg.Recognition;
           console.log(`WeChat voice recognized: "${text.substring(0,50)}"`);
           const reply = await Promise.race([
-            askClaudeWithMemory("wechat", from, text, SYSTEM_PROMPT),
+            askClaudeWithMemory("wechat", from, text, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT),
             new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4200))
           ]);
           res.type("application/xml").send(wcXmlReply(from, to,
@@ -624,7 +625,6 @@ async function handleWeChatMsg(req, res) {
         }
         return;
       }
-      // No built-in recognition available — ask user to type, suggest other channels
       res.type("application/xml").send(wcXmlReply(from, to,
         "🎤 WeChat暂不支持语音识别，请改用文字提问。如需语音服务，请使用 Telegram (@TEZJJBot) 或 WhatsApp (+1 555-634-2247)。\n\nVoice isn't supported on WeChat. For voice, please use Telegram (@TEZJJBot) or WhatsApp (+1 555-634-2247). Or just type here! 😊"
       ));
@@ -635,7 +635,7 @@ async function handleWeChatMsg(req, res) {
         const imgResp = await axios.get(msg.PicUrl, { responseType: "arraybuffer" });
         const mimeType = imgResp.headers["content-type"] || "image/jpeg";
         const reply = await Promise.race([
-          askClaudeWithMemory("wechat", from, "Analyze this image. If it's a legal document, explain what it is.", SYSTEM_PROMPT, { isImage:true, imageData:Buffer.from(imgResp.data).toString("base64"), imageMediaType:mimeType }),
+          askClaudeWithMemory("wechat", from, "Analyze this image. If it's a legal document, explain what it is.", app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT, { isImage:true, imageData:Buffer.from(imgResp.data).toString("base64"), imageMediaType:mimeType }),
           new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000))
         ]);
         res.type("application/xml").send(wcXmlReply(from, to, reply.substring(0, 600)));
@@ -678,7 +678,7 @@ app.post("/chat", async (req, res) => {
   const { message, sessionId } = req.body;
   if (!message || !sessionId) return res.status(400).json({ error: "Missing message or sessionId" });
   try {
-    const reply = await askClaudeWithMemory("website", sessionId, message, SYSTEM_PROMPT);
+    const reply = await askClaudeWithMemory("website", sessionId, message, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT);
     res.json({ reply });
   } catch(err) {
     console.error("Web chat error:", err.message);
@@ -714,6 +714,15 @@ app.listen(PORT, () => {
   console.log(`🚀 Zara running on port ${PORT}`);
   initDB();
   initIntakeTable();
+
+  // Load saved system prompt from DB (if admin has edited it)
+  initPromptTable().then(() => getSavedPrompt()).then(saved => {
+    if (saved) {
+      app.locals.SYSTEM_PROMPT = saved;
+      console.log("✅ Loaded saved system prompt from DB");
+    }
+  }).catch(() => {});
+
   const url = RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
   setInterval(() => axios.get(url).catch(() => {}), 4 * 60 * 1000);
   console.log("Keep-alive ping →", url);
