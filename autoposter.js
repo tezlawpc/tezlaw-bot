@@ -679,13 +679,25 @@ async function runDailyScheduler() {
   await runWithDelay(() => checkWeather(state, sources),          "Weather check",     15000);
   await runWithDelay(() => checkHolidays(state, sources),         "Holiday check",      5000);
   await runWithDelay(() => checkEvergreen(state, sources),        "Evergreen check",    5000);
+  state.lastDailyRun = new Date().toISOString();
   saveState(state);
   console.log(`✅ Auto-poster complete. Published ${total} post(s) today.\n`);
 }
 
 function scheduleDaily() {
-  console.log("🚀 Running auto-poster on startup...");
-  setTimeout(async () => { await runDailyScheduler(); }, 60000);
+  // Guard: skip startup run if already ran in last 20 hours
+  // Prevents duplicate runs on every Render redeploy
+  setTimeout(async () => {
+    const state = loadState();
+    const lastRun = state.lastDailyRun ? new Date(state.lastDailyRun) : null;
+    const hoursSince = lastRun ? (Date.now() - lastRun.getTime()) / (1000 * 60 * 60) : 999;
+    if (hoursSince < 20) {
+      console.log("⏭️  Auto-poster skipping — already ran " + Math.round(hoursSince) + "h ago");
+      return;
+    }
+    console.log("🚀 Running auto-poster on startup (first run today)...");
+    await runDailyScheduler();
+  }, 60000);
   function scheduleNext() {
     const now = new Date();
     const next = new Date();
