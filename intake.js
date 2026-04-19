@@ -6,7 +6,8 @@
 //        → ask contact → save to DB → notify Telegram + Email
 //        → continue conversation normally
 //
-//  State machine stored in PostgreSQL (intake_state table).
+//  State machine stored in PostgreSQL (client_summaries table
+//  reused with a special prefix, so no new table needed).
 //  Uses existing: saveIntake(), updateClient(), notifyLead()
 // ============================================================
 
@@ -27,6 +28,9 @@ function getPool() {
 }
 
 // ── Intake state keys (stored in pg) ─────────────────────
+// We store intake state as a small JSON blob in a dedicated table.
+// States: null → "awaiting_name" → "awaiting_issue" → "awaiting_contact" → "done"
+
 async function getIntakeState(platform, platformId) {
   try {
     const res = await getPool().query(
@@ -80,8 +84,12 @@ async function initIntakeTable() {
 }
 
 // ── Legal intent detector ─────────────────────────────────
+// Returns true if the message is clearly about a legal matter
+// (not a greeting, general question, or test)
 function isLegalIntent(text) {
   const t = text.toLowerCase();
+
+  // Explicit legal keywords
   const legalKeywords = [
     // Immigration
     "visa","green card","citizenship","naturalization","daca","deportation",
@@ -111,43 +119,14 @@ function isLegalIntent(text) {
     // Chinese
     "律师","签证","绿卡","移民","事故","遗嘱","合同","诉讼","法律"
   ];
+
   return legalKeywords.some(k => t.includes(k));
-}
-
-// ── Detect if a message is already detailed / self-contained ─
-//
-//  If someone sends a long message that already contains:
-//  - Their name (or clearly identifies themselves)
-//  - A specific detailed question or case description
-//  - Enough context for Zara to answer immediately
-//
-//  ...then skip intake entirely and let Claude answer directly.
-//  Intake is for vague short messages ("I need help with immigration")
-//  not for people who already provided full context.
-//
-function isDetailedQuestion(text) {
-  const wordCount = text.trim().split(/\s+/).length;
-
-  // Messages with 30+ words are detailed enough that intake adds no value —
-  // the person has already explained their situation fully.
-  if (wordCount >= 30) return true;
-
-  // Messages that introduce themselves and ask a question
-  const hasSelfIntro = /\b(my name is|i am|i'm|this is|我是|我叫)\b/i.test(text);
-  const hasQuestion  = /\?|please (advise|help|let me know)|need (your|some) (advice|help|guidance)/i.test(text);
-  if (hasSelfIntro && hasQuestion) return true;
-
-  // Messages with specific case numbers, form numbers, or reference numbers
-  // (these are clearly existing clients with a specific question, not new intakes)
-  if (/\b(i-\d{3,}|ref#|reference number|case number|receipt number|a-number)\b/i.test(text)) return true;
-
-  return false;
 }
 
 // ── Detect case type from message ────────────────────────
 function detectCaseType(text) {
   const t = text.toLowerCase();
-  if (/visa|green card|citizenship|immigration|uscis|daca|deportation|asylum|h-1b|eb-|overstay|undocumented|ice|removal|naturalization|petition|i-130|i-485|l-1|l1/.test(t)) return "Immigration";
+  if (/visa|green card|citizenship|immigration|uscis|daca|deportation|asylum|h-1b|eb-|overstay|undocumented|ice|removal|naturalization|petition|i-130|i-485/.test(t)) return "Immigration";
   if (/accident|crash|injury|injured|hospital|whiplash|personal injury|insurance claim|medical bills/.test(t)) return "Car Accident / Personal Injury";
   if (/eviction|evict|landlord|tenant|lease|rent|unlawful detainer|3-day|notice to quit/.test(t)) return "Landlord / Tenant";
   if (/will|trust|estate|probate|inheritance|beneficiary|power of attorney|executor/.test(t)) return "Estate Planning";
@@ -223,17 +202,27 @@ async function saveIntakeToDB(platform, platformId, data) {
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [platform, platformId, data.name, data.issue, data.contact, data.caseType]
     );
-    await getPool().query(
-      `UPDATE clients SET name=$3, case_type=$4 WHERE platform=$1 AND platform_id=$2`,
-      [platform, platformId, data.name, data.caseType]
-    );
+    // Sync all collected info to the clients table for memory persistence
+    const updates = {};
+    if (data.name) updates.name = data.name;
+    if (data.caseType) updates.case_type = data.caseType;
+    if (data.contact) {
+      if (data.contact.includes("@")) updates.email = data.contact;
+      else updates.phone = data.contact;
+    }
+    if (Object.keys(updates).length > 0) {
+      await getPool().query(
+        `UPDATE clients SET ${Object.keys(updates).map((k,i) => `${k}=$${i+3}`).join(", ")} WHERE platform=$1 AND platform_id=$2`,
+        [platform, platformId, ...Object.values(updates)]
+      );
+    }
   } catch (err) {
     console.error("saveIntakeToDB error:", err.message);
   }
 }
 
 // ── Main intake handler ───────────────────────────────────
-// Returns: { handled: true, reply: string } if intake intercepted
+// Returns: { handled: true, reply: string } if intake intercepted the message
 //          { handled: false } if intake is done or not applicable
 async function checkIntake(platform, userId, userText) {
   const state = await getIntakeState(platform, userId);
@@ -241,6 +230,7 @@ async function checkIntake(platform, userId, userText) {
   // ── STATE: awaiting_name ──────────────────────────────
   if (state?.step === "awaiting_name") {
     const name = userText.trim();
+    // Store name and advance
     await setIntakeState(platform, userId, {
       step: "awaiting_issue",
       name,
@@ -293,10 +283,9 @@ async function checkIntake(platform, userId, userText) {
       });
     });
 
+    // Mark intake as done
     await clearIntakeState(platform, userId);
 
-    // Return handled:false so askClaudeWithMemory continues and Claude can
-    // also answer any question the client originally had
     return {
       handled: true,
       reply: `Perfect — I've passed your info to the team and someone will follow up with you shortly. In the meantime, feel free to keep asking me anything! 😊`,
@@ -304,11 +293,8 @@ async function checkIntake(platform, userId, userText) {
   }
 
   // ── NO ACTIVE INTAKE STATE ────────────────────────────
-  // Only trigger intake for SHORT / VAGUE legal messages.
-  // If the message is already detailed (30+ words, self-introduction + question,
-  // or contains case/reference numbers), skip intake and let Claude answer directly.
-  // This prevents George Wu-style detailed questions from being intercepted.
-  if (!state && isLegalIntent(userText) && !isDetailedQuestion(userText)) {
+  // Check if this message triggers a new intake
+  if (!state && isLegalIntent(userText)) {
     const caseType = detectCaseType(userText);
     await setIntakeState(platform, userId, {
       step: "awaiting_name",
@@ -321,14 +307,8 @@ async function checkIntake(platform, userId, userText) {
     };
   }
 
-  // Detailed question OR not a legal matter — let Claude handle it directly
+  // Not a legal matter — let normal conversation handle it
   return { handled: false };
 }
 
-// ── Reset intake state for a user ────────────────────────
-// Called by askClaude-memory.js when starting fresh
-async function resetIntake(platform, userId) {
-  await clearIntakeState(platform, userId);
-}
-
-module.exports = { checkIntake, initIntakeTable, resetIntake };
+module.exports = { checkIntake, initIntakeTable };
