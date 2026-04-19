@@ -277,6 +277,13 @@ router.get("/api/stats", requireAuth, async (req, res) => {
   }
 });
 
+// Manual autoposter trigger
+router.post("/api/autoposter/run", requireAuth, (req, res) => {
+  res.json({ ok: true, message: "Auto-poster started — watch Telegram for results in ~5 min." });
+  const { runDailyScheduler } = require("./autoposter");
+  runDailyScheduler().catch(err => console.error("Admin autoposter error:", err.message));
+});
+
 // Get analytics history
 router.get("/api/analytics", requireAuth, (req, res) => {
   try {
@@ -809,6 +816,17 @@ function dashboardHtml() {
       <span id="analyticsMsg" style="margin-left:12px;font-size:13px;color:#006600"></span>
     </div>
     <div class="card">
+      <h3>📝 Auto-Poster</h3>
+      <p style="font-size:13px;color:#666;margin-bottom:16px">
+        Manually run the WordPress auto-poster. Checks for immigration news, weather, holidays, and evergreen topics.
+        Will not duplicate posts already published.
+      </p>
+      <button class="action-btn" id="runAutoposterBtn" onclick="runAutoposter()">
+        ▶ Run Auto-Poster Now
+      </button>
+      <span id="autoposterMsg" style="margin-left:12px;font-size:13px;color:#006600"></span>
+    </div>
+    <div class="card">
       <h3>📅 Analytics History</h3>
       <div id="analyticsHistory"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
@@ -1025,6 +1043,24 @@ function dashboardHtml() {
             <div class="analytics-summary">\${entry.summary}</div>
           </div>\`).join('')
       : '<p style="color:#999;font-size:13px">No analytics runs yet.</p>';
+  }
+
+  async function runAutoposter() {
+    var btn = document.getElementById('runAutoposterBtn');
+    var msg = document.getElementById('autoposterMsg');
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+    msg.textContent = '';
+    var res = await api('/api/autoposter/run', { method: 'POST' });
+    btn.disabled = false;
+    btn.textContent = '▶ Run Auto-Poster Now';
+    if (res && res.ok) {
+      msg.textContent = '✅ ' + res.message;
+      setTimeout(function(){ msg.textContent = ''; }, 10000);
+    } else {
+      msg.style.color = '#cc0000';
+      msg.textContent = '❌ Failed to start';
+    }
   }
 
   async function runAnalytics() {
