@@ -43,6 +43,10 @@ function getCookie(name) {
     if (name === 'conflicts') loadConflicts();
     if (name === 'questions') loadQuestions();
     if (name === 'audit') loadAudit();
+    if (name === 'scores') loadScores();
+    if (name === 'sol') { loadSol(); }
+    if (name === 'drip') loadDrip();
+    if (name === 'prompt') loadPromptHistory();
   }
 
   // Dashboard
