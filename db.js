@@ -337,7 +337,6 @@ async function syncIntakeToClient(platform, platformId, data) {
   const updates = {};
   if (data.name)    updates.name = data.name;
   if (data.contact) {
-    // Detect if contact is email or phone
     if (data.contact.includes("@")) updates.email = data.contact;
     else updates.phone = data.contact;
   }
@@ -347,9 +346,214 @@ async function syncIntakeToClient(platform, platformId, data) {
   }
 }
 
+// ── Wave 1: Init all new tables ───────────────────────────
+async function initWave1Tables() {
+  try {
+    // Lead pipeline
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS leads (
+        id SERIAL PRIMARY KEY,
+        platform VARCHAR(20),
+        platform_id VARCHAR(100),
+        name VARCHAR(200),
+        contact VARCHAR(200),
+        case_type VARCHAR(100),
+        stage VARCHAR(50) NOT NULL DEFAULT 'new_lead',
+        notes TEXT,
+        stage_changed_at TIMESTAMP DEFAULT NOW(),
+        acknowledged_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_leads_stage ON leads(stage);
+      CREATE INDEX IF NOT EXISTS idx_leads_created ON leads(created_at DESC);
+    `);
+
+    // Escalation log for hot lead alerts
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS escalation_log (
+        id SERIAL PRIMARY KEY,
+        lead_id INTEGER REFERENCES leads(id),
+        level INTEGER NOT NULL,
+        method VARCHAR(20) NOT NULL,
+        sent_at TIMESTAMP DEFAULT NOW(),
+        acknowledged_at TIMESTAMP
+      );
+    `);
+
+    // Conflict checks
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS conflict_checks (
+        id SERIAL PRIMARY KEY,
+        intake_id INTEGER,
+        platform VARCHAR(20),
+        platform_id VARCHAR(100),
+        search_name VARCHAR(200),
+        matches JSONB,
+        disposition VARCHAR(20) DEFAULT 'pending',
+        checked_at TIMESTAMP DEFAULT NOW(),
+        reviewed_by VARCHAR(100),
+        reviewed_at TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_conflicts_disposition ON conflict_checks(disposition);
+    `);
+
+    // Unanswered questions log
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS unanswered_questions (
+        id SERIAL PRIMARY KEY,
+        platform VARCHAR(20),
+        platform_id VARCHAR(100),
+        question TEXT NOT NULL,
+        zara_response TEXT,
+        resolved BOOLEAN DEFAULT FALSE,
+        resolved_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_uq_resolved ON unanswered_questions(resolved, created_at DESC);
+    `);
+
+    // Audit log
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id SERIAL PRIMARY KEY,
+        actor VARCHAR(100) NOT NULL DEFAULT 'admin',
+        action VARCHAR(100) NOT NULL,
+        target VARCHAR(200),
+        old_value TEXT,
+        new_value TEXT,
+        ip_address VARCHAR(50),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
+    `);
+
+    console.log("✅ Wave 1 tables ready");
+  } catch (err) {
+    console.error("initWave1Tables error:", err.message);
+  }
+}
+
+// ── Audit log helper ──────────────────────────────────────
+async function logAudit(actor, action, target, oldValue, newValue, ip) {
+  try {
+    await getPool().query(
+      `INSERT INTO audit_log (actor, action, target, old_value, new_value, ip_address)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [actor, action, target || null,
+       oldValue ? String(oldValue).substring(0, 2000) : null,
+       newValue ? String(newValue).substring(0, 2000) : null,
+       ip || null]
+    );
+  } catch (err) {
+    console.error("logAudit error:", err.message);
+  }
+}
+
+// ── Lead pipeline helpers ─────────────────────────────────
+async function createLead(data) {
+  try {
+    const res = await getPool().query(
+      `INSERT INTO leads (platform, platform_id, name, contact, case_type, stage, stage_changed_at)
+       VALUES ($1, $2, $3, $4, $5, 'new_lead', NOW())
+       RETURNING *`,
+      [data.platform, data.platformId, data.name, data.contact, data.caseType]
+    );
+    return res.rows[0];
+  } catch (err) {
+    console.error("createLead error:", err.message);
+    return null;
+  }
+}
+
+async function updateLeadStage(leadId, stage, actor, ip) {
+  try {
+    const old = await getPool().query(`SELECT stage FROM leads WHERE id=$1`, [leadId]);
+    const oldStage = old.rows[0]?.stage;
+    await getPool().query(
+      `UPDATE leads SET stage=$1, stage_changed_at=NOW() WHERE id=$2`,
+      [stage, leadId]
+    );
+    await logAudit(actor || "admin", "lead_stage_change",
+      `lead:${leadId}`, oldStage, stage, ip);
+  } catch (err) {
+    console.error("updateLeadStage error:", err.message);
+  }
+}
+
+// ── Conflict check helper ─────────────────────────────────
+async function runConflictCheck(intakeId, platform, platformId, name) {
+  try {
+    if (!name) return null;
+    const nameParts = name.toLowerCase().split(/\s+/);
+    const matches = [];
+
+    // Search clients table
+    const clientRes = await getPool().query(
+      `SELECT platform, platform_id, name, case_type, first_seen
+       FROM clients
+       WHERE LOWER(name) ILIKE ANY($1)
+         AND NOT (platform=$2 AND platform_id=$3)`,
+      [nameParts.map(p => `%${p}%`), platform, platformId]
+    );
+    if (clientRes.rows.length > 0) {
+      matches.push(...clientRes.rows.map(r => ({
+        source: "clients", name: r.name,
+        case_type: r.case_type, first_seen: r.first_seen
+      })));
+    }
+
+    // Search intakes table
+    const intakeRes = await getPool().query(
+      `SELECT name, case_type, contact, created_at
+       FROM intakes
+       WHERE LOWER(name) ILIKE ANY($1)
+         AND NOT (platform=$2 AND platform_id=$3)
+       ORDER BY created_at DESC LIMIT 5`,
+      [nameParts.map(p => `%${p}%`), platform, platformId]
+    );
+    if (intakeRes.rows.length > 0) {
+      matches.push(...intakeRes.rows.map(r => ({
+        source: "intakes", name: r.name,
+        case_type: r.case_type, contact: r.contact
+      })));
+    }
+
+    const disposition = matches.length > 0 ? "possible" : "cleared";
+    const res = await getPool().query(
+      `INSERT INTO conflict_checks
+         (intake_id, platform, platform_id, search_name, matches, disposition)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [intakeId, platform, platformId, name,
+       JSON.stringify(matches), disposition]
+    );
+    return res.rows[0];
+  } catch (err) {
+    console.error("runConflictCheck error:", err.message);
+    return null;
+  }
+}
+
+// ── Log unanswered question ───────────────────────────────
+async function logUnansweredQuestion(platform, platformId, question, zaraResponse) {
+  try {
+    await getPool().query(
+      `INSERT INTO unanswered_questions (platform, platform_id, question, zara_response)
+       VALUES ($1, $2, $3, $4)`,
+      [platform, platformId,
+       question.substring(0, 2000),
+       zaraResponse?.substring(0, 2000)]
+    );
+  } catch (err) {
+    console.error("logUnansweredQuestion error:", err.message);
+  }
+}
+
 module.exports = {
   initDB, getOrCreateClient, updateClient, saveMessage,
   getHistory, getClientContext, saveSummary, clearHistory,
   saveIntake, maybeAutoSummarize, saveJJMemory, getJJMemories,
   setJJSession, getJJSession, getLastMessageTime, syncIntakeToClient,
+  initWave1Tables, logAudit, createLead, updateLeadStage,
+  runConflictCheck, logUnansweredQuestion,
 };
