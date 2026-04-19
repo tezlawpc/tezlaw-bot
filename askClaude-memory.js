@@ -181,24 +181,71 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
     // 5. Load client context
     const { client, summary, history } = await db.getClientContext(platform, platformId);
 
+    // ── Session-start detection ────────────────────────────
+    // Only trigger warm welcome on the FIRST message of a new session
+    // (no messages in last 4 hours = new session)
+    let isFirstMessageOfSession = false;
+    if (history.length === 0) {
+      isFirstMessageOfSession = true;
+    } else {
+      // Check if last message was more than 4 hours ago
+      const lastMsg = await db.getLastMessageTime(platform, platformId);
+      if (lastMsg) {
+        const hoursSinceLast = (Date.now() - new Date(lastMsg).getTime()) / (1000 * 60 * 60);
+        if (hoursSinceLast > 4) isFirstMessageOfSession = true;
+      }
+    }
+
     // 6. Build personalized system prompt
     let personalizedSystem = systemPrompt;
     if (client) {
+      const firstSeen = new Date(client.first_seen);
+      const lastSeen  = client.last_seen ? new Date(client.last_seen) : null;
+      const msAgo = Date.now() - firstSeen.getTime();
+      const isReturning = msAgo > 60 * 60 * 1000;
+      const daysSince = Math.floor(msAgo / (1000 * 60 * 60 * 24));
+
+      // Format dates with time in PT for Zara to cite precisely
+      const fmtOpts = { timeZone: "America/Los_Angeles", year: "numeric", month: "long",
+                        day: "numeric", hour: "numeric", minute: "2-digit", hour12: true };
+      const firstSeenStr = firstSeen.toLocaleString("en-US", fmtOpts) + " PT";
+      const lastSeenStr  = lastSeen ? lastSeen.toLocaleString("en-US", fmtOpts) + " PT" : null;
+
       let ctx = "\n\n── CLIENT MEMORY ──";
-      if (client.name) ctx += `\nClient name: ${client.name}`;
+      if (client.name)  ctx += `\nClient name: ${client.name}`;
+      if (client.email) ctx += `\nClient email: ${client.email}`;
+      if (client.phone) ctx += `\nClient phone: ${client.phone}`;
       if (client.preferred_language && client.preferred_language !== "en")
         ctx += `\nPreferred language: ${client.preferred_language} — respond in this language`;
       if (client.case_type) ctx += `\nCase type: ${client.case_type}`;
-      if (client.first_seen) {
-        const isReturning = (Date.now() - new Date(client.first_seen)) > 60 * 60 * 1000;
-        if (isReturning) ctx += `\nReturning client (first contact: ${new Date(client.first_seen).toLocaleDateString()})`;
+
+      // Always provide exact timestamps so Zara can answer "when did I first contact you?"
+      ctx += `\nFirst contacted us: ${firstSeenStr}`;
+      if (lastSeenStr) ctx += `\nLast contact: ${lastSeenStr}`;
+
+      if (isReturning) {
+        ctx += `\nReturning client (${daysSince} days since first contact)`;
+        if (isFirstMessageOfSession) {
+          ctx += "\n\nIMPORTANT — This is a RETURNING client and this is their FIRST message of this session.";
+          ctx += "\n- Greet them warmly by name if you know it (e.g. \"Welcome back, Maria!\")";
+          ctx += "\n- Briefly reference what you remember about their situation in 1 sentence";
+          ctx += "\n- Do NOT make them re-explain everything from scratch";
+          ctx += "\n- Pick up naturally, e.g. \"Good to hear from you again! Last time you were asking about your green card application. What can I help you with today?\"";
+        } else {
+          ctx += "\n- This is a continuing conversation — no need to re-greet";
+        }
       }
-      if (summary) ctx += `\n\nConversation summary:\n${summary}`;
+
+      if (summary) {
+        ctx += `\n\nWhat we know about this client:\n${summary}`;
+        ctx += "\nUse this context to avoid asking questions they have already answered.";
+      }
+
       ctx += "\n── END MEMORY ──";
       personalizedSystem += ctx;
     }
 
-    // Inject JJ knowledge base into public responses (discreetly)
+        // Inject JJ knowledge base into public responses (discreetly)
     const jjKnowledge = await getJJPublicContext();
     if (jjKnowledge) {
       personalizedSystem += `\n\n── FIRM KNOWLEDGE (use naturally, never quote directly) ──\n${jjKnowledge.substring(0, 1500)}\n── END FIRM KNOWLEDGE ──`;
@@ -375,9 +422,10 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
 
     if (!reply) reply = "I'm sorry, I didn't catch that. Could you rephrase?";
 
-    // 9. Save reply + auto-summarize
+    // 9. Save reply + extract contact info + auto-summarize
     await db.saveMessage(platform, platformId, "assistant", reply);
     if (!client?.name) tryExtractName(platform, platformId, userMessage);
+    tryExtractContact(platform, platformId, userMessage);
     db.maybeAutoSummarize(platform, platformId, ANTHROPIC_API_KEY).catch(() => {});
 
     return reply;
@@ -388,8 +436,20 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
 }
 
 function tryExtractName(platform, platformId, text) {
-  const match = text.match(/(?:my name is|i'm|i am|this is)\s+([A-Z][a-z]+(?: [A-Z][a-z]+)?)/i);
+  const match = text.match(/(?:my name is|i\'m|i am|this is)\s+([A-Z][a-z]+(?: [A-Z][a-z]+)?)/i);
   if (match) db.updateClient(platform, platformId, { name: match[1].trim() }).catch(() => {});
+}
+
+// ── Extract and save contact info from any message ────────
+function tryExtractContact(platform, platformId, text) {
+  const updates = {};
+  const emailMatch = text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  const phoneMatch = text.match(/(\+?1?\s?)?(\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})/);
+  if (emailMatch) updates.email = emailMatch[0];
+  if (phoneMatch) updates.phone = phoneMatch[0];
+  if (Object.keys(updates).length > 0) {
+    db.updateClient(platform, platformId, updates).catch(() => {});
+  }
 }
 
 module.exports = { askClaudeWithMemory };
