@@ -59,7 +59,7 @@ async function initDB() {
       );
     `);
 
-    // ── Intakes table (new) ────────────────────────────────
+    // ── Intakes table ──────────────────────────────────────
     await getPool().query(`
       CREATE TABLE IF NOT EXISTS intakes (
         id SERIAL PRIMARY KEY,
@@ -204,7 +204,7 @@ async function clearHistory(platform, platformId) {
   }
 }
 
-// ── Save completed intake form ───────────────────────────────
+// ── Save completed intake form ────────────────────────────
 async function saveIntake(platform, platformId, data) {
   try {
     await getPool().query(
@@ -254,7 +254,7 @@ async function maybeAutoSummarize(platform, platformId, anthropicApiKey) {
   }
 }
 
-// ── Save a JJ memory entry (never deleted) ──────────────
+// ── Save a JJ memory entry (never deleted) ───────────────
 async function saveJJMemory(entry) {
   try {
     await getPool().query(
@@ -266,11 +266,13 @@ async function saveJJMemory(entry) {
   }
 }
 
-// ── Get JJ memories (most recent first) ─────────────────
+// ── Get JJ memories (most recent first) ──────────────────
 async function getJJMemories(limit = 50) {
   try {
     const res = await getPool().query(
-      `SELECT id, timestamp, jj_said, zara_said FROM jj_memory ORDER BY timestamp DESC LIMIT $1`,
+      `SELECT id, timestamp, jj_said, zara_said FROM jj_memory
+       WHERE jj_said NOT LIKE '_session_%'
+       ORDER BY timestamp DESC LIMIT $1`,
       [limit]
     );
     return res.rows;
@@ -280,8 +282,43 @@ async function getJJMemories(limit = 50) {
   }
 }
 
+// ── JJ Session persistence (survives Render redeploys) ────
+//  Stores auth state in jj_memory using a special _session_ key.
+//  No new table needed. Once authenticated, JJ stays logged in
+//  across redeploys until explicitly logging out with "exit".
+async function setJJSession(platform, userId, authenticated) {
+  try {
+    const key = `_session_${platform}_${userId}`;
+    // Always delete first to avoid duplicates
+    await getPool().query(`DELETE FROM jj_memory WHERE jj_said = $1`, [key]);
+    if (authenticated) {
+      await getPool().query(
+        `INSERT INTO jj_memory (timestamp, jj_said, zara_said) VALUES ($1, $2, $3)`,
+        [new Date().toISOString(), key, "authenticated"]
+      );
+    }
+  } catch(e) {
+    console.error("setJJSession error:", e.message);
+  }
+}
+
+async function getJJSession(platform, userId) {
+  try {
+    const key = `_session_${platform}_${userId}`;
+    const result = await getPool().query(
+      `SELECT 1 FROM jj_memory WHERE jj_said = $1 AND zara_said = 'authenticated' LIMIT 1`,
+      [key]
+    );
+    return result.rows.length > 0;
+  } catch(e) {
+    console.error("getJJSession error:", e.message);
+    return false;
+  }
+}
+
 module.exports = {
   initDB, getOrCreateClient, updateClient, saveMessage,
   getHistory, getClientContext, saveSummary, clearHistory,
   saveIntake, maybeAutoSummarize, saveJJMemory, getJJMemories,
+  setJJSession, getJJSession,
 };
