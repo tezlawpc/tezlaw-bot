@@ -1,16 +1,24 @@
-
-
-  function getCookie(name) {
+function getCookie(name) {
     return document.cookie.split('; ').find(r => r.startsWith(name + '='))?.split('=')[1] || '';
   }
 
   async function api(path, options = {}) {
-    const res = await fetch('/admin' + path, {
-      ...options,
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': getCookie('admin_token'), ...options.headers }
-    });
-    if (res.status === 401) { window.location.href = '/admin/login'; return null; }
-    return res.json();
+    try {
+      const res = await fetch('/admin' + path, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': getCookie('admin_token'), ...options.headers }
+      });
+      if (res.status === 401) { window.location.href = '/admin/login'; return null; }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error('API error ' + res.status + ' on ' + path + ':', err.error || 'unknown');
+        return null;
+      }
+      return res.json();
+    } catch(e) {
+      console.error('API fetch error on ' + path + ':', e.message);
+      return null;
+    }
   }
 
   function platBadge(p) {
@@ -381,6 +389,7 @@ async function loadScores() {
 
   var fe = document.getElementById('scoresFlagged');
   var ae = document.getElementById('scoresAll');
+  if (!flagged && !all) { fe.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Setting up — will populate after first conversations.</p>'; ae.innerHTML = ''; return; }
 
   if (flagged && flagged.length) {
     var fr = '';
@@ -422,7 +431,8 @@ async function loadScores() {
 async function loadSol() {
   var data = await api('/api/sol');
   var el = document.getElementById('solTable');
-  if (!data || !data.length) {
+  if (!data) { el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Setting up — DB tables initializing on next deploy.</p>'; return; }
+  if (!data.length) {
     el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No deadlines tracked yet. Add one above or they auto-create from intake.</p>';
     return;
   }
@@ -482,7 +492,8 @@ async function deleteSol(id) {
 async function loadDrip() {
   var data = await api('/api/drip');
   var el = document.getElementById('dripTable');
-  if (!data || !data.length) {
+  if (!data) { el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Setting up — DB tables initializing on next deploy.</p>'; return; }
+  if (!data.length) {
     el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No drip campaigns yet — they start automatically after intake completion.</p>';
     return;
   }
