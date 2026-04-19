@@ -4,11 +4,116 @@
 // ============================================================
 
 const axios  = require("axios");
+const fs     = require("fs");
 const db     = require("./db");
 const { checkIntake, resetIntake } = require("./intake");
 const { checkJJMode, getJJPublicContext } = require("./jj-mode");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+// ── Load weekly trends from autoposter sources.json ──────
+// Autoposter saves this file every Sunday with current legal trends
+const SOURCES_FILE = "/var/data/sources.json";
+
+function getWeeklyTrends() {
+  try {
+    if (!fs.existsSync(SOURCES_FILE)) return null;
+    const sources = JSON.parse(fs.readFileSync(SOURCES_FILE, "utf8"));
+    if (!sources.weeklyTrends) return null;
+
+    // Only use if researched within last 8 days
+    if (sources.lastResearched) {
+      const daysSince = (Date.now() - new Date(sources.lastResearched).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSince > 8) return null;
+    }
+
+    let trends = `Current legal trends (as of ${new Date(sources.lastResearched).toLocaleDateString()}): ${sources.weeklyTrends}`;
+    if (sources.urgentArea && sources.urgentTopic) {
+      trends += `\n\nURGENT THIS WEEK (${sources.urgentArea}): ${sources.urgentTopic}`;
+    }
+    return trends;
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── Load full sources data for proactive warnings + lead routing ──
+function getSourcesData() {
+  try {
+    if (!fs.existsSync(SOURCES_FILE)) return null;
+    const sources = JSON.parse(fs.readFileSync(SOURCES_FILE, "utf8"));
+    if (!sources.lastResearched) return null;
+    const daysSince = (Date.now() - new Date(sources.lastResearched).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSince > 8) return null;
+    return sources;
+  } catch(e) { return null; }
+}
+
+// ── Load recent WordPress posts for FAQ reference ──────────
+const POSTS_CACHE_FILE = "/var/data/recent_posts_cache.json";
+
+async function getRecentPosts() {
+  // Use cached posts if fresh (< 6 hours old)
+  try {
+    if (fs.existsSync(POSTS_CACHE_FILE)) {
+      const cache = JSON.parse(fs.readFileSync(POSTS_CACHE_FILE, "utf8"));
+      const hoursOld = (Date.now() - cache.timestamp) / (1000 * 60 * 60);
+      if (hoursOld < 6 && cache.posts?.length > 0) return cache.posts;
+    }
+  } catch(e) {}
+
+  // Fetch from WordPress REST API
+  const WP_URL = process.env.WP_URL;
+  if (!WP_URL) return null;
+  try {
+    const resp = await axios.get(
+      `${WP_URL}/wp-json/wp/v2/posts?per_page=20&status=publish&_fields=id,title,link,excerpt,categories,date`,
+      { timeout: 5000 }
+    );
+    const posts = resp.data.map(p => ({
+      title: p.title?.rendered?.replace(/<[^>]+>/g, "") || "",
+      link: p.link,
+      excerpt: p.excerpt?.rendered?.replace(/<[^>]+>/g, "").substring(0, 150) || "",
+      date: p.date?.split("T")[0] || ""
+    })).filter(p => p.title && p.link);
+
+    // Cache for 6 hours
+    fs.writeFileSync(POSTS_CACHE_FILE, JSON.stringify({ posts, timestamp: Date.now() }));
+    return posts;
+  } catch(e) {
+    console.log("WP posts fetch failed:", e.message);
+    return null;
+  }
+}
+
+// ── Build FAQ reference block from recent posts ───────────
+function buildFaqBlock(posts, caseType, weeklyTrends) {
+  if (!posts || posts.length === 0) return null;
+
+  // Map case type to keywords for relevance filtering
+  const keywordMap = {
+    immigration: ["immigration", "visa", "green card", "deportation", "asylum", "daca", "citizenship", "immigrant"],
+    personal_injury: ["accident", "injury", "car crash", "personal injury", "dui", "slip", "fall"],
+    business: ["business", "contract", "litigation", "employment", "non-compete", "trade secret"],
+    ip: ["trademark", "patent", "copyright", "intellectual property"],
+    estate: ["estate", "trust", "probate", "will", "inheritance", "prop 19"],
+  };
+
+  const keywords = caseType ? (keywordMap[caseType] || []) : [];
+
+  // Filter relevant posts
+  let relevant = posts.filter(p => {
+    const text = (p.title + " " + p.excerpt).toLowerCase();
+    return keywords.some(k => text.includes(k));
+  }).slice(0, 3);
+
+  // If no relevant posts by case type, use most recent
+  if (relevant.length === 0) relevant = posts.slice(0, 2);
+
+  if (relevant.length === 0) return null;
+
+  return relevant.map(p => `- "${p.title}" (${p.date}): ${p.link}`).join("\n");
+}
 
 function detectLanguage(text) {
   if (/[\u4e00-\u9fff]/.test(text)) return "zh";
@@ -93,10 +198,56 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       personalizedSystem += ctx;
     }
 
-    // Inject JJ's knowledge base into public responses (discreetly)
+    // Inject JJ knowledge base into public responses (discreetly)
     const jjKnowledge = await getJJPublicContext();
     if (jjKnowledge) {
       personalizedSystem += `\n\n── FIRM KNOWLEDGE (use naturally, never quote directly) ──\n${jjKnowledge.substring(0, 1500)}\n── END FIRM KNOWLEDGE ──`;
+    }
+
+    // ── Inject weekly trends + proactive warnings + lead routing + FAQ refs ──
+    const sources = getSourcesData();
+    const weeklyTrends = getWeeklyTrends();
+
+    if (weeklyTrends) {
+      personalizedSystem += `\n\n── CURRENT LEGAL TRENDS ──\n${weeklyTrends}\n── END TRENDS ──`;
+    }
+
+    // Proactive warning: if client is asking about urgent area, warn them naturally
+    if (sources?.urgentArea && sources?.urgentTopic && caseType) {
+      const urgentAreaLower = sources.urgentArea.toLowerCase();
+      const caseTypeLower = (caseType || "").toLowerCase();
+      const isMatch = (
+        (urgentAreaLower.includes("immigra") && caseTypeLower.includes("immigra")) ||
+        (urgentAreaLower.includes("personal injury") && caseTypeLower.includes("personal")) ||
+        (urgentAreaLower.includes("business") && caseTypeLower.includes("business")) ||
+        (urgentAreaLower.includes("estate") && caseTypeLower.includes("estate")) ||
+        (urgentAreaLower.includes("trademark") && caseTypeLower.includes("ip"))
+      );
+      if (isMatch) {
+        personalizedSystem += `\n\n── PROACTIVE WARNING (mention naturally once if relevant) ──\nThere is an important development this week related to this client\'s situation: ${sources.urgentTopic}. If appropriate, mention it naturally — e.g. "By the way, there\'s something important happening this week you should know about..."\n── END WARNING ──`;
+      }
+    }
+
+    // Smart lead routing: if urgent topic involves attorneys/professionals, route to JJ
+    if (sources?.urgentTopic) {
+      const urgentLower = sources.urgentTopic.toLowerCase();
+      const msgLower = userMessage.toLowerCase();
+      const isAttorneyTopic = /attorney|lawyer|law firm|sanctions|bar complaint|court sanction|fake citation|ai citation|malpractice/.test(urgentLower);
+      const userIsAttorney = /attorney|lawyer|i'm a lawyer|law firm|my client|legal practice|bar number/.test(msgLower);
+      if (isAttorneyTopic && userIsAttorney) {
+        personalizedSystem += `\n\n── LEAD ROUTING ──\nThis user appears to be a legal professional asking about: ${sources.urgentTopic}. Route them to JJ Zhang directly for a professional consultation: jj@tezlawfirm.com or 626-678-8677.\n── END ROUTING ──`;
+      }
+    }
+
+    // FAQ reference: inject recent relevant blog posts
+    try {
+      const recentPosts = await getRecentPosts();
+      const faqBlock = buildFaqBlock(recentPosts, caseType, weeklyTrends);
+      if (faqBlock) {
+        personalizedSystem += `\n\n── RECENT TEZ LAW GUIDES (reference naturally when answering questions) ──\nWe recently published these guides that may be relevant:\n${faqBlock}\nWhen a client asks a question covered by one of these, naturally mention: "We actually just published a guide on this — [title] at [link]" and give them the key points.\n── END GUIDES ──`;
+      }
+    } catch(e) {
+      // Non-fatal — continue without posts
     }
 
     // 7. Build messages array
@@ -121,16 +272,9 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
     }
 
     // 8. Call Claude — with tool_use loop for web search + action tools
-    //
-    //  When Claude uses web_search, stop_reason="tool_use" and we must:
-    //    1. Append the assistant's tool_use turn to messages
-    //    2. Append tool_result(s) as a user turn
-    //    3. Re-call the API until stop_reason="end_turn"
-    //  Without this loop, research requests silently fail.
-    //
     const allTools = [
       { type: "web_search_20250305", name: "web_search" },
-      ...(options.extraTools || [])  // action tools when JJ is messaging
+      ...(options.extraTools || [])
     ];
 
     let loopMessages = [...messages];
@@ -160,7 +304,6 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
         );
         respData = resp.data;
       } catch (apiErr) {
-        // Detailed error logging so Render logs show exactly what failed
         const status  = apiErr.response?.status;
         const errBody = apiErr.response?.data;
         console.error(`[askClaude] ❌ API call loop=${loop} FAILED`);
@@ -171,7 +314,6 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
         console.error(`[askClaude]   Platform    : ${platform} | User: ${platformId}`);
         console.error(`[askClaude]   Message     : ${userMessage.substring(0, 100)}`);
 
-        // Surface a descriptive error to the user
         if (apiErr.code === "ECONNABORTED") {
           throw new Error("⏱️ That request took too long — try a more specific question, or call us at 626-678-8677.");
         } else if (status === 529 || status === 503) {
@@ -185,7 +327,6 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
 
       console.log(`[askClaude] loop=${loop} stop_reason=${respData.stop_reason} blocks=${respData.content?.length}`);
 
-      // Final text response — done
       if (respData.stop_reason === "end_turn") {
         reply = respData.content
           .filter(b => b.type === "text").map(b => b.text).join("").trim();
@@ -196,26 +337,21 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
         break;
       }
 
-      // Tool use — loop back with results
       if (respData.stop_reason === "tool_use") {
         const toolUseBlocks = respData.content.filter(b => b.type === "tool_use");
         console.log(`[askClaude] tool_use blocks: ${toolUseBlocks.map(b => b.name).join(", ")}`);
 
-        // Append assistant turn
         loopMessages.push({ role: "assistant", content: respData.content });
 
-        // Build tool results
         const toolResults = [];
         for (const toolUse of toolUseBlocks) {
           if (toolUse.name === "web_search") {
-            // Web search is handled server-side by Anthropic — just acknowledge
             toolResults.push({
               type: "tool_result",
               tool_use_id: toolUse.id,
               content: "Search completed. Please synthesize the results."
             });
           } else if (options.executeAction) {
-            // Action tools (calendar, email, etc.) — delegated to caller
             try {
               const result = await options.executeAction(toolUse.name, toolUse.input);
               toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
@@ -232,7 +368,6 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
         continue;
       }
 
-      // Unexpected stop reason
       console.error(`[askClaude] ❌ Unexpected stop_reason: ${respData.stop_reason}`);
       reply = "I'm sorry, I didn't catch that. Could you rephrase?";
       break;
