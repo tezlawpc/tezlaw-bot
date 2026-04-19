@@ -8,6 +8,7 @@ const fs     = require("fs");
 const db     = require("./db");
 const { checkIntake, resetIntake } = require("./intake");
 const { checkJJMode, getJJPublicContext } = require("./jj-mode");
+const { detectPracticeArea, buildAgentPrompt } = require("./agents");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -196,8 +197,13 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       }
     }
 
-    // 6. Build personalized system prompt
-    let personalizedSystem = systemPrompt;
+    // 6. Route to specialist agent based on practice area
+    const practiceArea = detectPracticeArea(userMessage, client?.case_type);
+    const { prompt: agentPrompt, agentName } = buildAgentPrompt(systemPrompt, practiceArea);
+    if (practiceArea) console.log(`[agent] Routing to ${agentName} (${practiceArea})`);
+
+    // Build personalized system prompt on top of agent prompt
+    let personalizedSystem = agentPrompt;
     if (client) {
       const firstSeen = new Date(client.first_seen);
       const lastSeen  = client.last_seen ? new Date(client.last_seen) : null;
