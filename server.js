@@ -78,13 +78,13 @@ JJ ZHANG — Managing Attorney
 - Phone: 626-678-8677
 - Email: jj@tezlawfirm.com
 
-JUE WANG — USCIS filings & immigration questions
+JUE WANG — Paralegal (immigration filings & USCIS matters)
 - Email: jue.wang@tezlawfirm.com
 
-MICHAEL LIU — Immigration court hearings & motions
+MICHAEL LIU — Paralegal (immigration court support & motions)
 - Email: michael.liu@tezlawfirm.com
 
-LIN MEI — Car accidents & state court filings
+LIN MEI — Paralegal (personal injury & state court filings)
 - Email: lin.mei@tezlawfirm.com
 
 ============================
@@ -186,17 +186,17 @@ What's going on? Tell me what's on your mind! 😊`;
 
 const CONTACT_MESSAGE = `Here's the Tez Law P.C. team:
 
-👨‍💼 JJ Zhang (Managing Attorney)
+👨‍💼 JJ Zhang — Managing Attorney
 📞 626-678-8677
 📧 jj@tezlawfirm.com
 
-📋 Jue Wang (USCIS filings)
+📋 Jue Wang — Paralegal (immigration & USCIS)
 📧 jue.wang@tezlawfirm.com
 
-⚖️ Michael Liu (Immigration court)
+⚖️ Michael Liu — Paralegal (immigration court)
 📧 michael.liu@tezlawfirm.com
 
-🚗 Lin Mei (Car accidents & state court)
+🚗 Lin Mei — Paralegal (personal injury & state court)
 📧 lin.mei@tezlawfirm.com
 
 📍 West Covina, California`;
