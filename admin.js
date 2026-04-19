@@ -28,10 +28,32 @@ const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || crypto.randomBy
 const ANALYTICS_LOG        = process.env.ANALYTICS_LOG || "/var/data/analytics_history.json";
 const JJ_TELEGRAM_ID       = process.env.JJ_TELEGRAM_ID; // JJ's personal Telegram user ID
 
-// In-memory session store (tokens expire after 8 hours)
-const sessions = new Map(); // token → { userId, expiresAt }
-// Pending auth requests: telegramUserId → { token, expiresAt }
+// DB-backed session store (survives Render redeploys)
+// Pending auth requests: in-memory only (5 min TTL, no persistence needed)
 const pendingAuths = new Map();
+
+async function initSessionTable() {
+  try {
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS admin_sessions (
+        token VARCHAR(128) PRIMARY KEY,
+        user_id VARCHAR(50) NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    // Clean up expired sessions on startup
+    const deleted = await getPool().query(
+      `DELETE FROM admin_sessions WHERE expires_at < NOW()`
+    );
+    if (deleted.rowCount > 0) {
+      console.log(`🧹 Cleaned ${deleted.rowCount} expired admin sessions`);
+    }
+    console.log("✅ Admin sessions table ready");
+  } catch (err) {
+    console.error("Session table init error:", err.message);
+  }
+}
 
 // ── DB pool ───────────────────────────────────────────────
 let pool = null;
@@ -46,17 +68,41 @@ function getPool() {
 }
 
 // ── Session helpers ───────────────────────────────────────
-function createSession(userId) {
+async function createSession(userId) {
   const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, { userId, expiresAt: Date.now() + 8 * 60 * 60 * 1000 });
+  const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000); // 8 hours
+  try {
+    await getPool().query(
+      `INSERT INTO admin_sessions (token, user_id, expires_at) VALUES ($1, $2, $3)
+       ON CONFLICT (token) DO UPDATE SET expires_at = $3`,
+      [token, userId, expiresAt]
+    );
+  } catch (err) {
+    console.error("createSession DB error:", err.message);
+  }
   return token;
 }
 
-function validateSession(token) {
-  const s = sessions.get(token);
-  if (!s) return false;
-  if (Date.now() > s.expiresAt) { sessions.delete(token); return false; }
-  return true;
+async function validateSession(token) {
+  if (!token) return false;
+  try {
+    const r = await getPool().query(
+      `SELECT user_id FROM admin_sessions WHERE token=$1 AND expires_at > NOW()`,
+      [token]
+    );
+    return r.rows.length > 0;
+  } catch (err) {
+    console.error("validateSession DB error:", err.message);
+    return false;
+  }
+}
+
+async function deleteSession(token) {
+  try {
+    await getPool().query(`DELETE FROM admin_sessions WHERE token=$1`, [token]);
+  } catch (err) {
+    console.error("deleteSession DB error:", err.message);
+  }
 }
 
 function audit(req, action, target, oldVal, newVal) {
@@ -64,9 +110,9 @@ function audit(req, action, target, oldVal, newVal) {
   db.logAudit("jj", action, target, oldVal, newVal, ip).catch(() => {});
 }
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   const token = req.cookies?.admin_token || req.headers["x-admin-token"];
-  if (validateSession(token)) return next();
+  if (await validateSession(token)) return next();
   if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Unauthorized" });
   res.redirect("/admin/login");
 }
@@ -99,7 +145,7 @@ async function sendAuthRequest(requestId) {
 }
 
 // Called from server.js Telegram callback handler
-function handleAdminCallback(callbackData, callbackQueryId) {
+async function handleAdminCallback(callbackData, callbackQueryId) {
   const [action, requestId] = callbackData.split(":");
   if (!["admin_approve", "admin_deny"].includes(action)) return false;
 
@@ -110,7 +156,7 @@ function handleAdminCallback(callbackData, callbackQueryId) {
 
   if (action === "admin_approve") {
     pending.approved = true;
-    pending.token = createSession("jj");
+    pending.token = await createSession("jj");
     db.logAudit("jj","login","admin_panel",null,"approved",null).catch(()=>{});
     return { answer: "✅ Admin access approved!" };
   } else {
@@ -129,6 +175,7 @@ async function initPromptTable() {
       updated_by VARCHAR(100) DEFAULT 'admin'
     );
   `);
+  await initSessionTable();
 }
 
 async function getSavedPrompt() {
@@ -197,9 +244,9 @@ router.get("/api/auth/status/:requestId", (req, res) => {
 });
 
 // Logout
-router.post("/api/logout", requireAuth, (req, res) => {
+router.post("/api/logout", requireAuth, async (req, res) => {
   const token = req.cookies?.admin_token || req.headers["x-admin-token"];
-  sessions.delete(token);
+  await deleteSession(token);
   audit(req,"logout","admin_panel",null,null);
   res.json({ ok: true });
 });
