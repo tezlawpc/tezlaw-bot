@@ -22,9 +22,40 @@ jobs:
           node-version: '22'
 
       - name: Fetch USCIS processing times
-        run: node fetch-uscis.js
+        id: fetch
+        run: |
+          node fetch-uscis.js 2>&1 | tee fetch-output.txt
+          # Capture success count from output
+          SUCCESS=$(grep "Results:" fetch-output.txt | grep -oP '\d+ fetched' | grep -oP '\d+' || echo "0")
+          echo "success_count=$SUCCESS" >> $GITHUB_OUTPUT
+          echo ""
+          echo "=== FETCH SUMMARY ==="
+          cat fetch-output.txt
         env:
           OUTPUT_PATH: ./uscis-times.json
+
+      - name: Report result
+        run: |
+          SUCCESS="${{ steps.fetch.outputs.success_count }}"
+          echo ""
+          if [ "$SUCCESS" -gt "0" ]; then
+            echo "✅ SUCCESS: Fetched live data for $SUCCESS form/office combinations from USCIS.gov"
+            echo "   Zara will use real-time processing times starting next deploy."
+          else
+            echo "⚠️  WARNING: USCIS blocked all requests (0 live fetches)"
+            echo "   Existing cached data was preserved — Zara uses last known values."
+            echo "   This is common. USCIS will allow requests on most weeks."
+            echo ""
+            echo "   Last known data in uscis-times.json:"
+            cat uscis-times.json | python3 -c "
+          import json,sys
+          d = json.load(sys.stdin)
+          print(f'   Updated: {d.get(\"updated_at\",\"unknown\")}')
+          print(f'   Live fetches that run: {d.get(\"fetch_success_count\",\"N/A\")}')
+          for f, v in d.get(\"forms\",{}).items():
+              print(f'   {f}: {v[\"range\"]}')
+          "
+          fi
 
       - name: Commit if changed
         run: |
@@ -33,6 +64,7 @@ jobs:
           git diff --quiet uscis-times.json || (
             git add uscis-times.json &&
             git commit -m "chore: update USCIS processing times $(date +'%Y-%m-%d')" &&
-            git push
+            git push &&
+            echo "✅ Committed updated uscis-times.json to repo"
           )
-          echo "Done"
+          git diff --quiet uscis-times.json && echo "ℹ️  No changes to commit (data unchanged)"
