@@ -18,6 +18,7 @@ const { checkIntake, initIntakeTable } = require("./intake");
 const { isJJAuthenticated }       = require("./jj-mode");
 const { router: adminRouter, handleAdminCallback, initPromptTable, getSavedPrompt } = require("./admin");
 const { checkCompliance, initComplianceTable } = require("./compliance");
+const { scheduleUSCISRefresh, buildLivePrompt } = require("./uscis-updater");
 const cookieParser = require("cookie-parser");
 
 const app = express();
@@ -289,7 +290,7 @@ async function processMessage(platform, userId, userText, sendFn) {
     }
   }
 
-  const livePrompt = app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT;
+  const livePrompt = buildLivePrompt(app, buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT));
   const reply = await askClaudeWithMemory(platform, userId, userText, livePrompt);
   await sendFn(reply);
 
@@ -348,14 +349,14 @@ app.post("/telegram", async (req, res) => {
       const best = msg.photo[msg.photo.length-1];
       const { buffer, extension } = await tgDownloadFile(best.file_id);
       const mimeMap = { jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", gif:"image/gif", webp:"image/webp" };
-      const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "Analyze this image.", app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT, { isImage:true, imageData:buffer.toString("base64"), imageMediaType:mimeMap[extension]||"image/jpeg" });
+      const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "Analyze this image.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), { isImage:true, imageData:buffer.toString("base64"), imageMediaType:mimeMap[extension]||"image/jpeg" });
       await tgSend(chatId, reply); return;
     }
     if (msg.document) {
       await axios.post(`${TELEGRAM_API}/sendChatAction`, { chat_id: chatId, action: "typing" });
       const { buffer } = await tgDownloadFile(msg.document.file_id);
       if (msg.document.mime_type === "application/pdf") {
-        const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "Analyze this PDF.", app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT, { isPdf:true, pdfData:buffer.toString("base64") });
+        const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "Analyze this PDF.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), { isPdf:true, pdfData:buffer.toString("base64") });
         await tgSend(chatId, reply);
       } else {
         await tgSend(chatId, "I can read images and PDFs. Please resend in one of those formats.");
@@ -460,13 +461,13 @@ app.post("/whatsapp", async (req, res) => {
     try {
       if (message.type === "image") {
         const { buffer, mimeType } = await waDownloadMedia(message.image.id);
-        const reply = await askClaudeWithMemory("whatsapp", from, message.image.caption || "Analyze this image.", app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT, { isImage:true, imageData:buffer.toString("base64"), imageMediaType:mimeType });
+        const reply = await askClaudeWithMemory("whatsapp", from, message.image.caption || "Analyze this image.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), { isImage:true, imageData:buffer.toString("base64"), imageMediaType:mimeType });
         await waSend(from, reply); return;
       }
       if (message.type === "document") {
         const { buffer, mimeType } = await waDownloadMedia(message.document.id);
         if (mimeType === "application/pdf") {
-          const reply = await askClaudeWithMemory("whatsapp", from, message.document.caption || "Analyze this PDF.", app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT, { isPdf:true, pdfData:buffer.toString("base64") });
+          const reply = await askClaudeWithMemory("whatsapp", from, message.document.caption || "Analyze this PDF.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), { isPdf:true, pdfData:buffer.toString("base64") });
           await waSend(from, reply);
         } else { await waSend(from, "I can read images and PDFs. Please resend in one of those formats."); }
         return;
@@ -585,7 +586,7 @@ async function handleWeChatMsg(req, res) {
             }
             if (["contact","team","contacto"].includes(lowerText)) return CONTACT_MESSAGE;
             if (lowerText === "reset") { await clearHistory("wechat", from); return "Fresh start! What can I help you with? 😊"; }
-            const r = await askClaudeWithMemory("wechat", from, userText, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT);
+            const r = await askClaudeWithMemory("wechat", from, userText, buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT));
             if (!isJJAuthenticated("wechat", from)) {
               const urgency = detectDistress(userText);
               if (urgency !== "none") notifyDistress(from, userText, urgency, "WeChat").catch(()=>{});
@@ -614,7 +615,7 @@ async function handleWeChatMsg(req, res) {
           const text = msg.Recognition;
           console.log(`WeChat voice recognized: "${text.substring(0,50)}"`);
           const reply = await Promise.race([
-            askClaudeWithMemory("wechat", from, text, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT),
+            askClaudeWithMemory("wechat", from, text, buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT)),
             new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4200))
           ]);
           res.type("application/xml").send(wcXmlReply(from, to,
@@ -638,7 +639,7 @@ async function handleWeChatMsg(req, res) {
         const imgResp = await axios.get(msg.PicUrl, { responseType: "arraybuffer" });
         const mimeType = imgResp.headers["content-type"] || "image/jpeg";
         const reply = await Promise.race([
-          askClaudeWithMemory("wechat", from, "Analyze this image. If it's a legal document, explain what it is.", app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT, { isImage:true, imageData:Buffer.from(imgResp.data).toString("base64"), imageMediaType:mimeType }),
+          askClaudeWithMemory("wechat", from, "Analyze this image. If it's a legal document, explain what it is.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), { isImage:true, imageData:Buffer.from(imgResp.data).toString("base64"), imageMediaType:mimeType }),
           new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000))
         ]);
         res.type("application/xml").send(wcXmlReply(from, to, reply.substring(0, 600)));
@@ -680,7 +681,7 @@ app.post("/chat", async (req, res) => {
   const { message, sessionId } = req.body;
   if (!message || !sessionId) return res.status(400).json({ error: "Missing message or sessionId" });
   try {
-    const reply = await askClaudeWithMemory("website", sessionId, message, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT);
+    const reply = await askClaudeWithMemory("website", sessionId, message, buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT));
     res.json({ reply });
   } catch(err) {
     console.error("Web chat error:", err.message);
@@ -744,5 +745,13 @@ app.listen(PORT, () => {
     console.log("📊 Analytics scheduler started.");
   } catch (e) {
     console.error("❌ Analytics failed to load:", e.message);
+  }
+
+  // ── Load USCIS processing times ─────────────────────────
+  try {
+    scheduleUSCISRefresh(app);
+    console.log("🏛️  USCIS processing times scheduler started.");
+  } catch (e) {
+    console.error("❌ USCIS updater failed to load:", e.message);
   }
 });
