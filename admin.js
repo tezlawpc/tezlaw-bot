@@ -300,6 +300,22 @@ router.get("/api/messages", requireAuth, async (req, res) => {
   }
 });
 
+// Get compliance violations
+router.get("/api/compliance", requireAuth, async (req, res) => {
+  try {
+    const result = await getPool().query(`
+      SELECT id, platform, platform_id, user_message, zara_response,
+             violation_type, violation_detail, correction_sent, created_at
+      FROM compliance_violations
+      ORDER BY created_at DESC
+      LIMIT 100
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Main admin dashboard
 router.get("/", requireAuth, (req, res) => {
   res.send(dashboardHtml());
@@ -543,6 +559,9 @@ function dashboardHtml() {
   <div class="nav-item" onclick="showPage('messages')" id="nav-messages">
     <span class="icon">💬</span><span>Messages</span>
   </div>
+  <div class="nav-item" onclick="showPage('compliance')" id="nav-compliance">
+    <span class="icon">⚖️</span><span>Compliance</span>
+  </div>
   <div class="nav-item" onclick="showPage('analytics')" id="nav-analytics">
     <span class="icon">🤖</span><span>Analytics</span>
   </div>
@@ -613,6 +632,22 @@ function dashboardHtml() {
     </div>
   </div>
 
+  <!-- Compliance -->
+  <div class="page" id="page-compliance">
+    <div class="page-header">
+      <h1>Compliance Log</h1>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+    <div class="card">
+      <h3>⚖️ Flagged Responses</h3>
+      <p style="font-size:13px;color:#666;margin-bottom:16px">
+        Zara responses that contained definitive legal conclusions, guarantees, or UPL risk.
+        A correction was automatically sent to the client for each entry.
+      </p>
+      <div id="complianceTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
+    </div>
+  </div>
+
   <!-- Analytics -->
   <div class="page" id="page-analytics">
     <div class="page-header">
@@ -669,6 +704,7 @@ function dashboardHtml() {
     if (name === 'prompt') loadPrompt();
     if (name === 'intakes') loadIntakes();
     if (name === 'messages') loadMessages();
+    if (name === 'compliance') loadCompliance();
     if (name === 'analytics') loadAnalytics();
   }
 
@@ -759,6 +795,30 @@ function dashboardHtml() {
           </tr>\`).join('')}</tbody>
         </table>\`
       : '<p style="color:#999;font-size:13px;padding:12px">No messages yet.</p>';
+  }
+
+  // Compliance
+  async function loadCompliance() {
+    const data = await api('/api/compliance');
+    if (!data) return;
+    const typeColors = {
+      DEFINITIVE_CONCLUSION: '#cc6600',
+      LEGAL_GUARANTEE:       '#cc0000',
+      UPL_RISK:              '#990099',
+      UNAUTHORIZED_DIAGNOSIS:'#006699',
+    };
+    document.getElementById('complianceTable').innerHTML = data.length
+      ? \`<table>
+          <thead><tr><th>Date</th><th>Platform</th><th>Type</th><th>Zara Said</th><th>Correction Sent</th></tr></thead>
+          <tbody>\${data.map(r => \`<tr>
+            <td style="white-space:nowrap;font-size:11px">\${new Date(r.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+            <td>\${platBadge(r.platform)}</td>
+            <td><span style="font-size:11px;font-weight:bold;padding:3px 8px;border-radius:12px;background:#fff0f0;color:\${typeColors[r.violation_type]||'#cc0000'}">\${r.violation_type}</span></td>
+            <td style="max-width:260px;font-size:12px;color:#333" title="\${(r.zara_response||'').replace(/"/g,'&quot;')}">\${(r.zara_response||'').substring(0,120)}\${(r.zara_response||'').length>120?'…':''}</td>
+            <td style="max-width:220px;font-size:12px;color:#006600" title="\${(r.correction_sent||'').replace(/"/g,'&quot;')}">\${(r.correction_sent||'').substring(0,100)}\${(r.correction_sent||'').length>100?'…':''}</td>
+          </tr>\`).join('')}</tbody>
+        </table>\`
+      : '<p style="color:#006600;font-size:13px;padding:12px">✅ No compliance violations logged. Zara is clean!</p>';
   }
 
   // Analytics
