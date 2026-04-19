@@ -166,7 +166,7 @@ async function getHistory(platform, platformId, limit = 10) {
 async function getClientContext(platform, platformId) {
   try {
     const client = await getPool().query(
-      `SELECT name, preferred_language, case_type, first_seen FROM clients WHERE platform=$1 AND platform_id=$2`,
+      `SELECT name, email, phone, preferred_language, case_type, first_seen, last_seen FROM clients WHERE platform=$1 AND platform_id=$2`,
       [platform, platformId]
     );
     if (!client.rows.length) return { client: null, summary: null, history: [] };
@@ -316,9 +316,40 @@ async function getJJSession(platform, userId) {
   }
 }
 
+// ── Get timestamp of last message (for session detection) ──
+async function getLastMessageTime(platform, platformId) {
+  try {
+    const res = await getPool().query(
+      `SELECT created_at FROM messages
+       WHERE platform=$1 AND platform_id=$2
+       ORDER BY created_at DESC LIMIT 1`,
+      [platform, platformId]
+    );
+    return res.rows[0]?.created_at || null;
+  } catch (err) {
+    console.error("getLastMessageTime error:", err.message);
+    return null;
+  }
+}
+
+// ── Update client name/contact from intake completion ────
+async function syncIntakeToClient(platform, platformId, data) {
+  const updates = {};
+  if (data.name)    updates.name = data.name;
+  if (data.contact) {
+    // Detect if contact is email or phone
+    if (data.contact.includes("@")) updates.email = data.contact;
+    else updates.phone = data.contact;
+  }
+  if (data.caseType) updates.case_type = data.caseType;
+  if (Object.keys(updates).length > 0) {
+    await updateClient(platform, platformId, updates);
+  }
+}
+
 module.exports = {
   initDB, getOrCreateClient, updateClient, saveMessage,
   getHistory, getClientContext, saveSummary, clearHistory,
   saveIntake, maybeAutoSummarize, saveJJMemory, getJJMemories,
-  setJJSession, getJJSession,
+  setJJSession, getJJSession, getLastMessageTime, syncIntakeToClient,
 };
