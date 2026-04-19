@@ -861,16 +861,15 @@ function dashboardHtml() {
 </div>
 
 <script>
-  const TOKEN = getCookie('admin_token');
-
   function getCookie(name) {
     return document.cookie.split('; ').find(r => r.startsWith(name + '='))?.split('=')[1] || '';
   }
+  function getToken() { return getCookie('admin_token'); }
 
   async function api(path, options = {}) {
     const res = await fetch('/admin' + path, {
       ...options,
-      headers: { 'Content-Type': 'application/json', 'x-admin-token': TOKEN, ...options.headers }
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': getToken(), ...options.headers }
     });
     if (res.status === 401) { window.location.href = '/admin/login'; return null; }
     return res.json();
