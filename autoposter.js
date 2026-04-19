@@ -641,12 +641,20 @@ async function runDailyScheduler() {
     await new Promise(r => setTimeout(r, 15000)); // cooldown
   }
 
-  // Run all triggers using curated sources
-  try { total += await checkUrgentTopic(state, sources); } catch (e) { console.error("Urgent topic error:", e.message); }
-  try { total += await checkImmigrationNews(state, sources); } catch (e) { console.error("Immigration check error:", e.message); }
-  try { total += await checkWeather(state, sources); } catch (e) { console.error("Weather check error:", e.message); }
-  try { total += await checkHolidays(state, sources); } catch (e) { console.error("Holiday check error:", e.message); }
-  try { total += await checkEvergreen(state, sources); } catch (e) { console.error("Evergreen check error:", e.message); }
+  // Run all triggers sequentially with delays to avoid rate limits
+  const runWithDelay = async (fn, label, delayMs = 0) => {
+    if (delayMs > 0) {
+      console.log(`⏳ Waiting ${delayMs/1000}s before ${label}...`);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+    try { total += await fn(); } catch (e) { console.error(`${label} error:`, e.message); }
+  };
+
+  await runWithDelay(() => checkUrgentTopic(state, sources),    "Urgent topic",      0);
+  await runWithDelay(() => checkImmigrationNews(state, sources),"Immigration check",  45000);
+  await runWithDelay(() => checkWeather(state, sources),         "Weather check",     15000);
+  await runWithDelay(() => checkHolidays(state, sources),        "Holiday check",      5000);
+  await runWithDelay(() => checkEvergreen(state, sources),       "Evergreen check",    5000);
 
   saveState(state);
   console.log(`✅ Auto-poster complete. Published ${total} post(s) today.\n`);
@@ -658,7 +666,7 @@ async function runDailyScheduler() {
 function scheduleDaily() {
   // Run immediately on startup to catch missed posts
   console.log("🚀 Running auto-poster on startup...");
-  setTimeout(async () => { await runDailyScheduler(); }, 30000);
+  setTimeout(async () => { await runDailyScheduler(); }, 60000);
 
   // Schedule daily at 15:00 UTC (8 AM Pacific)
   function scheduleNext() {
