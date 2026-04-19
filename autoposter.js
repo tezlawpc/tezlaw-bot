@@ -685,19 +685,10 @@ async function runDailyScheduler() {
 }
 
 function scheduleDaily() {
-  // Guard: skip startup run if already ran in last 20 hours
-  // Prevents duplicate runs on every Render redeploy
-  setTimeout(async () => {
-    const state = loadState();
-    const lastRun = state.lastDailyRun ? new Date(state.lastDailyRun) : null;
-    const hoursSince = lastRun ? (Date.now() - lastRun.getTime()) / (1000 * 60 * 60) : 999;
-    if (hoursSince < 20) {
-      console.log("⏭️  Auto-poster skipping — already ran " + Math.round(hoursSince) + "h ago");
-      return;
-    }
-    console.log("🚀 Running auto-poster on startup (first run today)...");
-    await runDailyScheduler();
-  }, 60000);
+  // NO startup run — prevents duplicate posts on every Render redeploy
+  // Posts run daily at 8am PT via the scheduler below
+  // Use Admin Panel → Analytics → "Run Auto-Poster Now" for manual runs
+  console.log("📅 Auto-poster scheduler ready (runs daily at 8am PT / 15:00 UTC)");
   function scheduleNext() {
     const now = new Date();
     const next = new Date();
