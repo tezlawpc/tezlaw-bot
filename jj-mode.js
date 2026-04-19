@@ -49,8 +49,21 @@ async function isJJTrigger(message) {
     const answer = resp.data.content[0]?.text?.trim().toUpperCase();
     return answer === "YES";
   } catch(e) {
+    // Fallback if API call fails
     return lower.includes("jj zhang") || lower.includes("jj mode") || lower.includes("private channel");
   }
+}
+
+async function isJJAuthenticatedAsync(platform, userId) {
+  if (jjSessions[`${platform}:${userId}`] === "authenticated") return true;
+  try {
+    const session = await db.getJJSession(platform, userId);
+    if (session) {
+      jjSessions[`${platform}:${userId}`] = "authenticated";
+      return true;
+    }
+  } catch(e) {}
+  return false;
 }
 
 function isJJAuthenticated(platform, userId) {
@@ -62,11 +75,14 @@ function isAwaitingPassword(platform, userId) {
 }
 
 // ── Main JJ mode handler ──────────────────────────────────
+// Returns { handled: true, message } if JJ mode intercepts
+// Returns { handled: false } to let normal flow continue
 async function checkJJMode(platform, userId, userMessage, options = {}) {
   const key = `${platform}:${userId}`;
 
   // Already authenticated — handle JJ commands (pass options for docs/images)
-  if (isJJAuthenticated(platform, userId)) {
+  // DB-backed check so auth survives Render redeploys
+  if (await isJJAuthenticatedAsync(platform, userId)) {
     return await handleJJSession(platform, userId, userMessage, options);
   }
 
@@ -75,6 +91,8 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
     const normalize = (s) => s.toLowerCase().replace(/[\s\-_.,!?]+/g, "");
     if (normalize(userMessage) === normalize(JJ_PASSWORD)) {
       jjSessions[key] = "authenticated";
+      // Persist auth to DB so it survives Render redeploys
+      try { await db.setJJSession(platform, userId, true); } catch(e) {}
       const memory = await getJJMemorySummary();
       const welcomeMsg = memory
         ? `✅ Welcome back, JJ! You're now in private mode.\n\n📚 Here's what I remember:\n\n${memory}\n\nWhat would you like to work on today?`
@@ -82,6 +100,7 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
       sendVoiceReply(platform, userId, "Welcome back JJ! You're now in private mode. How can I help you today?").catch(() => {});
       return { handled: true, message: welcomeMsg };
     } else {
+      // Wrong password — clear state
       delete jjSessions[key];
       return {
         handled: true,
@@ -109,6 +128,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
   // Exit JJ mode
   if (["exit", "logout", "exit jj mode", "back to public", "退出"].includes(lower)) {
     delete jjSessions[`${platform}:${userId}`];
+    try { await db.setJJSession(platform, userId, false); } catch(e) {}
     return { handled: true, message: "👋 Exiting JJ private mode. Back to public mode." };
   }
 
@@ -179,7 +199,6 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
         console.error(`[JJ-Mode]   HTTP Status : ${status || "no response"}`);
         console.error(`[JJ-Mode]   Error       : ${apiErr.message}`);
         console.error(`[JJ-Mode]   Body        : ${JSON.stringify(errBody)}`);
-
         if (apiErr.code === "ECONNABORTED") {
           throw new Error("⏱️ That research took too long. Try a more specific query, or break it into smaller questions.");
         } else if (status === 529 || status === 503) {
@@ -204,15 +223,12 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       if (respData.stop_reason === "tool_use") {
         const toolUseBlocks = respData.content.filter(b => b.type === "tool_use");
         console.log(`[JJ-Mode] tool_use: ${toolUseBlocks.map(b => b.name).join(", ")}`);
-
         loopMessages.push({ role: "assistant", content: respData.content });
-
         const toolResults = toolUseBlocks.map(toolUse => ({
           type: "tool_result",
           tool_use_id: toolUse.id,
           content: "Search completed. Please synthesize the results."
         }));
-
         loopMessages.push({ role: "user", content: toolResults });
         continue;
       }
@@ -281,6 +297,7 @@ function buildJJSystemPrompt(jjContext) {
     "CURRENT JJ KNOWLEDGE BASE:",
     jjContext || "No previous knowledge stored yet — start building it together!",
     "",
+    "",
     "VOICE CAPABILITIES: You CAN send voice messages. When JJ asks to respond in voice or speak, just respond normally in text — the system converts it to voice automatically. Never say you cannot do voice.",
     "",
     "Be Zara at her best — smart, thorough, curious, and genuinely helpful."
@@ -300,7 +317,7 @@ async function extractAndSaveJJKnowledge(userMessage, zaraReply, label = null) {
 // ── Get JJ context for system prompt ─────────────────────
 async function getJJContext() {
   try {
-    const memories = await db.getJJMemories(50);
+    const memories = await db.getJJMemories(50); // last 50 entries
     if (!memories || memories.length === 0) return null;
     return memories
       .map(m => `[${new Date(m.timestamp).toLocaleDateString()}] JJ: ${m.jj_said}\nZara: ${m.zara_said}`)
@@ -325,10 +342,13 @@ async function getJJMemorySummary() {
 }
 
 // ── Get JJ knowledge for enriching PUBLIC responses ──────
+// Called by askClaude-memory.js to add JJ's insights to public answers
 async function getJJPublicContext() {
   try {
     const memories = await db.getJJMemories(30);
     if (!memories || memories.length === 0) return null;
+
+    // Return a condensed version for public use
     return memories
       .map(m => `${m.jj_said.substring(0, 150)}`)
       .join(" | ");
@@ -348,6 +368,7 @@ function isResearchRequest(message) {
 module.exports = {
   checkJJMode,
   isJJAuthenticated,
+  isJJAuthenticatedAsync,
   getJJPublicContext,
   isResearchRequest,
 };
