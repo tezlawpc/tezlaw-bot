@@ -434,10 +434,22 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
     tryExtractContact(platform, platformId, userMessage);
     db.maybeAutoSummarize(platform, platformId, ANTHROPIC_API_KEY).catch(() => {});
 
+    // 10. Log unanswered/fallback questions for admin panel
+    const isFallback = reply.includes("didn't catch that") ||
+                       reply.includes("I'm sorry") ||
+                       reply.includes("technical issue") ||
+                       reply.includes("Could you rephrase");
+    if (isFallback && !isImage && !isPdf) {
+      db.logUnansweredQuestion(platform, platformId, userMessage, reply).catch(() => {});
+    }
+
     return reply;
   } catch (err) {
     console.error("askClaudeWithMemory error:", err.response?.data || err.message);
-    return "I'm having a technical issue. Please contact us directly:\n📞 626-678-8677\n📧 jj@tezlawfirm.com";
+    const errReply = "I'm having a technical issue. Please contact us directly:\n📞 626-678-8677\n📧 jj@tezlawfirm.com";
+    // Log technical failures as unanswered too
+    db.logUnansweredQuestion(platform, platformId, userMessage, errReply).catch(() => {});
+    return errReply;
   }
 }
 
