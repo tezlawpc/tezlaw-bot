@@ -89,6 +89,8 @@ async function initDB() {
       );
     `);
 
+    await initWave1Tables();
+    await initWave2Tables();
     console.log("✅ DB tables ready");
   } catch (err) {
     console.error("❌ DB init error:", err.message);
