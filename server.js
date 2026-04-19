@@ -17,6 +17,7 @@ const { sendVoiceReply }          = require("./voice");
 const { checkIntake, initIntakeTable } = require("./intake");
 const { isJJAuthenticated }       = require("./jj-mode");
 const { router: adminRouter, handleAdminCallback, initPromptTable, getSavedPrompt } = require("./admin");
+const { checkCompliance, initComplianceTable } = require("./compliance");
 const cookieParser = require("cookie-parser");
 
 const app = express();
@@ -26,6 +27,7 @@ app.use(cookieParser());
 
 // ── Admin panel ───────────────────────────────────────────
 app.use("/admin", adminRouter);
+app.get("/admin", (req, res) => res.redirect("/admin/"));
 
 // ── Environment variables ─────────────────────────────────
 const {
@@ -62,7 +64,7 @@ console.log("WHATSAPP_TOKEN:", !!WHATSAPP_TOKEN);
 console.log("WECHAT_APP_ID:", !!WECHAT_APP_ID);
 
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-const CACHE_FILE   = process.env.CACHE_PATH || "/tmp/legal_cache.json";
+const CACHE_FILE   = process.env.CACHE_PATH || "/var/data/legal_cache.json";
 
 // ── System prompt ─────────────────────────────────────────
 const SYSTEM_PROMPT = `Your name is Zara. You are a warm, friendly legal assistant for Tez Law P.C. in West Covina, California.
@@ -158,7 +160,16 @@ DISTRESS DETECTION — CRITICAL
 HIGH URGENCY: ICE, detained, arrested, deportation, NTA, accident just happened, injured, scared, please help, court tomorrow
 MEDIUM URGENCY: visa expired, out of status, denied, worried, desperate
 
-For HIGH URGENCY: acknowledge warmly, give 626-678-8677, tell them NOT to sign anything.`;
+For HIGH URGENCY: acknowledge warmly, give 626-678-8677, tell them NOT to sign anything.
+
+============================
+VOICE CAPABILITIES
+============================
+You CAN send voice messages. When someone asks you to respond in voice, speak, or send audio:
+- Just respond normally in text as usual
+- The system automatically converts your text reply into a voice message and sends it
+- NEVER say you cannot do voice or that you only communicate through text
+- You have full voice capabilities on Telegram and WhatsApp`;
 
 const WELCOME_MESSAGE = `Hey there! 👋 I'm Zara, the virtual assistant for Tez Law P.C.
 
@@ -282,12 +293,16 @@ async function processMessage(platform, userId, userText, sendFn) {
   const reply = await askClaudeWithMemory(platform, userId, userText, livePrompt);
   await sendFn(reply);
 
-  // ── PRIVACY: never forward JJ's messages to the team group ──
+  // ── PRIVACY: never forward JJ's messages to the team ──
   if (isJJAuthenticated(platform, userId)) return;
 
+  // ── Post-response hooks (non-blocking) ─────────────────
   const urgency = detectDistress(userText);
-  if (urgency !== "none") await notifyDistress(userId, userText, urgency, platform);
-  await notifyLead(userId, userText, platform);
+  Promise.allSettled([
+    urgency !== "none" ? notifyDistress(userId, userText, urgency, platform) : Promise.resolve(),
+    notifyLead(userId, userText, platform),
+    checkCompliance(platform, userId, userText, reply, sendFn),
+  ]).catch(() => {});
 }
 
 // ────────────────────────────────────────────────────────────
@@ -376,7 +391,10 @@ app.post("/telegram", async (req, res) => {
       } catch(e) {}
     }, 5000);
 
-    await processMessage("telegram", chatId, text, (t) => tgSend(chatId, t));
+    await processMessage("telegram", chatId, text, async (t) => {
+      lastTgReply = t;
+      await tgSend(chatId, t);
+    });
     clearTimeout(thinkingTimer);
 
     // Delete the thinking message once real reply is sent
@@ -399,9 +417,15 @@ app.get("/telegram", (req, res) => res.send("Telegram webhook active"));
 //  WHATSAPP + MESSENGER
 // ────────────────────────────────────────────────────────────
 async function waSend(to, text) {
-  await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
-    messaging_product: "whatsapp", to, type: "text", text: { body: text }
-  }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, "Content-Type": "application/json" } });
+  try {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
+      messaging_product: "whatsapp", to, type: "text", text: { body: text }
+    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, "Content-Type": "application/json" } });
+  } catch(e) {
+    // 400 = invalid recipient or status webhook — ignore silently
+    if (e.response?.status === 400) return;
+    throw e;
+  }
 }
 async function msgrSend(recipientId, text) {
   await axios.post(`https://graph.facebook.com/v18.0/${PAGE_ID}/messages`, {
@@ -425,10 +449,13 @@ app.post("/whatsapp", async (req, res) => {
   res.sendStatus(200);
   const body = req.body;
 
-  // WhatsApp
   if (body.object === "whatsapp_business_account") {
-    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    const value = body.entry?.[0]?.changes?.[0]?.value;
+    // Ignore status updates (delivered, read, sent) — these are not messages
+    if (!value || value?.statuses || !value?.messages) return;
+    const message = value.messages[0];
     if (!message) return;
+    if (!["text","image","audio","document"].includes(message.type)) return;
     const from = message.from;
     try {
       if (message.type === "image") {
@@ -668,6 +695,18 @@ app.options("/chat", (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────
+//  ANALYTICS — Manual trigger endpoint
+// ────────────────────────────────────────────────────────────
+app.get("/analytics/run", async (req, res) => {
+  if (req.query.token !== process.env.ANALYTICS_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  res.json({ status: "started", message: "Analytics running — check jj@tezlawfirm.com in ~2 minutes." });
+  runWeeklyAnalysis(true).catch(err => console.error("Manual analytics error:", err.message));
+});
+
+
+// ────────────────────────────────────────────────────────────
 //  HEALTH CHECK + START
 // ────────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.send("Tez Law P.C. — Zara running on all channels ✅"));
@@ -676,6 +715,7 @@ app.listen(PORT, () => {
   console.log(`🚀 Zara running on port ${PORT}`);
   initDB();
   initIntakeTable();
+  initComplianceTable();
 
   // Load saved system prompt from DB (if admin has edited it)
   initPromptTable().then(() => getSavedPrompt()).then(saved => {
