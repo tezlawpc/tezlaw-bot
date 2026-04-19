@@ -10,6 +10,7 @@ const xml2js   = require("xml2js");
 const FormData = require("form-data");
 const fs       = require("fs");
 const { initDB, clearHistory }    = require("./db");
+const { scheduleWeeklyAnalytics, runWeeklyAnalysis } = require("./analytics");
 const { askClaudeWithMemory }     = require("./askClaude-memory");
 const { transcribeAudio }         = require("./whisper");
 const { sendVoiceReply }          = require("./voice");
@@ -666,6 +667,18 @@ app.options("/chat", (req, res) => {
 
 
 // ────────────────────────────────────────────────────────────
+//  ANALYTICS — Manual trigger endpoint
+// ────────────────────────────────────────────────────────────
+app.get("/analytics/run", async (req, res) => {
+  if (req.query.token !== process.env.ANALYTICS_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  res.json({ status: "started", message: "Analytics running — check jj@tezlawfirm.com in ~2 minutes." });
+  runWeeklyAnalysis(true).catch(err => console.error("Manual analytics error:", err.message));
+});
+
+
+// ────────────────────────────────────────────────────────────
 //  HEALTH CHECK + START
 // ────────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.send("TEZ Law PC — Zara running on all channels ✅"));
@@ -684,5 +697,13 @@ app.listen(PORT, () => {
     console.log("📅 WordPress auto-poster scheduler started.");
   } catch (e) {
     console.error("❌ Auto-poster failed to load:", e.message);
+  }
+
+  // ── Start weekly analytics ──────────────────────────────
+  try {
+    scheduleWeeklyAnalytics();
+    console.log("📊 Analytics scheduler started.");
+  } catch (e) {
+    console.error("❌ Analytics failed to load:", e.message);
   }
 });
