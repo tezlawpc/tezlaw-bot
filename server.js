@@ -19,6 +19,7 @@ const { isJJAuthenticated }       = require("./jj-mode");
 const { router: adminRouter, handleAdminCallback, initPromptTable, getSavedPrompt } = require("./admin");
 const { checkCompliance, initComplianceTable } = require("./compliance");
 const { scheduleUSCISRefresh, buildLivePrompt } = require("./uscis-updater");
+const { startHotLeadMonitor } = require("./hot-leads");
 const cookieParser = require("cookie-parser");
 
 const app = express();
@@ -745,6 +746,21 @@ app.listen(PORT, () => {
     console.log("📊 Analytics scheduler started.");
   } catch (e) {
     console.error("❌ Analytics failed to load:", e.message);
+  }
+
+  // ── Init Wave 1 tables ─────────────────────────────────
+  try {
+    const { initWave1Tables } = require("./db");
+    initWave1Tables();
+  } catch (e) {
+    console.error("❌ Wave 1 tables failed:", e.message);
+  }
+
+  // ── Hot lead escalation monitor ─────────────────────────
+  try {
+    startHotLeadMonitor();
+  } catch (e) {
+    console.error("❌ Hot lead monitor failed:", e.message);
   }
 
   // ── Load USCIS processing times ─────────────────────────
