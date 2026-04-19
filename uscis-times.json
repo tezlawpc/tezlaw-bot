@@ -1,0 +1,48 @@
+{
+  "updated_at": "April 19, 2026",
+  "updated_iso": "2026-04-19T00:00:00.000Z",
+  "note": "Seed data — will be auto-updated weekly by GitHub Actions",
+  "forms": {
+    "I-485": {
+      "range": "8–44 months",
+      "office": "NBC",
+      "fetched_at": "2026-04-19T00:00:00.000Z"
+    },
+    "I-130": {
+      "range": "5–12 months",
+      "office": "NBC",
+      "fetched_at": "2026-04-19T00:00:00.000Z"
+    },
+    "I-765": {
+      "range": "3–6 months",
+      "office": "NBC",
+      "fetched_at": "2026-04-19T00:00:00.000Z"
+    },
+    "I-131": {
+      "range": "4–8 months",
+      "office": "NBC",
+      "fetched_at": "2026-04-19T00:00:00.000Z"
+    },
+    "N-400": {
+      "range": "5–9 months",
+      "office": "NBC",
+      "fetched_at": "2026-04-19T00:00:00.000Z"
+    },
+    "I-751": {
+      "range": "24–36 months",
+      "office": "NBC",
+      "fetched_at": "2026-04-19T00:00:00.000Z"
+    },
+    "I-589": {
+      "range": "6–12 months",
+      "office": "ZLA",
+      "fetched_at": "2026-04-19T00:00:00.000Z"
+    },
+    "I-90": {
+      "range": "8–14 months",
+      "office": "NBC",
+      "fetched_at": "2026-04-19T00:00:00.000Z"
+    }
+  },
+  "source_note": "USCIS.gov — times are estimates and vary by service center and case specifics"
+}
