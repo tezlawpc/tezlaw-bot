@@ -707,6 +707,16 @@ app.get("/analytics/run", async (req, res) => {
   runWeeklyAnalysis(true).catch(err => console.error("Manual analytics error:", err.message));
 });
 
+// ── Manual autoposter trigger ─────────────────────────────
+app.post("/autoposter/run", async (req, res) => {
+  if (req.query.token !== process.env.ANALYTICS_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  const { runDailyScheduler } = require("./autoposter");
+  res.json({ status: "started", message: "Auto-poster running — check Telegram for results." });
+  runDailyScheduler().catch(err => console.error("Manual autoposter error:", err.message));
+});
+
 
 // ────────────────────────────────────────────────────────────
 //  HEALTH CHECK + START
