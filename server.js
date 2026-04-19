@@ -14,7 +14,7 @@ const { scheduleWeeklyAnalytics, runWeeklyAnalysis } = require("./analytics");
 const { askClaudeWithMemory }     = require("./askClaude-memory");
 const { transcribeAudio }         = require("./whisper");
 const { sendVoiceReply }          = require("./voice");
-const { checkIntake }             = require("./intake");
+const { checkIntake, initIntakeTable } = require("./intake");
 const { isJJAuthenticated }       = require("./jj-mode");
 
 
@@ -290,6 +290,22 @@ async function processMessage(platform, userId, userText, sendFn) {
     await clearHistory(platform, userId);
     await sendFn("Fresh start! What can I help you with? 😊"); return;
   }
+
+  // ── Intake flow — intercept if in progress or legal intent detected ──
+  const intake = await checkIntake(platform, userId, userText);
+  if (intake.handled) {
+    await sendFn(intake.reply);
+    // If intake just completed (contact step), also let Claude respond
+    // normally so the conversation continues naturally after intake
+    if (intake.reply.includes("feel free to keep asking")) {
+      const reply = await askClaudeWithMemory(platform, userId, userText, SYSTEM_PROMPT);
+      // Don't send a second message — intake completion message is enough
+      // Claude's context is updated so she remembers this for next message
+    }
+    return;
+  }
+
+  // ── Normal Claude response ────────────────────────────
   const reply = await askClaudeWithMemory(platform, userId, userText, SYSTEM_PROMPT);
   await sendFn(reply);
   const urgency = detectDistress(userText);
@@ -686,6 +702,7 @@ app.get("/", (req, res) => res.send("TEZ Law PC — Zara running on all channels
 app.listen(PORT, () => {
   console.log(`🚀 Zara running on port ${PORT}`);
   initDB();
+  initIntakeTable();
   const url = RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
   setInterval(() => axios.get(url).catch(() => {}), 4 * 60 * 1000);
   console.log("Keep-alive ping →", url);
