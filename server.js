@@ -413,9 +413,15 @@ app.get("/telegram", (req, res) => res.send("Telegram webhook active"));
 //  WHATSAPP + MESSENGER
 // ────────────────────────────────────────────────────────────
 async function waSend(to, text) {
-  await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
-    messaging_product: "whatsapp", to, type: "text", text: { body: text }
-  }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, "Content-Type": "application/json" } });
+  try {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
+      messaging_product: "whatsapp", to, type: "text", text: { body: text }
+    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}`, "Content-Type": "application/json" } });
+  } catch(e) {
+    // 400 = invalid recipient or status webhook — ignore silently
+    if (e.response?.status === 400) return;
+    throw e;
+  }
 }
 async function msgrSend(recipientId, text) {
   await axios.post(`https://graph.facebook.com/v18.0/${PAGE_ID}/messages`, {
@@ -443,8 +449,8 @@ app.post("/whatsapp", async (req, res) => {
   if (body.object === "whatsapp_business_account") {
     const value = body.entry?.[0]?.changes?.[0]?.value;
     // Ignore status updates (delivered, read, sent) — these are not messages
-    if (value?.statuses) return;
-    const message = value?.messages?.[0];
+    if (!value || value?.statuses || !value?.messages) return;
+    const message = value.messages[0];
     if (!message) return;
     // Only process text, image, audio, document — ignore everything else silently
     if (!["text","image","audio","document"].includes(message.type)) return;
