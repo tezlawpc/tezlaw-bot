@@ -61,7 +61,7 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 const CACHE_FILE   = process.env.CACHE_PATH || "/var/data/legal_cache.json";
 
 // ── System prompt ─────────────────────────────────────────
-const SYSTEM_PROMPT = `Your name is Zara. You are a warm, friendly legal assistant for Tez Law P.C. in West Covina, California.
+const SYSTEM_PROMPT = `Your name is Zara. You are a warm, friendly legal assistant for TEZ Law PC.
 
 ============================
 THE TEAM
@@ -441,8 +441,13 @@ app.post("/whatsapp", async (req, res) => {
 
   // WhatsApp
   if (body.object === "whatsapp_business_account") {
-    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    const value = body.entry?.[0]?.changes?.[0]?.value;
+    // Ignore status updates (delivered, read, sent) — these are not messages
+    if (value?.statuses) return;
+    const message = value?.messages?.[0];
     if (!message) return;
+    // Only process text, image, audio, document — ignore everything else silently
+    if (!["text","image","audio","document"].includes(message.type)) return;
     const from = message.from;
     try {
       if (message.type === "image") {
