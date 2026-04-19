@@ -358,6 +358,9 @@ Return ONLY this JSON (no markdown, no backticks):
 async function runWeeklySourceResearch() {
   console.log("🔬 Running weekly source research...");
   const sources = loadSources();
+  const state = loadState();
+  // Pass recent titles so Claude doesn't suggest already-covered topics as urgent
+  const recentlyPublished = (state.titleHistory || []).slice(-20).join(", ") || "None yet";
 
   const prompt = `You are a legal content research specialist. Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.
 
@@ -451,11 +454,16 @@ async function checkImmigrationNews(state, sources) {
   const sourceList = sources.immigration.join(", ");
   const weeklyContext = sources.weeklyTrends ? `\nWeekly context: ${sources.weeklyTrends}` : "";
   const urgentContext = sources.urgentArea === "immigration" && sources.urgentTopic ? `\nUrgent topic flagged this week: ${sources.urgentTopic}` : "";
-  const prompt = `Search for the most significant US immigration law news from the past 7 days. PRIORITY SOURCES: ${sourceList}${weeklyContext}${urgentContext}
+  // Pass recently published titles so Claude avoids researching the same topics
+  const recentTitles = (state.titleHistory || []).slice(-30).join(" | ");
+  const avoidContext = recentTitles ? `\nAVOID these recently published topics (do NOT repeat these): ${recentTitles.substring(0, 800)}` : "";
 
+  const prompt = `Search for the most significant US immigration law news from the past 7 days. PRIORITY SOURCES: ${sourceList}${weeklyContext}${urgentContext}${avoidContext}
+
+Pick a topic that has NOT been recently covered (check the AVOID list above).
 Respond ONLY in this exact JSON:
 {"hasNews":true,"headline":"brief headline","summary":"one sentence summary","source":"which source"}
-If nothing noteworthy: {"hasNews":false}`;
+If nothing noteworthy or all recent news already covered: {"hasNews":false}`;
   const result = await askClaude(prompt, true);
   let newsData;
   try {
@@ -553,7 +561,8 @@ async function checkEvergreen(state, sources) {
   // PI — every Tuesday
   if (dayOfWeek === 2 && state.weeklyEvergreen.pi !== now.toDateString()) {
     const allSeen = [...new Set([...(state.titleHistory || []), ...(state.publishedTitles || [])])];
-    const available = EVERGREEN_TOPICS.pi.filter(t => !allSeen.some(s => s.toLowerCase().includes(t.toLowerCase().substring(0, 20))));
+    // Use full isDuplicateTitle fuzzy match (not just 20-char prefix)
+    const available = EVERGREEN_TOPICS.pi.filter(t => !isDuplicateTitle(t, state));
     const topic = available.length > 0 ? available[0] : EVERGREEN_TOPICS.pi[Math.floor(Math.random() * EVERGREEN_TOPICS.pi.length)];
     const post = await generatePost({ topic, practiceArea: "Personal Injury", useSearch: false, sources: sources.personalInjury });
     if (post) {
@@ -569,7 +578,8 @@ async function checkEvergreen(state, sources) {
   if (dayOfWeek === 4 && state.weeklyEvergreen.business !== now.toDateString()) {
     const weekNum = Math.floor(now.getDate() / 7);
     if (weekNum % 2 === 0) {
-      const topic = EVERGREEN_TOPICS.business[Math.floor(Math.random() * EVERGREEN_TOPICS.business.length)];
+      const availBiz = EVERGREEN_TOPICS.business.filter(t => !isDuplicateTitle(t, state));
+      const topic = availBiz.length > 0 ? availBiz[Math.floor(Math.random() * availBiz.length)] : EVERGREEN_TOPICS.business[Math.floor(Math.random() * EVERGREEN_TOPICS.business.length)];
       const post = await generatePost({ topic, practiceArea: "Business Law", useSearch: false, sources: sources.business });
       if (post) {
         if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate Business evergreen:", post.title); }
@@ -579,7 +589,8 @@ async function checkEvergreen(state, sources) {
         }
       }
     } else {
-      const topic = EVERGREEN_TOPICS.trademark[Math.floor(Math.random() * EVERGREEN_TOPICS.trademark.length)];
+      const availTm = EVERGREEN_TOPICS.trademark.filter(t => !isDuplicateTitle(t, state));
+      const topic = availTm.length > 0 ? availTm[Math.floor(Math.random() * availTm.length)] : EVERGREEN_TOPICS.trademark[Math.floor(Math.random() * EVERGREEN_TOPICS.trademark.length)];
       const post = await generatePost({ topic, practiceArea: "Trademarks", useSearch: false, sources: sources.trademark });
       if (post) {
         if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate Trademark evergreen:", post.title); }
@@ -595,7 +606,8 @@ async function checkEvergreen(state, sources) {
   if (dayOfWeek === 5 && state.weeklyEvergreen.estate !== now.toDateString()) {
     const weekNum = Math.floor(now.getDate() / 7);
     if (weekNum % 2 === 0) {
-      const topic = EVERGREEN_TOPICS.estate[Math.floor(Math.random() * EVERGREEN_TOPICS.estate.length)];
+      const availEst = EVERGREEN_TOPICS.estate.filter(t => !isDuplicateTitle(t, state));
+      const topic = availEst.length > 0 ? availEst[Math.floor(Math.random() * availEst.length)] : EVERGREEN_TOPICS.estate[Math.floor(Math.random() * EVERGREEN_TOPICS.estate.length)];
       const post = await generatePost({ topic, practiceArea: "Estate Planning", useSearch: false, sources: sources.estate });
       if (post) {
         if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate Estate evergreen:", post.title); }
@@ -624,6 +636,13 @@ async function checkUrgentTopic(state, sources) {
   const area = sources.urgentArea?.toLowerCase();
   const practiceArea = practiceAreaMap[area] || "Immigration Law";
   const relevantSources = areaToSources[area] || sources.immigration;
+  // Skip if urgent topic is already a duplicate of something published
+  if (isDuplicateTitle(sources.urgentTopic, state)) {
+    console.log("⚠️ Urgent topic already covered — clearing:", sources.urgentTopic);
+    const s = loadSources(); s.urgentTopic = null; saveSources(s);
+    return 0;
+  }
+
   const post = await generatePost({ topic: sources.urgentTopic, practiceArea, context: sources.weeklyTrends || "", useSearch: true, sources: relevantSources });
   if (!post) return 0;
   if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate urgent post:", post.title); return 0; }
