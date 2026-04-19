@@ -17,6 +17,7 @@ const crypto     = require("crypto");
 const axios      = require("axios");
 const { Pool }   = require("pg");
 const fs         = require("fs");
+// nodemailer loaded lazily in sendAuthEmail to avoid crash if not installed
 
 const router = express.Router();
 
@@ -139,6 +140,11 @@ async function savePrompt(prompt) {
 }
 
 // ── Routes ────────────────────────────────────────────────
+
+// Health check — confirms admin.js loaded correctly
+router.get("/health", (req, res) => {
+  res.json({ status: "ok", module: "admin", time: new Date().toISOString() });
+});
 
 // Login page
 router.get("/login", (req, res) => {
@@ -335,7 +341,7 @@ function loginPageHtml() {
 </head>
 <body>
   <div class="card">
-    <div class="logo">⚖️</div>
+    <img src="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png" alt="TEZ Law" style="width:100px;height:auto;margin-bottom:12px">
     <h1>Zara Admin Panel</h1>
     <p class="sub">TEZ Law P.C. — Authorized Access Only</p>
     <button class="btn" id="loginBtn" onclick="requestLogin()">
@@ -521,7 +527,8 @@ function dashboardHtml() {
 
 <div class="sidebar">
   <div class="sidebar-logo">
-    <h2>⚖️ Zara</h2>
+    <img src="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png" alt="TEZ Law" style="width:60px;height:auto;display:block;margin-bottom:8px">
+    <h2>Zara</h2>
     <p>Admin Panel</p>
   </div>
   <div class="nav-item active" onclick="showPage('dashboard')" id="nav-dashboard">
