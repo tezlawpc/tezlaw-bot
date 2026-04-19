@@ -14,11 +14,9 @@ const WP_URL            = process.env.WP_URL;
 const WP_USER           = process.env.WP_USER;
 const WP_APP_PASSWORD   = process.env.WP_APP_PASSWORD;
 
-// ── File paths ────────────────────────────────────────────────
 const STATE_FILE   = "/var/data/autoposter_state.json";
 const SOURCES_FILE = "/var/data/sources.json";
 
-// ── JJ Zhang voice profile ────────────────────────────────────
 const JJ_VOICE = `
 You are rewriting a legal blog post in the voice of JJ Zhang, managing attorney at Tez Law P.C.
 JJ's style: Conversational and direct. Signature phrase: "Protect your rights — we handle the rest."
@@ -28,7 +26,6 @@ Gets straight to the point. Empathetic but practical. Uses contractions naturall
 Occasionally uses rhetorical questions. Never guarantees outcomes.
 JJ is an immigrant himself. Has business/real estate background. Speaks English, Mandarin, Shanghainese.`;
 
-// ── Static footer (author box + disclaimer + schema) ──────────
 function getStaticFooter(title) {
   const today = new Date().toISOString().split("T")[0];
   return `
@@ -49,14 +46,12 @@ function getStaticFooter(title) {
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"${title.replace(/"/g, '\\"')}","author":{"@type":"Person","name":"JJ Zhang","alternateName":"章律師","jobTitle":"Founding Attorney","knowsLanguage":["English","Chinese","Shanghainese"],"worksFor":{"@type":"LegalService","name":"Tez Law P.C.","url":"https://tezlawfirm.com"}},"publisher":{"@type":"Organization","name":"Tez Law P.C.","url":"https://tezlawfirm.com"},"datePublished":"${today}","dateModified":"${today}"}</script>`;
 }
 
-// ── State management ──────────────────────────────────────────
 function loadState() {
   try { if (fs.existsSync(STATE_FILE)) return JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch (e) {}
   return { lastImmigrationCheck: null, lastWeatherCheck: null, publishedTitles: [], weeklyEvergreen: { pi: null, business: null, trademark: null, estate: null }, lastHolidayPost: null, titleHistory: [] };
 }
 function saveState(state) { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)); } catch (e) {} }
 
-// ── Sources management ────────────────────────────────────────
 const DEFAULT_SOURCES = {
   immigration: [
     "uscis.gov/newsroom",
@@ -106,18 +101,13 @@ function loadSources() {
   try {
     if (fs.existsSync(SOURCES_FILE)) {
       const s = JSON.parse(fs.readFileSync(SOURCES_FILE, "utf8"));
-      // Merge with defaults to ensure all keys exist
       return { ...DEFAULT_SOURCES, ...s };
     }
   } catch (e) {}
   return { ...DEFAULT_SOURCES };
 }
+function saveSources(sources) { try { fs.writeFileSync(SOURCES_FILE, JSON.stringify(sources, null, 2)); } catch (e) {} }
 
-function saveSources(sources) {
-  try { fs.writeFileSync(SOURCES_FILE, JSON.stringify(sources, null, 2)); } catch (e) {}
-}
-
-// ── Claude API ────────────────────────────────────────────────
 async function askClaude(prompt, useWebSearch = false, retries = 3) {
   const body = { model: "claude-sonnet-4-20250514", max_tokens: 4096, messages: [{ role: "user", content: prompt }] };
   if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
@@ -129,7 +119,7 @@ async function askClaude(prompt, useWebSearch = false, retries = 3) {
       return response.data.content.filter(b => b.type === "text").map(b => b.text).join("");
     } catch (e) {
       if (e.response?.status === 429 && attempt < retries) {
-        const wait = attempt * 30000; // 30s, 60s backoff
+        const wait = attempt * 30000;
         console.log(`⏳ Rate limited. Waiting ${wait/1000}s before retry ${attempt}/${retries}...`);
         await new Promise(r => setTimeout(r, wait));
       } else { throw e; }
@@ -138,8 +128,233 @@ async function askClaude(prompt, useWebSearch = false, retries = 3) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  WEEKLY SOURCE RESEARCH — runs every Sunday
+//  DUPLICATE DETECTION — FIXED
+//  FIX 1: isDuplicateTitle checks BOTH titleHistory AND publishedTitles
+//  FIX 2: recordPublishedTitle deduplicates and caps at 500 entries
 // ─────────────────────────────────────────────────────────────
+
+function isDuplicateTitle(title, state) {
+  const normalize = t => t.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, " ").replace(/\s+/g, " ").trim();
+  const normalized = normalize(title);
+  // Check BOTH lists — previously only checked titleHistory, missing entries saved to publishedTitles
+  const allTitles = [...new Set([...(state.titleHistory || []), ...(state.publishedTitles || [])])];
+  return allTitles.some(t => {
+    const n = normalize(t);
+    const words = normalized.split(" ").filter(w => w.length > 3);
+    const matches = words.filter(w => n.includes(w));
+    return matches.length >= 3 || (matches.length / Math.max(words.length, 1)) >= 0.6;
+  });
+}
+
+async function checkWordPressDuplicate(title, auth) {
+  try {
+    const search = title.split(" ").slice(0, 5).join(" ");
+    const res = await axios.get(`${WP_URL}/wp-json/wp/v2/posts?search=${encodeURIComponent(search)}&per_page=5&status=publish`, { headers: { Authorization: `Basic ${auth}` } });
+    if (res.data.length > 0) {
+      const normalize = t => t.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
+      const normalized = normalize(title);
+      for (const post of res.data) {
+        const existing = normalize(post.title.rendered);
+        const words = normalized.split(" ").filter(w => w.length > 3);
+        if (words.filter(w => existing.includes(w)).length >= 4) { console.log(`⚠️ WP duplicate found: "${post.title.rendered}"`); return true; }
+      }
+    }
+  } catch (e) { console.log("WP duplicate check failed:", e.message); }
+  return false;
+}
+
+function recordPublishedTitle(title, state) {
+  if (!state.titleHistory) state.titleHistory = [];
+  if (!state.publishedTitles) state.publishedTitles = [];
+  // Deduplicate — don't add if already present
+  if (!state.titleHistory.includes(title)) state.titleHistory.push(title);
+  if (!state.publishedTitles.includes(title)) state.publishedTitles.push(title);
+  // Cap at 500 entries to prevent state file bloat
+  if (state.titleHistory.length > 500) state.titleHistory = state.titleHistory.slice(-400);
+  if (state.publishedTitles.length > 500) state.publishedTitles = state.publishedTitles.slice(-400);
+  saveState(state);
+}
+
+async function translatePost(post, language) {
+  const cfgs = {
+    chinese: { label: "Traditional Chinese (繁體中文)", instruction: "Translate to Traditional Chinese. Keep all HTML tags. Only translate visible text. Keep URLs, phone numbers, emails unchanged.", categoryPrefix: "中文-", tagSuffix: " 中文" },
+    spanish: { label: "Spanish (Latin American)", instruction: "Translate to Latin American Spanish. Keep all HTML tags. Only translate visible text. Keep URLs, phone numbers, emails unchanged.", categoryPrefix: "Español-", tagSuffix: " español" }
+  };
+  const cfg = cfgs[language];
+  if (!cfg) return null;
+  console.log(`🌐 Translating to ${cfg.label}...`);
+  const footerIdx = post.content.indexOf("<style>.tez-ab{");
+  const articleBody = footerIdx > 0 ? post.content.substring(0, footerIdx) : post.content;
+  const prompt = `${cfg.instruction}\n\nORIGINAL TITLE: ${post.title}\nHTML BODY:\n${articleBody}\n\nReturn ONLY JSON:\n{"title":"translated title","content":"translated HTML body","metaDescription":"150-160 char translated meta","focusKeyword":"primary keyword in ${cfg.label}"}`;
+  try {
+    await new Promise(r => setTimeout(r, 8000));
+    const raw = await askClaude(prompt, false);
+    const cleaned = raw.replace(/```json|```/g, "").trim();
+    const translated = JSON.parse(cleaned.substring(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1));
+    return { title: translated.title, content: (translated.content || "") + getStaticFooter(translated.title || post.title), category: cfg.categoryPrefix + post.category, tags: (post.tags || []).map(t => t + cfg.tagSuffix), metaDescription: translated.metaDescription, focusKeyword: translated.focusKeyword };
+  } catch (e) { console.log(`Translation to ${cfg.label} failed:`, e.message); return null; }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  FIX 3: publishAllLanguages — pass state to check/record
+//         translated titles so Chinese/Spanish can't duplicate
+// ─────────────────────────────────────────────────────────────
+async function publishAllLanguages(post, notifyPrefix, state) {
+  const results = [];
+  const auth = Buffer.from(`${WP_USER}:${WP_APP_PASSWORD}`).toString("base64");
+
+  // English — check WP first
+  if (await checkWordPressDuplicate(post.title, auth)) {
+    console.log("⚠️ Skipping WP duplicate:", post.title);
+    return 0;
+  }
+  try { const p = await publishToWordPress(post); results.push({ lang: "English", link: p.link }); }
+  catch (e) { console.error("English publish failed:", e.message); }
+
+  // Chinese — check both WP and local history before publishing
+  const chPost = await translatePost(post, "chinese");
+  if (chPost) {
+    if (isDuplicateTitle(chPost.title, state)) {
+      console.log("⚠️ Skipping duplicate Chinese translation:", chPost.title);
+    } else if (await checkWordPressDuplicate(chPost.title, auth)) {
+      console.log("⚠️ Skipping WP duplicate Chinese:", chPost.title);
+    } else {
+      try {
+        const p = await publishToWordPress(chPost);
+        results.push({ lang: "中文", link: p.link });
+        recordPublishedTitle(chPost.title, state);
+      } catch (e) { console.error("Chinese publish failed:", e.message); }
+    }
+  }
+
+  // Spanish — same checks
+  const esPost = await translatePost(post, "spanish");
+  if (esPost) {
+    if (isDuplicateTitle(esPost.title, state)) {
+      console.log("⚠️ Skipping duplicate Spanish translation:", esPost.title);
+    } else if (await checkWordPressDuplicate(esPost.title, auth)) {
+      console.log("⚠️ Skipping WP duplicate Spanish:", esPost.title);
+    } else {
+      try {
+        const p = await publishToWordPress(esPost);
+        results.push({ lang: "Español", link: p.link });
+        recordPublishedTitle(esPost.title, state);
+      } catch (e) { console.error("Spanish publish failed:", e.message); }
+    }
+  }
+
+  if (results.length > 0) {
+    await notifyTeam(`${notifyPrefix}\n\n📌 *${post.title}*\n\n🌐 Published in ${results.length} language(s):\n${results.map(r => `${r.lang}: ${r.link}`).join("\n")}`);
+  }
+  return results.length;
+}
+
+async function notifyTeam(message) {
+  if (!TEAM_CHAT_ID || !TELEGRAM_TOKEN) { console.log("Telegram notify:", message); return; }
+  try { await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, { chat_id: TEAM_CHAT_ID, text: message, parse_mode: "Markdown" }); }
+  catch (e) { console.error("Telegram notify failed:", e.message); }
+}
+
+async function publishToWordPress({ title, content, category, tags, metaDescription, focusKeyword }) {
+  const auth = Buffer.from(`${WP_USER}:${WP_APP_PASSWORD}`).toString("base64");
+  console.log("Publishing to WordPress:", title?.substring(0, 50));
+
+  let categoryId = 1;
+  try {
+    const catRes = await axios.get(`${WP_URL}/wp-json/wp/v2/categories?search=${encodeURIComponent(category)}`, { headers: { Authorization: `Basic ${auth}` } });
+    if (catRes.data.length > 0) { categoryId = catRes.data[0].id; }
+    else {
+      const newCat = await axios.post(`${WP_URL}/wp-json/wp/v2/categories`, { name: category }, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
+      categoryId = newCat.data.id;
+    }
+  } catch (e) { console.log("Category lookup failed:", e.message); }
+
+  let tagIds = [];
+  try {
+    for (const tagName of (tags || [])) {
+      await new Promise(r => setTimeout(r, 500));
+      const tagRes = await axios.get(`${WP_URL}/wp-json/wp/v2/tags?search=${encodeURIComponent(tagName)}`, { headers: { Authorization: `Basic ${auth}` } });
+      if (tagRes.data.length > 0) { tagIds.push(tagRes.data[0].id); }
+      else {
+        const newTag = await axios.post(`${WP_URL}/wp-json/wp/v2/tags`, { name: tagName }, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
+        tagIds.push(newTag.data.id);
+      }
+    }
+  } catch (e) { console.log("Tag lookup failed:", e.message); tagIds = []; }
+
+  const postData = { title, content, status: "publish", categories: [categoryId], tags: tagIds, excerpt: metaDescription || "" };
+  if (metaDescription || focusKeyword) {
+    postData.meta = {};
+    if (metaDescription) {
+      postData.meta._yoast_wpseo_metadesc = metaDescription;
+      postData.meta._yoast_wpseo_opengraph_description = metaDescription;
+    }
+    if (focusKeyword) postData.meta._yoast_wpseo_focuskw = focusKeyword;
+    if (title) postData.meta._yoast_wpseo_title = title + " - Tez Law P.C.";
+  }
+
+  const postRes = await axios.post(`${WP_URL}/wp-json/wp/v2/posts`, postData, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
+  console.log("✅ WordPress published, ID:", postRes.data.id);
+  return postRes.data;
+}
+
+async function generatePost({ topic, practiceArea, context, useSearch, sources }) {
+  const currentYear = new Date().getFullYear();
+  const todayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const locationContext = ["Immigration Law", "Immigration"].includes(practiceArea)
+    ? "nationwide United States (Tez Law handles immigration cases across the entire US)"
+    : "Southern California — Los Angeles County, Orange County, San Bernardino County, and Riverside Counties. Key cities: West Covina, LA, Anaheim, San Bernardino, Riverside, Ontario, Pomona.";
+  const sourceInstruction = sources && sources.length > 0
+    ? `\nPRIORITY SOURCES: When researching this topic, prioritize information from these high-authority sources: ${sources.join(", ")}. Search these first, then supplement with other credible sources if needed.\n`
+    : "";
+  const prompt = `You are an expert legal content writer and SEO specialist for Tez Law P.C., West Covina, California. JJ Zhang is managing attorney (California Bar #326666).
+
+IMPORTANT: Today is ${todayStr}. Current year is ${currentYear}. ALWAYS use ${currentYear} — NEVER use any past year.
+${sourceInstruction}
+Write a COMPREHENSIVE, SEO-optimized WordPress blog post about:
+TOPIC: ${topic}
+PRACTICE AREA: ${practiceArea}
+CONTEXT: ${context || "None"}
+LOCATION: ${locationContext}
+
+REQUIREMENTS:
+1. TITLE (under 65 chars, include primary keyword + location. If adding year, use ${currentYear} only)
+2. META DESCRIPTION (150-160 chars, includes keyword + CTA)
+3. CONTENT (1,000-1,400 words):
+   - Opening paragraph: hook + who this affects + what to do
+   - H2: Background/What This Means
+   - H2: How This Affects [Specific Audience]
+   - H2: What You Should Do Now (actionable steps)
+   - H2: Why Choose Tez Law P.C.
+   - H2: Frequently Asked Questions
+     * 3 FAQs as <div class="faq-item"><h3>Question?</h3><p>Answer</p></div>
+   - Closing CTA paragraph
+4. INTERNAL LINKS:
+   - Immigration: <a href="https://tezlawfirm.com/immigration/">immigration services</a>
+   - PI: <a href="https://tezlawfirm.com/home/personal-injury/">personal injury attorney</a>
+   - General: <a href="https://tezlawfirm.com/contact/">free consultation</a>
+5. TAGS: 5-7 specific tags including location + practice area keywords
+
+Return ONLY this JSON (no markdown, no backticks):
+{"title":"SEO title","metaDescription":"150-160 char meta","content":"full HTML content","category":"Immigration|Personal Injury|Business Law|Trademarks|Estate Planning","tags":["tag1","tag2","tag3","tag4","tag5"],"focusKeyword":"main SEO keyword"}`;
+  const raw = await askClaude(prompt, useSearch);
+  let postData;
+  try {
+    const cleaned = raw.replace(/```json|```/g, "").trim();
+    postData = JSON.parse(cleaned.substring(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1));
+  } catch (e) { console.error("Failed to parse Claude response:", e.message); return null; }
+  postData.content = (postData.content || "") + getStaticFooter(postData.title || "");
+  await new Promise(r => setTimeout(r, 5000));
+  try {
+    const firstParaMatch = postData.content.match(/(<p>.*?<\/p>\s*<p>.*?<\/p>)/s);
+    if (firstParaMatch) {
+      const humanized = await askClaude(`${JJ_VOICE}\n\nRewrite ONLY these two opening paragraphs in JJ Zhang's voice. Return ONLY the rewritten HTML:\n\n${firstParaMatch[1]}`, false);
+      if (humanized && humanized.includes("<p>")) { postData.content = postData.content.replace(firstParaMatch[1], humanized.trim()); }
+    }
+  } catch (e) { console.log("Humanization failed:", e.message); }
+  return postData;
+}
+
 async function runWeeklySourceResearch() {
   console.log("🔬 Running weekly source research...");
   const sources = loadSources();
@@ -182,7 +397,6 @@ Return ONLY this JSON (no markdown, no backticks):
     const start = cleaned.indexOf("{"); const end = cleaned.lastIndexOf("}");
     const newSources = JSON.parse(cleaned.substring(start, end + 1));
 
-    // Update sources but keep structure
     const updated = {
       immigration:    newSources.immigration    || sources.immigration,
       personalInjury: newSources.personalInjury || sources.personalInjury,
@@ -207,7 +421,6 @@ Return ONLY this JSON (no markdown, no backticks):
     console.log("✅ Sources updated. Urgent area:", updated.urgentArea);
     console.log("📊 Weekly trends:", updated.weeklyTrends?.substring(0, 100));
 
-    // Notify team about source update
     await notifyTeam(
       `🔬 *Weekly Source Research Complete!*\n\n` +
       `📊 *Trends:* ${updated.weeklyTrends || "No major trends detected"}\n\n` +
@@ -219,263 +432,57 @@ Return ONLY this JSON (no markdown, no backticks):
     return updated;
   } catch (e) {
     console.error("Weekly source research failed:", e.message);
-    return sources; // Fall back to existing sources
+    return sources;
   }
 }
 
-// ── Check if weekly research is needed ───────────────────────
 function shouldRunWeeklyResearch(sources) {
   if (!sources.lastResearched) return true;
   const daysSince = (Date.now() - new Date(sources.lastResearched).getTime()) / (1000 * 60 * 60 * 24);
   return daysSince >= 7;
 }
 
-// ── WordPress publish ─────────────────────────────────────────
-async function publishToWordPress({ title, content, category, tags, metaDescription, focusKeyword }) {
-  const auth = Buffer.from(`${WP_USER}:${WP_APP_PASSWORD}`).toString("base64");
-  console.log("Publishing to WordPress:", title?.substring(0, 50));
-
-  let categoryId = 1;
-  try {
-    const catRes = await axios.get(`${WP_URL}/wp-json/wp/v2/categories?search=${encodeURIComponent(category)}`, { headers: { Authorization: `Basic ${auth}` } });
-    if (catRes.data.length > 0) { categoryId = catRes.data[0].id; }
-    else { const newCat = await axios.post(`${WP_URL}/wp-json/wp/v2/categories`, { name: category }, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } }); categoryId = newCat.data.id; }
-  } catch (e) { console.log("Category lookup failed:", e.message); }
-
-  let tagIds = [];
-  try {
-    for (const tagName of (tags || [])) {
-      await new Promise(r => setTimeout(r, 500));
-      const tagRes = await axios.get(`${WP_URL}/wp-json/wp/v2/tags?search=${encodeURIComponent(tagName)}`, { headers: { Authorization: `Basic ${auth}` } });
-      if (tagRes.data.length > 0) { tagIds.push(tagRes.data[0].id); }
-      else { const newTag = await axios.post(`${WP_URL}/wp-json/wp/v2/tags`, { name: tagName }, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } }); tagIds.push(newTag.data.id); }
-    }
-  } catch (e) { console.log("Tag lookup failed:", e.message); tagIds = []; }
-
-  const postData = { title, content, status: "publish", categories: [categoryId], tags: tagIds, excerpt: metaDescription || "" };
-  if (metaDescription || focusKeyword) {
-    postData.meta = {};
-    if (metaDescription) { postData.meta._yoast_wpseo_metadesc = metaDescription; postData.meta._yoast_wpseo_opengraph_description = metaDescription; }
-    if (focusKeyword) postData.meta._yoast_wpseo_focuskw = focusKeyword;
-    if (title) postData.meta._yoast_wpseo_title = title + " - Tez Law P.C.";
-  }
-
-  const postRes = await axios.post(`${WP_URL}/wp-json/wp/v2/posts`, postData, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
-  console.log("✅ WordPress published, ID:", postRes.data.id);
-  return postRes.data;
-}
-
-// ── Telegram notification ─────────────────────────────────────
-async function notifyTeam(message) {
-  if (!TEAM_CHAT_ID || !TELEGRAM_TOKEN) { console.log("Telegram notify:", message); return; }
-  try { await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, { chat_id: TEAM_CHAT_ID, text: message, parse_mode: "Markdown" }); }
-  catch (e) { console.error("Telegram notify failed:", e.message); }
-}
-
-// ── Duplicate detection ───────────────────────────────────────
-function isDuplicateTitle(title, state) {
-  const normalize = t => t.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, " ").replace(/\s+/g, " ").trim();
-  const normalized = normalize(title);
-  const history = state.titleHistory || [];
-  return history.some(t => {
-    const n = normalize(t);
-    const words = normalized.split(" ").filter(w => w.length > 3);
-    const matches = words.filter(w => n.includes(w));
-    return matches.length >= 3 || (matches.length / Math.max(words.length, 1)) >= 0.6;
-  });
-}
-
-async function checkWordPressDuplicate(title, auth) {
-  try {
-    const search = title.split(" ").slice(0, 5).join(" ");
-    const res = await axios.get(`${WP_URL}/wp-json/wp/v2/posts?search=${encodeURIComponent(search)}&per_page=5&status=publish`, { headers: { Authorization: `Basic ${auth}` } });
-    if (res.data.length > 0) {
-      const normalize = t => t.toLowerCase().replace(/[^a-z0-9]/g, " ").replace(/\s+/g, " ").trim();
-      const normalized = normalize(title);
-      for (const post of res.data) {
-        const existing = normalize(post.title.rendered);
-        const words = normalized.split(" ").filter(w => w.length > 3);
-        if (words.filter(w => existing.includes(w)).length >= 4) { console.log(`⚠️ WP duplicate found: "${post.title.rendered}"`); return true; }
-      }
-    }
-  } catch (e) { console.log("WP duplicate check failed:", e.message); }
-  return false;
-}
-
-// ── Translation ───────────────────────────────────────────────
-async function translatePost(post, language) {
-  const cfgs = {
-    chinese: { label: "Traditional Chinese (繁體中文)", instruction: "Translate to Traditional Chinese. Keep all HTML tags. Only translate visible text. Keep URLs, phone numbers, emails unchanged.", categoryPrefix: "中文-", tagSuffix: " 中文" },
-    spanish: { label: "Spanish (Latin American)", instruction: "Translate to Latin American Spanish. Keep all HTML tags. Only translate visible text. Keep URLs, phone numbers, emails unchanged.", categoryPrefix: "Español-", tagSuffix: " español" }
-  };
-  const cfg = cfgs[language];
-  if (!cfg) return null;
-  console.log(`🌐 Translating to ${cfg.label}...`);
-  const footerIdx = post.content.indexOf("<style>.tez-ab{");
-  const articleBody = footerIdx > 0 ? post.content.substring(0, footerIdx) : post.content;
-  const prompt = `${cfg.instruction}\n\nORIGINAL TITLE: ${post.title}\nHTML BODY:\n${articleBody}\n\nReturn ONLY JSON:\n{"title":"translated title","content":"translated HTML body","metaDescription":"150-160 char translated meta","focusKeyword":"primary keyword in ${cfg.label}"}`;
-  try {
-    await new Promise(r => setTimeout(r, 8000));
-    const raw = await askClaude(prompt, false);
-    const cleaned = raw.replace(/```json|```/g, "").trim();
-    const translated = JSON.parse(cleaned.substring(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1));
-    return { title: translated.title, content: (translated.content || "") + getStaticFooter(translated.title || post.title), category: cfg.categoryPrefix + post.category, tags: (post.tags || []).map(t => t + cfg.tagSuffix), metaDescription: translated.metaDescription, focusKeyword: translated.focusKeyword };
-  } catch (e) { console.log(`Translation to ${cfg.label} failed:`, e.message); return null; }
-}
-
-// ── Publish in all 3 languages ────────────────────────────────
-async function publishAllLanguages(post, notifyPrefix) {
-  const results = [];
-  const auth = Buffer.from(`${WP_USER}:${WP_APP_PASSWORD}`).toString("base64");
-  if (await checkWordPressDuplicate(post.title, auth)) { console.log("⚠️ Skipping WP duplicate:", post.title); return 0; }
-
-  try { const p = await publishToWordPress(post); results.push({ lang: "English", link: p.link }); }
-  catch (e) { console.error("English publish failed:", e.message); }
-
-  const chPost = await translatePost(post, "chinese");
-  if (chPost) { try { const p = await publishToWordPress(chPost); results.push({ lang: "中文", link: p.link }); } catch (e) { console.error("Chinese publish failed:", e.message); } }
-
-  const esPost = await translatePost(post, "spanish");
-  if (esPost) { try { const p = await publishToWordPress(esPost); results.push({ lang: "Español", link: p.link }); } catch (e) { console.error("Spanish publish failed:", e.message); } }
-
-  if (results.length > 0) {
-    await notifyTeam(`${notifyPrefix}\n\n📌 *${post.title}*\n\n🌐 Published in ${results.length} language(s):\n${results.map(r => `${r.lang}: ${r.link}`).join("\n")}`);
-  }
-  return results.length;
-}
-
-function recordPublishedTitle(title, state) {
-  if (!state.titleHistory) state.titleHistory = [];
-  if (!state.publishedTitles) state.publishedTitles = [];
-  state.titleHistory.push(title);
-  state.publishedTitles.push(title);
-  saveState(state);
-}
-
-// ── Generate post using curated sources ───────────────────────
-async function generatePost({ topic, practiceArea, context, useSearch, sources }) {
-  const currentYear = new Date().getFullYear();
-  const todayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-
-  const locationContext = ["Immigration Law", "Immigration"].includes(practiceArea)
-    ? "nationwide United States (Tez Law handles immigration cases across the entire US)"
-    : "Southern California — Los Angeles County, Orange County, San Bernardino County, and Riverside Counties. Key cities: West Covina, LA, Anaheim, San Bernardino, Riverside, Ontario, Pomona.";
-
-  // Build source instruction if sources are provided
-  const sourceInstruction = sources && sources.length > 0
-    ? `\nPRIORITY SOURCES: When researching this topic, prioritize information from these high-authority sources: ${sources.join(", ")}. Search these first, then supplement with other credible sources if needed.\n`
-    : "";
-
-  const prompt = `You are an expert legal content writer and SEO specialist for Tez Law P.C., West Covina, California. JJ Zhang is managing attorney (California Bar #326666).
-
-IMPORTANT: Today is ${todayStr}. Current year is ${currentYear}. ALWAYS use ${currentYear} — NEVER use any past year.
-${sourceInstruction}
-Write a COMPREHENSIVE, SEO-optimized WordPress blog post about:
-TOPIC: ${topic}
-PRACTICE AREA: ${practiceArea}
-CONTEXT: ${context || "None"}
-LOCATION: ${locationContext}
-
-REQUIREMENTS:
-1. TITLE (under 65 chars, include primary keyword + location. If adding year, use ${currentYear} only)
-2. META DESCRIPTION (150-160 chars, includes keyword + CTA)
-3. CONTENT (1,000-1,400 words):
-   - Opening paragraph: hook + who this affects + what to do
-   - H2: Background/What This Means
-   - H2: How This Affects [Specific Audience]
-   - H2: What You Should Do Now (actionable steps)
-   - H2: Why Choose Tez Law P.C.
-   - H2: Frequently Asked Questions
-     * 3 FAQs as <div class="faq-item"><h3>Question?</h3><p>Answer</p></div>
-   - Closing CTA paragraph
-4. INTERNAL LINKS:
-   - Immigration: <a href="https://tezlawfirm.com/immigration/">immigration services</a>
-   - PI: <a href="https://tezlawfirm.com/home/personal-injury/">personal injury attorney</a>
-   - General: <a href="https://tezlawfirm.com/contact/">free consultation</a>
-5. TAGS: 5-7 specific tags including location + practice area keywords
-
-Return ONLY this JSON (no markdown, no backticks):
-{"title":"SEO title","metaDescription":"150-160 char meta","content":"full HTML content","category":"Immigration|Personal Injury|Business Law|Trademarks|Estate Planning","tags":["tag1","tag2","tag3","tag4","tag5"],"focusKeyword":"main SEO keyword"}`;
-
-  const raw = await askClaude(prompt, useSearch);
-  let postData;
-  try {
-    const cleaned = raw.replace(/```json|```/g, "").trim();
-    postData = JSON.parse(cleaned.substring(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1));
-  } catch (e) { console.error("Failed to parse Claude response:", e.message); return null; }
-
-  postData.content = (postData.content || "") + getStaticFooter(postData.title || "");
-
-  // Humanize intro in JJ Zhang's voice
-  await new Promise(r => setTimeout(r, 5000));
-  try {
-    const firstParaMatch = postData.content.match(/(<p>.*?<\/p>\s*<p>.*?<\/p>)/s);
-    if (firstParaMatch) {
-      const humanized = await askClaude(`${JJ_VOICE}\n\nRewrite ONLY these two opening paragraphs in JJ Zhang's voice. Return ONLY the rewritten HTML:\n\n${firstParaMatch[1]}`, false);
-      if (humanized && humanized.includes("<p>")) { postData.content = postData.content.replace(firstParaMatch[1], humanized.trim()); }
-    }
-  } catch (e) { console.log("Humanization failed:", e.message); }
-
-  return postData;
-}
-
 // ─────────────────────────────────────────────────────────────
-//  TRIGGER 1: Immigration News (uses curated sources)
+//  TRIGGER 1: Immigration News
+//  FIX 4: Check generated post.title for duplicates (not raw headline)
 // ─────────────────────────────────────────────────────────────
 async function checkImmigrationNews(state, sources) {
   console.log("📰 Checking immigration news...");
   const sourceList = sources.immigration.join(", ");
   const weeklyContext = sources.weeklyTrends ? `\nWeekly context: ${sources.weeklyTrends}` : "";
-  const urgentContext = sources.urgentArea === "immigration" && sources.urgentTopic
-    ? `\nUrgent topic flagged this week: ${sources.urgentTopic}` : "";
+  const urgentContext = sources.urgentArea === "immigration" && sources.urgentTopic ? `\nUrgent topic flagged this week: ${sources.urgentTopic}` : "";
+  const prompt = `Search for the most significant US immigration law news from the past 7 days. PRIORITY SOURCES: ${sourceList}${weeklyContext}${urgentContext}
 
-  const prompt = `Search for the most significant US immigration law news or development from the past 7 days.
-
-PRIORITY SOURCES to check: ${sourceList}
-${weeklyContext}${urgentContext}
-
-Pick the single most newsworthy item relevant to US immigration (visas, green cards, deportation, work permits, asylum, DACA, TPS, immigration enforcement).
-
-Respond ONLY in this exact JSON format:
-{"hasNews":true,"headline":"brief headline here","summary":"one sentence summary","source":"which source had this news"}
-
-If nothing noteworthy in past 7 days: {"hasNews":false}`;
-
+Respond ONLY in this exact JSON:
+{"hasNews":true,"headline":"brief headline","summary":"one sentence summary","source":"which source"}
+If nothing noteworthy: {"hasNews":false}`;
   const result = await askClaude(prompt, true);
   let newsData;
   try {
     const cleaned = result.replace(/```json|```/g, "").trim();
     newsData = JSON.parse(cleaned.substring(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1));
   } catch (e) { console.log("Failed to parse news result:", e.message); return 0; }
-
   if (!newsData.hasNews) { console.log("No new immigration news today."); return 0; }
-  if (isDuplicateTitle(newsData.headline, state)) { console.log("⚠️ Duplicate:", newsData.headline); return 0; }
-
+  // Check BOTH headline AND any existing title to catch near-duplicates
+  if (isDuplicateTitle(newsData.headline, state)) { console.log("⚠️ Duplicate headline:", newsData.headline); return 0; }
   console.log(`📰 News found from ${newsData.source}: ${newsData.headline}`);
   await new Promise(r => setTimeout(r, 10000));
-
   let post = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      post = await generatePost({
-        topic: newsData.headline,
-        practiceArea: "Immigration Law",
-        context: newsData.summary,
-        useSearch: false,
-        sources: sources.immigration
-      });
-      if (post) break;
-    } catch (e) { if (attempt < 3) await new Promise(r => setTimeout(r, 15000)); }
+    try { post = await generatePost({ topic: newsData.headline, practiceArea: "Immigration Law", context: newsData.summary, useSearch: false, sources: sources.immigration }); if (post) break; }
+    catch (e) { if (attempt < 3) await new Promise(r => setTimeout(r, 15000)); }
   }
   if (!post) return 0;
-
-  const count = await publishAllLanguages(post, "📢 *New Immigration Post Published!*");
+  // Check the GENERATED title too (may differ from headline)
+  if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate generated title:", post.title); return 0; }
+  const count = await publishAllLanguages(post, "📢 *New Immigration Post Published!*", state);
   if (count > 0) recordPublishedTitle(post.title, state);
   return count > 0 ? 1 : 0;
 }
 
 // ─────────────────────────────────────────────────────────────
-//  TRIGGER 2: Weather check (PI)
+//  TRIGGER 2: Weather (PI)
+//  FIX 5: Use recordPublishedTitle instead of push directly
 // ─────────────────────────────────────────────────────────────
 async function checkWeather(state, sources) {
   console.log("🌦️ Checking weather...");
@@ -489,14 +496,16 @@ async function checkWeather(state, sources) {
     const rainType = /thunderstorm|flood/i.test(weatherText) ? "Storms" : "Rain";
     const post = await generatePost({ topic: `Car Accidents During ${rainType} in California`, practiceArea: "Personal Injury", context: `Weather: ${weatherText.substring(0, 200)}`, useSearch: false, sources: sources.personalInjury });
     if (!post) return 0;
-    const count = await publishAllLanguages(post, "🌧️ *Weather PI Post Published!*");
-    if (count > 0) { state.lastWeatherCheck = now; state.publishedTitles.push(post.title); }
+    if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate weather post:", post.title); return 0; }
+    const count = await publishAllLanguages(post, "🌧️ *Weather PI Post Published!*", state);
+    if (count > 0) { state.lastWeatherCheck = now; recordPublishedTitle(post.title, state); }
     return count > 0 ? 1 : 0;
   } catch (e) { console.error("Weather check failed:", e.message); return 0; }
 }
 
 // ─────────────────────────────────────────────────────────────
 //  TRIGGER 3: Holiday posts
+//  FIX 6: Use recordPublishedTitle instead of push directly
 // ─────────────────────────────────────────────────────────────
 const HOLIDAYS = [
   { month:1,  day:1,  name:"New Year's Day",  topic:"New Year's DUI Accidents in California — What to Do If You're Hit by a Drunk Driver" },
@@ -517,15 +526,17 @@ async function checkHolidays(state, sources) {
       if (state.lastHolidayPost === key) continue;
       const post = await generatePost({ topic: holiday.topic, practiceArea: "Personal Injury", context: `${holiday.name} in ${daysUntil} day(s).`, useSearch: false, sources: sources.personalInjury });
       if (!post) continue;
-      const count = await publishAllLanguages(post, "🎉 *Holiday Post Published!*");
-      if (count > 0) { state.lastHolidayPost = key; state.publishedTitles.push(post.title); return 1; }
+      if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate holiday post:", post.title); continue; }
+      const count = await publishAllLanguages(post, "🎉 *Holiday Post Published!*", state);
+      if (count > 0) { state.lastHolidayPost = key; recordPublishedTitle(post.title, state); return 1; }
     }
   }
   return 0;
 }
 
 // ─────────────────────────────────────────────────────────────
-//  TRIGGER 4: Evergreen posts (uses curated sources)
+//  TRIGGER 4: Evergreen posts
+//  FIX 7: Use recordPublishedTitle consistently for all 4 types
 // ─────────────────────────────────────────────────────────────
 const EVERGREEN_TOPICS = {
   pi:        ["How Long Does a Personal Injury Case Take in California?","What Is California's Pure Comparative Negligence Rule?","Uber and Lyft Accident Claims in Los Angeles — A Complete Guide","Slip and Fall Accidents in California — What You Need to Prove","How Much Is My Car Accident Case Worth in California?","Hit and Run Accidents in California — Your Legal Options","Truck Accident Claims in Los Angeles — Why They're Different","What to Do Immediately After a Car Accident in California"],
@@ -541,10 +552,17 @@ async function checkEvergreen(state, sources) {
 
   // PI — every Tuesday
   if (dayOfWeek === 2 && state.weeklyEvergreen.pi !== now.toDateString()) {
-    const available = EVERGREEN_TOPICS.pi.filter(t => !(state.publishedTitles || []).includes(t));
+    const allSeen = [...new Set([...(state.titleHistory || []), ...(state.publishedTitles || [])])];
+    const available = EVERGREEN_TOPICS.pi.filter(t => !allSeen.some(s => s.toLowerCase().includes(t.toLowerCase().substring(0, 20))));
     const topic = available.length > 0 ? available[0] : EVERGREEN_TOPICS.pi[Math.floor(Math.random() * EVERGREEN_TOPICS.pi.length)];
     const post = await generatePost({ topic, practiceArea: "Personal Injury", useSearch: false, sources: sources.personalInjury });
-    if (post) { const c = await publishAllLanguages(post, "📝 *PI Evergreen Post!*"); if (c > 0) { state.weeklyEvergreen.pi = now.toDateString(); state.publishedTitles.push(post.title); published++; } }
+    if (post) {
+      if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate PI evergreen:", post.title); }
+      else {
+        const c = await publishAllLanguages(post, "📝 *PI Evergreen Post!*", state);
+        if (c > 0) { state.weeklyEvergreen.pi = now.toDateString(); recordPublishedTitle(post.title, state); published++; }
+      }
+    }
   }
 
   // Business or Trademark — every Thursday (alternating)
@@ -553,11 +571,23 @@ async function checkEvergreen(state, sources) {
     if (weekNum % 2 === 0) {
       const topic = EVERGREEN_TOPICS.business[Math.floor(Math.random() * EVERGREEN_TOPICS.business.length)];
       const post = await generatePost({ topic, practiceArea: "Business Law", useSearch: false, sources: sources.business });
-      if (post) { const c = await publishAllLanguages(post, "📝 *Business Law Post!*"); if (c > 0) { state.weeklyEvergreen.business = now.toDateString(); state.publishedTitles.push(post.title); published++; } }
+      if (post) {
+        if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate Business evergreen:", post.title); }
+        else {
+          const c = await publishAllLanguages(post, "📝 *Business Law Post!*", state);
+          if (c > 0) { state.weeklyEvergreen.business = now.toDateString(); recordPublishedTitle(post.title, state); published++; }
+        }
+      }
     } else {
       const topic = EVERGREEN_TOPICS.trademark[Math.floor(Math.random() * EVERGREEN_TOPICS.trademark.length)];
       const post = await generatePost({ topic, practiceArea: "Trademarks", useSearch: false, sources: sources.trademark });
-      if (post) { const c = await publishAllLanguages(post, "📝 *Trademark Post!*"); if (c > 0) { state.weeklyEvergreen.trademark = now.toDateString(); state.publishedTitles.push(post.title); published++; } }
+      if (post) {
+        if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate Trademark evergreen:", post.title); }
+        else {
+          const c = await publishAllLanguages(post, "📝 *Trademark Post!*", state);
+          if (c > 0) { state.weeklyEvergreen.trademark = now.toDateString(); recordPublishedTitle(post.title, state); published++; }
+        }
+      }
     }
   }
 
@@ -567,7 +597,13 @@ async function checkEvergreen(state, sources) {
     if (weekNum % 2 === 0) {
       const topic = EVERGREEN_TOPICS.estate[Math.floor(Math.random() * EVERGREEN_TOPICS.estate.length)];
       const post = await generatePost({ topic, practiceArea: "Estate Planning", useSearch: false, sources: sources.estate });
-      if (post) { const c = await publishAllLanguages(post, "📝 *Estate Planning Post!*"); if (c > 0) { state.weeklyEvergreen.estate = now.toDateString(); state.publishedTitles.push(post.title); published++; } }
+      if (post) {
+        if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate Estate evergreen:", post.title); }
+        else {
+          const c = await publishAllLanguages(post, "📝 *Estate Planning Post!*", state);
+          if (c > 0) { state.weeklyEvergreen.estate = now.toDateString(); recordPublishedTitle(post.title, state); published++; }
+        }
+      }
     }
   }
 
@@ -575,49 +611,26 @@ async function checkEvergreen(state, sources) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  URGENT TOPIC — if weekly research flagged something urgent
+//  URGENT TOPIC
+//  FIX 8: Save post.title not truncated urgentKey
 // ─────────────────────────────────────────────────────────────
 async function checkUrgentTopic(state, sources) {
   if (!sources.urgentTopic || !sources.urgentArea) return 0;
-
-  // Only post urgent topic once — check if already posted
   const urgentKey = `urgent-${sources.urgentTopic?.substring(0, 30)}`;
   if (isDuplicateTitle(urgentKey, state)) { console.log("Urgent topic already posted."); return 0; }
-
   console.log(`🚨 Posting urgent topic: ${sources.urgentTopic}`);
-
-  const areaToSources = {
-    immigration: sources.immigration,
-    "personal injury": sources.personalInjury,
-    business: sources.business,
-    trademark: sources.trademark,
-    estate: sources.estate,
-  };
-  const practiceAreaMap = {
-    immigration: "Immigration Law",
-    "personal injury": "Personal Injury",
-    business: "Business Law",
-    trademark: "Trademarks",
-    estate: "Estate Planning",
-  };
-
+  const areaToSources = { immigration: sources.immigration, "personal injury": sources.personalInjury, business: sources.business, trademark: sources.trademark, estate: sources.estate };
+  const practiceAreaMap = { immigration: "Immigration Law", "personal injury": "Personal Injury", business: "Business Law", trademark: "Trademarks", estate: "Estate Planning" };
   const area = sources.urgentArea?.toLowerCase();
   const practiceArea = practiceAreaMap[area] || "Immigration Law";
   const relevantSources = areaToSources[area] || sources.immigration;
-
-  const post = await generatePost({
-    topic: sources.urgentTopic,
-    practiceArea,
-    context: sources.weeklyTrends || "",
-    useSearch: true,
-    sources: relevantSources
-  });
-
+  const post = await generatePost({ topic: sources.urgentTopic, practiceArea, context: sources.weeklyTrends || "", useSearch: true, sources: relevantSources });
   if (!post) return 0;
-  const count = await publishAllLanguages(post, `🚨 *Urgent Topic Post: ${practiceArea}!*`);
+  if (isDuplicateTitle(post.title, state)) { console.log("⚠️ Duplicate urgent post:", post.title); return 0; }
+  const count = await publishAllLanguages(post, `🚨 *Urgent Topic Post: ${practiceArea}!*`, state);
   if (count > 0) {
-    recordPublishedTitle(urgentKey, state);
-    // Clear urgent topic after posting
+    recordPublishedTitle(post.title, state);   // save actual generated title
+    recordPublishedTitle(urgentKey, state);     // also save key to prevent re-check
     const s = loadSources(); s.urgentTopic = null; saveSources(s);
   }
   return count > 0 ? 1 : 0;
@@ -631,44 +644,29 @@ async function runDailyScheduler() {
   const state = loadState();
   let sources = loadSources();
   let total = 0;
-
-  // Run weekly source research if needed (Sundays or overdue)
   const today = new Date();
   const isSunday = today.getDay() === 0;
   if (isSunday || shouldRunWeeklyResearch(sources)) {
     console.log("📅 Running weekly source research...");
     sources = await runWeeklySourceResearch();
-    await new Promise(r => setTimeout(r, 15000)); // cooldown
+    await new Promise(r => setTimeout(r, 15000));
   }
-
-  // Run all triggers sequentially with delays to avoid rate limits
   const runWithDelay = async (fn, label, delayMs = 0) => {
-    if (delayMs > 0) {
-      console.log(`⏳ Waiting ${delayMs/1000}s before ${label}...`);
-      await new Promise(r => setTimeout(r, delayMs));
-    }
+    if (delayMs > 0) { console.log(`⏳ Waiting ${delayMs/1000}s before ${label}...`); await new Promise(r => setTimeout(r, delayMs)); }
     try { total += await fn(); } catch (e) { console.error(`${label} error:`, e.message); }
   };
-
-  await runWithDelay(() => checkUrgentTopic(state, sources),    "Urgent topic",      0);
-  await runWithDelay(() => checkImmigrationNews(state, sources),"Immigration check",  45000);
-  await runWithDelay(() => checkWeather(state, sources),         "Weather check",     15000);
-  await runWithDelay(() => checkHolidays(state, sources),        "Holiday check",      5000);
-  await runWithDelay(() => checkEvergreen(state, sources),       "Evergreen check",    5000);
-
+  await runWithDelay(() => checkUrgentTopic(state, sources),     "Urgent topic",       0);
+  await runWithDelay(() => checkImmigrationNews(state, sources), "Immigration check",  45000);
+  await runWithDelay(() => checkWeather(state, sources),          "Weather check",     15000);
+  await runWithDelay(() => checkHolidays(state, sources),         "Holiday check",      5000);
+  await runWithDelay(() => checkEvergreen(state, sources),        "Evergreen check",    5000);
   saveState(state);
   console.log(`✅ Auto-poster complete. Published ${total} post(s) today.\n`);
 }
 
-// ─────────────────────────────────────────────────────────────
-//  SCHEDULER — runs on startup + daily at 8 AM Pacific
-// ─────────────────────────────────────────────────────────────
 function scheduleDaily() {
-  // Run immediately on startup to catch missed posts
   console.log("🚀 Running auto-poster on startup...");
   setTimeout(async () => { await runDailyScheduler(); }, 60000);
-
-  // Schedule daily at 15:00 UTC (8 AM Pacific)
   function scheduleNext() {
     const now = new Date();
     const next = new Date();
