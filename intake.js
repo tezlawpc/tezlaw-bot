@@ -270,17 +270,44 @@ async function checkIntake(platform, userId, userText) {
       platform,
     };
 
-    // Save + notify (non-blocking)
+    // Save + notify + create lead + conflict check (non-blocking)
     Promise.allSettled([
       saveIntakeToDB(platform, userId, intakeData),
       notifyTelegram(intakeData),
       notifyEmail(intakeData),
-    ]).then(results => {
+    ]).then(async (results) => {
       results.forEach((r, i) => {
         if (r.status === "rejected") {
           console.error(`Intake step ${i} failed:`, r.reason?.message);
         }
       });
+      // Wave 1: auto-create lead + run conflict check after intake saves
+      try {
+        const db = require("./db");
+        const lead = await db.createLead({
+          platform, platformId: userId,
+          name: intakeData.name,
+          contact: intakeData.contact,
+          caseType: intakeData.caseType,
+        });
+        if (lead && intakeData.name) {
+          const conflict = await db.runConflictCheck(
+            lead.id, platform, userId, intakeData.name
+          );
+          if (conflict?.disposition === "possible") {
+            // Notify JJ of potential conflict
+            const { TELEGRAM_TOKEN, JJ_TELEGRAM_ID } = process.env;
+            if (TELEGRAM_TOKEN && JJ_TELEGRAM_ID) {
+              await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+                chat_id: JJ_TELEGRAM_ID,
+                text: `⚠️ CONFLICT CHECK — Possible match!\n\nNew client: ${intakeData.name}\nCase: ${intakeData.caseType}\n\n${conflict.matches.length} existing record(s) found with similar name.\n\nReview in Admin Panel → Conflicts tab before assigning.`,
+              }).catch(() => {});
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Lead/conflict post-intake error:", e.message);
+      }
     });
 
     // Mark intake as done
