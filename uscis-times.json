@@ -1,7 +1,7 @@
 {
   "updated_at": "April 19, 2026",
-  "updated_iso": "2026-04-19T00:00:00.000Z",
-  "note": "Seed data — will be auto-updated weekly by GitHub Actions",
+  "updated_iso": "2026-04-19T08:33:00.056Z",
+  "fetch_success_count": 0,
   "forms": {
     "I-485": {
       "range": "8–44 months",
@@ -44,5 +44,16 @@
       "fetched_at": "2026-04-19T00:00:00.000Z"
     }
   },
+  "errors": [
+    "I-485/NBC: HTTP 403",
+    "I-485/TSC: HTTP 403",
+    "I-130/NBC: HTTP 403",
+    "I-765/NBC: HTTP 403",
+    "I-131/NBC: HTTP 403",
+    "N-400/NBC: HTTP 403",
+    "I-751/NBC: HTTP 403",
+    "I-589/ZLA: HTTP 403",
+    "I-90/NBC: HTTP 403"
+  ],
   "source_note": "USCIS.gov — times are estimates and vary by service center and case specifics"
 }
