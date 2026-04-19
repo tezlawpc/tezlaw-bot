@@ -1234,9 +1234,9 @@ function dashboardHtml() {
         + '<td style="font-size:12px;max-width:200px">' + matchStr + '</td>'
         + '<td><span class="badge ' + (dispColor[r.disposition] || '') + '">' + r.disposition + '</span></td>'
         + '<td>'
-        + '<button class="disp-btn disp-cleared" onclick="setDisposition(' + r.id + ',\'cleared\')">Clear</button>'
-        + '<button class="disp-btn disp-denied" onclick="setDisposition(' + r.id + ',\'denied\')">Deny</button>'
-        + '</td></tr>';
+        + '<button class="disp-btn disp-cleared" data-id="' + r.id + '" data-disp="cleared" onclick="setDisposition(this.dataset.id,this.dataset.disp)">Clear</button>'
+        + '<button class="disp-btn disp-denied" data-id="' + r.id + '" data-disp="denied" onclick="setDisposition(this.dataset.id,this.dataset.disp)">Deny</button>'
+        + </td></tr>';
     });
     document.getElementById('conflictsTable').innerHTML = '<table><thead><tr><th>Date</th><th>Name</th><th>Case Type</th><th>Matches</th><th>Status</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
