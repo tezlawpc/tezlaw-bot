@@ -20,6 +20,8 @@ const { router: adminRouter, handleAdminCallback, initPromptTable, getSavedPromp
 const { checkCompliance, initComplianceTable } = require("./compliance");
 const { scheduleUSCISRefresh, buildLivePrompt } = require("./uscis-updater");
 const { startHotLeadMonitor } = require("./hot-leads");
+const { startSolScheduler }   = require("./sol");
+const { startDripScheduler }  = require("./drip");
 const cookieParser = require("cookie-parser");
 
 const app = express();
@@ -769,6 +771,8 @@ app.listen(PORT, () => {
   // ── Hot lead escalation monitor ─────────────────────────
   try {
     startHotLeadMonitor();
+  startSolScheduler();
+  startDripScheduler();
   } catch (e) {
     console.error("❌ Hot lead monitor failed:", e.message);
   }

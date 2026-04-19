@@ -549,6 +549,67 @@ async function logUnansweredQuestion(platform, platformId, question, zaraRespons
   }
 }
 
+// Save conversation score
+async function saveConversationScore(platform, platformId, sessionStart, sessionEnd, msgCount, scores, summary) {
+  const overall = Math.round((scores.accuracy + scores.tone + scores.disclaimer + (10 - scores.upl_risk)) / 4);
+  const needsReview = overall < 6 || scores.upl_risk > 7;
+  const pool = getPool();
+  const r = await pool.query(
+    `INSERT INTO conversation_scores
+     (platform, platform_id, session_start, session_end, message_count,
+      score_accuracy, score_tone, score_disclaimer, score_upl_risk, score_overall,
+      needs_review, summary)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+    [platform, platformId, sessionStart, sessionEnd, msgCount,
+     scores.accuracy, scores.tone, scores.disclaimer, scores.upl_risk, overall,
+     needsReview, summary]
+  );
+  return r.rows[0].id;
+}
+
+// Create SOL deadline
+async function createSolDeadline(platformId, clientName, caseType, incidentDate) {
+  const SOL_YEARS = {
+    'personal_injury': 2, 'car_accident': 2, 'slip_and_fall': 2,
+    'medical_malpractice': 3, 'wrongful_death': 2,
+    'employment': 3, 'contract': 4, 'fraud': 3,
+    'property_damage': 3, 'defamation': 1,
+  };
+  const caseKey = caseType.toLowerCase().replace(/\s+/g,'_');
+  const years = SOL_YEARS[caseKey] || 2;
+  const incident = new Date(incidentDate);
+  const deadline = new Date(incident);
+  deadline.setFullYear(deadline.getFullYear() + years);
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO sol_deadlines (platform_id, client_name, case_type, incident_date, deadline_date)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [platformId, clientName, caseType, incidentDate, deadline.toISOString().split('T')[0]]
+  );
+  return { deadline: deadline.toISOString().split('T')[0], years };
+}
+
+// Create drip campaign
+async function createDripCampaign(platform, platformId, intakeId, clientName, caseType) {
+  const pool = getPool();
+  const r = await pool.query(
+    `INSERT INTO drip_campaigns (platform, platform_id, intake_id, client_name, case_type)
+     VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+    [platform, platformId, intakeId, clientName, caseType]
+  );
+  return r.rows[0].id;
+}
+
+// Stop drip campaign
+async function stopDripCampaign(platformId, reason) {
+  const pool = getPool();
+  await pool.query(
+    `UPDATE drip_campaigns SET status='stopped', stopped_at=NOW(), stop_reason=$1
+     WHERE platform_id=$2 AND status='active'`,
+    [reason, platformId]
+  );
+}
+
 module.exports = {
   initDB, getOrCreateClient, updateClient, saveMessage,
   getHistory, getClientContext, saveSummary, clearHistory,

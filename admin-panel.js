@@ -362,3 +362,186 @@ async function runAutoposter() {
   if (res && res.ok) { msg.textContent = '✅ ' + res.message; setTimeout(function(){ msg.textContent=''; }, 10000); }
   else { msg.style.color = '#cc0000'; msg.textContent = '❌ Failed to start'; }
 }
+
+// ── Wave 2: Conversation Scores ───────────────────────────
+
+function scoreColor(n) {
+  if (n >= 8) return 'score-high';
+  if (n >= 6) return 'score-mid';
+  return 'score-low';
+}
+
+function scoreBadge(n, label) {
+  return '<span class="score-badge ' + scoreColor(n) + '">' + label + ': ' + n + '</span> ';
+}
+
+async function loadScores() {
+  var flagged = await api('/api/scores/flagged');
+  var all     = await api('/api/scores');
+
+  var fe = document.getElementById('scoresFlagged');
+  var ae = document.getElementById('scoresAll');
+
+  if (flagged && flagged.length) {
+    var fr = '';
+    flagged.forEach(function(r) {
+      fr += '<tr class="needs-review">'
+        + '<td style="font-size:11px;white-space:nowrap">' + new Date(r.created_at).toLocaleDateString('en-US') + '</td>'
+        + '<td>' + platBadge(r.platform) + '</td>'
+        + '<td>' + scoreBadge(r.score_accuracy,'Acc') + scoreBadge(r.score_tone,'Tone') + scoreBadge(r.score_disclaimer,'Disc') + '</td>'
+        + '<td><span class="score-badge score-low">UPL: ' + r.score_upl_risk + '</span></td>'
+        + '<td><span class="score-badge ' + scoreColor(r.score_overall) + '">Overall: ' + r.score_overall + '</span></td>'
+        + '<td style="font-size:12px;max-width:300px;color:#333">' + (r.summary||'').substring(0,150) + '</td>'
+        + '</tr>';
+    });
+    fe.innerHTML = '<table><thead><tr><th>Date</th><th>Platform</th><th>Scores</th><th>UPL</th><th>Overall</th><th>Summary</th></tr></thead><tbody>' + fr + '</tbody></table>';
+  } else {
+    fe.innerHTML = '<p style="color:#006600;font-size:13px;padding:12px">✅ No conversations flagged for review!</p>';
+  }
+
+  if (all && all.length) {
+    var ar = '';
+    all.slice(0, 50).forEach(function(r) {
+      ar += '<tr>'
+        + '<td style="font-size:11px;white-space:nowrap">' + new Date(r.created_at).toLocaleDateString('en-US') + '</td>'
+        + '<td>' + platBadge(r.platform) + '</td>'
+        + '<td style="font-size:11px">' + r.message_count + ' msgs</td>'
+        + '<td>' + scoreBadge(r.score_accuracy,'Acc') + scoreBadge(r.score_tone,'Tone') + scoreBadge(r.score_disclaimer,'Disc') + '</td>'
+        + '<td><span class="score-badge ' + scoreColor(r.score_overall) + '">' + r.score_overall + '/10</span></td>'
+        + '<td style="font-size:12px;max-width:200px;color:#666">' + (r.summary||'').substring(0,100) + '</td>'
+        + '</tr>';
+    });
+    ae.innerHTML = '<table><thead><tr><th>Date</th><th>Platform</th><th>Msgs</th><th>Scores</th><th>Overall</th><th>Summary</th></tr></thead><tbody>' + ar + '</tbody></table>';
+  } else {
+    ae.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No scored conversations yet — scores generate automatically after each session ends.</p>';
+  }
+}
+
+// ── Wave 2: SOL Tracker ───────────────────────────────────
+
+async function loadSol() {
+  var data = await api('/api/sol');
+  var el = document.getElementById('solTable');
+  if (!data || !data.length) {
+    el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No deadlines tracked yet. Add one above or they auto-create from intake.</p>';
+    return;
+  }
+  var rows = '';
+  data.forEach(function(r) {
+    var days = Math.ceil((new Date(r.deadline_date) - new Date()) / (1000*60*60*24));
+    var urgency = days <= 7 ? 'score-low' : days <= 30 ? 'score-mid' : 'score-high';
+    var expired = days < 0;
+    rows += '<tr>'
+      + '<td style="font-weight:bold">' + (r.client_name||'—') + '</td>'
+      + '<td style="font-size:12px">' + (r.case_type||'—') + '</td>'
+      + '<td style="font-size:12px">' + (r.incident_date ? new Date(r.incident_date).toLocaleDateString('en-US') : '—') + '</td>'
+      + '<td style="font-weight:bold">' + (r.deadline_date ? new Date(r.deadline_date).toLocaleDateString('en-US') : '—') + '</td>'
+      + '<td><span class="score-badge ' + (expired ? 'score-low' : urgency) + '">' + (expired ? '⚠️ EXPIRED' : days + ' days') + '</span></td>'
+      + '<td style="font-size:11px">'
+      + (r.alerted_90 ? '✅' : '⬜') + '90d '
+      + (r.alerted_30 ? '✅' : '⬜') + '30d '
+      + (r.alerted_7  ? '✅' : '⬜') + '7d '
+      + (r.alerted_1  ? '✅' : '⬜') + '1d'
+      + '</td>'
+      + '<td style="font-size:11px;color:#999">' + (r.notes||'') + '</td>'
+      + '<td><button class="action-btn" style="font-size:11px;padding:3px 10px;background:#cc0000" data-sid="' + r.id + '" onclick="deleteSol(this.getAttribute(\'data-sid\'))">Delete</button></td>'
+      + '</tr>';
+  });
+  el.innerHTML = '<table><thead><tr><th>Client</th><th>Case Type</th><th>Incident</th><th>Deadline</th><th>Time Left</th><th>Alerts</th><th>Notes</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+async function addSolDeadline() {
+  var name      = document.getElementById('solName').value.trim();
+  var caseType  = document.getElementById('solType').value;
+  var date      = document.getElementById('solDate').value;
+  var notes     = document.getElementById('solNotes').value.trim();
+  var resultEl  = document.getElementById('solResult');
+
+  if (!name || !date) { resultEl.innerHTML = '<span style="color:#cc0000">Please fill in client name and incident date.</span>'; return; }
+
+  var res = await api('/api/sol', { method: 'POST', body: JSON.stringify({ clientName: name, caseType, incidentDate: date, notes }) });
+  if (res && res.ok) {
+    resultEl.innerHTML = '<span style="color:#006600">✅ Deadline added: <strong>' + res.deadline + '</strong> (' + res.years + ' yr SOL, ' + res.daysLeft + ' days left)</span>';
+    document.getElementById('solName').value = '';
+    document.getElementById('solDate').value = '';
+    document.getElementById('solNotes').value = '';
+    loadSol();
+  } else {
+    resultEl.innerHTML = '<span style="color:#cc0000">❌ Failed to add deadline</span>';
+  }
+}
+
+async function deleteSol(id) {
+  if (!confirm('Delete this deadline?')) return;
+  await api('/api/sol/' + id, { method: 'DELETE' });
+  loadSol();
+}
+
+// ── Wave 2: Drip Campaigns ────────────────────────────────
+
+async function loadDrip() {
+  var data = await api('/api/drip');
+  var el = document.getElementById('dripTable');
+  if (!data || !data.length) {
+    el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No drip campaigns yet — they start automatically after intake completion.</p>';
+    return;
+  }
+  var rows = '';
+  data.forEach(function(r) {
+    var statusColor = r.status === 'active' ? '#006600' : '#999';
+    var sentPct = r.total_msgs > 0 ? Math.round((r.sent_msgs / r.total_msgs) * 100) : 0;
+    rows += '<tr>'
+      + '<td style="font-weight:bold">' + (r.client_name||'Unknown') + '</td>'
+      + '<td style="font-size:12px">' + (r.case_type||'—') + '</td>'
+      + '<td>' + platBadge(r.platform) + '</td>'
+      + '<td><span style="color:' + statusColor + ';font-weight:bold;font-size:12px">' + r.status.toUpperCase() + '</span></td>'
+      + '<td style="font-size:12px">' + r.sent_msgs + ' / ' + r.total_msgs + ' sent (' + sentPct + '%)</td>'
+      + '<td style="font-size:11px;white-space:nowrap">' + new Date(r.started_at).toLocaleDateString('en-US') + '</td>'
+      + '<td style="font-size:11px;color:#999">' + (r.stop_reason||'') + '</td>'
+      + '<td>' + (r.status === 'active'
+        ? '<button class="action-btn" style="font-size:11px;padding:3px 10px;background:#cc0000" data-did="' + r.id + '" onclick="stopDrip(this.getAttribute(\'data-did\'))">Stop</button>'
+        : '') + '</td>'
+      + '</tr>';
+  });
+  el.innerHTML = '<table><thead><tr><th>Client</th><th>Case Type</th><th>Platform</th><th>Status</th><th>Progress</th><th>Started</th><th>Stop Reason</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+async function stopDrip(id) {
+  if (!confirm('Stop this drip campaign?')) return;
+  await api('/api/drip/' + id + '/stop', { method: 'POST' });
+  loadDrip();
+}
+
+// ── Wave 2: Prompt Version History (in System Prompt page) ──
+
+async function loadPromptHistory() {
+  var data = await api('/api/prompt/history');
+  var el = document.getElementById('promptHistory');
+  if (!el) return;
+  if (!data || !data.length) {
+    el.innerHTML = '<p style="color:#999;font-size:13px">No version history yet.</p>';
+    return;
+  }
+  var rows = '';
+  data.forEach(function(r) {
+    var time = new Date(r.updated_at).toLocaleString('en-US', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    rows += '<tr>'
+      + '<td style="font-size:11px;white-space:nowrap">' + time + '</td>'
+      + '<td style="font-size:11px;color:#666">' + (r.updated_by||'admin') + '</td>'
+      + '<td style="font-size:12px;max-width:400px;font-family:monospace">' + (r.preview||'').substring(0,120) + '...</td>'
+      + '<td><button class="action-btn" style="font-size:11px;padding:3px 10px" data-vid="' + r.id + '" onclick="rollbackPrompt(this.getAttribute(\'data-vid\'))">Restore</button></td>'
+      + '</tr>';
+  });
+  el.innerHTML = '<table><thead><tr><th>Saved At</th><th>By</th><th>Preview</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+async function rollbackPrompt(id) {
+  if (!confirm('Restore this version? It will become the live prompt immediately.')) return;
+  var res = await api('/api/prompt/rollback/' + id, { method: 'POST' });
+  if (res && res.ok) {
+    document.getElementById('promptEditor').value = res.prompt;
+    document.getElementById('saveMsg').textContent = '✅ Rolled back to version ' + id + ' — live now!';
+    setTimeout(function(){ document.getElementById('saveMsg').textContent = ''; }, 4000);
+    loadPromptHistory();
+  }
+}

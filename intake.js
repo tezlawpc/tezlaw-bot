@@ -284,6 +284,7 @@ async function checkIntake(platform, userId, userText) {
       // Wave 1: auto-create lead + run conflict check after intake saves
       try {
         const db = require("./db");
+const { startDripCampaign } = require("./drip");
         const lead = await db.createLead({
           platform, platformId: userId,
           name: intakeData.name,

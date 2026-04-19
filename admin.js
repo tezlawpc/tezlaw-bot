@@ -206,6 +206,32 @@ router.post("/api/logout", requireAuth, (req, res) => {
 
 // ── Protected API routes ──────────────────────────────────
 
+// Get prompt version history
+router.get("/api/prompt/history", requireAuth, async (req, res) => {
+  try {
+    const r = await getPool().query(
+      `SELECT id, prompt, updated_at, updated_by FROM system_prompts ORDER BY id DESC LIMIT 50`
+    );
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// Rollback to a previous prompt version
+router.post("/api/prompt/rollback/:id", requireAuth, async (req, res) => {
+  try {
+    const old = await getPool().query(`SELECT prompt FROM system_prompts WHERE id=$1`, [req.params.id]);
+    if (!old.rows[0]) return res.status(404).json({error:"Version not found"});
+    const prompt = old.rows[0].prompt;
+    await getPool().query(
+      `INSERT INTO system_prompts (prompt, updated_at, updated_by) VALUES ($1, NOW(), 'rollback')`,
+      [prompt]
+    );
+    req.app.locals.SYSTEM_PROMPT = prompt;
+    audit(req, "prompt_rollback", "system_prompt", null, "rolled back to version " + req.params.id);
+    res.json({ ok: true, prompt });
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
 // Get current system prompt
 router.get("/api/prompt", requireAuth, async (req, res) => {
   const saved = await getSavedPrompt();
@@ -328,6 +354,104 @@ router.get("/api/compliance", requireAuth, async (req, res) => {
   }
 });
 
+
+
+// ── Wave 2: Conversation Scores ───────────────────────────
+router.get("/api/scores", requireAuth, async (req, res) => {
+  try {
+    const r = await getPool().query(`
+      SELECT * FROM conversation_scores ORDER BY created_at DESC LIMIT 200
+    `);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+router.get("/api/scores/flagged", requireAuth, async (req, res) => {
+  try {
+    const r = await getPool().query(`
+      SELECT * FROM conversation_scores WHERE needs_review=TRUE ORDER BY created_at DESC LIMIT 100
+    `);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── Wave 2: SOL Calculator ────────────────────────────────
+router.get("/api/sol", requireAuth, async (req, res) => {
+  try {
+    const r = await getPool().query(`SELECT * FROM sol_deadlines ORDER BY deadline_date ASC LIMIT 200`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+router.post("/api/sol", requireAuth, async (req, res) => {
+  try {
+    const { platformId, clientName, caseType, incidentDate, notes } = req.body;
+    const { calculateDeadline } = require("./sol");
+    const result = calculateDeadline(incidentDate, caseType);
+    await getPool().query(
+      `INSERT INTO sol_deadlines (platform_id, client_name, case_type, incident_date, deadline_date, notes)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [platformId || "manual", clientName, caseType, incidentDate, result.deadline, notes || ""]
+    );
+    res.json({ ok: true, ...result });
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+router.delete("/api/sol/:id", requireAuth, async (req, res) => {
+  try {
+    await getPool().query(`DELETE FROM sol_deadlines WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── Wave 2: Drip Campaigns ────────────────────────────────
+router.get("/api/drip", requireAuth, async (req, res) => {
+  try {
+    const r = await getPool().query(`
+      SELECT dc.*, COUNT(dm.id) as total_msgs,
+             COUNT(CASE WHEN dm.status='sent' THEN 1 END) as sent_msgs
+      FROM drip_campaigns dc
+      LEFT JOIN drip_messages dm ON dc.id = dm.campaign_id
+      GROUP BY dc.id ORDER BY dc.started_at DESC LIMIT 200
+    `);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+router.post("/api/drip/:id/stop", requireAuth, async (req, res) => {
+  try {
+    await getPool().query(
+      `UPDATE drip_campaigns SET status='stopped', stopped_at=NOW(), stop_reason='manual_admin'
+       WHERE id=$1`, [req.params.id]
+    );
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── Wave 2: Prompt Version History ───────────────────────
+router.get("/api/prompt/history", requireAuth, async (req, res) => {
+  try {
+    const r = await getPool().query(
+      `SELECT id, LEFT(prompt,200) as preview, updated_at, updated_by FROM system_prompts ORDER BY id DESC LIMIT 50`
+    );
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+router.post("/api/prompt/rollback/:id", requireAuth, async (req, res) => {
+  try {
+    const old = await getPool().query(`SELECT prompt FROM system_prompts WHERE id=$1`, [req.params.id]);
+    if (!old.rows[0]) return res.status(404).json({error:"Version not found"});
+    const prompt = old.rows[0].prompt;
+    await getPool().query(
+      `INSERT INTO system_prompts (prompt, updated_at, updated_by) VALUES ($1, NOW(), 'rollback')`,
+      [prompt]
+    );
+    req.app.locals.SYSTEM_PROMPT = prompt;
+    audit(req, "prompt_rollback", "system_prompt", null, "rolled back to v" + req.params.id);
+    res.json({ ok: true, prompt });
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
 
 // ── Serve admin panel JS ──────────────────────────────────
 router.get("/panel.js", requireAuth, (req, res) => {
@@ -765,6 +889,9 @@ function dashboardHtml() {
     .stage-select{width:100%;font-size:11px;padding:4px 6px;border-radius:5px;border:1px solid #ddd;margin-top:6px;background:#f9f9f9;cursor:pointer}
     .disp-pending{background:#fff3cd;color:#856404}.disp-possible{background:#f8d7da;color:#721c24}.disp-cleared{background:#d4edda;color:#155724}.disp-denied{background:#e2e3e5;color:#383d41}
     .disp-btn{font-size:11px;padding:3px 10px;border:none;border-radius:10px;cursor:pointer;font-weight:bold;margin-right:4px}
+    .score-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold}
+    .score-high{background:#d4edda;color:#155724}.score-mid{background:#fff3cd;color:#856404}.score-low{background:#f8d7da;color:#721c24}
+    .needs-review{border-left-color:#cc0000!important;background:#fff8f8!important}
     @media (max-width: 768px) {
       .sidebar { width: 60px; }
       .sidebar-logo p, .nav-item span { display: none; }
@@ -810,6 +937,15 @@ function dashboardHtml() {
   <div class="nav-item" onclick="showPage('audit')" id="nav-audit">
     <span class="icon">📜</span><span>Audit Log</span>
   </div>
+  <div class="nav-item" onclick="showPage('scores')" id="nav-scores">
+    <span class="icon">🎯</span><span>Conv. Scores</span>
+  </div>
+  <div class="nav-item" onclick="showPage('sol')" id="nav-sol">
+    <span class="icon">⏳</span><span>SOL Tracker</span>
+  </div>
+  <div class="nav-item" onclick="showPage('drip')" id="nav-drip">
+    <span class="icon">💧</span><span>Drip Campaigns</span>
+  </div>
 </div>
 
 <div class="main">
@@ -850,6 +986,11 @@ function dashboardHtml() {
         <button class="save-btn" id="saveBtn" onclick="savePrompt()">💾 Save & Apply Now</button>
         <span class="save-msg" id="saveMsg"></span>
       </div>
+    </div>
+    <div class="card">
+      <h3>🕐 Version History</h3>
+      <p style="font-size:13px;color:#666;margin-bottom:12px">Every save is versioned. Click Restore to roll back instantly.</p>
+      <div id="promptHistory"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
   </div>
 
@@ -959,6 +1100,66 @@ function dashboardHtml() {
     </div>
   </div>
   <!-- Autoposter button in Analytics page -->
+
+  <!-- Conversation Scores -->
+  <div class="page" id="page-scores">
+    <div class="page-header"><h1>Conversation Scores</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
+    <div class="card">
+      <h3>🚨 Needs Review</h3>
+      <p style="font-size:13px;color:#666;margin-bottom:16px">Conversations flagged for low quality, UPL risk, or missing disclaimers.</p>
+      <div id="scoresFlagged"><div class="loading"><span class="spinner"></span> Loading...</div></div>
+    </div>
+    <div class="card">
+      <h3>🎯 All Scored Conversations</h3>
+      <div id="scoresAll"><div class="loading"><span class="spinner"></span> Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- SOL Tracker -->
+  <div class="page" id="page-sol">
+    <div class="page-header"><h1>SOL Deadline Tracker</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
+    <div class="card">
+      <h3>➕ Add Deadline Manually</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:8px">
+        <div><label style="font-size:12px;color:#666">Client Name</label><br>
+          <input id="solName" placeholder="Full name" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px"></div>
+        <div><label style="font-size:12px;color:#666">Case Type</label><br>
+          <select id="solType" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+            <option value="personal_injury">Personal Injury</option>
+            <option value="car_accident">Car Accident</option>
+            <option value="slip_and_fall">Slip & Fall</option>
+            <option value="medical_malpractice">Medical Malpractice</option>
+            <option value="employment">Employment</option>
+            <option value="contract">Contract</option>
+            <option value="immigration">Immigration</option>
+            <option value="wrongful_death">Wrongful Death</option>
+            <option value="fraud">Fraud</option>
+            <option value="defamation">Defamation</option>
+          </select></div>
+        <div><label style="font-size:12px;color:#666">Incident Date</label><br>
+          <input id="solDate" type="date" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px"></div>
+        <div><label style="font-size:12px;color:#666">Notes</label><br>
+          <input id="solNotes" placeholder="Optional notes" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px"></div>
+        <button class="action-btn" onclick="addSolDeadline()" style="padding:9px 16px;white-space:nowrap">+ Add</button>
+      </div>
+      <div id="solResult" style="font-size:13px;margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h3>⚖️ Active Deadlines</h3>
+      <p style="font-size:12px;color:#666;margin-bottom:12px">Alerts sent via Telegram at 90 / 30 / 7 / 1 days before deadline.</p>
+      <div id="solTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- Drip Campaigns -->
+  <div class="page" id="page-drip">
+    <div class="page-header"><h1>Drip Campaigns</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
+    <div class="card">
+      <h3>💧 Active Campaigns</h3>
+      <p style="font-size:13px;color:#666;margin-bottom:16px">Auto-started after intake. Sends follow-ups at 1hr / 24hr / 3day / 7day. Stops when client responds or signs.</p>
+      <div id="dripTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
+    </div>
+  </div>
 
 </div>
 
