@@ -17,8 +17,8 @@ const crypto     = require("crypto");
 const axios      = require("axios");
 const { Pool }   = require("pg");
 const fs         = require("fs");
-// nodemailer loaded lazily in sendAuthEmail to avoid crash if not installed
 const db         = require("./db");
+// nodemailer loaded lazily in sendAuthEmail to avoid crash if not installed
 
 const router = express.Router();
 
@@ -58,17 +58,16 @@ function validateSession(token) {
   return true;
 }
 
+function audit(req, action, target, oldVal, newVal) {
+  const ip = (req.headers["x-forwarded-for"] || "").split(",")[0] || "unknown";
+  db.logAudit("jj", action, target, oldVal, newVal, ip).catch(() => {});
+}
+
 function requireAuth(req, res, next) {
   const token = req.cookies?.admin_token || req.headers["x-admin-token"];
   if (validateSession(token)) return next();
   if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Unauthorized" });
   res.redirect("/admin/login");
-}
-
-// ── Audit log helper (wraps db.logAudit with IP) ─────────
-function audit(req, action, target, oldVal, newVal) {
-  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket?.remoteAddress || "unknown";
-  db.logAudit("jj", action, target, oldVal, newVal, ip).catch(() => {});
 }
 
 // ── Telegram auth flow ────────────────────────────────────
@@ -111,11 +110,10 @@ function handleAdminCallback(callbackData, callbackQueryId) {
   if (action === "admin_approve") {
     pending.approved = true;
     pending.token = createSession("jj");
-    db.logAudit("jj", "login", "admin_panel", null, "approved", null).catch(() => {});
+    db.logAudit("jj","login","admin_panel",null,"approved",null).catch(()=>{});
     return { answer: "✅ Admin access approved!" };
   } else {
     pending.denied = true;
-    db.logAudit("jj", "login_denied", "admin_panel", null, "denied", null).catch(() => {});
     return { answer: "❌ Access denied." };
   }
 }
@@ -201,7 +199,7 @@ router.get("/api/auth/status/:requestId", (req, res) => {
 router.post("/api/logout", requireAuth, (req, res) => {
   const token = req.cookies?.admin_token || req.headers["x-admin-token"];
   sessions.delete(token);
-  audit(req, "logout", "admin_panel", null, null);
+  audit(req,"logout","admin_panel",null,null);
   res.json({ ok: true });
 });
 
@@ -217,12 +215,12 @@ router.get("/api/prompt", requireAuth, async (req, res) => {
 router.post("/api/prompt", requireAuth, async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: "No prompt provided" });
-  const old = await getSavedPrompt();
+  const oldPrompt = await getSavedPrompt();
   await savePrompt(prompt);
   req.app.locals.SYSTEM_PROMPT = prompt;
-  audit(req, "prompt_edit", "system_prompt",
-    old ? old.substring(0, 200) + "..." : null,
-    prompt.substring(0, 200) + "...");
+  audit(req,"prompt_edit","system_prompt",
+    oldPrompt ? oldPrompt.substring(0,200) : null,
+    prompt.substring(0,200));
   res.json({ ok: true, message: "Prompt updated and live immediately!" });
 });
 
@@ -329,138 +327,98 @@ router.get("/api/compliance", requireAuth, async (req, res) => {
   }
 });
 
-// ── WAVE 1 API ROUTES ────────────────────────────────────
 
-// ── Lead Pipeline ────────────────────────────────────────
+// ── Wave 1: Lead Pipeline ─────────────────────────────────
 router.get("/api/leads", requireAuth, async (req, res) => {
   try {
-    const result = await getPool().query(`
-      SELECT l.*,
-        EXTRACT(EPOCH FROM (NOW() - l.stage_changed_at))/3600 AS hours_in_stage
-      FROM leads l
-      WHERE l.stage NOT IN ('signed','lost')
-      ORDER BY l.created_at DESC
-      LIMIT 200
-    `);
-    res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const r = await getPool().query(`SELECT *,
+      EXTRACT(EPOCH FROM (NOW()-stage_changed_at))/3600 AS hours_in_stage
+      FROM leads WHERE stage NOT IN ('signed','lost') ORDER BY created_at DESC LIMIT 200`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
-
 router.get("/api/leads/all", requireAuth, async (req, res) => {
   try {
-    const result = await getPool().query(`
-      SELECT *, EXTRACT(EPOCH FROM (NOW() - stage_changed_at))/3600 AS hours_in_stage
-      FROM leads ORDER BY created_at DESC LIMIT 500
-    `);
-    res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const r = await getPool().query(`SELECT *,
+      EXTRACT(EPOCH FROM (NOW()-stage_changed_at))/3600 AS hours_in_stage
+      FROM leads ORDER BY created_at DESC LIMIT 500`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
-
 router.patch("/api/leads/:id/stage", requireAuth, async (req, res) => {
   try {
-    const { stage, notes } = req.body;
-    const VALID_STAGES = ["new_lead","qualified","consult_scheduled","consult_held","retainer_sent","signed","lost"];
-    if (!VALID_STAGES.includes(stage)) return res.status(400).json({ error: "Invalid stage" });
+    const {stage} = req.body;
+    const VALID = ["new_lead","qualified","consult_scheduled","consult_held","retainer_sent","signed","lost"];
+    if (!VALID.includes(stage)) return res.status(400).json({error:"Invalid stage"});
     await db.updateLeadStage(req.params.id, stage, "jj",
-      req.headers["x-forwarded-for"]?.split(",")[0] || "unknown");
-    if (notes) {
-      await getPool().query(`UPDATE leads SET notes=$1 WHERE id=$2`, [notes, req.params.id]);
-    }
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+      (req.headers["x-forwarded-for"]||"").split(",")[0]||"unknown");
+    res.json({ok:true});
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
-
 router.post("/api/leads/:id/acknowledge", requireAuth, async (req, res) => {
   try {
-    await getPool().query(
-      `UPDATE leads SET acknowledged_at=NOW() WHERE id=$1`,
-      [req.params.id]
-    );
-    await getPool().query(
-      `UPDATE escalation_log SET acknowledged_at=NOW()
-       WHERE lead_id=$1 AND acknowledged_at IS NULL`,
-      [req.params.id]
-    );
-    audit(req, "lead_acknowledged", `lead:${req.params.id}`, null, "acknowledged");
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    await getPool().query(`UPDATE leads SET acknowledged_at=NOW() WHERE id=$1`,[req.params.id]);
+    await getPool().query(`UPDATE escalation_log SET acknowledged_at=NOW()
+      WHERE lead_id=$1 AND acknowledged_at IS NULL`,[req.params.id]);
+    audit(req,"lead_acknowledged","lead:"+req.params.id,null,"acknowledged");
+    res.json({ok:true});
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
 
-// ── Conflict Checks ───────────────────────────────────────
+// ── Wave 1: Conflict Checks ───────────────────────────────
 router.get("/api/conflicts", requireAuth, async (req, res) => {
   try {
-    const result = await getPool().query(`
-      SELECT c.*, i.name as intake_name, i.case_type as intake_case_type
-      FROM conflict_checks c
-      LEFT JOIN intakes i ON c.intake_id = i.id
-      ORDER BY c.checked_at DESC LIMIT 100
-    `);
-    res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const r = await getPool().query(`SELECT c.*,i.name AS intake_name,i.case_type AS intake_case_type
+      FROM conflict_checks c LEFT JOIN intakes i ON c.intake_id=i.id
+      ORDER BY c.checked_at DESC LIMIT 100`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
-
 router.patch("/api/conflicts/:id/disposition", requireAuth, async (req, res) => {
   try {
-    const { disposition } = req.body;
-    const VALID = ["pending","possible","cleared","denied"];
-    if (!VALID.includes(disposition)) return res.status(400).json({ error: "Invalid disposition" });
-    const old = await getPool().query(`SELECT disposition FROM conflict_checks WHERE id=$1`, [req.params.id]);
+    const {disposition} = req.body;
+    if (!["pending","possible","cleared","denied"].includes(disposition))
+      return res.status(400).json({error:"Invalid"});
+    const old = await getPool().query(`SELECT disposition FROM conflict_checks WHERE id=$1`,[req.params.id]);
     await getPool().query(
-      `UPDATE conflict_checks SET disposition=$1, reviewed_by='jj', reviewed_at=NOW() WHERE id=$2`,
-      [disposition, req.params.id]
-    );
-    audit(req, "conflict_review", `conflict:${req.params.id}`,
-      old.rows[0]?.disposition, disposition);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+      `UPDATE conflict_checks SET disposition=$1,reviewed_by='jj',reviewed_at=NOW() WHERE id=$2`,
+      [disposition,req.params.id]);
+    audit(req,"conflict_review","conflict:"+req.params.id,old.rows[0]?.disposition,disposition);
+    res.json({ok:true});
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
 
-// ── Unanswered Questions ──────────────────────────────────
+// ── Wave 1: Unanswered Questions ──────────────────────────
 router.get("/api/questions", requireAuth, async (req, res) => {
   try {
-    const result = await getPool().query(`
-      SELECT * FROM unanswered_questions
-      WHERE resolved = FALSE
-      ORDER BY created_at DESC LIMIT 200
-    `);
-    res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const r = await getPool().query(
+      `SELECT * FROM unanswered_questions WHERE resolved=FALSE ORDER BY created_at DESC LIMIT 200`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
-
 router.get("/api/questions/weekly", requireAuth, async (req, res) => {
   try {
-    const result = await getPool().query(`
-      SELECT question, COUNT(*) as n,
-             MAX(created_at) as last_seen
+    const r = await getPool().query(`SELECT question,COUNT(*) AS n,MAX(created_at) AS last_seen
       FROM unanswered_questions
-      WHERE created_at > NOW() - INTERVAL '7 days'
-        AND resolved = FALSE
-      GROUP BY question
-      ORDER BY n DESC LIMIT 50
-    `);
-    res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+      WHERE created_at>NOW()-INTERVAL '7 days' AND resolved=FALSE
+      GROUP BY question ORDER BY n DESC LIMIT 50`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
-
 router.patch("/api/questions/:id/resolve", requireAuth, async (req, res) => {
   try {
     await getPool().query(
-      `UPDATE unanswered_questions SET resolved=TRUE, resolved_at=NOW() WHERE id=$1`,
-      [req.params.id]
-    );
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+      `UPDATE unanswered_questions SET resolved=TRUE,resolved_at=NOW() WHERE id=$1`,[req.params.id]);
+    res.json({ok:true});
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
 
-// ── Audit Log ─────────────────────────────────────────────
+// ── Wave 1: Audit Log ────────────────────────────────────
 router.get("/api/audit", requireAuth, async (req, res) => {
   try {
-    const result = await getPool().query(`
-      SELECT * FROM audit_log
-      ORDER BY created_at DESC LIMIT 500
-    `);
-    res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const r = await getPool().query(`SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 500`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
 });
 
 // Main admin dashboard
@@ -679,56 +637,38 @@ function dashboardHtml() {
     .platform-stat .n { font-size: 22px; font-weight: bold; color: #0C1C36; }
     .platform-stat .p { font-size: 12px; color: #666; margin-top: 2px; }
 
+    .kanban-board{display:flex;gap:12px;min-width:900px;align-items:flex-start}
+    .kanban-col{flex:1;min-width:140px;background:#f5f2ec;border-radius:10px;padding:12px}
+    .kanban-col-header{font-size:12px;font-weight:bold;color:#0C1C36;text-transform:uppercase;
+      letter-spacing:.05em;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #B79C62;
+      display:flex;justify-content:space-between;align-items:center}
+    .kanban-count{background:#0C1C36;color:#B79C62;border-radius:10px;padding:1px 7px;font-size:11px}
+    .lead-card{background:#fff;border-radius:8px;padding:12px;margin-bottom:8px;
+      box-shadow:0 1px 4px rgba(0,0,0,.08);border-left:3px solid #ddd;transition:box-shadow .2s}
+    .lead-card:hover{box-shadow:0 3px 10px rgba(0,0,0,.15)}
+    .lead-card.stale-warn{border-left-color:#ff9900}
+    .lead-card.stale-crit{border-left-color:#cc0000}
+    .lead-card.unacknowledged{border-left-color:#B79C62;background:#fffdf5}
+    .lead-name{font-weight:bold;font-size:13px;color:#0C1C36;margin-bottom:3px}
+    .lead-meta{font-size:11px;color:#888;margin-bottom:6px}
+    .lead-case{display:inline-block;font-size:10px;padding:2px 7px;border-radius:10px;
+      background:#e8eef4;color:#0C1C36;font-weight:bold;margin-bottom:6px}
+    .lead-time{font-size:10px;color:#aaa}
+    .lead-time.warn{color:#ff9900;font-weight:bold}
+    .lead-time.crit{color:#cc0000;font-weight:bold}
+    .stage-select{width:100%;font-size:11px;padding:4px 6px;border-radius:5px;
+      border:1px solid #ddd;margin-top:6px;background:#f9f9f9;cursor:pointer}
+    .disp-pending{background:#fff3cd;color:#856404}
+    .disp-possible{background:#f8d7da;color:#721c24}
+    .disp-cleared{background:#d4edda;color:#155724}
+    .disp-denied{background:#e2e3e5;color:#383d41}
+    .disp-btn{font-size:11px;padding:3px 10px;border:none;border-radius:10px;
+      cursor:pointer;font-weight:bold;margin-right:4px}
     @media (max-width: 768px) {
       .sidebar { width: 60px; }
       .sidebar-logo p, .nav-item span { display: none; }
       .main { margin-left: 60px; }
     }
-
-    /* ── Pipeline / Kanban ─────────────────────────────── */
-    .kanban-board { display:flex; gap:12px; min-width:900px; align-items:flex-start; }
-    .kanban-col { flex:1; min-width:140px; background:#f5f2ec; border-radius:10px;
-                  padding:12px; }
-    .kanban-col-header { font-size:12px; font-weight:bold; color:#0C1C36;
-                         text-transform:uppercase; letter-spacing:.05em;
-                         margin-bottom:10px; padding-bottom:8px;
-                         border-bottom:2px solid #B79C62; display:flex;
-                         justify-content:space-between; align-items:center; }
-    .kanban-count { background:#0C1C36; color:#B79C62; border-radius:10px;
-                    padding:1px 7px; font-size:11px; }
-    .lead-card { background:#fff; border-radius:8px; padding:12px;
-                 margin-bottom:8px; box-shadow:0 1px 4px rgba(0,0,0,.08);
-                 border-left:3px solid #ddd; cursor:pointer; transition:box-shadow .2s; }
-    .lead-card:hover { box-shadow:0 3px 10px rgba(0,0,0,.15); }
-    .lead-card.stale-warn { border-left-color:#ff9900; }
-    .lead-card.stale-crit { border-left-color:#cc0000; }
-    .lead-card.unacknowledged { border-left-color:#B79C62; background:#fffdf5; }
-    .lead-name { font-weight:bold; font-size:13px; color:#0C1C36; margin-bottom:3px; }
-    .lead-meta { font-size:11px; color:#888; margin-bottom:6px; }
-    .lead-case { display:inline-block; font-size:10px; padding:2px 7px;
-                 border-radius:10px; background:#e8eef4; color:#0C1C36;
-                 font-weight:bold; margin-bottom:6px; }
-    .lead-time { font-size:10px; color:#aaa; }
-    .lead-time.warn { color:#ff9900; font-weight:bold; }
-    .lead-time.crit { color:#cc0000; font-weight:bold; }
-    .stage-select { width:100%; font-size:11px; padding:4px 6px;
-                    border-radius:5px; border:1px solid #ddd; margin-top:6px;
-                    background:#f9f9f9; cursor:pointer; }
-
-    /* ── Conflict badges ───────────────────────────────── */
-    .disp-pending  { background:#fff3cd; color:#856404; }
-    .disp-possible { background:#f8d7da; color:#721c24; }
-    .disp-cleared  { background:#d4edda; color:#155724; }
-    .disp-denied   { background:#e2e3e5; color:#383d41; }
-    .disp-btn { font-size:11px; padding:3px 10px; border:none; border-radius:10px;
-                cursor:pointer; font-weight:bold; margin-right:4px; }
-
-    /* ── Audit action colors ───────────────────────────── */
-    .audit-login      { color:#006600; }
-    .audit-logout     { color:#666; }
-    .audit-prompt     { color:#B79C62; font-weight:bold; }
-    .audit-lead       { color:#0066cc; }
-    .audit-conflict   { color:#990099; }
   </style>
 </head>
 <body>
@@ -875,69 +815,45 @@ function dashboardHtml() {
   </div>
 
 
-  <!-- Lead Pipeline -->
+  <!-- Pipeline -->
   <div class="page" id="page-pipeline">
-    <div class="page-header">
-      <h1>Lead Pipeline</h1>
-      <button class="logout-btn" onclick="logout()">Logout</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-      <label style="font-size:13px;color:#666">Filter:
-        <select id="pipelineFilter" onchange="loadPipeline()" style="margin-left:6px;padding:4px 8px;border-radius:6px;border:1px solid #ddd">
-          <option value="active">Active only</option>
-          <option value="all">All leads</option>
-        </select>
-      </label>
-    </div>
-    <div id="pipelineBoard" style="overflow-x:auto">
-      <div class="loading"><span class="spinner"></span> Loading...</div>
-    </div>
+    <div class="page-header"><h1>Lead Pipeline</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
+    <div style="margin-bottom:12px"><label style="font-size:13px;color:#666">Show:
+      <select id="pipelineFilter" onchange="loadPipeline()" style="margin-left:6px;padding:4px 8px;border-radius:6px;border:1px solid #ddd">
+        <option value="active">Active only</option><option value="all">All leads</option>
+      </select></label></div>
+    <div id="pipelineBoard" style="overflow-x:auto"><div class="loading"><span class="spinner"></span> Loading...</div></div>
   </div>
 
-  <!-- Conflict Checks -->
+  <!-- Conflicts -->
   <div class="page" id="page-conflicts">
-    <div class="page-header">
-      <h1>Conflict Checks</h1>
-      <button class="logout-btn" onclick="logout()">Logout</button>
-    </div>
+    <div class="page-header"><h1>Conflict Checks</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
     <div class="card">
-      <h3>⚠️ Potential Conflicts — Review Before Assigning</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">
-        Auto-generated when a new intake matches an existing client or prior intake by name.
-        Mark each as Cleared or Denied before assigning to attorney.
-      </p>
+      <h3>⚠️ Potential Conflicts</h3>
+      <p style="font-size:13px;color:#666;margin-bottom:16px">Auto-generated when a new intake name matches an existing client. Review before assigning.</p>
       <div id="conflictsTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
   </div>
 
-  <!-- Unanswered Questions -->
+  <!-- Gaps -->
   <div class="page" id="page-questions">
-    <div class="page-header">
-      <h1>Knowledge Gaps</h1>
-      <button class="logout-btn" onclick="logout()">Logout</button>
-    </div>
+    <div class="page-header"><h1>Knowledge Gaps</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
     <div class="card">
       <h3>📊 Top Gaps This Week</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">Questions Zara couldn't answer well — grouped by frequency. Fix these in the System Prompt.</p>
+      <p style="font-size:13px;color:#666;margin-bottom:16px">Questions Zara failed — fix in System Prompt.</p>
       <div id="questionsWeekly"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
-    <div class="card">
-      <h3>❓ All Unanswered Questions</h3>
+    <div class="card"><h3>❓ All Open Questions</h3>
       <div id="questionsTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
   </div>
 
-  <!-- Audit Log -->
+  <!-- Audit -->
   <div class="page" id="page-audit">
-    <div class="page-header">
-      <h1>Audit Log</h1>
-      <button class="logout-btn" onclick="logout()">Logout</button>
-    </div>
+    <div class="page-header"><h1>Audit Log</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
     <div class="card">
-      <h3>📜 All Admin Actions — ABA Compliance Record</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">
-        Every login, logout, prompt edit, lead move, and conflict review is logged here with timestamp and IP.
-      </p>
+      <h3>📜 All Admin Actions</h3>
+      <p style="font-size:13px;color:#666;margin-bottom:16px">Every login, prompt edit, lead move and conflict review — ABA compliance record.</p>
       <div id="auditTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
   </div>
@@ -952,22 +868,12 @@ function dashboardHtml() {
   }
 
   async function api(path, options = {}) {
-    try {
-      const res = await fetch('/admin' + path, {
-        ...options,
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': TOKEN, ...options.headers }
-      });
-      if (res.status === 401) { window.location.href = '/admin/login'; return null; }
-      if (!res.ok) {
-        const text = await res.text();
-        console.error('API error ' + res.status + ' on ' + path + ':', text.substring(0, 200));
-        return null;
-      }
-      return res.json();
-    } catch (err) {
-      console.error('API fetch error on ' + path + ':', err.message);
-      return null;
-    }
+    const res = await fetch('/admin' + path, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': TOKEN, ...options.headers }
+    });
+    if (res.status === 401) { window.location.href = '/admin/login'; return null; }
+    return res.json();
   }
 
   function platBadge(p) {
@@ -997,12 +903,7 @@ function dashboardHtml() {
   // Dashboard
   async function loadDashboard() {
     const data = await api('/api/stats');
-    if (!data) {
-      document.getElementById('statsGrid').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">&#10060; Failed to load stats — check Render logs for errors. Open browser console for details.</p>';
-      document.getElementById('platformBar').innerHTML = '';
-      document.getElementById('caseTypeBar').innerHTML = '';
-      return;
-    }
+    if (!data) return;
 
     document.getElementById('statsGrid').innerHTML = \`
       <div class="stat-card"><div class="stat-num">\${data.totalMessages.toLocaleString()}</div><div class="stat-label">Total Messages</div></div>
@@ -1148,134 +1049,135 @@ function dashboardHtml() {
     window.location.href = '/admin/login';
   }
 
-  // ── WAVE 1: Lead Pipeline ──────────────────────────────
 
-  const STAGES = [
-    { key:'new_lead',          label:'New Lead',          emoji:'🆕' },
-    { key:'qualified',         label:'Qualified',         emoji:'✅' },
-    { key:'consult_scheduled', label:'Consult Scheduled', emoji:'📅' },
-    { key:'consult_held',      label:'Consult Held',      emoji:'🤝' },
-    { key:'retainer_sent',     label:'Retainer Sent',     emoji:'📄' },
-    { key:'signed',            label:'Signed',            emoji:'🏆' },
-    { key:'lost',              label:'Lost',              emoji:'❌' },
+  // ── Wave 1: Lead Pipeline ──────────────────────────────
+
+  var STAGES = [
+    {key:'new_lead',label:'New Lead',emoji:'New'},
+    {key:'qualified',label:'Qualified',emoji:'OK'},
+    {key:'consult_scheduled',label:'Consult Sched',emoji:'Cal'},
+    {key:'consult_held',label:'Consult Held',emoji:'Done'},
+    {key:'retainer_sent',label:'Retainer Sent',emoji:'Doc'},
+    {key:'signed',label:'Signed',emoji:'Win'},
+    {key:'lost',label:'Lost',emoji:'X'},
   ];
 
   async function loadPipeline() {
-    const filter = document.getElementById('pipelineFilter') ? document.getElementById('pipelineFilter').value : 'active';
-    const data = await api(filter === 'all' ? '/api/leads/all' : '/api/leads');
-    if (!data) return;
+    var filterEl = document.getElementById('pipelineFilter');
+    var filter = filterEl ? filterEl.value : 'active';
+    var data = await api(filter === 'all' ? '/api/leads/all' : '/api/leads');
+    if (!data) { document.getElementById('pipelineBoard').innerHTML = '<p style="color:#cc0000;padding:12px">Failed to load leads</p>'; return; }
 
-    const byStage = {};
-    STAGES.forEach(function(s) { byStage[s.key] = []; });
-    data.forEach(function(lead) { if (byStage[lead.stage]) byStage[lead.stage].push(lead); });
+    var byStage = {};
+    STAGES.forEach(function(s){ byStage[s.key] = []; });
+    data.forEach(function(lead){ if(byStage[lead.stage]) byStage[lead.stage].push(lead); });
 
-    const cols = STAGES.map(function(s) {
-      const leads = byStage[s.key] || [];
-      const cards = leads.map(function(lead) {
-        const hrs = parseFloat(lead.hours_in_stage || 0);
-        const staleClass = hrs > 168 ? 'stale-crit' : hrs > 72 ? 'stale-warn' : '';
-        const timeClass  = hrs > 168 ? 'crit' : hrs > 72 ? 'warn' : '';
-        const ackClass   = (!lead.acknowledged_at && s.key === 'new_lead') ? 'unacknowledged' : '';
-        const timeStr    = hrs < 1 ? 'Just now' : (hrs < 24 ? Math.round(hrs) + 'h' : Math.round(hrs/24) + 'd');
-        const stageOpts  = STAGES.map(function(st) {
-          return '<option value="' + st.key + '"' + (st.key === lead.stage ? ' selected' : '') + '>' + st.emoji + ' ' + st.label + '</option>';
-        }).join('');
-        const ackBtn = (!lead.acknowledged_at && s.key === 'new_lead')
-          ? '<button class="action-btn" style="font-size:11px;padding:4px 10px;margin-top:6px" onclick="acknowledgeLead(' + lead.id + ')">Acknowledge</button>'
-          : '';
-        return '<div class="lead-card ' + staleClass + ' ' + ackClass + '" id="lead-' + lead.id + '">'
-          + '<div class="lead-name">' + (lead.name || 'Unknown') + '</div>'
-          + '<div class="lead-meta">' + platBadge(lead.platform) + ' ' + (lead.contact || '') + '</div>'
-          + '<div class="lead-case">' + (lead.case_type || 'General') + '</div>'
-          + '<div class="lead-time ' + timeClass + '">&#9201; ' + timeStr + ' in stage</div>'
-          + ackBtn
-          + '<select class="stage-select" onchange="moveLead(' + lead.id + ', this.value, this)">' + stageOpts + '</select>'
-          + '</div>';
-      }).join('');
-      return '<div class="kanban-col">'
-        + '<div class="kanban-col-header">' + s.emoji + ' ' + s.label
-        + ' <span class="kanban-count">' + leads.length + '</span></div>'
-        + (cards || '<p style="font-size:12px;color:#aaa;text-align:center;padding:8px">Empty</p>')
-        + '</div>';
-    }).join('');
-
-    document.getElementById('pipelineBoard').innerHTML = '<div class="kanban-board">' + cols + '</div>';
+    var html = '<div class="kanban-board">';
+    STAGES.forEach(function(s) {
+      var leads = byStage[s.key] || [];
+      html += '<div class="kanban-col">';
+      html += '<div class="kanban-col-header">' + s.label + ' <span class="kanban-count">' + leads.length + '</span></div>';
+      if (!leads.length) {
+        html += '<p style="font-size:12px;color:#aaa;text-align:center;padding:8px">Empty</p>';
+      }
+      leads.forEach(function(lead) {
+        var hrs = parseFloat(lead.hours_in_stage || 0);
+        var staleClass = hrs > 168 ? 'stale-crit' : (hrs > 72 ? 'stale-warn' : '');
+        var timeClass  = hrs > 168 ? 'crit' : (hrs > 72 ? 'warn' : '');
+        var ackClass   = (!lead.acknowledged_at && s.key === 'new_lead') ? 'unacknowledged' : '';
+        var timeStr    = hrs < 1 ? 'Just now' : (hrs < 24 ? Math.round(hrs) + 'h' : Math.round(hrs/24) + 'd');
+        html += '<div class="lead-card ' + staleClass + ' ' + ackClass + '" id="lead-' + lead.id + '">';
+        html += '<div class="lead-name">' + (lead.name || 'Unknown') + '</div>';
+        html += '<div class="lead-meta">' + platBadge(lead.platform) + ' ' + (lead.contact || '') + '</div>';
+        html += '<div class="lead-case">' + (lead.case_type || 'General') + '</div>';
+        html += '<div class="lead-time ' + timeClass + '">&#9201; ' + timeStr + ' in stage</div>';
+        if (!lead.acknowledged_at && s.key === 'new_lead') {
+          html += '<button class="action-btn" style="font-size:11px;padding:4px 10px;margin-top:6px" data-id="' + lead.id + '" onclick="acknowledgeLead(this.getAttribute(\'data-id\'))">Acknowledge</button>';
+        }
+        var opts = '';
+        STAGES.forEach(function(st){
+          opts += '<option value="' + st.key + '"' + (st.key === lead.stage ? ' selected' : '') + '>' + st.label + '</option>';
+        });
+        html += '<select class="stage-select" data-id="' + lead.id + '" onchange="moveLead(this.getAttribute(\'data-id\'),this.value)">' + opts + '</select>';
+        html += '</div>';
+      });
+      html += '</div>';
+    });
+    html += '</div>';
+    document.getElementById('pipelineBoard').innerHTML = html;
   }
 
-  async function moveLead(id, stage, selectEl) {
-    const res = await api('/api/leads/' + id + '/stage', { method: 'PATCH', body: JSON.stringify({ stage: stage }) });
+  async function moveLead(id, stage) {
+    var res = await api('/api/leads/' + id + '/stage', {method:'PATCH', body:JSON.stringify({stage:stage})});
     if (res && res.ok) { setTimeout(loadPipeline, 300); }
     else { alert('Failed to update stage'); loadPipeline(); }
   }
 
   async function acknowledgeLead(id) {
-    await api('/api/leads/' + id + '/acknowledge', { method: 'POST' });
+    await api('/api/leads/' + id + '/acknowledge', {method:'POST'});
     loadPipeline();
   }
 
-  // ── WAVE 1: Conflict Checks ────────────────────────────
+  // ── Wave 1: Conflict Checks ────────────────────────────
 
   async function loadConflicts() {
-    const data = await api('/api/conflicts');
+    var data = await api('/api/conflicts');
     if (!data) return;
-    const dispColor = { pending:'disp-pending', possible:'disp-possible', cleared:'disp-cleared', denied:'disp-denied' };
     if (!data.length) {
       document.getElementById('conflictsTable').innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No conflict checks yet.</p>';
       return;
     }
-    let rows = '';
+    var dispColor = {pending:'disp-pending',possible:'disp-possible',cleared:'disp-cleared',denied:'disp-denied'};
+    var rows = '';
     data.forEach(function(r) {
-      const matches = Array.isArray(r.matches) ? r.matches : JSON.parse(r.matches || '[]');
-      const matchStr = matches.length === 0 ? 'None' : matches.map(function(m) { return (m.name || '') + ' (' + (m.case_type || '?') + ', ' + m.source + ')'; }).join('; ');
+      var matches = [];
+      try { matches = Array.isArray(r.matches) ? r.matches : JSON.parse(r.matches || '[]'); } catch(e){}
+      var matchStr = !matches.length ? 'None' : matches.map(function(m){ return (m.name||'') + ' (' + (m.case_type||'?') + ')'; }).join(', ');
       rows += '<tr>'
-        + '<td style="white-space:nowrap;font-size:11px">' + new Date(r.checked_at).toLocaleDateString('en-US') + '</td>'
-        + '<td style="font-weight:bold">' + (r.search_name || '—') + '</td>'
-        + '<td>' + (r.intake_case_type || '—') + '</td>'
-        + '<td style="font-size:12px;max-width:200px">' + matchStr + '</td>'
-        + '<td><span class="badge ' + (dispColor[r.disposition] || '') + '">' + r.disposition + '</span></td>'
+        + '<td style="font-size:11px;white-space:nowrap">' + new Date(r.checked_at).toLocaleDateString('en-US') + '</td>'
+        + '<td style="font-weight:bold">' + (r.search_name||'—') + '</td>'
+        + '<td>' + (r.intake_case_type||'—') + '</td>'
+        + '<td style="font-size:12px">' + matchStr + '</td>'
+        + '<td><span class="badge ' + (dispColor[r.disposition]||'') + '">' + r.disposition + '</span></td>'
         + '<td>'
-        + '<button class="disp-btn disp-cleared" data-id="' + r.id + '" data-disp="cleared" onclick="setDisposition(this.dataset.id,this.dataset.disp)">Clear</button>'
-        + '<button class="disp-btn disp-denied" data-id="' + r.id + '" data-disp="denied" onclick="setDisposition(this.dataset.id,this.dataset.disp)">Deny</button>'
-        + </td></tr>';
+        + '<button class="disp-btn disp-cleared" data-id="' + r.id + '" onclick="setDisposition(this.getAttribute(\'data-id\'),\'cleared\')">Clear</button>'
+        + '<button class="disp-btn disp-denied" data-id="' + r.id + '" onclick="setDisposition(this.getAttribute(\'data-id\'),\'denied\')">Deny</button>'
+        + '</td></tr>';
     });
     document.getElementById('conflictsTable').innerHTML = '<table><thead><tr><th>Date</th><th>Name</th><th>Case Type</th><th>Matches</th><th>Status</th><th>Action</th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
 
-  async function setDisposition(id, disposition) {
-    await api('/api/conflicts/' + id + '/disposition', { method: 'PATCH', body: JSON.stringify({ disposition: disposition }) });
+  async function setDisposition(id, disp) {
+    await api('/api/conflicts/' + id + '/disposition', {method:'PATCH', body:JSON.stringify({disposition:disp})});
     loadConflicts();
   }
 
-  // ── WAVE 1: Unanswered Questions ───────────────────────
+  // ── Wave 1: Unanswered Questions ───────────────────────
 
   async function loadQuestions() {
-    const weekly = await api('/api/questions/weekly');
-    const all    = await api('/api/questions');
+    var weekly = await api('/api/questions/weekly');
+    var all    = await api('/api/questions');
 
     if (weekly && weekly.length) {
-      let wrows = '';
-      weekly.forEach(function(r) {
-        wrows += '<tr>'
-          + '<td style="font-size:13px">' + r.question.substring(0,120) + (r.question.length > 120 ? '…' : '') + '</td>'
+      var wrows = '';
+      weekly.forEach(function(r){
+        wrows += '<tr><td style="font-size:13px">' + r.question.substring(0,120) + (r.question.length>120?'...':'') + '</td>'
           + '<td style="text-align:center;font-weight:bold;color:#B79C62">' + r.n + '</td>'
-          + '<td style="font-size:11px;white-space:nowrap">' + new Date(r.last_seen).toLocaleDateString('en-US') + '</td>'
-          + '</tr>';
+          + '<td style="font-size:11px">' + new Date(r.last_seen).toLocaleDateString('en-US') + '</td></tr>';
       });
-      document.getElementById('questionsWeekly').innerHTML = '<table><thead><tr><th>Question</th><th>Times Asked</th><th>Last Seen</th></tr></thead><tbody>' + wrows + '</tbody></table>';
+      document.getElementById('questionsWeekly').innerHTML = '<table><thead><tr><th>Question</th><th>Count</th><th>Last Seen</th></tr></thead><tbody>' + wrows + '</tbody></table>';
     } else {
       document.getElementById('questionsWeekly').innerHTML = '<p style="color:#006600;font-size:13px;padding:12px">No gaps this week!</p>';
     }
 
     if (all && all.length) {
-      let arows = '';
-      all.forEach(function(r) {
-        arows += '<tr>'
-          + '<td style="font-size:11px;white-space:nowrap">' + new Date(r.created_at).toLocaleDateString('en-US') + '</td>'
+      var arows = '';
+      all.forEach(function(r){
+        arows += '<tr><td style="font-size:11px;white-space:nowrap">' + new Date(r.created_at).toLocaleDateString('en-US') + '</td>'
           + '<td>' + platBadge(r.platform) + '</td>'
-          + '<td style="font-size:12px;max-width:200px">' + r.question.substring(0,100) + (r.question.length > 100 ? '…' : '') + '</td>'
-          + '<td style="font-size:11px;color:#999;max-width:160px">' + (r.zara_response || '').substring(0,80) + '…</td>'
-          + '<td><button class="action-btn" style="font-size:11px;padding:4px 10px" onclick="resolveQuestion(' + r.id + ', this)">Resolved</button></td>'
-          + '</tr>';
+          + '<td style="font-size:12px">' + r.question.substring(0,100) + (r.question.length>100?'...':'') + '</td>'
+          + '<td style="font-size:11px;color:#999">' + (r.zara_response||'').substring(0,80) + '...</td>'
+          + '<td><button class="action-btn" style="font-size:11px;padding:4px 10px" data-id="' + r.id + '" onclick="resolveQuestion(this.getAttribute(\'data-id\'),this)">Resolved</button></td></tr>';
       });
       document.getElementById('questionsTable').innerHTML = '<table><thead><tr><th>Date</th><th>Platform</th><th>Question</th><th>Zara Said</th><th>Action</th></tr></thead><tbody>' + arows + '</tbody></table>';
     } else {
@@ -1285,40 +1187,32 @@ function dashboardHtml() {
 
   async function resolveQuestion(id, btn) {
     btn.disabled = true; btn.textContent = 'Done';
-    await api('/api/questions/' + id + '/resolve', { method: 'PATCH' });
+    await api('/api/questions/' + id + '/resolve', {method:'PATCH'});
     btn.closest('tr').style.opacity = '0.4';
   }
 
-  // ── WAVE 1: Audit Log ──────────────────────────────────
-
-  const auditColors = { login:'audit-login', logout:'audit-logout', login_denied:'audit-logout',
-    prompt_edit:'audit-prompt', lead_stage_change:'audit-lead', lead_acknowledged:'audit-lead',
-    conflict_review:'audit-conflict' };
+  // ── Wave 1: Audit Log ──────────────────────────────────
 
   async function loadAudit() {
-    const data = await api('/api/audit');
+    var data = await api('/api/audit');
     if (!data) return;
     if (!data.length) {
       document.getElementById('auditTable').innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No audit events yet.</p>';
       return;
     }
-    let rows = '';
+    var rows = '';
     data.forEach(function(r) {
-      const cls = auditColors[r.action] || '';
-      const timeStr = new Date(r.created_at).toLocaleString('en-US', { timeZone:'America/Los_Angeles', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
-      let change = '—';
-      if (r.old_value && r.new_value) {
-        change = '<span style="color:#cc0000">' + r.old_value.substring(0,30) + '</span> → <span style="color:#006600">' + r.new_value.substring(0,30) + '</span>';
-      } else if (r.new_value) {
-        change = r.new_value.substring(0,40);
-      }
+      var timeStr = new Date(r.created_at).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      var change = '—';
+      if (r.old_value && r.new_value) change = r.old_value.substring(0,25) + ' → ' + r.new_value.substring(0,25);
+      else if (r.new_value) change = r.new_value.substring(0,40);
       rows += '<tr>'
-        + '<td style="white-space:nowrap;font-size:11px">' + timeStr + '</td>'
+        + '<td style="font-size:11px;white-space:nowrap">' + timeStr + '</td>'
         + '<td style="font-weight:bold;font-size:12px">' + r.actor + '</td>'
-        + '<td><span class="' + cls + '" style="font-size:12px">' + r.action + '</span></td>'
-        + '<td style="font-size:11px;color:#666">' + (r.target || '—') + '</td>'
-        + '<td style="font-size:11px;max-width:200px">' + change + '</td>'
-        + '<td style="font-size:10px;color:#aaa">' + (r.ip_address || '—') + '</td>'
+        + '<td style="font-size:12px">' + r.action + '</td>'
+        + '<td style="font-size:11px;color:#666">' + (r.target||'—') + '</td>'
+        + '<td style="font-size:11px;max-width:180px">' + change + '</td>'
+        + '<td style="font-size:10px;color:#aaa">' + (r.ip_address||'—') + '</td>'
         + '</tr>';
     });
     document.getElementById('auditTable').innerHTML = '<table><thead><tr><th>Time (PT)</th><th>Actor</th><th>Action</th><th>Target</th><th>Change</th><th>IP</th></tr></thead><tbody>' + rows + '</tbody></table>';
