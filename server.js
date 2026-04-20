@@ -330,7 +330,7 @@ app.post("/telegram", async (req, res) => {
   if (update.callback_query) {
     const cb = update.callback_query;
     if (cb.data?.startsWith("admin_")) {
-      const result = handleAdminCallback(cb.data, cb.id);
+      const result = await handleAdminCallback(cb.data, cb.id);
       if (result) {
         axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
           callback_query_id: cb.id,
@@ -449,6 +449,20 @@ app.get("/whatsapp", (req, res) => {
   } else { res.sendStatus(403); }
 });
 
+// ── Facebook Messenger webhook verification ───────────────
+app.get("/messenger", (req, res) => {
+  const mode      = req.query["hub.mode"];
+  const token     = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  if (mode === "subscribe" && token === (process.env.MESSENGER_VERIFY_TOKEN || VERIFY_TOKEN)) {
+    console.log("✅ Messenger webhook verified");
+    res.send(challenge);
+  } else {
+    console.error("❌ Messenger webhook verification failed");
+    res.sendStatus(403);
+  }
+});
+
 app.post("/whatsapp", async (req, res) => {
   res.sendStatus(200);
   const body = req.body;
@@ -501,11 +515,52 @@ app.post("/whatsapp", async (req, res) => {
 
   // Facebook Messenger
   if (body.object === "page") {
-    const event = body.entry?.[0]?.messaging?.[0];
-    if (!event?.message?.text) return;
+    const entry = body.entry?.[0];
+    // Handle messaging events (not echoes, not reads)
+    const event = entry?.messaging?.[0];
+    if (!event || event.message?.is_echo) return;
     const senderId = event.sender.id;
+
+    // Handle postbacks (button clicks)
+    if (event.postback) {
+      try {
+        await processMessage("messenger", senderId, event.postback.payload || event.postback.title, (t) => msgrSend(senderId, t));
+      } catch(err) { console.error("Messenger postback error:", err.message); }
+      return;
+    }
+
+    // Must have a message
+    if (!event.message) return;
+
     try {
+      // Send typing indicator
+      await axios.post(`https://graph.facebook.com/v18.0/${PAGE_ID}/messages`, {
+        recipient: { id: senderId },
+        sender_action: "typing_on"
+      }, { headers: { Authorization: `Bearer ${PAGE_ACCESS_TOKEN}` } }).catch(() => {});
+
+      // Handle image attachments
+      if (event.message.attachments) {
+        const att = event.message.attachments[0];
+        if (att.type === "image") {
+          const reply = await askClaudeWithMemory("messenger", senderId,
+            "The user sent an image. Please acknowledge and ask how you can help.",
+            buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT));
+          await msgrSend(senderId, reply);
+          return;
+        }
+      }
+
+      if (!event.message.text) return;
+
+      // Thinking message if Claude takes > 5s
+      let thinkingTimer = setTimeout(() => {
+        msgrSend(senderId, "🤔 Let me look into that for you...").catch(() => {});
+      }, 5000);
+
       await processMessage("messenger", senderId, event.message.text, (t) => msgrSend(senderId, t));
+      clearTimeout(thinkingTimer);
+
     } catch(err) {
       console.error("Messenger error:", err.message);
       try { await msgrSend(senderId, "Something went wrong. 📞 626-678-8677"); } catch(e) {}
@@ -771,10 +826,20 @@ app.listen(PORT, () => {
   // ── Hot lead escalation monitor ─────────────────────────
   try {
     startHotLeadMonitor();
-  startSolScheduler();
-  startDripScheduler();
   } catch (e) {
     console.error("❌ Hot lead monitor failed:", e.message);
+  }
+
+  try {
+    startSolScheduler();
+  } catch (e) {
+    console.error("❌ SOL scheduler failed:", e.message);
+  }
+
+  try {
+    startDripScheduler();
+  } catch (e) {
+    console.error("❌ Drip scheduler failed:", e.message);
   }
 
   // ── Load USCIS processing times ─────────────────────────
