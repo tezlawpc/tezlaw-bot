@@ -1,4 +1,6 @@
-function getCookie(name) {
+
+
+  function getCookie(name) {
     return document.cookie.split('; ').find(r => r.startsWith(name + '='))?.split('=')[1] || '';
   }
 
@@ -43,6 +45,7 @@ function getCookie(name) {
     if (name === 'conflicts') loadConflicts();
     if (name === 'questions') loadQuestions();
     if (name === 'audit') loadAudit();
+    if (name === 'poster') initPoster();
     if (name === 'scores') loadScores();
     if (name === 'sol') { loadSol(); }
     if (name === 'drip') loadDrip();
@@ -177,7 +180,108 @@ function getCookie(name) {
       : '<p style="color:#999;font-size:13px">No analytics runs yet.</p>';
   }
 
-  async function runAnalytics() {
+  async function submitCustomPost() {
+  var btn  = document.getElementById('customPostBtn');
+  var msg  = document.getElementById('customPostMsg');
+  var topic = document.getElementById('customTopic').value.trim();
+  var area  = document.getElementById('customArea').value;
+  var url   = document.getElementById('customUrl').value.trim();
+  var notes = document.getElementById('customNotes').value.trim();
+
+  if (!topic) {
+    msg.style.color = '#cc0000';
+    msg.textContent = '❌ Please enter a topic or headline.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  msg.style.color = '#006600';
+  msg.textContent = '⏳ Writing and publishing — this takes ~1-2 minutes...';
+
+  var res = await api('/api/autoposter/custom', {
+    method: 'POST',
+    body: JSON.stringify({ topic: topic, practiceArea: area, url: url, notes: notes })
+  });
+
+  btn.disabled = false;
+  btn.textContent = '✍️ Generate & Publish Post';
+
+  if (res && res.ok) {
+    msg.textContent = '✅ ' + res.message;
+    // Clear form
+    document.getElementById('customTopic').value = '';
+    document.getElementById('customUrl').value = '';
+    document.getElementById('customNotes').value = '';
+    setTimeout(function(){ msg.textContent = ''; }, 15000);
+  } else {
+    msg.style.color = '#cc0000';
+    msg.textContent = '❌ Failed to start. Check Render logs.';
+  }
+}
+
+
+// ── Manual Post ───────────────────────────────────────────
+
+function initPoster() {
+  // Nothing to load — just a form. Clear any previous result.
+  var r = document.getElementById('posterResult');
+  if (r) { r.style.display = 'none'; r.innerHTML = ''; }
+  var m = document.getElementById('posterMsg');
+  if (m) { m.textContent = ''; }
+}
+
+async function submitManualPost() {
+  var btn     = document.getElementById('posterBtn');
+  var msg     = document.getElementById('posterMsg');
+  var result  = document.getElementById('posterResult');
+  var content = document.getElementById('posterContent').value.trim();
+  var area    = document.getElementById('posterArea').value;
+  var url     = document.getElementById('posterUrl').value.trim();
+  var notes   = document.getElementById('posterNotes').value.trim();
+
+  if (!content) {
+    msg.style.color = '#cc0000';
+    msg.textContent = '❌ Please enter a topic or paste content.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Generating...';
+  msg.style.color = '#B79C62';
+  msg.textContent = 'Writing post and publishing to WordPress — ~1-2 minutes...';
+  result.style.display = 'none';
+
+  var res = await api('/api/autoposter/custom', {
+    method: 'POST',
+    body: JSON.stringify({
+      topic:         content,
+      practiceArea:  area,
+      url:           url,
+      notes:         notes,
+    })
+  });
+
+  btn.disabled = false;
+  btn.textContent = '✍️ Generate & Publish';
+
+  if (res && res.ok) {
+    msg.style.color = '#006600';
+    msg.textContent = '✅ ' + res.message;
+    result.style.display = 'block';
+    result.innerHTML = '📨 <strong>Publishing now</strong> — you\'ll receive a Telegram notification with the WordPress links in ~1-2 minutes.';
+    // Clear the form
+    document.getElementById('posterContent').value = '';
+    document.getElementById('posterUrl').value = '';
+    document.getElementById('posterNotes').value = '';
+    setTimeout(function(){ msg.textContent = ''; }, 20000);
+  } else {
+    msg.style.color = '#cc0000';
+    msg.textContent = '❌ Failed to start. Check Render logs.';
+  }
+}
+
+async function runAnalytics() {
     const btn = document.getElementById('runAnalyticsBtn');
     const msg = document.getElementById('analyticsMsg');
     btn.disabled = true;
@@ -559,4 +663,160 @@ async function rollbackPrompt(id) {
     setTimeout(function(){ document.getElementById('saveMsg').textContent = ''; }, 4000);
     loadPromptHistory();
   }
+}
+
+// ── Manual Post Creator ───────────────────────────────────
+
+var _previewPost = null; // holds generated post data for publish step
+
+async function previewManualPost() {
+  var topic   = document.getElementById('postTopic').value.trim();
+  var area    = document.getElementById('postArea').value;
+  var context = document.getElementById('postContext').value.trim();
+  var search  = document.getElementById('postSearch').value === 'true';
+  var msg     = document.getElementById('postMsg');
+  var btn     = document.getElementById('previewBtn');
+
+  if (!topic) { msg.style.color='#cc0000'; msg.textContent='Please enter a topic or URL.'; return; }
+
+  btn.disabled = true; btn.textContent = '⏳ Generating...';
+  msg.style.color = '#666'; msg.textContent = 'Writing post — usually takes 15-30 seconds...';
+  document.getElementById('postPreviewCard').style.display = 'none';
+
+  var res = await api('/api/post/generate', {
+    method: 'POST',
+    body: JSON.stringify({ topic, practiceArea: area, context, useSearch: search })
+  });
+
+  btn.disabled = false; btn.textContent = '👁 Preview First';
+
+  if (!res || !res.ok) {
+    msg.style.color = '#cc0000';
+    msg.textContent = '❌ Generation failed — check that WordPress credentials are set in Render env vars.';
+    return;
+  }
+
+  _previewPost = res.post;
+  msg.textContent = '';
+
+  // Show preview
+  var preview = document.getElementById('postPreviewContent');
+  preview.textContent =
+    '📌 TITLE: ' + (res.post.title || '(no title)') + '\n\n' +
+    '🏷 CATEGORY: ' + (res.post.category || '') + ' | TAGS: ' + (res.post.tags || []).join(', ') + '\n\n' +
+    '📝 CONTENT:\n' + (res.post.content || '').replace(/<[^>]+>/g, '') + '\n\n' +
+    '🔍 META: ' + (res.post.metaDescription || '');
+  document.getElementById('postPreviewCard').style.display = 'block';
+  document.getElementById('postPreviewCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function publishPreview() {
+  if (!_previewPost) return;
+  var btn  = document.getElementById('publishBtn');
+  var area = document.getElementById('postArea').value;
+  var lang = document.getElementById('postLang').value;
+  var topic = document.getElementById('postTopic').value.trim();
+
+  btn.disabled = true; btn.textContent = '⏳ Publishing...';
+
+  var res = await api('/api/post/publish', {
+    method: 'POST',
+    body: JSON.stringify({ post: _previewPost, topic, practiceArea: area, languages: lang })
+  });
+
+  btn.disabled = false; btn.textContent = '✅ Publish Now';
+
+  if (res && res.ok) {
+    var ids = res.results.map(function(r) { return r.lang + ' (ID ' + r.id + ')'; }).join(', ');
+    document.getElementById('postMsg').style.color = '#006600';
+    document.getElementById('postMsg').textContent = '✅ Published! ' + ids;
+    document.getElementById('postPreviewCard').style.display = 'none';
+    document.getElementById('postTopic').value = '';
+    document.getElementById('postContext').value = '';
+    _previewPost = null;
+    loadManualPost(); // refresh history
+  } else {
+    document.getElementById('postMsg').style.color = '#cc0000';
+    document.getElementById('postMsg').textContent = '❌ Publish failed';
+  }
+}
+
+async function submitManualPost() {
+  var topic   = document.getElementById('postTopic').value.trim();
+  var area    = document.getElementById('postArea').value;
+  var context = document.getElementById('postContext').value.trim();
+  var search  = document.getElementById('postSearch').value === 'true';
+  var lang    = document.getElementById('postLang').value;
+  var msg     = document.getElementById('postMsg');
+  var btn     = document.getElementById('postBtn');
+
+  if (!topic) { msg.style.color='#cc0000'; msg.textContent='Please enter a topic or URL.'; return; }
+
+  btn.disabled = true; btn.textContent = '⏳ Generating & Publishing...';
+  msg.style.color = '#666'; msg.textContent = 'Writing post — usually takes 15-30 seconds...';
+
+  // Step 1: Generate
+  var genRes = await api('/api/post/generate', {
+    method: 'POST',
+    body: JSON.stringify({ topic, practiceArea: area, context, useSearch: search })
+  });
+
+  if (!genRes || !genRes.ok) {
+    btn.disabled = false; btn.textContent = '🚀 Generate & Publish';
+    msg.style.color = '#cc0000';
+    msg.textContent = '❌ Generation failed';
+    return;
+  }
+
+  msg.textContent = '✍️ Post written! Publishing to WordPress...';
+
+  // Step 2: Publish
+  var pubRes = await api('/api/post/publish', {
+    method: 'POST',
+    body: JSON.stringify({ post: genRes.post, topic, practiceArea: area, languages: lang })
+  });
+
+  btn.disabled = false; btn.textContent = '🚀 Generate & Publish';
+
+  if (pubRes && pubRes.ok) {
+    var ids = pubRes.results.map(function(r) { return r.lang + ' (ID ' + r.id + ')'; }).join(', ');
+    msg.style.color = '#006600';
+    msg.textContent = '✅ Published! ' + ids;
+    document.getElementById('postTopic').value = '';
+    document.getElementById('postContext').value = '';
+    loadManualPost();
+  } else {
+    msg.style.color = '#cc0000';
+    msg.textContent = '❌ Publish failed — ' + (pubRes && pubRes.error ? pubRes.error : 'unknown error');
+  }
+}
+
+function cancelPreview() {
+  document.getElementById('postPreviewCard').style.display = 'none';
+  _previewPost = null;
+}
+
+async function loadManualPost() {
+  // Init table first (safe to call multiple times)
+  api('/api/post/init', { method: 'POST' }).catch(function(){});
+
+  var data = await api('/api/post/history');
+  var el = document.getElementById('postHistory');
+  if (!data || !data.length) {
+    el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No manual posts yet. Create your first one above!</p>';
+    return;
+  }
+  var rows = '';
+  data.forEach(function(r) {
+    var ids = [];
+    try { ids = JSON.parse(r.wp_post_ids || '[]'); } catch(e) {}
+    rows += '<tr>'
+      + '<td style="font-size:11px;white-space:nowrap">' + new Date(r.created_at).toLocaleDateString('en-US') + '</td>'
+      + '<td style="font-weight:bold;font-size:13px">' + (r.title || '—') + '</td>'
+      + '<td style="font-size:12px">' + (r.practice_area || '—') + '</td>'
+      + '<td style="font-size:12px;max-width:250px;color:#666">' + (r.topic || '').substring(0, 80) + '</td>'
+      + '<td style="font-size:11px">' + ids.length + ' post(s)</td>'
+      + '</tr>';
+  });
+  el.innerHTML = '<table><thead><tr><th>Date</th><th>Title</th><th>Area</th><th>Topic</th><th>Published</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }

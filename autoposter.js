@@ -701,4 +701,4 @@ function scheduleDaily() {
   scheduleNext();
 }
 
-module.exports = { runDailyScheduler, scheduleDaily, runWeeklySourceResearch };
+module.exports = { runDailyScheduler, scheduleDaily, runWeeklySourceResearch, generatePost, publishToWordPress, publishAllLanguages, loadState, saveState };

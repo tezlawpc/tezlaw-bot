@@ -576,6 +576,174 @@ router.post("/api/autoposter/run", requireAuth, (req, res) => {
   runDailyScheduler().catch(err => console.error("Admin autoposter error:", err.message));
 });
 
+// ── Manual custom post ────────────────────────────────────
+router.post("/api/autoposter/custom", requireAuth, async (req, res) => {
+  const { topic, practiceArea, url, notes } = req.body;
+  if (!topic) return res.status(400).json({ error: "Topic is required" });
+
+  res.json({ ok: true, message: "Custom post generating — check WordPress and Telegram in ~2 min." });
+
+  // Run async after response
+  (async () => {
+    try {
+      const ap = require("./autoposter");
+
+      // Build the full topic string including URL/notes if provided
+      let fullTopic = topic;
+      if (url)   fullTopic += "\n\nSource URL: " + url;
+      if (notes) fullTopic += "\n\nAdditional context: " + notes;
+
+      const state = ap.loadState ? ap.loadState() : {};
+
+      // Generate the post using the same function the autoposter uses
+      const post = await ap.generatePost({
+        topic:         fullTopic,
+        practiceArea:  practiceArea || "Legal",
+        context:       url ? "Source article: " + url : "",
+        useSearch:     !!url,
+        sources:       [],
+      });
+
+      if (!post) {
+        console.log("❌ Custom post: generatePost returned null for topic:", fullTopic.substring(0,80));
+        return;
+      }
+
+      console.log("✅ Custom post generated:", post.title);
+
+      // Publish English + Chinese + Spanish (same as daily autoposter)
+      const published = await ap.publishAllLanguages(
+        post,
+        "✍️ *Manual Post Published via Admin Panel*",
+        state
+      );
+
+      if (published > 0) {
+        console.log("✅ Custom post published in", published, "language(s)");
+        if (ap.saveState) ap.saveState(state);
+      } else {
+        console.log("⚠️ Custom post: no languages published (may be duplicate)");
+      }
+
+    } catch (err) {
+      console.error("Custom post error:", err.message);
+    }
+  })();
+});
+
+
+// ── Manual Post Creator ───────────────────────────────────
+router.post("/api/post/generate", requireAuth, async (req, res) => {
+  try {
+    const { topic, practiceArea, context, useSearch } = req.body;
+    if (!topic) return res.status(400).json({ error: "Topic required" });
+    const { generatePost } = require("./autoposter");
+    const post = await generatePost({
+      topic,
+      practiceArea: practiceArea || "General",
+      context: context || "",
+      useSearch: useSearch !== false,
+      sources: [],
+    });
+    if (!post) return res.status(500).json({ error: "Failed to generate post" });
+    res.json({ ok: true, post });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/api/post/publish", requireAuth, async (req, res) => {
+  try {
+    const { post, topic, practiceArea, languages } = req.body;
+    if (!post) return res.status(400).json({ error: "Post data required" });
+    const { publishToWordPress } = require("./autoposter");
+
+    const results = [];
+
+    // Publish English
+    const wpResult = await publishToWordPress(post);
+    if (!wpResult) return res.status(500).json({ error: "WordPress publish failed" });
+    results.push({ lang: "English", id: wpResult.id, url: wpResult.url });
+    audit(req, "manual_post", "wordpress", null, post.title?.substring(0, 100));
+
+    // Translate and publish if requested
+    if (languages && languages !== "english") {
+      const axios = require("axios");
+      const Anthropic = require("@anthropic-ai/sdk");
+      const client = new Anthropic();
+
+      const langs = languages === "all"
+        ? [{ code: "zh-TW", label: "Traditional Chinese (繁體中文)" }, { code: "es", label: "Spanish (Latin American)" }]
+        : languages === "chinese"
+        ? [{ code: "zh-TW", label: "Traditional Chinese (繁體中文)" }]
+        : [{ code: "es", label: "Spanish (Latin American)" }];
+
+      for (const lang of langs) {
+        try {
+          const tx = await client.messages.create({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 2000,
+            messages: [{
+              role: "user",
+              content: `Translate this WordPress post to ${lang.label}. Keep HTML formatting. Return JSON only: {"title":"...","content":"...","metaDescription":"..."}
+Title: ${post.title}
+Content: ${post.content?.substring(0, 3000)}
+MetaDescription: ${post.metaDescription}`
+            }]
+          });
+          const txText = tx.content[0].text.replace(/```json|```/g, "").trim();
+          const txPost = JSON.parse(txText);
+          const txWp = await publishToWordPress({
+            ...post,
+            title: txPost.title,
+            content: txPost.content,
+            metaDescription: txPost.metaDescription,
+          });
+          if (txWp) results.push({ lang: lang.label, id: txWp.id, url: txWp.url });
+        } catch(txErr) {
+          console.error("Translation error:", txErr.message);
+        }
+      }
+    }
+
+    // Log to DB
+    await getPool().query(
+      `INSERT INTO manual_posts (title, practice_area, topic, published_by, wp_post_ids, created_at)
+       VALUES ($1,$2,$3,'jj',$4,NOW())
+       ON CONFLICT DO NOTHING`,
+      [post.title, practiceArea, topic, JSON.stringify(results.map(r => r.id))]
+    ).catch(() => {}); // table may not exist yet, non-fatal
+
+    res.json({ ok: true, results });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/api/post/history", requireAuth, async (req, res) => {
+  try {
+    // Try DB first, fall back to empty
+    const r = await getPool().query(
+      `SELECT * FROM manual_posts ORDER BY created_at DESC LIMIT 50`
+    ).catch(() => ({ rows: [] }));
+    res.json(r.rows);
+  } catch(e) { res.json([]); }
+});
+
+// Create manual_posts table if needed
+router.post("/api/post/init", requireAuth, async (req, res) => {
+  try {
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS manual_posts (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(500),
+        practice_area VARCHAR(100),
+        topic TEXT,
+        published_by VARCHAR(50),
+        wp_post_ids JSONB,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── One-time migration endpoint ──────────────────────────
 router.post("/api/migrate-wave2", requireAuth, async (req, res) => {
   try {
@@ -872,6 +1040,9 @@ function dashboardHtml() {
   <div class="nav-item" onclick="showPage('analytics')" id="nav-analytics">
     <span class="icon">🤖</span><span>Analytics</span>
   </div>
+  <div class="nav-item" onclick="showPage('poster')" id="nav-poster">
+    <span class="icon">✍️</span><span>Manual Post</span>
+  </div>
   <div class="nav-item" onclick="showPage('pipeline')" id="nav-pipeline">
     <span class="icon">🏆</span><span>Pipeline</span>
   </div>
@@ -883,6 +1054,9 @@ function dashboardHtml() {
   </div>
   <div class="nav-item" onclick="showPage('audit')" id="nav-audit">
     <span class="icon">📜</span><span>Audit Log</span>
+  </div>
+  <div class="nav-item" onclick="showPage('post')" id="nav-post">
+    <span class="icon">📝</span><span>Post Creator</span>
   </div>
   <div class="nav-item" onclick="showPage('scores')" id="nav-scores">
     <span class="icon">🎯</span><span>Conv. Scores</span>
@@ -1004,11 +1178,125 @@ function dashboardHtml() {
       <span id="autoposterMsg" style="margin-left:12px;font-size:13px;color:#006600"></span>
     </div>
     <div class="card">
+      <h3>✍️ Post Custom Topic</h3>
+      <p style="font-size:13px;color:#666;margin-bottom:16px">
+        Write a post on any topic or news link. Zara will research, write, and publish to WordPress with Chinese and Spanish translations — just like the daily auto-poster.
+      </p>
+      <div style="display:grid;gap:10px;max-width:700px">
+        <div>
+          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Topic or News Headline <span style="color:#cc0000">*</span></label>
+          <input id="customTopic" placeholder="e.g. New USCIS fee increases 2026, or Trump immigration enforcement update"
+            style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Practice Area</label>
+            <select id="customArea" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;background:#fff">
+              <option value="Immigration Law">Immigration Law</option>
+              <option value="Personal Injury">Personal Injury</option>
+              <option value="Business Law">Business Law</option>
+              <option value="Estate Planning">Estate Planning</option>
+              <option value="Real Estate">Real Estate</option>
+              <option value="Landlord Tenant">Landlord / Tenant</option>
+              <option value="Criminal Defense">Criminal Defense</option>
+              <option value="General Legal">General Legal</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Source URL (optional)</label>
+            <input id="customUrl" placeholder="https://uscis.gov/news/..."
+              style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+          </div>
+        </div>
+        <div>
+          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Additional Notes (optional)</label>
+          <input id="customNotes" placeholder="e.g. Focus on how this affects clients in California, mention consult availability"
+            style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+        </div>
+        <div>
+          <button class="action-btn" id="customPostBtn" onclick="submitCustomPost()" style="padding:10px 24px">
+            ✍️ Generate &amp; Publish Post
+          </button>
+          <span id="customPostMsg" style="margin-left:12px;font-size:13px;color:#006600"></span>
+        </div>
+      </div>
+    </div>
+    <div class="card">
       <h3>📅 Analytics History</h3>
       <div id="analyticsHistory"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
   </div>
 
+
+  <!-- Manual Post -->
+  <div class="page" id="page-poster">
+    <div class="page-header">
+      <h1>Manual Post</h1>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+    <div class="card">
+      <h3>✍️ Write &amp; Publish a Post</h3>
+      <p style="font-size:13px;color:#666;margin-bottom:20px">
+        Paste an article, news link, or write your own content. Zara will write a full SEO post
+        and publish to WordPress in <strong>English + Chinese + Spanish</strong>. Takes ~1–2 minutes.
+      </p>
+
+      <div style="display:grid;gap:14px;max-width:800px">
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:5px">
+              Practice Area
+            </label>
+            <select id="posterArea" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;background:#fff">
+              <option value="Immigration Law">Immigration Law</option>
+              <option value="Personal Injury">Personal Injury</option>
+              <option value="Business Law">Business Law</option>
+              <option value="Estate Planning">Estate Planning</option>
+              <option value="Real Estate">Real Estate</option>
+              <option value="Landlord Tenant">Landlord / Tenant</option>
+              <option value="Criminal Defense">Criminal Defense</option>
+              <option value="General Legal">General Legal</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:5px">
+              Source URL <span style="font-weight:normal;color:#999">(optional — paste a news link)</span>
+            </label>
+            <input id="posterUrl" placeholder="https://uscis.gov/news/..." 
+              style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+          </div>
+        </div>
+
+        <div>
+          <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:5px">
+            Topic / Content <span style="color:#cc0000">*</span>
+            <span style="font-weight:normal;color:#999"> — paste an article, headline, or describe what to write</span>
+          </label>
+          <textarea id="posterContent" rows="10"
+            placeholder="Examples:&#10;• USCIS announces new fee increases effective January 2026&#10;• Paste the full text of a news article here&#10;• Write about how the new H-1B lottery rules affect tech workers in California&#10;• California AB 1234 changes eviction procedures for landlords"
+            style="width:100%;padding:12px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:Arial,sans-serif;line-height:1.5;resize:vertical;outline:none;color:#0C1C36"></textarea>
+        </div>
+
+        <div>
+          <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:5px">
+            Instructions for Zara <span style="font-weight:normal;color:#999">(optional)</span>
+          </label>
+          <input id="posterNotes" placeholder="e.g. Focus on how this affects clients in West Covina, mention free consultations available"
+            style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+        </div>
+
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <button class="action-btn" id="posterBtn" onclick="submitManualPost()" style="padding:12px 28px;font-size:14px">
+            ✍️ Generate &amp; Publish
+          </button>
+          <span id="posterMsg" style="font-size:13px"></span>
+        </div>
+
+        <div id="posterResult" style="display:none;padding:16px;background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;font-size:13px"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- Pipeline -->
   <div class="page" id="page-pipeline">
@@ -1047,6 +1335,80 @@ function dashboardHtml() {
     </div>
   </div>
   <!-- Autoposter button in Analytics page -->
+
+  <!-- Manual Post Creator -->
+  <div class="page" id="page-post">
+    <div class="page-header"><h1>Post Creator</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
+    <div class="card">
+      <h3>📝 Create a Post</h3>
+      <p style="font-size:13px;color:#666;margin-bottom:20px">
+        Enter a topic, paste a news link, or describe what you want to post.
+        Zara will write and publish it to WordPress just like the daily autoposter.
+      </p>
+      <div style="display:grid;gap:14px">
+        <div>
+          <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:6px">Topic or News Link *</label>
+          <textarea id="postTopic" placeholder="e.g. &#39;New USCIS fee increase effective January 2026&#39; or paste a URL like https://uscis.gov/news/..." 
+            style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:13px;height:80px;resize:vertical;font-family:Arial"></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:6px">Practice Area</label>
+            <select id="postArea" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+              <option value="Immigration Law">Immigration Law</option>
+              <option value="Personal Injury">Personal Injury</option>
+              <option value="Business Law">Business Law</option>
+              <option value="Estate Planning">Estate Planning</option>
+              <option value="Real Estate">Real Estate</option>
+              <option value="Landlord Tenant">Landlord/Tenant</option>
+              <option value="General">General Legal</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:6px">Language</label>
+            <select id="postLang" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+              <option value="english">English only</option>
+              <option value="all">English + Chinese + Spanish</option>
+              <option value="chinese">English + Chinese</option>
+              <option value="spanish">English + Spanish</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:6px">Research Web</label>
+            <select id="postSearch" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+              <option value="true">Yes — search for latest info</option>
+              <option value="false">No — use topic as-is</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:6px">Additional Context (optional)</label>
+          <input id="postContext" placeholder="Any extra details, key points to include, or specific angle..." 
+            style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <button class="action-btn" id="postBtn" onclick="submitManualPost()">🚀 Generate &amp; Publish</button>
+          <button class="action-btn" style="background:#555" id="previewBtn" onclick="previewManualPost()">👁 Preview First</button>
+          <span id="postMsg" style="font-size:13px;color:#006600"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preview panel -->
+    <div class="card" id="postPreviewCard" style="display:none">
+      <h3>👁 Preview — Review Before Publishing</h3>
+      <div id="postPreviewContent" style="font-size:13px;line-height:1.7;color:#333;white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:12px;background:#fafafa;border-radius:6px;border:1px solid #eee"></div>
+      <div style="margin-top:14px;display:flex;gap:10px">
+        <button class="action-btn" id="publishBtn" onclick="publishPreview()">✅ Publish Now</button>
+        <button class="action-btn" style="background:#cc0000" onclick="cancelPreview()">✕ Cancel</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>📋 Recent Manual Posts</h3>
+      <div id="postHistory"><div class="loading"><span class="spinner"></span> Loading...</div></div>
+    </div>
+  </div>
 
   <!-- Conversation Scores -->
   <div class="page" id="page-scores">
