@@ -9,7 +9,7 @@ const crypto   = require("crypto");
 const xml2js   = require("xml2js");
 const FormData = require("form-data");
 const fs       = require("fs");
-const { initDB, clearHistory }    = require("./db");
+const { initDB, clearHistory, getHistory } = require("./db");
 const { scheduleWeeklyAnalytics, runWeeklyAnalysis } = require("./analytics");
 const { askClaudeWithMemory }     = require("./askClaude-memory");
 const { transcribeAudio }         = require("./whisper");
@@ -175,17 +175,11 @@ You CAN send voice messages. When someone asks you to respond in voice, speak, o
 - NEVER say you cannot do voice or that you only communicate through text
 - You have full voice capabilities on Telegram and WhatsApp`;
 
-const WELCOME_MESSAGE = `Hey there! 👋 I'm Zara, the virtual assistant for Tez Law P.C.
+const WELCOME_MESSAGE = `Hi! 👋 I'm Zara, the virtual assistant for Tez Law P.C. in West Covina.
 
-I'm here to help you figure out your legal options and connect you with the right person on our team. We handle:
+I'm here 24/7 to help with any legal questions — whether it's immigration, a car accident, estate planning, evictions, or business matters.
 
-🛂 Immigration
-🚗 Car Accidents & Personal Injury
-⚖️ Business Litigation
-™️ Patents & Trademarks
-📋 Estate Planning
-
-What's going on? Tell me what's on your mind! 😊`;
+What brings you here today? Feel free to describe your situation and I'll point you in the right direction. 😊`;
 
 const CONTACT_MESSAGE = `Here's the Tez Law P.C. team:
 
@@ -275,6 +269,15 @@ async function notifyLead(userId, message, platform) {
 
 // ── Shared message processor ──────────────────────────────
 async function processMessage(platform, userId, userText, sendFn) {
+  // Proactive greeting for brand new users on their very first message ever
+  try {
+    const hist = await getHistory(platform, userId);
+    if (hist.length === 0) {
+      await sendFn(WELCOME_MESSAGE);
+      await new Promise(r => setTimeout(r, 600));
+    }
+  } catch(e) { /* non-fatal — continue */ }
+
   const lower = userText.toLowerCase().trim();
 
   // ── OWNER CHECK: never treat JJ as a client ──────────────
