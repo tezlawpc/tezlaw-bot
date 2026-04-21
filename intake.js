@@ -1,21 +1,13 @@
 // ============================================================
 //  intake.js — Structured Intake Flow for Zara
 //  Tez Law P.C.
-//
-//  Flow: detect legal intent → ask name → ask issue detail
-//        → ask contact → save to DB → notify Telegram + Email
-//        → continue conversation normally
-//
-//  State machine stored in PostgreSQL (client_summaries table
-//  reused with a special prefix, so no new table needed).
-//  Uses existing: saveIntake(), updateClient(), notifyLead()
 // ============================================================
 
 const axios      = require("axios");
 const nodemailer = require("nodemailer");
 const { Pool }   = require("pg");
 
-// ── DB pool (same pattern as db.js) ──────────────────────
+// ── DB pool ───────────────────────────────────────────────
 let pool = null;
 function getPool() {
   if (!pool) {
@@ -26,10 +18,6 @@ function getPool() {
   }
   return pool;
 }
-
-// ── Intake state keys (stored in pg) ─────────────────────
-// We store intake state as a small JSON blob in a dedicated table.
-// States: null → "awaiting_name" → "awaiting_issue" → "awaiting_contact" → "done"
 
 async function getIntakeState(platform, platformId) {
   try {
@@ -64,7 +52,6 @@ async function clearIntakeState(platform, platformId) {
   } catch {}
 }
 
-// ── Create intake_state table if it doesn't exist ────────
 async function initIntakeTable() {
   try {
     await getPool().query(`
@@ -84,12 +71,29 @@ async function initIntakeTable() {
 }
 
 // ── Legal intent detector ─────────────────────────────────
-// Returns true if the message is clearly about a legal matter
-// (not a greeting, general question, or test)
 function isLegalIntent(text) {
   const t = text.toLowerCase();
 
-  // Explicit legal keywords
+  // ── Skip intake for professional/procedural questions ──
+  // These come from lawyers, existing clients, or staff — not new client intakes
+  const isDistress = /ice|detained|arrested|deportation|court tomorrow|emergency|urgent|help me|scared/i.test(t);
+  if (!isDistress) {
+    const professionalPatterns = [
+      /does the attorney/i,
+      /does (?:the|my|your) lawyer/i,
+      /do (?:we|you|i) need to file/i,
+      /(?:file|filing|amend|amending|g-28|g28|i-765|i-131|i-485|i-130|n-400|i-90)\s+(?:for|to|with|again|another)/i,
+      /^(?:hi\s+)?(?:does|do|is|are|can|should|will|would|what|when|how|why)\s/i,
+      /\b(?:case status|receipt number|case number|a-number|uscis case)\b/i,
+      /(?:already filed|previously filed|we filed|you filed)/i,
+      /(?:amending|amendment|correcting|correction) (?:the|a|an)/i,
+      /(?:processing time|how long|timeline|status update)/i,
+    ];
+    for (const pat of professionalPatterns) {
+      if (pat.test(text)) return false;
+    }
+  }
+
   const legalKeywords = [
     // Immigration
     "visa","green card","citizenship","naturalization","daca","deportation",
@@ -115,7 +119,7 @@ function isLegalIntent(text) {
     "lawyer","attorney","legal help","legal advice","law firm","consultation",
     "case","sue","file","court","hearing","judge","rights","legal issue",
     // Spanish
-    "abogado","visa","accidente","demanda","herencia","contrato","ayuda legal",
+    "abogado","accidente","demanda","herencia","contrato","ayuda legal",
     // Chinese
     "律师","签证","绿卡","移民","事故","遗嘱","合同","诉讼","法律"
   ];
@@ -123,7 +127,7 @@ function isLegalIntent(text) {
   return legalKeywords.some(k => t.includes(k));
 }
 
-// ── Detect case type from message ────────────────────────
+// ── Detect case type ──────────────────────────────────────
 function detectCaseType(text) {
   const t = text.toLowerCase();
   if (/visa|green card|citizenship|immigration|uscis|daca|deportation|asylum|h-1b|eb-|overstay|undocumented|ice|removal|naturalization|petition|i-130|i-485/.test(t)) return "Immigration";
@@ -202,7 +206,6 @@ async function saveIntakeToDB(platform, platformId, data) {
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [platform, platformId, data.name, data.issue, data.contact, data.caseType]
     );
-    // Sync all collected info to the clients table for memory persistence
     const updates = {};
     if (data.name) updates.name = data.name;
     if (data.caseType) updates.case_type = data.caseType;
@@ -222,15 +225,23 @@ async function saveIntakeToDB(platform, platformId, data) {
 }
 
 // ── Main intake handler ───────────────────────────────────
-// Returns: { handled: true, reply: string } if intake intercepted the message
-//          { handled: false } if intake is done or not applicable
 async function checkIntake(platform, userId, userText) {
   const state = await getIntakeState(platform, userId);
 
   // ── STATE: awaiting_name ──────────────────────────────
   if (state?.step === "awaiting_name") {
     const name = userText.trim();
-    // Store name and advance
+    // Validate: reject questions, very short inputs, non-names
+    const looksLikeQuestion = /^(?:what|how|when|why|where|who|does|do|is|are|can|will|would|could|should|i |my |the |a )/i.test(name);
+    const tooShort = name.length < 2;
+    const tooLong = name.split(" ").length > 6;
+    const hasQuestionMark = name.includes("?");
+    if (looksLikeQuestion || tooShort || tooLong || hasQuestionMark) {
+      return {
+        handled: true,
+        reply: `I just need your name to get started — something like "John Smith". What's your name?`,
+      };
+    }
     await setIntakeState(platform, userId, {
       step: "awaiting_issue",
       name,
@@ -262,6 +273,16 @@ async function checkIntake(platform, userId, userText) {
   // ── STATE: awaiting_contact ───────────────────────────
   if (state?.step === "awaiting_contact") {
     const contact = userText.trim();
+    // Validate: must look like a phone number or email
+    const looksLikePhone = /[\d]{7,}/.test(contact.replace(/[\s\-\(\)\+]/g, ""));
+    const looksLikeEmail = /\S+@\S+\.\S+/.test(contact);
+    const looksLikeQuestion = /^(?:what|how|when|why|where|who|does|do|is|are|can|will|would|could|should)/i.test(contact) || contact.includes("?");
+    if ((!looksLikePhone && !looksLikeEmail) || looksLikeQuestion) {
+      return {
+        handled: true,
+        reply: `I need a phone number or email so our team can reach you. For example: "626-555-1234" or "yourname@email.com". What's the best way to contact you?`,
+      };
+    }
     const intakeData = {
       name: state.name,
       caseType: state.caseType,
@@ -281,22 +302,28 @@ async function checkIntake(platform, userId, userText) {
           console.error(`Intake step ${i} failed:`, r.reason?.message);
         }
       });
-      // Wave 1: auto-create lead + run conflict check after intake saves
+      // Only create lead if we have both name AND contact
       try {
         const db = require("./db");
-const { startDripCampaign } = require("./drip");
+        const { startDripCampaign } = require("./drip");
+        if (!intakeData.name || !intakeData.contact) {
+          console.log("[intake] Skipping lead creation — missing name or contact");
+          return;
+        }
         const lead = await db.createLead({
           platform, platformId: userId,
           name: intakeData.name,
           contact: intakeData.contact,
           caseType: intakeData.caseType,
         });
-        if (lead && intakeData.name) {
+        if (lead) {
+          // Start drip campaign
+          startDripCampaign(lead.id, platform, userId, intakeData.caseType).catch(() => {});
+          // Run conflict check
           const conflict = await db.runConflictCheck(
             lead.id, platform, userId, intakeData.name
           );
           if (conflict?.disposition === "possible") {
-            // Notify JJ of potential conflict
             const { TELEGRAM_TOKEN, JJ_TELEGRAM_ID } = process.env;
             if (TELEGRAM_TOKEN && JJ_TELEGRAM_ID) {
               await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
@@ -311,7 +338,6 @@ const { startDripCampaign } = require("./drip");
       }
     });
 
-    // Mark intake as done
     await clearIntakeState(platform, userId);
 
     return {
@@ -321,8 +347,13 @@ const { startDripCampaign } = require("./drip");
   }
 
   // ── NO ACTIVE INTAKE STATE ────────────────────────────
-  // Check if this message triggers a new intake
-  if (!state && isLegalIntent(userText)) {
+  // Only trigger intake if:
+  // 1. Has legal intent (not a professional/procedural question)
+  // 2. NOT a pure question starting with question words
+  // 3. At least 5 words (avoids single keyword triggers)
+  const wordCount = userText.trim().split(/\s+/).length;
+  const isPureQuestion = /^(?:does|do|is|are|can|should|will|would|what|when|how|why|where|who|which|could|may|might)\b/i.test(userText.trim());
+  if (!state && isLegalIntent(userText) && !isPureQuestion && wordCount >= 5) {
     const caseType = detectCaseType(userText);
     await setIntakeState(platform, userId, {
       step: "awaiting_name",
