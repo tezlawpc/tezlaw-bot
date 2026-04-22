@@ -264,28 +264,28 @@ async function handleIncomingCall(req, res, savedPrompt) {
   const base    = process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
   console.log(`[voice] Incoming call SID=${callSid} from=${from}`);
 
-  try {
-    const greeting = isBusinessHours()
-      ? "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. How may I help you?"
-      : "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. Our office is currently closed, but I can take a message and have our team call you back next business day. How may I help you?";
+  const greeting = isBusinessHours()
+    ? "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. How may I help you?"
+    : "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. Our office is currently closed, but I can take a message and have our team call you back next business day. How may I help you?";
 
-    const audio = await elevenLabsTTS(greeting);
-    const id = `greeting_${callSid}_${Date.now()}`;
-    storeAudio(id, audio);
+  const session = getSession(callSid);
+  session.conversation.push({ role: "assistant", content: greeting });
+  session.transcript.push(`Zara: ${greeting}`);
+  session.from = from;
+  session.savedPrompt = savedPrompt;
 
-    const audioUrl = `${base}/voice/audio/${id}`;
-    const session = getSession(callSid);
-    session.conversation.push({ role: "assistant", content: greeting });
-    session.transcript.push(`Zara: ${greeting}`);
-    session.from = from;
-    session.savedPrompt = savedPrompt;
-
-    res.type("text/xml").send(buildGatherTwiML(audioUrl, `${base}/voice/respond`));
-  } catch (err) {
-    console.error("[voice] handleIncomingCall error:", err.message);
-    res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response><Say>Thank you for calling Tez Law P.C. Please call us back at 626-678-8677. Goodbye.</Say></Response>`);
-  }
+  // Use <Say> for greeting — instant, no audio file storage race condition
+  // ElevenLabs used for all responses after caller speaks
+  res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="Polly.Joanna">${greeting}</Say>
+  <Record action="${base}/voice/respond" method="POST"
+    maxLength="30"
+    timeout="5"
+    playBeep="false"
+    trim="trim-silence"/>
+</Response>`);
+  console.log(`[voice] Greeting sent via <Say>, waiting for caller speech`);
 }
 
 // POST /voice/respond — caller spoke, process and respond
