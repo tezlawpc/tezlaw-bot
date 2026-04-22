@@ -26,7 +26,7 @@ const { startDripScheduler }  = require("./drip");
 const cookieParser = require("cookie-parser");
 
 const app = express();
-app.use(express.json());
+app.use(express.json()); app.use(express.urlencoded({ extended: true }));
 app.use(express.text({ type: "text/xml" }));
 app.use(cookieParser());
 
