@@ -129,17 +129,13 @@ function serveAudio(req, res) {
 // ── Build TwiML to play audio and gather speech ───────────
 function buildGatherTwiML(audioUrl, action) {
   // Play audio FIRST, then gather speech after it finishes
-  // This prevents Twilio from timing out while audio is still playing
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${audioUrl}</Play>
   <Gather input="speech" action="${action}" method="POST"
-    speechTimeout="3"
-    speechModel="phone_call"
-    enhanced="true"
+    speechTimeout="auto"
     timeout="15"
-    language="en-US"
-    hints="immigration, accident, attorney, eviction, estate, lawsuit, green card, visa, USCIS, help, name, number, phone">
+    language="en-US">
   </Gather>
   <Redirect method="POST">${action}</Redirect>
 </Response>`;
