@@ -65,7 +65,11 @@ IMPORTANT: Never say you're an AI unless directly asked. You are Zara, the legal
 // ── ElevenLabs TTS → returns audio Buffer ────────────────
 async function elevenLabsTTS(text, voiceId) {
   const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-  if (!ELEVENLABS_API_KEY) throw new Error("ELEVENLABS_API_KEY not set");
+  if (!ELEVENLABS_API_KEY) {
+    console.error("[voice] ERROR: ELEVENLABS_API_KEY not set in environment");
+    throw new Error("ELEVENLABS_API_KEY not set");
+  }
+  console.log("[voice] ElevenLabs TTS request:", text.substring(0, 60));
 
   // Default voice: Rachel (warm, professional American female)
   const voice = voiceId || process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
@@ -107,7 +111,7 @@ function createDeepgramConnection(onTranscript) {
   const dgWs = new WebSocket(
     "wss://api.deepgram.com/v1/listen?" +
     "model=nova-3&" +
-    "language=en-US&" +
+    "detect_language=true&" +     // Auto-detect English, Chinese, Spanish
     "encoding=mulaw&" +
     "sample_rate=8000&" +
     "channels=1&" +
@@ -368,6 +372,16 @@ function handleMediaStream(ws, req, savedPrompt) {
 
   // ── Send opening greeting ───────────────────────────
   async function sendGreeting() {
+    // Wait until streamSid is available (retry up to 10 times)
+    let attempts = 0;
+    while (!streamSid && attempts < 10) {
+      await new Promise(r => setTimeout(r, 200));
+      attempts++;
+    }
+    if (!streamSid) {
+      console.error("[voice] Greeting failed — streamSid not available after 2s");
+      return;
+    }
     try {
       const greeting = isBusinessHours()
         ? "Thank you for calling Tez Law P.C., this is Zara your legal assistant. How can I help you today?"
@@ -376,9 +390,11 @@ function handleMediaStream(ws, req, savedPrompt) {
       transcript.push(`Zara: ${greeting}`);
       conversation.push({ role: "assistant", content: greeting });
 
+      console.log("[voice] Generating greeting audio, streamSid:", streamSid);
       const audio = await elevenLabsTTS(greeting);
+      console.log("[voice] Greeting audio generated, size:", audio.length, "bytes");
       sendAudioToTwilio(audio);
-      console.log("[voice] Opening greeting sent");
+      console.log("[voice] Opening greeting sent to Twilio");
     } catch (err) {
       console.error("[voice] Greeting error:", err.message);
     }
@@ -404,7 +420,7 @@ function handleMediaStream(ws, req, savedPrompt) {
           });
 
           // Send greeting after brief delay (let stream stabilize)
-          setTimeout(sendGreeting, 500);
+          setTimeout(sendGreeting, 1500);
           break;
 
         case "media":
