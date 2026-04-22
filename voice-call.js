@@ -87,8 +87,7 @@ async function elevenLabsTTS(text) {
   }
 
   return buf;
-}
-
+Buffer.from((await axios.get(audioUrl + ".mp3", { auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN }, responseType: "arraybuffer" })).data)
 
 // ── Deepgram STT — transcribe audio URL ──────────────────
 async function deepgramTranscribe(audioUrl) {
@@ -98,7 +97,7 @@ async function deepgramTranscribe(audioUrl) {
   const res = await axios.post(
     "https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&detect_language=true",
     { url: audioUrl },
-    { headers: { Authorization: `Token ${key}`, "Content-Type": "application/json" } }
+    { headers: { Authorization: `Token ${key}`, "Content-Type": "audio/mpeg" } }
   );
   const transcript = res.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
   console.log("[voice] Deepgram transcript:", transcript);
