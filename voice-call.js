@@ -290,6 +290,9 @@ async function handleIncomingCall(req, res, savedPrompt) {
 
 // POST /voice/respond — caller spoke, process and respond
 async function handleRespond(req, res) {
+  // DIAGNOSTIC: log everything Twilio sends
+  console.log("[voice] /voice/respond body keys:", Object.keys(req.body || {}));
+  console.log("[voice] /voice/respond body:", JSON.stringify(req.body).substring(0, 500));
   const callSid    = req.body?.CallSid || "unknown";
   // Get speech from either SpeechResult (Gather) or RecordingUrl (Record)
   let speechText = req.body?.SpeechResult || "";
