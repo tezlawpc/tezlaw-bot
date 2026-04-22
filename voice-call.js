@@ -55,7 +55,7 @@ async function elevenLabsTTS(text) {
     `https://api.elevenlabs.io/v1/text-to-speech/${voice}`,
     {
       text,
-      model_id: "eleven_flash_v2_5",
+      model_id: "eleven_turbo_v2_5",  // Fastest ElevenLabs model ~75ms
       voice_settings: { stability: 0.5, similarity_boost: 0.75 },
     },
     {
@@ -127,13 +127,19 @@ function serveAudio(req, res) {
 }
 
 // ── Build TwiML to play audio and gather speech ───────────
-function buildGatherTwiML(audioUrl, action, timeout = 5) {
+function buildGatherTwiML(audioUrl, action) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Gather input="speech" action="${action}" method="POST" speechTimeout="auto" timeout="${timeout}" language="en-US">
+  <Gather input="speech" action="${action}" method="POST"
+    speechTimeout="2"
+    speechModel="phone_call"
+    enhanced="true"
+    timeout="10"
+    language="en-US"
+    hints="immigration, accident, attorney, eviction, estate, lawsuit, green card, visa, USCIS">
     <Play>${audioUrl}</Play>
   </Gather>
-  <Redirect method="POST">${action}</Redirect>
+  <Redirect method="POST">${action}?retry=1</Redirect>
 </Response>`;
 }
 
@@ -273,16 +279,19 @@ async function handleRespond(req, res) {
   const session    = getSession(callSid);
   console.log(`[voice] Speech received: "${speechText}"`);
 
-  // No speech detected
+  // No speech detected - just re-gather silently, don't speak
   if (!speechText.trim()) {
-    try {
-      const audio = await elevenLabsTTS("I didn't catch that. Could you please repeat?");
-      const id = `nospeech_${Date.now()}`;
-      storeAudio(id, audio);
-      return res.type("text/xml").send(buildGatherTwiML(`${base}/voice/audio/${id}`, `${base}/voice/respond`));
-    } catch (err) {
-      return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Redirect method="POST">${base}/voice/respond</Redirect></Response>`);
-    }
+    return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech" action="${base}/voice/respond" method="POST"
+    speechTimeout="2"
+    speechModel="phone_call"
+    enhanced="true"
+    timeout="10"
+    language="en-US">
+  </Gather>
+  <Redirect method="POST">${base}/voice/respond</Redirect>
+</Response>`);
   }
 
   session.transcript.push(`Caller: ${speechText}`);
@@ -303,7 +312,7 @@ async function handleRespond(req, res) {
       return res.type("text/xml").send(buildTransferTwiML(`${base}/voice/audio/${id}`));
     }
 
-    // Get Claude response
+    // Get Claude response then convert to speech
     session.conversation.push({ role: "user", content: speechText });
     const systemPrompt = buildVoicePrompt(session.savedPrompt);
     const aiReply = await askClaude(systemPrompt, session.conversation);
@@ -326,8 +335,9 @@ async function handleRespond(req, res) {
     session.conversation.push({ role: "assistant", content: aiReply });
     session.transcript.push(`Zara: ${aiReply}`);
 
+    // Convert to speech
     const audio = await elevenLabsTTS(aiReply);
-    const id = `reply_${Date.now()}`;
+    const id = `reply_${callSid}_${Date.now()}`;
     storeAudio(id, audio);
 
     res.type("text/xml").send(buildGatherTwiML(`${base}/voice/audio/${id}`, `${base}/voice/respond`));
