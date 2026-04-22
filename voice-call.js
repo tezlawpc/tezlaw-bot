@@ -55,8 +55,9 @@ async function elevenLabsTTS(text) {
     `https://api.elevenlabs.io/v1/text-to-speech/${voice}`,
     {
       text,
-      model_id: "eleven_turbo_v2_5",  // Fastest ElevenLabs model ~75ms
+      model_id: "eleven_multilingual_v2",   // Most widely supported model
       voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      // No output_format — let ElevenLabs return default MP3
     },
     {
       headers: {
@@ -65,11 +66,29 @@ async function elevenLabsTTS(text) {
         "Accept":       "audio/mpeg",
       },
       responseType: "arraybuffer",
+      validateStatus: (s) => s < 500, // Don't throw on 4xx — check manually
     }
   );
-  console.log("[voice] ElevenLabs audio:", res.data.byteLength, "bytes");
-  return Buffer.from(res.data);
+
+  // Check for API error (ElevenLabs returns JSON error as arraybuffer on 4xx)
+  if (res.status !== 200) {
+    const errText = Buffer.from(res.data).toString("utf8");
+    console.error("[voice] ElevenLabs API error", res.status, errText.substring(0, 200));
+    throw new Error(`ElevenLabs ${res.status}: ${errText.substring(0, 100)}`);
+  }
+
+  const buf = Buffer.from(res.data);
+  console.log("[voice] ElevenLabs audio:", buf.length, "bytes");
+
+  if (buf.length < 1000) {
+    const txt = buf.toString("utf8");
+    console.error("[voice] ElevenLabs returned too-small buffer:", txt.substring(0, 200));
+    throw new Error("ElevenLabs returned invalid audio: " + txt.substring(0, 100));
+  }
+
+  return buf;
 }
+
 
 // ── Deepgram STT — transcribe audio URL ──────────────────
 async function deepgramTranscribe(audioUrl) {
