@@ -70,33 +70,48 @@ async function elevenLabsTTS(text, voiceId) {
     throw new Error("ELEVENLABS_API_KEY not set");
   }
   console.log("[voice] ElevenLabs TTS request:", text.substring(0, 60));
-
-  // Default voice: Rachel (warm, professional American female)
   const voice = voiceId || process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
 
   const res = await axios.post(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voice}/stream`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${voice}`,
     {
       text,
-      model_id: "eleven_flash_v2_5",  // ~75ms latency, optimized for real-time
+      model_id: "eleven_flash_v2_5",
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.75,
-        style: 0.3,
+        style: 0.0,
         use_speaker_boost: true,
       },
-      output_format: "ulaw_8000",  // Twilio needs 8kHz µ-law
+      output_format: "ulaw_8000",
     },
     {
       headers: {
         "xi-api-key": ELEVENLABS_API_KEY,
         "Content-Type": "application/json",
+        "Accept": "audio/mulaw",
       },
       responseType: "arraybuffer",
     }
   );
 
-  return Buffer.from(res.data);
+  const buf = Buffer.from(res.data);
+  console.log("[voice] ElevenLabs audio received:", buf.length, "bytes");
+
+  // Strip WAV header if present (WAV files start with "RIFF")
+  if (buf.slice(0, 4).toString("ascii") === "RIFF") {
+    console.log("[voice] Stripping WAV header");
+    let dataOffset = 44;
+    for (let i = 0; i < Math.min(buf.length - 4, 200); i++) {
+      if (buf.slice(i, i + 4).toString("ascii") === "data") {
+        dataOffset = i + 8;
+        break;
+      }
+    }
+    return buf.slice(dataOffset);
+  }
+
+  return buf;
 }
 
 // ── Deepgram STT — streaming via WebSocket ────────────────
