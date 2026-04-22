@@ -20,6 +20,7 @@ const { router: adminRouter, handleAdminCallback, initPromptTable, getSavedPromp
 const { checkCompliance, initComplianceTable } = require("./compliance");
 const { scheduleUSCISRefresh, buildLivePrompt } = require("./uscis-updater");
 const { startHotLeadMonitor } = require("./hot-leads");
+const { handleIncomingCall, handleTransfer, handleTransferFallback, handleTranscription, handleMediaStream } = require("./voice-call");
 const { startSolScheduler }   = require("./sol");
 const { startDripScheduler }  = require("./drip");
 const cookieParser = require("cookie-parser");
@@ -231,11 +232,28 @@ function isLegalResearchQuestion(m) {
 
 // ── Distress detection ────────────────────────────────────
 function detectDistress(msg) {
-  msg = msg.toLowerCase();
-  const high = ["ice","detained","arrested","deportation","deported","removal","notice to appear","nta","they took","raid","emergency","accident just happened","injured","hospital","bleeding","scared","please help","don't know what to do","help me","court tomorrow","hearing tomorrow","sign anything","拘留","被抓","遣返","紧急","帮我","害怕","detenido","arrestado","deportación","ayúdame","miedo"];
-  const med  = ["visa expired","status expired","out of status","denied","lost my job","fired","separated","family separated","worried","desperate","no options"];
-  if (high.some(k => msg.includes(k))) return "high";
-  if (med.some(k => msg.includes(k)))  return "medium";
+  const t = msg.toLowerCase();
+
+  // Use whole-word regex for short keywords that appear inside other words
+  // e.g. "ice" inside "police", "raid" inside "afraid", "nta" inside "santa"
+  function wholeWord(keyword) {
+    return new RegExp("(?<![a-z])" + keyword.replace(/[-]/g, "\\-") + "(?![a-z])", "i").test(t);
+  }
+
+  // Keywords that need whole-word matching (short, risky substrings)
+  const highWholeWord = ["ice","nta","raid","help me","scared","miedo"];
+  // Keywords safe to substring match (long enough, unique enough)
+  const highSubstring = ["detained","arrested","deportation","deported","removal",
+    "notice to appear","they took","emergency","accident just happened","injured",
+    "hospital","bleeding","please help","don\'t know what to do","court tomorrow",
+    "hearing tomorrow","sign anything","拘留","被抓","遣返","紧急","帮我","害怕",
+    "detenido","arrestado","deportación","ayúdame"];
+  const med = ["visa expired","status expired","out of status","denied",
+    "lost my job","fired","separated","family separated","worried","desperate","no options"];
+
+  const highMatch = highWholeWord.some(k => wholeWord(k)) || highSubstring.some(k => t.includes(k));
+  if (highMatch) return "high";
+  if (med.some(k => t.includes(k))) return "medium";
   return "none";
 }
 
@@ -783,7 +801,13 @@ app.post("/autoposter/run", async (req, res) => {
 // ────────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.send("Tez Law P.C. — Zara running on all channels ✅"));
 
-app.listen(PORT, () => {
+// ── Voice call HTTP routes ────────────────────────────────
+app.post("/voice/incoming", (req, res) => handleIncomingCall(req, res));
+app.post("/voice/transfer", (req, res) => handleTransfer(req, res));
+app.post("/voice/transfer-fallback", (req, res) => handleTransferFallback(req, res));
+app.post("/voice/transcribe",       (req, res) => handleTranscription(req, res));
+
+const httpServer = app.listen(PORT, () => {
   console.log(`🚀 Zara running on port ${PORT}`);
   initDB();
   initIntakeTable();
@@ -851,5 +875,19 @@ app.listen(PORT, () => {
     console.log("🏛️  USCIS processing times scheduler started.");
   } catch (e) {
     console.error("❌ USCIS updater failed to load:", e.message);
+  }
+});
+// ── WebSocket server for voice media streams ─────────────
+const { WebSocketServer } = require("ws");
+const wss = new WebSocketServer({ noServer: true });
+
+httpServer.on("upgrade", (req, socket, head) => {
+  if (req.url === "/voice/stream") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      const savedPrompt = app.locals.SYSTEM_PROMPT || null;
+      handleMediaStream(ws, req, savedPrompt);
+    });
+  } else {
+    socket.destroy();
   }
 });
