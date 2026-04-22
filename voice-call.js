@@ -128,16 +128,16 @@ function serveAudio(req, res) {
 
 // ── Build TwiML to play audio and gather speech ───────────
 function buildGatherTwiML(audioUrl, action) {
-  // Play audio FIRST, then gather speech after it finishes
+  // Play audio first, then Record caller speech
+  // Using Record instead of Gather - more reliable, uses Deepgram for transcription
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${audioUrl}</Play>
-  <Gather input="speech" action="${action}" method="POST"
-    speechTimeout="auto"
-    timeout="15"
-    language="en-US">
-  </Gather>
-  <Redirect method="POST">${action}</Redirect>
+  <Record action="${action}" method="POST"
+    maxLength="30"
+    timeout="5"
+    playBeep="false"
+    trim="trim-silence"/>
 </Response>`;
 }
 
@@ -272,25 +272,33 @@ async function handleIncomingCall(req, res, savedPrompt) {
 // POST /voice/respond — caller spoke, process and respond
 async function handleRespond(req, res) {
   const callSid    = req.body?.CallSid || "unknown";
-  const speechText = req.body?.SpeechResult || "";
+  // Get speech from either SpeechResult (Gather) or RecordingUrl (Record)
+  let speechText = req.body?.SpeechResult || "";
+
+  // If we have a recording URL, transcribe it with Deepgram
+  if (!speechText && req.body?.RecordingUrl) {
+    try {
+      console.log("[voice] Transcribing recording:", req.body.RecordingUrl);
+      speechText = await deepgramTranscribe(req.body.RecordingUrl + ".mp3");
+      console.log("[voice] Deepgram result:", speechText);
+    } catch (err) {
+      console.error("[voice] Deepgram transcription error:", err.message);
+    }
+  }
   const base       = process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
   const session    = getSession(callSid);
   console.log(`[voice] Speech received: "${speechText}"`);
 
-  // No speech detected - just re-gather silently, don't speak
+  // No speech detected - re-record silently
   if (!speechText.trim()) {
     return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Gather input="speech" action="${base}/voice/respond" method="POST"
-    speechTimeout="2"
-    speechModel="phone_call"
-    enhanced="true"
-    timeout="10"
-    language="en-US">
-  </Gather>
-  <Redirect method="POST">${base}/voice/respond</Redirect>
+  <Record action="${base}/voice/respond" method="POST"
+    maxLength="30"
+    timeout="5"
+    playBeep="false"
+    trim="trim-silence"/>
 </Response>`);
-  }
 
   session.transcript.push(`Caller: ${speechText}`);
   extractIntake(speechText, session.intake);
@@ -353,6 +361,7 @@ async function handleRespond(req, res) {
 }
 
 // POST /voice/status — call ended
+}
 async function handleCallStatus(req, res) {
   res.sendStatus(200);
   const { CallSid, CallStatus, From } = req.body || {};
