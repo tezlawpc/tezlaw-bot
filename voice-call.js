@@ -94,9 +94,35 @@ async function deepgramTranscribe(audioUrl) {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) throw new Error("DEEPGRAM_API_KEY not set");
 
+  // Wait for Twilio to finalize the recording file
+  await new Promise(r => setTimeout(r, 1500));
+
+  // Download audio from Twilio with Basic Auth (recordings are auth-protected)
+  console.log("[voice] Downloading Twilio recording:", audioUrl);
+  const audioResp = await axios.get(audioUrl + ".mp3", {
+    auth: {
+      username: process.env.TWILIO_ACCOUNT_SID,
+      password: process.env.TWILIO_AUTH_TOKEN,
+    },
+    responseType: "arraybuffer",
+    validateStatus: (s) => s < 500,
+  });
+  if (audioResp.status !== 200) {
+    console.error("[voice] Twilio audio download failed:", audioResp.status);
+    return "";
+  }
+  const audioBuffer = Buffer.from(audioResp.data);
+  console.log("[voice] Twilio audio downloaded:", audioBuffer.length, "bytes");
+
+  if (audioBuffer.length < 500) {
+    console.log("[voice] Recording too short, skipping");
+    return "";
+  }
+
+  // Send raw audio bytes to Deepgram
   const res = await axios.post(
     "https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&detect_language=true",
-    { url: audioUrl },
+    audioBuffer,
     { headers: { Authorization: `Token ${key}`, "Content-Type": "audio/mpeg" } }
   );
   const transcript = res.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
