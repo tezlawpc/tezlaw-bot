@@ -288,24 +288,30 @@ function handleMediaStream(ws, req, savedPrompt) {
 
   // ── Send audio back to Twilio ───────────────────────
   function sendAudioToTwilio(audioBuffer) {
-    if (!streamSid || ws.readyState !== WebSocket.OPEN) return;
-    const base64Audio = audioBuffer.toString("base64");
-    // Split into 20ms chunks (160 bytes at 8kHz) for smooth playback
-    const chunkSize = 160;
-    for (let i = 0; i < base64Audio.length; i += chunkSize * 4) {
-      const chunk = base64Audio.substring(i, i + chunkSize * 4);
+    if (!streamSid || ws.readyState !== WebSocket.OPEN) {
+      console.error("[voice] Cannot send audio — streamSid:", streamSid, "ws state:", ws.readyState);
+      return;
+    }
+    // Twilio expects raw mulaw audio as base64 in 20ms chunks (160 bytes each at 8kHz)
+    // Each chunk = 160 bytes of raw audio (NOT base64 size)
+    const CHUNK_BYTES = 160; // 20ms at 8kHz mulaw
+    let offset = 0;
+    while (offset < audioBuffer.length) {
+      const chunk = audioBuffer.slice(offset, offset + CHUNK_BYTES);
       ws.send(JSON.stringify({
         event:     "media",
         streamSid: streamSid,
-        media:     { payload: chunk },
+        media:     { payload: chunk.toString("base64") },
       }));
+      offset += CHUNK_BYTES;
     }
-    // Send mark to know when audio finishes
+    // Mark end of audio
     ws.send(JSON.stringify({
       event:     "mark",
       streamSid: streamSid,
-      mark:      { name: "playback_done" },
+      mark:      { name: "audio_done" },
     }));
+    console.log("[voice] Audio sent to Twilio:", audioBuffer.length, "bytes in", Math.ceil(audioBuffer.length/CHUNK_BYTES), "chunks");
   }
 
   // ── Process caller speech with AI + TTS ────────────
