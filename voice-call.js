@@ -128,18 +128,20 @@ function serveAudio(req, res) {
 
 // ── Build TwiML to play audio and gather speech ───────────
 function buildGatherTwiML(audioUrl, action) {
+  // Play audio FIRST, then gather speech after it finishes
+  // This prevents Twilio from timing out while audio is still playing
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
+  <Play>${audioUrl}</Play>
   <Gather input="speech" action="${action}" method="POST"
-    speechTimeout="2"
+    speechTimeout="3"
     speechModel="phone_call"
     enhanced="true"
-    timeout="10"
+    timeout="15"
     language="en-US"
-    hints="immigration, accident, attorney, eviction, estate, lawsuit, green card, visa, USCIS">
-    <Play>${audioUrl}</Play>
+    hints="immigration, accident, attorney, eviction, estate, lawsuit, green card, visa, USCIS, help, name, number, phone">
   </Gather>
-  <Redirect method="POST">${action}?retry=1</Redirect>
+  <Redirect method="POST">${action}</Redirect>
 </Response>`;
 }
 
@@ -249,7 +251,7 @@ async function handleIncomingCall(req, res, savedPrompt) {
 
   try {
     const greeting = isBusinessHours()
-      ? "Thank you for calling Tez Law P.C., this is Zara your legal assistant. How can I help you today?"
+      ? "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. How may I help you?"
       : "Thank you for calling Tez Law P.C., this is Zara. Our office is closed right now, but I can take a message and have the team call you back next business day. How can I help?";
 
     const audio = await elevenLabsTTS(greeting);
