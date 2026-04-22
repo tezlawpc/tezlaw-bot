@@ -1,17 +1,9 @@
 // ============================================================
-//  voice-call.js — Zara Voice AI
+//  voice-call.js — Zara Voice AI (clean rewrite)
 //  Twilio (phone) + Deepgram (STT) + Claude (AI) + ElevenLabs (TTS)
-//
-//  Architecture (no media streaming — avoids audio encoding issues):
-//  1. Caller dials → POST /voice/incoming → Zara greets with <Play>
-//  2. Caller speaks → Twilio records speech → POST /voice/respond
-//  3. Server: Deepgram transcribes → Claude replies → ElevenLabs speaks
-//  4. Twilio plays audio → gather next speech → loop
 // ============================================================
 
 const axios = require("axios");
-const fs    = require("fs");
-const path  = require("path");
 
 // ── Business hours (Pacific Time) ────────────────────────
 function isBusinessHours() {
@@ -40,9 +32,7 @@ function getSession(callSid) {
   return sessions.get(callSid);
 }
 
-function clearSession(callSid) {
-  sessions.delete(callSid);
-}
+function clearSession(callSid) { sessions.delete(callSid); }
 
 // ── ElevenLabs TTS → returns mp3 Buffer ──────────────────
 async function elevenLabsTTS(text) {
@@ -55,22 +45,16 @@ async function elevenLabsTTS(text) {
     `https://api.elevenlabs.io/v1/text-to-speech/${voice}`,
     {
       text,
-      model_id: "eleven_multilingual_v2",   // Most widely supported model
+      model_id: "eleven_multilingual_v2",
       voice_settings: { stability: 0.5, similarity_boost: 0.75 },
-      // No output_format — let ElevenLabs return default MP3
     },
     {
-      headers: {
-        "xi-api-key":   key,
-        "Content-Type": "application/json",
-        "Accept":       "audio/mpeg",
-      },
+      headers: { "xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg" },
       responseType: "arraybuffer",
-      validateStatus: (s) => s < 500, // Don't throw on 4xx — check manually
+      validateStatus: (s) => s < 500,
     }
   );
 
-  // Check for API error (ElevenLabs returns JSON error as arraybuffer on 4xx)
   if (res.status !== 200) {
     const errText = Buffer.from(res.data).toString("utf8");
     console.error("[voice] ElevenLabs API error", res.status, errText.substring(0, 200));
@@ -79,27 +63,20 @@ async function elevenLabsTTS(text) {
 
   const buf = Buffer.from(res.data);
   console.log("[voice] ElevenLabs audio:", buf.length, "bytes");
-
   if (buf.length < 1000) {
-    const txt = buf.toString("utf8");
-    console.error("[voice] ElevenLabs returned too-small buffer:", txt.substring(0, 200));
-    throw new Error("ElevenLabs returned invalid audio: " + txt.substring(0, 100));
+    throw new Error("ElevenLabs returned invalid audio: " + buf.toString("utf8").substring(0, 100));
   }
-
   return buf;
-Buffer.from((await axios.get(audioUrl + ".mp3", { auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN }, responseType: "arraybuffer" })).data)
+}
 
-// ── Deepgram STT — transcribe audio URL ──────────────────
-async function deepgramTranscribe(audioUrl) {
+// ── Deepgram STT — download Twilio recording with auth, then transcribe ──
+async function deepgramTranscribe(recordingUrl) {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) throw new Error("DEEPGRAM_API_KEY not set");
 
-  // Wait for Twilio to finalize the recording file
-  await new Promise(r => setTimeout(r, 1500));
-
-  // Download audio from Twilio with Basic Auth (recordings are auth-protected)
-  console.log("[voice] Downloading Twilio recording:", audioUrl);
-  const audioResp = await axios.get(audioUrl + ".mp3", {
+  // Download the Twilio recording as mp3 with basic auth
+  console.log("[voice] Downloading Twilio recording:", recordingUrl);
+  const dl = await axios.get(recordingUrl + ".mp3", {
     auth: {
       username: process.env.TWILIO_ACCOUNT_SID,
       password: process.env.TWILIO_AUTH_TOKEN,
@@ -107,24 +84,26 @@ async function deepgramTranscribe(audioUrl) {
     responseType: "arraybuffer",
     validateStatus: (s) => s < 500,
   });
-  if (audioResp.status !== 200) {
-    console.error("[voice] Twilio audio download failed:", audioResp.status);
+  if (dl.status !== 200) {
+    console.error("[voice] Twilio recording download failed:", dl.status);
     return "";
   }
-  const audioBuffer = Buffer.from(audioResp.data);
-  console.log("[voice] Twilio audio downloaded:", audioBuffer.length, "bytes");
-
-  if (audioBuffer.length < 500) {
-    console.log("[voice] Recording too short, skipping");
-    return "";
-  }
+  const audioBytes = Buffer.from(dl.data);
+  console.log("[voice] Recording downloaded:", audioBytes.length, "bytes");
 
   // Send raw audio bytes to Deepgram
   const res = await axios.post(
     "https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&detect_language=true",
-    audioBuffer,
-    { headers: { Authorization: `Token ${key}`, "Content-Type": "audio/mpeg" } }
+    audioBytes,
+    {
+      headers: { Authorization: `Token ${key}`, "Content-Type": "audio/mpeg" },
+      validateStatus: (s) => s < 500,
+    }
   );
+  if (res.status !== 200) {
+    console.error("[voice] Deepgram error:", res.status, JSON.stringify(res.data).substring(0, 300));
+    return "";
+  }
   const transcript = res.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
   console.log("[voice] Deepgram transcript:", transcript);
   return transcript;
@@ -152,15 +131,11 @@ async function askClaude(systemPrompt, conversation) {
 }
 
 // ── Serve audio file ──────────────────────────────────────
-// We save mp3 to /tmp and serve it via /voice/audio/:id
 const audioCache = new Map();
-
 function storeAudio(id, buffer) {
   audioCache.set(id, { buffer, created: Date.now() });
-  // Clean up old audio after 5 min
   setTimeout(() => audioCache.delete(id), 5 * 60 * 1000);
 }
-
 function serveAudio(req, res) {
   const { id } = req.params;
   const entry = audioCache.get(id);
@@ -170,18 +145,12 @@ function serveAudio(req, res) {
   res.send(entry.buffer);
 }
 
-// ── Build TwiML to play audio and gather speech ───────────
-function buildGatherTwiML(audioUrl, action) {
-  // Play audio first, then Record caller speech
-  // Using Record instead of Gather - more reliable, uses Deepgram for transcription
+// ── Build TwiML ───────────────────────────────────────────
+function buildPlayAndRecordTwiML(audioUrl, action) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${audioUrl}</Play>
-  <Record action="${action}" method="POST"
-    maxLength="30"
-    timeout="5"
-    playBeep="false"
-    trim="trim-silence"/>
+  <Record action="${action}" method="POST" maxLength="30" timeout="5" playBeep="false" trim="trim-silence"/>
 </Response>`;
 }
 
@@ -210,7 +179,6 @@ function buildVoicePrompt(savedPrompt) {
   const afterHours = !isBusinessHours()
     ? "\n\nIMPORTANT: It is currently after office hours (Mon-Fri 9am-5pm PT). Let the caller know their info will be passed to the team and they'll hear back next business day."
     : "";
-
   return (savedPrompt || "") + `
 
 ============================
@@ -239,11 +207,11 @@ function extractIntake(text, intake) {
     if (m) intake.callback = m[1].replace(/\D/g, "");
   }
   if (!intake.caseType) {
-    if (/visa|green card|immigration|uscis|daca|deportation/i.test(text))    intake.caseType = "Immigration";
-    else if (/accident|injury|crash/i.test(text))                             intake.caseType = "Car Accident / Personal Injury";
-    else if (/evict|landlord|tenant|rent/i.test(text))                        intake.caseType = "Landlord / Tenant";
-    else if (/will|trust|estate|probate/i.test(text))                         intake.caseType = "Estate Planning";
-    else if (/contract|lawsuit|sued|business/i.test(text))                    intake.caseType = "Business Litigation";
+    if (/visa|green card|immigration|uscis|daca|deportation/i.test(text))  intake.caseType = "Immigration";
+    else if (/accident|injury|crash/i.test(text))                          intake.caseType = "Car Accident / Personal Injury";
+    else if (/evict|landlord|tenant|rent/i.test(text))                     intake.caseType = "Landlord / Tenant";
+    else if (/will|trust|estate|probate/i.test(text))                      intake.caseType = "Estate Planning";
+    else if (/contract|lawsuit|sued|business/i.test(text))                 intake.caseType = "Business Litigation";
   }
   if (!intake.issue && text.length > 20) intake.issue = text.substring(0, 200);
 }
@@ -257,7 +225,8 @@ async function notifyCallSummary({ from, transcript, intake, transferred }) {
     : "\n(No intake collected)";
   const text = `📞 VOICE CALL — TEZ LAW P.C.\n\n📱 Caller: ${from}\n${transferred ? "🔀 Transferred to JJ\n" : ""}${intakeText}\n\n📝 Transcript:\n${transcript.slice(-2000) || "(empty)"}`;
   await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-    chat_id: JJ_TELEGRAM_ID, text: text.substring(0, 4000),
+    chat_id: JJ_TELEGRAM_ID,
+    text: text.substring(0, 4000),
   }).catch(e => console.error("[voice] Telegram notify error:", e.message));
 }
 
@@ -268,24 +237,28 @@ async function saveCallIntake(from, intake) {
     const db = require("./db");
     const uid = `phone_${from}`;
     await db.saveIntake("phone", uid, {
-      name: intake.name || "Voice Caller", issue: intake.issue || "Phone inquiry",
-      contact: intake.callback || from, case_type: intake.caseType || "General Legal",
+      name: intake.name || "Voice Caller",
+      issue: intake.issue || "Phone inquiry",
+      contact: intake.callback || from,
+      case_type: intake.caseType || "General Legal",
     });
     if (intake.name && intake.callback) {
-      await db.createLead({ platform: "phone", platformId: uid,
-        name: intake.name, contact: intake.callback, caseType: intake.caseType || "General Legal" });
+      await db.createLead({
+        platform: "phone", platformId: uid,
+        name: intake.name, contact: intake.callback,
+        caseType: intake.caseType || "General Legal",
+      });
     }
   } catch (e) { console.error("[voice] saveCallIntake error:", e.message); }
 }
 
-// ══════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
 //  ROUTE HANDLERS
-// ══════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
 
-// POST /voice/incoming — first webhook when call arrives
 async function handleIncomingCall(req, res, savedPrompt) {
   const callSid = req.body?.CallSid || "unknown";
-  const from    = req.body?.From || "unknown";
+  const from    = req.body?.From   || "unknown";
   const base    = process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
   console.log(`[voice] Incoming call SID=${callSid} from=${from}`);
 
@@ -299,59 +272,46 @@ async function handleIncomingCall(req, res, savedPrompt) {
   session.from = from;
   session.savedPrompt = savedPrompt;
 
-  // Use <Say> for greeting — instant, no audio file storage race condition
-  // ElevenLabs used for all responses after caller speaks
   res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="Polly.Joanna">${greeting}</Say>
-  <Record action="${base}/voice/respond" method="POST"
-    maxLength="30"
-    timeout="5"
-    playBeep="false"
-    trim="trim-silence"/>
+  <Record action="${base}/voice/respond" method="POST" maxLength="30" timeout="5" playBeep="false" trim="trim-silence"/>
 </Response>`);
-  console.log(`[voice] Greeting sent via <Say>, waiting for caller speech`);
+  console.log("[voice] Greeting sent, waiting for caller speech");
 }
 
-// POST /voice/respond — caller spoke, process and respond
 async function handleRespond(req, res) {
-  // DIAGNOSTIC: log everything Twilio sends
   console.log("[voice] /voice/respond body keys:", Object.keys(req.body || {}));
-  console.log("[voice] /voice/respond body:", JSON.stringify(req.body).substring(0, 500));
-  const callSid    = req.body?.CallSid || "unknown";
-  // Get speech from either SpeechResult (Gather) or RecordingUrl (Record)
-  let speechText = req.body?.SpeechResult || "";
+  const callSid = req.body?.CallSid || "unknown";
+  const base    = process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
+  const session = getSession(callSid);
 
-  // If we have a recording URL, transcribe it with Deepgram
+  // Get speech text — either from Twilio SpeechResult or from recording via Deepgram
+  let speechText = req.body?.SpeechResult || "";
   if (!speechText && req.body?.RecordingUrl) {
     try {
-      console.log("[voice] Transcribing recording:", req.body.RecordingUrl);
-      speechText = await deepgramTranscribe(req.body.RecordingUrl + ".mp3");
-      console.log("[voice] Deepgram result:", speechText);
+      speechText = await deepgramTranscribe(req.body.RecordingUrl);
     } catch (err) {
       console.error("[voice] Deepgram transcription error:", err.message);
     }
   }
-  const base       = process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
-  const session    = getSession(callSid);
+
   console.log(`[voice] Speech received: "${speechText}"`);
 
-  // No speech detected - re-record silently
+  // If no speech, re-record silently
   if (!speechText.trim()) {
     return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Record action="${base}/voice/respond" method="POST"
-    maxLength="30"
-    timeout="5"
-    playBeep="false"
-    trim="trim-silence"/>
+  <Record action="${base}/voice/respond" method="POST" maxLength="30" timeout="5" playBeep="false" trim="trim-silence"/>
 </Response>`);
+  }
 
+  // We have speech — process it
   session.transcript.push(`Caller: ${speechText}`);
   extractIntake(speechText, session.intake);
 
   try {
-    // Check urgent
+    // Urgent → transfer to JJ
     if (isUrgent(speechText) && !session.transferred) {
       session.transferred = true;
       const msg = "This sounds urgent — please hold while I connect you with Attorney Zhang.";
@@ -365,13 +325,13 @@ async function handleRespond(req, res) {
       return res.type("text/xml").send(buildTransferTwiML(`${base}/voice/audio/${id}`));
     }
 
-    // Get Claude response then convert to speech
+    // Claude response
     session.conversation.push({ role: "user", content: speechText });
     const systemPrompt = buildVoicePrompt(session.savedPrompt);
     const aiReply = await askClaude(systemPrompt, session.conversation);
     console.log(`[voice] Zara reply: "${aiReply.substring(0, 80)}"`);
 
-    // Check if Claude wants to transfer
+    // Claude requested transfer
     if (aiReply.includes("TRANSFER_NOW") && !session.transferred) {
       session.transferred = true;
       const cleanReply = aiReply.replace("TRANSFER_NOW", "").trim() || "Please hold while I connect you.";
@@ -388,48 +348,39 @@ async function handleRespond(req, res) {
     session.conversation.push({ role: "assistant", content: aiReply });
     session.transcript.push(`Zara: ${aiReply}`);
 
-    // Convert to speech
     const audio = await elevenLabsTTS(aiReply);
     const id = `reply_${callSid}_${Date.now()}`;
     storeAudio(id, audio);
 
-    res.type("text/xml").send(buildGatherTwiML(`${base}/voice/audio/${id}`, `${base}/voice/respond`));
+    res.type("text/xml").send(buildPlayAndRecordTwiML(`${base}/voice/audio/${id}`, `${base}/voice/respond`));
   } catch (err) {
     console.error("[voice] handleRespond error:", err.message);
-    try {
-      const audio = await elevenLabsTTS("I'm having a technical issue. Please call us at 626-678-8677. Goodbye.");
-      const id = `error_${Date.now()}`;
-      storeAudio(id, audio);
-      res.type("text/xml").send(buildPlayTwiML(`${base}/voice/audio/${id}`));
-    } catch {
-      res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say>Please call us at 626-678-8677. Goodbye.</Say></Response>`);
-    }
+    res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna">I'm having a technical issue. Please call us back at 626-678-8677. Goodbye.</Say></Response>`);
   }
 }
 
-// POST /voice/status — call ended
-}
 async function handleCallStatus(req, res) {
   res.sendStatus(200);
   const { CallSid, CallStatus, From } = req.body || {};
   if (CallStatus === "completed" || CallStatus === "no-answer") {
     const session = sessions.get(CallSid);
     if (session) {
-      notifyCallSummary({ from: session.from || From, transcript: session.transcript.join("\n"), intake: session.intake, transferred: session.transferred });
+      notifyCallSummary({
+        from: session.from || From,
+        transcript: session.transcript.join("\n"),
+        intake: session.intake,
+        transferred: session.transferred,
+      });
       saveCallIntake(session.from || From, session.intake);
       clearSession(CallSid);
     }
   }
 }
 
-// GET /voice/audio/:id — serve audio file
-function handleAudio(req, res) {
-  serveAudio(req, res);
-}
+function handleAudio(req, res) { serveAudio(req, res); }
 
-// POST /voice/transfer — transfer TwiML
 function handleTransfer(req, res) {
-  const JJ   = process.env.JJ_PHONE || "6266788677";
+  const JJ = process.env.JJ_PHONE || "6266788677";
   const base = process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
   res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -440,7 +391,6 @@ function handleTransfer(req, res) {
 </Response>`);
 }
 
-// POST /voice/transfer-fallback — JJ didn't answer
 function handleTransferFallback(req, res) {
   res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -450,7 +400,6 @@ function handleTransferFallback(req, res) {
 </Response>`);
 }
 
-// POST /voice/transcribe — voicemail transcription
 async function handleTranscription(req, res) {
   res.sendStatus(200);
   const { TranscriptionText, From } = req.body || {};
