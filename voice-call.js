@@ -252,7 +252,7 @@ async function handleIncomingCall(req, res, savedPrompt) {
   try {
     const greeting = isBusinessHours()
       ? "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. How may I help you?"
-      : "Thank you for calling Tez Law P.C., this is Zara. Our office is closed right now, but I can take a message and have the team call you back next business day. How can I help?";
+      : "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. Our office is currently closed, but I can take a message and have our team call you back next business day. How may I help you?";
 
     const audio = await elevenLabsTTS(greeting);
     const id = `greeting_${callSid}_${Date.now()}`;
