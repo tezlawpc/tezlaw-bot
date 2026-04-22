@@ -436,6 +436,60 @@ async function initWave1Tables() {
 }
 
 // ── Audit log helper ──────────────────────────────────────
+async function initWave2Tables() {
+  try {
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS conversation_scores (
+        id SERIAL PRIMARY KEY,
+        platform VARCHAR(20),
+        platform_id VARCHAR(100),
+        message_count INT DEFAULT 0,
+        score_accuracy INT,
+        score_tone INT,
+        score_disclaimer INT,
+        score_upl_risk VARCHAR(10),
+        score_overall INT,
+        summary TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS sol_deadlines (
+        id SERIAL PRIMARY KEY,
+        platform VARCHAR(20),
+        platform_id VARCHAR(100),
+        client_name VARCHAR(200),
+        case_type VARCHAR(100),
+        incident_date DATE,
+        deadline_date DATE,
+        alerted_90 BOOLEAN DEFAULT FALSE,
+        alerted_30 BOOLEAN DEFAULT FALSE,
+        alerted_7  BOOLEAN DEFAULT FALSE,
+        alerted_1  BOOLEAN DEFAULT FALSE,
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS drip_campaigns (
+        id SERIAL PRIMARY KEY,
+        platform VARCHAR(20),
+        platform_id VARCHAR(100),
+        case_type VARCHAR(100),
+        status VARCHAR(20) DEFAULT 'active',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS drip_messages (
+        id SERIAL PRIMARY KEY,
+        campaign_id INT REFERENCES drip_campaigns(id),
+        message TEXT,
+        send_at TIMESTAMPTZ,
+        status VARCHAR(20) DEFAULT 'pending',
+        sent_at TIMESTAMPTZ
+      );
+    `);
+    console.log("✅ Wave 2 tables ready");
+  } catch (err) {
+    console.error("❌ Wave 2 tables error:", err.message);
+  }
+}
+
 async function logAudit(actor, action, target, oldValue, newValue, ip) {
   try {
     await getPool().query(
