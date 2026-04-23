@@ -1,7 +1,7 @@
 // ============================================================
-//  voice-call.js — Zara Voice AI (Max Speed, All ElevenLabs)
-//  Twilio Gather STT + Claude Haiku + ElevenLabs Flash + cached greeting
-//  Target: ~3s perceived per turn
+//  voice-call.js — Zara Voice AI (Court Clerk Priority)
+//  Twilio Gather STT + Claude Haiku + ElevenLabs Flash
+//  Special handling for court clerk calls
 // ============================================================
 
 const axios = require("axios");
@@ -18,6 +18,11 @@ function isUrgent(text) {
   return /\b(ice|detained|arrest|deport|court today|court tomorrow|accident just|just happened|emergency|injured badly|in jail|in custody|scared|please help now)\b/i.test(text);
 }
 
+// ── Court clerk detection ─────────────────────────────────
+function isCourtClerk(text) {
+  return /\b(court clerk|clerk of (the )?court|clerk'?s office|calling from (the )?court|superior court|courthouse|judge'?s chambers|district court|federal court|court of appeals|municipal court|calling regarding (the )?case|case manager|court reporter|bailiff|probation officer|court administrator|calling on behalf of (the )?judge|this is .{0,40}(court|clerk))\b/i.test(text);
+}
+
 // ── In-memory call sessions ───────────────────────────────
 const sessions = new Map();
 
@@ -26,8 +31,10 @@ function getSession(callSid) {
     sessions.set(callSid, {
       conversation: [],
       transcript:   [],
-      intake:       { name: null, issue: null, callback: null, caseType: null },
+      intake:       { name: null, issue: null, callback: null, caseType: null, caseNumber: null, courtName: null },
       transferred:  false,
+      isCourtClerk: false,
+      courtAlertSent: false,
     });
   }
   return sessions.get(callSid);
@@ -108,7 +115,7 @@ function serveAudio(req, res) {
   res.send(entry.buffer);
 }
 
-// ── Pre-cached greetings (generated once at server startup) ──
+// ── Pre-cached greetings ──────────────────────────────────
 const GREETING_OPEN  = "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. How may I help you?";
 const GREETING_CLOSED = "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. Our office is currently closed, but I can take a message and have our team call you back next business day. How may I help you?";
 
@@ -126,7 +133,6 @@ async function initGreetings() {
     console.error("[voice] Greeting pre-cache failed (will fallback to Polly):", err.message);
   }
 }
-// Kick off greeting generation immediately when this module loads
 initGreetings();
 
 // ── Build TwiML — Gather for caller speech ────────────────
@@ -140,7 +146,7 @@ function buildPlayAndGatherTwiML(audioUrl, action) {
           timeout="5"
           profanityFilter="false"
           actionOnEmptyResult="true"
-          hints="immigration, green card, visa, USCIS, deportation, ICE, accident, injury, crash, eviction, landlord, tenant, estate, will, trust, business, lawsuit, attorney, Zhang, callback, emergency">
+          hints="court clerk, superior court, case number, hearing, docket, judge, Zhang, immigration, green card, visa, USCIS, deportation, accident, injury, crash, eviction, landlord, tenant, estate, will, trust, business, lawsuit, callback">
   </Gather>
   <Redirect method="POST">${action}</Redirect>
 </Response>`;
@@ -181,10 +187,28 @@ function buildTransferTwiML(audioUrl) {
 }
 
 // ── Voice system prompt ───────────────────────────────────
-function buildVoicePrompt(savedPrompt) {
+function buildVoicePrompt(savedPrompt, isCourtClerkCall) {
   const afterHours = !isBusinessHours()
     ? "\n\nIMPORTANT: It is currently after office hours (Mon-Fri 9am-5pm PT). Let the caller know their info will be passed to the team and they'll hear back next business day."
     : "";
+
+  const courtProtocol = isCourtClerkCall ? `
+
+============================
+COURT CLERK PROTOCOL — HIGHEST PRIORITY
+============================
+This caller is a COURT CLERK or court personnel. Handle with extreme respect and efficiency.
+Do NOT discuss legal matters, give advice, or engage in small talk. Be brief and professional.
+
+Your mission, in order (one question per turn):
+1. If you don't already have it, get the CASE NUMBER (ask them to state it slowly and clearly, including letters).
+2. Get the COURT NAME and DEPARTMENT if applicable.
+3. Get the BEST CALLBACK NUMBER.
+4. Ask if there is a SPECIFIC MESSAGE or DEADLINE.
+5. Close with: "Thank you — I'm alerting Attorney Zhang right now. He will call you back as soon as possible."
+
+Keep every turn to 1 SHORT sentence. Do not ramble. Do not offer legal information.` : "";
+
   return (savedPrompt || "") + `
 
 ============================
@@ -199,7 +223,7 @@ If URGENT (ICE, detained, accident just happened, court today): say exactly:
 "This sounds urgent — please hold while I connect you with Attorney Zhang."
 Then say ONLY: TRANSFER_NOW
 
-Never mention you are AI unless asked directly.${afterHours}`;
+Never mention you are AI unless asked directly.${courtProtocol}${afterHours}`;
 }
 
 // ── Extract intake from speech ────────────────────────────
@@ -212,8 +236,31 @@ function extractIntake(text, intake) {
     const m = text.match(/\b(\+?1?\s?[\(\-]?\d{3}[\)\-\s]?\s?\d{3}[\-\s]?\d{4})\b/);
     if (m) intake.callback = m[1].replace(/\D/g, "");
   }
+
+  // Case number extraction — multiple common formats
+  if (!intake.caseNumber) {
+    const patterns = [
+      /\b(\d{2}[A-Z]{2,6}\d{4,8})\b/,                      // 22STCV12345, 23CMCV00123
+      /\b([A-Z]{1,3}\d{5,8})\b/,                           // BC123456, SC123456, VA123456
+      /\b(\d{1,2}:\d{2}-[A-Za-z]{2}-\d{4,6})\b/,           // federal 2:24-cv-00123
+      /\bcase\s+(?:number|no\.?|#)[\s:]*([\w\-]{4,20})\b/i, // "case number 22STCV12345"
+      /\bdocket\s+(?:number|no\.?|#)?[\s:]*([\w\-]{4,20})\b/i, // "docket number XYZ"
+    ];
+    for (const re of patterns) {
+      const m = text.match(re);
+      if (m && m[1]) { intake.caseNumber = m[1].trim(); break; }
+    }
+  }
+
+  // Court name
+  if (!intake.courtName) {
+    const m = text.match(/\b([A-Za-z\s]{3,40}(?:superior court|district court|court of appeals|supreme court|municipal court|federal court|courthouse))\b/i);
+    if (m) intake.courtName = m[1].trim().replace(/\s+/g, " ");
+  }
+
   if (!intake.caseType) {
-    if (/visa|green card|immigration|uscis|daca|deportation/i.test(text))  intake.caseType = "Immigration";
+    if (isCourtClerk(text))                                                intake.caseType = "⚖️ COURT CLERK CALL";
+    else if (/visa|green card|immigration|uscis|daca|deportation/i.test(text))  intake.caseType = "Immigration";
     else if (/accident|injury|crash/i.test(text))                          intake.caseType = "Car Accident / Personal Injury";
     else if (/evict|landlord|tenant|rent/i.test(text))                     intake.caseType = "Landlord / Tenant";
     else if (/will|trust|estate|probate/i.test(text))                      intake.caseType = "Estate Planning";
@@ -222,15 +269,52 @@ function extractIntake(text, intake) {
   if (!intake.issue && text.length > 20) intake.issue = text.substring(0, 200);
 }
 
-// ── Send post-call summary to Telegram ───────────────────
-async function notifyCallSummary({ from, transcript, intake, transferred }) {
+// ── 🚨 IMMEDIATE court clerk alert to JJ ────────────────
+async function notifyCourtClerkAlert({ from, transcript, intake, callSid }) {
   const { TELEGRAM_TOKEN, JJ_TELEGRAM_ID, TEAM_TELEGRAM_CHAT_ID } = process.env;
   if (!TELEGRAM_TOKEN) return;
+
+  const text = `🚨🚨🚨 COURT CLERK CALLING — URGENT 🚨🚨🚨
+
+⚖️ Court: ${intake.courtName || "Not captured yet"}
+📋 Case #: ${intake.caseNumber || "Not captured yet"}
+📞 Clerk callback: ${intake.callback || "Not yet given"}
+📱 Caller ID: ${from}
+🆔 CallSid: ${callSid || "n/a"}
+
+📝 What they said so far:
+${transcript.slice(-1500) || "(call just started)"}
+
+⚡ JJ — please call this clerk back ASAP.`;
+
+  const targets = [JJ_TELEGRAM_ID, TEAM_TELEGRAM_CHAT_ID].filter(Boolean);
+  for (const chat_id of targets) {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+      chat_id,
+      text: text.substring(0, 4000),
+    }).catch(e => console.error("[voice] Court clerk alert Telegram error:", e.message));
+  }
+  console.log(`[voice] 🚨 COURT CLERK ALERT sent to ${targets.length} recipient(s)`);
+}
+
+// ── Send post-call summary to Telegram ───────────────────
+async function notifyCallSummary({ from, transcript, intake, transferred, isCourtClerkCall }) {
+  const { TELEGRAM_TOKEN, JJ_TELEGRAM_ID, TEAM_TELEGRAM_CHAT_ID } = process.env;
+  if (!TELEGRAM_TOKEN) return;
+
+  const header = isCourtClerkCall
+    ? `🚨 COURT CLERK CALL ENDED — FULL SUMMARY 🚨`
+    : `📞 VOICE CALL — TEZ LAW P.C.`;
+
+  const courtBlock = isCourtClerkCall
+    ? `\n⚖️ Court: ${intake.courtName || "Not captured"}\n📋 Case #: ${intake.caseNumber || "Not captured"}\n`
+    : "";
 
   const intakeText = (intake.name || intake.callback || intake.caseType)
     ? `\n👤 Name: ${intake.name || "Not captured"}\n⚖️ Issue: ${intake.issue || intake.caseType || "Not specified"}\n📞 Callback: ${intake.callback || from}`
     : "\n(No intake collected)";
-  const text = `📞 VOICE CALL — TEZ LAW P.C.\n\n📱 Caller: ${from}\n${transferred ? "🔀 Transferred to JJ\n" : ""}${intakeText}\n\n📝 Transcript:\n${transcript.slice(-2000) || "(empty)"}`;
+
+  const text = `${header}\n\n📱 Caller: ${from}\n${transferred ? "🔀 Transferred to JJ\n" : ""}${courtBlock}${intakeText}\n\n📝 Full transcript:\n${transcript.slice(-2000) || "(empty)"}`;
 
   const targets = [JJ_TELEGRAM_ID, TEAM_TELEGRAM_CHAT_ID].filter(Boolean);
   for (const chat_id of targets) {
@@ -244,13 +328,19 @@ async function notifyCallSummary({ from, transcript, intake, transferred }) {
 
 // ── Save intake to DB ─────────────────────────────────────
 async function saveCallIntake(from, intake) {
-  if (!intake.name && !intake.callback) return;
+  if (!intake.name && !intake.callback && !intake.caseNumber) return;
   try {
     const db = require("./db");
     const uid = `phone_${from}`;
+    const issueFull = [
+      intake.caseNumber ? `Case#: ${intake.caseNumber}` : null,
+      intake.courtName ? `Court: ${intake.courtName}` : null,
+      intake.issue,
+    ].filter(Boolean).join(" | ") || "Phone inquiry";
+
     await db.saveIntake("phone", uid, {
       name: intake.name || "Voice Caller",
-      issue: intake.issue || "Phone inquiry",
+      issue: issueFull,
       contact: intake.callback || from,
       case_type: intake.caseType || "General Legal",
     });
@@ -284,7 +374,6 @@ async function handleIncomingCall(req, res, savedPrompt) {
   session.from = from;
   session.savedPrompt = savedPrompt;
 
-  // Use pre-cached ElevenLabs greeting if ready, otherwise fallback to Polly
   if (greetingReady && audioCache.has(greetingKey)) {
     res.type("text/xml").send(buildPlayAndGatherTwiML(
       `${base}/voice/audio/${greetingKey}`,
@@ -292,7 +381,6 @@ async function handleIncomingCall(req, res, savedPrompt) {
     ));
     console.log("[voice] Greeting served from cache (ElevenLabs)");
   } else {
-    // Fallback: Polly while greeting still generating
     res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="Polly.Joanna-Neural">${greetingText}</Say>
@@ -311,12 +399,10 @@ async function handleRespond(req, res) {
   const base    = process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
   const session = getSession(callSid);
 
-  // Get speech directly from Twilio's built-in STT — no Deepgram needed
   const speechText = (req.body?.SpeechResult || "").trim();
   const confidence = parseFloat(req.body?.Confidence || "0");
   console.log(`[voice] Speech received (confidence=${confidence}): "${speechText}"`);
 
-  // No speech — re-prompt silently (no TTS fetch)
   if (!speechText) {
     return res.type("text/xml").send(buildGatherOnly(`${base}/voice/respond`));
   }
@@ -334,31 +420,55 @@ async function handleRespond(req, res) {
     }
   }
 
-  // We have speech — process it
   session.transcript.push(`Caller: ${speechText}`);
   extractIntake(speechText, session.intake);
 
+  // ── COURT CLERK DETECTION ────────────────────────────
+  // Check if this turn OR any prior turn mentions court clerk keywords
+  if (!session.isCourtClerk) {
+    const fullContext = session.transcript.join(" ");
+    if (isCourtClerk(speechText) || isCourtClerk(fullContext)) {
+      session.isCourtClerk = true;
+      session.intake.caseType = "⚖️ COURT CLERK CALL";
+      console.log(`[voice] 🚨 COURT CLERK DETECTED on call ${callSid}`);
+    }
+  }
+
+  // Fire immediate alert once we have minimum info (case# OR callback OR 2+ exchanges)
+  if (session.isCourtClerk && !session.courtAlertSent) {
+    const hasUsefulInfo = session.intake.caseNumber || session.intake.callback || session.transcript.length >= 3;
+    if (hasUsefulInfo) {
+      session.courtAlertSent = true;
+      // Fire and forget (don't block the response)
+      notifyCourtClerkAlert({
+        from: session.from,
+        transcript: session.transcript.join("\n"),
+        intake: session.intake,
+        callSid,
+      }).catch(() => {});
+    }
+  }
+
   try {
-    // Urgent → transfer to JJ
-    if (isUrgent(speechText) && !session.transferred) {
+    // Urgent (legal emergency, not court clerk) → transfer to JJ
+    if (isUrgent(speechText) && !session.transferred && !session.isCourtClerk) {
       session.transferred = true;
       const msg = "This sounds urgent — please hold while I connect you with Attorney Zhang.";
       const audio = await elevenLabsTTS(msg);
       const id = `transfer_${Date.now()}`;
       storeAudio(id, audio);
       session.transcript.push(`Zara: ${msg}`);
-      notifyCallSummary({ from: session.from, transcript: session.transcript.join("\n"), intake: session.intake, transferred: true });
+      notifyCallSummary({ from: session.from, transcript: session.transcript.join("\n"), intake: session.intake, transferred: true, isCourtClerkCall: false });
       saveCallIntake(session.from, session.intake);
       return res.type("text/xml").send(buildTransferTwiML(`${base}/voice/audio/${id}`));
     }
 
-    // Claude response
+    // Claude response (with court clerk prompt if applicable)
     session.conversation.push({ role: "user", content: speechText });
-    const systemPrompt = buildVoicePrompt(session.savedPrompt);
+    const systemPrompt = buildVoicePrompt(session.savedPrompt, session.isCourtClerk);
     const aiReply = await askClaude(systemPrompt, session.conversation);
     console.log(`[voice] Zara reply: "${aiReply.substring(0, 80)}"`);
 
-    // Claude requested transfer
     if (aiReply.includes("TRANSFER_NOW") && !session.transferred) {
       session.transferred = true;
       const cleanReply = aiReply.replace("TRANSFER_NOW", "").trim() || "Please hold while I connect you.";
@@ -366,7 +476,7 @@ async function handleRespond(req, res) {
       const id = `transfer_${Date.now()}`;
       storeAudio(id, audio);
       session.transcript.push(`Zara: ${cleanReply}`);
-      notifyCallSummary({ from: session.from, transcript: session.transcript.join("\n"), intake: session.intake, transferred: true });
+      notifyCallSummary({ from: session.from, transcript: session.transcript.join("\n"), intake: session.intake, transferred: true, isCourtClerkCall: session.isCourtClerk });
       saveCallIntake(session.from, session.intake);
       return res.type("text/xml").send(buildTransferTwiML(`${base}/voice/audio/${id}`));
     }
@@ -397,6 +507,7 @@ async function handleCallStatus(req, res) {
         transcript: session.transcript.join("\n"),
         intake: session.intake,
         transferred: session.transferred,
+        isCourtClerkCall: session.isCourtClerk,
       });
       await saveCallIntake(session.from || From, session.intake);
       clearSession(CallSid);
