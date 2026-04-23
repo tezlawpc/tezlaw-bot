@@ -1,7 +1,7 @@
 // ============================================================
-//  voice-call.js — Zara Voice AI (Optimized for Speed)
-//  Twilio (phone) + Deepgram (STT) + Claude Haiku (AI) + ElevenLabs Turbo (TTS)
-//  Target: ~4s per turn (down from 8-10s)
+//  voice-call.js — Zara Voice AI (Max Speed, All ElevenLabs)
+//  Twilio Gather STT + Claude Haiku + ElevenLabs Flash + cached greeting
+//  Target: ~3s perceived per turn
 // ============================================================
 
 const axios = require("axios");
@@ -35,7 +35,7 @@ function getSession(callSid) {
 
 function clearSession(callSid) { sessions.delete(callSid); }
 
-// ── ElevenLabs TTS → returns mp3 Buffer (TURBO MODEL = FASTEST) ──
+// ── ElevenLabs TTS → returns mp3 Buffer (FLASH = ~40ms first byte) ──
 async function elevenLabsTTS(text) {
   const key   = process.env.ELEVENLABS_API_KEY;
   const voice = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
@@ -46,7 +46,7 @@ async function elevenLabsTTS(text) {
     `https://api.elevenlabs.io/v1/text-to-speech/${voice}`,
     {
       text,
-      model_id: "eleven_turbo_v2_5",
+      model_id: "eleven_flash_v2_5",
       voice_settings: { stability: 0.5, similarity_boost: 0.75 },
     },
     {
@@ -70,51 +70,13 @@ async function elevenLabsTTS(text) {
   return buf;
 }
 
-// ── Deepgram STT — download Twilio recording with auth, then transcribe ──
-async function deepgramTranscribe(recordingUrl) {
-  const key = process.env.DEEPGRAM_API_KEY;
-  if (!key) throw new Error("DEEPGRAM_API_KEY not set");
-
-  console.log("[voice] Downloading Twilio recording:", recordingUrl);
-  const dl = await axios.get(recordingUrl + ".mp3", {
-    auth: {
-      username: process.env.TWILIO_ACCOUNT_SID,
-      password: process.env.TWILIO_AUTH_TOKEN,
-    },
-    responseType: "arraybuffer",
-    validateStatus: (s) => s < 500,
-  });
-  if (dl.status !== 200) {
-    console.error("[voice] Twilio recording download failed:", dl.status);
-    return "";
-  }
-  const audioBytes = Buffer.from(dl.data);
-  console.log("[voice] Recording downloaded:", audioBytes.length, "bytes");
-
-  const res = await axios.post(
-    "https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&detect_language=true",
-    audioBytes,
-    {
-      headers: { Authorization: `Token ${key}`, "Content-Type": "audio/mpeg" },
-      validateStatus: (s) => s < 500,
-    }
-  );
-  if (res.status !== 200) {
-    console.error("[voice] Deepgram error:", res.status, JSON.stringify(res.data).substring(0, 300));
-    return "";
-  }
-  const transcript = res.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
-  console.log("[voice] Deepgram transcript:", transcript);
-  return transcript;
-}
-
 // ── Claude AI response (HAIKU + short max_tokens = FASTEST) ──
 async function askClaude(systemPrompt, conversation) {
   const res = await axios.post(
     "https://api.anthropic.com/v1/messages",
     {
       model:      "claude-haiku-4-5-20251001",
-      max_tokens: 120,
+      max_tokens: 80,
       system:     systemPrompt,
       messages:   conversation,
     },
@@ -131,9 +93,11 @@ async function askClaude(systemPrompt, conversation) {
 
 // ── Serve audio file ──────────────────────────────────────
 const audioCache = new Map();
-function storeAudio(id, buffer) {
-  audioCache.set(id, { buffer, created: Date.now() });
-  setTimeout(() => audioCache.delete(id), 5 * 60 * 1000);
+function storeAudio(id, buffer, persistent = false) {
+  audioCache.set(id, { buffer, created: Date.now(), persistent });
+  if (!persistent) {
+    setTimeout(() => audioCache.delete(id), 5 * 60 * 1000);
+  }
 }
 function serveAudio(req, res) {
   const { id } = req.params;
@@ -144,12 +108,55 @@ function serveAudio(req, res) {
   res.send(entry.buffer);
 }
 
-// ── Build TwiML (timeout="2" = faster silence detection) ──
-function buildPlayAndRecordTwiML(audioUrl, action) {
+// ── Pre-cached greetings (generated once at server startup) ──
+const GREETING_OPEN  = "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. How may I help you?";
+const GREETING_CLOSED = "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. Our office is currently closed, but I can take a message and have our team call you back next business day. How may I help you?";
+
+let greetingReady = false;
+async function initGreetings() {
+  try {
+    console.log("[voice] Pre-generating greeting audio...");
+    const openAudio = await elevenLabsTTS(GREETING_OPEN);
+    storeAudio("greeting_open", openAudio, true);
+    const closedAudio = await elevenLabsTTS(GREETING_CLOSED);
+    storeAudio("greeting_closed", closedAudio, true);
+    greetingReady = true;
+    console.log("[voice] Greetings pre-cached successfully");
+  } catch (err) {
+    console.error("[voice] Greeting pre-cache failed (will fallback to Polly):", err.message);
+  }
+}
+// Kick off greeting generation immediately when this module loads
+initGreetings();
+
+// ── Build TwiML — Gather for caller speech ────────────────
+function buildPlayAndGatherTwiML(audioUrl, action) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${audioUrl}</Play>
-  <Record action="${action}" method="POST" maxLength="30" timeout="2" playBeep="false" trim="trim-silence"/>
+  <Gather input="speech" action="${action}" method="POST"
+          language="en-US"
+          speechTimeout="1"
+          timeout="5"
+          profanityFilter="false"
+          actionOnEmptyResult="true"
+          hints="immigration, green card, visa, USCIS, deportation, ICE, accident, injury, crash, eviction, landlord, tenant, estate, will, trust, business, lawsuit, attorney, Zhang, callback, emergency">
+  </Gather>
+  <Redirect method="POST">${action}</Redirect>
+</Response>`;
+}
+
+function buildGatherOnly(action) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="speech" action="${action}" method="POST"
+          language="en-US"
+          speechTimeout="1"
+          timeout="5"
+          profanityFilter="false"
+          actionOnEmptyResult="true">
+  </Gather>
+  <Redirect method="POST">${action}</Redirect>
 </Response>`;
 }
 
@@ -183,8 +190,8 @@ function buildVoicePrompt(savedPrompt) {
 ============================
 VOICE CALL — CRITICAL RULES
 ============================
-You are Zara answering a PHONE CALL for Tez Law P.C. Keep ALL responses to 1-2 SHORT sentences max.
-No bullet points. No lists. Speak naturally like a warm receptionist.
+You are Zara answering a PHONE CALL for Tez Law P.C. Keep ALL responses to 1-2 SHORT sentences.
+Under 25 words. No bullet points. No lists. Speak like a warm receptionist.
 
 GOAL: Briefly help, then collect name, brief description of issue, and callback number (one at a time).
 
@@ -267,49 +274,64 @@ async function handleIncomingCall(req, res, savedPrompt) {
   const base    = process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
   console.log(`[voice] Incoming call SID=${callSid} from=${from}`);
 
-  const greeting = isBusinessHours()
-    ? "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. How may I help you?"
-    : "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. Our office is currently closed, but I can take a message and have our team call you back next business day. How may I help you?";
+  const afterHours = !isBusinessHours();
+  const greetingText = afterHours ? GREETING_CLOSED : GREETING_OPEN;
+  const greetingKey  = afterHours ? "greeting_closed" : "greeting_open";
 
   const session = getSession(callSid);
-  session.conversation.push({ role: "assistant", content: greeting });
-  session.transcript.push(`Zara: ${greeting}`);
+  session.conversation.push({ role: "assistant", content: greetingText });
+  session.transcript.push(`Zara: ${greetingText}`);
   session.from = from;
   session.savedPrompt = savedPrompt;
 
-  // Use Polly for greeting = instant, no audio-file race condition
-  res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
+  // Use pre-cached ElevenLabs greeting if ready, otherwise fallback to Polly
+  if (greetingReady && audioCache.has(greetingKey)) {
+    res.type("text/xml").send(buildPlayAndGatherTwiML(
+      `${base}/voice/audio/${greetingKey}`,
+      `${base}/voice/respond`
+    ));
+    console.log("[voice] Greeting served from cache (ElevenLabs)");
+  } else {
+    // Fallback: Polly while greeting still generating
+    res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna-Neural">${greeting}</Say>
-  <Record action="${base}/voice/respond" method="POST" maxLength="30" timeout="2" playBeep="false" trim="trim-silence"/>
+  <Say voice="Polly.Joanna-Neural">${greetingText}</Say>
+  <Gather input="speech" action="${base}/voice/respond" method="POST"
+          language="en-US" speechTimeout="1" timeout="5"
+          profanityFilter="false" actionOnEmptyResult="true">
+  </Gather>
+  <Redirect method="POST">${base}/voice/respond</Redirect>
 </Response>`);
-  console.log("[voice] Greeting sent, waiting for caller speech");
+    console.log("[voice] Greeting served via Polly (ElevenLabs cache not ready)");
+  }
 }
 
 async function handleRespond(req, res) {
-  console.log("[voice] /voice/respond body keys:", Object.keys(req.body || {}));
   const callSid = req.body?.CallSid || "unknown";
   const base    = process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com";
   const session = getSession(callSid);
 
-  // Get speech text via Deepgram
-  let speechText = req.body?.SpeechResult || "";
-  if (!speechText && req.body?.RecordingUrl) {
-    try {
-      speechText = await deepgramTranscribe(req.body.RecordingUrl);
-    } catch (err) {
-      console.error("[voice] Deepgram transcription error:", err.message);
-    }
+  // Get speech directly from Twilio's built-in STT — no Deepgram needed
+  const speechText = (req.body?.SpeechResult || "").trim();
+  const confidence = parseFloat(req.body?.Confidence || "0");
+  console.log(`[voice] Speech received (confidence=${confidence}): "${speechText}"`);
+
+  // No speech — re-prompt silently (no TTS fetch)
+  if (!speechText) {
+    return res.type("text/xml").send(buildGatherOnly(`${base}/voice/respond`));
   }
 
-  console.log(`[voice] Speech received: "${speechText}"`);
-
-  // If no speech, re-record silently (no reprompt = no TTS cost)
-  if (!speechText.trim()) {
-    return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Record action="${base}/voice/respond" method="POST" maxLength="30" timeout="2" playBeep="false" trim="trim-silence"/>
-</Response>`);
+  // Low confidence — ask to repeat
+  if (confidence > 0 && confidence < 0.35 && session.conversation.length > 0) {
+    try {
+      const msg = "Sorry, could you repeat that?";
+      const audio = await elevenLabsTTS(msg);
+      const id = `reprompt_${Date.now()}`;
+      storeAudio(id, audio);
+      return res.type("text/xml").send(buildPlayAndGatherTwiML(`${base}/voice/audio/${id}`, `${base}/voice/respond`));
+    } catch {
+      return res.type("text/xml").send(buildGatherOnly(`${base}/voice/respond`));
+    }
   }
 
   // We have speech — process it
@@ -356,7 +378,7 @@ async function handleRespond(req, res) {
     const id = `reply_${callSid}_${Date.now()}`;
     storeAudio(id, audio);
 
-    res.type("text/xml").send(buildPlayAndRecordTwiML(`${base}/voice/audio/${id}`, `${base}/voice/respond`));
+    res.type("text/xml").send(buildPlayAndGatherTwiML(`${base}/voice/audio/${id}`, `${base}/voice/respond`));
   } catch (err) {
     console.error("[voice] handleRespond error:", err.message);
     res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">I'm having a technical issue. Please call us back at 626-678-8677. Goodbye.</Say></Response>`);
