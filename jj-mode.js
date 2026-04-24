@@ -256,7 +256,13 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     // Send voice reply async — non-blocking, text already returned
     sendVoiceReply(platform, userId, reply).catch(() => {});
 
-    return { handled: true, message: `🔒 [JJ Mode]\n\n${docNote}${reply}` };
+    return { handled: true, message: `🔒 [JJ Mode]\n\n${docNote}${reply}`.substring(0, 3900) + (`🔒 [JJ Mode]
+
+${docNote}${reply}`.length > 3900 ? "
+
+...
+
+📝 [Response truncated for Telegram — voice reply has full analysis]" : "") };
   } catch (err) {
     console.error("JJ mode Claude error:", err.message);
     return { handled: true, message: "Sorry JJ, I had a technical issue. Please try again." };
