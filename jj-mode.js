@@ -17,7 +17,7 @@ const JJ_PASSWORD = process.env.JJ_PASSWORD || "tezlaw2026jj";
 // ── Trigger phrases ───────────────────────────────────────
 const JJ_TRIGGERS_KEYWORDS = ["jj", "zhang", "private", "switch",
   "private channel", "private mode", "attorney mode", "jj mode",
-  "我是jj", "我是张", "张律师", "切换", "私人", "private chat", "secure mode"];
+  "我是jj", "我是章", "章律师", "切换", "私人", "private chat", "secure mode"];
 
 async function isJJTrigger(message) {
   const lower = message.toLowerCase();
