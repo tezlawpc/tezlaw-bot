@@ -188,7 +188,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
               "anthropic-version": "2023-06-01",
               "Content-Type": "application/json"
             },
-            timeout: 30000
+            timeout: 180000
           }
         );
         respData = resp.data;
