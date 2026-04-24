@@ -1,7 +1,7 @@
 // ============================================================
-//  voice-call.js — Zara Voice AI (Court Clerk Priority)
-//  Twilio Gather STT + Claude Haiku + ElevenLabs Flash
-//  Special handling for court clerk calls
+//  voice-call.js — Zara Voice AI (Max Speed + Thinking Sound)
+//  Twilio Gather STT + Claude Haiku + ElevenLabs Flash + Court Clerk Priority
+//  "Okay, give me one second" plays instantly while reply generates in background
 // ============================================================
 
 const axios = require("axios");
@@ -40,7 +40,13 @@ function getSession(callSid) {
   return sessions.get(callSid);
 }
 
-function clearSession(callSid) { sessions.delete(callSid); }
+function clearSession(callSid) {
+  sessions.delete(callSid);
+  pendingReplies.delete(callSid);
+}
+
+// ── Background work queue (for "thinking sound" pattern) ──
+const pendingReplies = new Map();
 
 // ── ElevenLabs TTS → returns mp3 Buffer (FLASH = ~40ms first byte) ──
 async function elevenLabsTTS(text) {
@@ -77,13 +83,13 @@ async function elevenLabsTTS(text) {
   return buf;
 }
 
-// ── Claude AI response (HAIKU + short max_tokens = FASTEST) ──
+// ── Claude AI response (HAIKU + tight max_tokens = FASTEST) ──
 async function askClaude(systemPrompt, conversation) {
   const res = await axios.post(
     "https://api.anthropic.com/v1/messages",
     {
       model:      "claude-haiku-4-5-20251001",
-      max_tokens: 80,
+      max_tokens: 60,
       system:     systemPrompt,
       messages:   conversation,
     },
@@ -115,38 +121,40 @@ function serveAudio(req, res) {
   res.send(entry.buffer);
 }
 
-// ── Pre-cached greetings ──────────────────────────────────
-const GREETING_OPEN  = "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. How may I help you?";
-const GREETING_CLOSED = "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. Our office is currently closed, but I can take a message and have our team call you back next business day. How may I help you?";
+// ── Pre-cached audio (generated once at server startup) ──
+const GREETING_OPEN    = "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. How may I help you?";
+const GREETING_CLOSED  = "Hi, thank you for calling TEZ Law Firm, this is Zara speaking. Our office is currently closed, but I can take a message and have our team call you back next business day. How may I help you?";
+const THINKING_TEXT    = "Okay, give me one second.";
+const REPROMPT_TEXT    = "Sorry, could you repeat that?";
 
-let greetingReady = false;
-async function initGreetings() {
+let cacheReady = false;
+async function initAudioCache() {
   try {
-    console.log("[voice] Pre-generating greeting audio...");
-    const openAudio = await elevenLabsTTS(GREETING_OPEN);
-    storeAudio("greeting_open", openAudio, true);
-    const closedAudio = await elevenLabsTTS(GREETING_CLOSED);
-    storeAudio("greeting_closed", closedAudio, true);
-    greetingReady = true;
-    console.log("[voice] Greetings pre-cached successfully");
+    console.log("[voice] Pre-generating audio cache...");
+    const openAudio     = await elevenLabsTTS(GREETING_OPEN);     storeAudio("greeting_open", openAudio, true);
+    const closedAudio   = await elevenLabsTTS(GREETING_CLOSED);   storeAudio("greeting_closed", closedAudio, true);
+    const thinkingAudio = await elevenLabsTTS(THINKING_TEXT);     storeAudio("thinking", thinkingAudio, true);
+    const repromptAudio = await elevenLabsTTS(REPROMPT_TEXT);     storeAudio("reprompt", repromptAudio, true);
+    cacheReady = true;
+    console.log("[voice] Audio cache ready (greetings + thinking + reprompt)");
   } catch (err) {
-    console.error("[voice] Greeting pre-cache failed (will fallback to Polly):", err.message);
+    console.error("[voice] Pre-cache failed (will fallback to Polly):", err.message);
   }
 }
-initGreetings();
+initAudioCache();
 
-// ── Build TwiML — Gather for caller speech ────────────────
+// ── Build TwiML ───────────────────────────────────────────
 function buildPlayAndGatherTwiML(audioUrl, action) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${audioUrl}</Play>
   <Gather input="speech" action="${action}" method="POST"
           language="en-US"
-          speechTimeout="1"
+          speechTimeout="0.5"
           timeout="5"
           profanityFilter="false"
           actionOnEmptyResult="true"
-          hints="court clerk, superior court, case number, hearing, docket, judge, Zhang, immigration, green card, visa, USCIS, deportation, accident, injury, crash, eviction, landlord, tenant, estate, will, trust, business, lawsuit, callback">
+          hints="court clerk, superior court, case number, hearing, docket, judge, Zhang, immigration, green card, visa, USCIS, deportation, accident, injury, eviction, landlord, tenant, estate, will, trust, business, lawsuit, callback">
   </Gather>
   <Redirect method="POST">${action}</Redirect>
 </Response>`;
@@ -157,7 +165,7 @@ function buildGatherOnly(action) {
 <Response>
   <Gather input="speech" action="${action}" method="POST"
           language="en-US"
-          speechTimeout="1"
+          speechTimeout="0.5"
           timeout="5"
           profanityFilter="false"
           actionOnEmptyResult="true">
@@ -166,11 +174,11 @@ function buildGatherOnly(action) {
 </Response>`;
 }
 
-function buildPlayTwiML(audioUrl) {
+function buildThinkingTwiML(thinkingUrl, continueUrl) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Play>${audioUrl}</Play>
-  <Hangup/>
+  <Play>${thinkingUrl}</Play>
+  <Redirect method="POST">${continueUrl}</Redirect>
 </Response>`;
 }
 
@@ -186,10 +194,10 @@ function buildTransferTwiML(audioUrl) {
 </Response>`;
 }
 
-// ── Voice system prompt ───────────────────────────────────
+// ── Voice system prompt (ULTRA-TIGHT: 1 sentence max) ───
 function buildVoicePrompt(savedPrompt, isCourtClerkCall) {
   const afterHours = !isBusinessHours()
-    ? "\n\nIMPORTANT: It is currently after office hours (Mon-Fri 9am-5pm PT). Let the caller know their info will be passed to the team and they'll hear back next business day."
+    ? "\n\nIMPORTANT: After office hours (Mon-Fri 9am-5pm PT). Tell caller team will call back next business day."
     : "";
 
   const courtProtocol = isCourtClerkCall ? `
@@ -197,27 +205,28 @@ function buildVoicePrompt(savedPrompt, isCourtClerkCall) {
 ============================
 COURT CLERK PROTOCOL — HIGHEST PRIORITY
 ============================
-This caller is a COURT CLERK or court personnel. Handle with extreme respect and efficiency.
-Do NOT discuss legal matters, give advice, or engage in small talk. Be brief and professional.
+This caller is a COURT CLERK. Be brief, professional, no legal chit-chat.
 
-Your mission, in order (one question per turn):
-1. If you don't already have it, get the CASE NUMBER (ask them to state it slowly and clearly, including letters).
-2. Get the COURT NAME and DEPARTMENT if applicable.
-3. Get the BEST CALLBACK NUMBER.
-4. Ask if there is a SPECIFIC MESSAGE or DEADLINE.
-5. Close with: "Thank you — I'm alerting Attorney Zhang right now. He will call you back as soon as possible."
+Your next question, in order (ONE per turn):
+1. Case number (ask to state slowly with letters).
+2. Court name and department.
+3. Best callback number.
+4. Any specific message or deadline.
+5. Then: "Thank you — I'm alerting Attorney Zhang right now. He will call you back as soon as possible."
 
-Keep every turn to 1 SHORT sentence. Do not ramble. Do not offer legal information.` : "";
+ONE sentence only. Under 15 words. No legal info.` : "";
 
   return (savedPrompt || "") + `
 
 ============================
 VOICE CALL — CRITICAL RULES
 ============================
-You are Zara answering a PHONE CALL for Tez Law P.C. Keep ALL responses to 1-2 SHORT sentences.
-Under 25 words. No bullet points. No lists. Speak like a warm receptionist.
+You are Zara on a PHONE CALL for Tez Law P.C.
 
-GOAL: Briefly help, then collect name, brief description of issue, and callback number (one at a time).
+HARD LIMIT: ONE short sentence per reply. Under 20 words. No exceptions.
+No bullet points. No lists. Speak like a warm receptionist.
+
+GOAL: Collect name, brief issue, callback number — one question at a time.
 
 If URGENT (ICE, detained, accident just happened, court today): say exactly:
 "This sounds urgent — please hold while I connect you with Attorney Zhang."
@@ -236,28 +245,23 @@ function extractIntake(text, intake) {
     const m = text.match(/\b(\+?1?\s?[\(\-]?\d{3}[\)\-\s]?\s?\d{3}[\-\s]?\d{4})\b/);
     if (m) intake.callback = m[1].replace(/\D/g, "");
   }
-
-  // Case number extraction — multiple common formats
   if (!intake.caseNumber) {
     const patterns = [
-      /\b(\d{2}[A-Z]{2,6}\d{4,8})\b/,                      // 22STCV12345, 23CMCV00123
-      /\b([A-Z]{1,3}\d{5,8})\b/,                           // BC123456, SC123456, VA123456
-      /\b(\d{1,2}:\d{2}-[A-Za-z]{2}-\d{4,6})\b/,           // federal 2:24-cv-00123
-      /\bcase\s+(?:number|no\.?|#)[\s:]*([\w\-]{4,20})\b/i, // "case number 22STCV12345"
-      /\bdocket\s+(?:number|no\.?|#)?[\s:]*([\w\-]{4,20})\b/i, // "docket number XYZ"
+      /\b(\d{2}[A-Z]{2,6}\d{4,8})\b/,
+      /\b([A-Z]{1,3}\d{5,8})\b/,
+      /\b(\d{1,2}:\d{2}-[A-Za-z]{2}-\d{4,6})\b/,
+      /\bcase\s+(?:number|no\.?|#)[\s:]*([\w\-]{4,20})\b/i,
+      /\bdocket\s+(?:number|no\.?|#)?[\s:]*([\w\-]{4,20})\b/i,
     ];
     for (const re of patterns) {
       const m = text.match(re);
       if (m && m[1]) { intake.caseNumber = m[1].trim(); break; }
     }
   }
-
-  // Court name
   if (!intake.courtName) {
     const m = text.match(/\b([A-Za-z\s]{3,40}(?:superior court|district court|court of appeals|supreme court|municipal court|federal court|courthouse))\b/i);
     if (m) intake.courtName = m[1].trim().replace(/\s+/g, " ");
   }
-
   if (!intake.caseType) {
     if (isCourtClerk(text))                                                intake.caseType = "⚖️ COURT CLERK CALL";
     else if (/visa|green card|immigration|uscis|daca|deportation/i.test(text))  intake.caseType = "Immigration";
@@ -292,12 +296,12 @@ ${transcript.slice(-1500) || "(call just started)"}
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
       chat_id,
       text: text.substring(0, 4000),
-    }).catch(e => console.error("[voice] Court clerk alert Telegram error:", e.message));
+    }).catch(e => console.error("[voice] Court clerk alert error:", e.message));
   }
   console.log(`[voice] 🚨 COURT CLERK ALERT sent to ${targets.length} recipient(s)`);
 }
 
-// ── Send post-call summary to Telegram ───────────────────
+// ── Post-call summary ────────────────────────────────────
 async function notifyCallSummary({ from, transcript, intake, transferred, isCourtClerkCall }) {
   const { TELEGRAM_TOKEN, JJ_TELEGRAM_ID, TEAM_TELEGRAM_CHAT_ID } = process.env;
   if (!TELEGRAM_TOKEN) return;
@@ -354,6 +358,45 @@ async function saveCallIntake(from, intake) {
   } catch (e) { console.error("[voice] saveCallIntake error:", e.message); }
 }
 
+// ── Generate reply in background (runs during thinking sound) ──
+async function generateReply(session, speechText) {
+  // Urgent — transfer to JJ (no Claude call needed)
+  if (isUrgent(speechText) && !session.transferred && !session.isCourtClerk) {
+    const msg = "This sounds urgent — please hold while I connect you with Attorney Zhang.";
+    const audio = await elevenLabsTTS(msg);
+    const id = `transfer_${Date.now()}`;
+    storeAudio(id, audio);
+    session.transcript.push(`Zara: ${msg}`);
+    session.transferred = true;
+    return { audioId: id, transfer: true };
+  }
+
+  // Claude response
+  session.conversation.push({ role: "user", content: speechText });
+  const systemPrompt = buildVoicePrompt(session.savedPrompt, session.isCourtClerk);
+  const aiReply = await askClaude(systemPrompt, session.conversation);
+  console.log(`[voice] Zara reply: "${aiReply.substring(0, 80)}"`);
+
+  // Claude requested transfer
+  if (aiReply.includes("TRANSFER_NOW") && !session.transferred) {
+    session.transferred = true;
+    const cleanReply = aiReply.replace("TRANSFER_NOW", "").trim() || "Please hold while I connect you.";
+    const audio = await elevenLabsTTS(cleanReply);
+    const id = `transfer_${Date.now()}`;
+    storeAudio(id, audio);
+    session.transcript.push(`Zara: ${cleanReply}`);
+    return { audioId: id, transfer: true };
+  }
+
+  session.conversation.push({ role: "assistant", content: aiReply });
+  session.transcript.push(`Zara: ${aiReply}`);
+
+  const audio = await elevenLabsTTS(aiReply);
+  const id = `reply_${Date.now()}`;
+  storeAudio(id, audio);
+  return { audioId: id, transfer: false };
+}
+
 // ════════════════════════════════════════════════════════
 //  ROUTE HANDLERS
 // ════════════════════════════════════════════════════════
@@ -374,7 +417,7 @@ async function handleIncomingCall(req, res, savedPrompt) {
   session.from = from;
   session.savedPrompt = savedPrompt;
 
-  if (greetingReady && audioCache.has(greetingKey)) {
+  if (cacheReady && audioCache.has(greetingKey)) {
     res.type("text/xml").send(buildPlayAndGatherTwiML(
       `${base}/voice/audio/${greetingKey}`,
       `${base}/voice/respond`
@@ -385,12 +428,12 @@ async function handleIncomingCall(req, res, savedPrompt) {
 <Response>
   <Say voice="Polly.Joanna-Neural">${greetingText}</Say>
   <Gather input="speech" action="${base}/voice/respond" method="POST"
-          language="en-US" speechTimeout="1" timeout="5"
+          language="en-US" speechTimeout="0.5" timeout="5"
           profanityFilter="false" actionOnEmptyResult="true">
   </Gather>
   <Redirect method="POST">${base}/voice/respond</Redirect>
 </Response>`);
-    console.log("[voice] Greeting served via Polly (ElevenLabs cache not ready)");
+    console.log("[voice] Greeting served via Polly (cache not ready)");
   }
 }
 
@@ -401,30 +444,48 @@ async function handleRespond(req, res) {
 
   const speechText = (req.body?.SpeechResult || "").trim();
   const confidence = parseFloat(req.body?.Confidence || "0");
-  console.log(`[voice] Speech received (confidence=${confidence}): "${speechText}"`);
 
+  // ═══ CONTINUE PHASE ═══
+  // No speech in this request + pending reply exists → return the real reply
+  if (!speechText && pendingReplies.has(callSid)) {
+    const pending = pendingReplies.get(callSid);
+    pendingReplies.delete(callSid);
+    try {
+      const result = await pending;
+      if (result.transfer) {
+        notifyCallSummary({ from: session.from, transcript: session.transcript.join("\n"), intake: session.intake, transferred: true, isCourtClerkCall: session.isCourtClerk });
+        saveCallIntake(session.from, session.intake);
+        return res.type("text/xml").send(buildTransferTwiML(`${base}/voice/audio/${result.audioId}`));
+      }
+      return res.type("text/xml").send(buildPlayAndGatherTwiML(`${base}/voice/audio/${result.audioId}`, `${base}/voice/respond`));
+    } catch (err) {
+      console.error("[voice] Reply generation failed:", err.message);
+      return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">I'm having a technical issue. Please call us back. Goodbye.</Say></Response>`);
+    }
+  }
+
+  // ═══ SILENCE ═══
+  // No speech + no pending → caller is silent, gather again
   if (!speechText) {
     return res.type("text/xml").send(buildGatherOnly(`${base}/voice/respond`));
   }
 
-  // Low confidence — ask to repeat
+  console.log(`[voice] Speech received (confidence=${confidence}): "${speechText}"`);
+
+  // ═══ LOW CONFIDENCE ═══
+  // Use pre-cached "Sorry, could you repeat that?" — instant
   if (confidence > 0 && confidence < 0.35 && session.conversation.length > 0) {
-    try {
-      const msg = "Sorry, could you repeat that?";
-      const audio = await elevenLabsTTS(msg);
-      const id = `reprompt_${Date.now()}`;
-      storeAudio(id, audio);
-      return res.type("text/xml").send(buildPlayAndGatherTwiML(`${base}/voice/audio/${id}`, `${base}/voice/respond`));
-    } catch {
-      return res.type("text/xml").send(buildGatherOnly(`${base}/voice/respond`));
+    if (cacheReady && audioCache.has("reprompt")) {
+      return res.type("text/xml").send(buildPlayAndGatherTwiML(`${base}/voice/audio/reprompt`, `${base}/voice/respond`));
     }
+    return res.type("text/xml").send(buildGatherOnly(`${base}/voice/respond`));
   }
 
+  // ═══ NEW TURN — real speech received ═══
   session.transcript.push(`Caller: ${speechText}`);
   extractIntake(speechText, session.intake);
 
-  // ── COURT CLERK DETECTION ────────────────────────────
-  // Check if this turn OR any prior turn mentions court clerk keywords
+  // Court clerk detection
   if (!session.isCourtClerk) {
     const fullContext = session.transcript.join(" ");
     if (isCourtClerk(speechText) || isCourtClerk(fullContext)) {
@@ -434,12 +495,11 @@ async function handleRespond(req, res) {
     }
   }
 
-  // Fire immediate alert once we have minimum info (case# OR callback OR 2+ exchanges)
+  // Fire immediate court clerk alert (non-blocking)
   if (session.isCourtClerk && !session.courtAlertSent) {
     const hasUsefulInfo = session.intake.caseNumber || session.intake.callback || session.transcript.length >= 3;
     if (hasUsefulInfo) {
       session.courtAlertSent = true;
-      // Fire and forget (don't block the response)
       notifyCourtClerkAlert({
         from: session.from,
         transcript: session.transcript.join("\n"),
@@ -449,49 +509,29 @@ async function handleRespond(req, res) {
     }
   }
 
-  try {
-    // Urgent (legal emergency, not court clerk) → transfer to JJ
-    if (isUrgent(speechText) && !session.transferred && !session.isCourtClerk) {
-      session.transferred = true;
-      const msg = "This sounds urgent — please hold while I connect you with Attorney Zhang.";
-      const audio = await elevenLabsTTS(msg);
-      const id = `transfer_${Date.now()}`;
-      storeAudio(id, audio);
-      session.transcript.push(`Zara: ${msg}`);
-      notifyCallSummary({ from: session.from, transcript: session.transcript.join("\n"), intake: session.intake, transferred: true, isCourtClerkCall: false });
-      saveCallIntake(session.from, session.intake);
-      return res.type("text/xml").send(buildTransferTwiML(`${base}/voice/audio/${id}`));
-    }
+  // ═══ KICK OFF REPLY IN BACKGROUND + PLAY THINKING SOUND ═══
+  // Start generating reply now — it runs while thinking sound plays
+  const replyPromise = generateReply(session, speechText).catch(err => {
+    console.error("[voice] generateReply error:", err.message);
+    throw err;
+  });
+  pendingReplies.set(callSid, replyPromise);
 
-    // Claude response (with court clerk prompt if applicable)
-    session.conversation.push({ role: "user", content: speechText });
-    const systemPrompt = buildVoicePrompt(session.savedPrompt, session.isCourtClerk);
-    const aiReply = await askClaude(systemPrompt, session.conversation);
-    console.log(`[voice] Zara reply: "${aiReply.substring(0, 80)}"`);
+  // Immediately play "Okay, give me one second" — caller hears response NOW
+  const thinkingUrl = (cacheReady && audioCache.has("thinking"))
+    ? `${base}/voice/audio/thinking`
+    : null;
 
-    if (aiReply.includes("TRANSFER_NOW") && !session.transferred) {
-      session.transferred = true;
-      const cleanReply = aiReply.replace("TRANSFER_NOW", "").trim() || "Please hold while I connect you.";
-      const audio = await elevenLabsTTS(cleanReply);
-      const id = `transfer_${Date.now()}`;
-      storeAudio(id, audio);
-      session.transcript.push(`Zara: ${cleanReply}`);
-      notifyCallSummary({ from: session.from, transcript: session.transcript.join("\n"), intake: session.intake, transferred: true, isCourtClerkCall: session.isCourtClerk });
-      saveCallIntake(session.from, session.intake);
-      return res.type("text/xml").send(buildTransferTwiML(`${base}/voice/audio/${id}`));
-    }
-
-    session.conversation.push({ role: "assistant", content: aiReply });
-    session.transcript.push(`Zara: ${aiReply}`);
-
-    const audio = await elevenLabsTTS(aiReply);
-    const id = `reply_${callSid}_${Date.now()}`;
-    storeAudio(id, audio);
-
-    res.type("text/xml").send(buildPlayAndGatherTwiML(`${base}/voice/audio/${id}`, `${base}/voice/respond`));
-  } catch (err) {
-    console.error("[voice] handleRespond error:", err.message);
-    res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">I'm having a technical issue. Please call us back at 626-678-8677. Goodbye.</Say></Response>`);
+  if (thinkingUrl) {
+    res.type("text/xml").send(buildThinkingTwiML(thinkingUrl, `${base}/voice/respond`));
+    console.log("[voice] Thinking sound playing while reply generates...");
+  } else {
+    // Fallback: Polly "okay, give me one second"
+    res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="Polly.Joanna-Neural">Okay, give me one second.</Say>
+  <Redirect method="POST">${base}/voice/respond</Redirect>
+</Response>`);
   }
 }
 
