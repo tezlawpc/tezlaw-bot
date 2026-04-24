@@ -256,7 +256,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     // Send voice reply async — non-blocking, text already returned
     sendVoiceReply(platform, userId, reply).catch(() => {});
 
-    return { handled: true, message: `🔒 [JJ Mode]\n\n${docNote}${reply}`.substring(0, 3900) + (`🔒 [JJ Mode]
+    return { handled: true, message: "🔒 [JJ Mode]\n\n" + docNote + reply.substring(0, 3800) }; + (`🔒 [JJ Mode]
 
 ${docNote}${reply}`.length > 3900 ? "
 
