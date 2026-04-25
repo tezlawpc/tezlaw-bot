@@ -116,7 +116,8 @@ function serveAudio(req, res) {
   const { id } = req.params;
   const entry = audioCache.get(id);
   if (!entry) return res.status(404).send("Not found");
-  res.set("Content-Type", "audio/mpeg");
+  const contentType = id === "thinking" ? "audio/wav" : "audio/mpeg";
+  res.set("Content-Type", contentType);
   res.set("Content-Length", entry.buffer.length);
   res.send(entry.buffer);
 }
@@ -124,7 +125,40 @@ function serveAudio(req, res) {
 // ── Pre-cached audio (generated once at server startup) ──
 const GREETING_OPEN   = "Thank you for calling Tez Law Firm. My name is Zara, and I'm here to help. How can I help you today?";
 const GREETING_CLOSED = "Thank you for calling Tez Law Firm. My name is Zara. Our office is currently closed. But I can still assist you. How can I help you?";
-const THINKING_TEXT   = "Okay, give me one second.";
+// ── Generate soft analyzing tone (no npm needed — pure PCM WAV) ──
+function generateProcessingTone() {
+  const sampleRate  = 8000;
+  const duration    = 1.2;   // seconds
+  const frequency   = 520;   // Hz — soft, neutral processing tone
+  const numSamples  = Math.floor(sampleRate * duration);
+  const dataSize    = numSamples * 2; // 16-bit mono = 2 bytes/sample
+  const buf         = Buffer.alloc(44 + dataSize);
+
+  // RIFF/WAV header
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + dataSize, 4);
+  buf.write("WAVE", 8);
+  buf.write("fmt ", 12);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);            // PCM
+  buf.writeUInt16LE(1, 22);            // mono
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(sampleRate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(dataSize, 40);
+
+  // Sine wave with gentle fade-in and fade-out envelope
+  for (let i = 0; i < numSamples; i++) {
+    const t       = i / sampleRate;
+    const fadeIn  = Math.min(1, t / 0.08);
+    const fadeOut = Math.min(1, (duration - t) / 0.15);
+    const sample  = Math.sin(2 * Math.PI * frequency * t) * fadeIn * fadeOut * 0.28 * 32767;
+    buf.writeInt16LE(Math.round(sample), 44 + i * 2);
+  }
+  return buf;
+}
 const REPROMPT_TEXT   = "Sorry, could you repeat that?";
 
 let cacheReady = false;
@@ -133,10 +167,12 @@ async function initAudioCache() {
     console.log("[voice] Pre-generating audio cache...");
     const openAudio     = await elevenLabsTTS(GREETING_OPEN);     storeAudio("greeting_open", openAudio, true);
     const closedAudio   = await elevenLabsTTS(GREETING_CLOSED);   storeAudio("greeting_closed", closedAudio, true);
-    const thinkingAudio = await elevenLabsTTS(THINKING_TEXT);     storeAudio("thinking", thinkingAudio, true);
+    const toneBuffer = generateProcessingTone();
+    storeAudio("thinking", toneBuffer, true);
+    console.log("[voice] Processing tone generated and cached");
     const repromptAudio = await elevenLabsTTS(REPROMPT_TEXT);     storeAudio("reprompt", repromptAudio, true);
     cacheReady = true;
-    console.log("[voice] Audio cache ready (greetings + thinking + reprompt)");
+    console.log("[voice] Audio cache ready (greetings + thinking tone + reprompt)");
   } catch (err) {
     console.error("[voice] Pre-cache failed (will fallback to Polly):", err.message);
   }
@@ -150,7 +186,7 @@ function buildPlayAndGatherTwiML(audioUrl, action) {
   <Play>${audioUrl}</Play>
   <Gather input="speech" action="${action}" method="POST"
           language="en-US"
-          speechTimeout="0.5"
+          speechTimeout="2"
           timeout="5"
           profanityFilter="false"
           actionOnEmptyResult="true"
@@ -165,7 +201,7 @@ function buildGatherOnly(action) {
 <Response>
   <Gather input="speech" action="${action}" method="POST"
           language="en-US"
-          speechTimeout="0.5"
+          speechTimeout="2"
           timeout="5"
           profanityFilter="false"
           actionOnEmptyResult="true">
@@ -174,10 +210,10 @@ function buildGatherOnly(action) {
 </Response>`;
 }
 
-function buildThinkingTwiML(thinkingUrl, continueUrl) {
+function buildThinkingTwiML(audioUrl, continueUrl) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Play>${thinkingUrl}</Play>
+  <Play>${audioUrl}</Play>
   <Redirect method="POST">${continueUrl}</Redirect>
 </Response>`;
 }
@@ -442,7 +478,7 @@ async function handleIncomingCall(req, res, savedPrompt) {
 <Response>
   <Say voice="Polly.Joanna-Neural">${greetingText}</Say>
   <Gather input="speech" action="${base}/voice/respond" method="POST"
-          language="en-US" speechTimeout="0.5" timeout="5"
+          language="en-US" speechTimeout="2" timeout="5"
           profanityFilter="false" actionOnEmptyResult="true">
   </Gather>
   <Redirect method="POST">${base}/voice/respond</Redirect>
@@ -523,27 +559,23 @@ async function handleRespond(req, res) {
     }
   }
 
-  // ═══ KICK OFF REPLY IN BACKGROUND + PLAY THINKING SOUND ═══
-  // Start generating reply now — it runs while thinking sound plays
+  // ═══ KICK OFF REPLY IN BACKGROUND + ANALYZING TONE ═══
+  // Start generating reply now — runs while tone plays
   const replyPromise = generateReply(session, speechText).catch(err => {
     console.error("[voice] generateReply error:", err.message);
     throw err;
   });
   pendingReplies.set(callSid, replyPromise);
 
-  // Immediately play "Okay, give me one second" — caller hears response NOW
-  const thinkingUrl = (cacheReady && audioCache.has("thinking"))
-    ? `${base}/voice/audio/thinking`
-    : null;
-
-  if (thinkingUrl) {
-    res.type("text/xml").send(buildThinkingTwiML(thinkingUrl, `${base}/voice/respond`));
-    console.log("[voice] Thinking sound playing while reply generates...");
+  // Play soft analyzing tone — neutral sound, works for any caller response
+  if (cacheReady && audioCache.has("thinking")) {
+    res.type("text/xml").send(buildThinkingTwiML(`${base}/voice/audio/thinking`, `${base}/voice/respond`));
+    console.log("[voice] Analyzing tone playing while reply generates...");
   } else {
-    // Fallback: Polly "okay, give me one second"
+    // Fallback: silent pause if tone not ready
     res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna-Neural">Okay, give me one second.</Say>
+  <Pause length="1"/>
   <Redirect method="POST">${base}/voice/respond</Redirect>
 </Response>`);
   }
