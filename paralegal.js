@@ -687,11 +687,20 @@ async function handleParalegalCommand(message, options = {}) {
     }
 
     // ── Step 3: Determine team routing ──────────────────────
+    // Immigration (USCIS + EOIR) → Jue Wang
+    // Personal Injury             → Lin Mei
+    // Litigation/Eviction/RE      → Chandler Jin
     let teamToNotify = ["jj"];
-    if (courtType === "eoir") teamToNotify = ["jj", "michael"];
-    if (/uscis|i-130|i-485|i-765|green card|visa|naturalization/.test(m)) teamToNotify = ["jj", "jue"];
-    if (/accident|injury|personal injury/.test(m)) teamToNotify = ["jj", "lin"];
-    if (/litigation|eviction|unlawful detainer|real estate/.test(m)) teamToNotify = ["jj", "chandler"];
+    const isImmigration = (
+      courtType === "eoir" ||
+      /uscis|i-130|i-485|i-765|i-589|i-131|i-90|green card|visa|naturalization|citizenship|daca|asylum|removal|deportation|nta|bia|eoir|immigration court|a-number/i.test(m)
+    );
+    const isPI = /accident|injury|personal injury|car crash|slip and fall|hospital|medical bill|bodily injury/.test(m);
+    const isLitigation = /litigation|eviction|unlawful detainer|real estate|business dispute|contract|breach|lawsuit|civil case|demurrer|estate plan|trust|probate/.test(m);
+
+    if (isImmigration)              teamToNotify = ["jj", "jue"];
+    else if (isPI || isLitigation)  teamToNotify = ["jj", "lin"];
+    else                            teamToNotify = ["jj", "chandler"];
 
     // ── Step 4: Call Claude with full context ────────────────
     const systemWithDeadlines = PARALEGAL_SYSTEM_PROMPT + deadlineBlock;
