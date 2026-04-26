@@ -393,14 +393,21 @@ async function fetchOpinionText(clusterId) {
     const subOpinions = clusterResp.data?.sub_opinions || [];
     if (!subOpinions.length) return "";
 
-    // Step 2: fetch the first opinion's text
-    // sub_opinions is array of URLs like /api/rest/v4/opinions/12345/
-    const opinionUrl = subOpinions[0];
-    const opinionId  = typeof opinionUrl === "string"
-      ? opinionUrl.replace(/.*\/opinions\/(\d+)\/.*/, "$1")
-      : opinionUrl;
+    // sub_opinions can be: full URL, relative URL, or plain numeric ID
+    const raw = subOpinions[0];
+    let opinionId;
 
-    if (!opinionId || opinionId === opinionUrl) return "";
+    if (typeof raw === "number") {
+      opinionId = String(raw);
+    } else if (typeof raw === "string") {
+      // Extract numeric ID from URL if present, otherwise use as-is
+      const match = raw.match(/\/opinions\/(\d+)\//);
+      opinionId = match ? match[1] : raw.replace(/\D/g, "");
+    } else {
+      return "";
+    }
+
+    if (!opinionId) return "";
 
     const opResp = await axios.get(
       `https://www.courtlistener.com/api/rest/v4/opinions/${opinionId}/`,
@@ -904,9 +911,7 @@ async function scanCourtListenerCourt(courtKey, options = {}) {
           processed++;
         }
       }
-
-      await sleep(CL_DELAY_MS);
-    }
+    } // end for opinion of batch.results
 
     await updateScanProgress(courtKey, {
       total_found: totalFound,
