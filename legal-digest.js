@@ -93,7 +93,6 @@ async function fetchNewOpinions(court, daysSince = 1) {
       params: {
         type:              "o",           // opinions only — never RECAP
         stat_Published:    "on",          // published only
-        stat_Precedential: "on",          // precedential only (Layer 2)
         court:             court,
         filed_after:       dateStr,
         order_by:          "-dateFiled",
