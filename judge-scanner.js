@@ -259,29 +259,39 @@ async function updateScanProgress(courtKey, updates) {
 //  COURTLISTENER FETCHER
 //  Used for: 9th Circuit, all CA Districts, BIA, CA Appellate
 // ============================================================
-async function fetchCourtListenerBatch(courtCode, page = 1, dateAfter = "2005-01-01") {
+// ── Fetch a batch from CourtListener using cursor pagination ─
+// v4 uses cursor-based pagination — never send a `page` param
+// Pass nextUrl on subsequent calls to paginate
+async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2005-01-01") {
   const headers = {};
   if (COURTLISTENER_TOKEN) headers["Authorization"] = `Token ${COURTLISTENER_TOKEN}`;
 
   try {
-    const resp = await axios.get("https://www.courtlistener.com/api/rest/v4/search/", {
-      params: {
-        type:           "o",
-        stat_Published: "on",
-        court:          courtCode,
-        filed_after:    dateAfter,
-        order_by:       "-dateFiled",
-        page_size:      20,
-        page,
-      },
-      headers,
-      timeout: 20000,
-    });
+    let resp;
+
+    if (nextUrl) {
+      // Follow cursor URL directly — do NOT add any params
+      resp = await axios.get(nextUrl, { headers, timeout: 20000 });
+    } else {
+      // First page — build fresh query, NO `page` param
+      resp = await axios.get("https://www.courtlistener.com/api/rest/v4/search/", {
+        params: {
+          type:           "o",
+          stat_Published: "on",
+          court:          courtCode,
+          filed_after:    dateAfter,
+          order_by:       "-dateFiled",
+          page_size:      20,
+        },
+        headers,
+        timeout: 20000,
+      });
+    }
 
     return {
       results: resp.data?.results || [],
       count:   resp.data?.count   || 0,
-      next:    resp.data?.next    || null,
+      next:    resp.data?.next    || null,  // cursor URL for next page
     };
   } catch (err) {
     if (err.response?.status === 429) {
@@ -289,7 +299,10 @@ async function fetchCourtListenerBatch(courtCode, page = 1, dateAfter = "2005-01
       await sleep(60000);
       return { results: [], count: 0, next: null };
     }
-    console.error(`[scanner] CL fetch error (${courtCode} p${page}):`, err.message);
+    console.error(`[scanner] CL fetch error (${courtCode}):`, err.message);
+    if (err.response?.data) {
+      console.error(`[scanner] CL error detail:`, JSON.stringify(err.response.data).substring(0, 200));
+    }
     return { results: [], count: 0, next: null };
   }
 }
@@ -724,7 +737,8 @@ async function storeRuling(analyzed) {
 async function scanCourtListenerCourt(courtKey, options = {}) {
   const court      = COURTS[courtKey];
   const dateAfter  = options.dateAfter || `${court.startYear}-01-01`;
-  let   page       = options.startPage || 1;
+  let   nextUrl    = null;   // null = first page, then follow cursor
+  let   pageNum    = 0;
   let   totalFound = 0;
   let   processed  = 0;
 
@@ -733,12 +747,13 @@ async function scanCourtListenerCourt(courtKey, options = {}) {
   await updateScanProgress(courtKey, { status: "running", last_scan: new Date() });
 
   while (true) {
-    const batch = await fetchCourtListenerBatch(court.clCourt, page, dateAfter);
+    const batch = await fetchCourtListenerBatch(court.clCourt, nextUrl, dateAfter);
 
     if (!batch.results.length) break;
 
+    pageNum++;
     totalFound += batch.results.length;
-    console.log(`[scanner] ${court.shortName} p${page}: ${batch.results.length} opinions (total: ${totalFound})`);
+    console.log(`[scanner] ${court.shortName} p${pageNum}: ${batch.results.length} opinions (total: ${totalFound})`);
 
     for (const opinion of batch.results) {
       // Search API returns cluster IDs — use snippet first for relevance check
@@ -791,12 +806,13 @@ async function scanCourtListenerCourt(courtKey, options = {}) {
       processed,
     });
 
+    // Follow cursor to next page — null means done
     if (!batch.next) break;
-    page++;
+    nextUrl = batch.next;
 
     // Pause every 10 pages to be respectful
-    if (page % 10 === 0) {
-      console.log(`[scanner] Pausing 5s after page ${page}...`);
+    if (pageNum % 10 === 0) {
+      console.log(`[scanner] Pausing 5s after page ${pageNum}...`);
       await sleep(5000);
     }
   }
