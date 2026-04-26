@@ -24,6 +24,7 @@
 // ============================================================
 
 const axios = require("axios");
+const { validateOpinions, validateCitation, isSafeToCache } = require("./source-validator");
 
 const CL_BASE    = "https://www.courtlistener.com/api/rest/v4";
 const CL_TOKEN   = process.env.COURTLISTENER_TOKEN;
@@ -80,14 +81,15 @@ async function searchCaseLaw(query, options = {}) {
 
   try {
     const params = {
-      q:           query,
-      type:        "o",          // opinions
-      stat_Published: "on",      // published opinions only
-      order_by:    orderBy,
-      page_size:   maxResults,
+      q:              query,
+      type:           "o",           // opinions only — never RECAP
+      stat_Published: "on",          // published opinions only
+      stat_Precedential: "on",       // precedential only (Layer 2)
+      order_by:       orderBy,
+      page_size:      maxResults * 2, // fetch extra — some will be filtered
     };
 
-    // Add court filter
+    // Add court filter (Layer 3 — only whitelisted courts)
     if (courts) {
       params.court = courts;
     }
@@ -102,8 +104,11 @@ async function searchCaseLaw(query, options = {}) {
       timeout: 15000,
     });
 
-    const results = resp.data?.results || [];
-    return results.map(r => formatOpinion(r));
+    const raw     = resp.data?.results || [];
+    // Layer 1-3: run through source validator
+    const { valid } = validateOpinions(raw);
+    // Return only up to maxResults after filtering
+    return valid.slice(0, maxResults).map(r => formatOpinion(r));
 
   } catch (err) {
     console.error("[courtlistener] Search error:", err.response?.data || err.message);
@@ -145,6 +150,16 @@ async function lookupCitation(citation) {
 // ── Verify a citation is real (anti-hallucination check) ─────
 // Returns { verified: bool, caseName, citation, url, warning }
 async function verifyCitation(citation) {
+  // Layer 4: validate format before even hitting the API
+  const formatCheck = validateCitation(citation);
+  if (!formatCheck.valid && !formatCheck.weak) {
+    return {
+      verified: false,
+      citation,
+      warning:  `⚠️ CITATION FORMAT INVALID — "${citation}" does not match any known reporter format (Cal., F.4th, I&N Dec., etc.).\n\nThis may be a hallucinated citation. DO NOT use in any filing.`,
+    };
+  }
+
   try {
     const result = await lookupCitation(citation);
 
@@ -152,11 +167,12 @@ async function verifyCitation(citation) {
       return {
         verified: false,
         citation,
-        warning: "⚠️ CITATION NOT VERIFIED — Could not confirm this citation exists. DO NOT use in filings without manual Westlaw/Lexis verification.",
+        warning: "⚠️ CITATION NOT VERIFIED — Format looks valid but could not confirm this case exists in CourtListener. DO NOT use in filings without manual Westlaw/Lexis verification.",
       };
     }
 
     const best = result.results[0];
+    const bindingNote = best._binding ? " (BINDING authority in CA)" : " (persuasive authority)";
     return {
       verified:  true,
       citation,
@@ -164,7 +180,11 @@ async function verifyCitation(citation) {
       court:     best.court,
       dateFiled: best.dateFiled,
       url:       best.absoluteUrl,
-      warning:   null,
+      binding:   best._binding || false,
+      bindingNote,
+      warning:   formatCheck.weak
+        ? "⚠️ Docket number only — no reporter citation. Verify in Westlaw before filing."
+        : null,
     };
   } catch (err) {
     return {
@@ -216,6 +236,10 @@ function formatOpinion(r) {
                     ? `https://www.courtlistener.com${r.absolute_url}`
                     : null,
     score:        r.score || null,
+    // Source credibility fields
+    _binding:     r._binding   || false,
+    _courtInfo:   r._courtInfo || null,
+    _warnings:    r._warnings  || [],
   };
 }
 
@@ -298,7 +322,7 @@ async function handleResearchCommand(message) {
 
 function formatSearchResults(query, results, area) {
   if (!results || results.length === 0) {
-    return `🔍 No published cases found for: "${query}"\n\nTry broader search terms or check Westlaw/Lexis for more comprehensive coverage.`;
+    return `🔍 No published precedential cases found for: "${query}"\n\nTry broader search terms or check Westlaw/Lexis for more comprehensive coverage.`;
   }
 
   const areaLabel = {
@@ -311,29 +335,33 @@ function formatSearchResults(query, results, area) {
   }[area] || "California";
 
   let out = `🔍 Case Law Research: "${query}"\n`;
-  out    += `Court: ${areaLabel} | ${results.length} results\n`;
-  out    += `Source: CourtListener (Free Law Project)\n`;
+  out    += `Court: ${areaLabel} | ${results.length} verified results\n`;
+  out    += `Source: CourtListener (Free Law Project) — published precedential opinions only\n`;
   out    += `⚠️  Always verify citations in Westlaw/Lexis before filing\n`;
   out    += `${"─".repeat(50)}\n\n`;
 
   results.forEach((r, i) => {
-    out += `${i + 1}. ${r.caseName}\n`;
-    if (r.citation) out += `   📎 ${r.citation}\n`;
+    const bindingBadge = r._binding ? " 🔴 BINDING" : " 🟡 Persuasive";
+    out += `${i + 1}. ${r.caseName}${bindingBadge}\n`;
+    if (r.citation && r.citation !== "No citation") out += `   📎 ${r.citation}\n`;
     out += `   🏛️  ${r.court} | 📅 ${r.dateFiled}\n`;
     if (r.snippet) out += `   "${r.snippet}..."\n`;
+    if (r._warnings?.length) out += `   ⚠️  ${r._warnings.join("; ")}\n`;
     if (r.absoluteUrl) out += `   🔗 ${r.absoluteUrl}\n`;
     out += "\n";
   });
 
-  out += `\nTo read full opinion text, say: "get full text for case [number]"`;
+  out += `\n🔴 BINDING = must follow in CA courts | 🟡 Persuasive = consider but not required\n`;
+  out += `To read full opinion text, say: "get full text for case [number]"`;
   return out;
 }
 
 function formatVerificationResult(result) {
   if (result.verified) {
-    return `✅ CITATION VERIFIED\n\n📎 ${result.citation}\n📋 ${result.caseName}\n🏛️  ${result.court}\n📅 ${result.dateFiled}\n🔗 ${result.url}\n\nThis citation appears genuine. Still verify Good Law status in Westlaw KeyCite or Lexis Shepard's before filing.`;
+    const bindingLabel = result.binding ? "🔴 BINDING authority in CA" : "🟡 Persuasive authority";
+    return `✅ CITATION VERIFIED\n\n📎 ${result.citation}\n📋 ${result.caseName}\n🏛️  ${result.court} ${result.bindingNote || ""}\n📅 ${result.dateFiled}\n🔗 ${result.url}\n⚖️  ${bindingLabel}\n${result.warning ? "\n" + result.warning : ""}\n\nStill verify Good Law status in Westlaw KeyCite or Lexis Shepard's before filing.`;
   }
-  return `❌ CITATION NOT VERIFIED\n\n📎 ${result.citation}\n\n${result.warning}\n\nThis citation could not be confirmed in CourtListener. It may be:\n- A hallucinated/fake citation\n- A very recent case not yet indexed\n- A lower court case not in the database\n\n🚨 DO NOT use in any filing without manual Westlaw/Lexis verification.`;
+  return `❌ CITATION NOT VERIFIED\n\n📎 ${result.citation}\n\n${result.warning}\n\nThis citation could not be confirmed. It may be:\n• A hallucinated/fake citation\n• A very recent case not yet indexed\n• A lower court case not in the database\n• An unpublished/non-precedential memo\n\n🚨 DO NOT use in any filing without manual Westlaw/Lexis verification.`;
 }
 
 function formatLookupResult(result) {
@@ -363,4 +391,7 @@ module.exports = {
   isResearchCommand,
   CA_COURTS,
   PRACTICE_COURTS,
+  // Re-export for convenience
+  validateCitation,
+  isSafeToCache,
 };

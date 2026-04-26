@@ -23,6 +23,7 @@
 const axios     = require("axios");
 const cron      = require("node-cron");
 const db        = require("./db");
+const { validateOpinions, isSafeToCache } = require("./source-validator");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const TELEGRAM_TOKEN    = process.env.TELEGRAM_TOKEN;
@@ -90,18 +91,27 @@ async function fetchNewOpinions(court, daysSince = 1) {
   try {
     const resp = await axios.get("https://www.courtlistener.com/api/rest/v4/search/", {
       params: {
-        type:           "o",
-        stat_Published: "on",
-        court:          court,
-        filed_after:    dateStr,
-        order_by:       "-dateFiled",
-        page_size:      20,
+        type:              "o",           // opinions only — never RECAP
+        stat_Published:    "on",          // published only
+        stat_Precedential: "on",          // precedential only (Layer 2)
+        court:             court,
+        filed_after:       dateStr,
+        order_by:          "-dateFiled",
+        page_size:         30,            // fetch extra — some filtered out
       },
       headers,
       timeout: 15000,
     });
 
-    return (resp.data?.results || []).map(r => ({
+    const raw = (resp.data?.results || []);
+
+    // Layers 1-3: run through source validator
+    const { valid, rejected } = validateOpinions(raw);
+    if (rejected.length > 0) {
+      console.log(`[digest] 🚫 Filtered ${rejected.length} non-credible sources from ${court}`);
+    }
+
+    return valid.slice(0, 20).map(r => ({
       id:         r.id,
       title:      r.caseName || r.case_name || "Unknown",
       citation:   (r.citation || []).join(", "),
@@ -110,6 +120,8 @@ async function fetchNewOpinions(court, daysSince = 1) {
       snippet:    (r.snippet || "").replace(/<[^>]+>/g, " ").trim().substring(0, 500),
       url:        r.absolute_url ? `https://www.courtlistener.com${r.absolute_url}` : null,
       source:     "CourtListener",
+      binding:    r._binding   || false,
+      courtInfo:  r._courtInfo || null,
     }));
   } catch (err) {
     console.error(`[digest] CourtListener fetch error (${court}):`, err.message);
@@ -439,7 +451,19 @@ Respond ONLY with JSON array (empty array [] if no good FAQs):
       const practiceArea = detectPracticeArea(pair.q) || opinion.category || "general";
       const answer = `${pair.a} (Based on ${opinion.title}, ${opinion.court}, ${opinion.date || "2025"})`;
 
-      await storeCachedAnswer(pair.q, answer, practiceArea, "en");
+      // Layer 4: validate any citations in the generated answer
+      const safetyCheck = isSafeToCache(pair.q, answer);
+      if (!safetyCheck.safe) {
+        console.log(`[digest] 🚫 Skipping cache entry — ${safetyCheck.reason}`);
+        continue;
+      }
+
+      // Add disclaimer if answer contains weak citations
+      const finalAnswer = safetyCheck.addDisclaimer
+        ? `${answer} ${safetyCheck.disclaimer}`
+        : answer;
+
+      await storeCachedAnswer(pair.q, finalAnswer, practiceArea, "en");
       seeded++;
     }
 
