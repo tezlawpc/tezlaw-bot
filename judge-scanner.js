@@ -845,30 +845,43 @@ async function scanCourtListenerCourt(courtKey, options = {}) {
     console.log(`[scanner] ${court.shortName} p${pageNum}: ${batch.results.length} opinions (total: ${totalFound})`);
 
     for (const opinion of batch.results) {
-      // Search API returns cluster IDs — use snippet first for relevance check
-      const opinionId   = opinion.id;
-      let   fullText    = (opinion.snippet || "").replace(/<[^>]+>/g, " ").trim();
+      const opinionId = opinion.id;
+      if (!opinionId) continue;
 
-      // Quick relevance check on snippet before fetching full text
-      const snippetLower = fullText.toLowerCase();
-      const likelyRelevant = PRACTICE_KEYWORDS.some(kw => snippetLower.includes(kw));
+      // Search API returns EMPTY snippets and no judge field
+      // Must fetch full cluster to get text and judge
+      await sleep(CL_DELAY_MS);
+      const fullText = await fetchOpinionText(opinionId);
 
-      // Only fetch full text for relevant opinions (saves API calls)
-      if (likelyRelevant && opinionId && fullText.length < 500) {
-        await sleep(CL_DELAY_MS);
-        const fetched = await fetchOpinionText(opinionId);
-        if (fetched && fetched.length > fullText.length) fullText = fetched;
+      if (!fullText || fullText.length < 30) {
+        // No text available — store minimal profile from metadata alone
+        const judgeName = opinion.judge || extractJudgeFromCaseName(opinion.caseName || "");
+        if (!judgeName) continue;
+
+        // At minimum store the judge profile entry from metadata
+        await db.query(`
+          INSERT INTO judge_profiles (judge_name, court, court_type, total_rulings)
+          VALUES ($1, $2, $3, 1)
+          ON CONFLICT (judge_name, court) DO UPDATE SET
+            total_rulings = judge_profiles.total_rulings + 1,
+            last_updated  = NOW()
+        `, [judgeName, court.name, court.type || "appellate"]);
+
+        processed++;
+        continue;
       }
 
-      // Use snippet alone if full text fetch failed — snippet is enough for judge analysis
-      if (!fullText || fullText.length < 30) continue;
+      // Check relevance against full text
+      const textLower = fullText.toLowerCase();
+      const isRelevant = PRACTICE_KEYWORDS.some(kw => textLower.includes(kw));
+      if (!isRelevant) continue;
 
-      // Extract judge name from opinion metadata or text
+      // Extract judge names
       const judgeNames = extractJudgeNamesFromText(fullText, opinion);
 
-      // Diagnostic: log first opinion of each batch to verify data shape
+      // Diagnostic log first opinion of each court
       if (batch.results.indexOf(opinion) === 0 && pageNum === 1) {
-        console.log(`[scanner] Sample opinion — judge field: "${opinion.judge?.substring(0,50)}", snippet length: ${fullText.length}, relevant: ${likelyRelevant}`);
+        console.log(`[scanner] ${court.shortName} sample — judge: "${judgeNames[0]}", text length: ${fullText.length}, relevant: ${isRelevant}`);
       }
 
       for (const judgeName of judgeNames) {
@@ -1365,6 +1378,13 @@ function getCourtsType(courtName) {
   if (n.includes("district") || n.includes("federal") || n.includes("cacd") || n.includes("caed")) return "federal";
   if (n.includes("eoir") || n.includes("bia") || n.includes("immigration")) return "immigration";
   return "state";
+}
+
+// ── Extract judge name from case name as last resort ────────
+// e.g. "Smith v. Jones" → no judge, but "In re: Petition of Hon. Smith" → Smith
+function extractJudgeFromCaseName(caseName) {
+  const m = caseName.match(/(?:Hon\.|Judge|Justice)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
+  return m ? m[1] : null;
 }
 
 function extractJudgeNamesFromText(text, opinion) {
