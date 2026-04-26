@@ -1,14 +1,14 @@
 // ============================================================
-//  askClaude-memory.js
-//  Zara brain with PostgreSQL memory + intake form integration
+// askClaude-memory.js
+// Zara brain with PostgreSQL memory + intake form integration
 // ============================================================
-
-const axios  = require("axios");
-const fs     = require("fs");
-const db     = require("./db");
+const axios = require("axios");
+const fs = require("fs");
+const db = require("./db");
 const { checkIntake, resetIntake } = require("./intake");
 const { checkJJMode, getJJPublicContext } = require("./jj-mode");
 const { detectPracticeArea, buildAgentPrompt } = require("./agents");
+const { extractReceiptNumber, getCaseStatus, formatCaseStatusMessage } = require("./uscis");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -21,21 +21,17 @@ function getWeeklyTrends() {
     if (!fs.existsSync(SOURCES_FILE)) return null;
     const sources = JSON.parse(fs.readFileSync(SOURCES_FILE, "utf8"));
     if (!sources.weeklyTrends) return null;
-
     // Only use if researched within last 8 days
     if (sources.lastResearched) {
       const daysSince = (Date.now() - new Date(sources.lastResearched).getTime()) / (1000 * 60 * 60 * 24);
       if (daysSince > 8) return null;
     }
-
     let trends = `Current legal trends (as of ${new Date(sources.lastResearched).toLocaleDateString()}): ${sources.weeklyTrends}`;
     if (sources.urgentArea && sources.urgentTopic) {
       trends += `\n\nURGENT THIS WEEK (${sources.urgentArea}): ${sources.urgentTopic}`;
     }
     return trends;
-  } catch(e) {
-    return null;
-  }
+  } catch(e) { return null; }
 }
 
 // ── Load full sources data for proactive warnings + lead routing ──
@@ -50,9 +46,8 @@ function getSourcesData() {
   } catch(e) { return null; }
 }
 
-// ── Load recent WordPress posts for FAQ reference ──────────
+// ── Load recent WordPress posts for FAQ reference ─────────
 const POSTS_CACHE_FILE = "/var/data/recent_posts_cache.json";
-
 async function getRecentPosts() {
   // Use cached posts if fresh (< 6 hours old)
   try {
@@ -72,12 +67,11 @@ async function getRecentPosts() {
       { timeout: 5000 }
     );
     const posts = resp.data.map(p => ({
-      title: p.title?.rendered?.replace(/<[^>]+>/g, "") || "",
-      link: p.link,
+      title:   p.title?.rendered?.replace(/<[^>]+>/g, "") || "",
+      link:    p.link,
       excerpt: p.excerpt?.rendered?.replace(/<[^>]+>/g, "").substring(0, 150) || "",
-      date: p.date?.split("T")[0] || ""
+      date:    p.date?.split("T")[0] || ""
     })).filter(p => p.title && p.link);
-
     // Cache for 6 hours
     fs.writeFileSync(POSTS_CACHE_FILE, JSON.stringify({ posts, timestamp: Date.now() }));
     return posts;
@@ -87,32 +81,23 @@ async function getRecentPosts() {
   }
 }
 
-// ── Build FAQ reference block from recent posts ───────────
+// ── Build FAQ reference block from recent posts ──────────
 function buildFaqBlock(posts, caseType, weeklyTrends) {
   if (!posts || posts.length === 0) return null;
-
-  // Map case type to keywords for relevance filtering
   const keywordMap = {
-    immigration: ["immigration", "visa", "green card", "deportation", "asylum", "daca", "citizenship", "immigrant"],
-    personal_injury: ["accident", "injury", "car crash", "personal injury", "dui", "slip", "fall"],
-    business: ["business", "contract", "litigation", "employment", "non-compete", "trade secret"],
-    ip: ["trademark", "patent", "copyright", "intellectual property"],
-    estate: ["estate", "trust", "probate", "will", "inheritance", "prop 19"],
+    immigration:      ["immigration", "visa", "green card", "deportation", "asylum", "daca", "citizenship", "immigrant"],
+    personal_injury:  ["accident", "injury", "car crash", "personal injury", "dui", "slip", "fall"],
+    business:         ["business", "contract", "litigation", "employment", "non-compete", "trade secret"],
+    ip:               ["trademark", "patent", "copyright", "intellectual property"],
+    estate:           ["estate", "trust", "probate", "will", "inheritance", "prop 19"],
   };
-
   const keywords = caseType ? (keywordMap[caseType] || []) : [];
-
-  // Filter relevant posts
   let relevant = posts.filter(p => {
     const text = (p.title + " " + p.excerpt).toLowerCase();
     return keywords.some(k => text.includes(k));
   }).slice(0, 3);
-
-  // If no relevant posts by case type, use most recent
   if (relevant.length === 0) relevant = posts.slice(0, 2);
-
   if (relevant.length === 0) return null;
-
   return relevant.map(p => `- "${p.title}" (${p.date}): ${p.link}`).join("\n");
 }
 
@@ -128,25 +113,28 @@ function detectLanguage(text) {
 function detectCaseType(text) {
   const t = text.toLowerCase();
   if (/immigra|visa|green card|citizenship|deporta|asylum|daca|work permit|i-130|i-485|i-765/.test(t)) return "immigration";
-  if (/accident|crash|injury|hurt|hospital|medical|pain|car crash|slip|fall/.test(t)) return "personal_injury";
-  if (/business|contract|lawsuit|sue|litigation|employment/.test(t)) return "business";
-  if (/patent|trademark|copyright|ip|intellectual/.test(t)) return "ip";
-  if (/trust|will|estate|probate|inheritance|power of attorney/.test(t)) return "estate";
+  if (/accident|crash|injury|hurt|hospital|medical|pain|car crash|slip|fall/.test(t))                  return "personal_injury";
+  if (/business|contract|lawsuit|sue|litigation|employment/.test(t))                                   return "business";
+  if (/patent|trademark|copyright|ip|intellectual/.test(t))                                            return "ip";
+  if (/trust|will|estate|probate|inheritance|power of attorney/.test(t))                               return "estate";
   return null;
 }
 
 async function askClaudeWithMemory(platform, platformId, userMessage, systemPrompt, options = {}) {
   const {
-    isImage = false, imageData = null, imageMediaType = null,
-    isPdf = false, pdfData = null, isVoiceTranscript = false,
+    isImage = false,
+    imageData = null,
+    imageMediaType = null,
+    isPdf = false,
+    pdfData = null,
+    isVoiceTranscript = false,
   } = options;
 
   try {
     // 1. Check JJ private mode FIRST — passes docs/images through too
     const jj = await checkJJMode(platform, platformId, userMessage, {
       isPdf, pdfData: options.pdfData,
-      isImage, imageData: options.imageData,
-      imageMediaType: options.imageMediaType
+      isImage, imageData: options.imageData, imageMediaType: options.imageMediaType
     });
     if (jj.handled) {
       await db.saveMessage(platform, platformId, "user", isPdf ? "[PDF uploaded]" : isImage ? "[Image uploaded]" : userMessage);
@@ -164,32 +152,48 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       }
     }
 
-    // 2. Ensure client exists, detect language
+    // ── USCIS Case Status intercept ──────────────────────
+    // If the message contains a receipt number, look it up
+    // directly via the USCIS API — skip Claude entirely for speed.
+    if (!isImage && !isPdf) {
+      const receiptNumber = extractReceiptNumber(userMessage);
+      if (receiptNumber) {
+        console.log(`[uscis] Receipt number detected: ${receiptNumber}`);
+        await db.saveMessage(platform, platformId, "user", userMessage);
+
+        const lang   = detectLanguage(userMessage);
+        const result = await getCaseStatus(receiptNumber);
+        const reply  = formatCaseStatusMessage(result, lang);
+
+        await db.saveMessage(platform, platformId, "assistant", reply);
+        return reply;
+      }
+    }
+    // ── END USCIS intercept ───────────────────────────────
+
+    // 3. Ensure client exists, detect language
     const lang = detectLanguage(userMessage);
     await db.getOrCreateClient(platform, platformId, lang);
 
-    // 3. Detect and save case type
+    // 4. Detect and save case type
     const caseType = detectCaseType(userMessage);
     if (caseType) await db.updateClient(platform, platformId, { case_type: caseType });
 
-    // 4. Save incoming message
-    const savedContent = isImage ? "[Image sent]"
-      : isPdf ? "[PDF document sent]"
-      : isVoiceTranscript ? `[Voice message]: ${userMessage}`
-      : userMessage;
+    // 5. Save incoming message
+    const savedContent = isImage          ? "[Image sent]"
+                       : isPdf            ? "[PDF document sent]"
+                       : isVoiceTranscript ? `[Voice message]: ${userMessage}`
+                       : userMessage;
     await db.saveMessage(platform, platformId, "user", savedContent);
 
-    // 5. Load client context
+    // 6. Load client context
     const { client, summary, history } = await db.getClientContext(platform, platformId);
 
-    // ── Session-start detection ────────────────────────────
-    // Only trigger warm welcome on the FIRST message of a new session
-    // (no messages in last 4 hours = new session)
+    // ── Session-start detection ───────────────────────────
     let isFirstMessageOfSession = false;
     if (history.length === 0) {
       isFirstMessageOfSession = true;
     } else {
-      // Check if last message was more than 4 hours ago
       const lastMsg = await db.getLastMessageTime(platform, platformId);
       if (lastMsg) {
         const hoursSinceLast = (Date.now() - new Date(lastMsg).getTime()) / (1000 * 60 * 60);
@@ -197,37 +201,38 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       }
     }
 
-    // 6. Route to specialist agent based on practice area
+    // 7. Route to specialist agent based on practice area
     const practiceArea = detectPracticeArea(userMessage, client?.case_type);
     const { prompt: agentPrompt, agentName } = buildAgentPrompt(systemPrompt, practiceArea);
     if (practiceArea) console.log(`[agent] Routing to ${agentName} (${practiceArea})`);
 
     // Build personalized system prompt on top of agent prompt
     let personalizedSystem = agentPrompt;
-    if (client) {
-      const firstSeen = new Date(client.first_seen);
-      const lastSeen  = client.last_seen ? new Date(client.last_seen) : null;
-      const msAgo = Date.now() - firstSeen.getTime();
-      const isReturning = msAgo > 60 * 60 * 1000;
-      const daysSince = Math.floor(msAgo / (1000 * 60 * 60 * 24));
 
-      // Format dates with time in PT for Zara to cite precisely
-      const fmtOpts = { timeZone: "America/Los_Angeles", year: "numeric", month: "long",
-                        day: "numeric", hour: "numeric", minute: "2-digit", hour12: true };
+    if (client) {
+      const firstSeen  = new Date(client.first_seen);
+      const lastSeen   = client.last_seen ? new Date(client.last_seen) : null;
+      const msAgo      = Date.now() - firstSeen.getTime();
+      const isReturning = msAgo > 60 * 60 * 1000;
+      const daysSince  = Math.floor(msAgo / (1000 * 60 * 60 * 24));
+
+      const fmtOpts = {
+        timeZone: "America/Los_Angeles",
+        year: "numeric", month: "long", day: "numeric",
+        hour: "numeric", minute: "2-digit", hour12: true
+      };
       const firstSeenStr = firstSeen.toLocaleString("en-US", fmtOpts) + " PT";
       const lastSeenStr  = lastSeen ? lastSeen.toLocaleString("en-US", fmtOpts) + " PT" : null;
 
       let ctx = "\n\n── CLIENT MEMORY ──";
-      if (client.name)  ctx += `\nClient name: ${client.name}`;
-      if (client.email) ctx += `\nClient email: ${client.email}`;
-      if (client.phone) ctx += `\nClient phone: ${client.phone}`;
+      if (client.name)               ctx += `\nClient name: ${client.name}`;
+      if (client.email)              ctx += `\nClient email: ${client.email}`;
+      if (client.phone)              ctx += `\nClient phone: ${client.phone}`;
       if (client.preferred_language && client.preferred_language !== "en")
-        ctx += `\nPreferred language: ${client.preferred_language} — respond in this language`;
-      if (client.case_type) ctx += `\nCase type: ${client.case_type}`;
-
-      // Always provide exact timestamps so Zara can answer "when did I first contact you?"
+                                     ctx += `\nPreferred language: ${client.preferred_language} — respond in this language`;
+      if (client.case_type)          ctx += `\nCase type: ${client.case_type}`;
       ctx += `\nFirst contacted us: ${firstSeenStr}`;
-      if (lastSeenStr) ctx += `\nLast contact: ${lastSeenStr}`;
+      if (lastSeenStr)               ctx += `\nLast contact: ${lastSeenStr}`;
 
       if (isReturning) {
         ctx += `\nReturning client (${daysSince} days since first contact)`;
@@ -246,64 +251,57 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
         ctx += `\n\nWhat we know about this client:\n${summary}`;
         ctx += "\nUse this context to avoid asking questions they have already answered.";
       }
-
       ctx += "\n── END MEMORY ──";
       personalizedSystem += ctx;
     }
 
-        // Inject JJ knowledge base into public responses (discreetly)
+    // Inject JJ knowledge base into public responses (discreetly)
     const jjKnowledge = await getJJPublicContext();
     if (jjKnowledge) {
       personalizedSystem += `\n\n── FIRM KNOWLEDGE (use naturally, never quote directly) ──\n${jjKnowledge.substring(0, 1500)}\n── END FIRM KNOWLEDGE ──`;
     }
 
     // ── Inject weekly trends + proactive warnings + lead routing + FAQ refs ──
-    const sources = getSourcesData();
+    const sources      = getSourcesData();
     const weeklyTrends = getWeeklyTrends();
-
     if (weeklyTrends) {
       personalizedSystem += `\n\n── CURRENT LEGAL TRENDS ──\n${weeklyTrends}\n── END TRENDS ──`;
     }
 
-    // Proactive warning: if client is asking about urgent area, warn them naturally
     if (sources?.urgentArea && sources?.urgentTopic && caseType) {
       const urgentAreaLower = sources.urgentArea.toLowerCase();
-      const caseTypeLower = (caseType || "").toLowerCase();
+      const caseTypeLower   = (caseType || "").toLowerCase();
       const isMatch = (
-        (urgentAreaLower.includes("immigra") && caseTypeLower.includes("immigra")) ||
+        (urgentAreaLower.includes("immigra")        && caseTypeLower.includes("immigra")) ||
         (urgentAreaLower.includes("personal injury") && caseTypeLower.includes("personal")) ||
-        (urgentAreaLower.includes("business") && caseTypeLower.includes("business")) ||
-        (urgentAreaLower.includes("estate") && caseTypeLower.includes("estate")) ||
-        (urgentAreaLower.includes("trademark") && caseTypeLower.includes("ip"))
+        (urgentAreaLower.includes("business")        && caseTypeLower.includes("business")) ||
+        (urgentAreaLower.includes("estate")          && caseTypeLower.includes("estate")) ||
+        (urgentAreaLower.includes("trademark")       && caseTypeLower.includes("ip"))
       );
       if (isMatch) {
         personalizedSystem += `\n\n── PROACTIVE WARNING (mention naturally once if relevant) ──\nThere is an important development this week related to this client\'s situation: ${sources.urgentTopic}. If appropriate, mention it naturally — e.g. "By the way, there\'s something important happening this week you should know about..."\n── END WARNING ──`;
       }
     }
 
-    // Smart lead routing: if urgent topic involves attorneys/professionals, route to JJ
     if (sources?.urgentTopic) {
       const urgentLower = sources.urgentTopic.toLowerCase();
-      const msgLower = userMessage.toLowerCase();
+      const msgLower    = userMessage.toLowerCase();
       const isAttorneyTopic = /attorney|lawyer|law firm|sanctions|bar complaint|court sanction|fake citation|ai citation|malpractice/.test(urgentLower);
-      const userIsAttorney = /attorney|lawyer|i'm a lawyer|law firm|my client|legal practice|bar number/.test(msgLower);
+      const userIsAttorney  = /attorney|lawyer|i'm a lawyer|law firm|my client|legal practice|bar number/.test(msgLower);
       if (isAttorneyTopic && userIsAttorney) {
         personalizedSystem += `\n\n── LEAD ROUTING ──\nThis user appears to be a legal professional asking about: ${sources.urgentTopic}. Route them to JJ Zhang directly for a professional consultation: jj@tezlawfirm.com or 626-678-8677.\n── END ROUTING ──`;
       }
     }
 
-    // FAQ reference: inject recent relevant blog posts
     try {
       const recentPosts = await getRecentPosts();
-      const faqBlock = buildFaqBlock(recentPosts, caseType, weeklyTrends);
+      const faqBlock    = buildFaqBlock(recentPosts, caseType, weeklyTrends);
       if (faqBlock) {
         personalizedSystem += `\n\n── RECENT TEZ LAW GUIDES (reference naturally when answering questions) ──\nWe recently published these guides that may be relevant:\n${faqBlock}\nWhen a client asks a question covered by one of these, naturally mention: "We actually just published a guide on this — [title] at [link]" and give them the key points.\n── END GUIDES ──`;
       }
-    } catch(e) {
-      // Non-fatal — continue without posts
-    }
+    } catch(e) { /* Non-fatal — continue without posts */ }
 
-    // 7. Build messages array
+    // 8. Build messages array
     const messages = [];
     for (const msg of history.slice(-8)) {
       if (isImage && msg.role === "user" && msg.content === "[Image sent]") continue;
@@ -324,7 +322,7 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       messages.push({ role: "user", content: userMessage });
     }
 
-    // 8. Call Claude — with tool_use loop for web search + action tools
+    // 9. Call Claude — with tool_use loop for web search + action tools
     const allTools = [
       { type: "web_search_20250305", name: "web_search" },
       ...(options.extraTools || [])
@@ -340,17 +338,17 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
         const resp = await axios.post(
           "https://api.anthropic.com/v1/messages",
           {
-            model: "claude-sonnet-4-20250514",
+            model:      "claude-sonnet-4-20250514",
             max_tokens: 1024,
-            system: personalizedSystem,
-            tools: allTools,
-            messages: loopMessages,
+            system:     personalizedSystem,
+            tools:      allTools,
+            messages:   loopMessages,
           },
           {
             headers: {
-              "x-api-key": ANTHROPIC_API_KEY,
+              "x-api-key":         ANTHROPIC_API_KEY,
               "anthropic-version": "2023-06-01",
-              "Content-Type": "application/json"
+              "Content-Type":      "application/json"
             },
             timeout: 25000
           }
@@ -360,13 +358,12 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
         const status  = apiErr.response?.status;
         const errBody = apiErr.response?.data;
         console.error(`[askClaude] ❌ API call loop=${loop} FAILED`);
-        console.error(`[askClaude]   HTTP Status : ${status || "no response"}`);
-        console.error(`[askClaude]   Error       : ${apiErr.message}`);
-        console.error(`[askClaude]   Body        : ${JSON.stringify(errBody)}`);
-        console.error(`[askClaude]   Timeout?    : ${apiErr.code === "ECONNABORTED"}`);
-        console.error(`[askClaude]   Platform    : ${platform} | User: ${platformId}`);
-        console.error(`[askClaude]   Message     : ${userMessage.substring(0, 100)}`);
-
+        console.error(`[askClaude] HTTP Status : ${status || "no response"}`);
+        console.error(`[askClaude] Error       : ${apiErr.message}`);
+        console.error(`[askClaude] Body        : ${JSON.stringify(errBody)}`);
+        console.error(`[askClaude] Timeout?    : ${apiErr.code === "ECONNABORTED"}`);
+        console.error(`[askClaude] Platform    : ${platform} | User: ${platformId}`);
+        console.error(`[askClaude] Message     : ${userMessage.substring(0, 100)}`);
         if (apiErr.code === "ECONNABORTED") {
           throw new Error("⏱️ That request took too long — try a more specific question, or call us at 626-678-8677.");
         } else if (status === 529 || status === 503) {
@@ -393,15 +390,13 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       if (respData.stop_reason === "tool_use") {
         const toolUseBlocks = respData.content.filter(b => b.type === "tool_use");
         console.log(`[askClaude] tool_use blocks: ${toolUseBlocks.map(b => b.name).join(", ")}`);
-
         loopMessages.push({ role: "assistant", content: respData.content });
 
         const toolResults = [];
         for (const toolUse of toolUseBlocks) {
           if (toolUse.name === "web_search") {
             toolResults.push({
-              type: "tool_result",
-              tool_use_id: toolUse.id,
+              type: "tool_result", tool_use_id: toolUse.id,
               content: "Search completed. Please synthesize the results."
             });
           } else if (options.executeAction) {
@@ -416,7 +411,6 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
             toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: "Action not available." });
           }
         }
-
         loopMessages.push({ role: "user", content: toolResults });
         continue;
       }
@@ -428,13 +422,13 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
 
     if (!reply) reply = "I'm sorry, I didn't catch that. Could you rephrase?";
 
-    // 9. Save reply + extract contact info + auto-summarize
+    // 10. Save reply + extract contact info + auto-summarize
     await db.saveMessage(platform, platformId, "assistant", reply);
     if (!client?.name) tryExtractName(platform, platformId, userMessage);
     tryExtractContact(platform, platformId, userMessage);
     db.maybeAutoSummarize(platform, platformId, ANTHROPIC_API_KEY).catch(() => {});
 
-    // 10. Log unanswered/fallback questions for admin panel
+    // 11. Log unanswered/fallback questions for admin panel
     const isFallback = reply.includes("didn't catch that") ||
                        reply.includes("I'm sorry") ||
                        reply.includes("technical issue") ||
@@ -444,10 +438,10 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
     }
 
     return reply;
+
   } catch (err) {
     console.error("askClaudeWithMemory error:", err.response?.data || err.message);
     const errReply = "I'm having a technical issue. Please contact us directly:\n📞 626-678-8677\n📧 jj@tezlawfirm.com";
-    // Log technical failures as unanswered too
     db.logUnansweredQuestion(platform, platformId, userMessage, errReply).catch(() => {});
     return errReply;
   }
