@@ -38,15 +38,46 @@ const TEAM = {
 
 // ============================================================
 //  TRIGGER DETECTION
-//  Returns true if JJ's message is a paralegal command
+//  Fires ONLY when message looks like a real case update:
+//  Must have EITHER a case number OR a client name pattern
+//  PLUS a legal action keyword — prevents false positives
+//  on general legal questions.
 // ============================================================
 function isParalegalCommand(message) {
   const m = message.toLowerCase();
+
+  // Explicit prefixes always trigger
+  if (m.startsWith("paralegal:") || m.startsWith("para:") || m.startsWith("case:") || m.startsWith("p:")) {
+    return true;
+  }
+
+  // ── Signal 1: Case number patterns ──────────────────────
+  // CA state: CIVVS2507281, CIVSB123456, 23STCV12345
+  // Federal:  5:26-cv-02057, 2:24-cr-00123, 8:25-bk-12345
+  // EOIR A-number: A123-456-789 or A123456789
+  const hasCaseNumber = (
+    /\b(CIVVS|CIVSB|CIVRS|CIVBS|CIVFS)\d{5,}/i.test(message) ||   // SB county unlimited civil
+    /\b\d{2}(STCV|STCP|STFL|SMCV)\d{5,}/i.test(message) ||        // LA county
+    /\b\d:\d{2}-[a-z]{2,4}-\d{4,}/i.test(message) ||              // Federal (5:26-cv-02057)
+    /\bA[\-\s]?\d{3}[\-\s]?\d{3}[\-\s]?\d{3}\b/i.test(message) || // EOIR A-number
+    /\b[A-Z]{3}\d{10,13}\b/.test(message)                          // USCIS receipt (MSC2490012345)
+  );
+
+  // ── Signal 2: Client name pattern ───────────────────────
+  // Two or more capitalized words (First Last) near a legal keyword
+  const hasClientName = /\b[A-Z][a-z]{1,20}\s+[A-Z][a-z]{1,20}\b/.test(message);
+
+  // ── Signal 3: Legal action keyword ──────────────────────
+  const hasLegalAction = /\b(received|filed|served|issued|granted|denied|scheduled|set for|hearing|order|deadline|calendar|fac|nta|bia|eoir|demurrer|motion|discovery|judgment|removal|deportation|bond|appeal|reopen|reconsider|voluntary departure|in absentia|asylum|i-589|i-130|i-485|meet and confer|m&c|case note|notify team|draft)\b/i.test(message);
+
+  // ── Signal 4: Explicit action phrases always trigger ────
+  const hasExplicitAction = /\b(set deadlines|need deadlines|calendar this|create tasks|notify (the )?team|draft (a |the )?(m&c|meet and confer|case note|motion|letter)|add (to |a )?mycase|case update for)\b/i.test(m);
+
+  // Fire if:
+  // (case number OR client name) AND (legal action keyword OR explicit action)
   return (
-    m.startsWith("paralegal:") ||
-    m.startsWith("para:") ||
-    m.startsWith("case:") ||
-    /\b(deadline|deadlines|calendar|calendaring|cal\b|case note|case update|notify team|team notification|draft m&c|meet and confer|demurrer|answer|motion to strike|fac|nta|bia appeal|eoir|hearing notice|minute order|order to show cause)\b/.test(m)
+    hasExplicitAction ||
+    ((hasCaseNumber || hasClientName) && hasLegalAction)
   );
 }
 
