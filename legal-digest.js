@@ -376,6 +376,150 @@ async function storeCitationsFromOpinions(opinions) {
   }
 }
 
+// ============================================================
+//  ADDITION 1 — SEED ANSWER CACHE FROM HIGH-RELEVANCE OPINIONS
+//  For any opinion scoring 8+, generate 3-5 Q&A pairs and
+//  pre-load them into the answer cache so clients get
+//  accurate, up-to-date answers before they even ask.
+// ============================================================
+async function seedCacheFromOpinion(opinion) {
+  if (!opinion || (opinion.relevanceScore || 0) < 8) return 0;
+
+  const { storeCachedAnswer, detectPracticeArea } = require("./answer-cache");
+
+  try {
+    const resp = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      {
+        model:      "claude-haiku-4-5-20251001",
+        max_tokens: 800,
+        messages: [{
+          role:    "user",
+          content: `You are generating FAQ cache entries for a law firm chatbot based on a new court opinion.
+
+Opinion: ${opinion.title}
+Court: ${opinion.court}
+Category: ${opinion.category}
+Summary: ${opinion.snippet || opinion.relevanceReason || ""}
+
+Generate 3-5 client FAQ questions that this opinion answers, with concise accurate answers.
+ONLY generate questions a general client would actually ask — not legal jargon.
+ONLY include factual, general answers — never personal advice.
+
+Rules:
+- Questions must be general (no "my case" or specific facts)
+- Answers max 2 sentences
+- Answers must accurately reflect the opinion's holding
+- Skip if the holding is too narrow to generate useful FAQs
+
+Respond ONLY with JSON array (empty array [] if no good FAQs):
+[{"q": "client question", "a": "concise accurate answer"}, ...]`,
+        }],
+      },
+      {
+        headers: {
+          "x-api-key":         ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "Content-Type":      "application/json",
+        },
+        timeout: 15000,
+      }
+    );
+
+    const text  = resp.data.content[0]?.text || "[]";
+    const clean = text.replace(/```json|```/g, "").trim();
+    const pairs = JSON.parse(clean);
+
+    if (!Array.isArray(pairs) || pairs.length === 0) return 0;
+
+    let seeded = 0;
+    for (const pair of pairs) {
+      if (!pair.q || !pair.a || pair.q.length < 10 || pair.a.length < 20) continue;
+
+      const practiceArea = detectPracticeArea(pair.q) || opinion.category || "general";
+      const answer = `${pair.a} (Based on ${opinion.title}, ${opinion.court}, ${opinion.date || "2025"})`;
+
+      await storeCachedAnswer(pair.q, answer, practiceArea, "en");
+      seeded++;
+    }
+
+    if (seeded > 0) {
+      console.log(`[digest] 💾 Cache seeded: ${seeded} Q&As from "${opinion.title.substring(0, 50)}"`);
+    }
+    return seeded;
+
+  } catch (err) {
+    console.error("[digest] Cache seed error:", err.message);
+    return 0;
+  }
+}
+
+// ============================================================
+//  ADDITION 2 — SAVE RESEARCH NOTES TO JJ MEMORY
+//  For any opinion scoring 8+, save a concise research note
+//  into jj_memory so JJ mode already knows about it.
+//  Scores 9-10 also trigger an immediate Telegram alert.
+// ============================================================
+async function saveResearchNoteToJJMemory(opinion) {
+  if (!opinion || (opinion.relevanceScore || 0) < 8) return;
+
+  try {
+    // Build a concise research note
+    const note = [
+      `📚 New ${opinion.court} opinion: ${opinion.title}`,
+      opinion.citation ? `Citation: ${opinion.citation}` : null,
+      `Date: ${opinion.date || "Recent"}`,
+      `Category: ${opinion.category}`,
+      `Why it matters: ${opinion.relevanceReason || opinion.snippet?.substring(0, 200) || ""}`,
+      opinion.url ? `Read: ${opinion.url}` : null,
+    ].filter(Boolean).join(" | ");
+
+    // Save to jj_memory as a research entry
+    await db.query(
+      `INSERT INTO jj_memory (timestamp, jj_said, zara_said)
+       VALUES ($1, $2, $3)`,
+      [
+        new Date().toISOString(),
+        `[RESEARCH] ${opinion.title}`,
+        note.substring(0, 2000),
+      ]
+    );
+
+    console.log(`[digest] 🧠 JJ memory updated: "${opinion.title.substring(0, 50)}"`);
+
+    // For score 9-10 (critical/landmark): send immediate Telegram alert
+    if ((opinion.relevanceScore || 0) >= 9 && TELEGRAM_TOKEN && JJ_TELEGRAM_ID) {
+      const urgentMsg = [
+        `🚨 <b>URGENT — New Legal Development</b>`,
+        ``,
+        `<b>${opinion.title}</b>`,
+        `🏛️ ${opinion.court} | 📅 ${opinion.date || "Today"}`,
+        ``,
+        `⚠️ ${opinion.relevanceReason || opinion.snippet?.substring(0, 200) || ""}`,
+        ``,
+        opinion.url ? `<a href="${opinion.url}">📄 Read Full Opinion →</a>` : "",
+        ``,
+        `<i>Zara has saved this to your research memory and pre-seeded the client cache.</i>`,
+      ].filter(s => s !== null).join("\n");
+
+      await axios.post(
+        `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+        {
+          chat_id:    JJ_TELEGRAM_ID,
+          text:       urgentMsg,
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        }
+      ).catch(err => console.error("[digest] Urgent alert error:", err.message));
+
+      console.log(`[digest] 🚨 Urgent alert sent for score-${opinion.relevanceScore} opinion`);
+    }
+
+  } catch (err) {
+    console.error("[digest] JJ memory save error:", err.message);
+  }
+}
+
 // ── Initialize citation table in PostgreSQL ──────────────────
 async function initCitationTable() {
   try {
@@ -447,6 +591,24 @@ async function runDailyDigest(forceRun = false) {
     // ── Store in PostgreSQL ──────────────────────────────────
     await storeCitationsFromOpinions(relevant);
 
+    // ── Seed answer cache + save to JJ memory ────────────────
+    // Runs for all opinions scoring 8+ (high relevance)
+    // Non-blocking — digest continues even if these fail
+    const highRelevance = relevant.filter(o => (o.relevanceScore || 0) >= 8);
+    if (highRelevance.length > 0) {
+      console.log(`[digest] 🔄 Processing ${highRelevance.length} high-relevance opinions for cache + memory...`);
+      let totalSeeded = 0;
+      for (const opinion of highRelevance) {
+        // Run sequentially to avoid hammering the API
+        const [seeded] = await Promise.allSettled([
+          seedCacheFromOpinion(opinion),
+          saveResearchNoteToJJMemory(opinion),
+        ]);
+        totalSeeded += (seeded.value || 0);
+      }
+      console.log(`[digest] ✅ Cache seeded: ${totalSeeded} total Q&As | Memory updated: ${highRelevance.length} notes`);
+    }
+
     // ── Generate summary ────────────────────────────────────
     console.log("[digest] Generating summary...");
     const summary = await generateDigestSummary(relevant);
@@ -514,4 +676,6 @@ module.exports = {
   initCitationTable,
   fetchNewOpinions,
   scoreRelevance,
+  seedCacheFromOpinion,
+  saveResearchNoteToJJMemory,
 };
