@@ -1,0 +1,1809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zara Research — Tez Law P.C.</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold:      #B79C62;
+    --gold-lite: #d4bb8a;
+    --gold-dim:  #7a6640;
+    --navy:      #0C1C36;
+    --navy-mid:  #162848;
+    --navy-lite: #1e3460;
+    --cream:     #f5f0e8;
+    --cream-dim: #e8e0d0;
+    --red:       #c0392b;
+    --green:     #27ae60;
+    --text:      #1a1a1a;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'IBM Plex Sans', sans-serif;
+    --serif:     'Playfair Display', Georgia, serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--navy);
+    color: var(--cream);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: var(--navy);
+    border-bottom: 1px solid var(--navy-lite);
+    padding: 0 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 60px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .header-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .header-logo {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .header-logo img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+  }
+
+  .header-title {
+    font-family: var(--serif);
+    font-size: 18px;
+    color: var(--cream);
+    letter-spacing: 0.3px;
+  }
+
+  .header-title span {
+    color: var(--gold);
+  }
+
+  .header-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    background: var(--navy-lite);
+    color: var(--gold);
+    padding: 3px 8px;
+    border-radius: 3px;
+    border: 1px solid var(--gold-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* ── Layout ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    min-height: calc(100vh - 60px);
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    background: var(--navy-mid);
+    border-right: 1px solid var(--navy-lite);
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sidebar-section {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--gold-dim);
+    padding: 12px 8px 6px;
+  }
+
+  .sidebar-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--cream-dim);
+    font-family: var(--sans);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+    width: 100%;
+  }
+
+  .sidebar-btn:hover { background: var(--navy-lite); color: var(--cream); }
+  .sidebar-btn.active {
+    background: rgba(183,156,98,0.12);
+    color: var(--gold);
+    border-left: 2px solid var(--gold);
+  }
+
+  .sidebar-btn .icon {
+    font-size: 15px;
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .sidebar-divider {
+    height: 1px;
+    background: var(--navy-lite);
+    margin: 8px 0;
+  }
+
+  /* ── Main content ── */
+  .main {
+    padding: 32px;
+    overflow-y: auto;
+  }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── Search panel ── */
+  .search-header {
+    margin-bottom: 28px;
+  }
+
+  .search-header h1 {
+    font-family: var(--serif);
+    font-size: 28px;
+    color: var(--cream);
+    margin-bottom: 6px;
+  }
+
+  .search-header h1 span { color: var(--gold); }
+
+  .search-header p {
+    font-size: 13px;
+    color: var(--cream-dim);
+    opacity: 0.7;
+  }
+
+  .search-box {
+    background: var(--navy-mid);
+    border: 1px solid var(--navy-lite);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    transition: border-color 0.2s;
+  }
+
+  .search-box:focus-within {
+    border-color: var(--gold-dim);
+  }
+
+  .search-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .search-input {
+    flex: 1;
+    background: var(--navy);
+    border: 1px solid var(--navy-lite);
+    border-radius: 6px;
+    padding: 12px 16px;
+    font-family: var(--sans);
+    font-size: 14px;
+    color: var(--cream);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .search-input:focus { border-color: var(--gold-dim); }
+  .search-input::placeholder { color: rgba(245,240,232,0.3); }
+
+  .search-btn {
+    background: var(--gold);
+    color: var(--navy);
+    border: none;
+    border-radius: 6px;
+    padding: 12px 24px;
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .search-btn:hover { background: var(--gold-lite); }
+  .search-btn:disabled { background: var(--gold-dim); cursor: not-allowed; }
+
+  .filters {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 160px;
+  }
+
+  .filter-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--gold-dim);
+  }
+
+  .filter-select {
+    background: var(--navy);
+    border: 1px solid var(--navy-lite);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--cream);
+    outline: none;
+    cursor: pointer;
+  }
+
+  .filter-select:focus { border-color: var(--gold-dim); }
+
+  /* ── Quick searches ── */
+  .quick-searches {
+    margin-bottom: 24px;
+  }
+
+  .quick-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--gold-dim);
+    margin-bottom: 8px;
+  }
+
+  .quick-pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .quick-pill {
+    background: var(--navy-mid);
+    border: 1px solid var(--navy-lite);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 12px;
+    color: var(--cream-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .quick-pill:hover {
+    border-color: var(--gold-dim);
+    color: var(--gold);
+    background: rgba(183,156,98,0.08);
+  }
+
+  /* ── Results ── */
+  .results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .results-count {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--gold-dim);
+    letter-spacing: 1px;
+  }
+
+  .results-warning {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(192,57,43,0.12);
+    border: 1px solid rgba(192,57,43,0.3);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #e74c3c;
+    margin-bottom: 16px;
+  }
+
+  .case-card {
+    background: var(--navy-mid);
+    border: 1px solid var(--navy-lite);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-bottom: 12px;
+    transition: border-color 0.15s;
+    cursor: pointer;
+  }
+
+  .case-card:hover { border-color: var(--gold-dim); }
+
+  .case-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .case-name {
+    font-family: var(--serif);
+    font-size: 16px;
+    color: var(--cream);
+    line-height: 1.3;
+  }
+
+  .case-citation {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--gold);
+    background: rgba(183,156,98,0.1);
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .case-meta {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 10px;
+  }
+
+  .case-meta-item {
+    font-size: 11px;
+    color: rgba(245,240,232,0.5);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .case-snippet {
+    font-size: 13px;
+    color: rgba(245,240,232,0.65);
+    line-height: 1.5;
+    font-style: italic;
+    border-left: 2px solid var(--gold-dim);
+    padding-left: 10px;
+    margin-bottom: 10px;
+  }
+
+  .case-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .case-action-btn {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--navy-lite);
+    background: transparent;
+    color: var(--cream-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .case-action-btn:hover {
+    border-color: var(--gold-dim);
+    color: var(--gold);
+  }
+
+  .case-action-btn.primary {
+    background: rgba(183,156,98,0.12);
+    border-color: var(--gold-dim);
+    color: var(--gold);
+  }
+
+  /* ── Citation verifier ── */
+  .verify-box {
+    background: var(--navy-mid);
+    border: 1px solid var(--navy-lite);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+
+  .verify-box h2 {
+    font-family: var(--serif);
+    font-size: 20px;
+    margin-bottom: 6px;
+  }
+
+  .verify-box p {
+    font-size: 13px;
+    color: rgba(245,240,232,0.6);
+    margin-bottom: 16px;
+  }
+
+  .verify-result {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.6;
+    display: none;
+  }
+
+  .verify-result.verified {
+    background: rgba(39,174,96,0.12);
+    border: 1px solid rgba(39,174,96,0.3);
+    color: #2ecc71;
+    display: block;
+  }
+
+  .verify-result.not-verified {
+    background: rgba(192,57,43,0.12);
+    border: 1px solid rgba(192,57,43,0.3);
+    color: #e74c3c;
+    display: block;
+  }
+
+  /* ── Loading state ── */
+  .loading {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px;
+    gap: 16px;
+  }
+
+  .loading.active { display: flex; }
+
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 2px solid var(--navy-lite);
+    border-top-color: var(--gold);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-text {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--gold-dim);
+    letter-spacing: 1px;
+  }
+
+  /* ── Empty state ── */
+  .empty-state {
+    text-align: center;
+    padding: 60px 32px;
+    color: rgba(245,240,232,0.3);
+  }
+
+  .empty-state .icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.4;
+  }
+
+  .empty-state h3 {
+    font-family: var(--serif);
+    font-size: 20px;
+    margin-bottom: 8px;
+    color: rgba(245,240,232,0.4);
+  }
+
+  .empty-state p {
+    font-size: 13px;
+    max-width: 360px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+
+  /* ── Token setup banner ── */
+  .setup-banner {
+    background: rgba(183,156,98,0.08);
+    border: 1px solid var(--gold-dim);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .setup-banner p {
+    font-size: 12px;
+    color: var(--gold);
+    line-height: 1.4;
+  }
+
+  .setup-banner a {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--gold);
+    border: 1px solid var(--gold-dim);
+    padding: 6px 12px;
+    border-radius: 4px;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background 0.15s;
+  }
+
+  .setup-banner a:hover { background: rgba(183,156,98,0.15); }
+
+  /* ── Token input ── */
+  .token-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .token-input {
+    flex: 1;
+    background: var(--navy);
+    border: 1px solid var(--navy-lite);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--cream);
+    outline: none;
+  }
+
+  .token-input:focus { border-color: var(--gold-dim); }
+
+  .token-save-btn {
+    background: var(--gold);
+    color: var(--navy);
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* ── Court tag chips ── */
+  .court-tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--navy-lite);
+    color: rgba(245,240,232,0.5);
+    text-transform: uppercase;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .main { padding: 20px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-brand">
+    <div class="header-logo"><img src="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png" alt="Tez Law"></div>
+    <div class="header-title">Zara <span>Research</span></div>
+  </div>
+  <span class="header-badge">JJ Private Mode</span>
+</header>
+
+<div class="layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-section">Research Tools</div>
+    <button class="sidebar-btn active" onclick="showPage('search')">
+      <span class="icon">🔍</span> Case Law Search
+    </button>
+    <button class="sidebar-btn" onclick="showPage('verify')">
+      <span class="icon">✅</span> Citation Verifier
+    </button>
+    <button class="sidebar-btn" onclick="showPage('immigration')">
+      <span class="icon">🛂</span> Immigration (BIA/9th)
+    </button>
+    <button class="sidebar-btn" onclick="showPage('statutes')">
+      <span class="icon">📚</span> CA Statutes
+    </button>
+    <button class="sidebar-btn" onclick="showPage('judge')">
+      <span class="icon">⚖️</span> Judge Analytics
+    </button>
+    <button class="sidebar-btn" onclick="showPage('citations')">
+      <span class="icon">🔗</span> Citation Tracker
+    </button>
+
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-section">Shortcuts</div>
+
+    <button class="sidebar-btn" onclick="quickSearch('demurrer grounds breach of contract california')">
+      <span class="icon">⚖️</span> Demurrer — Contract
+    </button>
+    <button class="sidebar-btn" onclick="quickSearch('unlawful detainer 3-day notice california')">
+      <span class="icon">🏠</span> UD / Eviction
+    </button>
+    <button class="sidebar-btn" onclick="quickSearch('comparative negligence personal injury california')">
+      <span class="icon">🚗</span> PI / Negligence
+    </button>
+    <button class="sidebar-btn" onclick="quickSearch('asylum credibility adverse findings bia')">
+      <span class="icon">🌐</span> Asylum / Credibility
+    </button>
+    <button class="sidebar-btn" onclick="quickSearch('voluntary departure immigration court 9th circuit')">
+      <span class="icon">✈️</span> Voluntary Departure
+    </button>
+    <button class="sidebar-btn" onclick="quickSearch('motion to reopen bia in absentia')">
+      <span class="icon">📋</span> MTR / In Absentia
+    </button>
+    <button class="sidebar-btn" onclick="quickSearch('revocable living trust california probate')">
+      <span class="icon">📜</span> Trusts / Probate
+    </button>
+
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-section">Settings</div>
+    <button class="sidebar-btn" onclick="showPage('settings')">
+      <span class="icon">⚙️</span> API Token
+    </button>
+  </nav>
+
+  <!-- Main content -->
+  <main class="main">
+
+    <!-- ── CASE LAW SEARCH ── -->
+    <div id="page-search" class="page active">
+      <div class="search-header">
+        <h1>California <span>Case Law</span> Search</h1>
+        <p>Powered by CourtListener REST API v4 — Free Law Project | ~9M decisions</p>
+      </div>
+
+      <div id="setup-banner" class="setup-banner" style="display:none">
+        <p>⚡ Add your free CourtListener API token for higher rate limits (5,000/hr vs 100/hr anonymous).</p>
+        <a href="https://www.courtlistener.com/sign-in/" target="_blank">Get Free Token →</a>
+      </div>
+
+      <div class="search-box">
+        <div class="search-row">
+          <input type="text" class="search-input" id="search-input"
+            placeholder="e.g. demurrer grounds breach of contract, unlawful detainer notice, asylum credibility..."
+            onkeydown="if(event.key==='Enter') runSearch()">
+          <button class="search-btn" id="search-btn" onclick="runSearch()">
+            <span>Search</span> <span id="btn-spinner" style="display:none">⟳</span>
+          </button>
+        </div>
+        <div class="filters">
+          <div class="filter-group">
+            <div class="filter-label">Practice Area</div>
+            <select class="filter-select" id="filter-area">
+              <option value="civil">California Civil</option>
+              <option value="immigration">Immigration (9th/BIA)</option>
+              <option value="pi">Personal Injury</option>
+              <option value="eviction">Eviction / UD</option>
+              <option value="federal">Federal (CACD/CAED)</option>
+              <option value="estate">Estate / Probate</option>
+              <option value="all">All Courts</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <div class="filter-label">Date Range</div>
+            <select class="filter-select" id="filter-date">
+              <option value="2015-01-01">Last 10 years</option>
+              <option value="2010-01-01" selected>Last 15 years</option>
+              <option value="2000-01-01">Last 25 years</option>
+              <option value="1990-01-01">All available</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <div class="filter-label">Results</div>
+            <select class="filter-select" id="filter-count">
+              <option value="5" selected>5 cases</option>
+              <option value="10">10 cases</option>
+              <option value="20">20 cases</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <div class="filter-label">Sort By</div>
+            <select class="filter-select" id="filter-sort">
+              <option value="score" selected>Relevance</option>
+              <option value="-dateFiled">Most Recent</option>
+              <option value="dateFiled">Oldest First</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="quick-searches">
+        <div class="quick-label">Quick searches</div>
+        <div class="quick-pills">
+          <span class="quick-pill" onclick="quickSearch('demurrer uncertainty cause of action')">Demurrer — Uncertainty</span>
+          <span class="quick-pill" onclick="quickSearch('meet and confer good faith CCP 430.41')">Meet & Confer Good Faith</span>
+          <span class="quick-pill" onclick="quickSearch('unlawful detainer substantial compliance notice')">UD Notice Compliance</span>
+          <span class="quick-pill" onclick="quickSearch('comparative fault pure negligence apportionment')">PI Comparative Fault</span>
+          <span class="quick-pill" onclick="quickSearch('BIA one year asylum bar exception')">Asylum 1-Year Bar</span>
+          <span class="quick-pill" onclick="quickSearch('9th circuit due process immigration hearing')">EOIR Due Process</span>
+          <span class="quick-pill" onclick="quickSearch('living trust amendment revocation california probate')">Trust Amendment</span>
+          <span class="quick-pill" onclick="quickSearch('breach of contract damages mitigation california')">Contract Damages</span>
+        </div>
+      </div>
+
+      <!-- Loading -->
+      <div class="loading" id="search-loading">
+        <div class="spinner"></div>
+        <div class="loading-text">Searching CourtListener...</div>
+      </div>
+
+      <!-- Results -->
+      <div id="search-results"></div>
+    </div>
+
+    <!-- ── CITATION VERIFIER ── -->
+    <div id="page-verify" class="page">
+      <div class="search-header">
+        <h1>Citation <span>Verifier</span></h1>
+        <p>Anti-hallucination check — verify any case citation before using in filings</p>
+      </div>
+
+      <div class="verify-box">
+        <h2>Verify a Citation</h2>
+        <p>Paste any case citation to confirm it exists in CourtListener's database. Always follow up with Westlaw KeyCite or Shepard's before filing.</p>
+        <div class="search-row">
+          <input type="text" class="search-input" id="verify-input"
+            placeholder="e.g. 230 Cal.App.4th 1234, or Martinez v. Jones (2019)"
+            onkeydown="if(event.key==='Enter') runVerify()">
+          <button class="search-btn" onclick="runVerify()">Verify</button>
+        </div>
+        <div class="loading" id="verify-loading" style="padding:16px">
+          <div class="spinner"></div>
+          <div class="loading-text">Checking CourtListener...</div>
+        </div>
+        <div id="verify-result" class="verify-result"></div>
+      </div>
+
+      <div class="verify-box">
+        <h2>Batch Verify</h2>
+        <p>Paste multiple citations, one per line, to verify all at once.</p>
+        <textarea class="search-input" id="batch-input" rows="6"
+          style="width:100%;resize:vertical;margin-bottom:12px"
+          placeholder="230 Cal.App.4th 1234&#10;45 Cal.3d 678&#10;Martinez v. Jones, 2019 WL 123456"></textarea>
+        <button class="search-btn" onclick="runBatchVerify()">Verify All</button>
+        <div id="batch-results" style="margin-top:16px"></div>
+      </div>
+    </div>
+
+    <!-- ── IMMIGRATION RESEARCH ── -->
+    <div id="page-immigration" class="page">
+      <div class="search-header">
+        <h1>Immigration <span>Research</span></h1>
+        <p>9th Circuit Court of Appeals + Board of Immigration Appeals decisions</p>
+      </div>
+
+      <div class="search-box">
+        <div class="search-row">
+          <input type="text" class="search-input" id="imm-input"
+            placeholder="e.g. asylum credibility adverse findings, CAT deferral, BIA voluntary departure..."
+            onkeydown="if(event.key==='Enter') runImmSearch()">
+          <button class="search-btn" onclick="runImmSearch()">Search</button>
+        </div>
+      </div>
+
+      <div class="quick-searches">
+        <div class="quick-label">Common immigration searches</div>
+        <div class="quick-pills">
+          <span class="quick-pill" onclick="immQuick('asylum one year bar exceptional circumstances')">1-Year Bar Exceptions</span>
+          <span class="quick-pill" onclick="immQuick('BIA adverse credibility inconsistencies')">Adverse Credibility</span>
+          <span class="quick-pill" onclick="immQuick('voluntary departure bond payment deadline')">Vol. Departure Bond</span>
+          <span class="quick-pill" onclick="immQuick('motion to reopen in absentia exceptional circumstances')">MTR In Absentia</span>
+          <span class="quick-pill" onclick="immQuick('withholding removal particular social group')">PSG / Withholding</span>
+          <span class="quick-pill" onclick="immQuick('CAT convention against torture deferral')">CAT Deferral</span>
+          <span class="quick-pill" onclick="immQuick('BIA ineffective assistance counsel Lozada')">IAC / Lozada</span>
+          <span class="quick-pill" onclick="immQuick('9th circuit petition for review jurisdiction')">PFR Jurisdiction</span>
+          <span class="quick-pill" onclick="immQuick('VAWA self-petition battery cruelty')">VAWA Cases</span>
+          <span class="quick-pill" onclick="immQuick('cancellation removal continuous presence')">Cancel. of Removal</span>
+        </div>
+      </div>
+
+      <div class="loading" id="imm-loading">
+        <div class="spinner"></div>
+        <div class="loading-text">Searching 9th Circuit + BIA...</div>
+      </div>
+
+      <div id="imm-results"></div>
+    </div>
+
+    <!-- ── CA STATUTES ── -->
+    <div id="page-statutes" class="page">
+      <div class="search-header">
+        <h1>California <span>Statutes</span></h1>
+        <p>Official text from leginfo.legislature.ca.gov — public domain under Gov. Code §10248.5</p>
+      </div>
+
+      <div class="search-box">
+        <div class="search-row">
+          <input type="text" class="search-input" id="stat-input"
+            placeholder="e.g. CCP 430.10, Civil Code 1710, demurrer, unlawful detainer, damages..."
+            onkeydown="if(event.key==='Enter') runStatSearch()">
+          <button class="search-btn" onclick="runStatSearch()">Look Up</button>
+        </div>
+        <div style="font-size:11px;color:rgba(245,240,232,0.4);margin-top:8px;font-family:var(--mono)">
+          Try: "CCP 430.10" · "Civil Code 1714" · "FAM 4320" · "PROB 15200" · "demurrer" · "unlawful detainer" · "damages"
+        </div>
+      </div>
+
+      <div class="quick-searches">
+        <div class="quick-label">Common sections — Civil Litigation</div>
+        <div class="quick-pills">
+          <span class="quick-pill" onclick="statLookup('CCP','430.10')">CCP §430.10 — Demurrer Grounds</span>
+          <span class="quick-pill" onclick="statLookup('CCP','430.41')">CCP §430.41 — Meet &amp; Confer</span>
+          <span class="quick-pill" onclick="statLookup('CCP','437c')">CCP §437c — Summary Judgment</span>
+          <span class="quick-pill" onclick="statLookup('CCP','335.1')">CCP §335.1 — PI SOL (2 yrs)</span>
+          <span class="quick-pill" onclick="statLookup('CCP','337')">CCP §337 — Contract SOL (4 yrs)</span>
+          <span class="quick-pill" onclick="statLookup('CCP','425.16')">CCP §425.16 — Anti-SLAPP</span>
+          <span class="quick-pill" onclick="statLookup('CCP','1010.6')">CCP §1010.6 — Electronic Service</span>
+          <span class="quick-pill" onclick="statLookup('CIV','3294')">CIV §3294 — Punitive Damages</span>
+        </div>
+        <div class="quick-label" style="margin-top:14px">Eviction / Landlord-Tenant</div>
+        <div class="quick-pills">
+          <span class="quick-pill" onclick="statLookup('CCP','1161')">CCP §1161 — UD / 3-Day Notice</span>
+          <span class="quick-pill" onclick="statLookup('CIV','1946.2')">CIV §1946.2 — Just Cause (AB 1482)</span>
+          <span class="quick-pill" onclick="statLookup('CIV','1947.12')">CIV §1947.12 — Rent Cap</span>
+          <span class="quick-pill" onclick="statLookup('CIV','1950.5')">CIV §1950.5 — Security Deposit</span>
+          <span class="quick-pill" onclick="statLookup('CIV','1941')">CIV §1941 — Habitability Duty</span>
+          <span class="quick-pill" onclick="statLookup('CIV','1942.5')">CIV §1942.5 — Anti-Retaliation</span>
+        </div>
+        <div class="quick-label" style="margin-top:14px">Estate Planning / Probate</div>
+        <div class="quick-pills">
+          <span class="quick-pill" onclick="statLookup('PROB','15200')">PROB §15200 — Living Trust</span>
+          <span class="quick-pill" onclick="statLookup('PROB','13100')">PROB §13100 — Small Estate ($184K)</span>
+          <span class="quick-pill" onclick="statLookup('PROB','4124')">PROB §4124 — Durable POA</span>
+          <span class="quick-pill" onclick="statLookup('PROB','21402')">PROB §21402 — Probate Fees</span>
+          <span class="quick-pill" onclick="statLookup('PROB','6100')">PROB §6100 — Will Execution</span>
+        </div>
+        <div class="quick-label" style="margin-top:14px">Business / Contracts</div>
+        <div class="quick-pills">
+          <span class="quick-pill" onclick="statLookup('BPC','16600')">BPC §16600 — Non-Competes VOID</span>
+          <span class="quick-pill" onclick="statLookup('CIV','1710')">CIV §1710 — Fraud / Deceit</span>
+          <span class="quick-pill" onclick="statLookup('CIV','1717')">CIV §1717 — Attorneys Fees</span>
+          <span class="quick-pill" onclick="statLookup('CIV','3426')">CIV §3426 — Trade Secrets</span>
+          <span class="quick-pill" onclick="statLookup('CCP','1281.2')">CCP §1281.2 — Arbitration</span>
+        </div>
+        <div class="quick-label" style="margin-top:14px">Personal Injury / Govt Claims</div>
+        <div class="quick-pills">
+          <span class="quick-pill" onclick="statLookup('CIV','1714')">CIV §1714 — Negligence Standard</span>
+          <span class="quick-pill" onclick="statLookup('GOV','911.2')">GOV §911.2 — Govt Claim (6 mos)</span>
+          <span class="quick-pill" onclick="statLookup('GOV','945.4')">GOV §945.4 — Claim Presentation</span>
+          <span class="quick-pill" onclick="statLookup('VEH','17150')">VEH §17150 — Owner Liability</span>
+        </div>
+      </div>
+
+      <div class="loading" id="stat-loading">
+        <div class="spinner"></div>
+        <div class="loading-text">Fetching from leginfo.legislature.ca.gov...</div>
+      </div>
+
+      <div id="stat-results"></div>
+    </div>
+
+
+    <!-- ── JUDGE ANALYTICS ── -->
+    <div id="page-judge" class="page">
+      <div class="search-header">
+        <h1>Judge <span>Analytics</span></h1>
+        <p>Powered by Trellis Law — trial court motion grant rates, ruling patterns, opposing counsel</p>
+      </div>
+
+      <div id="trellis-setup-banner" class="setup-banner">
+        <p>⚡ Add your Trellis API key to unlock judge analytics, motion grant rates, and tentative rulings. Plans from $199.95/mo at trellis.law/plans</p>
+        <a href="https://trellis.law/plans" target="_blank">Subscribe →</a>
+      </div>
+
+      <div class="search-box">
+        <div class="search-row">
+          <input type="text" class="search-input" id="judge-input"
+            placeholder="e.g. Judge Martinez, Hon. Smith, Judge Rodriguez San Bernardino..."
+            onkeydown="if(event.key==='Enter') runJudgeSearch()">
+          <button class="search-btn" onclick="runJudgeSearch()">Analyze</button>
+        </div>
+        <div style="font-size:11px;color:rgba(245,240,232,0.4);margin-top:8px;font-family:var(--mono)">
+          Optional: add motion type — "Judge Martinez demurrer" · "Judge Smith summary judgment" · "Judge Lee unlawful detainer"
+        </div>
+      </div>
+
+      <div class="quick-searches">
+        <div class="quick-label">San Bernardino Superior Court — Common Motions</div>
+        <div class="quick-pills">
+          <span class="quick-pill" onclick="judgeQuick('demurrer')">Demurrer Grant Rates</span>
+          <span class="quick-pill" onclick="judgeQuick('summary judgment')">MSJ Grant Rates</span>
+          <span class="quick-pill" onclick="judgeQuick('unlawful detainer')">UD Motion Rates</span>
+          <span class="quick-pill" onclick="judgeQuick('motion to compel')">Discovery Motions</span>
+          <span class="quick-pill" onclick="judgeQuick('anti-slapp')">Anti-SLAPP</span>
+        </div>
+        <div class="quick-label" style="margin-top:14px">Find Winning Motions</div>
+        <div class="quick-pills">
+          <span class="quick-pill" onclick="findMotion('demurrer','breach of contract')">Demurrer — Breach of Contract</span>
+          <span class="quick-pill" onclick="findMotion('demurrer','fraud misrepresentation')">Demurrer — Fraud</span>
+          <span class="quick-pill" onclick="findMotion('motion to strike','punitive damages')">MTS — Punitive Damages</span>
+          <span class="quick-pill" onclick="findMotion('summary judgment','personal injury negligence')">MSJ — PI Negligence</span>
+          <span class="quick-pill" onclick="findMotion('unlawful detainer','3-day notice')">UD — 3-Day Notice</span>
+          <span class="quick-pill" onclick="findMotion('anti-slapp','defamation')">Anti-SLAPP — Defamation</span>
+        </div>
+      </div>
+
+      <div class="loading" id="judge-loading">
+        <div class="spinner"></div>
+        <div class="loading-text">Fetching from Trellis Law...</div>
+      </div>
+
+      <div id="judge-results"></div>
+    </div>
+
+    <!-- ── CITATION TRACKER ── -->
+    <div id="page-citations" class="page">
+      <div class="search-header">
+        <h1>Citation <span>Tracker</span></h1>
+        <p>Zara's growing citation graph — built from daily opinion ingestion since launch</p>
+      </div>
+
+      <div class="verify-box" id="citation-stats-box">
+        <h2>Database Status</h2>
+        <div id="citation-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:16px">
+          <div style="text-align:center;padding:16px;background:var(--navy);border-radius:8px">
+            <div style="font-family:var(--mono);font-size:24px;color:var(--gold)" id="stat-total">—</div>
+            <div style="font-size:11px;color:rgba(245,240,232,0.5);margin-top:4px">Cases Indexed</div>
+          </div>
+          <div style="text-align:center;padding:16px;background:var(--navy);border-radius:8px">
+            <div style="font-family:var(--mono);font-size:24px;color:var(--gold)" id="stat-treatments">—</div>
+            <div style="font-size:11px;color:rgba(245,240,232,0.5);margin-top:4px">Citations Tracked</div>
+          </div>
+          <div style="text-align:center;padding:16px;background:var(--navy);border-radius:8px">
+            <div style="font-family:var(--mono);font-size:24px;color:#e74c3c" id="stat-negative">—</div>
+            <div style="font-size:11px;color:rgba(245,240,232,0.5);margin-top:4px">Negative Treatments</div>
+          </div>
+          <div style="text-align:center;padding:16px;background:var(--navy);border-radius:8px">
+            <div style="font-family:var(--mono);font-size:24px;color:#2ecc71" id="stat-week">—</div>
+            <div style="font-size:11px;color:rgba(245,240,232,0.5);margin-top:4px">Added This Week</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;font-size:11px;color:rgba(245,240,232,0.35);font-family:var(--mono)">
+          ⚠️ Database coverage: April 2026 onwards. Always verify pre-launch cases in vLex Fastcase.
+        </div>
+      </div>
+
+      <div class="verify-box">
+        <h2>Citation Good Law Check</h2>
+        <p>Check if a case has been overruled, distinguished, or criticized in our database.</p>
+        <div class="search-row" style="margin-top:16px">
+          <input type="text" class="search-input" id="cite-check-input"
+            placeholder="e.g. 45 Cal.3d 678, or Smith v. Jones..."
+            onkeydown="if(event.key==='Enter') runCiteCheck()">
+          <button class="search-btn" onclick="runCiteCheck()">Check</button>
+        </div>
+        <div class="loading" id="cite-loading" style="padding:16px">
+          <div class="spinner"></div>
+          <div class="loading-text">Checking citation database...</div>
+        </div>
+        <div id="cite-check-result" style="margin-top:16px"></div>
+      </div>
+
+      <div class="verify-box">
+        <h2>⚠️ Important: Coverage Limitation</h2>
+        <p style="margin-bottom:10px">Zara's citation database only covers opinions <strong>since April 2026</strong>. For any case decided before that:</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+          <a href="https://law.vlex.com" target="_blank" class="case-action-btn primary">🔍 vLex Fastcase (free via CLA) →</a>
+          <a href="https://www.courtlistener.com" target="_blank" class="case-action-btn">CourtListener →</a>
+          <a href="https://scholar.google.com" target="_blank" class="case-action-btn">Google Scholar →</a>
+        </div>
+        <p style="margin-top:12px;font-size:11px;opacity:0.5">The citation database grows every day as Zara ingests new opinions. Over time, coverage of recent cases approaches Shepard's quality for your practice areas.</p>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS ── -->
+    <div id="page-settings" class="page">
+      <div class="search-header">
+        <h1>API <span>Settings</span></h1>
+        <p>Configure your CourtListener API token for higher rate limits</p>
+      </div>
+
+      <div class="verify-box">
+        <h2>CourtListener API Token</h2>
+        <p>Anonymous access: ~100 requests/hour. Free account token: 5,000 requests/hour. Register free at <a href="https://www.courtlistener.com/sign-in/" target="_blank" style="color:var(--gold)">courtlistener.com</a>, then go to Profile → API Token.</p>
+        <div class="token-row" style="margin-top:14px">
+          <input type="password" class="token-input" id="token-input" placeholder="Paste your API token here...">
+          <button class="token-save-btn" onclick="saveToken()">Save</button>
+        </div>
+        <div id="token-status" style="margin-top:10px;font-size:12px;color:var(--gold-dim)"></div>
+      </div>
+
+      <div class="verify-box">
+        <h2>Add to Zara (Render)</h2>
+        <p style="margin-bottom:12px">To enable case law search in Telegram/WhatsApp JJ mode, add this environment variable to your Render service:</p>
+        <code style="font-family:var(--mono);font-size:12px;background:var(--navy);padding:10px 14px;border-radius:6px;display:block;color:var(--gold)">COURTLISTENER_TOKEN=your_token_here</code>
+        <p style="margin-top:12px;font-size:12px;opacity:0.6">Then redeploy. In JJ mode, type: "find cases on [topic]" or "verify citation [citation]"</p>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────
+let apiToken = localStorage.getItem('cl_token') || '';
+
+const COURT_MAP = {
+  civil:       'cal,calctapp_1st,calctapp_2nd,calctapp_3rd,calctapp_4th,calctapp_5th,calctapp_6th',
+  immigration: 'ca9,bia',
+  pi:          'cal,calctapp_1st,calctapp_2nd,calctapp_3rd,calctapp_4th,calctapp_5th,calctapp_6th',
+  eviction:    'cal,calctapp_1st,calctapp_2nd,calctapp_3rd,calctapp_4th,calctapp_5th,calctapp_6th',
+  federal:     'ca9,cacd,caed',
+  estate:      'cal,calctapp_1st,calctapp_2nd,calctapp_3rd,calctapp_4th,calctapp_5th,calctapp_6th',
+  all:         'cal,calctapp_1st,calctapp_2nd,calctapp_3rd,calctapp_4th,calctapp_5th,calctapp_6th,ca9,bia',
+};
+
+// ── Page navigation ────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  event.currentTarget && event.currentTarget.classList.add('active');
+}
+
+// ── CourtListener API call ─────────────────────────────────
+async function clSearch(params) {
+  const url = new URL('https://www.courtlistener.com/api/rest/v4/search/');
+  Object.entries(params).forEach(([k,v]) => v && url.searchParams.set(k, v));
+
+  const headers = { 'Accept': 'application/json' };
+  if (apiToken) headers['Authorization'] = `Token ${apiToken}`;
+
+  const resp = await fetch(url.toString(), { headers });
+  if (!resp.ok) {
+    if (resp.status === 401) throw new Error('Invalid API token. Check your token in Settings.');
+    if (resp.status === 429) throw new Error('Rate limit hit. Add a free API token in Settings for higher limits.');
+    throw new Error(`API error: ${resp.status}`);
+  }
+  return resp.json();
+}
+
+// ── Run keyword search ─────────────────────────────────────
+async function runSearch() {
+  const query = document.getElementById('search-input').value.trim();
+  if (!query) return;
+
+  const area     = document.getElementById('filter-area').value;
+  const dateAfter = document.getElementById('filter-date').value;
+  const count    = document.getElementById('filter-count').value;
+  const sort     = document.getElementById('filter-sort').value;
+
+  showLoading('search-loading', true);
+  document.getElementById('search-results').innerHTML = '';
+  document.getElementById('search-btn').disabled = true;
+
+  try {
+    const data = await clSearch({
+      q:              query,
+      type:           'o',
+      stat_Published: 'on',
+      court:          COURT_MAP[area] || COURT_MAP.civil,
+      filed_after:    dateAfter,
+      order_by:       sort,
+      page_size:      count,
+    });
+
+    renderResults('search-results', query, data.results || []);
+  } catch (err) {
+    document.getElementById('search-results').innerHTML =
+      `<div class="results-warning">❌ ${err.message}</div>`;
+  } finally {
+    showLoading('search-loading', false);
+    document.getElementById('search-btn').disabled = false;
+  }
+}
+
+// ── Immigration search ─────────────────────────────────────
+async function runImmSearch() {
+  const query = document.getElementById('imm-input').value.trim();
+  if (!query) return;
+  showLoading('imm-loading', true);
+  document.getElementById('imm-results').innerHTML = '';
+
+  try {
+    const data = await clSearch({
+      q:              query,
+      type:           'o',
+      stat_Published: 'on',
+      court:          COURT_MAP.immigration,
+      filed_after:    '2005-01-01',
+      order_by:       'score',
+      page_size:      8,
+    });
+    renderResults('imm-results', query, data.results || []);
+  } catch (err) {
+    document.getElementById('imm-results').innerHTML =
+      `<div class="results-warning">❌ ${err.message}</div>`;
+  } finally {
+    showLoading('imm-loading', false);
+  }
+}
+
+function immQuick(q) {
+  document.getElementById('imm-input').value = q;
+  runImmSearch();
+}
+
+// ── Quick search ───────────────────────────────────────────
+function quickSearch(q) {
+  showPage('search');
+  document.getElementById('search-input').value = q;
+  setTimeout(runSearch, 100);
+}
+
+// ── Citation verifier ──────────────────────────────────────
+async function runVerify() {
+  const citation = document.getElementById('verify-input').value.trim();
+  if (!citation) return;
+
+  showLoading('verify-loading', true);
+  const resultEl = document.getElementById('verify-result');
+  resultEl.className = 'verify-result';
+  resultEl.innerHTML = '';
+
+  try {
+    const data = await clSearch({
+      q:         `"${citation}"`,
+      type:      'o',
+      page_size: 3,
+    });
+
+    const results = data.results || [];
+    if (results.length === 0) {
+      resultEl.className = 'verify-result not-verified';
+      resultEl.innerHTML = `
+        <strong>❌ CITATION NOT VERIFIED</strong><br><br>
+        <strong>Citation:</strong> ${esc(citation)}<br><br>
+        Could not confirm this citation in CourtListener's database of 9M+ decisions.<br><br>
+        This citation may be: <strong>hallucinated/fake</strong>, a very recent case not yet indexed, or a lower court case not covered.<br><br>
+        <strong>🚨 DO NOT use in any filing without manual Westlaw KeyCite or Shepard's verification.</strong>
+      `;
+    } else {
+      const r = results[0];
+      const cit = (r.citation || []).join(', ') || 'No reporter citation';
+      resultEl.className = 'verify-result verified';
+      resultEl.innerHTML = `
+        <strong>✅ CITATION FOUND IN DATABASE</strong><br><br>
+        <strong>Case:</strong> ${esc(r.caseName || r.case_name || 'Unknown')}<br>
+        <strong>Citation:</strong> ${esc(cit)}<br>
+        <strong>Court:</strong> ${esc(r.court || 'Unknown')}<br>
+        <strong>Date:</strong> ${esc(r.dateFiled || r.date_filed || 'Unknown')}<br>
+        ${r.absolute_url ? `<strong>Link:</strong> <a href="https://www.courtlistener.com${r.absolute_url}" target="_blank" style="color:var(--gold)">View Opinion →</a><br>` : ''}
+        <br>
+        ⚠️ Found in CourtListener. Still verify <strong>Good Law status</strong> in Westlaw KeyCite or Lexis Shepard's before filing.
+      `;
+    }
+  } catch (err) {
+    resultEl.className = 'verify-result not-verified';
+    resultEl.innerHTML = `❌ Verification error: ${esc(err.message)}`;
+  } finally {
+    showLoading('verify-loading', false);
+  }
+}
+
+// ── Batch verify ───────────────────────────────────────────
+async function runBatchVerify() {
+  const lines = document.getElementById('batch-input').value
+    .split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return;
+
+  const container = document.getElementById('batch-results');
+  container.innerHTML = '<div class="loading-text" style="font-family:var(--mono);font-size:11px;color:var(--gold-dim)">Verifying...</div>';
+
+  const results = [];
+  for (const citation of lines) {
+    try {
+      const data = await clSearch({ q: `"${citation}"`, type: 'o', page_size: 1 });
+      const found = (data.results || []).length > 0;
+      results.push({ citation, found, case: found ? (data.results[0].caseName || data.results[0].case_name) : null });
+    } catch (e) {
+      results.push({ citation, found: false, error: e.message });
+    }
+    await new Promise(r => setTimeout(r, 300)); // rate limit
+  }
+
+  container.innerHTML = results.map(r => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;
+      background:${r.found ? 'rgba(39,174,96,0.08)' : 'rgba(192,57,43,0.08)'};
+      border:1px solid ${r.found ? 'rgba(39,174,96,0.25)' : 'rgba(192,57,43,0.25)'};
+      border-radius:6px;margin-bottom:8px;font-size:12px;">
+      <span style="font-size:16px">${r.found ? '✅' : '❌'}</span>
+      <div>
+        <div style="font-family:var(--mono);color:${r.found ? '#2ecc71' : '#e74c3c'}">${esc(r.citation)}</div>
+        ${r.found ? `<div style="color:rgba(245,240,232,0.5);margin-top:2px">${esc(r.case || '')}</div>` : ''}
+        ${r.error ? `<div style="color:#e74c3c;margin-top:2px">${esc(r.error)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Render search results ──────────────────────────────────
+function renderResults(containerId, query, results) {
+  const el = document.getElementById(containerId);
+  if (!results.length) {
+    el.innerHTML = `
+      <div class="empty-state">
+        <div class="icon">🔍</div>
+        <h3>No results found</h3>
+        <p>No published cases found for "${esc(query)}". Try broader terms or a different date range.</p>
+      </div>`;
+    return;
+  }
+
+  let html = `
+    <div class="results-warning">
+      ⚠️ Always verify citations in Westlaw KeyCite or Lexis Shepard's before filing. CourtListener does not provide good-law/citator status.
+    </div>
+    <div class="results-header">
+      <span class="results-count">${results.length} RESULTS — "${esc(query)}"</span>
+    </div>`;
+
+  results.forEach((r, i) => {
+    const caseName  = esc(r.caseName || r.case_name || 'Unknown');
+    const citations = (r.citation || []).join(', ') || 'No reporter citation';
+    const court     = esc(r.court || r.court_id || 'Unknown');
+    const date      = esc(r.dateFiled || r.date_filed || 'Unknown');
+    const snippet   = esc((r.snippet || '')
+      .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 280));
+    const url       = r.absolute_url ? `https://www.courtlistener.com${r.absolute_url}` : null;
+
+    html += `
+      <div class="case-card">
+        <div class="case-card-header">
+          <div class="case-name">${caseName}</div>
+          ${citations !== 'No reporter citation' ? `<span class="case-citation">${esc(citations)}</span>` : ''}
+        </div>
+        <div class="case-meta">
+          <span class="case-meta-item">🏛️ ${court}</span>
+          <span class="case-meta-item">📅 ${date}</span>
+          ${r.score ? `<span class="case-meta-item">⭐ Score: ${Math.round(r.score * 100) / 100}</span>` : ''}
+        </div>
+        ${snippet ? `<div class="case-snippet">${snippet}...</div>` : ''}
+        <div class="case-actions">
+          ${url ? `<a class="case-action-btn primary" href="${url}" target="_blank">📄 Read Opinion →</a>` : ''}
+          <button class="case-action-btn" onclick="copyToCite('${esc(caseName)}', '${esc(citations)}', '${esc(date)}')">
+            📋 Copy Citation
+          </button>
+          <button class="case-action-btn" onclick="verifyCiteFromCard('${esc(citations)}')">
+            ✅ Verify
+          </button>
+        </div>
+      </div>`;
+  });
+
+  el.innerHTML = html;
+}
+
+// ── Utility functions ──────────────────────────────────────
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function showLoading(id, show) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('active', show);
+}
+
+function copyToCite(caseName, citation, date) {
+  const text = citation !== 'No reporter citation'
+    ? `${caseName}, ${citation}`
+    : `${caseName} (${date})`;
+  navigator.clipboard.writeText(text).catch(() => {});
+  // Brief visual feedback
+  event.currentTarget.textContent = '✅ Copied!';
+  setTimeout(() => event.currentTarget.textContent = '📋 Copy Citation', 1500);
+}
+
+function verifyCiteFromCard(citation) {
+  if (citation === 'No reporter citation') {
+    alert('No reporter citation available for this case. Check the full opinion for citation details.');
+    return;
+  }
+  showPage('verify');
+  document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('verify-input').value = citation;
+  setTimeout(runVerify, 200);
+}
+
+function saveToken() {
+  const t = document.getElementById('token-input').value.trim();
+  apiToken = t;
+  localStorage.setItem('cl_token', t);
+  const status = document.getElementById('token-status');
+  status.textContent = t ? '✅ Token saved. You now have 5,000 requests/hour.' : '⚠️ Token cleared.';
+  status.style.color = t ? 'var(--green)' : 'var(--gold-dim)';
+  setTimeout(() => { status.textContent = ''; }, 4000);
+}
+
+// ── Statute lookup ────────────────────────────────────────
+async function runStatSearch() {
+  const query = document.getElementById('stat-input').value.trim();
+  if (!query) return;
+
+  // Detect if it's a direct section lookup (e.g. "CCP 430.10")
+  const directMatch = query.match(/^([A-Za-z]{2,6})\s*[§§]?\s*(\d+(?:\.\d+)?[a-z]?)$/i);
+  if (directMatch) {
+    await statLookup(directMatch[1].toUpperCase(), directMatch[2]);
+    return;
+  }
+
+  // Keyword search using EOIR style - just open leginfo search
+  showLoading('stat-loading', true);
+  document.getElementById('stat-results').innerHTML = '';
+
+  try {
+    // Build leginfo search URL
+    const url = `https://leginfo.legislature.ca.gov/faces/codes_displayexpandedbranch.xhtml?tocCode=CCP&tocTitle=+Code+of+Civil+Procedure+-+CCP`;
+    document.getElementById('stat-results').innerHTML = buildStatKeywordResults(query);
+  } finally {
+    showLoading('stat-loading', false);
+  }
+}
+
+async function statLookup(lawCode, section) {
+  const code = lawCode.toUpperCase();
+  showLoading('stat-loading', true);
+  document.getElementById('stat-results').innerHTML = '';
+  document.getElementById('stat-input').value = `${code} ${section}`;
+
+  // Build the leginfo URL
+  const normalized = section.endsWith('.') ? section : section + '.';
+  const url = `https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=${code}&sectionNum=${encodeURIComponent(normalized)}`;
+
+  try {
+    const resp = await fetch(url);
+    const html = await resp.text();
+
+    // Parse the statute text from HTML
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // Try multiple selectors leginfo uses
+    const textEl = doc.getElementById('codeLawSectionNoClass') ||
+                   doc.querySelector('.lawText') ||
+                   doc.querySelector('.codeLawSectionNoClass');
+
+    const headingEl = doc.getElementById('codeLawSectionNoClassHeading') ||
+                      doc.querySelector('.codeSectionNumber');
+
+    const codeNames = {
+      CCP: 'Code of Civil Procedure', CIV: 'Civil Code', FAM: 'Family Code',
+      PROB: 'Probate Code', BPC: 'Business & Professions Code', CORP: 'Corporations Code',
+      EVID: 'Evidence Code', GOV: 'Government Code', HSC: 'Health & Safety Code',
+      LAB: 'Labor Code', PEN: 'Penal Code', RTC: 'Revenue & Taxation Code',
+      VEH: 'Vehicle Code', WIC: 'Welfare & Institutions Code'
+    };
+
+    if (textEl) {
+      const text = textEl.innerText || textEl.textContent || '';
+      const heading = headingEl ? (headingEl.innerText || headingEl.textContent || '').trim() : '';
+      const codeName = codeNames[code] || code;
+
+      document.getElementById('stat-results').innerHTML = `
+        <div class="case-card">
+          <div class="case-card-header">
+            <div class="case-name">📚 ${esc(codeName)} §${esc(section)}</div>
+            <span class="case-citation">${esc(code)} §${esc(section)}</span>
+          </div>
+          ${heading ? `<div class="case-meta"><span class="case-meta-item" style="font-style:italic">${esc(heading)}</span></div>` : ''}
+          <div style="font-size:13px;color:rgba(245,240,232,0.8);line-height:1.7;white-space:pre-wrap;font-family:var(--sans);padding:12px 0;border-top:1px solid var(--navy-lite);border-bottom:1px solid var(--navy-lite);margin:10px 0">${esc(text.trim().substring(0, 4000))}${text.length > 4000 ? '...' : ''}</div>
+          <div class="case-actions">
+            <a class="case-action-btn primary" href="${url}" target="_blank">🔗 View on leginfo.ca.gov →</a>
+            <button class="case-action-btn" onclick="navigator.clipboard.writeText('${esc(codeName)} §${esc(section)}: ' + document.querySelector('#stat-results .case-card div[style*=pre-wrap]').innerText.substring(0,200))">📋 Copy Text</button>
+          </div>
+          <div style="margin-top:10px;font-size:11px;color:rgba(245,240,232,0.35);font-family:var(--mono)">
+            Source: leginfo.legislature.ca.gov — Public domain under Gov. Code §10248.5 — Verify current text before filing
+          </div>
+        </div>`;
+    } else {
+      // Fallback — just provide the link
+      document.getElementById('stat-results').innerHTML = buildStatFallback(code, section, url, codeNames[code] || code);
+    }
+  } catch (err) {
+    document.getElementById('stat-results').innerHTML = buildStatFallback(code, section, url, '', err.message);
+  } finally {
+    showLoading('stat-loading', false);
+  }
+}
+
+function buildStatFallback(code, section, url, codeName, errMsg) {
+  return `
+    <div class="case-card">
+      <div class="case-name">📚 ${esc(codeName || code)} §${esc(section)}</div>
+      <div style="margin:12px 0;font-size:13px;color:rgba(245,240,232,0.6)">
+        ${errMsg ? `Could not auto-fetch (${esc(errMsg)}). ` : ''}Click below to view the official text on leginfo.ca.gov.
+      </div>
+      <a class="case-action-btn primary" href="${url}" target="_blank">📄 View on leginfo.ca.gov →</a>
+    </div>`;
+}
+
+function buildStatKeywordResults(keyword) {
+  // Map keyword to known sections using our index
+  const index = {
+    'demurrer': [{c:'CCP',s:'430.10'},{c:'CCP',s:'430.40'},{c:'CCP',s:'430.41'}],
+    'unlawful detainer': [{c:'CCP',s:'1161'}],
+    'eviction': [{c:'CCP',s:'1161'},{c:'CIV',s:'1946.2'}],
+    'damages': [{c:'CIV',s:'3281'},{c:'CIV',s:'3294'}],
+    'negligence': [{c:'CIV',s:'1714'}],
+    'fraud': [{c:'CIV',s:'1709'},{c:'CIV',s:'1710'}],
+    'breach of contract': [{c:'CIV',s:'1550'},{c:'CIV',s:'3300'}],
+    'statute of limitations': [{c:'CCP',s:'335.1'},{c:'CCP',s:'337'},{c:'CCP',s:'338'}],
+    'arbitration': [{c:'CCP',s:'1281'},{c:'CCP',s:'1281.2'}],
+    'trust': [{c:'PROB',s:'15200'},{c:'PROB',s:'15400'}],
+    'probate': [{c:'PROB',s:'7000'},{c:'PROB',s:'13100'}],
+    'non-compete': [{c:'BPC',s:'16600'}],
+    'trade secret': [{c:'CIV',s:'3426'}],
+    'summary judgment': [{c:'CCP',s:'437c'}],
+  };
+
+  const k = keyword.toLowerCase();
+  const codeNames = {CCP:'Code of Civil Procedure',CIV:'Civil Code',FAM:'Family Code',PROB:'Probate Code',BPC:'Business & Professions Code'};
+  let matches = [];
+
+  for (const [topic, sections] of Object.entries(index)) {
+    if (topic.includes(k) || k.includes(topic) || k.split(' ').some(w => w.length > 3 && topic.includes(w))) {
+      matches = matches.concat(sections);
+    }
+  }
+
+  if (matches.length === 0) {
+    return `<div class="empty-state"><div class="icon">📚</div><h3>No quick matches</h3><p>Try a direct section like "CCP 430.10" or use the quick-access buttons above. For full text search, visit <a href="https://leginfo.legislature.ca.gov" target="_blank" style="color:var(--gold)">leginfo.legislature.ca.gov</a></p></div>`;
+  }
+
+  return matches.slice(0, 6).map(({c, s}) => `
+    <div class="case-card" onclick="statLookup('${c}','${s}')" style="cursor:pointer">
+      <div class="case-card-header">
+        <div class="case-name">📚 ${esc(codeNames[c] || c)} §${esc(s)}</div>
+        <span class="case-citation">${c} §${s}</span>
+      </div>
+      <div class="case-meta"><span class="case-meta-item">Click to load full text</span></div>
+    </div>`).join('');
+}
+
+// ── Judge Analytics (Trellis) ─────────────────────────────
+async function runJudgeSearch() {
+  const query = document.getElementById('judge-input').value.trim();
+  if (!query) return;
+
+  const trellisKey = localStorage.getItem('trellis_key') || '';
+  if (!trellisKey) {
+    document.getElementById('judge-results').innerHTML = buildTrellisSetup();
+    return;
+  }
+
+  showLoading('judge-loading', true);
+  document.getElementById('judge-results').innerHTML = '';
+
+  try {
+    // Extract judge name and motion type from query
+    const judgeMatch = query.match(/(?:judge|hon\.?)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/i);
+    const judgeName = judgeMatch ? judgeMatch[1] : query.split(' ')[0];
+
+    const motionTypes = {'demurrer':'Demurrer','summary judgment':'Summary Judgment','motion to compel':'Motion to Compel','unlawful detainer':'Unlawful Detainer','anti-slapp':'Anti-SLAPP'};
+    let motionType = null;
+    for (const [k,v] of Object.entries(motionTypes)) {
+      if (query.toLowerCase().includes(k)) { motionType = v; break; }
+    }
+
+    const resp = await fetch(`https://api.trellis.law/v2/judges/analytics?judge_name=${encodeURIComponent(judgeName)}&state=CA`, {
+      headers: { 'Authorization': `Bearer ${trellisKey}`, 'Accept': 'application/json' }
+    });
+
+    if (!resp.ok) {
+      if (resp.status === 401) throw new Error('Invalid Trellis API key. Check your key in Settings.');
+      if (resp.status === 404) throw new Error(`No analytics found for Judge ${judgeName}. Try the exact name from Trellis.`);
+      throw new Error(`Trellis error: ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    renderJudgeAnalytics(judgeName, data, motionType);
+  } catch (err) {
+    document.getElementById('judge-results').innerHTML = `
+      <div class="results-warning">❌ ${esc(err.message)}</div>
+      <div class="case-card" style="margin-top:12px">
+        <div class="case-name">Try Trellis directly</div>
+        <div class="case-meta"><span class="case-meta-item">Search judge analytics on the Trellis website</span></div>
+        <a class="case-action-btn primary" href="https://trellis.law" target="_blank" style="margin-top:8px;display:inline-flex">Open Trellis →</a>
+      </div>`;
+  } finally {
+    showLoading('judge-loading', false);
+  }
+}
+
+function judgeQuick(motionType) {
+  const current = document.getElementById('judge-input').value.trim();
+  if (current && !current.toLowerCase().includes(motionType)) {
+    document.getElementById('judge-input').value = current + ' ' + motionType;
+  } else if (!current) {
+    document.getElementById('judge-input').value = motionType;
+    document.getElementById('judge-results').innerHTML = buildMotionRateInfo(motionType);
+    return;
+  }
+  runJudgeSearch();
+}
+
+function findMotion(motionType, issue) {
+  showLoading('judge-loading', true);
+  document.getElementById('judge-results').innerHTML = '';
+  const trellisKey = localStorage.getItem('trellis_key') || '';
+
+  if (!trellisKey) {
+    showLoading('judge-loading', false);
+    document.getElementById('judge-results').innerHTML = buildTrellisSetup();
+    return;
+  }
+
+  fetch(`https://api.trellis.law/v2/search?q=${encodeURIComponent(motionType+' '+issue)}&state=CA&type=documents&page_size=6`, {
+    headers: { 'Authorization': `Bearer ${trellisKey}`, 'Accept': 'application/json' }
+  })
+  .then(r => r.json())
+  .then(data => {
+    const docs = data.results || data || [];
+    renderMotionDocuments(docs, motionType, issue);
+  })
+  .catch(err => {
+    document.getElementById('judge-results').innerHTML = `<div class="results-warning">❌ ${esc(err.message)}</div>`;
+  })
+  .finally(() => showLoading('judge-loading', false));
+}
+
+function renderJudgeAnalytics(judgeName, data, motionType) {
+  const overview = data.overview || data.at_a_glance || {};
+  const motions  = data.motions || data.motion_analytics || [];
+
+  let html = `
+    <div class="case-card">
+      <div class="case-card-header">
+        <div class="case-name">⚖️ Judge ${esc(judgeName)}</div>
+        <span class="case-citation">Trellis Analytics</span>
+      </div>`;
+
+  if (overview.overall_motion_grant_rate !== undefined) {
+    const rate = (overview.overall_motion_grant_rate * 100).toFixed(1);
+    const bar  = "█".repeat(Math.round(overview.overall_motion_grant_rate * 10)) + "░".repeat(10 - Math.round(overview.overall_motion_grant_rate * 10));
+    html += `
+      <div class="case-meta">
+        <span class="case-meta-item">Overall grant rate: ${rate}%</span>
+        ${overview.active_cases ? `<span class="case-meta-item">Active cases: ${overview.active_cases}</span>` : ''}
+        ${overview.avg_time_to_trial ? `<span class="case-meta-item">Avg time to trial: ${overview.avg_time_to_trial}d</span>` : ''}
+      </div>
+      <div style="font-family:var(--mono);font-size:13px;color:var(--gold);margin:8px 0">${bar} ${rate}%</div>`;
+  }
+
+  if (motions.length > 0) {
+    html += `<div style="margin-top:14px;border-top:1px solid var(--navy-lite);padding-top:14px">
+      <div style="font-family:var(--mono);font-size:10px;letter-spacing:1.5px;color:var(--gold-dim);text-transform:uppercase;margin-bottom:10px">Motion Grant Rates</div>`;
+
+    // Highlight requested motion type
+    if (motionType) {
+      const specific = motions.find(m => m.motion_type?.toLowerCase().includes(motionType.toLowerCase()));
+      if (specific) {
+        const r = (specific.grant_rate * 100).toFixed(1);
+        const color = specific.grant_rate > 0.6 ? '#2ecc71' : specific.grant_rate > 0.4 ? 'var(--gold)' : '#e74c3c';
+        html += `<div style="background:rgba(183,156,98,0.1);border:1px solid var(--gold-dim);border-radius:6px;padding:10px 14px;margin-bottom:10px">
+          <div style="font-size:13px;color:var(--cream)">🎯 ${esc(specific.motion_type)}</div>
+          <div style="font-family:var(--mono);font-size:20px;color:${color};margin:4px 0">${r}%</div>
+          ${specific.county_average ? `<div style="font-size:11px;color:rgba(245,240,232,0.5)">County avg: ${(specific.county_average*100).toFixed(1)}% | State avg: ${specific.state_average ? (specific.state_average*100).toFixed(1) : '—'}%</div>` : ''}
+        </div>`;
+      }
+    }
+
+    motions.slice(0, 8).forEach(m => {
+      if (motionType && m.motion_type?.toLowerCase().includes(motionType.toLowerCase())) return;
+      const r    = (m.grant_rate * 100).toFixed(1);
+      const bar  = "█".repeat(Math.round(m.grant_rate * 10)) + "░".repeat(10 - Math.round(m.grant_rate * 10));
+      const color = m.grant_rate > 0.6 ? '#2ecc71' : m.grant_rate > 0.4 ? 'var(--gold)' : '#e74c3c';
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:12px">
+        <span style="color:rgba(245,240,232,0.7)">${esc(m.motion_type || 'Unknown')}</span>
+        <span style="font-family:var(--mono);color:${color}">${bar} ${r}%</span>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // Strategy tip
+  const grantRate = overview.overall_motion_grant_rate;
+  if (grantRate !== undefined) {
+    const tip = grantRate > 0.6
+      ? '✅ This judge grants motions at a higher-than-average rate. Lead with your strongest grounds.'
+      : grantRate > 0.4
+        ? '⚠️ Near-average grant rate. Make your motion airtight with clear statutory grounds.'
+        : '🔴 Below-average grant rate. Evaluate whether alternative approaches may be stronger.';
+    html += `<div class="case-snippet" style="margin-top:12px">${tip}</div>`;
+  }
+
+  html += `<div class="case-actions" style="margin-top:12px">
+    <a class="case-action-btn primary" href="https://trellis.law" target="_blank">Open in Trellis →</a>
+  </div></div>`;
+
+  document.getElementById('judge-results').innerHTML = html;
+}
+
+function renderMotionDocuments(docs, motionType, issue) {
+  if (!docs || docs.length === 0) {
+    document.getElementById('judge-results').innerHTML = `
+      <div class="empty-state">
+        <div class="icon">📄</div>
+        <h3>No sample motions found</h3>
+        <p>Try broader search terms or search directly on Trellis.</p>
+        <a href="https://trellis.law" target="_blank" class="case-action-btn primary" style="display:inline-flex;margin-top:16px">Search on Trellis →</a>
+      </div>`;
+    return;
+  }
+
+  let html = `<div class="results-header">
+    <span class="results-count">${docs.length} SAMPLE MOTIONS — ${esc(motionType.toUpperCase())} — "${esc(issue)}"</span>
+  </div>`;
+
+  docs.forEach((d, i) => {
+    html += `<div class="case-card">
+      <div class="case-card-header">
+        <div class="case-name">📄 ${esc(d.case_name || d.title || 'Unknown Case')}</div>
+        ${d.outcome ? `<span class="case-citation">${esc(d.outcome)}</span>` : ''}
+      </div>
+      <div class="case-meta">
+        ${d.judge ? `<span class="case-meta-item">⚖️ ${esc(d.judge)}</span>` : ''}
+        ${d.court ? `<span class="case-meta-item">🏛️ ${esc(d.court)}</span>` : ''}
+        ${d.date  ? `<span class="case-meta-item">📅 ${esc(d.date)}</span>` : ''}
+      </div>
+      ${d.snippet ? `<div class="case-snippet">"${esc(d.snippet.substring(0,200))}..."</div>` : ''}
+      <div class="case-actions">
+        ${d.url ? `<a class="case-action-btn primary" href="${esc(d.url)}" target="_blank">📄 View Motion →</a>` : ''}
+      </div>
+    </div>`;
+  });
+
+  document.getElementById('judge-results').innerHTML = html;
+}
+
+function buildTrellisSetup() {
+  const trellisKey = localStorage.getItem('trellis_key') || '';
+  return `<div class="verify-box">
+    <h2>Connect Trellis Law</h2>
+    <p style="margin-bottom:12px">Add your Trellis API key to enable judge analytics, motion grant rates, and sample motion documents.</p>
+    <p style="margin-bottom:12px;font-size:12px;opacity:0.6">Plans from $199.95/mo at <a href="https://trellis.law/plans" target="_blank" style="color:var(--gold)">trellis.law/plans</a> — includes Research + Judge Analytics for CA.</p>
+    <div class="token-row">
+      <input type="password" class="token-input" id="trellis-key-input" placeholder="Paste your Trellis API key..." value="${esc(trellisKey)}">
+      <button class="token-save-btn" onclick="saveTrellisKey()">Save & Connect</button>
+    </div>
+    <div id="trellis-key-status" style="margin-top:8px;font-size:12px;color:var(--gold-dim)"></div>
+  </div>`;
+}
+
+function buildMotionRateInfo(motionType) {
+  return `<div class="case-card">
+    <div class="case-name">📊 ${esc(motionType)} — Grant Rates</div>
+    <div class="case-snippet" style="margin-top:10px">Enter a specific judge name above to see their individual ${esc(motionType)} grant rate vs. county and state averages.</div>
+    <div class="case-actions" style="margin-top:12px">
+      <a class="case-action-btn primary" href="https://trellis.law" target="_blank">Browse Judge Analytics on Trellis →</a>
+    </div>
+  </div>`;
+}
+
+function saveTrellisKey() {
+  const key = document.getElementById('trellis-key-input')?.value?.trim() || '';
+  if (key) {
+    localStorage.setItem('trellis_key', key);
+    const status = document.getElementById('trellis-key-status');
+    if (status) { status.textContent = '✅ Trellis key saved.'; status.style.color = '#2ecc71'; }
+    document.getElementById('trellis-setup-banner').style.display = 'none';
+  }
+}
+
+// ── Citation Tracker ───────────────────────────────────────
+async function runCiteCheck() {
+  const query = document.getElementById('cite-check-input').value.trim();
+  if (!query) return;
+
+  showLoading('cite-loading', true);
+  const resultEl = document.getElementById('cite-check-result');
+  resultEl.innerHTML = '';
+
+  try {
+    // First check CourtListener
+    const clResp = await fetch(
+      `https://www.courtlistener.com/api/rest/v4/search/?q="${encodeURIComponent(query)}"&type=o&page_size=3`,
+      { headers: localStorage.getItem('cl_token') ? { 'Authorization': `Token ${localStorage.getItem('cl_token')}` } : {} }
+    );
+    const clData = await clResp.json();
+    const found  = (clData.results || []).length > 0;
+    const best   = found ? clData.results[0] : null;
+
+    resultEl.innerHTML = `
+      <div class="verify-result ${found ? 'verified' : 'not-verified'}" style="display:block">
+        <strong>${found ? '✅ FOUND IN COURTLISTENER' : '⚠️ NOT FOUND IN COURTLISTENER'}</strong><br><br>
+        ${best ? `<strong>Case:</strong> ${esc(best.caseName || best.case_name || 'Unknown')}<br>
+        <strong>Citation:</strong> ${esc((best.citation || []).join(', ') || 'No reporter citation')}<br>
+        <strong>Court:</strong> ${esc(best.court || 'Unknown')} | <strong>Date:</strong> ${esc(best.dateFiled || best.date_filed || 'Unknown')}<br>
+        ${best.absolute_url ? `<strong>Link:</strong> <a href="https://www.courtlistener.com${best.absolute_url}" target="_blank" style="color:var(--gold)">View Opinion →</a><br>` : ''}` : ''}
+        <br>
+        <strong>📊 Zara Citation Database:</strong> Growing since April 2026. Check vLex Fastcase for full history.<br><br>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <a href="https://law.vlex.com" target="_blank" class="case-action-btn primary">Verify in vLex Fastcase →</a>
+          <a href="https://scholar.google.com/scholar?q=${encodeURIComponent(query)}" target="_blank" class="case-action-btn">Google Scholar →</a>
+        </div>
+      </div>`;
+  } catch (err) {
+    resultEl.innerHTML = `<div class="results-warning">❌ ${esc(err.message)}</div>`;
+  } finally {
+    showLoading('cite-loading', false);
+  }
+}
+
+// Load citation stats
+async function loadCitationStats() {
+  // Stats come from the Zara backend — just show placeholder for now
+  // These will populate once the bot is running and ingesting opinions
+  const today = new Date().toLocaleDateString("en-US", {timeZone: "America/Los_Angeles"});
+  document.getElementById('stat-total')?.setAttribute('title', `As of ${today}`);
+  // In production, fetch from /api/citation-stats endpoint on your Render bot
+}
+
+// ── Init ───────────────────────────────────────────────────
+function init() {
+  // Load saved CourtListener token
+  if (apiToken) {
+    document.getElementById('token-input').value = apiToken;
+    document.getElementById('token-status').textContent = '✅ Token loaded from storage.';
+  } else {
+    document.getElementById('setup-banner').style.display = 'flex';
+  }
+
+  // Check Trellis key
+  const trellisKey = localStorage.getItem('trellis_key') || '';
+  if (trellisKey) {
+    document.getElementById('trellis-setup-banner').style.display = 'none';
+  }
+
+  // Load citation stats
+  loadCitationStats();
+}
+
+init();
+</script>
+</body>
+</html>
