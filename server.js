@@ -25,6 +25,11 @@ const { startSolScheduler }   = require("./sol");
 const { startDripScheduler }  = require("./drip");
 const cookieParser = require("cookie-parser");
 
+// ── Legal Intelligence modules ────────────────────────────
+const { scheduleDigest, runDailyDigest }         = require("./legal-digest");
+const { initCitationTables }                      = require("./citations");
+const { initJudgeProfileTables, getScanStatus }   = require("./judge-scanner");
+
 const app = express();
 app.use(express.json()); app.use(express.urlencoded({ extended: true }));
 app.use(express.text({ type: "text/xml" }));
@@ -61,12 +66,19 @@ const {
   // Render
   RENDER_EXTERNAL_URL,
   PORT = 3000,
+  // Legal Intelligence
+  COURTLISTENER_TOKEN,
+  TRELLIS_API_KEY,
+  JJ_TELEGRAM_ID,
 } = process.env;
 
 console.log("ANTHROPIC_API_KEY:", !!ANTHROPIC_API_KEY);
 console.log("TELEGRAM_TOKEN:", !!TELEGRAM_TOKEN);
 console.log("WHATSAPP_TOKEN:", !!WHATSAPP_TOKEN);
 console.log("WECHAT_APP_ID:", !!WECHAT_APP_ID);
+console.log("COURTLISTENER_TOKEN:", !!COURTLISTENER_TOKEN);
+console.log("TRELLIS_API_KEY:", !!TRELLIS_API_KEY);
+console.log("JJ_TELEGRAM_ID:", !!JJ_TELEGRAM_ID);
 
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 const CACHE_FILE   = process.env.CACHE_PATH || "/var/data/legal_cache.json";
@@ -797,6 +809,52 @@ app.post("/autoposter/run", async (req, res) => {
 
 
 // ────────────────────────────────────────────────────────────
+//  LEGAL INTELLIGENCE — Manual trigger endpoints
+// ────────────────────────────────────────────────────────────
+
+// Manual digest trigger
+app.post("/legal/digest/run", async (req, res) => {
+  if (req.query.token !== process.env.ANALYTICS_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  res.json({ status: "started", message: "Legal digest running — check Telegram in ~2 minutes." });
+  runDailyDigest(true).catch(err => console.error("Manual digest error:", err.message));
+});
+
+// Judge scanner status
+app.get("/legal/judge-scanner/status", async (req, res) => {
+  if (req.query.token !== process.env.ANALYTICS_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  try {
+    const status = await getScanStatus();
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Citation stats for dashboard
+app.get("/legal/citation-stats", async (req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  try {
+    const db = require("./db");
+    const result = await db.query(`
+      SELECT
+        (SELECT COUNT(*) FROM legal_citations)         AS total_cases,
+        (SELECT COUNT(*) FROM citation_treatments)      AS total_treatments,
+        (SELECT COUNT(*) FROM citation_treatments
+         WHERE treatment_type = 'negative')             AS negative_count,
+        (SELECT COUNT(*) FROM legal_citations
+         WHERE created_at > NOW() - INTERVAL '7 days') AS new_this_week
+    `);
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    res.json({ total_cases: 0, total_treatments: 0, negative_count: 0, new_this_week: 0 });
+  }
+});
+
+// ────────────────────────────────────────────────────────────
 //  HEALTH CHECK + START
 // ────────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.send("Tez Law P.C. — Zara running on all channels ✅"));
@@ -813,7 +871,7 @@ app.post("/voice/transfer",          (req, res) => handleTransfer(req, res));
 app.post("/voice/transfer-fallback", (req, res) => handleTransferFallback(req, res));
 app.post("/voice/transcribe",        (req, res) => handleTranscription(req, res));
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Zara running on port ${PORT}`);
   initDB();
   initIntakeTable();
@@ -881,5 +939,29 @@ app.listen(PORT, () => {
     console.log("🏛️  USCIS processing times scheduler started.");
   } catch (e) {
     console.error("❌ USCIS updater failed to load:", e.message);
+  }
+
+  // ── Legal Intelligence — Citation tables ────────────────
+  try {
+    await initCitationTables();
+    console.log("🔗 Citation tracker tables ready.");
+  } catch (e) {
+    console.error("❌ Citation tables failed:", e.message);
+  }
+
+  // ── Legal Intelligence — Judge profile tables ────────────
+  try {
+    await initJudgeProfileTables();
+    console.log("⚖️  Judge profile tables ready.");
+  } catch (e) {
+    console.error("❌ Judge profile tables failed:", e.message);
+  }
+
+  // ── Legal Intelligence — Daily digest scheduler ──────────
+  try {
+    scheduleDigest();
+    console.log("📰 Legal digest scheduler started (6:00 AM Pacific).");
+  } catch (e) {
+    console.error("❌ Legal digest scheduler failed:", e.message);
   }
 });
