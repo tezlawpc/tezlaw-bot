@@ -115,17 +115,14 @@ async function getCaseStatus(receiptNumber) {
       validateStatus: () => true, // handle all codes manually
     });
 
-    // ── Diagnostic logging ────────────────────────────────
     console.log(`[uscis] HTTP status: ${res.status}`);
-    console.log(`[uscis] Response keys: ${Object.keys(res.data || {}).join(", ") || "(empty)"}`);
-    console.log(`[uscis] Raw (first 500): ${JSON.stringify(res.data).substring(0, 500)}`);
 
     // ── 200 Success ──────────────────────────────────────
     if (res.status === 200) {
       const cs = res.data?.case_status;
 
       if (!cs) {
-        console.log(`[uscis] ❌ parse_error — case_status field missing. Full data: ${JSON.stringify(res.data).substring(0, 300)}`);
+        console.error(`[uscis] parse_error — unexpected structure: ${JSON.stringify(res.data).substring(0, 200)}`);
         return {
           success: false,
           error:   "parse_error",
@@ -133,9 +130,7 @@ async function getCaseStatus(receiptNumber) {
         };
       }
 
-      console.log(`[uscis] ✅ case_status keys: ${Object.keys(cs).join(", ")}`);
-      console.log(`[uscis] status_text_en: ${cs.current_case_status_text_en}`);
-      console.log(`[uscis] hist_case_status length: ${(cs.hist_case_status || []).length}`);
+      console.log(`[uscis] ✅ ${normalized} — ${cs.current_case_status_text_en || "status received"}`);
 
       // Core fields
       const receiptNum    = cs.receiptNumber   || normalized;
