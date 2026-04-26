@@ -1067,6 +1067,9 @@ function dashboardHtml() {
   <div class="nav-item" onclick="showPage('drip')" id="nav-drip">
     <span class="icon">💧</span><span>Drip Campaigns</span>
   </div>
+  <div class="nav-item" onclick="showPage('research')" id="nav-research">
+    <span class="icon">🔍</span><span>Research</span>
+  </div>
 </div>
 
 <div class="main">
@@ -1470,7 +1473,353 @@ function dashboardHtml() {
     </div>
   </div>
 
+  <!-- Research Dashboard -->
+  <div class="page" id="page-research">
+    <div class="page-header">
+      <h1>🔍 Legal Research</h1>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+
+    <!-- Research sub-tabs -->
+    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
+      <button class="action-btn" id="rtab-caselaw" onclick="showResearchTab('caselaw')" style="font-size:12px;padding:8px 14px">⚖️ Case Law</button>
+      <button class="action-btn" id="rtab-statutes" onclick="showResearchTab('statutes')" style="font-size:12px;padding:8px 14px;opacity:.6">📚 CA Statutes</button>
+      <button class="action-btn" id="rtab-immigration" onclick="showResearchTab('immigration')" style="font-size:12px;padding:8px 14px;opacity:.6">🛂 Immigration</button>
+      <button class="action-btn" id="rtab-verify" onclick="showResearchTab('verify')" style="font-size:12px;padding:8px 14px;opacity:.6">✅ Verify Citation</button>
+      <button class="action-btn" id="rtab-cache" onclick="showResearchTab('cache')" style="font-size:12px;padding:8px 14px;opacity:.6">⚡ Answer Cache</button>
+    </div>
+
+    <!-- Case Law Search -->
+    <div id="rsub-caselaw">
+      <div class="card">
+        <h3>⚖️ California Case Law Search</h3>
+        <p style="font-size:12px;color:#666;margin-bottom:14px">Powered by CourtListener REST API v4 — Free Law Project | ~9M decisions</p>
+        <div style="display:flex;gap:10px;margin-bottom:12px">
+          <input id="cl-query" placeholder="e.g. demurrer breach of contract, unlawful detainer notice, asylum credibility..."
+            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
+            onkeydown="if(event.key==='Enter') runAdminCLSearch()">
+          <button class="action-btn" onclick="runAdminCLSearch()">Search</button>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+          <select id="cl-area" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px">
+            <option value="cal,calctapp_1st,calctapp_2nd,calctapp_3rd,calctapp_4th,calctapp_5th,calctapp_6th">California Civil</option>
+            <option value="ca9,bia">Immigration (9th/BIA)</option>
+            <option value="ca9,cacd,caed">Federal (CA Districts)</option>
+            <option value="cal,calctapp_1st,calctapp_2nd,calctapp_3rd,calctapp_4th,calctapp_5th,calctapp_6th,ca9,bia">All Courts</option>
+          </select>
+          <select id="cl-date" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px">
+            <option value="2015-01-01">Last 10 years</option>
+            <option value="2010-01-01" selected>Last 15 years</option>
+            <option value="2000-01-01">Last 25 years</option>
+          </select>
+          <select id="cl-sort" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px">
+            <option value="score">Relevance</option>
+            <option value="-dateFiled">Most Recent</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          ${['demurrer breach of contract','unlawful detainer 3-day notice','comparative negligence personal injury','asylum credibility BIA','voluntary departure 9th circuit','living trust probate California','anti-SLAPP motion','non-compete void California'].map(q =>
+            `<span onclick="document.getElementById('cl-query').value='${q}';runAdminCLSearch()"
+              style="font-size:11px;background:#f0ede6;padding:4px 10px;border-radius:12px;cursor:pointer;color:#0C1C36">${q}</span>`
+          ).join('')}
+        </div>
+        <div id="cl-warning" style="display:none;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:10px;font-size:12px;margin-bottom:12px;color:#856404">
+          ⚠️ Always verify citations in vLex Fastcase before filing. CourtListener does not provide citator/good-law status.
+        </div>
+        <div id="cl-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Searching CourtListener...</div>
+        <div id="cl-results"></div>
+      </div>
+    </div>
+
+    <!-- CA Statutes -->
+    <div id="rsub-statutes" style="display:none">
+      <div class="card">
+        <h3>📚 California Statute Lookup</h3>
+        <p style="font-size:12px;color:#666;margin-bottom:14px">Official text from leginfo.legislature.ca.gov — public domain under Gov. Code §10248.5</p>
+        <div style="display:flex;gap:10px;margin-bottom:14px">
+          <input id="stat-query" placeholder="e.g. CCP 430.10, Civil Code 1714, demurrer, unlawful detainer..."
+            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
+            onkeydown="if(event.key==='Enter') runAdminStatLookup()">
+          <button class="action-btn" onclick="runAdminStatLookup()">Look Up</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          ${[['CCP','430.10'],['CCP','430.41'],['CCP','437c'],['CCP','335.1'],['CCP','1161'],['CIV','1946.2'],['CIV','3294'],['PROB','15200'],['BPC','16600'],['GOV','911.2']].map(([c,s]) =>
+            `<span onclick="adminStatLookup('${c}','${s}')"
+              style="font-size:11px;background:#f0ede6;padding:4px 10px;border-radius:12px;cursor:pointer;color:#0C1C36">${c} §${s}</span>`
+          ).join('')}
+        </div>
+        <div id="stat-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Fetching from leginfo.ca.gov...</div>
+        <div id="stat-results"></div>
+      </div>
+    </div>
+
+    <!-- Immigration Research -->
+    <div id="rsub-immigration" style="display:none">
+      <div class="card">
+        <h3>🛂 Immigration Research — 9th Circuit + BIA</h3>
+        <div style="display:flex;gap:10px;margin-bottom:12px">
+          <input id="imm-query" placeholder="e.g. asylum credibility adverse findings, CAT deferral, voluntary departure bond..."
+            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
+            onkeydown="if(event.key==='Enter') runAdminImmSearch()">
+          <button class="action-btn" onclick="runAdminImmSearch()">Search</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          ${['asylum one year bar exception','BIA adverse credibility inconsistencies','voluntary departure bond deadline','motion to reopen in absentia','withholding removal PSG','CAT deferral torture','BIA Lozada IAC','9th circuit PFR jurisdiction','VAWA self petition','cancellation of removal continuous presence'].map(q =>
+            `<span onclick="document.getElementById('imm-query').value='${q}';runAdminImmSearch()"
+              style="font-size:11px;background:#f0ede6;padding:4px 10px;border-radius:12px;cursor:pointer;color:#0C1C36">${q}</span>`
+          ).join('')}
+        </div>
+        <div id="imm-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Searching 9th Circuit + BIA...</div>
+        <div id="imm-results"></div>
+      </div>
+    </div>
+
+    <!-- Citation Verifier -->
+    <div id="rsub-verify" style="display:none">
+      <div class="card">
+        <h3>✅ Citation Verifier</h3>
+        <p style="font-size:12px;color:#666;margin-bottom:14px">Anti-hallucination check — confirm any case citation exists before using in filings</p>
+        <div style="display:flex;gap:10px;margin-bottom:12px">
+          <input id="cite-query" placeholder="e.g. 230 Cal.App.4th 1234, or Smith v. Jones 2019"
+            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
+            onkeydown="if(event.key==='Enter') runAdminVerify()">
+          <button class="action-btn" onclick="runAdminVerify()">Verify</button>
+        </div>
+        <div id="cite-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Checking CourtListener...</div>
+        <div id="cite-result"></div>
+        <div class="card" style="margin-top:16px;background:#faf8f4">
+          <h3>Batch Verify</h3>
+          <textarea id="batch-cites" rows="5" placeholder="Paste citations one per line..."
+            style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px;resize:vertical;margin-bottom:8px"></textarea>
+          <button class="action-btn" onclick="runAdminBatch()">Verify All</button>
+          <div id="batch-results" style="margin-top:12px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Answer Cache Stats -->
+    <div id="rsub-cache" style="display:none">
+      <div class="card">
+        <h3>⚡ Answer Cache Statistics</h3>
+        <p style="font-size:12px;color:#666;margin-bottom:14px">Semantic cache saves tokens by reusing verified answers for similar questions</p>
+        <div id="cache-stats"><div class="loading"><span class="spinner"></span> Loading...</div></div>
+      </div>
+      <div class="card">
+        <h3>🔗 Citation Database</h3>
+        <div id="citation-stats"><div class="loading"><span class="spinner"></span> Loading...</div></div>
+      </div>
+    </div>
+
+  </div>
+
 </div>
+
+<script>
+// ── Research tab logic ─────────────────────────────────────
+function showResearchTab(tab) {
+  ['caselaw','statutes','immigration','verify','cache'].forEach(t => {
+    document.getElementById('rsub-' + t).style.display = t === tab ? 'block' : 'none';
+    const btn = document.getElementById('rtab-' + t);
+    if (btn) btn.style.opacity = t === tab ? '1' : '.6';
+  });
+  if (tab === 'cache') loadCacheStats();
+}
+
+// ── CourtListener search ───────────────────────────────────
+const CL_TOKEN = ''; // Set in admin settings or leave blank for anonymous
+
+async function runAdminCLSearch() {
+  const q     = document.getElementById('cl-query').value.trim();
+  const court = document.getElementById('cl-area').value;
+  const date  = document.getElementById('cl-date').value;
+  const sort  = document.getElementById('cl-sort').value;
+  if (!q) return;
+
+  document.getElementById('cl-loading').style.display = 'block';
+  document.getElementById('cl-results').innerHTML = '';
+  document.getElementById('cl-warning').style.display = 'none';
+
+  try {
+    const params = new URLSearchParams({ q, type:'o', stat_Published:'on', court, filed_after:date, order_by:sort, page_size:'8' });
+    const headers = {};
+    const savedToken = localStorage.getItem('cl_token');
+    if (savedToken) headers['Authorization'] = 'Token ' + savedToken;
+
+    const resp = await fetch('https://www.courtlistener.com/api/rest/v4/search/?' + params, { headers });
+    if (resp.status === 429) throw new Error('Rate limited — add a free CourtListener API token in Settings');
+    const data = await resp.json();
+    const results = data.results || [];
+
+    document.getElementById('cl-warning').style.display = results.length ? 'block' : 'none';
+    document.getElementById('cl-results').innerHTML = results.length
+      ? results.map(r => renderCaseCard(r)).join('')
+      : '<p style="color:#999;font-size:13px;padding:12px">No results. Try broader terms.</p>';
+  } catch(err) {
+    document.getElementById('cl-results').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + err.message + '</p>';
+  } finally {
+    document.getElementById('cl-loading').style.display = 'none';
+  }
+}
+
+async function runAdminImmSearch() {
+  const q = document.getElementById('imm-query').value.trim();
+  if (!q) return;
+  document.getElementById('imm-loading').style.display = 'block';
+  document.getElementById('imm-results').innerHTML = '';
+  try {
+    const params = new URLSearchParams({ q, type:'o', stat_Published:'on', court:'ca9,bia', filed_after:'2005-01-01', order_by:'score', page_size:'8' });
+    const headers = {};
+    const savedToken = localStorage.getItem('cl_token');
+    if (savedToken) headers['Authorization'] = 'Token ' + savedToken;
+    const resp = await fetch('https://www.courtlistener.com/api/rest/v4/search/?' + params, { headers });
+    const data = await resp.json();
+    const results = data.results || [];
+    document.getElementById('imm-results').innerHTML = results.length
+      ? results.map(r => renderCaseCard(r)).join('')
+      : '<p style="color:#999;font-size:13px;padding:12px">No results found.</p>';
+  } catch(err) {
+    document.getElementById('imm-results').innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + err.message + '</p>';
+  } finally {
+    document.getElementById('imm-loading').style.display = 'none';
+  }
+}
+
+function renderCaseCard(r) {
+  const name     = esc(r.caseName || r.case_name || 'Unknown');
+  const citation = esc((r.citation || []).join(', ') || 'No citation');
+  const court    = esc(r.court || '');
+  const date     = esc(r.dateFiled || r.date_filed || '');
+  const snippet  = esc((r.snippet || '').replace(/<[^>]+>/g,' ').trim().substring(0,220));
+  const url      = r.absolute_url ? 'https://www.courtlistener.com' + r.absolute_url : null;
+  return \`<div style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:8px;padding:14px;margin-bottom:10px">
+    <div style="font-weight:bold;color:#0C1C36;margin-bottom:4px">\${name}</div>
+    <div style="font-size:11px;color:#B79C62;background:rgba(183,156,98,.1);display:inline-block;padding:2px 8px;border-radius:4px;margin-bottom:6px">\${citation}</div>
+    <div style="font-size:11px;color:#888;margin-bottom:6px">🏛️ \${court} &nbsp;📅 \${date}</div>
+    \${snippet ? '<div style="font-size:12px;color:#555;font-style:italic;border-left:2px solid #B79C62;padding-left:8px;margin-bottom:8px">"' + snippet + '..."</div>' : ''}
+    <div style="display:flex;gap:8px">
+      \${url ? '<a href="' + url + '" target="_blank" style="font-size:11px;background:#0C1C36;color:#B79C62;padding:4px 10px;border-radius:4px;text-decoration:none">📄 Read →</a>' : ''}
+      <button onclick="navigator.clipboard.writeText(\\'' + name.replace(/'/g,"\\\\'") + ', ' + citation.replace(/'/g,"\\\\'") + '\\')" style="font-size:11px;background:#f0ede6;color:#0C1C36;border:none;padding:4px 10px;border-radius:4px;cursor:pointer">📋 Copy</button>
+    </div>
+  </div>\`;
+}
+
+// ── CA Statute lookup ──────────────────────────────────────
+async function runAdminStatLookup() {
+  const query = document.getElementById('stat-query').value.trim();
+  if (!query) return;
+  const m = query.match(/^([A-Za-z]{2,6})\\s*[§§]?\\s*(\\d+(?:\\.\\d+)?[a-z]?)$/i);
+  if (m) { adminStatLookup(m[1].toUpperCase(), m[2]); return; }
+  // Keyword — show quick matches
+  const index = {demurrer:[['CCP','430.10'],['CCP','430.41']],'unlawful detainer':[['CCP','1161']],'damages':[['CIV','3294']],'negligence':[['CIV','1714']],'fraud':[['CIV','1710']],'trust':[['PROB','15200']],'non-compete':[['BPC','16600']],'summary judgment':[['CCP','437c']]};
+  const k = query.toLowerCase();
+  let matches = [];
+  for (const [topic, secs] of Object.entries(index)) { if (topic.includes(k) || k.includes(topic)) matches = matches.concat(secs); }
+  document.getElementById('stat-results').innerHTML = matches.length
+    ? matches.map(([c,s]) => '<span onclick="adminStatLookup(\\'' + c + '\\',\\'' + s + '\\')" style="cursor:pointer;display:inline-block;margin:4px;background:#f0ede6;padding:6px 12px;border-radius:6px;font-size:13px">' + c + ' §' + s + '</span>').join('')
+    : '<p style="color:#999;font-size:13px">Try a direct section like "CCP 430.10"</p>';
+}
+
+async function adminStatLookup(code, section) {
+  document.getElementById('stat-query').value = code + ' ' + section;
+  document.getElementById('stat-loading').style.display = 'block';
+  document.getElementById('stat-results').innerHTML = '';
+  const normalized = section.endsWith('.') ? section : section + '.';
+  const url = 'https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=' + code + '&sectionNum=' + encodeURIComponent(normalized);
+  try {
+    const resp = await fetch(url);
+    const html = await resp.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const textEl = doc.getElementById('codeLawSectionNoClass') || doc.querySelector('.lawText');
+    const codeNames = {CCP:'Code of Civil Procedure',CIV:'Civil Code',FAM:'Family Code',PROB:'Probate Code',BPC:'Business & Professions Code',GOV:'Government Code',LAB:'Labor Code',PEN:'Penal Code',VEH:'Vehicle Code'};
+    if (textEl) {
+      const text = (textEl.innerText || textEl.textContent || '').trim();
+      document.getElementById('stat-results').innerHTML = '<div style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:8px;padding:16px"><div style="font-weight:bold;color:#B79C62;margin-bottom:8px">📚 ' + (codeNames[code]||code) + ' §' + section + '</div><pre style="white-space:pre-wrap;font-family:Arial;font-size:13px;color:#0C1C36;line-height:1.6">' + esc(text.substring(0,3000)) + '</pre><div style="margin-top:10px"><a href="' + url + '" target="_blank" style="font-size:11px;background:#0C1C36;color:#B79C62;padding:5px 12px;border-radius:4px;text-decoration:none">🔗 View on leginfo.ca.gov →</a></div><p style="font-size:10px;color:#aaa;margin-top:8px">Verify current text before filing. Public domain — Gov. Code §10248.5</p></div>';
+    } else {
+      document.getElementById('stat-results').innerHTML = '<div style="padding:12px"><p style="font-size:13px;margin-bottom:10px">Could not auto-extract. View directly:</p><a href="' + url + '" target="_blank" style="font-size:12px;background:#0C1C36;color:#B79C62;padding:6px 14px;border-radius:4px;text-decoration:none">📄 View ' + code + ' §' + section + ' on leginfo.ca.gov →</a></div>';
+    }
+  } catch(err) {
+    document.getElementById('stat-results').innerHTML = '<div style="padding:12px"><a href="' + url + '" target="_blank" style="font-size:12px;background:#0C1C36;color:#B79C62;padding:6px 14px;border-radius:4px;text-decoration:none">📄 View ' + code + ' §' + section + ' on leginfo.ca.gov →</a></div>';
+  } finally {
+    document.getElementById('stat-loading').style.display = 'none';
+  }
+}
+
+// ── Citation verifier ──────────────────────────────────────
+async function runAdminVerify() {
+  const q = document.getElementById('cite-query').value.trim();
+  if (!q) return;
+  document.getElementById('cite-loading').style.display = 'block';
+  document.getElementById('cite-result').innerHTML = '';
+  try {
+    const headers = {};
+    const t = localStorage.getItem('cl_token');
+    if (t) headers['Authorization'] = 'Token ' + t;
+    const resp = await fetch('https://www.courtlistener.com/api/rest/v4/search/?q=' + encodeURIComponent('"' + q + '"') + '&type=o&page_size=3', { headers });
+    const data = await resp.json();
+    const found = (data.results||[]).length > 0;
+    const best  = found ? data.results[0] : null;
+    document.getElementById('cite-result').innerHTML = '<div style="background:' + (found?'#d4edda':'#f8d7da') + ';border:1px solid ' + (found?'#c3e6cb':'#f5c6cb') + ';border-radius:6px;padding:14px;font-size:13px">'
+      + (found ? '✅ <strong>FOUND IN DATABASE</strong><br><br>' : '❌ <strong>NOT FOUND</strong><br><br>')
+      + (best ? '<strong>Case:</strong> ' + esc(best.caseName||best.case_name||'') + '<br><strong>Citation:</strong> ' + esc((best.citation||[]).join(', ')||'No reporter') + '<br><strong>Court:</strong> ' + esc(best.court||'') + ' | <strong>Date:</strong> ' + esc(best.dateFiled||best.date_filed||'') + '<br>' + (best.absolute_url ? '<br><a href="https://www.courtlistener.com' + best.absolute_url + '" target="_blank" style="color:#155724">View Opinion →</a>' : '') : 'Verify manually in vLex Fastcase before filing.')
+      + '<br><br><small>⚠️ Still verify Good Law status in vLex Fastcase (Shepard\'s) before any filing.</small></div>';
+  } catch(err) {
+    document.getElementById('cite-result').innerHTML = '<p style="color:#cc0000">❌ ' + esc(err.message) + '</p>';
+  } finally {
+    document.getElementById('cite-loading').style.display = 'none';
+  }
+}
+
+async function runAdminBatch() {
+  const lines = document.getElementById('batch-cites').value.split('\\n').map(l=>l.trim()).filter(Boolean);
+  if (!lines.length) return;
+  const container = document.getElementById('batch-results');
+  container.innerHTML = '<div class="loading"><span class="spinner"></span> Verifying ' + lines.length + ' citations...</div>';
+  const headers = {};
+  const t = localStorage.getItem('cl_token');
+  if (t) headers['Authorization'] = 'Token ' + t;
+  const results = [];
+  for (const cite of lines) {
+    try {
+      const resp = await fetch('https://www.courtlistener.com/api/rest/v4/search/?q=' + encodeURIComponent('"'+cite+'"') + '&type=o&page_size=1', { headers });
+      const data = await resp.json();
+      results.push({ cite, found: (data.results||[]).length > 0, name: data.results?.[0]?.caseName || '' });
+    } catch { results.push({ cite, found: false, name: '' }); }
+    await new Promise(r => setTimeout(r, 400));
+  }
+  container.innerHTML = results.map(r =>
+    '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:' + (r.found?'rgba(39,174,96,.08)':'rgba(192,57,43,.08)') + ';border:1px solid ' + (r.found?'rgba(39,174,96,.25)':'rgba(192,57,43,.25)') + ';border-radius:6px;margin-bottom:6px;font-size:12px">'
+    + '<span>' + (r.found?'✅':'❌') + '</span><div><div style="font-family:monospace">' + esc(r.cite) + '</div>' + (r.name?'<div style="color:#888;font-size:11px">'+esc(r.name)+'</div>':'') + '</div></div>'
+  ).join('');
+}
+
+// ── Cache stats ────────────────────────────────────────────
+async function loadCacheStats() {
+  try {
+    const token = document.cookie.split(';').find(c=>c.trim().startsWith('admin_token='))?.split('=')[1];
+    const resp = await fetch('/legal/citation-stats');
+    const data = await resp.json();
+    document.getElementById('citation-stats').innerHTML =
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">'
+      + [['Cases Indexed', data.total_cases||0],['Citations Tracked',data.total_treatments||0],['Negative Treatments',data.negative_count||0],['Added This Week',data.new_this_week||0]].map(([label,val])=>
+        '<div style="text-align:center;background:#f0ede6;border-radius:8px;padding:14px"><div style="font-size:28px;font-weight:bold;color:#B79C62">'+val+'</div><div style="font-size:11px;color:#666;margin-top:4px">'+label+'</div></div>'
+      ).join('') + '</div>'
+      + '<p style="font-size:11px;color:#aaa;margin-top:10px">Coverage: April 2026 onwards. Always verify pre-launch cases in vLex Fastcase.</p>';
+  } catch { document.getElementById('citation-stats').innerHTML = '<p style="color:#999;font-size:13px">Stats unavailable</p>'; }
+
+  // Answer cache stats placeholder
+  document.getElementById('cache-stats').innerHTML =
+    '<p style="font-size:13px;color:#555;line-height:1.6">The semantic answer cache automatically stores verified responses to common client questions. Every time a client asks something Zara has answered before, the cached answer is returned instantly — no Claude API call needed.</p>'
+    + '<div style="margin-top:12px;background:#f0ede6;border-radius:8px;padding:14px;font-size:13px"><strong>How it works:</strong><br>'
+    + '① Keyword fingerprint check (free, instant)<br>'
+    + '② Haiku similarity check against cached Q&As (~$0.001)<br>'
+    + '③ Full Sonnet response → stored for next client<br><br>'
+    + '<strong>Never cached:</strong> personal situations, case numbers, emergency/distress, JJ private mode</div>';
+}
+
+// ── Utility ────────────────────────────────────────────────
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+</script>
 
 <script src="/admin/panel.js"></script>
 </body>
