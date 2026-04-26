@@ -7,11 +7,6 @@
 const axios              = require("axios");
 const db                 = require("./db");
 const { sendVoiceReply } = require("./voice");
-const { isParalegalCommand, handleParalegalCommand } = require("./paralegal");
-const { isResearchCommand, handleResearchCommand }   = require("./courtlistener");
-const { isStatuteCommand, handleStatuteCommand }     = require("./castatutes");
-const { isCitationCommand, handleCitationCommand }   = require("./citations");
-const { formatJudgeProfileForJJ }                    = require("./judge-scanner");
 
 // ── JJ Session state (per platform:userId) ────────────────
 const jjSessions = {};
@@ -148,84 +143,6 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     };
   }
 
-  // ── Paralegal command intercept ──────────────────────────
-  if (isParalegalCommand(userMessage)) {
-    console.log("[JJ-Mode] 🏛️ Paralegal command detected");
-    try {
-      const paralegalReply = await handleParalegalCommand(userMessage, { platform, platformId: userId });
-      await extractAndSaveJJKnowledge(userMessage, paralegalReply, "[Paralegal]");
-      const full = "🏛️ [Zara Paralegal]\n\n" + paralegalReply;
-      const final = full.length > 3900
-        ? full.substring(0, 3800) + "\n\n...[truncated — voice reply has full response]"
-        : full;
-      sendVoiceReply(platform, userId, paralegalReply).catch(() => {});
-      return { handled: true, message: final };
-    } catch (err) {
-      console.error("[JJ-Mode] Paralegal error:", err.message);
-      // Fall through to normal JJ mode
-    }
-  }
-  // ── End paralegal intercept ───────────────────────────────
-
-  // ── CourtListener case law research ──────────────────────
-  if (isResearchCommand(userMessage)) {
-    console.log("[JJ-Mode] 🔍 Research command detected");
-    try {
-      const research = await handleResearchCommand(userMessage);
-      await extractAndSaveJJKnowledge(userMessage, research, "[Research]");
-      sendVoiceReply(platform, userId, research).catch(() => {});
-      const full = "🔍 [Case Law]\n\n" + research;
-      return { handled: true, message: full.length > 3900 ? full.substring(0,3800) + "\n...[truncated]" : full };
-    } catch (err) {
-      console.error("[JJ-Mode] Research error:", err.message);
-    }
-  }
-
-  // ── CA Statute lookup ────────────────────────────────────
-  if (isStatuteCommand(userMessage)) {
-    console.log("[JJ-Mode] 📚 Statute command detected");
-    try {
-      const statute = await handleStatuteCommand(userMessage);
-      sendVoiceReply(platform, userId, statute).catch(() => {});
-      return { handled: true, message: "📚 [CA Statute]\n\n" + statute };
-    } catch (err) {
-      console.error("[JJ-Mode] Statute error:", err.message);
-    }
-  }
-
-  // ── Citation good law check ──────────────────────────────
-  if (isCitationCommand(userMessage)) {
-    console.log("[JJ-Mode] 🔗 Citation command detected");
-    try {
-      const cite = await handleCitationCommand(userMessage);
-      sendVoiceReply(platform, userId, cite).catch(() => {});
-      return { handled: true, message: "🔗 [Citation Check]\n\n" + cite };
-    } catch (err) {
-      console.error("[JJ-Mode] Citation error:", err.message);
-    }
-  }
-
-  // ── Judge profile lookup ─────────────────────────────────
-  const judgeMatch = userMessage.match(/judge\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i) ||
-                     userMessage.match(/hon\.?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
-  const motionMatch = userMessage.match(/(demurrer|msj|summary judgment|motion to strike|motion to compel|unlawful detainer|anti-slapp|sanctions|discovery|injunction)/i);
-
-  if (judgeMatch && /profile|analytics|how does|how do|ruling|grant rate|tend|usually|typically/.test(userMessage.toLowerCase())) {
-    console.log("[JJ-Mode] ⚖️ Judge profile command detected");
-    try {
-      const profile = await formatJudgeProfileForJJ(
-        judgeMatch[1],
-        null,
-        motionMatch?.[1] || null
-      );
-      sendVoiceReply(platform, userId, profile).catch(() => {});
-      const full = "⚖️ [Judge Profile]\n\n" + profile;
-      return { handled: true, message: full.length > 3900 ? full.substring(0,3800) + "\n...[truncated]" : full };
-    } catch (err) {
-      console.error("[JJ-Mode] Judge profile error:", err.message);
-    }
-  }
-
   // Build JJ-specific system prompt
   const jjContext = await getJJContext();
   const jjSystemPrompt = buildJJSystemPrompt(jjContext);
@@ -307,11 +224,41 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
         const toolUseBlocks = respData.content.filter(b => b.type === "tool_use");
         console.log(`[JJ-Mode] tool_use: ${toolUseBlocks.map(b => b.name).join(", ")}`);
         loopMessages.push({ role: "assistant", content: respData.content });
-        const toolResults = toolUseBlocks.map(toolUse => ({
-          type: "tool_result",
-          tool_use_id: toolUse.id,
-          content: "Search completed. Please synthesize the results."
-        }));
+
+        const toolResults = [];
+        for (const toolUse of toolUseBlocks) {
+          if (toolUse.name === "web_search") {
+            const query = toolUse.input?.query || "";
+            console.log(`[JJ-Mode] web_search query: "${query}"`);
+
+            // ── Legal citation/case search interceptor ───────────
+            // If Claude is trying to search for a case, redirect to
+            // CourtListener instead of trusting random web results
+            const legalSearchPattern = /\b(v\.|versus|case|cases|ruling|opinion|decision|court|held|holding|citing|cites?|\d+\s+[A-Z][a-z]+\.\s*\d+|Cal\.|F\.\d+[a-z]+|I&N Dec)\b/i;
+
+            if (legalSearchPattern.test(query)) {
+              console.log(`[JJ-Mode] 🔒 Legal query intercepted — redirecting to CourtListener: "${query}"`);
+              toolResults.push({
+                type:        "tool_result",
+                tool_use_id: toolUse.id,
+                content:     `⚠️ LEGAL SEARCH INTERCEPTED: Web search is not a reliable source for case law verification. Query: "${query}"\n\nIMPORTANT: Do NOT cite any case based on web search results. Instead:\n1. Use the CourtListener integration (already available) for verified case lookup\n2. Tell JJ: "I'm routing this to CourtListener for a verified result"\n3. If CourtListener is unavailable, tell JJ the citation is UNVERIFIED and must be checked in Westlaw/Lexis before any use\n\nDo NOT fabricate or assume any case details. Do NOT treat blog posts, law reviews, or secondary sources as proof a case exists.`,
+              });
+            } else {
+              // Non-legal web search — proceed normally
+              toolResults.push({
+                type:        "tool_result",
+                tool_use_id: toolUse.id,
+                content:     "Search completed. Please synthesize the results. Remember: if any case citations appear in search results, flag them as UNVERIFIED until confirmed via CourtListener.",
+              });
+            }
+          } else {
+            toolResults.push({
+              type:        "tool_result",
+              tool_use_id: toolUse.id,
+              content:     "Action not available.",
+            });
+          }
+        }
         loopMessages.push({ role: "user", content: toolResults });
         continue;
       }
@@ -373,6 +320,16 @@ function buildJJSystemPrompt(jjContext) {
     "3. Save the research to memory automatically",
     "4. Give JJ a detailed but readable response with key takeaways",
     "",
+    "⚠️  LEGAL CITATION RULES — STRICTLY ENFORCED:",
+    "When web search returns content about case law or legal citations:",
+    "1. NEVER treat a blog post, law review article, legal news site, or secondary source as proof a case exists",
+    "2. NEVER cite a case you found mentioned on a website as real authority — mention source as unverified only",
+    "3. ONLY treat these as verified authority: courtlistener.com, courts.ca.gov, ca9.uscourts.gov, justice.gov/eoir, supremecourt.gov, law.justia.com/cases (primary source pages only)",
+    "4. If JJ asks to research case law → say 'I'll use CourtListener for this' and let the CourtListener module handle it — do NOT use web_search for finding cases",
+    "5. If a citation appears in web search results, ALWAYS flag it as 'UNVERIFIED — needs CourtListener/Westlaw check' before presenting it",
+    "6. NEVER fabricate or guess at reporter volumes, page numbers, or years — if uncertain, say 'I cannot confirm this citation'",
+    "7. Legal blog posts (Justia blog, Above the Law, Law360, legal newsletters) are COMMENTARY — never authority",
+    "",
     "RULES IN JJ MODE:",
     "- No topic restrictions — help with anything JJ asks",
     "- Be direct, detailed, and treat JJ as a peer",
@@ -388,13 +345,7 @@ function buildJJSystemPrompt(jjContext) {
     "",
     "VOICE CAPABILITIES: You CAN send voice messages. When JJ asks to respond in voice or speak, just respond normally in text — the system converts it to voice automatically. Never say you cannot do voice.",
     "",
-    "Be Zara at her best — smart, thorough, curious, and genuinely helpful.",
-    "",
-    "JUDGE INTELLIGENCE:",
-    "When JJ mentions a judge by name in the context of drafting a motion or preparing for hearing,",
-    "proactively mention that you can pull that judge\'s profile from your database.",
-    "Example: \'I can pull Judge Martinez\'s profile — want to see how he rules on demurrers?\'",
-    "Use: \'judge [name] profile\' or \'how does judge [name] rule on [motion]\'",
+    "Be Zara at her best — smart, thorough, curious, and genuinely helpful."
   ].join("\n");
 }
 
