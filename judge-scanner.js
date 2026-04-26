@@ -329,9 +329,9 @@ async function updateScanProgress(courtKey, updates) {
 //  COURTLISTENER FETCHER
 //  Used for: 9th Circuit, all CA Districts, BIA, CA Appellate
 // ============================================================
-// ── Fetch a batch from CourtListener using cursor pagination ─
-// v4 uses cursor-based pagination — never send a `page` param
-// Pass nextUrl on subsequent calls to paginate
+// ── Fetch a batch from CourtListener using opinions endpoint ─
+// Use /opinions/ endpoint directly — returns text fields we need
+// Much more reliable than search API which returns empty snippets
 async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2005-01-01") {
   const headers = {};
   if (COURTLISTENER_TOKEN) headers["Authorization"] = `Token ${COURTLISTENER_TOKEN}`;
@@ -340,85 +340,90 @@ async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2
     let resp;
 
     if (nextUrl) {
-      // Follow cursor URL directly — do NOT add any params
       resp = await axios.get(nextUrl, { headers, timeout: 20000 });
     } else {
-      // First page — build fresh query, NO `page` param
-      resp = await axios.get("https://www.courtlistener.com/api/rest/v4/search/", {
+      // Use /opinions/ endpoint directly — returns plain_text and judge data
+      resp = await axios.get("https://www.courtlistener.com/api/rest/v4/opinions/", {
         params: {
-          type:           "o",
-          stat_Published: "on",
-          court:          courtCode,
-          filed_after:    dateAfter,
-          order_by:       "dateFiled desc",
-          page_size:      20,
+          cluster__court:             courtCode,
+          cluster__date_filed__gte:   dateAfter,
+          cluster__precedential_status: "Published",
+          ordering:                   "-cluster__date_filed",
+          page_size:                  20,
+          // Request only fields we need to save bandwidth
+          fields: "id,cluster_id,plain_text,html_with_citations,author_str,joined_by_str,type,cluster",
         },
         headers,
         timeout: 20000,
       });
     }
 
+    const results = resp.data?.results || [];
+
+    // Transform opinions into the format our scanner expects
+    const transformed = results.map(op => ({
+      id:           op.cluster_id || op.cluster?.id || op.id,
+      opinionId:    op.id,
+      caseName:     op.cluster?.case_name || op.cluster || "",
+      judge:        op.author_str || op.joined_by_str || op.cluster?.judges || "",
+      dateFiled:    op.cluster?.date_filed || "",
+      absolute_url: op.cluster?.absolute_url || "",
+      // Text directly available — no extra fetch needed
+      _text:        op.plain_text || op.html_with_citations || "",
+    }));
+
     return {
-      results: resp.data?.results || [],
-      count:   resp.data?.count   || 0,
-      next:    resp.data?.next    || null,  // cursor URL for next page
+      results: transformed,
+      count:   resp.data?.count || 0,
+      next:    resp.data?.next  || null,
     };
   } catch (err) {
     if (err.response?.status === 429) {
-      console.log("[scanner] CourtListener rate limited — waiting 60s");
+      console.log("[scanner] Rate limited — waiting 60s");
       await sleep(60000);
       return { results: [], count: 0, next: null };
     }
-    console.error(`[scanner] CL fetch error (${courtCode}):`, err.message);
+    console.error(`[scanner] Fetch error (${courtCode}):`, err.message);
     if (err.response?.data) {
-      console.error(`[scanner] CL error detail:`, JSON.stringify(err.response.data).substring(0, 200));
+      console.error(`[scanner] Detail:`, JSON.stringify(err.response.data).substring(0, 200));
     }
     return { results: [], count: 0, next: null };
   }
 }
 
-// ── Fetch opinion full text from CourtListener ───────────────
-// Search API returns CLUSTER IDs — must fetch cluster to get opinion IDs
+// ── Fetch opinion full text ───────────────────────────────────
+// Text is now pre-loaded from /opinions/ endpoint
+// This function is only called as fallback for trial court PDFs
 async function fetchOpinionText(clusterId) {
   const headers = {};
   if (COURTLISTENER_TOKEN) headers["Authorization"] = `Token ${COURTLISTENER_TOKEN}`;
 
   try {
-    // Step 1: fetch the cluster to get the sub-opinion IDs
-    const clusterResp = await axios.get(
-      `https://www.courtlistener.com/api/rest/v4/clusters/${clusterId}/`,
-      { headers, timeout: 15000 }
+    // Query opinions by cluster ID
+    const resp = await axios.get(
+      "https://www.courtlistener.com/api/rest/v4/opinions/",
+      {
+        params: { cluster: clusterId, fields: "id,plain_text,html_with_citations,author_str" },
+        headers,
+        timeout: 15000,
+      }
     );
 
-    const subOpinions = clusterResp.data?.sub_opinions || [];
-    if (!subOpinions.length) return "";
+    const opinions = resp.data?.results || [];
+    if (!opinions.length) return "";
 
-    // sub_opinions can be: full URL, relative URL, or plain numeric ID
-    const raw = subOpinions[0];
-    let opinionId;
-
-    if (typeof raw === "number") {
-      opinionId = String(raw);
-    } else if (typeof raw === "string") {
-      // Extract numeric ID from URL if present, otherwise use as-is
-      const match = raw.match(/\/opinions\/(\d+)\//);
-      opinionId = match ? match[1] : raw.replace(/\D/g, "");
-    } else {
-      return "";
+    // Log first fetch for diagnostics
+    if (!fetchOpinionText._logged) {
+      fetchOpinionText._logged = true;
+      console.log(`[scanner] Opinion fetch sample — keys: ${Object.keys(opinions[0]).join(", ")}`);
+      console.log(`[scanner] plain_text length: ${(opinions[0].plain_text||"").length}`);
+      console.log(`[scanner] html length: ${(opinions[0].html_with_citations||"").length}`);
     }
 
-    if (!opinionId) return "";
-
-    const opResp = await axios.get(
-      `https://www.courtlistener.com/api/rest/v4/opinions/${opinionId}/`,
-      { headers, timeout: 15000 }
-    );
-
-    const text = opResp.data?.plain_text || opResp.data?.html_with_citations || "";
+    const text = opinions[0].plain_text || opinions[0].html_with_citations || "";
     return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().substring(0, 8000);
 
   } catch (err) {
-    // Non-fatal — fall back to snippet
     return "";
   }
 }
@@ -855,41 +860,40 @@ async function scanCourtListenerCourt(courtKey, options = {}) {
       const opinionId = opinion.id;
       if (!opinionId) continue;
 
-      // Search API returns EMPTY snippets and no judge field
-      // Must fetch full cluster to get text and judge
-      await sleep(CL_DELAY_MS);
-      const fullText = await fetchOpinionText(opinionId);
+      // Text is pre-loaded from /opinions/ endpoint — no extra fetch needed
+      let fullText = (opinion._text || "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      // Log first opinion for diagnostics
+      if (batch.results.indexOf(opinion) === 0 && pageNum === 1) {
+        console.log(`[scanner] ${court.shortName} sample — caseName: "${opinion.caseName?.substring(0,50)}", judge: "${opinion.judge?.substring(0,40)}", text length: ${fullText.length}`);
+      }
 
       if (!fullText || fullText.length < 30) {
-        // No text available — store minimal profile from metadata alone
-        const judgeName = opinion.judge || extractJudgeFromCaseName(opinion.caseName || "");
-        if (!judgeName) continue;
-
-        // At minimum store the judge profile entry from metadata
-        await db.query(`
-          INSERT INTO judge_profiles (judge_name, court, court_type, total_rulings)
-          VALUES ($1, $2, $3, 1)
-          ON CONFLICT (judge_name, court) DO UPDATE SET
-            total_rulings = judge_profiles.total_rulings + 1,
-            last_updated  = NOW()
-        `, [judgeName, court.name, court.type || "appellate"]);
-
-        processed++;
+        // No text — store minimal profile from metadata if we have a judge name
+        const judgeName = opinion.judge?.trim();
+        if (judgeName && judgeName.length > 2) {
+          await db.query(`
+            INSERT INTO judge_profiles (judge_name, court, court_type, total_rulings)
+            VALUES ($1, $2, $3, 1)
+            ON CONFLICT (judge_name, court) DO UPDATE SET
+              total_rulings = judge_profiles.total_rulings + 1,
+              last_updated  = NOW()
+          `, [judgeName, court.name, court.type || "appellate"]);
+          processed++;
+        }
         continue;
       }
 
-      // Check relevance against full text
+      // Check relevance
       const textLower = fullText.toLowerCase();
       const isRelevant = PRACTICE_KEYWORDS.some(kw => textLower.includes(kw));
       if (!isRelevant) continue;
 
       // Extract judge names
       const judgeNames = extractJudgeNamesFromText(fullText, opinion);
-
-      // Diagnostic log first opinion of each court
-      if (batch.results.indexOf(opinion) === 0 && pageNum === 1) {
-        console.log(`[scanner] ${court.shortName} sample — judge: "${judgeNames[0]}", text length: ${fullText.length}, relevant: ${isRelevant}`);
-      }
 
       for (const judgeName of judgeNames) {
         const ruling = {
