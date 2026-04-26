@@ -666,6 +666,11 @@ async function stopDripCampaign(platformId, reason) {
   );
 }
 
+// ── Raw query passthrough (used by legal intelligence modules) ──
+async function query(sql, params) {
+  return getPool().query(sql, params);
+}
+
 module.exports = {
   initDB, getOrCreateClient, updateClient, saveMessage,
   getHistory, getClientContext, saveSummary, clearHistory,
@@ -673,4 +678,5 @@ module.exports = {
   setJJSession, getJJSession, getLastMessageTime, syncIntakeToClient,
   initWave1Tables, logAudit, createLead, updateLeadStage,
   runConflictCheck, logUnansweredQuestion,
+  query,
 };
