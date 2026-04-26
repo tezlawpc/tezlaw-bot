@@ -84,7 +84,6 @@ async function searchCaseLaw(query, options = {}) {
       q:              query,
       type:           "o",           // opinions only — never RECAP
       stat_Published: "on",          // published opinions only
-      stat_Precedential: "on",       // precedential only (Layer 2)
       order_by:       orderBy,
       page_size:      maxResults * 2, // fetch extra — some will be filtered
     };
