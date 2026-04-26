@@ -9,6 +9,7 @@ const { checkIntake, resetIntake } = require("./intake");
 const { checkJJMode, getJJPublicContext } = require("./jj-mode");
 const { detectPracticeArea, buildAgentPrompt } = require("./agents");
 const { extractReceiptNumber, getCaseStatus, formatCaseStatusMessage } = require("./uscis");
+const { checkAnswerCache, storeCachedAnswer, detectPracticeArea: cacheDetectArea } = require("./answer-cache");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -179,6 +180,28 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       }
     }
     // ── END USCIS intercept ───────────────────────────────
+
+    // ── ANSWER CACHE CHECK ───────────────────────────────
+    // Check before loading client context or calling Claude
+    // Never runs for JJ, images, PDFs, or personal/urgent questions
+    if (!isImage && !isPdf) {
+      try {
+        const lang         = detectLanguage(userMessage);
+        const practiceArea = cacheDetectArea(userMessage);
+        const cached       = await checkAnswerCache(userMessage, practiceArea, lang);
+
+        if (cached) {
+          console.log(`[cache] ⚡ Cache hit (${cached.source}) — skipping Claude entirely`);
+          await db.saveMessage(platform, platformId, "user", userMessage);
+          await db.saveMessage(platform, platformId, "assistant", cached.answer);
+          return cached.answer;
+        }
+      } catch (cacheErr) {
+        // Cache errors are non-fatal — fall through to Claude
+        console.error("[cache] Check error (non-fatal):", cacheErr.message);
+      }
+    }
+    // ── END CACHE CHECK ──────────────────────────────────
 
     // 3. Ensure client exists, detect language
     const lang = detectLanguage(userMessage);
@@ -437,7 +460,14 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
     tryExtractContact(platform, platformId, userMessage);
     db.maybeAutoSummarize(platform, platformId, ANTHROPIC_API_KEY).catch(() => {});
 
-    // 11. Log unanswered/fallback questions for admin panel
+    // ── Store in answer cache for future clients ──────────
+    // Non-blocking — cache misses are fine, never delay the response
+    if (!isImage && !isPdf) {
+      const practiceArea = cacheDetectArea(userMessage);
+      const lang         = detectLanguage(userMessage);
+      storeCachedAnswer(userMessage, reply, practiceArea, lang).catch(() => {});
+    }
+    // ── End cache store ───────────────────────────────────    // 11. Log unanswered/fallback questions for admin panel
     const isFallback = reply.includes("didn't catch that") ||
                        reply.includes("I'm sorry") ||
                        reply.includes("technical issue") ||
