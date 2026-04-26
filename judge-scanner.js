@@ -295,18 +295,40 @@ async function fetchCourtListenerBatch(courtCode, page = 1, dateAfter = "2005-01
 }
 
 // ── Fetch opinion full text from CourtListener ───────────────
-async function fetchOpinionText(opinionId) {
+// Search API returns CLUSTER IDs — must fetch cluster to get opinion IDs
+async function fetchOpinionText(clusterId) {
   const headers = {};
   if (COURTLISTENER_TOKEN) headers["Authorization"] = `Token ${COURTLISTENER_TOKEN}`;
 
   try {
-    const resp = await axios.get(
+    // Step 1: fetch the cluster to get the sub-opinion IDs
+    const clusterResp = await axios.get(
+      `https://www.courtlistener.com/api/rest/v4/clusters/${clusterId}/`,
+      { headers, timeout: 15000 }
+    );
+
+    const subOpinions = clusterResp.data?.sub_opinions || [];
+    if (!subOpinions.length) return "";
+
+    // Step 2: fetch the first opinion's text
+    // sub_opinions is array of URLs like /api/rest/v4/opinions/12345/
+    const opinionUrl = subOpinions[0];
+    const opinionId  = typeof opinionUrl === "string"
+      ? opinionUrl.replace(/.*\/opinions\/(\d+)\/.*/, "$1")
+      : opinionUrl;
+
+    if (!opinionId || opinionId === opinionUrl) return "";
+
+    const opResp = await axios.get(
       `https://www.courtlistener.com/api/rest/v4/opinions/${opinionId}/`,
       { headers, timeout: 15000 }
     );
-    const text = resp.data?.plain_text || resp.data?.html_with_citations || "";
+
+    const text = opResp.data?.plain_text || opResp.data?.html_with_citations || "";
     return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().substring(0, 8000);
+
   } catch (err) {
+    // Non-fatal — fall back to snippet
     return "";
   }
 }
@@ -719,20 +741,23 @@ async function scanCourtListenerCourt(courtKey, options = {}) {
     console.log(`[scanner] ${court.shortName} p${page}: ${batch.results.length} opinions (total: ${totalFound})`);
 
     for (const opinion of batch.results) {
-      // Fetch full text for analysis
+      // Search API returns cluster IDs — use snippet first for relevance check
       const opinionId   = opinion.id;
-      let   fullText    = opinion.snippet || "";
+      let   fullText    = (opinion.snippet || "").replace(/<[^>]+>/g, " ").trim();
 
-      // Only fetch full text if snippet looks relevant
+      // Quick relevance check on snippet before fetching full text
       const snippetLower = fullText.toLowerCase();
       const likelyRelevant = PRACTICE_KEYWORDS.some(kw => snippetLower.includes(kw));
 
-      if (likelyRelevant && opinionId) {
+      // Only fetch full text for relevant opinions (saves API calls)
+      if (likelyRelevant && opinionId && fullText.length < 500) {
         await sleep(CL_DELAY_MS);
-        fullText = await fetchOpinionText(opinionId) || fullText;
+        const fetched = await fetchOpinionText(opinionId);
+        if (fetched && fetched.length > fullText.length) fullText = fetched;
       }
 
-      if (!fullText || fullText.length < 100) continue;
+      // Use snippet alone if full text fetch failed — snippet is enough for judge analysis
+      if (!fullText || fullText.length < 30) continue;
 
       // Extract judge name from opinion metadata or text
       const judgeNames = extractJudgeNamesFromText(fullText, opinion);
