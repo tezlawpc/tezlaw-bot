@@ -7,6 +7,7 @@
 const axios              = require("axios");
 const db                 = require("./db");
 const { sendVoiceReply } = require("./voice");
+const { isParalegalCommand, handleParalegalCommand } = require("./paralegal");
 
 // ── JJ Session state (per platform:userId) ────────────────
 const jjSessions = {};
@@ -142,6 +143,25 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
         : "No JJ memories stored yet. Start sharing things or upload documents!"
     };
   }
+
+  // ── Paralegal command intercept ──────────────────────────
+  if (isParalegalCommand(userMessage)) {
+    console.log("[JJ-Mode] 🏛️ Paralegal command detected");
+    try {
+      const paralegalReply = await handleParalegalCommand(userMessage, { platform, platformId: userId });
+      await extractAndSaveJJKnowledge(userMessage, paralegalReply, "[Paralegal]");
+      const full = "🏛️ [Zara Paralegal]\n\n" + paralegalReply;
+      const final = full.length > 3900
+        ? full.substring(0, 3800) + "\n\n...[truncated — voice reply has full response]"
+        : full;
+      sendVoiceReply(platform, userId, paralegalReply).catch(() => {});
+      return { handled: true, message: final };
+    } catch (err) {
+      console.error("[JJ-Mode] Paralegal error:", err.message);
+      // Fall through to normal JJ mode
+    }
+  }
+  // ── End paralegal intercept ───────────────────────────────
 
   // Build JJ-specific system prompt
   const jjContext = await getJJContext();
