@@ -139,25 +139,90 @@ const COURTS = {
 
 // ── Practice area keywords for relevance filtering ───────────
 const PRACTICE_KEYWORDS = [
-  // Civil litigation
+  // ── Civil litigation (state) ─────────────────────────────
   "demurrer","motion to strike","summary judgment","anti-slapp",
   "motion to compel","protective order","default judgment",
   "preliminary injunction","sanctions","attorneys fees",
   "breach of contract","fraud","negligence","damages",
-  // Eviction/UD
+  "intentional infliction","emotional distress","conversion",
+  "unjust enrichment","specific performance","rescission",
+
+  // ── Eviction / Landlord-Tenant ───────────────────────────
   "unlawful detainer","eviction","3-day notice","just cause",
   "habitability","security deposit","rent","landlord","tenant",
-  // Personal injury
-  "personal injury","negligence","premises liability",
-  "comparative fault","pain and suffering","medical expenses",
-  // Immigration
+  "wrongful eviction","retaliatory","lease",
+
+  // ── Personal Injury ──────────────────────────────────────
+  "personal injury","premises liability","comparative fault",
+  "pain and suffering","medical expenses","wrongful death",
+  "products liability","defective","motor vehicle","accident",
+
+  // ── Immigration ──────────────────────────────────────────
   "asylum","removal","deportation","voluntary departure",
   "credibility","particular social group","withholding",
-  "BIA","EOIR","in absentia","motion to reopen","CAT",
-  // Estate/probate
+  "bia","eoir","in absentia","motion to reopen","cat",
+  "immigration","petitioner","respondent","nta","overstay",
+  "cancellation of removal","adjustment of status","visa",
+  "refugee","persecution","torture","hardship","inadmissible",
+
+  // ── Federal / 9th Circuit ────────────────────────────────
+  "qualified immunity","due process","equal protection",
+  "fourth amendment","fifth amendment","first amendment",
+  "section 1983","42 u.s.c","civil rights","constitutional",
+  "habeas corpus","§ 2255","§ 2241","ineffective assistance",
+  "class action","class certification","rule 23",
+  "rule 12","rule 56","12(b)(6)","iqbal","twombly",
+  "standing","mootness","ripeness","jurisdiction",
+  "preliminary injunction","temporary restraining order",
+  "erisa","title vii","adea","ada","fmla","employment",
+  "discrimination","retaliation","hostile work environment",
+  "copyright","trademark","patent","trade secret",
+  "securities","fraud","false claims act","qui tam",
+  "bankruptcy","discharge","automatic stay","adversary",
+  "sentencing","guidelines","enhancement","career offender",
+  "appeal","affirm","reverse","remand","de novo","abuse of discretion",
+
+  // ── Estate / Probate ─────────────────────────────────────
   "probate","trust","conservatorship","will","estate",
-  // Business
-  "trade secret","non-compete","employment","fiduciary",
+  "fiduciary","trustee","executor","beneficiary","heir",
+
+  // ── Business Litigation ───────────────────────────────────
+  "breach of contract","trade secret","non-compete","noncompete",
+  "misappropriation","partnership dispute","shareholder dispute",
+  "llc dispute","operating agreement","buy-sell","breach of fiduciary",
+  "corporate opportunity","alter ego","piercing the corporate veil",
+  "franchise","license agreement","intellectual property",
+  "copyright infringement","trademark infringement","patent infringement",
+  "unfair business practices","unfair competition","business and professions",
+  "17200","preliminary injunction","temporary restraining order",
+  "inevitable disclosure","trade dress","unjust enrichment",
+
+  // ── Employment Law ────────────────────────────────────────
+  "title vii","feha","fair employment","age discrimination","adea",
+  "disability discrimination","ada","fmla","cfra","pdl",
+  "pregnancy discrimination","equal pay","wage and hour","overtime",
+  "meal break","rest break","paga","labor code","wrongful termination",
+  "constructive discharge","hostile work environment","sexual harassment",
+  "employment retaliation","whistleblower","mcdonnell douglas",
+  "disparate treatment","disparate impact","reasonable accommodation",
+  "interactive process","arbitration agreement","class waiver",
+  "pslra","misclassification","independent contractor","abc test",
+  "piece rate","final pay","pay stub","expense reimbursement",
+
+  // ── Public Entity & Securities ────────────────────────────
+  "section 1983","42 u.s.c","monell","municipal liability",
+  "public entity","government entity","civil rights","constitutional",
+  "qualified immunity","public employee","due process","first amendment",
+  "fourth amendment","14th amendment","deliberate indifference",
+  "failure to train","official policy","custom and practice",
+  "securities fraud","rule 10b-5","10b-5","insider trading",
+  "material misrepresentation","loss causation","scienter",
+  "false claims act","qui tam","false claim","original source",
+  "government contract","sovereign immunity","tucker act",
+  "dodd-frank","sarbanes-oxley","sec enforcement","sec v.",
+  "public disclosure bar","presentment","reverse false claim",
+  "dangerous condition","government claim act","design immunity",
+  "discretionary immunity","scope of employment","public entity tort",
 ];
 
 // ============================================================
@@ -556,12 +621,18 @@ async function fetchEOIRJudgeData() {
 //  Reads each ruling and extracts structured judge intelligence
 // ============================================================
 async function analyzeRulingWithClaude(ruling) {
-  if (!ruling.full_text || ruling.full_text.length < 30) return null;
+  if (!ruling.full_text || ruling.full_text.length < 30) {
+    // Too short — skip silently
+    return null;
+  }
 
   // Check relevance first (fast keyword check)
   const text = ruling.full_text.toLowerCase();
   const isRelevant = PRACTICE_KEYWORDS.some(kw => text.includes(kw));
-  if (!isRelevant) return null;
+  if (!isRelevant) {
+    // Not relevant to practice areas — skip silently
+    return null;
+  }
 
   await sleep(CLAUDE_DELAY_MS);
 
@@ -794,6 +865,11 @@ async function scanCourtListenerCourt(courtKey, options = {}) {
 
       // Extract judge name from opinion metadata or text
       const judgeNames = extractJudgeNamesFromText(fullText, opinion);
+
+      // Diagnostic: log first opinion of each batch to verify data shape
+      if (batch.results.indexOf(opinion) === 0 && pageNum === 1) {
+        console.log(`[scanner] Sample opinion — judge field: "${opinion.judge?.substring(0,50)}", snippet length: ${fullText.length}, relevant: ${likelyRelevant}`);
+      }
 
       for (const judgeName of judgeNames) {
         const ruling = {
@@ -1294,27 +1370,46 @@ function getCourtsType(courtName) {
 function extractJudgeNamesFromText(text, opinion) {
   const names = new Set();
 
-  // From CourtListener metadata
-  if (opinion?.judge) names.add(opinion.judge);
+  // CourtListener search API returns judge field directly — use it first
+  if (opinion?.judge && opinion.judge.trim().length > 2) {
+    // May be comma-separated panel e.g. "Wardlaw, Tallman, Bea"
+    opinion.judge.split(",").forEach(n => {
+      const name = n.trim();
+      if (name.length > 2 && name.length < 60) names.add(name);
+    });
+  }
 
-  // From text patterns
-  const patterns = [
-    /(?:Judge|Justice|Honorable|Hon\.)\s+([A-Z][a-z]+(?:\s+[A-Z]\.?\s+)?[A-Z][a-z]+)/g,
-    /(?:PER CURIAM|Before:\s*)([A-Z][A-Z\s,]+)(?:\n|,\s*Circuit)/,
-  ];
+  // Also try panel_names array if present
+  if (Array.isArray(opinion?.panel_names)) {
+    opinion.panel_names.forEach(n => {
+      if (n && n.length > 2) names.add(n.trim());
+    });
+  }
 
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(text)) !== null) {
-      const name = match[1].trim();
-      if (name.length > 4 && name.length < 50) names.add(name);
+  // Fallback: extract from text
+  if (names.size === 0) {
+    const patterns = [
+      /(?:Judge|Justice|Hon\.|Honorable)\s+([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)?[A-Z][a-z]+)/g,
+      /([A-Z][A-Z]+,\s+[A-Z][a-z]+)\s*,\s*(?:Circuit Judge|District Judge|J\.)/g,
+    ];
+
+    for (const pattern of patterns) {
+      let match;
+      const globalRe = new RegExp(pattern.source, "g");
+      while ((match = globalRe.exec(text)) !== null) {
+        const name = match[1].trim();
+        if (name.length > 4 && name.length < 60) names.add(name);
+      }
     }
   }
 
-  // If no names found, use generic court label
-  if (names.size === 0) names.add("Unknown");
+  // If still nothing, use court as fallback label so ruling isn't lost
+  if (names.size === 0) {
+    const courtLabel = opinion?.court || opinion?.court_id || "Unknown Judge";
+    names.add(courtLabel);
+  }
 
-  return [...names].slice(0, 3); // Max 3 per opinion
+  return [...names].slice(0, 3);
 }
 
 // ============================================================

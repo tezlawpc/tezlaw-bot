@@ -25,6 +25,7 @@
 
 const axios = require("axios");
 const db    = require("./db");
+const { buildExtractionPrompt, normalizeExtractedData } = require("./extraction-prompts");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -92,11 +93,12 @@ async function initMotionIntelligenceTables() {
         practice_area     TEXT,
         argument_text     TEXT NOT NULL,
         argument_category TEXT,
-        outcome           TEXT NOT NULL,  -- 'winning' | 'losing' | 'neutral'
+        outcome           TEXT NOT NULL,
         frequency         INTEGER DEFAULT 1,
-        confidence        NUMERIC(4,2),   -- 0.0-1.0 based on sample size
+        confidence        NUMERIC(4,2),
         example_case      TEXT,
-        example_language  TEXT,           -- exact quote from opinion
+        example_language  TEXT,
+        ruling_year       INTEGER,
         created_at        TIMESTAMPTZ DEFAULT NOW(),
         updated_at        TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(judge_name, court, motion_type, argument_text)
@@ -108,14 +110,14 @@ async function initMotionIntelligenceTables() {
       ON motion_arguments(judge_name, court, motion_type)
     `);
 
-    // Brief frameworks — structural patterns that work per judge
+    // Brief frameworks
     await db.query(`
       CREATE TABLE IF NOT EXISTS motion_frameworks (
         id                SERIAL PRIMARY KEY,
         judge_name        TEXT NOT NULL,
         court             TEXT NOT NULL,
         motion_type       TEXT NOT NULL,
-        framework_type    TEXT NOT NULL,  -- 'opening' | 'argument' | 'structure' | 'closing'
+        framework_type    TEXT NOT NULL,
         description       TEXT NOT NULL,
         example_text      TEXT,
         success_rate      NUMERIC(4,2),
@@ -125,24 +127,78 @@ async function initMotionIntelligenceTables() {
       )
     `);
 
-    // Reasoning chains — how this judge thinks through each issue
+    // Reasoning patterns with full-scope fields
     await db.query(`
       CREATE TABLE IF NOT EXISTS reasoning_patterns (
         id                SERIAL PRIMARY KEY,
         judge_name        TEXT NOT NULL,
         court             TEXT NOT NULL,
         motion_type       TEXT NOT NULL,
+        practice_area     TEXT,
         legal_issue       TEXT NOT NULL,
-        reasoning_chain   TEXT NOT NULL,  -- step-by-step logic
-        key_factors       TEXT[],         -- what tips the scales
-        counter_factors   TEXT[],         -- what they dismiss
-        standard_applied  TEXT,           -- legal standard they use
-        burden_placement  TEXT,           -- who bears burden
-        sample_language   TEXT,           -- their exact words
+        reasoning_chain   TEXT NOT NULL,
+        key_factors       TEXT[],
+        counter_factors   TEXT[],
+        standard_applied  TEXT,
+        burden_placement  TEXT,
+        sample_language   TEXT,
+        area_data         JSONB,
+        ruling_year       INTEGER,
+        trend_note        TEXT,
         frequency         INTEGER DEFAULT 1,
         created_at        TIMESTAMPTZ DEFAULT NOW(),
         updated_at        TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(judge_name, court, motion_type, legal_issue)
+      )
+    `);
+
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS idx_reasoning_area
+      ON reasoning_patterns(practice_area, motion_type)
+    `);
+
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS idx_reasoning_year
+      ON reasoning_patterns(ruling_year, judge_name)
+    `);
+
+    // Area-specific intelligence tables
+    // Immigration-specific intelligence
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS immigration_intelligence (
+        id              SERIAL PRIMARY KEY,
+        judge_name      TEXT NOT NULL,
+        court           TEXT NOT NULL,
+        ij_or_brd       TEXT,
+        psg_definitions TEXT[],
+        psg_rejections  TEXT[],
+        credibility_factors TEXT[],
+        corroboration_standard TEXT,
+        country_conditions_weight TEXT,
+        nexus_theories  TEXT[],
+        mtr_standards   TEXT[],
+        grant_rate      NUMERIC(5,2),
+        deny_rate       NUMERIC(5,2),
+        remand_rate     NUMERIC(5,2),
+        sample_count    INTEGER DEFAULT 0,
+        last_updated    TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(judge_name, court)
+      )
+    `);
+
+    // Temporal tracking — how judge standards evolve year by year
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS judge_temporal (
+        id              SERIAL PRIMARY KEY,
+        judge_name      TEXT NOT NULL,
+        court           TEXT NOT NULL,
+        motion_type     TEXT NOT NULL,
+        ruling_year     INTEGER NOT NULL,
+        grant_count     INTEGER DEFAULT 0,
+        deny_count      INTEGER DEFAULT 0,
+        key_standard    TEXT,
+        notable_shift   TEXT,
+        UNIQUE(judge_name, court, motion_type, ruling_year)
       )
     `);
 
@@ -154,69 +210,22 @@ async function initMotionIntelligenceTables() {
 }
 
 // ============================================================
-//  DEEP REASONING EXTRACTION
-//  Called during scan for high-relevance opinions
-//  Uses Sonnet for accuracy on complex reasoning extraction
+//  FULL-SCOPE DEEP REASONING EXTRACTION
+//  Uses practice-area-specific prompts for 15/15 coverage
 // ============================================================
 async function extractDeepReasoning(ruling) {
-  if (!ruling || !ruling.full_text || ruling.full_text.length < 100) return null;
-  if (!DEEP_ANALYSIS_MOTIONS.has(ruling.motion_type)) return null;
+  if (!ruling || !ruling.full_text || ruling.full_text.length < 30) return null;
 
-  const practiceArea = detectPracticeArea(ruling.court, ruling.motion_type);
+  // Build the right prompt for this practice area
+  const { prompt, area } = buildExtractionPrompt(ruling);
 
   try {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
         model:      "claude-haiku-4-5-20251001",
-        max_tokens: 1200,
-        messages: [{
-          role:    "user",
-          content: `You are a legal analyst extracting deep reasoning patterns from a court opinion for a judge intelligence database.
-
-Court: ${ruling.court}
-Judge: ${ruling.judge_name}
-Motion: ${ruling.motion_type}
-Result: ${ruling.result}
-Date: ${ruling.hearing_date || "Unknown"}
-
-OPINION TEXT:
-${ruling.full_text.substring(0, 4000)}
-
-Extract the judge's COMPLETE REASONING STRUCTURE. Focus on:
-1. The exact legal standard they applied
-2. Why they ruled the way they did — step by step
-3. What specific arguments they found convincing
-4. What arguments they rejected and why
-5. What facts or elements were decisive
-6. Their exact language when ruling
-
-Respond ONLY with JSON (empty {} if insufficient text):
-{
-  "legal_standard": "exact standard applied e.g. 'Iqbal/Twombly plausibility standard'",
-  "reasoning_chain": "Step 1: ... Step 2: ... Step 3: ... (judge's actual logic)",
-  "decisive_factors": ["what actually tipped the ruling", "max 4 items"],
-  "winning_arguments": [
-    {
-      "argument": "specific argument that worked",
-      "why_it_worked": "judge's reasoning for accepting it",
-      "exact_language": "quote from opinion under 20 words"
-    }
-  ],
-  "losing_arguments": [
-    {
-      "argument": "specific argument that failed",
-      "why_it_failed": "judge's reasoning for rejecting it",
-      "exact_language": "quote from opinion under 20 words"
-    }
-  ],
-  "burden_placement": "who bears burden and how judge described it",
-  "key_factors": ["factor 1", "factor 2", "factor 3"],
-  "counter_factors": ["what judge dismissed", "max 3"],
-  "procedural_notes": "any procedural requirements judge emphasized",
-  "drafting_insight": "one sentence: what an attorney should know before filing this motion with this judge"
-}`,
-        }],
+        max_tokens: 1500,
+        messages: [{ role: "user", content: prompt }],
       },
       {
         headers: {
@@ -224,17 +233,21 @@ Respond ONLY with JSON (empty {} if insufficient text):
           "anthropic-version": "2023-06-01",
           "Content-Type":      "application/json",
         },
-        timeout: 25000,
+        timeout: 30000,
       }
     );
 
     const text  = resp.data.content[0]?.text || "{}";
     const clean = text.replace(/```json|```/g, "").trim();
-    const data  = JSON.parse(clean);
+    const raw   = JSON.parse(clean);
 
-    if (!data.reasoning_chain && !data.legal_standard) return null;
+    if (!raw || Object.keys(raw).length === 0) return null;
 
-    return { ...data, practiceArea };
+    // Normalize into standard fields regardless of which prompt was used
+    const normalized = normalizeExtractedData(raw, area);
+    if (!normalized) return null;
+
+    return normalized;
 
   } catch (err) {
     console.error("[motion-intel] Deep extraction error:", err.message);
@@ -251,106 +264,122 @@ async function storeMotionIntelligence(ruling, reasoning) {
 
   const { judge_name, court, motion_type } = ruling;
   const practiceArea = reasoning.practiceArea || "general";
+  const rulingYear   = reasoning.ruling_year
+    || (ruling.hearing_date ? parseInt(ruling.hearing_date.substring(0, 4)) : null);
 
   try {
-    // Store winning arguments
-    if (reasoning.winning_arguments?.length) {
-      for (const arg of reasoning.winning_arguments) {
-        if (!arg.argument) continue;
-        await db.query(`
-          INSERT INTO motion_arguments
-            (judge_name, court, motion_type, practice_area, argument_text,
-             argument_category, outcome, frequency, example_case, example_language)
-          VALUES ($1,$2,$3,$4,$5,$6,'winning',1,$7,$8)
-          ON CONFLICT (judge_name, court, motion_type, argument_text) DO UPDATE SET
-            frequency     = motion_arguments.frequency + 1,
-            example_language = COALESCE($8, motion_arguments.example_language),
-            updated_at    = NOW()
-        `, [
-          judge_name, court, motion_type, practiceArea,
-          arg.argument.substring(0, 500),
-          categorizeArgument(arg.argument, practiceArea),
-          ruling.case_name || null,
-          arg.exact_language?.substring(0, 300) || null,
-        ]);
-      }
+    // ── Store winning arguments ─────────────────────────────
+    for (const arg of (reasoning.winning_arguments || [])) {
+      if (!arg.argument) continue;
+      await db.query(`
+        INSERT INTO motion_arguments
+          (judge_name, court, motion_type, practice_area, argument_text,
+           argument_category, outcome, frequency, example_case, example_language, ruling_year)
+        VALUES ($1,$2,$3,$4,$5,$6,'winning',1,$7,$8,$9)
+        ON CONFLICT (judge_name, court, motion_type, argument_text) DO UPDATE SET
+          frequency        = motion_arguments.frequency + 1,
+          example_language = COALESCE($8, motion_arguments.example_language),
+          updated_at       = NOW()
+      `, [
+        judge_name, court, motion_type, practiceArea,
+        arg.argument.substring(0, 500),
+        categorizeArgument(arg.argument, practiceArea),
+        ruling.case_name || null,
+        arg.exact_language?.substring(0, 300) || null,
+        rulingYear,
+      ]);
     }
 
-    // Store losing arguments
-    if (reasoning.losing_arguments?.length) {
-      for (const arg of reasoning.losing_arguments) {
-        if (!arg.argument) continue;
-        await db.query(`
-          INSERT INTO motion_arguments
-            (judge_name, court, motion_type, practice_area, argument_text,
-             argument_category, outcome, frequency, example_case, example_language)
-          VALUES ($1,$2,$3,$4,$5,$6,'losing',1,$7,$8)
-          ON CONFLICT (judge_name, court, motion_type, argument_text) DO UPDATE SET
-            frequency     = motion_arguments.frequency + 1,
-            example_language = COALESCE($8, motion_arguments.example_language),
-            updated_at    = NOW()
-        `, [
-          judge_name, court, motion_type, practiceArea,
-          arg.argument.substring(0, 500),
-          categorizeArgument(arg.argument, practiceArea),
-          ruling.case_name || null,
-          arg.exact_language?.substring(0, 300) || null,
-        ]);
-      }
+    // ── Store losing arguments ──────────────────────────────
+    for (const arg of (reasoning.losing_arguments || [])) {
+      if (!arg.argument) continue;
+      await db.query(`
+        INSERT INTO motion_arguments
+          (judge_name, court, motion_type, practice_area, argument_text,
+           argument_category, outcome, frequency, example_case, example_language, ruling_year)
+        VALUES ($1,$2,$3,$4,$5,$6,'losing',1,$7,$8,$9)
+        ON CONFLICT (judge_name, court, motion_type, argument_text) DO UPDATE SET
+          frequency        = motion_arguments.frequency + 1,
+          example_language = COALESCE($8, motion_arguments.example_language),
+          updated_at       = NOW()
+      `, [
+        judge_name, court, motion_type, practiceArea,
+        arg.argument.substring(0, 500),
+        categorizeArgument(arg.argument, practiceArea),
+        ruling.case_name || null,
+        arg.exact_language?.substring(0, 300) || null,
+        rulingYear,
+      ]);
     }
 
-    // Store reasoning pattern
-    if (reasoning.reasoning_chain) {
+    // ── Store reasoning pattern with full-scope data ────────
+    if (reasoning.reasoning_chain || reasoning.legal_standard) {
       const legalIssue = `${motion_type} — ${reasoning.legal_standard || "general"}`;
       await db.query(`
         INSERT INTO reasoning_patterns
-          (judge_name, court, motion_type, legal_issue, reasoning_chain,
-           key_factors, counter_factors, standard_applied, burden_placement,
-           sample_language, frequency)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1)
+          (judge_name, court, motion_type, practice_area, legal_issue,
+           reasoning_chain, key_factors, counter_factors, standard_applied,
+           burden_placement, sample_language, area_data, ruling_year, trend_note)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
         ON CONFLICT (judge_name, court, motion_type, legal_issue) DO UPDATE SET
           frequency       = reasoning_patterns.frequency + 1,
-          reasoning_chain = $5,
-          key_factors     = (
-            SELECT ARRAY(
-              SELECT DISTINCT unnest(reasoning_patterns.key_factors || $6::text[])
-              LIMIT 10
-            )
-          ),
-          counter_factors = (
-            SELECT ARRAY(
-              SELECT DISTINCT unnest(reasoning_patterns.counter_factors || $7::text[])
-              LIMIT 10
-            )
-          ),
-          updated_at = NOW()
+          reasoning_chain = $6,
+          key_factors     = (SELECT ARRAY(SELECT DISTINCT unnest(reasoning_patterns.key_factors || $7::text[]) LIMIT 10)),
+          counter_factors = (SELECT ARRAY(SELECT DISTINCT unnest(reasoning_patterns.counter_factors || $8::text[]) LIMIT 10)),
+          area_data       = $12,
+          trend_note      = COALESCE($14, reasoning_patterns.trend_note),
+          updated_at      = NOW()
       `, [
-        judge_name, court, motion_type,
+        judge_name, court, motion_type, practiceArea,
         legalIssue.substring(0, 300),
-        reasoning.reasoning_chain.substring(0, 2000),
-        reasoning.key_factors || [],
+        (reasoning.reasoning_chain || "").substring(0, 2000),
+        reasoning.key_factors    || [],
         reasoning.counter_factors || [],
-        reasoning.legal_standard?.substring(0, 300) || null,
-        reasoning.burden_placement?.substring(0, 300) || null,
-        reasoning.drafting_insight?.substring(0, 500) || null,
+        reasoning.legal_standard?.substring(0, 300)    || null,
+        reasoning.burden_placement?.substring(0, 300)  || null,
+        reasoning.sample_language?.substring(0, 500)   || null,
+        reasoning.area_data ? JSON.stringify(reasoning.area_data) : null,
+        rulingYear,
+        reasoning.trend_note?.substring(0, 300) || null,
       ]);
     }
 
-    // Store brief framework insight
+    // ── Store drafting insight ──────────────────────────────
     if (reasoning.drafting_insight) {
       await db.query(`
         INSERT INTO motion_frameworks
-          (judge_name, court, motion_type, framework_type, description,
-           example_text, sample_count)
-        VALUES ($1,$2,$3,'drafting_insight',$4,$5,1)
+          (judge_name, court, motion_type, framework_type, description, sample_count)
+        VALUES ($1,$2,$3,'drafting_insight',$4,1)
         ON CONFLICT (judge_name, court, motion_type, framework_type) DO UPDATE SET
           sample_count = motion_frameworks.sample_count + 1,
           description  = $4
+      `, [judge_name, court, motion_type,
+          reasoning.drafting_insight.substring(0, 500)]);
+    }
+
+    // ── Temporal tracking ───────────────────────────────────
+    if (rulingYear) {
+      const isGrant = ["Sustained","Granted"].includes(reasoning.result);
+      const isDeny  = ["Overruled","Denied"].includes(reasoning.result);
+      await db.query(`
+        INSERT INTO judge_temporal
+          (judge_name, court, motion_type, ruling_year, grant_count, deny_count, key_standard)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT (judge_name, court, motion_type, ruling_year) DO UPDATE SET
+          grant_count  = judge_temporal.grant_count + $5,
+          deny_count   = judge_temporal.deny_count  + $6,
+          key_standard = COALESCE($7, judge_temporal.key_standard)
       `, [
-        judge_name, court, motion_type,
-        reasoning.drafting_insight.substring(0, 500),
-        reasoning.procedural_notes?.substring(0, 500) || null,
+        judge_name, court, motion_type, rulingYear,
+        isGrant ? 1 : 0,
+        isDeny  ? 1 : 0,
+        reasoning.legal_standard?.substring(0, 200) || null,
       ]);
+    }
+
+    // ── Immigration-specific intelligence ──────────────────
+    if (practiceArea === "immigration" && reasoning.area_data) {
+      await storeImmigrationIntelligence(judge_name, court, reasoning);
     }
 
   } catch (err) {
@@ -600,6 +629,67 @@ After enrichment, use in JJ mode:
   }
 }
 
+// ── Store immigration-specific intelligence ──────────────────
+async function storeImmigrationIntelligence(judgeName, court, reasoning) {
+  const d = reasoning.area_data;
+  if (!d) return;
+
+  const psgAccepted   = d.psg_analysis?.psg_proposed ? [d.psg_analysis.psg_proposed] : [];
+  const psgRejections = d.psg_analysis?.psg_rejection_reason ? [d.psg_analysis.psg_rejection_reason] : [];
+  const credFactors   = d.credibility?.adverse_factors || [];
+
+  try {
+    await db.query(`
+      INSERT INTO immigration_intelligence
+        (judge_name, court, psg_definitions, psg_rejections, credibility_factors,
+         corroboration_standard, country_conditions_weight, sample_count)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,1)
+      ON CONFLICT (judge_name, court) DO UPDATE SET
+        psg_definitions = (SELECT ARRAY(SELECT DISTINCT unnest(immigration_intelligence.psg_definitions || $3::text[]) LIMIT 20)),
+        psg_rejections  = (SELECT ARRAY(SELECT DISTINCT unnest(immigration_intelligence.psg_rejections  || $4::text[]) LIMIT 20)),
+        credibility_factors = (SELECT ARRAY(SELECT DISTINCT unnest(immigration_intelligence.credibility_factors || $5::text[]) LIMIT 20)),
+        corroboration_standard   = COALESCE($6, immigration_intelligence.corroboration_standard),
+        country_conditions_weight = COALESCE($7, immigration_intelligence.country_conditions_weight),
+        sample_count    = immigration_intelligence.sample_count + 1,
+        last_updated    = NOW()
+    `, [
+      judgeName, court,
+      psgAccepted,
+      psgRejections,
+      credFactors,
+      d.credibility?.corroboration_required ? "required" : null,
+      d.country_conditions?.weight_given || null,
+    ]);
+  } catch (err) {
+    if (!err.message.includes("duplicate")) {
+      console.error("[motion-intel] Immigration intel store error:", err.message);
+    }
+  }
+}
+
+// ── Query temporal evolution for a judge ────────────────────
+async function getTemporalTrends(judgeName, court, motionType) {
+  try {
+    const result = await db.query(`
+      SELECT ruling_year,
+             grant_count,
+             deny_count,
+             key_standard,
+             notable_shift,
+             ROUND(grant_count::numeric / NULLIF(grant_count + deny_count, 0) * 100, 1) AS grant_rate
+      FROM judge_temporal
+      WHERE judge_name ILIKE $1
+        AND ($2::text IS NULL OR court ILIKE $2)
+        AND ($3::text IS NULL OR motion_type ILIKE $3)
+      ORDER BY ruling_year ASC
+    `, [`%${judgeName}%`, court ? `%${court}%` : null, motionType ? `%${motionType}%` : null]);
+
+    return result.rows;
+  } catch (err) {
+    return [];
+  }
+}
+
 module.exports = {
   initMotionIntelligenceTables,
   extractDeepReasoning,
@@ -607,4 +697,5 @@ module.exports = {
   getMotionIntelligence,
   formatMotionIntelligenceForJJ,
   enrichExistingProfiles,
+  getTemporalTrends,
 };
