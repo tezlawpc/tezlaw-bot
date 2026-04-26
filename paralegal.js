@@ -565,17 +565,37 @@ PRACTICE AREA → TEAM ROUTING
 - Personal injury → Lin Mei + JJ
 
 ============================
-OUTPUT FORMAT
+OUTPUT FORMAT — ALWAYS USE THIS EXACT STRUCTURE
 ============================
-Always respond with:
-1. 📋 CASE SUMMARY (1-2 sentences)
-2. ⚖️  DEADLINES (bullet list with dates and code citations)
-3. 👥 NOTIFY (who to email and why)
-4. ✅ NEXT STEPS (numbered action list)
-5. 📄 DRAFT (if JJ requested a document)
+1. 📋 CASE SUMMARY
+   1-2 sentences: who, what court, what happened today.
 
-Be precise, cite statutes, and flag any CRITICAL jurisdictional deadlines clearly.
-Always note if a deadline is JURISDICTIONAL (court loses power if missed).`;
+2. ⚖️  DEADLINES
+   Bullet list with exact dates, statute citations, and priority level.
+   Flag JURISDICTIONAL deadlines in ALL CAPS.
+
+3. 🔍 LEGAL RESEARCH & OPTIONS
+   This is critical — JJ needs strategy, not just deadlines.
+   - Search for the most relevant California statutes, recent case law, and legal standards
+   - Identify ALL viable legal options/defenses/strategies available
+   - For complaints: analyze causes of action, identify weaknesses, demurrer grounds (CCP §430.10)
+   - For immigration: research current EOIR trends, BIA precedent decisions, circuit court rulings
+   - For PI: research liability theories, comparative fault, damages case law
+   - Cite specific code sections and leading cases
+   - Flag any recent changes in law that affect this case
+
+4. ✅ NEXT STEPS (numbered, prioritized)
+   Concrete actions JJ should take in the next 24-48 hours.
+   Be specific — not "research the case" but "file EOIR-28 today, schedule M&C call by [date]"
+
+5. 💡 STRATEGIC RECOMMENDATIONS
+   JJ's best options ranked by likelihood of success.
+   Include: risk assessment, cost-benefit, settlement considerations if relevant.
+
+6. 📄 DRAFT (only if JJ specifically requested a document)
+
+Be precise, cite statutes, search for current law.
+Flag any JURISDICTIONAL deadline clearly — court loses power if missed.`;
 
 // ============================================================
 //  MAIN PARALEGAL HANDLER
@@ -702,32 +722,74 @@ async function handleParalegalCommand(message, options = {}) {
     else if (isPI || isLitigation)  teamToNotify = ["jj", "lin"];
     else                            teamToNotify = ["jj", "chandler"];
 
-    // ── Step 4: Call Claude with full context ────────────────
+    // ── Step 4: Call Claude with web search tool loop ───────
+    // Uses the same tool_use loop pattern as jj-mode.js so Claude
+    // can research current statutes, case law, and EOIR/court updates
     const systemWithDeadlines = PARALEGAL_SYSTEM_PROMPT + deadlineBlock;
 
-    const resp = await axios.post(
-      "https://api.anthropic.com/v1/messages",
-      {
-        model:      "claude-sonnet-4-20250514",
-        max_tokens: 2000,
-        system:     systemWithDeadlines,
-        messages:   [{ role: "user", content: message }],
-      },
-      {
-        headers: {
-          "x-api-key":         ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "Content-Type":      "application/json",
-        },
-        timeout: 30000,
-      }
-    );
+    const paralegalTools = [{ type: "web_search_20250305", name: "web_search" }];
+    let loopMessages = [{ role: "user", content: message }];
+    let claudeReply = "";
+    const MAX_LOOPS = 6;
 
-    const claudeReply = resp.data.content
-      .filter(b => b.type === "text")
-      .map(b => b.text)
-      .join("")
-      .trim();
+    for (let loop = 0; loop < MAX_LOOPS; loop++) {
+      let respData;
+      try {
+        const resp = await axios.post(
+          "https://api.anthropic.com/v1/messages",
+          {
+            model:    "claude-sonnet-4-20250514",
+            max_tokens: 2500,
+            system:   systemWithDeadlines,
+            tools:    paralegalTools,
+            messages: loopMessages,
+          },
+          {
+            headers: {
+              "x-api-key":         ANTHROPIC_API_KEY,
+              "anthropic-version": "2023-06-01",
+              "Content-Type":      "application/json",
+            },
+            timeout: 55000,
+          }
+        );
+        respData = resp.data;
+      } catch (apiErr) {
+        console.error(`[paralegal] API loop=${loop} error:`, apiErr.message);
+        if (loop === 0) throw apiErr;
+        break; // use whatever reply we have
+      }
+
+      console.log(`[paralegal] loop=${loop} stop_reason=${respData.stop_reason}`);
+
+      if (respData.stop_reason === "end_turn") {
+        claudeReply = respData.content
+          .filter(b => b.type === "text")
+          .map(b => b.text)
+          .join("")
+          .trim();
+        break;
+      }
+
+      if (respData.stop_reason === "tool_use") {
+        const toolUseBlocks = respData.content.filter(b => b.type === "tool_use");
+        console.log(`[paralegal] web_search triggered (${toolUseBlocks.length} calls)`);
+        loopMessages.push({ role: "assistant", content: respData.content });
+        const toolResults = toolUseBlocks.map(t => ({
+          type: "tool_result",
+          tool_use_id: t.id,
+          content: "Search completed. Use results to provide current statutes, recent case law, and strategic recommendations."
+        }));
+        loopMessages.push({ role: "user", content: toolResults });
+        continue;
+      }
+
+      // Unexpected stop — use what we have
+      claudeReply = respData.content?.filter(b => b.type === "text").map(b => b.text).join("").trim() || "";
+      break;
+    }
+
+    if (!claudeReply) claudeReply = "I had trouble generating the analysis. Please try again.";
 
     // ── Step 5: Auto-create MyCase tasks for CRITICAL deadlines ──
     const criticalDeadlines = deadlines.filter(d => d.priority === "CRITICAL" || d.priority === "HIGH");
