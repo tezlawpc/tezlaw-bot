@@ -427,10 +427,27 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
         const toolResults = [];
         for (const toolUse of toolUseBlocks) {
           if (toolUse.name === "web_search") {
-            toolResults.push({
-              type: "tool_result", tool_use_id: toolUse.id,
-              content: "Search completed. Please synthesize the results."
-            });
+            const query = toolUse.input?.query || "";
+
+            // ── Legal citation interceptor for CLIENT queries ─────
+            // Clients should never get case citations sourced from web search
+            // — too high a risk of hallucination or secondary source confusion
+            const legalCitePattern = /\b(v\.|versus|\d+\s+[A-Z][a-z]+\.\s*\d+|Cal\.|F\.\d+[a-z]+|court (held|ruled|decided)|case law|legal precedent)\b/i;
+
+            if (legalCitePattern.test(query)) {
+              console.log(`[askClaude] 🔒 Client legal search blocked: "${query}"`);
+              toolResults.push({
+                type:        "tool_result",
+                tool_use_id: toolUse.id,
+                content:     "Legal case search results are not available through web search for client responses. Provide general legal information from your training knowledge only. Do NOT cite specific case names or citations to the client. If the client needs case-specific research, advise them to consult with an attorney.",
+              });
+            } else {
+              toolResults.push({
+                type:        "tool_result",
+                tool_use_id: toolUse.id,
+                content:     "Search completed. Please synthesize the results. Do NOT include specific case citations in your response to the client.",
+              });
+            }
           } else if (options.executeAction) {
             try {
               const result = await options.executeAction(toolUse.name, toolUse.input);
@@ -465,7 +482,20 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
     if (!isImage && !isPdf) {
       const practiceArea = cacheDetectArea(userMessage);
       const lang         = detectLanguage(userMessage);
-      storeCachedAnswer(userMessage, reply, practiceArea, lang).catch(() => {});
+
+      // Citation safety gate: never cache a response containing
+      // unverified or malformed citation strings
+      const { isSafeToCache } = require("./source-validator");
+      const safetyCheck = isSafeToCache(userMessage, reply);
+
+      if (safetyCheck.safe) {
+        const finalReply = safetyCheck.addDisclaimer
+          ? `${reply}\n\n${safetyCheck.disclaimer}`
+          : reply;
+        storeCachedAnswer(userMessage, finalReply, practiceArea, lang).catch(() => {});
+      } else {
+        console.log(`[askClaude] 🚫 Response not cached — ${safetyCheck.reason}`);
+      }
     }
     // ── End cache store ───────────────────────────────────    // 11. Log unanswered/fallback questions for admin panel
     const isFallback = reply.includes("didn't catch that") ||
