@@ -155,18 +155,27 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
     // ── USCIS Case Status intercept ──────────────────────
     // If the message contains a receipt number, look it up
     // directly via the USCIS API — skip Claude entirely for speed.
+    // Falls back to Claude if USCIS is unavailable (503, network error).
     if (!isImage && !isPdf) {
       const receiptNumber = extractReceiptNumber(userMessage);
       if (receiptNumber) {
         console.log(`[uscis] Receipt number detected: ${receiptNumber}`);
-        await db.saveMessage(platform, platformId, "user", userMessage);
-
-        const lang   = detectLanguage(userMessage);
         const result = await getCaseStatus(receiptNumber);
-        const reply  = formatCaseStatusMessage(result, lang);
 
-        await db.saveMessage(platform, platformId, "assistant", reply);
-        return reply;
+        // Only intercept on definitive results — fall back to Claude for service errors
+        const definitiveErrors = ["invalid_receipt", "invalid_format", "not_found"];
+        const isDefinitive = result.success || definitiveErrors.includes(result.error);
+
+        if (isDefinitive) {
+          const lang  = detectLanguage(userMessage);
+          const reply = formatCaseStatusMessage(result, lang);
+          await db.saveMessage(platform, platformId, "user", userMessage);
+          await db.saveMessage(platform, platformId, "assistant", reply);
+          return reply;
+        }
+
+        // 503 / rate_limit / network_error — let Claude respond naturally
+        console.log(`[uscis] Non-definitive error (${result.error}) — falling back to Claude`);
       }
     }
     // ── END USCIS intercept ───────────────────────────────
