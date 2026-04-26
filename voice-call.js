@@ -125,13 +125,19 @@ function serveAudio(req, res) {
 // ── Pre-cached audio (generated once at server startup) ──
 const GREETING_OPEN   = "Thank you for calling Tez Law Firm. My name is Zara, and I'm here to help. How can I help you today?";
 const GREETING_CLOSED = "Thank you for calling Tez Law Firm. My name is Zara. Our office is currently closed. But I can still assist you. How can I help you?";
-// ── Generate soft analyzing tone (no npm needed — pure PCM WAV) ──
+// ── Generate comforting two-note chime (pure PCM WAV, no npm) ──
+// A gentle descending A4 (440Hz) → E4 (330Hz) chime — soft, musical,
+// never annoying regardless of what the caller just said.
 function generateProcessingTone() {
   const sampleRate  = 8000;
-  const duration    = 1.2;   // seconds
-  const frequency   = 520;   // Hz — soft, neutral processing tone
-  const numSamples  = Math.floor(sampleRate * duration);
-  const dataSize    = numSamples * 2; // 16-bit mono = 2 bytes/sample
+  const note1Freq   = 440;   // A4 — warm, familiar
+  const note2Freq   = 330;   // E4 — perfect fifth lower, resolves gently
+  const note1Dur    = 0.42;  // seconds
+  const gapDur      = 0.06;  // brief silence between notes
+  const note2Dur    = 0.52;  // slightly longer, softer landing
+  const totalDur    = note1Dur + gapDur + note2Dur;
+  const numSamples  = Math.floor(sampleRate * totalDur);
+  const dataSize    = numSamples * 2;
   const buf         = Buffer.alloc(44 + dataSize);
 
   // RIFF/WAV header
@@ -149,12 +155,29 @@ function generateProcessingTone() {
   buf.write("data", 36);
   buf.writeUInt32LE(dataSize, 40);
 
-  // Sine wave with gentle fade-in and fade-out envelope
+  const note1Samples = Math.floor(sampleRate * note1Dur);
+  const gapSamples   = Math.floor(sampleRate * gapDur);
+  const note2Start   = note1Samples + gapSamples;
+
   for (let i = 0; i < numSamples; i++) {
-    const t       = i / sampleRate;
-    const fadeIn  = Math.min(1, t / 0.08);
-    const fadeOut = Math.min(1, (duration - t) / 0.15);
-    const sample  = Math.sin(2 * Math.PI * frequency * t) * fadeIn * fadeOut * 0.28 * 32767;
+    let sample = 0;
+
+    if (i < note1Samples) {
+      // Note 1: 440Hz — quick attack, exponential bell-like decay
+      const t      = i / sampleRate;
+      const attack = Math.min(1, t / 0.06);
+      const decay  = Math.exp(-t / 0.18);
+      sample = Math.sin(2 * Math.PI * note1Freq * t) * attack * decay * 0.20 * 32767;
+
+    } else if (i >= note2Start) {
+      // Note 2: 330Hz — softer, slightly slower decay for a gentle landing
+      const t      = (i - note2Start) / sampleRate;
+      const attack = Math.min(1, t / 0.05);
+      const decay  = Math.exp(-t / 0.22);
+      sample = Math.sin(2 * Math.PI * note2Freq * t) * attack * decay * 0.16 * 32767;
+    }
+    // Gap samples stay 0 (silence between notes)
+
     buf.writeInt16LE(Math.round(sample), 44 + i * 2);
   }
   return buf;
