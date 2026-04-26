@@ -350,8 +350,6 @@ async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2
           cluster__precedential_status: "Published",
           ordering:                   "-cluster__date_filed",
           page_size:                  20,
-          // Request only fields we need to save bandwidth
-          fields: "id,cluster_id,plain_text,html_with_citations,author_str,joined_by_str,type,cluster",
         },
         headers,
         timeout: 20000,
@@ -359,6 +357,25 @@ async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2
     }
 
     const results = resp.data?.results || [];
+
+    // One-time diagnostic — log what fields actually come back
+    if (!fetchCourtListenerBatch._logged && results.length) {
+      fetchCourtListenerBatch._logged = true;
+      const sample = results[0];
+      console.log("[scanner] OPINIONS API SAMPLE:");
+      console.log("  keys:", Object.keys(sample).join(", "));
+      console.log("  plain_text length:", (sample.plain_text||"").length);
+      console.log("  html_with_citations length:", (sample.html_with_citations||"").length);
+      console.log("  author_str:", sample.author_str);
+      console.log("  cluster type:", typeof sample.cluster);
+      if (typeof sample.cluster === "object") {
+        console.log("  cluster keys:", Object.keys(sample.cluster||{}).join(", "));
+        console.log("  cluster.judges:", sample.cluster?.judges);
+        console.log("  cluster.date_filed:", sample.cluster?.date_filed);
+      } else {
+        console.log("  cluster value:", String(sample.cluster).substring(0,100));
+      }
+    }
 
     // Transform opinions into the format our scanner expects
     const transformed = results.map(op => ({
