@@ -76,7 +76,7 @@ async function searchCaseLaw(query, options = {}) {
     maxResults = 5,
     dateAfter  = "2010-01-01", // default: last 15 years
     dateBefore = null,
-    orderBy    = "score",      // "score" | "dateFiled" | "-dateFiled"
+    orderBy    = "score desc", // "score desc" | "dateFiled desc" | "dateFiled asc"
   } = options;
 
   try {
