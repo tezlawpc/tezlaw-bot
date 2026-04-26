@@ -29,6 +29,7 @@ const cookieParser = require("cookie-parser");
 const { scheduleDigest, runDailyDigest }         = require("./legal-digest");
 const { initCitationTables }                      = require("./citations");
 const { initJudgeProfileTables, getScanStatus }   = require("./judge-scanner");
+const { initCacheTable, getCacheStats, purgeExpiredCache } = require("./answer-cache");
 
 const app = express();
 app.use(express.json()); app.use(express.urlencoded({ extended: true }));
@@ -854,6 +855,19 @@ app.get("/legal/citation-stats", async (req, res) => {
   }
 });
 
+// Cache stats endpoint
+app.get("/legal/cache-stats", async (req, res) => {
+  if (req.query.token !== process.env.ANALYTICS_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  try {
+    const stats = await getCacheStats();
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ────────────────────────────────────────────────────────────
 //  HEALTH CHECK + START
 // ────────────────────────────────────────────────────────────
@@ -939,6 +953,25 @@ app.listen(PORT, async () => {
     console.log("🏛️  USCIS processing times scheduler started.");
   } catch (e) {
     console.error("❌ USCIS updater failed to load:", e.message);
+  }
+
+  // ── Answer cache table ──────────────────────────────────
+  try {
+    await initCacheTable();
+    console.log("⚡ Answer cache table ready.");
+  } catch (e) {
+    console.error("❌ Answer cache table failed:", e.message);
+  }
+
+  // ── Weekly cache purge (every Sunday 3 AM PT) ────────────
+  try {
+    const { default: cron } = await import("node-cron").catch(() => ({ default: require("node-cron") }));
+    cron.schedule("0 11 * * 0", () => {
+      purgeExpiredCache().catch(err => console.error("Cache purge error:", err.message));
+    }, { timezone: "America/Los_Angeles" });
+    console.log("🧹 Weekly cache purge scheduled (Sunday 3 AM PT).");
+  } catch (e) {
+    console.error("❌ Cache purge scheduler failed:", e.message);
   }
 
   // ── Legal Intelligence — Citation tables ────────────────
