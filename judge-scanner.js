@@ -280,7 +280,7 @@ async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2
           stat_Published: "on",
           court:          courtCode,
           filed_after:    dateAfter,
-          order_by:       "-dateFiled",
+          order_by:       "dateFiled desc",
           page_size:      20,
         },
         headers,
