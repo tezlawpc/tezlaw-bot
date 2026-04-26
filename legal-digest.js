@@ -95,7 +95,7 @@ async function fetchNewOpinions(court, daysSince = 1) {
         stat_Published:    "on",          // published only
         court:             court,
         filed_after:       dateStr,
-        order_by:          "-dateFiled",
+        order_by:          "dateFiled desc",
         page_size:         30,            // fetch extra — some filtered out
       },
       headers,
