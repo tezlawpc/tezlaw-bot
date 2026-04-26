@@ -8,6 +8,10 @@ const axios              = require("axios");
 const db                 = require("./db");
 const { sendVoiceReply } = require("./voice");
 const { isParalegalCommand, handleParalegalCommand } = require("./paralegal");
+const { isResearchCommand, handleResearchCommand }   = require("./courtlistener");
+const { isStatuteCommand, handleStatuteCommand }     = require("./castatutes");
+const { isCitationCommand, handleCitationCommand }   = require("./citations");
+const { formatJudgeProfileForJJ }                    = require("./judge-scanner");
 
 // ── JJ Session state (per platform:userId) ────────────────
 const jjSessions = {};
@@ -162,6 +166,65 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     }
   }
   // ── End paralegal intercept ───────────────────────────────
+
+  // ── CourtListener case law research ──────────────────────
+  if (isResearchCommand(userMessage)) {
+    console.log("[JJ-Mode] 🔍 Research command detected");
+    try {
+      const research = await handleResearchCommand(userMessage);
+      await extractAndSaveJJKnowledge(userMessage, research, "[Research]");
+      sendVoiceReply(platform, userId, research).catch(() => {});
+      const full = "🔍 [Case Law]\n\n" + research;
+      return { handled: true, message: full.length > 3900 ? full.substring(0,3800) + "\n...[truncated]" : full };
+    } catch (err) {
+      console.error("[JJ-Mode] Research error:", err.message);
+    }
+  }
+
+  // ── CA Statute lookup ────────────────────────────────────
+  if (isStatuteCommand(userMessage)) {
+    console.log("[JJ-Mode] 📚 Statute command detected");
+    try {
+      const statute = await handleStatuteCommand(userMessage);
+      sendVoiceReply(platform, userId, statute).catch(() => {});
+      return { handled: true, message: "📚 [CA Statute]\n\n" + statute };
+    } catch (err) {
+      console.error("[JJ-Mode] Statute error:", err.message);
+    }
+  }
+
+  // ── Citation good law check ──────────────────────────────
+  if (isCitationCommand(userMessage)) {
+    console.log("[JJ-Mode] 🔗 Citation command detected");
+    try {
+      const cite = await handleCitationCommand(userMessage);
+      sendVoiceReply(platform, userId, cite).catch(() => {});
+      return { handled: true, message: "🔗 [Citation Check]\n\n" + cite };
+    } catch (err) {
+      console.error("[JJ-Mode] Citation error:", err.message);
+    }
+  }
+
+  // ── Judge profile lookup ─────────────────────────────────
+  const judgeMatch = userMessage.match(/judge\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i) ||
+                     userMessage.match(/hon\.?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
+  const motionMatch = userMessage.match(/(demurrer|msj|summary judgment|motion to strike|motion to compel|unlawful detainer|anti-slapp|sanctions|discovery|injunction)/i);
+
+  if (judgeMatch && /profile|analytics|how does|how do|ruling|grant rate|tend|usually|typically/.test(userMessage.toLowerCase())) {
+    console.log("[JJ-Mode] ⚖️ Judge profile command detected");
+    try {
+      const profile = await formatJudgeProfileForJJ(
+        judgeMatch[1],
+        null,
+        motionMatch?.[1] || null
+      );
+      sendVoiceReply(platform, userId, profile).catch(() => {});
+      const full = "⚖️ [Judge Profile]\n\n" + profile;
+      return { handled: true, message: full.length > 3900 ? full.substring(0,3800) + "\n...[truncated]" : full };
+    } catch (err) {
+      console.error("[JJ-Mode] Judge profile error:", err.message);
+    }
+  }
 
   // Build JJ-specific system prompt
   const jjContext = await getJJContext();
@@ -325,7 +388,13 @@ function buildJJSystemPrompt(jjContext) {
     "",
     "VOICE CAPABILITIES: You CAN send voice messages. When JJ asks to respond in voice or speak, just respond normally in text — the system converts it to voice automatically. Never say you cannot do voice.",
     "",
-    "Be Zara at her best — smart, thorough, curious, and genuinely helpful."
+    "Be Zara at her best — smart, thorough, curious, and genuinely helpful.",
+    "",
+    "JUDGE INTELLIGENCE:",
+    "When JJ mentions a judge by name in the context of drafting a motion or preparing for hearing,",
+    "proactively mention that you can pull that judge\'s profile from your database.",
+    "Example: \'I can pull Judge Martinez\'s profile — want to see how he rules on demurrers?\'",
+    "Use: \'judge [name] profile\' or \'how does judge [name] rule on [motion]\'",
   ].join("\n");
 }
 
