@@ -34,6 +34,7 @@
 
 const axios  = require("axios");
 const db     = require("./db");
+const { extractDeepReasoning, storeMotionIntelligence, initMotionIntelligenceTables } = require("./motion-intelligence");
 
 const ANTHROPIC_API_KEY     = process.env.ANTHROPIC_API_KEY;
 const COURTLISTENER_TOKEN   = process.env.COURTLISTENER_TOKEN;
@@ -238,6 +239,10 @@ async function initJudgeProfileTables() {
     `);
 
     console.log("[scanner] ✅ Judge profile tables ready");
+
+    // Also init Layer 2 tables
+    await initMotionIntelligenceTables();
+
   } catch (err) {
     console.error("[scanner] Table init error:", err.message);
     throw err;
@@ -551,7 +556,7 @@ async function fetchEOIRJudgeData() {
 //  Reads each ruling and extracts structured judge intelligence
 // ============================================================
 async function analyzeRulingWithClaude(ruling) {
-  if (!ruling.full_text || ruling.full_text.length < 200) return null;
+  if (!ruling.full_text || ruling.full_text.length < 30) return null;
 
   // Check relevance first (fast keyword check)
   const text = ruling.full_text.toLowerCase();
@@ -564,18 +569,18 @@ async function analyzeRulingWithClaude(ruling) {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model:      "claude-haiku-4-5-20251001", // Use Haiku for cost efficiency
-        max_tokens: 800,
+        model:      "claude-haiku-4-5-20251001",
+        max_tokens: 1000,
         messages: [{
           role:    "user",
-          content: `You are extracting structured data from a California court ruling for a legal database.
+          content: `You are extracting structured data from a court ruling for a judge intelligence database at a California law firm.
 
 Court: ${ruling.court}
 Judge: ${ruling.judge_name || "Unknown"}
 Date: ${ruling.hearing_date || "Unknown"}
 
 RULING TEXT:
-${ruling.full_text.substring(0, 3000)}
+${ruling.full_text.substring(0, 3500)}
 
 Extract ONLY if this is a civil motion ruling (demurrer, MSJ, motion to strike, motion to compel, UD, anti-SLAPP, PI/injunction, discovery, sanctions, or immigration motion).
 
@@ -584,13 +589,15 @@ Respond with JSON only (empty object {} if not a relevant civil ruling):
   "judge_name": "exact name from ruling",
   "motion_type": "Demurrer|MSJ|Motion to Strike|Motion to Compel|Unlawful Detainer|Anti-SLAPP|Preliminary Injunction|Discovery Motion|Sanctions|Asylum|Removal|Other",
   "result": "Sustained|Overruled|Granted|Denied|Continued|Mixed",
-  "key_phrases": ["exact phrases judge used in reasoning", "max 5 phrases under 15 words each"],
-  "accepted_args": ["arguments/grounds judge agreed with", "max 3"],
-  "rejected_args": ["arguments judge rejected", "max 3"],
-  "cited_statutes": ["CCP 430.10", "CCP 437c", etc],
-  "cited_cases": ["case names only, max 3"],
-  "leave_to_amend": true/false/null,
-  "reasoning_notes": "1 sentence summary of judge's reasoning style"
+  "key_phrases": ["exact phrases judge used in reasoning, max 5, under 15 words each"],
+  "accepted_args": ["specific arguments/grounds judge agreed with, max 4"],
+  "rejected_args": ["specific arguments judge rejected with brief reason, max 4"],
+  "cited_statutes": ["CCP 430.10", "CCP 437c"],
+  "cited_cases": ["case names only, max 4"],
+  "leave_to_amend": true,
+  "legal_standard": "exact standard applied e.g. 'Iqbal/Twombly' or 'CCP 430.10(e)'",
+  "decisive_factor": "the single most important reason for the ruling in one sentence",
+  "reasoning_notes": "2 sentence summary: what the judge required and why this motion won/lost"
 }`,
         }],
       },
@@ -727,6 +734,17 @@ async function storeRuling(analyzed) {
     if (!err.message.includes("duplicate")) {
       console.error("[scanner] Store error:", err.message);
     }
+  }
+
+  // ── Layer 2: Deep reasoning extraction ──────────────────
+  // Only for high-value motion types — runs async after storing surface data
+  try {
+    const reasoning = await extractDeepReasoning(analyzed);
+    if (reasoning) {
+      await storeMotionIntelligence(analyzed, reasoning);
+    }
+  } catch (err) {
+    // Non-fatal — Layer 2 failure never blocks Layer 1
   }
 }
 
@@ -1012,7 +1030,6 @@ async function formatJudgeProfileForJJ(judgeName, court = null, motionType = nul
   if (allMotions.length > 0) {
     out += `📋 MOTION GRANT RATES\n`;
 
-    // Highlight requested motion type
     const specific = motionType
       ? allMotions.find(m => m.motion_type?.toLowerCase().includes(motionType.toLowerCase()))
       : null;
@@ -1024,7 +1041,6 @@ async function formatJudgeProfileForJJ(judgeName, court = null, motionType = nul
       out += `\n🎯 ${specific.motion_type}: ${bar} ${rate || 0}% (${total} rulings)\n\n`;
     }
 
-    // All motions summary
     allMotions.forEach(m => {
       if (!m.motion_type) return;
       const total = (m.grant_count || 0) + (m.deny_count || 0);
@@ -1036,7 +1052,6 @@ async function formatJudgeProfileForJJ(judgeName, court = null, motionType = nul
     out += "\n";
   }
 
-  // Get specific motion insights
   const insight = motionType
     ? allMotions.find(m => m.motion_type?.toLowerCase().includes(motionType.toLowerCase()))
     : allMotions[0];
@@ -1067,6 +1082,53 @@ async function formatJudgeProfileForJJ(judgeName, court = null, motionType = nul
 
     if (insight.reasoning_style) {
       out += `🧠 REASONING STYLE\n  ${insight.reasoning_style}\n\n`;
+    }
+  }
+
+  // ── Layer 2: Motion Intelligence ─────────────────────────
+  // Append deep reasoning data if available
+  if (motionType) {
+    try {
+      const { getMotionIntelligence } = require("./motion-intelligence");
+      const intel = await getMotionIntelligence(judgeName, court, motionType);
+
+      if (intel.hasData) {
+        out += `${"─".repeat(50)}\n`;
+        out += `🔬 DEEP MOTION INTELLIGENCE — ${motionType}\n\n`;
+
+        const pattern = intel.patterns[0];
+        if (pattern?.standard_applied) {
+          out += `⚖️ Standard: ${pattern.standard_applied}\n\n`;
+        }
+
+        if (intel.winning.length) {
+          out += `✅ PROVEN WINNING ARGUMENTS\n`;
+          intel.winning.slice(0, 4).forEach((a, i) => {
+            out += `  ${i+1}. ${a.argument_text}`;
+            if (a.frequency > 1) out += ` (${a.frequency}x confirmed)`;
+            out += "\n";
+            if (a.example_language) out += `     → "${a.example_language}"\n`;
+          });
+          out += "\n";
+        }
+
+        if (intel.losing.length) {
+          out += `❌ PROVEN LOSING ARGUMENTS\n`;
+          intel.losing.slice(0, 3).forEach((a, i) => {
+            out += `  ${i+1}. ${a.argument_text}`;
+            if (a.frequency > 1) out += ` (${a.frequency}x rejected)`;
+            out += "\n";
+          });
+          out += "\n";
+        }
+
+        const framework = intel.frameworks.find(f => f.framework_type === "drafting_insight");
+        if (framework?.description) {
+          out += `💡 DRAFTING INSIGHT\n  ${framework.description}\n\n`;
+        }
+      }
+    } catch (err) {
+      // Layer 2 data is additive — never breaks Layer 1 display
     }
   }
 
