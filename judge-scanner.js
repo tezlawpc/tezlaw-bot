@@ -344,12 +344,12 @@ async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2
     } else {
       resp = await axios.get("https://www.courtlistener.com/api/rest/v4/opinions/", {
         params: {
-          cluster__court:               courtCode,
-          cluster__date_filed__gte:     dateAfter,
-          cluster__precedential_status: "Published",
-          ordering:                     "-id",   // must order by id for deep pagination
-          page_size:                    20,
-          // DO NOT use fields= param — it suppresses text content
+          cluster__court:           courtCode,
+          cluster__date_filed__gte: dateAfter,
+          ordering:                 "-id",   // must order by id for deep pagination
+          page_size:                20,
+          // NOTE: cluster__precedential_status is NOT valid on opinions endpoint
+          // Published filtering is handled by court whitelist in source-validator
         },
         headers,
         timeout: 20000,
