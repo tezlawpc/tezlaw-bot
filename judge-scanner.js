@@ -344,7 +344,7 @@ async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2
     } else {
       resp = await axios.get("https://www.courtlistener.com/api/rest/v4/opinions/", {
         params: {
-          cluster__court:           courtCode,
+          cluster__docket__court:   courtCode,
           cluster__date_filed__gte: dateAfter,
           ordering:                 "-id",   // must order by id for deep pagination
           page_size:                20,
