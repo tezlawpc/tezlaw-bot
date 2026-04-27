@@ -375,16 +375,16 @@ async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2
       }
     }
 
-    // Transform opinions into the format our scanner expects
+    // Transform opinions — cluster is a URL string in v4, not nested
     const transformed = results.map(op => ({
-      id:           op.cluster_id || op.cluster?.id || op.id,
+      id:           op.cluster_id || op.id,
       opinionId:    op.id,
-      caseName:     op.cluster?.case_name || op.cluster || "",
-      judge:        op.author_str || op.joined_by_str || op.cluster?.judges || "",
-      dateFiled:    op.cluster?.date_filed || "",
-      absolute_url: op.cluster?.absolute_url || "",
-      // Text directly available — no extra fetch needed
-      _text:        op.plain_text || op.html_with_citations || "",
+      caseName:     "",  // cluster URL — case name comes from text extraction
+      judge:        (op.author_str || op.joined_by_str || "").trim(),
+      dateFiled:    op.date_created?.split("T")[0] || "",
+      absolute_url: op.absolute_url || "",
+      // Text directly available
+      _text:        op.plain_text || op.html_with_citations || op.xml_harvard || "",
     }));
 
     return {
@@ -711,7 +711,27 @@ Respond with JSON only (empty object {} if not a relevant civil ruling):
 
     const text2  = resp.data.content[0]?.text || "{}";
     const clean  = text2.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
+
+    // Safe JSON parse — handle truncation
+    let parsed;
+    try {
+      parsed = JSON.parse(clean);
+    } catch (e) {
+      // Try to recover partial object
+      const motionMatch = clean.match(/"motion_type"\s*:\s*"([^"]+)"/);
+      const resultMatch = clean.match(/"result"\s*:\s*"([^"]+)"/);
+      const judgeMatch  = clean.match(/"judge_name"\s*:\s*"([^"]+)"/);
+
+      if (motionMatch && resultMatch) {
+        parsed = {
+          motion_type: motionMatch[1],
+          result:      resultMatch[1],
+          judge_name:  judgeMatch?.[1] || ruling.judge_name,
+        };
+      } else {
+        return null;
+      }
+    }
 
     if (!parsed.motion_type || !parsed.result) return null;
     return { ...ruling, ...parsed };
@@ -1414,7 +1434,7 @@ function extractJudgeFromCaseName(caseName) {
 function extractJudgeNamesFromText(text, opinion) {
   const names = new Set();
 
-  // CourtListener search API returns judge field directly — use it first
+  // First: try author_str / joined_by_str (often the panel for 9th Circuit)
   if (opinion?.judge && opinion.judge.trim().length > 2) {
     // May be comma-separated panel e.g. "Wardlaw, Tallman, Bea"
     opinion.judge.split(",").forEach(n => {
