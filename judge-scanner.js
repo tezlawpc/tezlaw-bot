@@ -346,7 +346,7 @@ async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2
         params: {
           cluster__docket__court:   courtCode,
           cluster__date_filed__gte: dateAfter,
-          ordering:                 "-id",   // must order by id for deep pagination
+          order_by:                 "-id",   // must order by id for deep pagination
           page_size:                20,
           // NOTE: cluster__precedential_status is NOT valid on opinions endpoint
           // Published filtering is handled by court whitelist in source-validator
