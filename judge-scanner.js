@@ -342,14 +342,14 @@ async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2
     if (nextUrl) {
       resp = await axios.get(nextUrl, { headers, timeout: 20000 });
     } else {
-      // Use /opinions/ endpoint directly — returns plain_text and judge data
       resp = await axios.get("https://www.courtlistener.com/api/rest/v4/opinions/", {
         params: {
-          cluster__court:             courtCode,
-          cluster__date_filed__gte:   dateAfter,
+          cluster__court:               courtCode,
+          cluster__date_filed__gte:     dateAfter,
           cluster__precedential_status: "Published",
-          ordering:                   "-cluster__date_filed",
-          page_size:                  20,
+          ordering:                     "-id",   // must order by id for deep pagination
+          page_size:                    20,
+          // DO NOT use fields= param — it suppresses text content
         },
         headers,
         timeout: 20000,
@@ -358,22 +358,20 @@ async function fetchCourtListenerBatch(courtCode, nextUrl = null, dateAfter = "2
 
     const results = resp.data?.results || [];
 
-    // One-time diagnostic — log what fields actually come back
+    // One-time diagnostic
     if (!fetchCourtListenerBatch._logged && results.length) {
       fetchCourtListenerBatch._logged = true;
-      const sample = results[0];
+      const s = results[0];
       console.log("[scanner] OPINIONS API SAMPLE:");
-      console.log("  keys:", Object.keys(sample).join(", "));
-      console.log("  plain_text length:", (sample.plain_text||"").length);
-      console.log("  html_with_citations length:", (sample.html_with_citations||"").length);
-      console.log("  author_str:", sample.author_str);
-      console.log("  cluster type:", typeof sample.cluster);
-      if (typeof sample.cluster === "object") {
-        console.log("  cluster keys:", Object.keys(sample.cluster||{}).join(", "));
-        console.log("  cluster.judges:", sample.cluster?.judges);
-        console.log("  cluster.date_filed:", sample.cluster?.date_filed);
-      } else {
-        console.log("  cluster value:", String(sample.cluster).substring(0,100));
+      console.log("  keys:", Object.keys(s).join(", "));
+      console.log("  plain_text length:", (s.plain_text||"").length);
+      console.log("  html_with_citations length:", (s.html_with_citations||"").length);
+      console.log("  author_str:", s.author_str);
+      console.log("  cluster type:", typeof s.cluster);
+      if (s.cluster && typeof s.cluster === "object") {
+        console.log("  cluster.judges:", s.cluster.judges);
+        console.log("  cluster.case_name:", s.cluster.case_name?.substring(0,50));
+        console.log("  cluster.date_filed:", s.cluster.date_filed);
       }
     }
 
