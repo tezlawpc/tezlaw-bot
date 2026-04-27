@@ -77,11 +77,13 @@ const SOURCES = {
 
 // ============================================================
 //  FETCH NEW OPINIONS FROM COURTLISTENER
+//  Uses opinions endpoint directly to get real text,
+//  not search snippets which come back empty in v4
 // ============================================================
-async function fetchNewOpinions(court, daysSince = 1) {
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - daysSince);
-  const dateStr = yesterday.toISOString().split("T")[0];
+async function fetchNewOpinions(court, daysSince = 7) {
+  const since = new Date();
+  since.setDate(since.getDate() - daysSince);
+  const dateStr = since.toISOString().split("T")[0];
 
   const headers = {};
   if (process.env.COURTLISTENER_TOKEN) {
@@ -89,39 +91,72 @@ async function fetchNewOpinions(court, daysSince = 1) {
   }
 
   try {
-    const resp = await axios.get("https://www.courtlistener.com/api/rest/v4/search/", {
+    // Use opinions endpoint — returns plain_text directly
+    const resp = await axios.get("https://www.courtlistener.com/api/rest/v4/opinions/", {
       params: {
-        type:              "o",           // opinions only — never RECAP
-        stat_Published:    "on",          // published only
-        court:             court,
-        filed_after:       dateStr,
-        order_by:          "dateFiled desc",
-        page_size:         30,            // fetch extra — some filtered out
+        cluster__docket__court:   court,
+        cluster__date_filed__gte: dateStr,
+        order_by:                 "-id",   // valid for deep pagination
+        page_size:                30,
       },
       headers,
       timeout: 15000,
     });
 
-    const raw = (resp.data?.results || []);
+    const raw = resp.data?.results || [];
+    if (!raw.length) return [];
+
+    // Fetch cluster info for case names — opinions endpoint returns cluster as URL
+    const enriched = [];
+    for (const op of raw.slice(0, 20)) {
+      const text = (op.plain_text || op.html_with_citations || "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .substring(0, 4000);
+
+      // Extract case name from text or fetch cluster
+      let caseName = "Unknown";
+      let dateFiled = "";
+
+      if (typeof op.cluster === "string" && op.cluster_id) {
+        try {
+          const clusterResp = await axios.get(
+            `https://www.courtlistener.com/api/rest/v4/clusters/${op.cluster_id}/`,
+            { headers, timeout: 8000 }
+          );
+          caseName  = clusterResp.data?.case_name || "Unknown";
+          dateFiled = clusterResp.data?.date_filed || "";
+        } catch (e) {
+          // First-line extraction fallback
+          const firstLine = text.split(/[.\n]/)[0]?.trim();
+          if (firstLine && firstLine.length < 200) caseName = firstLine;
+        }
+      }
+
+      enriched.push({
+        id:        op.cluster_id || op.id,
+        title:     caseName,
+        court:     court,
+        date:      dateFiled,
+        snippet:   text.substring(0, 1500),    // real text now, not empty
+        full_text: text,                        // full text available for digest
+        url:       op.absolute_url
+                    ? `https://www.courtlistener.com${op.absolute_url}`
+                    : null,
+        source:    "CourtListener",
+        author:    op.author_str || op.joined_by_str || "",
+      });
+    }
 
     // Layers 1-3: run through source validator
-    const { valid, rejected } = validateOpinions(raw);
+    const { valid, rejected } = validateOpinions(enriched);
     if (rejected.length > 0) {
       console.log(`[digest] 🚫 Filtered ${rejected.length} non-credible sources from ${court}`);
     }
 
-    return valid.slice(0, 20).map(r => ({
-      id:         r.id,
-      title:      r.caseName || r.case_name || "Unknown",
-      citation:   (r.citation || []).join(", "),
-      court:      r.court || court,
-      date:       r.dateFiled || r.date_filed,
-      snippet:    (r.snippet || "").replace(/<[^>]+>/g, " ").trim().substring(0, 500),
-      url:        r.absolute_url ? `https://www.courtlistener.com${r.absolute_url}` : null,
-      source:     "CourtListener",
-      binding:    r._binding   || false,
-      courtInfo:  r._courtInfo || null,
-    }));
+    return valid;
+
   } catch (err) {
     console.error(`[digest] CourtListener fetch error (${court}):`, err.message);
     return [];
@@ -278,38 +313,54 @@ Respond ONLY with JSON array:
 
 // ============================================================
 //  GENERATE DIGEST SUMMARY WITH CLAUDE
+//  Produces substantive case briefs with facts, holding, significance
 // ============================================================
 async function generateDigestSummary(relevantOpinions) {
   if (!relevantOpinions || relevantOpinions.length === 0) return null;
 
-  const opinionList = relevantOpinions.map((o, i) =>
-    `${i+1}. [Score: ${o.relevanceScore}/10] [${o.category}] ${o.title}\n   Court: ${o.court} | Date: ${o.date}\n   ${o.snippet}`
-  ).join("\n\n");
+  // Use full text (not just snippet) so Claude can read actual holdings
+  const opinionList = relevantOpinions.slice(0, 8).map((o, i) => {
+    const text = (o.full_text || o.snippet || "").substring(0, 2500);
+    return `${i+1}. [${o.category || "general"}] ${o.title}
+   Court: ${o.court} | Date: ${o.date}${o.author ? ` | Judge: ${o.author}` : ""}
+   OPINION TEXT:
+   ${text}`;
+  }).join("\n\n---\n\n");
 
   try {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model:      "claude-sonnet-4-20250514",
-        max_tokens: 2000,
+        model:      "claude-sonnet-4-5-20250929",
+        max_tokens: 4500,                       // raised for substantive briefs
         messages: [{
           role:    "user",
-          content: `You are Zara, the AI legal assistant for JJ Zhang at Tez Law P.C. in West Covina, CA.
+          content: `You are Zara, AI legal assistant for JJ Zhang at Tez Law P.C. in West Covina, CA.
 
-Write JJ's daily legal intelligence digest based on these new opinions. 
+JJ's practice areas: immigration (asylum/removal/CAT/cancellation), personal injury (auto/premises/wrongful death), eviction/UD (CA), business litigation (contracts/trade secrets), employment (FEHA/PAGA/wage hour), estate planning/probate, real estate, public entity/securities, federal civil rights.
 
-INSTRUCTIONS:
-- Group by practice area
-- For each opinion: 1 sentence what happened, 1 sentence why it matters to JJ's practice
-- Flag anything URGENT or that could affect active cases with ⚠️
-- End with "Zara's Take" — 2-3 sentences on what actually matters today
-- Keep the whole digest under 1,500 characters for Telegram readability
-- Use plain language, not legalese
-- If an opinion is landmark or changes the law, say so clearly
+Write JJ's daily legal intelligence digest based on these opinions. For EACH opinion you include, provide a SUBSTANTIVE brief with:
+
+**Format for each case:**
+**[Case Name]** ([Court], [Date])
+- *Facts:* 1-2 sentences on what happened
+- *Holding:* The actual legal ruling — what the court decided
+- *Why it matters:* 1 sentence on practical impact for JJ's specific practice areas
+- *Citation:* Bluebook-style if available
+
+**STRICT RULES:**
+- Read the OPINION TEXT for each case — extract real facts and the actual holding
+- Never just say "decision on X matter" — say what the holding IS
+- Group by practice area with bold headers (IMMIGRATION, EVICTION, PI, BUSINESS, EMPLOYMENT, ESTATE, FEDERAL CIVIL RIGHTS, OTHER)
+- Skip cases that don't touch JJ's practice areas
+- Flag with ⚠️ URGENT only if it changes existing law or affects a pending case type
+- End with "**Zara's Take**" — 3-4 sentences on what genuinely changes JJ's practice today
+- No character limit — be substantive, but don't pad. If only 3 cases matter, write 3.
+- Use plain language, but include exact statutory cites when the court did
 
 Today's date: ${new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}
 
-New opinions:
+Opinions:
 ${opinionList}`,
         }],
       },
@@ -319,7 +370,7 @@ ${opinionList}`,
           "anthropic-version": "2023-06-01",
           "Content-Type":      "application/json",
         },
-        timeout: 30000,
+        timeout: 60000,
       }
     );
 
@@ -339,14 +390,37 @@ async function sendTelegramDigest(message) {
     return false;
   }
 
+  // Telegram limit is 4096 chars per message. Split substantive digests on paragraph boundaries.
+  const MAX_LEN = 3900;
+  const chunks = [];
+  if (message.length <= MAX_LEN) {
+    chunks.push(message);
+  } else {
+    let remaining = message;
+    while (remaining.length > MAX_LEN) {
+      // Find last paragraph break before MAX_LEN
+      let cutAt = remaining.lastIndexOf("\n\n", MAX_LEN);
+      if (cutAt < MAX_LEN * 0.5) cutAt = remaining.lastIndexOf("\n", MAX_LEN);
+      if (cutAt < MAX_LEN * 0.5) cutAt = MAX_LEN;
+      chunks.push(remaining.substring(0, cutAt));
+      remaining = remaining.substring(cutAt).trimStart();
+    }
+    if (remaining.length) chunks.push(remaining);
+  }
+
   try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      chat_id:    JJ_TELEGRAM_ID,
-      text:       message,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-    });
-    console.log("[digest] ✅ Digest sent to JJ via Telegram");
+    for (let i = 0; i < chunks.length; i++) {
+      const part = chunks.length > 1 ? `[Part ${i+1}/${chunks.length}]\n\n${chunks[i]}` : chunks[i];
+      await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+        chat_id:    JJ_TELEGRAM_ID,
+        text:       part,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+      });
+      // Brief pause between parts to maintain order
+      if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 500));
+    }
+    console.log(`[digest] ✅ Digest sent to JJ via Telegram (${chunks.length} part${chunks.length>1?"s":""})`);
     return true;
   } catch (err) {
     console.error("[digest] Telegram send error:", err.message);
