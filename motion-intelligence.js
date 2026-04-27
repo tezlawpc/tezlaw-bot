@@ -224,7 +224,7 @@ async function extractDeepReasoning(ruling) {
       "https://api.anthropic.com/v1/messages",
       {
         model:      "claude-haiku-4-5-20251001",
-        max_tokens: 1500,
+        max_tokens: 4000,   // increased from 1500 — prompts ask for 1500+ fields
         messages: [{ role: "user", content: prompt }],
       },
       {
@@ -239,8 +239,9 @@ async function extractDeepReasoning(ruling) {
 
     const text  = resp.data.content[0]?.text || "{}";
     const clean = text.replace(/```json|```/g, "").trim();
-    const raw   = JSON.parse(clean);
 
+    // Safe JSON parse — handle truncation gracefully
+    const raw = safeJsonParse(clean);
     if (!raw || Object.keys(raw).length === 0) return null;
 
     // Normalize into standard fields regardless of which prompt was used
@@ -250,9 +251,59 @@ async function extractDeepReasoning(ruling) {
     return normalized;
 
   } catch (err) {
-    console.error("[motion-intel] Deep extraction error:", err.message);
+    // Silent — don't spam logs with every Claude API hiccup
     return null;
   }
+}
+
+// ── Safe JSON parser — handles truncated responses gracefully ────
+function safeJsonParse(text) {
+  if (!text || text.length < 5) return null;
+
+  // First try: direct parse
+  try { return JSON.parse(text); } catch (e) {}
+
+  // Second try: trim to last valid closing brace
+  // Find the last } that could close the object
+  let depth = 0;
+  let lastValidEnd = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (c === "\\") { escaped = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) lastValidEnd = i;
+    }
+  }
+
+  if (lastValidEnd > 0) {
+    try { return JSON.parse(text.substring(0, lastValidEnd + 1)); } catch (e) {}
+  }
+
+  // Third try: extract first complete top-level object via regex
+  const match = text.match(/\{[\s\S]*?\}(?=[^}]*$)/);
+  if (match) {
+    try { return JSON.parse(match[0]); } catch (e) {}
+  }
+
+  // Fourth try: build minimal object from key fields if visible
+  const result = {};
+  const motionMatch = text.match(/"motion_type"\s*:\s*"([^"]+)"/);
+  const resultMatch = text.match(/"result"\s*:\s*"([^"]+)"/);
+  const standardMatch = text.match(/"legal_standard"\s*:\s*"([^"]+)"/);
+
+  if (motionMatch) result.motion_type = motionMatch[1];
+  if (resultMatch) result.result = resultMatch[1];
+  if (standardMatch) result.legal_standard = standardMatch[1];
+
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 // ============================================================
