@@ -1698,7 +1698,7 @@ function renderCaseCard(r) {
     \${snippet ? '<div style="font-size:12px;color:#555;font-style:italic;border-left:2px solid #B79C62;padding-left:8px;margin-bottom:8px">"' + snippet + '..."</div>' : ''}
     <div style="display:flex;gap:8px">
       \${url ? '<a href="' + url + '" target="_blank" style="font-size:11px;background:#0C1C36;color:#B79C62;padding:4px 10px;border-radius:4px;text-decoration:none">📄 Read →</a>' : ''}
-      <button onclick="navigator.clipboard.writeText(\\'' + name.replace(/'/g,"\\\\'") + ', ' + citation.replace(/'/g,"\\\\'") + '\\')" style="font-size:11px;background:#f0ede6;color:#0C1C36;border:none;padding:4px 10px;border-radius:4px;cursor:pointer">📋 Copy</button>
+      <button onclick="navigator.clipboard.writeText(this.dataset.cite)" data-cite="\${(name + ', ' + citation).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;')}" style="font-size:11px;background:#f0ede6;color:#0C1C36;border:none;padding:4px 10px;border-radius:4px;cursor:pointer">📋 Copy</button>
     </div>
   </div>\`;
 }
@@ -1715,7 +1715,7 @@ async function runAdminStatLookup() {
   let matches = [];
   for (const [topic, secs] of Object.entries(index)) { if (topic.includes(k) || k.includes(topic)) matches = matches.concat(secs); }
   document.getElementById('stat-results').innerHTML = matches.length
-    ? matches.map(([c,s]) => '<span onclick="adminStatLookup(\\'' + c + '\\',\\'' + s + '\\')" style="cursor:pointer;display:inline-block;margin:4px;background:#f0ede6;padding:6px 12px;border-radius:6px;font-size:13px">' + c + ' §' + s + '</span>').join('')
+    ? matches.map(([c,s]) => '<span onclick="adminStatLookup(&quot;' + c + '&quot;,&quot;' + s + '&quot;)" style="cursor:pointer;display:inline-block;margin:4px;background:#f0ede6;padding:6px 12px;border-radius:6px;font-size:13px">' + c + ' §' + s + '</span>').join('')
     : '<p style="color:#999;font-size:13px">Try a direct section like "CCP 430.10"</p>';
 }
 
@@ -1762,7 +1762,7 @@ async function runAdminVerify() {
     document.getElementById('cite-result').innerHTML = '<div style="background:' + (found?'#d4edda':'#f8d7da') + ';border:1px solid ' + (found?'#c3e6cb':'#f5c6cb') + ';border-radius:6px;padding:14px;font-size:13px">'
       + (found ? '✅ <strong>FOUND IN DATABASE</strong><br><br>' : '❌ <strong>NOT FOUND</strong><br><br>')
       + (best ? '<strong>Case:</strong> ' + esc(best.caseName||best.case_name||'') + '<br><strong>Citation:</strong> ' + esc((best.citation||[]).join(', ')||'No reporter') + '<br><strong>Court:</strong> ' + esc(best.court||'') + ' | <strong>Date:</strong> ' + esc(best.dateFiled||best.date_filed||'') + '<br>' + (best.absolute_url ? '<br><a href="https://www.courtlistener.com' + best.absolute_url + '" target="_blank" style="color:#155724">View Opinion →</a>' : '') : 'Verify manually in vLex Fastcase before filing.')
-      + '<br><br><small>⚠️ Still verify Good Law status in vLex Fastcase (Shepard\'s) before any filing.</small></div>';
+      + '<br><br><small>⚠️ Still verify Good Law status in vLex Fastcase (Shepards) before any filing.</small></div>';
   } catch(err) {
     document.getElementById('cite-result').innerHTML = '<p style="color:#cc0000">❌ ' + esc(err.message) + '</p>';
   } finally {
