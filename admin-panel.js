@@ -1,4 +1,5 @@
-
+// admin-panel.js — Tez Law P.C. | Zara Admin Panel Frontend
+// Served from admin.js at GET /admin/panel.js
 
   function getCookie(name) {
     return document.cookie.split('; ').find(r => r.startsWith(name + '='))?.split('=')[1] || '';
@@ -50,6 +51,8 @@
     if (name === 'sol') { loadSol(); }
     if (name === 'drip') loadDrip();
     if (name === 'prompt') loadPromptHistory();
+    if (name === 'research') showResearchTab('caselaw');
+    if (name === 'post') loadManualPost();
   }
 
   // Dashboard
@@ -181,104 +184,52 @@
   }
 
   async function submitCustomPost() {
-  var btn  = document.getElementById('customPostBtn');
-  var msg  = document.getElementById('customPostMsg');
-  var topic = document.getElementById('customTopic').value.trim();
-  var area  = document.getElementById('customArea').value;
-  var url   = document.getElementById('customUrl').value.trim();
-  var notes = document.getElementById('customNotes').value.trim();
+    var btn  = document.getElementById('customPostBtn');
+    var msg  = document.getElementById('customPostMsg');
+    var topic = document.getElementById('customTopic').value.trim();
+    var area  = document.getElementById('customArea').value;
+    var url   = document.getElementById('customUrl').value.trim();
+    var notes = document.getElementById('customNotes').value.trim();
 
-  if (!topic) {
-    msg.style.color = '#cc0000';
-    msg.textContent = '❌ Please enter a topic or headline.';
-    return;
+    if (!topic) {
+      msg.style.color = '#cc0000';
+      msg.textContent = '❌ Please enter a topic or headline.';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+    msg.style.color = '#006600';
+    msg.textContent = '⏳ Writing and publishing — this takes ~1-2 minutes...';
+
+    var res = await api('/api/autoposter/custom', {
+      method: 'POST',
+      body: JSON.stringify({ topic: topic, practiceArea: area, url: url, notes: notes })
+    });
+
+    btn.disabled = false;
+    btn.textContent = '✍️ Generate & Publish Post';
+
+    if (res && res.ok) {
+      msg.textContent = '✅ ' + res.message;
+      document.getElementById('customTopic').value = '';
+      document.getElementById('customUrl').value = '';
+      document.getElementById('customNotes').value = '';
+      setTimeout(function(){ msg.textContent = ''; }, 15000);
+    } else {
+      msg.style.color = '#cc0000';
+      msg.textContent = '❌ Failed to start. Check Render logs.';
+    }
   }
-
-  btn.disabled = true;
-  btn.textContent = 'Generating...';
-  msg.style.color = '#006600';
-  msg.textContent = '⏳ Writing and publishing — this takes ~1-2 minutes...';
-
-  var res = await api('/api/autoposter/custom', {
-    method: 'POST',
-    body: JSON.stringify({ topic: topic, practiceArea: area, url: url, notes: notes })
-  });
-
-  btn.disabled = false;
-  btn.textContent = '✍️ Generate & Publish Post';
-
-  if (res && res.ok) {
-    msg.textContent = '✅ ' + res.message;
-    // Clear form
-    document.getElementById('customTopic').value = '';
-    document.getElementById('customUrl').value = '';
-    document.getElementById('customNotes').value = '';
-    setTimeout(function(){ msg.textContent = ''; }, 15000);
-  } else {
-    msg.style.color = '#cc0000';
-    msg.textContent = '❌ Failed to start. Check Render logs.';
-  }
-}
 
 
 // ── Manual Post ───────────────────────────────────────────
 
 function initPoster() {
-  // Nothing to load — just a form. Clear any previous result.
   var r = document.getElementById('posterResult');
   if (r) { r.style.display = 'none'; r.innerHTML = ''; }
   var m = document.getElementById('posterMsg');
   if (m) { m.textContent = ''; }
-}
-
-async function submitManualPost() {
-  var btn     = document.getElementById('posterBtn');
-  var msg     = document.getElementById('posterMsg');
-  var result  = document.getElementById('posterResult');
-  var content = document.getElementById('posterContent').value.trim();
-  var area    = document.getElementById('posterArea').value;
-  var url     = document.getElementById('posterUrl').value.trim();
-  var notes   = document.getElementById('posterNotes').value.trim();
-
-  if (!content) {
-    msg.style.color = '#cc0000';
-    msg.textContent = '❌ Please enter a topic or paste content.';
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = '⏳ Generating...';
-  msg.style.color = '#B79C62';
-  msg.textContent = 'Writing post and publishing to WordPress — ~1-2 minutes...';
-  result.style.display = 'none';
-
-  var res = await api('/api/autoposter/custom', {
-    method: 'POST',
-    body: JSON.stringify({
-      topic:         content,
-      practiceArea:  area,
-      url:           url,
-      notes:         notes,
-    })
-  });
-
-  btn.disabled = false;
-  btn.textContent = '✍️ Generate & Publish';
-
-  if (res && res.ok) {
-    msg.style.color = '#006600';
-    msg.textContent = '✅ ' + res.message;
-    result.style.display = 'block';
-    result.innerHTML = '📨 <strong>Publishing now</strong> — you\'ll receive a Telegram notification with the WordPress links in ~1-2 minutes.';
-    // Clear the form
-    document.getElementById('posterContent').value = '';
-    document.getElementById('posterUrl').value = '';
-    document.getElementById('posterNotes').value = '';
-    setTimeout(function(){ msg.textContent = ''; }, 20000);
-  } else {
-    msg.style.color = '#cc0000';
-    msg.textContent = '❌ Failed to start. Check Render logs.';
-  }
 }
 
 async function runAnalytics() {
@@ -292,7 +243,7 @@ async function runAnalytics() {
     btn.textContent = '▶ Run Analytics Now';
     if (res?.ok) {
       msg.textContent = '✅ ' + res.message;
-      setTimeout(() => loadAnalytics(), 120000); // reload after 2 min
+      setTimeout(() => loadAnalytics(), 120000);
     }
   }
 
@@ -304,8 +255,6 @@ async function runAnalytics() {
 
   // Load dashboard on start
   loadDashboard();
-
-// Wave 1 functions appended below
 
 // ── Wave 1: Lead Pipeline ─────────────────────────────────
 
@@ -667,7 +616,7 @@ async function rollbackPrompt(id) {
 
 // ── Manual Post Creator ───────────────────────────────────
 
-var _previewPost = null; // holds generated post data for publish step
+var _previewPost = null;
 
 async function previewManualPost() {
   var topic   = document.getElementById('postTopic').value.trim();
@@ -699,7 +648,6 @@ async function previewManualPost() {
   _previewPost = res.post;
   msg.textContent = '';
 
-  // Show preview
   var preview = document.getElementById('postPreviewContent');
   preview.textContent =
     '📌 TITLE: ' + (res.post.title || '(no title)') + '\n\n' +
@@ -734,7 +682,7 @@ async function publishPreview() {
     document.getElementById('postTopic').value = '';
     document.getElementById('postContext').value = '';
     _previewPost = null;
-    loadManualPost(); // refresh history
+    loadManualPost();
   } else {
     document.getElementById('postMsg').style.color = '#cc0000';
     document.getElementById('postMsg').textContent = '❌ Publish failed';
@@ -755,7 +703,6 @@ async function submitManualPost() {
   btn.disabled = true; btn.textContent = '⏳ Generating & Publishing...';
   msg.style.color = '#666'; msg.textContent = 'Writing post — usually takes 15-30 seconds...';
 
-  // Step 1: Generate
   var genRes = await api('/api/post/generate', {
     method: 'POST',
     body: JSON.stringify({ topic, practiceArea: area, context, useSearch: search })
@@ -770,7 +717,6 @@ async function submitManualPost() {
 
   msg.textContent = '✍️ Post written! Publishing to WordPress...';
 
-  // Step 2: Publish
   var pubRes = await api('/api/post/publish', {
     method: 'POST',
     body: JSON.stringify({ post: genRes.post, topic, practiceArea: area, languages: lang })
@@ -797,7 +743,6 @@ function cancelPreview() {
 }
 
 async function loadManualPost() {
-  // Init table first (safe to call multiple times)
   api('/api/post/init', { method: 'POST' }).catch(function(){});
 
   var data = await api('/api/post/history');
@@ -819,4 +764,343 @@ async function loadManualPost() {
       + '</tr>';
   });
   el.innerHTML = '<table><thead><tr><th>Date</th><th>Title</th><th>Area</th><th>Topic</th><th>Published</th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+// ============================================================
+//  RESEARCH TAB — Case Law, Statutes, Immigration, Verify, Cache
+// ============================================================
+
+function showResearchTab(tab) {
+  var tabs = ['caselaw','statutes','immigration','verify','cache','judges'];
+  tabs.forEach(function(t) {
+    var sub = document.getElementById('rsub-' + t);
+    if (sub) sub.style.display = t === tab ? 'block' : 'none';
+    var btn = document.getElementById('rtab-' + t);
+    if (btn) btn.style.opacity = t === tab ? '1' : '.6';
+  });
+  if (tab === 'cache') loadCacheStats();
+  if (tab === 'judges') loadJudgesIndex();
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                       .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ── CourtListener case law search ───────────────────────────
+async function runAdminCLSearch() {
+  var qEl     = document.getElementById('cl-query');
+  var areaEl  = document.getElementById('cl-area');
+  var dateEl  = document.getElementById('cl-date');
+  var sortEl  = document.getElementById('cl-sort');
+
+  var q     = qEl ? qEl.value.trim() : '';
+  var court = areaEl ? areaEl.value : '';
+  var date  = dateEl ? dateEl.value : '2020-01-01';
+  var sort  = sortEl ? sortEl.value : 'score';
+
+  if (!q) {
+    var resultsEl = document.getElementById('cl-results');
+    if (resultsEl) resultsEl.innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">Please enter a search query.</p>';
+    return;
+  }
+
+  var loadingEl = document.getElementById('cl-loading');
+  var resultsEl = document.getElementById('cl-results');
+  var warningEl = document.getElementById('cl-warning');
+
+  if (loadingEl) loadingEl.style.display = 'block';
+  if (resultsEl) resultsEl.innerHTML = '';
+  if (warningEl) warningEl.style.display = 'none';
+
+  try {
+    var params = new URLSearchParams({
+      q: q,
+      type: 'o',
+      stat_Published: 'on',
+      court: court,
+      filed_after: date,
+      order_by: sort,
+      page_size: '8'
+    });
+    var headers = {};
+    var savedToken = localStorage.getItem('cl_token');
+    if (savedToken) headers['Authorization'] = 'Token ' + savedToken;
+
+    var resp = await fetch('https://www.courtlistener.com/api/rest/v4/search/?' + params, { headers: headers });
+    if (resp.status === 429) throw new Error('Rate limited — add a free CourtListener API token in Settings');
+    var data = await resp.json();
+    var results = data.results || [];
+
+    if (warningEl) warningEl.style.display = results.length ? 'block' : 'none';
+    if (resultsEl) {
+      resultsEl.innerHTML = results.length
+        ? results.map(function(r) { return renderCaseCard(r); }).join('')
+        : '<p style="color:#999;font-size:13px;padding:12px">No results. Try broader terms.</p>';
+    }
+  } catch(err) {
+    if (resultsEl) resultsEl.innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + err.message + '</p>';
+  } finally {
+    if (loadingEl) loadingEl.style.display = 'none';
+  }
+}
+
+// ── Immigration search (9th Circuit + BIA) ──────────────────
+async function runAdminImmSearch() {
+  var qEl = document.getElementById('imm-query');
+  var q = qEl ? qEl.value.trim() : '';
+  if (!q) return;
+
+  var loadingEl = document.getElementById('imm-loading');
+  var resultsEl = document.getElementById('imm-results');
+
+  if (loadingEl) loadingEl.style.display = 'block';
+  if (resultsEl) resultsEl.innerHTML = '';
+
+  try {
+    var params = new URLSearchParams({
+      q: q,
+      type: 'o',
+      stat_Published: 'on',
+      court: 'ca9,bia',
+      filed_after: '2005-01-01',
+      order_by: 'score',
+      page_size: '8'
+    });
+    var headers = {};
+    var savedToken = localStorage.getItem('cl_token');
+    if (savedToken) headers['Authorization'] = 'Token ' + savedToken;
+
+    var resp = await fetch('https://www.courtlistener.com/api/rest/v4/search/?' + params, { headers: headers });
+    var data = await resp.json();
+    var results = data.results || [];
+
+    if (resultsEl) {
+      resultsEl.innerHTML = results.length
+        ? results.map(function(r) { return renderCaseCard(r); }).join('')
+        : '<p style="color:#999;font-size:13px;padding:12px">No results found.</p>';
+    }
+  } catch(err) {
+    if (resultsEl) resultsEl.innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + err.message + '</p>';
+  } finally {
+    if (loadingEl) loadingEl.style.display = 'none';
+  }
+}
+
+// ── Render individual case card ─────────────────────────────
+function renderCaseCard(r) {
+  var name     = esc(r.caseName || r.case_name || 'Unknown');
+  var citation = esc((r.citation || []).join(', ') || 'No citation');
+  var court    = esc(r.court || '');
+  var date     = r.dateFiled || r.date_filed || '';
+  var snippet  = esc((r.snippet || '').replace(/<[^>]+>/g, ' ').substring(0, 250));
+  var url      = r.absolute_url ? 'https://www.courtlistener.com' + r.absolute_url : '#';
+
+  return '<div style="background:#fff;border:1px solid #e8d8b0;border-radius:8px;padding:14px;margin-bottom:12px">'
+    + '<div style="font-weight:bold;color:#0C1C36;font-size:14px;margin-bottom:4px">' + name + '</div>'
+    + '<div style="font-size:12px;color:#666;margin-bottom:6px">' + citation + ' • ' + court + ' • ' + (date ? new Date(date).toLocaleDateString('en-US') : '') + '</div>'
+    + (snippet ? '<div style="font-size:13px;color:#333;margin-bottom:8px;line-height:1.4">' + snippet + '...</div>' : '')
+    + '<a href="' + url + '" target="_blank" style="color:#B79C62;font-size:12px;font-weight:bold;text-decoration:none">📄 Read full opinion →</a>'
+    + '</div>';
+}
+
+// ── CA Statute lookup ───────────────────────────────────────
+async function runStatuteSearch() {
+  var codeEl    = document.getElementById('stat-code');
+  var sectionEl = document.getElementById('stat-section');
+
+  var code    = codeEl    ? codeEl.value : 'CCP';
+  var section = sectionEl ? sectionEl.value.trim() : '';
+
+  if (!section) return;
+
+  var loadingEl = document.getElementById('stat-loading');
+  var resultsEl = document.getElementById('stat-results');
+
+  if (loadingEl) loadingEl.style.display = 'block';
+  if (resultsEl) resultsEl.innerHTML = '';
+
+  try {
+    var res = await api('/api/research/statute?code=' + encodeURIComponent(code) + '&section=' + encodeURIComponent(section));
+    if (resultsEl) {
+      if (res && res.text) {
+        resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #e8d8b0;border-radius:8px;padding:16px">'
+          + '<div style="font-weight:bold;color:#0C1C36;font-size:15px;margin-bottom:8px">' + esc(code) + ' § ' + esc(section) + '</div>'
+          + '<div style="font-size:13px;color:#333;line-height:1.5;white-space:pre-wrap">' + esc(res.text) + '</div>'
+          + (res.url ? '<a href="' + esc(res.url) + '" target="_blank" style="display:inline-block;margin-top:10px;color:#B79C62;font-size:12px;font-weight:bold;text-decoration:none">📄 View on leginfo.ca.gov →</a>' : '')
+          + '</div>';
+      } else {
+        resultsEl.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Statute not found. Verify the code and section number.</p>';
+      }
+    }
+  } catch(err) {
+    if (resultsEl) resultsEl.innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + err.message + '</p>';
+  } finally {
+    if (loadingEl) loadingEl.style.display = 'none';
+  }
+}
+
+// ── Citation verifier ───────────────────────────────────────
+async function verifyCitation() {
+  var inputEl = document.getElementById('verify-input');
+  var citation = inputEl ? inputEl.value.trim() : '';
+  if (!citation) return;
+
+  var loadingEl = document.getElementById('verify-loading');
+  var resultsEl = document.getElementById('verify-results');
+
+  if (loadingEl) loadingEl.style.display = 'block';
+  if (resultsEl) resultsEl.innerHTML = '';
+
+  try {
+    var res = await api('/api/research/verify', {
+      method: 'POST',
+      body: JSON.stringify({ citation: citation })
+    });
+
+    if (resultsEl) {
+      if (res && res.found) {
+        var statusColor = res.valid ? '#006600' : '#cc6600';
+        var statusIcon = res.valid ? '✅' : '⚠️';
+        resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #e8d8b0;border-radius:8px;padding:16px">'
+          + '<div style="font-size:15px;font-weight:bold;color:' + statusColor + ';margin-bottom:8px">' + statusIcon + ' ' + esc(res.status || 'Found') + '</div>'
+          + '<div style="font-size:14px;color:#0C1C36;font-weight:bold;margin-bottom:6px">' + esc(res.caseName || citation) + '</div>'
+          + (res.court ? '<div style="font-size:12px;color:#666;margin-bottom:4px">Court: ' + esc(res.court) + '</div>' : '')
+          + (res.date ? '<div style="font-size:12px;color:#666;margin-bottom:4px">Decided: ' + esc(res.date) + '</div>' : '')
+          + (res.treatment ? '<div style="font-size:12px;color:#666;margin-bottom:8px">Subsequent treatment: ' + esc(res.treatment) + '</div>' : '')
+          + (res.url ? '<a href="' + esc(res.url) + '" target="_blank" style="color:#B79C62;font-size:12px;font-weight:bold">📄 Read opinion →</a>' : '')
+          + '</div>';
+      } else {
+        resultsEl.innerHTML = '<div style="background:#fff5f5;border:1px solid #ffcccc;border-radius:8px;padding:16px"><span style="color:#cc0000;font-weight:bold">⚠️ Citation not found</span><br><span style="font-size:13px;color:#666">Verify the citation manually before relying on it.</span></div>';
+      }
+    }
+  } catch(err) {
+    if (resultsEl) resultsEl.innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + err.message + '</p>';
+  } finally {
+    if (loadingEl) loadingEl.style.display = 'none';
+  }
+}
+
+// ── Answer cache statistics ─────────────────────────────────
+async function loadCacheStats() {
+  var el = document.getElementById('cacheStats');
+  if (!el) return;
+
+  var data = await api('/api/research/cache-stats');
+  if (!data) {
+    el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Cache stats not available.</p>';
+    return;
+  }
+
+  var hitRate = data.totalLookups > 0 ? Math.round((data.cacheHits / data.totalLookups) * 100) : 0;
+  el.innerHTML =
+    '<div class="stats-grid">'
+    +   '<div class="stat-card"><div class="stat-num">' + (data.totalCached || 0) + '</div><div class="stat-label">Cached Answers</div></div>'
+    +   '<div class="stat-card"><div class="stat-num">' + (data.totalLookups || 0) + '</div><div class="stat-label">Total Lookups</div></div>'
+    +   '<div class="stat-card"><div class="stat-num">' + (data.cacheHits || 0) + '</div><div class="stat-label">Cache Hits</div></div>'
+    +   '<div class="stat-card"><div class="stat-num">' + hitRate + '%</div><div class="stat-label">Hit Rate</div></div>'
+    + '</div>'
+    + (data.estimatedSavings ? '<div style="background:#fffbf0;border:1px solid #e8d8b0;border-radius:8px;padding:12px;margin-top:14px"><strong>💰 Estimated savings:</strong> $' + data.estimatedSavings.toFixed(2) + ' this month</div>' : '')
+    + (data.recentEntries && data.recentEntries.length
+        ? '<h3 style="margin-top:16px;font-size:14px;color:#0C1C36">Recent Cache Entries</h3>'
+          + '<table style="margin-top:8px"><thead><tr><th>Question</th><th>Practice Area</th><th>Hits</th><th>Last Used</th></tr></thead><tbody>'
+          + data.recentEntries.slice(0,15).map(function(r) {
+              return '<tr><td style="font-size:12px;max-width:300px">' + esc((r.question||'').substring(0,80)) + '</td>'
+                + '<td style="font-size:12px">' + esc(r.practice_area||'—') + '</td>'
+                + '<td style="text-align:center;font-weight:bold">' + (r.hit_count||0) + '</td>'
+                + '<td style="font-size:11px;color:#666">' + (r.last_used ? new Date(r.last_used).toLocaleDateString('en-US') : '—') + '</td></tr>';
+            }).join('')
+          + '</tbody></table>'
+        : '');
+}
+
+// ── Judge Profile Index ─────────────────────────────────────
+async function loadJudgesIndex() {
+  var el = document.getElementById('judgesIndex');
+  if (!el) return;
+
+  el.innerHTML = '<p style="color:#666;font-size:13px;padding:12px">Loading judge database...</p>';
+
+  var data = await api('/api/research/judges');
+  if (!data) {
+    el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Judge database not yet populated. Run: <code>node judge-scanner.js --scan-all</code></p>';
+    return;
+  }
+
+  var html = '<div class="stats-grid">'
+    + '<div class="stat-card"><div class="stat-num">' + (data.totalJudges || 0) + '</div><div class="stat-label">Judges Indexed</div></div>'
+    + '<div class="stat-card"><div class="stat-num">' + (data.totalRulings || 0) + '</div><div class="stat-label">Rulings Analyzed</div></div>'
+    + '<div class="stat-card"><div class="stat-num">' + (data.totalInsights || 0) + '</div><div class="stat-label">Insights Built</div></div>'
+    + '</div>';
+
+  html += '<div style="margin-top:16px;display:flex;gap:8px">'
+    + '<input type="text" id="judge-search-input" placeholder="Search by judge name (e.g. Wardlaw, Kronstadt)" style="flex:1;padding:8px 12px;border:1px solid #d4c08c;border-radius:6px;font-size:13px" onkeydown="if(event.key===\'Enter\')searchJudge()" />'
+    + '<button class="action-btn" onclick="searchJudge()" style="font-size:12px;padding:8px 16px">🔍 Look Up</button>'
+    + '</div>';
+
+  html += '<div id="judge-search-results" style="margin-top:14px"></div>';
+
+  if (data.topJudges && data.topJudges.length) {
+    html += '<h3 style="margin-top:20px;font-size:14px;color:#0C1C36">Most-Indexed Judges</h3>';
+    html += '<table style="margin-top:8px"><thead><tr><th>Judge</th><th>Court</th><th>Rulings</th><th>Last Updated</th></tr></thead><tbody>';
+    data.topJudges.slice(0, 25).forEach(function(j) {
+      html += '<tr style="cursor:pointer" onclick="lookupJudgeFromTable(\'' + esc(j.judge_name).replace(/'/g, "\\'") + '\')">';
+      html += '<td style="font-weight:bold;color:#0C1C36">' + esc(j.judge_name) + '</td>';
+      html += '<td style="font-size:12px">' + esc(j.court) + '</td>';
+      html += '<td style="text-align:center;font-weight:bold;color:#B79C62">' + (j.total_rulings || 0) + '</td>';
+      html += '<td style="font-size:11px;color:#666">' + (j.last_updated ? new Date(j.last_updated).toLocaleDateString('en-US') : '—') + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+
+  el.innerHTML = html;
+}
+
+async function searchJudge() {
+  var inputEl = document.getElementById('judge-search-input');
+  var name = inputEl ? inputEl.value.trim() : '';
+  if (!name) return;
+
+  var resultsEl = document.getElementById('judge-search-results');
+  if (!resultsEl) return;
+
+  resultsEl.innerHTML = '<p style="color:#666;font-size:13px;padding:12px">Looking up ' + esc(name) + '...</p>';
+
+  var data = await api('/api/research/judges/' + encodeURIComponent(name));
+  if (!data || !data.found) {
+    resultsEl.innerHTML = '<div style="background:#fff5f5;border:1px solid #ffcccc;border-radius:8px;padding:16px"><span style="color:#cc0000;font-weight:bold">No profile found for "' + esc(name) + '"</span><br><span style="font-size:13px;color:#666;margin-top:8px;display:block">The judge may not yet be indexed. Continue running the scanner: <code>node judge-scanner.js --scan-all</code></span></div>';
+    return;
+  }
+
+  var profile = data.profile || '';
+  resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #e8d8b0;border-radius:8px;padding:16px;font-family:monospace;white-space:pre-wrap;font-size:12px;line-height:1.5">' + esc(profile) + '</div>';
+}
+
+function lookupJudgeFromTable(name) {
+  var inputEl = document.getElementById('judge-search-input');
+  if (inputEl) inputEl.value = name;
+  searchJudge();
+}
+
+// ── CourtListener API token storage ─────────────────────────
+function saveClToken() {
+  var input = document.getElementById('cl-token-input');
+  if (!input) return;
+  var token = input.value.trim();
+  if (token) {
+    localStorage.setItem('cl_token', token);
+    alert('CourtListener API token saved to your browser. You will no longer hit rate limits.');
+  } else {
+    localStorage.removeItem('cl_token');
+    alert('Token cleared.');
+  }
+}
+
+function loadClToken() {
+  var input = document.getElementById('cl-token-input');
+  if (input) {
+    var saved = localStorage.getItem('cl_token');
+    if (saved) input.value = saved;
+  }
 }
