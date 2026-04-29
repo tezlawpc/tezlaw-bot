@@ -1043,9 +1043,6 @@ function dashboardHtml() {
   <div class="nav-item" onclick="showPage('research')" id="nav-research">
     <span class="icon">🔍</span><span>Research</span>
   </div>
-  <div class="nav-item" onclick="showPage('poster')" id="nav-poster">
-    <span class="icon">✍️</span><span>Manual Post</span>
-  </div>
   <div class="nav-item" onclick="showPage('pipeline')" id="nav-pipeline">
     <span class="icon">🏆</span><span>Pipeline</span>
   </div>
@@ -1230,76 +1227,6 @@ function dashboardHtml() {
     </div>
   </div>
 
-
-  <!-- Manual Post -->
-  <div class="page" id="page-poster">
-    <div class="page-header">
-      <h1>Manual Post</h1>
-      <button class="logout-btn" onclick="logout()">Logout</button>
-    </div>
-    <div class="card">
-      <h3>✍️ Write &amp; Publish a Post</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:20px">
-        Paste an article, news link, or write your own content. Zara will write a full SEO post
-        and publish to WordPress in <strong>English + Chinese + Spanish</strong>. Takes ~1–2 minutes.
-      </p>
-
-      <div style="display:grid;gap:14px;max-width:800px">
-
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div>
-            <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:5px">
-              Practice Area
-            </label>
-            <select id="posterArea" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;background:#fff">
-              <option value="Immigration Law">Immigration Law</option>
-              <option value="Personal Injury">Personal Injury</option>
-              <option value="Business Law">Business Law</option>
-              <option value="Estate Planning">Estate Planning</option>
-              <option value="Real Estate">Real Estate</option>
-              <option value="Landlord Tenant">Landlord / Tenant</option>
-              <option value="Criminal Defense">Criminal Defense</option>
-              <option value="General Legal">General Legal</option>
-            </select>
-          </div>
-          <div>
-            <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:5px">
-              Source URL <span style="font-weight:normal;color:#999">(optional — paste a news link)</span>
-            </label>
-            <input id="posterUrl" placeholder="https://uscis.gov/news/..." 
-              style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px">
-          </div>
-        </div>
-
-        <div>
-          <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:5px">
-            Topic / Content <span style="color:#cc0000">*</span>
-            <span style="font-weight:normal;color:#999"> — paste an article, headline, or describe what to write</span>
-          </label>
-          <textarea id="posterContent" rows="10"
-            placeholder="Examples:&#10;• USCIS announces new fee increases effective January 2026&#10;• Paste the full text of a news article here&#10;• Write about how the new H-1B lottery rules affect tech workers in California&#10;• California AB 1234 changes eviction procedures for landlords"
-            style="width:100%;padding:12px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:Arial,sans-serif;line-height:1.5;resize:vertical;outline:none;color:#0C1C36"></textarea>
-        </div>
-
-        <div>
-          <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:5px">
-            Instructions for Zara <span style="font-weight:normal;color:#999">(optional)</span>
-          </label>
-          <input id="posterNotes" placeholder="e.g. Focus on how this affects clients in West Covina, mention free consultations available"
-            style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px">
-        </div>
-
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <button class="action-btn" id="posterBtn" onclick="submitManualPost()" style="padding:12px 28px;font-size:14px">
-            ✍️ Generate &amp; Publish
-          </button>
-          <span id="posterMsg" style="font-size:13px"></span>
-        </div>
-
-        <div id="posterResult" style="display:none;padding:16px;background:#f0fff4;border:1px solid #b2dfdb;border-radius:8px;font-size:13px"></div>
-      </div>
-    </div>
-  </div>
 
   <!-- Pipeline -->
   <div class="page" id="page-pipeline">
