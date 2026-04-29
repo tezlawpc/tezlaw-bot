@@ -154,16 +154,13 @@ const JUSTIA_CODE_SLUGS = {
 /**
  * Fetch a California statute section.
  *
- * Strategy: Justia is the primary text source because leginfo.legislature.ca.gov
- * uses JavaScript to render statute content, which means server-side fetch
- * returns an empty skeleton. Justia mirrors all CA codes server-rendered.
- *
- * Both the Justia URL (text source) and leginfo URL (official reference)
- * are returned so the UI can link to both.
+ * Strategy: Try leginfo first (authoritative, current). If that fails or returns
+ * empty content (some sections are JS-rendered and unreachable from server),
+ * fall back to Justia mirror. Both URLs are returned so the UI can show both.
  *
  * @param {string} code - e.g., "CCP", "CIV", "PEN"
  * @param {string} section - e.g., "335.1", "3342"
- * @returns {Object} { code, section, title, text, url, official_url, source }
+ * @returns {Object} { code, section, title, text, breadcrumbs, url, official_url, source }
  */
 async function getCaliforniaStatute(code, section) {
   code = code.toUpperCase().trim();
@@ -182,105 +179,218 @@ async function getCaliforniaStatute(code, section) {
   const justiaSection = section.replace(/\./g, "-");
   const justiaUrl   = `https://law.justia.com/codes/california/code-${justiaSlug}/section-${justiaSection}/`;
 
+  // Try leginfo first
   try {
-    // Fetch from Justia (server-rendered, scrapeable)
-    const r = await axios.get(justiaUrl, {
-      timeout: TIMEOUT,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-    });
-    const $ = cheerio.load(r.data);
-
-    // Justia structure: section text is inside <div class="codes-content"> or
-    // sometimes wrapped in <article> with class "codes-content".
-    // Title is the <h1>, text is in a series of <p> tags.
-    const title = $("h1").first().text().trim() || `Cal. ${CA_CODES[code]} § ${section}`;
-
-    // Multiple selectors for the body content
-    const SELECTORS = [
-      ".codes-content",
-      "article.codes-content",
-      "div.codes-content",
-      "#codes-content",
-      ".main-content .text-content",
-      "article p",
-      ".content-block p",
-    ];
-
-    let text = "";
-    let usedSelector = null;
-
-    for (const sel of SELECTORS) {
-      const $content = $(sel);
-      if ($content.length) {
-        // Get all paragraph text, dedupe
-        const paragraphs = $content.find("p").length
-          ? $content.find("p").map((i, el) => $(el).text().trim().replace(/\s+/g, " ")).get()
-          : [$content.text().trim().replace(/\s+/g, " ")];
-
-        const seen = new Set();
-        text = paragraphs.filter(p => {
-          if (!p || p.length < 5 || seen.has(p)) return false;
-          seen.add(p);
-          return true;
-        }).join("\n\n");
-
-        if (text.length > 50) {
-          usedSelector = sel;
-          break;
-        }
-      }
+    const result = await _fetchFromLeginfo(officialUrl, code, section);
+    if (result && result.text && result.text.length > 30) {
+      result.url = officialUrl;
+      result.official_url = officialUrl;
+      result.justia_url = justiaUrl;
+      await _cacheSet(cacheKey, "ca_leginfo", result);
+      return result;
     }
-
-    // Last-resort fallback: grab text between "Section X" headers
-    if (!text || text.length < 30) {
-      const bodyText = $("body").text();
-      const escapedSection = section.replace(/\./g, "\\.");
-      const m = bodyText.match(
-        new RegExp(`(?:Section\\s+|§\\s*)${escapedSection}[^\\n]*?\\n([\\s\\S]{100,8000}?)(?=\\n\\s*(?:Section\\s+\\d|§\\s*\\d|Updated|Get Justia))`, "i")
-      );
-      if (m) {
-        text = m[1].trim().replace(/\s+/g, " ");
-        usedSelector = "regex_fallback";
-      }
-    }
-
-    if (!text || text.length < 30) {
-      throw new Error(
-        `Could not locate section content on Justia (got ${text.length} chars). ` +
-        `Section may not exist or Justia format may have changed.`
-      );
-    }
-
-    const result = {
-      code,
-      code_name:     CA_CODES[code],
-      section,
-      title,
-      text:          text.substring(0, 50000),
-      url:           justiaUrl,
-      official_url:  officialUrl,
-      source:        "law.justia.com (mirrored from leginfo.legislature.ca.gov)",
-      selector_used: usedSelector,
-      fetched_at:    new Date().toISOString(),
-      note:          "Text from Justia (server-rendered mirror). Official source: leginfo.legislature.ca.gov.",
-    };
-
-    await _cacheSet(cacheKey, "ca_justia", result);
-    return result;
   } catch (err) {
-    if (err.response?.status === 404) {
-      throw new Error(
-        `Section ${code} § ${section} not found on Justia. ` +
-        `It may not exist, or Justia hasn't mirrored it yet. ` +
-        `Try the official URL: ${officialUrl}`
-      );
-    }
-    throw new Error(`Failed to fetch Cal. ${code} § ${section}: ${err.message}`);
+    console.warn(`[statute] leginfo failed for ${code} § ${section}: ${err.message}, trying Justia...`);
   }
+
+  // Fall back to Justia
+  try {
+    const result = await _fetchFromJustia(justiaUrl, code, section);
+    if (result && result.text && result.text.length > 30) {
+      result.url = justiaUrl;
+      result.official_url = officialUrl;
+      result.justia_url = justiaUrl;
+      result.note = "Text from Justia mirror. Verify against official URL for currency.";
+      await _cacheSet(cacheKey, "ca_justia", result);
+      return result;
+    }
+  } catch (err) {
+    console.warn(`[statute] Justia also failed for ${code} § ${section}: ${err.message}`);
+  }
+
+  throw new Error(
+    `Could not retrieve Cal. ${code} § ${section} from either leginfo or Justia. ` +
+    `Section may not exist. Try the official URL: ${officialUrl}`
+  );
+}
+
+/**
+ * Strip breadcrumb / navigation noise from leginfo content.
+ * Removes things like "PART 2. OF CIVIL ACTIONS [307 - 1062.34] ( Part 2 enacted 1872. )"
+ */
+function _stripBreadcrumbs(text) {
+  return text
+    // Remove "PART X." / "TITLE X." / "CHAPTER X." / "DIVISION X." breadcrumb headers
+    .split(/\n+/)
+    .filter(line => {
+      const t = line.trim();
+      if (!t) return false;
+      // Drop lines that are pure breadcrumbs
+      if (/^(?:PART|TITLE|CHAPTER|DIVISION|ARTICLE|SUBDIVISION|SECTION)\s+\d+(?:\.\d+)?\.\s+/i.test(t)
+          && /\[\s*\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?\s*\]/.test(t)) {
+        return false;
+      }
+      // Drop standalone "( Part X enacted YYYY. )" lines
+      if (/^\(\s*(?:Part|Title|Chapter|Division|Article)\s+\d+\s+(?:added|enacted|amended|repealed)/i.test(t)) {
+        return false;
+      }
+      // Drop lines that are JUST the code name
+      if (/^[A-Z][A-Za-z\s]+(?:Code|Procedure)\s*-\s*[A-Z]+$/.test(t)) {
+        return false;
+      }
+      return true;
+    })
+    .join("\n\n");
+}
+
+/**
+ * Pick the cleanest version of statute text from a list of candidate strings.
+ * leginfo nests content in multiple divs that all contain overlapping text;
+ * we want the SHORTEST one that still has the section number.
+ */
+function _pickCleanestText(candidates, section) {
+  if (!candidates.length) return "";
+
+  // Filter to ones containing section number
+  const sectionEsc = section.replace(/\./g, "\\.");
+  const sectionRx = new RegExp(`\\b${sectionEsc}\\b`);
+  let withSection = candidates.filter(c => sectionRx.test(c));
+  if (!withSection.length) withSection = candidates;
+
+  // Sort by length ascending — shortest is usually the leaf
+  withSection.sort((a, b) => a.length - b.length);
+
+  // Pick the shortest one that's at least 30 chars (avoid super-short fragments)
+  for (const c of withSection) {
+    if (c.length >= 30) return c;
+  }
+  return withSection[0] || "";
+}
+
+async function _fetchFromLeginfo(url, code, section) {
+  const r = await axios.get(url, {
+    timeout: TIMEOUT,
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
+  const $ = cheerio.load(r.data);
+
+  // leginfo has multiple possible content containers across pages
+  const SELECTORS = [
+    "#codeLawSectionNoHead",
+    "#manylawsections",
+    "#displayCodeSection",
+    "#codeLawSectionHead",
+    "div[id*='lawSection']",
+    "div[class*='lawsection']",
+  ];
+
+  // Collect text from each matching selector
+  const candidates = [];
+  let usedSelector = null;
+  for (const sel of SELECTORS) {
+    $(sel).each((i, el) => {
+      const t = $(el).text().trim().replace(/\s+/g, " ");
+      if (t.length > 30) {
+        candidates.push(t);
+        if (!usedSelector) usedSelector = sel;
+      }
+    });
+    if (candidates.length) break;
+  }
+
+  if (!candidates.length) {
+    throw new Error("No content found at leginfo selectors");
+  }
+
+  // Pick the cleanest (shortest matching) candidate
+  let text = _pickCleanestText(candidates, section);
+  text = _stripBreadcrumbs(text);
+
+  // Extract breadcrumbs separately from longer candidates
+  let breadcrumbs = null;
+  const longestCandidate = candidates.sort((a, b) => b.length - a.length)[0];
+  const partMatch = longestCandidate.match(/(PART\s+\d+[^[]+\[[^\]]+\][^()]*\([^)]+\))/);
+  const titleMatch = longestCandidate.match(/(TITLE\s+\d+[^[]+\[[^\]]+\][^()]*\([^)]+\))/);
+  const chapterMatch = longestCandidate.match(/(CHAPTER\s+\d+[^[]+\[[^\]]+\][^()]*\([^)]+\))/);
+  if (partMatch || titleMatch || chapterMatch) {
+    breadcrumbs = [partMatch?.[1], titleMatch?.[1], chapterMatch?.[1]].filter(Boolean).join(" › ");
+  }
+
+  return {
+    code,
+    code_name:     CA_CODES[code],
+    section,
+    title:         `Cal. ${CA_CODES[code]} § ${section}`,
+    text:          text.substring(0, 50000),
+    breadcrumbs,
+    source:        "leginfo.legislature.ca.gov",
+    selector_used: usedSelector,
+    fetched_at:    new Date().toISOString(),
+  };
+}
+
+async function _fetchFromJustia(url, code, section) {
+  const r = await axios.get(url, {
+    timeout: TIMEOUT,
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
+  const $ = cheerio.load(r.data);
+
+  const title = $("h1").first().text().trim() || `Cal. ${CA_CODES[code]} § ${section}`;
+
+  const SELECTORS = [
+    ".codes-content",
+    "article.codes-content",
+    "#codes-content",
+    "article p",
+  ];
+
+  let text = "";
+  let usedSelector = null;
+  for (const sel of SELECTORS) {
+    const $content = $(sel);
+    if ($content.length) {
+      const paragraphs = $content.find("p").length
+        ? $content.find("p").map((i, el) => $(el).text().trim().replace(/\s+/g, " ")).get()
+        : [$content.text().trim().replace(/\s+/g, " ")];
+
+      const seen = new Set();
+      text = paragraphs.filter(p => {
+        if (!p || p.length < 5 || seen.has(p)) return false;
+        seen.add(p);
+        return true;
+      }).join("\n\n");
+
+      if (text.length > 30) {
+        usedSelector = sel;
+        break;
+      }
+    }
+  }
+
+  if (!text || text.length < 30) {
+    throw new Error("No content found at Justia selectors");
+  }
+
+  return {
+    code,
+    code_name:     CA_CODES[code],
+    section,
+    title,
+    text:          text.substring(0, 50000),
+    breadcrumbs:   null,
+    source:        "law.justia.com",
+    selector_used: usedSelector,
+    fetched_at:    new Date().toISOString(),
+  };
 }
 
 // ============================================================
