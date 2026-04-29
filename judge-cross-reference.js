@@ -67,13 +67,12 @@ async function hasJudgeCited(judgeName, caseRef) {
       e.cited_case_citation, e.parenthetical, e.treatment, e.signal,
       e.pin_cite, e.judge_name, e.court,
       r.id AS ruling_id, r.case_name AS ruling_full_name,
-      r.cluster_id, r.date_filed, r.docket_number,
-      r.snippet AS ruling_snippet
+      r.case_number, r.hearing_date, r.motion_type AS ruling_motion_type
     FROM citation_edges_internal e
-    JOIN judge_rulings r ON r.id = e.ruling_id
+    LEFT JOIN judge_rulings r ON r.id = e.ruling_id
     WHERE e.judge_name ILIKE $1
       AND (${conditions.join(" OR ")})
-    ORDER BY r.date_filed DESC
+    ORDER BY e.id DESC
     LIMIT 50
   `;
 
@@ -126,9 +125,8 @@ async function judgesCitingCase(caseRef) {
       COUNT(*) FILTER (WHERE e.treatment = 'distinguishes') AS distinguishes_count,
       COUNT(*) FILTER (WHERE e.treatment IN ('criticizes','overrules','reverses')) AS negative_count,
       ARRAY_AGG(DISTINCT e.parenthetical) FILTER (WHERE e.parenthetical IS NOT NULL) AS sample_parentheticals,
-      MAX(r.date_filed) AS most_recent_citation
+      MAX(e.extracted_at) AS most_recent_citation
     FROM citation_edges_internal e
-    LEFT JOIN judge_rulings r ON r.id = e.ruling_id
     WHERE ${conditions.join(" OR ")}
     GROUP BY e.judge_name, e.court
     ORDER BY citation_count DESC, most_recent_citation DESC
@@ -231,8 +229,13 @@ async function judgeTopCitedCases(judgeName, motionType = null, limit = 20) {
   let pi = 2;
   let motionFilter = "";
 
+  // Motion filter via judge_insights (since citation_edges_internal doesn't have motion_type)
   if (motionType) {
-    motionFilter = ` AND r.motion_type ILIKE $${pi}`;
+    motionFilter = ` AND EXISTS (
+      SELECT 1 FROM judge_insights ji
+      WHERE ji.judge_profile_id = e.judge_profile_id
+        AND ji.motion_type ILIKE $${pi}
+    )`;
     params.push(`%${motionType}%`); pi++;
   }
   params.push(limit);
@@ -247,12 +250,11 @@ async function judgeTopCitedCases(judgeName, motionType = null, limit = 20) {
       COUNT(*) FILTER (WHERE e.treatment IN ('positive','followed')) AS positive_count,
       COUNT(*) FILTER (WHERE e.treatment = 'distinguishes') AS distinguishes_count,
       ARRAY_AGG(DISTINCT e.parenthetical) FILTER (WHERE e.parenthetical IS NOT NULL) AS sample_parentheticals,
-      MAX(r.date_filed) AS most_recent
+      MAX(e.extracted_at) AS most_recent
     FROM citation_edges_internal e
-    LEFT JOIN judge_rulings r ON r.id = e.ruling_id
     WHERE e.judge_name ILIKE $1${motionFilter}
     GROUP BY e.cited_case_name, e.cited_case_citation, e.cited_normalized, e.cited_cluster_id
-    HAVING COUNT(*) >= 2
+    HAVING COUNT(*) >= 1
     ORDER BY times_cited DESC, most_recent DESC
     LIMIT $${pi}
   `;
