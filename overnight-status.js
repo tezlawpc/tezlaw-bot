@@ -108,10 +108,32 @@ function box(title) {
       FROM citation_edges_internal
     `);
     const s = r.rows[0];
-    console.log(`Edges total:        ${s.total_edges}`);
-    console.log(`With cluster_id:    ${s.with_cluster_id}  (${pct(s.with_cluster_id, s.total_edges)}%)`);
-    console.log(`With parenthetical: ${s.with_parenthetical}  (${pct(s.with_parenthetical, s.total_edges)}%)`);
-    console.log(`With treatment:     ${s.with_treatment}  (${pct(s.with_treatment, s.total_edges)}%)`);
+    console.log("citation_edges_internal:");
+    console.log(`  Edges total:        ${s.total_edges}`);
+    console.log(`  With cluster_id:    ${s.with_cluster_id}  (${pct(s.with_cluster_id, s.total_edges)}%)`);
+    console.log(`  With parenthetical: ${s.with_parenthetical}  (${pct(s.with_parenthetical, s.total_edges)}%)`);
+    console.log(`  With treatment:     ${s.with_treatment}  (${pct(s.with_treatment, s.total_edges)}%)`);
+    console.log("");
+
+    // Phase 5 progress: judge_rulings full_text
+    try {
+      const r2 = await db.query(`
+        SELECT
+          COUNT(*) AS total_rulings,
+          COUNT(*) FILTER (WHERE cluster_id IS NOT NULL) AS with_cluster_id,
+          COUNT(*) FILTER (WHERE full_text IS NOT NULL AND length(full_text) > 500) AS with_full_text,
+          ROUND(SUM(length(full_text))::numeric / 1024 / 1024, 1) AS total_mb
+        FROM judge_rulings
+      `);
+      const s2 = r2.rows[0];
+      console.log("judge_rulings:");
+      console.log(`  Rulings total:      ${s2.total_rulings}`);
+      console.log(`  With cluster_id:    ${s2.with_cluster_id}  (${pct(s2.with_cluster_id, s2.total_rulings)}%)`);
+      console.log(`  With full_text:     ${s2.with_full_text}  (${pct(s2.with_full_text, s2.total_rulings)}%)`);
+      if (s2.total_mb) console.log(`  Full text size:     ${s2.total_mb} MB`);
+    } catch (err) {
+      // judge_rulings.cluster_id may not exist yet (Phase 5 adds it)
+    }
   } catch (err) {
     console.log("DB query failed:", err.message);
   }

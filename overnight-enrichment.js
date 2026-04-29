@@ -64,6 +64,8 @@ let state = {
     2: { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0 },
     3: { status: "pending", processed: 0, total: 0, merged: 0, errors: 0 },
     4: { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0 },
+    5: { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0, fetched_chars: 0 },
+    6: { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0 },
   },
   current_phase: null,
 };
@@ -616,6 +618,168 @@ async function phase4_motionIntel() {
 }
 
 // ============================================================
+//  PHASE 5 — Backfill judge_rulings.full_text from CourtListener
+//
+//  judge_rulings has cluster_id (or URL we can extract one from) but
+//  no full_text — Layer 1 only stored metadata. Without full_text,
+//  Phase 2 can't extract parentheticals.
+//
+//  Strategy:
+//    1. For each ruling missing full_text, derive its cluster_id (from
+//       URL like https://www.courtlistener.com/opinion/12345/...)
+//    2. Fetch the cluster's sub_opinions[0]
+//    3. Pull plain_text or html_with_citations and store it
+// ============================================================
+
+async function phase5_backfillFullText() {
+  log("===== PHASE 5: Backfilling full opinion text from CourtListener =====");
+  state.current_phase = 5;
+  state.phases[5].status = "running";
+
+  // Add cluster_id column to judge_rulings if missing
+  try {
+    await db.query(`ALTER TABLE judge_rulings ADD COLUMN IF NOT EXISTS cluster_id TEXT`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_rulings_cluster_id ON judge_rulings(cluster_id)`);
+  } catch { /* non-fatal */ }
+
+  // Step 5a: Extract cluster_id from URL where missing
+  const extractResult = await db.query(`
+    UPDATE judge_rulings
+    SET cluster_id = (
+      regexp_match(url, 'courtlistener\\.com/opinion/(\\d+)')
+    )[1]
+    WHERE cluster_id IS NULL
+      AND url LIKE '%courtlistener.com/opinion/%'
+  `);
+  log(`[phase5a] Extracted cluster_id from URL for ${extractResult.rowCount} rulings`);
+
+  // Step 5b: Fetch full_text for each ruling that has cluster_id but no full_text
+  const countQuery = await db.query(`
+    SELECT COUNT(*) FROM judge_rulings
+    WHERE cluster_id IS NOT NULL
+      AND (full_text IS NULL OR length(full_text) < 500)
+      AND id > $1
+  `, [state.phases[5].last_id]);
+  state.phases[5].total = parseInt(countQuery.rows[0].count);
+  log(`[phase5] ${state.phases[5].total} rulings need full_text backfill`);
+
+  if (state.phases[5].total === 0) {
+    state.phases[5].status = "complete";
+    saveCheckpoint();
+    return;
+  }
+
+  let lastId = state.phases[5].last_id;
+
+  while (true) {
+    if (!checkRuntimeBudget()) {
+      state.phases[5].status = "paused_budget";
+      saveCheckpoint();
+      return;
+    }
+
+    const batch = await db.query(`
+      SELECT id, cluster_id, case_name
+      FROM judge_rulings
+      WHERE cluster_id IS NOT NULL
+        AND (full_text IS NULL OR length(full_text) < 500)
+        AND id > $1
+      ORDER BY id ASC
+      LIMIT $2
+    `, [lastId, BATCH_SIZE]);
+
+    if (batch.rows.length === 0) break;
+
+    for (const row of batch.rows) {
+      try {
+        // Get cluster, then fetch first sub_opinion
+        const cluster = await cl.getCluster(row.cluster_id);
+        await sleep(OPINION_FETCH_INTERVAL_MS);
+
+        let fullText = null;
+        if (cluster.sub_opinions && cluster.sub_opinions.length > 0) {
+          // sub_opinions is an array of URLs like /api/rest/v4/opinions/12345/
+          const opUrl = cluster.sub_opinions[0];
+          const opIdMatch = opUrl.match(/\/opinions\/(\d+)/);
+          if (opIdMatch) {
+            const opinion = await cl.getOpinion(opIdMatch[1]);
+            await sleep(OPINION_FETCH_INTERVAL_MS);
+
+            // Prefer plain_text, fall back to HTML stripped, then html_with_citations
+            fullText = opinion.plain_text || null;
+            if (!fullText && opinion.html) {
+              // Quick HTML strip
+              fullText = opinion.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+            }
+            if (!fullText && opinion.html_with_citations) {
+              fullText = opinion.html_with_citations.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+            }
+          }
+        }
+
+        if (fullText && fullText.length > 500) {
+          await db.query(`
+            UPDATE judge_rulings
+            SET full_text = $1
+            WHERE id = $2
+          `, [fullText.substring(0, 500000), row.id]);  // 500K char cap
+
+          state.phases[5].fetched_chars += fullText.length;
+        }
+      } catch (err) {
+        state.phases[5].errors++;
+        // Common: 404 (cluster not found), 429 (rate limit handled by client)
+      }
+
+      state.phases[5].processed++;
+      state.phases[5].last_id = row.id;
+      lastId = row.id;
+
+      if (state.phases[5].processed % SAVE_CHECKPOINT_EVERY === 0) {
+        saveCheckpoint();
+        const mb = (state.phases[5].fetched_chars / 1024 / 1024).toFixed(1);
+        log(`[phase5] ${state.phases[5].processed}/${state.phases[5].total} processed, ~${mb}MB fetched (${state.phases[5].errors} errors)`);
+      }
+    }
+  }
+
+  state.phases[5].status = "complete";
+  saveCheckpoint();
+  const mb = (state.phases[5].fetched_chars / 1024 / 1024).toFixed(1);
+  log(`[phase5] ✅ Complete. Backfilled ${state.phases[5].processed} rulings (~${mb}MB), errors: ${state.phases[5].errors}`);
+}
+
+// ============================================================
+//  PHASE 6 — Re-run parenthetical extraction (was Phase 2)
+//
+//  Now that judge_rulings.full_text is populated by Phase 5,
+//  re-run the parenthetical extraction logic from Phase 2.
+//  This time it actually has source text to parse.
+// ============================================================
+
+async function phase6_extractParentheticalsRerun() {
+  log("===== PHASE 6: Re-extracting parentheticals with newly-backfilled text =====");
+  state.current_phase = 6;
+  state.phases[6].status = "running";
+
+  // Reset Phase 2 state so the same logic runs from scratch
+  state.phases[2] = { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0 };
+  saveCheckpoint();
+
+  // Borrow Phase 2's logic via direct call
+  await phase2_extractParentheticals();
+
+  // Mirror Phase 2's final state into Phase 6's slot
+  state.phases[6].processed = state.phases[2].processed;
+  state.phases[6].total     = state.phases[2].total;
+  state.phases[6].errors    = state.phases[2].errors;
+  state.phases[6].status    = state.phases[2].status === "complete" ? "complete" : state.phases[2].status;
+  saveCheckpoint();
+
+  log(`[phase6] ✅ Complete. Processed ${state.phases[6].processed}, errors: ${state.phases[6].errors}`);
+}
+
+// ============================================================
 //  FINAL REPORT
 // ============================================================
 
@@ -724,7 +888,7 @@ async function generateReport() {
 async function main() {
   // Parse CLI args
   const args = process.argv.slice(2);
-  let phasesToRun = [1, 2, 3, 4];
+  let phasesToRun = [1, 2, 3, 4, 5, 6];
   for (const arg of args) {
     if (arg.startsWith("--phase=")) {
       phasesToRun = [parseInt(arg.split("=")[1])];
@@ -743,6 +907,9 @@ async function main() {
   const checkpoint = loadCheckpoint();
   if (checkpoint) {
     state = checkpoint;
+    // Ensure phases 5 and 6 exist if checkpoint is from older version
+    if (!state.phases[5]) state.phases[5] = { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0, fetched_chars: 0 };
+    if (!state.phases[6]) state.phases[6] = { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0 };
     log(`[init] Resumed: ${JSON.stringify(state.phases, null, 2)}`);
   } else {
     state.job_id = `overnight-${Date.now()}`;
@@ -762,6 +929,12 @@ async function main() {
     if (phasesToRun.includes(4) && state.phases[4].status !== "complete") {
       await phase4_motionIntel();
     }
+    if (phasesToRun.includes(5) && state.phases[5].status !== "complete") {
+      await phase5_backfillFullText();
+    }
+    if (phasesToRun.includes(6) && state.phases[6].status !== "complete") {
+      await phase6_extractParentheticalsRerun();
+    }
 
     await generateReport();
   } catch (err) {
@@ -779,4 +952,13 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main, phase1_resolveClusterIds, phase2_extractParentheticals, phase3_deduplicate, phase4_motionIntel, generateReport };
+module.exports = {
+  main,
+  phase1_resolveClusterIds,
+  phase2_extractParentheticals,
+  phase3_deduplicate,
+  phase4_motionIntel,
+  phase5_backfillFullText,
+  phase6_extractParentheticalsRerun,
+  generateReport
+};
