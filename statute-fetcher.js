@@ -131,44 +131,115 @@ async function getCaliforniaStatute(code, section) {
   const cached = await _cacheGet(cacheKey);
   if (cached) return cached;
 
+  // leginfo uses a trailing period in URL: sectionNum=335.1.
   const url = `https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=${code}&sectionNum=${section}.`;
 
   try {
     const r = await axios.get(url, {
       timeout: TIMEOUT,
-      headers: { "User-Agent": "Mozilla/5.0 (TezLawResearch/1.0)" },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
     });
     const $ = cheerio.load(r.data);
 
-    // Extract section text - leginfo wraps content in #manylawsections
-    const $content = $("#manylawsections");
-    if (!$content.length) {
-      throw new Error("Section not found or page structure changed");
+    // Try multiple selectors — leginfo's HTML structure varies across pages
+    // and has changed multiple times over the years.
+    const SELECTORS = [
+      "#manylawsections",
+      "#codeLawSectionNoHead",
+      "#displayCodeSection",
+      "div[class*='lawsection']",
+      "div[class*='LawSection']",
+      ".law-section",
+      "#centerColumn",
+      "#contentBody",
+      "div.law-section-content",
+    ];
+
+    let $content = null;
+    let usedSelector = null;
+    for (const sel of SELECTORS) {
+      const $try = $(sel);
+      if ($try.length && $try.text().trim().length > 50) {
+        $content = $try;
+        usedSelector = sel;
+        break;
+      }
     }
 
-    // Get clean text — strip styling, preserve paragraph breaks
-    const text = $content
-      .find("div")
-      .map((i, el) => $(el).text().trim())
-      .get()
-      .filter(t => t.length > 0)
-      .join("\n\n")
-      .trim();
+    // If no specific container worked, try extracting from main content area
+    let text = "";
+    if (!$content) {
+      // Last resort: pull out any text near "section" markers
+      // Look for elements containing the section number
+      const fullText = $("body").text();
+      const sectionMatch = fullText.match(
+        new RegExp(
+          `(${section.replace(".", "\\.")}\\.?\\s*[\\s\\S]{50,3000}?)(?=\\n\\s*\\d+\\.\\s|$)`,
+          "m"
+        )
+      );
+      if (sectionMatch) {
+        text = sectionMatch[1].trim();
+        usedSelector = "regex_fallback";
+      } else {
+        // No content found at all
+        throw new Error(
+          `Could not locate section content. ` +
+          `Page returned ${r.data.length} bytes. ` +
+          `Tried selectors: ${SELECTORS.join(", ")}.`
+        );
+      }
+    } else {
+      // Extract clean paragraph text from the matched container
+      // First try paragraph elements, fall back to all child divs, fall back to raw text
+      const paragraphs = $content.find("p, div").map((i, el) => {
+        const t = $(el).text().trim().replace(/\s+/g, " ");
+        return t.length > 5 ? t : null;
+      }).get().filter(Boolean);
+
+      if (paragraphs.length) {
+        // Dedupe — sometimes nested divs cause same text to appear twice
+        const seen = new Set();
+        text = paragraphs.filter(p => {
+          if (seen.has(p)) return false;
+          seen.add(p);
+          return true;
+        }).join("\n\n");
+      } else {
+        text = $content.text().replace(/\s+/g, " ").trim();
+      }
+    }
+
+    if (!text || text.length < 20) {
+      throw new Error(
+        `Section content was empty or too short (${text.length} chars) ` +
+        `using selector "${usedSelector}". ` +
+        `Section may not exist or page format may have changed.`
+      );
+    }
 
     const result = {
       code,
-      code_name:   CA_CODES[code],
+      code_name:    CA_CODES[code],
       section,
-      title:       `Cal. ${CA_CODES[code]} § ${section}`,
-      text,
+      title:        `Cal. ${CA_CODES[code]} § ${section}`,
+      text:         text.substring(0, 50000),  // safety cap
       url,
-      source:      "leginfo.legislature.ca.gov",
-      fetched_at:  new Date().toISOString(),
+      source:       "leginfo.legislature.ca.gov",
+      selector_used: usedSelector,
+      fetched_at:   new Date().toISOString(),
     };
 
     await _cacheSet(cacheKey, "ca_leginfo", result);
     return result;
   } catch (err) {
+    if (err.response?.status === 404) {
+      throw new Error(`Section ${code} § ${section} not found on leginfo.`);
+    }
     throw new Error(`Failed to fetch Cal. ${code} § ${section}: ${err.message}`);
   }
 }
