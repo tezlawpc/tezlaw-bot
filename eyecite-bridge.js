@@ -1,97 +1,105 @@
 // ============================================================
-//  eyecite-bridge.js
-//  Node client for the Python eyecite Flask sidecar
+//  eyecite-bridge.js (subprocess version — SAME SERVICE)
 //
-//  ENV VAR REQUIRED:
-//    EYECITE_URL = "https://tezlaw-eyecite.onrender.com" (no trailing slash)
+//  Calls eyecite_runner.py as a child process. No separate Render
+//  web service. No EYECITE_URL env var. Just Python + Node in one box.
+//
+//  REQUIREMENTS:
+//    1. eyecite_runner.py must be in the same directory as this file
+//    2. Render build command must install eyecite:
+//         npm install && pip install --break-system-packages eyecite==2.6.5
 //
 //  USAGE:
 //    const ec = require("./eyecite-bridge");
-//    const citations = await ec.extract("Bush v. Gore, 531 U.S. 98 (2000).");
-//    const resolved  = await ec.resolve(briefText);
+//    const cites = await ec.extract("Bush v. Gore, 531 U.S. 98 (2000).");
 // ============================================================
 
-const axios = require("axios");
+const { spawn } = require("child_process");
+const path      = require("path");
 
-const EYECITE_URL = process.env.EYECITE_URL || "http://localhost:5000";
+const RUNNER_PATH = path.join(__dirname, "eyecite_runner.py");
+const PYTHON_BIN  = process.env.PYTHON_BIN || "python3";
 const TIMEOUT_MS  = 30000;
 
-async function _post(endpoint, body) {
-  try {
-    const r = await axios.post(`${EYECITE_URL}${endpoint}`, body, {
-      timeout: TIMEOUT_MS,
-      headers: { "Content-Type": "application/json" },
+/**
+ * Invoke the Python runner with a JSON request.
+ */
+function _run(request) {
+  return new Promise((resolve, reject) => {
+    const py = spawn(PYTHON_BIN, [RUNNER_PATH], {
+      stdio: ["pipe", "pipe", "pipe"],
     });
-    return r.data;
-  } catch (err) {
-    if (err.code === "ECONNREFUSED" || err.code === "ENOTFOUND") {
-      console.error(`[eyecite-bridge] Sidecar unreachable at ${EYECITE_URL}`);
-    }
-    throw new Error(`Eyecite sidecar error: ${err.message}`);
-  }
+
+    let stdout = "", stderr = "";
+    let timer = setTimeout(() => {
+      py.kill("SIGKILL");
+      reject(new Error(`Eyecite subprocess timed out after ${TIMEOUT_MS}ms`));
+    }, TIMEOUT_MS);
+
+    py.stdout.on("data", chunk => stdout += chunk.toString());
+    py.stderr.on("data", chunk => stderr += chunk.toString());
+
+    py.on("error", err => {
+      clearTimeout(timer);
+      reject(new Error(`Failed to spawn Python: ${err.message}`));
+    });
+
+    py.on("close", code => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        return reject(new Error(`eyecite_runner exited ${code}: ${stderr || stdout}`));
+      }
+      try {
+        const result = JSON.parse(stdout);
+        if (result.error) return reject(new Error(result.error));
+        resolve(result);
+      } catch (e) {
+        reject(new Error(`Invalid JSON from eyecite_runner: ${stdout.substring(0, 500)}`));
+      }
+    });
+
+    py.stdin.write(JSON.stringify(request));
+    py.stdin.end();
+  });
 }
 
-/**
- * Extract all citations from text.
- * @param {string} text - Raw text (PDF extraction, brief, opinion)
- * @param {string[]} cleanSteps - eyecite clean_text steps. Default: ['all_whitespace']
- *                                Common: 'html', 'all_whitespace', 'underscores', 'xml'
- * @returns {Promise<Array>} Array of citation objects
- */
+/** Extract all citations from text. */
 async function extract(text, cleanSteps = ["all_whitespace"]) {
   if (!text || !text.trim()) return [];
-  const data = await _post("/extract", { text, clean: cleanSteps });
-  if (data.error) throw new Error(data.error);
-  return data || [];
+  return await _run({ action: "extract", text, clean: cleanSteps });
 }
 
-/**
- * Extract + resolve short forms / supra / id back to full citations.
- * @param {string} text
- * @param {string[]} cleanSteps
- * @returns {Promise<Object>} { resolutions: [...] }
- */
+/** Resolve short forms / supra / id back to full citations. */
 async function resolve(text, cleanSteps = ["all_whitespace"]) {
   if (!text || !text.trim()) return { resolutions: [] };
-  return await _post("/resolve", { text, clean: cleanSteps });
+  return await _run({ action: "resolve", text, clean: cleanSteps });
 }
 
 /** Clean text using eyecite's clean_text helper. */
 async function clean(text, steps = ["all_whitespace"]) {
-  return await _post("/clean", { text, steps });
+  return await _run({ action: "clean", text, clean: steps });
 }
 
-/** Health check — returns true if sidecar is reachable. */
+/** Health check: verify Python + eyecite are available. */
 async function health() {
   try {
-    const r = await axios.get(`${EYECITE_URL}/health`, { timeout: 5000 });
-    return r.data?.ok === true;
-  } catch {
+    const r = await extract("Test v. Test, 1 U.S. 1 (2000).");
+    return Array.isArray(r) && r.length > 0;
+  } catch (err) {
+    console.error(`[eyecite-bridge] Health check failed: ${err.message}`);
     return false;
   }
 }
 
-/**
- * Filter to ONLY full case citations (excludes id, supra, short forms).
- * Most useful for cite-checking tasks where we want canonical citations.
- */
+/** Filter to ONLY full case citations. */
 async function extractFullCases(text, cleanSteps = ["all_whitespace"]) {
   const all = await extract(text, cleanSteps);
   return all.filter(c => c.type === "full_case");
 }
 
 /**
- * Detect negative-treatment signals in extracted citations by scanning
- * parenthetical text for Bluebook negative phrases.
- *
- * Returns citations enriched with `treatment` field:
- *   - "overrules"   — parenthetical says overruled / abrogated
- *   - "reverses"    — parenthetical says reversed / vacated
- *   - "criticizes"  — parenthetical says criticized / called into doubt
- *   - "distinguishes" — parenthetical says distinguished / declined to follow
- *   - "positive"    — parenthetical says followed / affirmed / reaffirmed
- *   - "neutral"     — parenthetical exists but is descriptive only
- *   - null          — no parenthetical
+ * Detect negative-treatment signals by scanning parenthetical text
+ * for Bluebook negative phrases.
  */
 function classifyTreatment(citations) {
   const NEG = {
@@ -107,7 +115,6 @@ function classifyTreatment(citations) {
   return citations.map(c => {
     const par = c.parenthetical || "";
     if (!par) return { ...c, treatment: null };
-
     for (const [k, rx] of Object.entries(NEG)) {
       if (rx.test(par)) return { ...c, treatment: k };
     }
