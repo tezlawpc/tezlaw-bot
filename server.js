@@ -31,6 +31,8 @@ const { initCitationTables }                      = require("./citations");
 const { initJudgeProfileTables, getScanStatus }   = require("./judge-scanner");
 const { initCacheTable, getCacheStats, purgeExpiredCache } = require("./answer-cache");
 
+// Research module is loaded inside admin.js so it inherits admin auth.
+
 const app = express();
 app.use(express.json()); app.use(express.urlencoded({ extended: true }));
 app.use(express.text({ type: "text/xml" }));
