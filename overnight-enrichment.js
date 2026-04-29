@@ -126,7 +126,20 @@ async function phase1_resolveClusterIds() {
   state.current_phase = 1;
   state.phases[1].status = "running";
 
-  // Count work remaining
+  // Step 1A: Citation-based lookup (fast, accurate via /citation-lookup/ endpoint)
+  await _phase1a_citationLookup();
+  if (!checkRuntimeBudget()) return;
+
+  // Step 1B: Name-only lookup via case search (slower, needs fuzzy matching)
+  await _phase1b_nameSearch();
+
+  state.phases[1].status = "complete";
+  saveCheckpoint();
+  log(`[phase1] ✅ Complete. Total processed: ${state.phases[1].processed}, errors: ${state.phases[1].errors}`);
+}
+
+async function _phase1a_citationLookup() {
+  // Count edges WITH a citation string
   const countQuery = await db.query(`
     SELECT COUNT(*) FROM citation_edges_internal
     WHERE cited_cluster_id IS NULL
@@ -134,14 +147,11 @@ async function phase1_resolveClusterIds() {
       AND cited_case_citation != ''
       AND id > $1
   `, [state.phases[1].last_id]);
-  state.phases[1].total = parseInt(countQuery.rows[0].count);
-  log(`[phase1] ${state.phases[1].total} edges need cluster resolution`);
+  const total = parseInt(countQuery.rows[0].count);
+  state.phases[1].total = (state.phases[1].total || 0) + total;
+  log(`[phase1a] ${total} edges have citations — using /citation-lookup/`);
 
-  if (state.phases[1].total === 0) {
-    state.phases[1].status = "complete";
-    saveCheckpoint();
-    return;
-  }
+  if (total === 0) return;
 
   let lastId = state.phases[1].last_id;
 
@@ -167,13 +177,10 @@ async function phase1_resolveClusterIds() {
 
     for (const row of batch.rows) {
       try {
-        // Build a citation string CourtListener understands
         const lookupText = `${row.cited_case_name || ""}, ${row.cited_case_citation}`.trim();
-
         const results = await cl.citationLookup(lookupText);
         await sleep(CITATION_LOOKUP_INTERVAL_MS);
 
-        // Find first result with a cluster match
         let clusterId = null;
         let normalizedCitation = null;
         if (Array.isArray(results)) {
@@ -194,10 +201,8 @@ async function phase1_resolveClusterIds() {
             WHERE id = $3
           `, [String(clusterId), normalizedCitation, row.id]);
         }
-        // (No-op if no cluster found — leave row unchanged)
       } catch (err) {
         state.phases[1].errors++;
-        log(`[phase1] Error on edge ${row.id}: ${err.message.substring(0, 100)}`);
       }
 
       state.phases[1].processed++;
@@ -206,14 +211,61 @@ async function phase1_resolveClusterIds() {
 
       if (state.phases[1].processed % SAVE_CHECKPOINT_EVERY === 0) {
         saveCheckpoint();
-        log(`[phase1] ${state.phases[1].processed}/${state.phases[1].total} processed (${state.phases[1].errors} errors)`);
+        log(`[phase1a] ${state.phases[1].processed} processed (${state.phases[1].errors} errors)`);
       }
     }
   }
+}
 
-  state.phases[1].status = "complete";
-  saveCheckpoint();
-  log(`[phase1] ✅ Complete. Processed ${state.phases[1].processed}, errors: ${state.phases[1].errors}`);
+async function _phase1b_nameSearch() {
+  // Edges WITHOUT citations — use search endpoint with case name
+  // De-dupe by case name first to avoid re-searching the same name
+  const distinctNames = await db.query(`
+    SELECT cited_case_name, MIN(id) AS first_id, COUNT(*) AS edge_count
+    FROM citation_edges_internal
+    WHERE cited_cluster_id IS NULL
+      AND (cited_case_citation IS NULL OR cited_case_citation = '')
+      AND cited_case_name IS NOT NULL
+      AND length(cited_case_name) > 5
+    GROUP BY cited_case_name
+    ORDER BY edge_count DESC
+  `);
+  log(`[phase1b] ${distinctNames.rows.length} unique case names need search-based resolution`);
+
+  let processed = 0;
+  for (const row of distinctNames.rows) {
+    if (!checkRuntimeBudget()) return;
+
+    try {
+      // Search caselaw by case name
+      const searchResults = await cl.searchOpinions({
+        q: `caseName:"${row.cited_case_name.replace(/"/g, "")}"`,
+        page_size: 3,
+      });
+      await sleep(OPINION_FETCH_INTERVAL_MS);
+
+      const top = (searchResults.results || [])[0];
+      if (top && (top.cluster_id || top.id)) {
+        const clusterId = String(top.cluster_id || top.id);
+        // Update ALL edges with this case name
+        await db.query(`
+          UPDATE citation_edges_internal
+          SET cited_cluster_id = $1
+          WHERE cited_case_name = $2
+            AND cited_cluster_id IS NULL
+        `, [clusterId, row.cited_case_name]);
+      }
+    } catch (err) {
+      state.phases[1].errors++;
+    }
+
+    processed++;
+    state.phases[1].processed++;
+    if (processed % 10 === 0) {
+      saveCheckpoint();
+      log(`[phase1b] ${processed}/${distinctNames.rows.length} unique names searched`);
+    }
+  }
 }
 
 // ============================================================
