@@ -267,6 +267,43 @@ router.get("/statute/ca/codes", (req, res) => {
   res.json(statutes.CA_CODES);
 });
 
+/**
+ * GET /statute/ca/:code/:section/debug
+ * Returns raw HTML preview when normal fetch fails — for troubleshooting.
+ */
+router.get("/statute/ca/:code/:section/debug", async (req, res) => {
+  const { code, section } = req.params;
+  const url = `https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=${code.toUpperCase()}&sectionNum=${section}.`;
+  try {
+    const axios = require("axios");
+    const r = await axios.get(url, {
+      timeout: 30000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+      },
+    });
+    const cheerio = require("cheerio");
+    const $ = cheerio.load(r.data);
+    const ids = [];
+    $("[id]").each((i, el) => {
+      if (i < 50) ids.push($(el).attr("id"));
+    });
+    res.json({
+      url,
+      status:        r.status,
+      content_length: r.data.length,
+      first_2000_chars: r.data.substring(0, 2000),
+      title:         $("title").text(),
+      h1:            $("h1").text(),
+      element_ids:   ids,
+      body_text_length: $("body").text().trim().length,
+      body_first_500: $("body").text().substring(0, 500),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, url });
+  }
+});
+
 // ============================================================
 //  JUDGE CROSS-REFERENCE (THE MOAT)
 // ============================================================
