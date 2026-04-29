@@ -216,31 +216,28 @@ async function getCaliforniaStatute(code, section) {
 
 /**
  * Strip breadcrumb / navigation noise from leginfo content.
- * Removes things like "PART 2. OF CIVIL ACTIONS [307 - 1062.34] ( Part 2 enacted 1872. )"
+ *
+ * leginfo serves text inline (no newlines between breadcrumbs and statute text).
+ * The breadcrumb chain always ends with a parenthetical like:
+ *   "( Part 2 enacted 1872. )" or "( Chapter 3 added 1980. )"
+ *
+ * Strategy: greedy match from start of string to the LAST such parenthetical,
+ * then strip everything matched. What remains is the actual statute text.
+ *
+ * Removes patterns like:
+ *   "Code of Civil Procedure - CCP"
+ *   "PART 2. OF CIVIL ACTIONS [307 - 1062.34] ( Part 2 enacted 1872. )"
+ *   "TITLE 2. OF THE TIME OF COMMENCING CIVIL ACTIONS [312 - 366.3] ( Title 2 enacted 1872. )"
+ *   "CHAPTER 3. The Time of Commencing Actions Other Than for the Recovery of Real Property [335 - 349.4] ( Chapter 3 enacted 1872. )"
  */
 function _stripBreadcrumbs(text) {
   return text
-    // Remove "PART X." / "TITLE X." / "CHAPTER X." / "DIVISION X." breadcrumb headers
-    .split(/\n+/)
-    .filter(line => {
-      const t = line.trim();
-      if (!t) return false;
-      // Drop lines that are pure breadcrumbs
-      if (/^(?:PART|TITLE|CHAPTER|DIVISION|ARTICLE|SUBDIVISION|SECTION)\s+\d+(?:\.\d+)?\.\s+/i.test(t)
-          && /\[\s*\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?\s*\]/.test(t)) {
-        return false;
-      }
-      // Drop standalone "( Part X enacted YYYY. )" lines
-      if (/^\(\s*(?:Part|Title|Chapter|Division|Article)\s+\d+\s+(?:added|enacted|amended|repealed)/i.test(t)) {
-        return false;
-      }
-      // Drop lines that are JUST the code name
-      if (/^[A-Z][A-Za-z\s]+(?:Code|Procedure)\s*-\s*[A-Z]+$/.test(t)) {
-        return false;
-      }
-      return true;
-    })
-    .join("\n\n");
+    .replace(
+      /^[\s\S]*\(\s*(?:Part|Title|Chapter|Division|Article|Subdivision)\s+\d+(?:\.\d+)?\s+(?:enacted|added|amended|repealed)[^)]*\)\s*/i,
+      ""
+    )
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
