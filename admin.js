@@ -1040,6 +1040,9 @@ function dashboardHtml() {
   <div class="nav-item" onclick="showPage('analytics')" id="nav-analytics">
     <span class="icon">🤖</span><span>Analytics</span>
   </div>
+  <div class="nav-item" onclick="showPage('research')" id="nav-research">
+    <span class="icon">🔍</span><span>Research</span>
+  </div>
   <div class="nav-item" onclick="showPage('poster')" id="nav-poster">
     <span class="icon">✍️</span><span>Manual Post</span>
   </div>
@@ -1066,9 +1069,6 @@ function dashboardHtml() {
   </div>
   <div class="nav-item" onclick="showPage('drip')" id="nav-drip">
     <span class="icon">💧</span><span>Drip Campaigns</span>
-  </div>
-  <div class="nav-item" onclick="showPage('research')" id="nav-research">
-    <span class="icon">🔍</span><span>Research</span>
   </div>
 </div>
 
