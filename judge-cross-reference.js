@@ -341,93 +341,117 @@ async function predictionSnapshot(judgeName, caseRef, motionType = null) {
 }
 
 // ============================================================
-//  6. ETL — BACKFILL citation_edges_internal FROM judge_rulings.cited_cases
-//  Run once to populate the moat table from existing JSONB.
+//  6. ETL — BACKFILL citation_edges_internal FROM judge_insights.cited_cases
+//  Run once to populate the moat table from existing data.
 // ============================================================
 
 /**
- * One-time backfill: flatten judge_rulings.cited_cases JSONB into
+ * One-time backfill: flatten judge_insights.cited_cases ARRAY into
  * citation_edges_internal table.
  *
- * cited_cases JSONB shape (from existing extraction):
- *   [
- *     { case_name, citation, parenthetical?, treatment?, pin_cite? },
- *     ...
- *   ]
+ * judge_insights schema (per Layer 1):
+ *   - judge_profile_id, judge_name, court, motion_type
+ *   - cited_cases    text[]   ← array of citation strings
+ *   - cited_statutes text[]
+ *   - accepted_args  text[]
  *
- * Use: node -e "require('./judge-cross-reference').backfillCitationEdges()"
+ * cited_cases entries are strings like:
+ *   "Nahrvani v. Gonzales, 399 F.3d 1148 (9th Cir. 2005)"
+ *   "Mendez-Gutierrez v. Ashcroft"
+ *
+ * Use: node judge-cross-reference.js --backfill
  */
 async function backfillCitationEdges({ batchSize = 500, startFrom = 0 } = {}) {
-  console.log(`[backfill] Starting citation edges backfill from ruling_id > ${startFrom}`);
+  console.log(`[backfill] Starting citation edges backfill from insight_id > ${startFrom}`);
 
-  // Get total count
+  // Get total count of insights with citations
   const countResult = await db.query(
-    `SELECT COUNT(*) FROM judge_rulings WHERE cited_cases IS NOT NULL AND id > $1`,
+    `SELECT COUNT(*) FROM judge_insights
+     WHERE cited_cases IS NOT NULL
+       AND array_length(cited_cases, 1) > 0
+       AND id > $1`,
     [startFrom]
   );
   const total = parseInt(countResult.rows[0].count);
-  console.log(`[backfill] ${total} rulings with cited_cases to process`);
+  console.log(`[backfill] ${total} judge_insights rows with citations to process`);
+
+  if (total === 0) {
+    console.log(`[backfill] No data to process. Exiting.`);
+    return { processed: 0, edgesCreated: 0 };
+  }
 
   let processed = 0;
   let edgesCreated = 0;
   let lastId = startFrom;
 
   while (processed < total) {
-    const rulings = await db.query(`
-      SELECT r.id, r.judge_profile_id, r.judge_name, r.court, r.case_name, r.cited_cases
-      FROM judge_rulings r
-      WHERE r.cited_cases IS NOT NULL AND r.id > $1
-      ORDER BY r.id ASC LIMIT $2
+    const insights = await db.query(`
+      SELECT id, judge_profile_id, judge_name, court, motion_type, cited_cases
+      FROM judge_insights
+      WHERE cited_cases IS NOT NULL
+        AND array_length(cited_cases, 1) > 0
+        AND id > $1
+      ORDER BY id ASC LIMIT $2
     `, [lastId, batchSize]);
 
-    if (!rulings.rows.length) break;
+    if (!insights.rows.length) break;
 
-    for (const ruling of rulings.rows) {
-      const cites = Array.isArray(ruling.cited_cases) ? ruling.cited_cases : [];
-      for (const c of cites) {
-        if (!c || typeof c !== "object") continue;
+    for (const ins of insights.rows) {
+      const cites = ins.cited_cases || [];
 
-        const citation = c.citation || c.cite || "";
-        const caseName = c.case_name || c.caseName || c.name || "";
-        if (!citation && !caseName) continue;
+      for (const citeStr of cites) {
+        if (!citeStr || typeof citeStr !== "string") continue;
+        const trimmed = citeStr.trim();
+        if (trimmed.length < 4) continue;
 
-        const normalized = (citation || caseName).toLowerCase().replace(/\s+/g, " ").trim();
+        // Parse "Case Name, ### Reporter ### (Court Year)" pattern
+        // Two main shapes seen in the data:
+        //   Full:    "Nahrvani v. Gonzales, 399 F.3d 1148 (9th Cir. 2005)"
+        //   Short:   "Mendez-Gutierrez v. Ashcroft"
+        const fullMatch = trimmed.match(/^(.+?),\s*(\d+\s+[A-Za-z.]+\s+\d+)\s*(?:\(([^)]+)\))?\s*$/);
+
+        let caseName, citation;
+        if (fullMatch) {
+          caseName = fullMatch[1].trim();
+          citation = fullMatch[2].trim();
+        } else {
+          // Short form — just the case name
+          caseName = trimmed;
+          citation = null;
+        }
+
+        const normalized = trimmed.toLowerCase().replace(/\s+/g, " ").trim();
 
         try {
           await db.query(`
             INSERT INTO citation_edges_internal
-              (ruling_id, judge_profile_id, judge_name, court, case_name,
+              (ruling_id, judge_profile_id, judge_name, court,
                cited_case_name, cited_case_citation, cited_normalized,
                parenthetical, treatment, pin_cite)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES (NULL, $1, $2, $3, $4, $5, $6, NULL, NULL, NULL)
           `, [
-            ruling.id,
-            ruling.judge_profile_id,
-            ruling.judge_name,
-            ruling.court,
-            ruling.case_name,
-            caseName || null,
-            citation || null,
+            ins.judge_profile_id,
+            ins.judge_name,
+            ins.court,
+            caseName,
+            citation,
             normalized,
-            c.parenthetical || c.parens || null,
-            c.treatment || null,
-            c.pin_cite || c.pinCite || null,
           ]);
           edgesCreated++;
         } catch (err) {
           // Skip individual edge failures; keep going
         }
       }
-      lastId = ruling.id;
+      lastId = ins.id;
       processed++;
     }
 
-    if (processed % 100 === 0 || processed >= total) {
-      console.log(`[backfill] ${processed}/${total} rulings processed, ${edgesCreated} edges created`);
+    if (processed % 50 === 0 || processed >= total) {
+      console.log(`[backfill] ${processed}/${total} insights processed, ${edgesCreated} edges created`);
     }
   }
 
-  console.log(`[backfill] ✅ Done. ${processed} rulings, ${edgesCreated} edges created.`);
+  console.log(`[backfill] ✅ Done. ${processed} insights, ${edgesCreated} edges created.`);
   return { processed, edgesCreated };
 }
 
