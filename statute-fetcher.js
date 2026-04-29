@@ -32,13 +32,20 @@ async function _cacheGet(key) {
 
 async function _cacheSet(key, source, payload, ttlHours = DEFAULT_TTL) {
   try {
+    let payloadJson;
+    try {
+      payloadJson = JSON.stringify(payload, (_, v) =>
+        typeof v === "bigint" ? v.toString() : (v === undefined ? null : v)
+      );
+    } catch { return; }
+
     await db.query(
       `INSERT INTO research_cache (cache_key, source, payload, expires_at)
-       VALUES ($1, $2, $3, NOW() + ($4 || ' hours')::interval)
+       VALUES ($1, $2, $3::jsonb, NOW() + ($4 || ' hours')::interval)
        ON CONFLICT (cache_key) DO UPDATE
        SET payload = EXCLUDED.payload,
            fetched_at = NOW(), expires_at = EXCLUDED.expires_at, hit_count = 0`,
-      [key, source, payload, String(ttlHours)]
+      [key, source, payloadJson, String(ttlHours)]
     );
   } catch (err) { /* non-fatal */ }
 }
