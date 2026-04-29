@@ -21,6 +21,15 @@ const path       = require("path");
 const db         = require("./db");
 // nodemailer loaded lazily in sendAuthEmail to avoid crash if not installed
 
+// Research module (Phase 1) — optional, gracefully degrades if not deployed
+let researchRouter = null;
+try {
+  researchRouter = require("./research-engine");
+  console.log("[admin] ✅ Research module loaded");
+} catch (err) {
+  console.log("[admin] ⚠️  Research module not available:", err.message);
+}
+
 const router = express.Router();
 
 // ── Config ────────────────────────────────────────────────
@@ -195,6 +204,12 @@ async function savePrompt(prompt) {
 }
 
 // ── Routes ────────────────────────────────────────────────
+
+// Research module — mounts at /admin/api/research/*
+// Inherits admin auth via requireAuth middleware
+if (researchRouter) {
+  router.use("/api/research", requireAuth, researchRouter);
+}
 
 // Health check — confirms admin.js loaded correctly
 router.get("/health", (req, res) => {
