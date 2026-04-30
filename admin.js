@@ -1423,132 +1423,318 @@ function dashboardHtml() {
     </div>
 
     <!-- Research sub-tabs -->
-    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
-      <button class="action-btn" id="rtab-caselaw" onclick="showResearchTab('caselaw')" style="font-size:12px;padding:8px 14px">⚖️ Case Law</button>
-      <button class="action-btn" id="rtab-statutes" onclick="showResearchTab('statutes')" style="font-size:12px;padding:8px 14px;opacity:.6">📚 CA Statutes</button>
-      <button class="action-btn" id="rtab-immigration" onclick="showResearchTab('immigration')" style="font-size:12px;padding:8px 14px;opacity:.6">🛂 Immigration</button>
-      <button class="action-btn" id="rtab-verify" onclick="showResearchTab('verify')" style="font-size:12px;padding:8px 14px;opacity:.6">✅ Verify Citation</button>
-      <button class="action-btn" id="rtab-cache" onclick="showResearchTab('cache')" style="font-size:12px;padding:8px 14px;opacity:.6">⚡ Answer Cache</button>
+    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;border-bottom:2px solid #e0d8c8;padding-bottom:12px">
+      <button class="action-btn" id="rtab-cases" onclick="showResearchTab('cases')" style="font-size:12px;padding:8px 14px">⚖️ Cases</button>
+      <button class="action-btn" id="rtab-statutes" onclick="showResearchTab('statutes')" style="font-size:12px;padding:8px 14px;opacity:.6">📚 Statutes</button>
+      <button class="action-btn" id="rtab-verify" onclick="showResearchTab('verify')" style="font-size:12px;padding:8px 14px;opacity:.6">✅ Verify</button>
+      <button class="action-btn" id="rtab-judge" onclick="showResearchTab('judge')" style="font-size:12px;padding:8px 14px;opacity:.6">📊 Judge Intel</button>
+      <button class="action-btn" id="rtab-saved" onclick="showResearchTab('saved')" style="font-size:12px;padding:8px 14px;opacity:.6">⭐ Saved</button>
     </div>
 
-    <!-- Case Law Search -->
-    <div id="rsub-caselaw">
-      <div class="card">
-        <h3>⚖️ California Case Law Search</h3>
-        <p style="font-size:12px;color:#666;margin-bottom:14px">Powered by CourtListener REST API v4 — Free Law Project | ~9M decisions</p>
-        <div style="display:flex;gap:10px;margin-bottom:12px">
-          <input id="cl-query" placeholder="e.g. demurrer breach of contract, unlawful detainer notice, asylum credibility..."
-            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
-            onkeydown="if(event.key==='Enter') runAdminCLSearch()">
-          <button class="action-btn" onclick="runAdminCLSearch()">Search</button>
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- TAB 1: CASE LAW SEARCH                                  -->
+    <!-- Left: search controls + results | Right: case detail    -->
+    <!-- Plus: judge intel right rail when case is selected      -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div id="rsub-cases">
+      <div style="display:grid;grid-template-columns:1fr;gap:14px" id="cases-layout">
+
+        <!-- Search panel -->
+        <div class="card" id="cases-search-panel">
+          <h3>⚖️ Caselaw Search</h3>
+          <p style="font-size:11px;color:#666;margin-bottom:12px">CourtListener REST v4 with caching and judge cross-reference</p>
+
+          <div style="display:flex;gap:10px;margin-bottom:10px">
+            <input id="cs-query" placeholder="e.g. asylum nexus 9th circuit, demurrer breach contract..."
+              style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
+              onkeydown="if(event.key==='Enter') runCaseSearch()">
+            <button class="action-btn" onclick="runCaseSearch()">Search</button>
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:11px">
+            <select id="cs-area" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:11px">
+              <option value="">All practice areas</option>
+              <option value="immigration">Immigration (BIA + 9th)</option>
+              <option value="pi">Personal Injury (CA)</option>
+              <option value="employment">Employment</option>
+              <option value="real_estate">Real Estate</option>
+              <option value="estate">Estate / Probate</option>
+              <option value="public_entity">Public Entity / SEC</option>
+            </select>
+            <select id="cs-court-level" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:11px">
+              <option value="">Any court level</option>
+              <option value="scotus">SCOTUS only</option>
+              <option value="federal_appeals">Federal Appeals (all circuits)</option>
+              <option value="federal_district">Federal District (CA)</option>
+              <option value="california_state">California state courts</option>
+              <option value="immigration">BIA + AG</option>
+            </select>
+            <input id="cs-date-from" type="date" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:11px" placeholder="From">
+            <input id="cs-date-to" type="date" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:11px" placeholder="To">
+            <input id="cs-judge" placeholder="Judge name (optional)" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:11px;width:160px">
+          </div>
+
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+            <span style="font-size:10px;color:#888;align-self:center">Quick:</span>
+            ${['asylum nexus particular social group','adverse credibility BIA','demurrer breach of contract','unlawful detainer notice','anti-SLAPP motion','VAWA self petition','dog bite strict liability'].map(q =>
+              `<span onclick="document.getElementById('cs-query').value='${q.replace(/'/g, "\\'")}';runCaseSearch()" style="font-size:10px;background:#f0ede6;padding:3px 8px;border-radius:10px;cursor:pointer;color:#0C1C36">${q}</span>`
+            ).join('')}
+          </div>
+
+          <div id="cs-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Searching...</div>
+          <div id="cs-results"></div>
         </div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-          <select id="cl-area" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px">
-            <option value="cal,calctapp_1st,calctapp_2nd,calctapp_3rd,calctapp_4th,calctapp_5th,calctapp_6th">California Civil</option>
-            <option value="ca9,bia">Immigration (9th/BIA)</option>
-            <option value="ca9,cacd,caed">Federal (CA Districts)</option>
-            <option value="cal,calctapp_1st,calctapp_2nd,calctapp_3rd,calctapp_4th,calctapp_5th,calctapp_6th,ca9,bia">All Courts</option>
-          </select>
-          <select id="cl-date" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px">
-            <option value="2015-01-01">Last 10 years</option>
-            <option value="2010-01-01" selected>Last 15 years</option>
-            <option value="2000-01-01">Last 25 years</option>
-          </select>
-          <select id="cl-sort" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px">
-            <option value="score">Relevance</option>
-            <option value="-dateFiled">Most Recent</option>
-          </select>
+
+        <!-- Case detail (initially hidden, shown when result clicked) -->
+        <div id="case-detail-panel" style="display:none">
+          <div style="display:grid;grid-template-columns:1fr 320px;gap:14px">
+            <!-- Left: case content -->
+            <div class="card">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+                <div>
+                  <h3 id="cd-case-name" style="margin-bottom:4px"></h3>
+                  <div id="cd-citation" style="font-size:12px;color:#B79C62;background:rgba(183,156,98,.1);display:inline-block;padding:3px 10px;border-radius:4px;margin-bottom:6px"></div>
+                  <div id="cd-meta" style="font-size:11px;color:#888"></div>
+                </div>
+                <button onclick="closeCaseDetail()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#888">✕</button>
+              </div>
+
+              <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+                <button class="action-btn" onclick="saveCurrentCase()" style="font-size:11px;padding:6px 12px">⭐ Save</button>
+                <button class="action-btn" onclick="useInBrief()" style="font-size:11px;padding:6px 12px">📝 Use in Brief</button>
+                <button class="action-btn" onclick="copyCurrentCite()" style="font-size:11px;padding:6px 12px;background:#f0ede6;color:#0C1C36">📋 Copy Cite</button>
+                <a id="cd-cl-link" href="#" target="_blank" class="action-btn" style="font-size:11px;padding:6px 12px;background:#0C1C36;color:#B79C62;text-decoration:none">🔗 CourtListener →</a>
+              </div>
+
+              <div id="cd-fulltext" style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:6px;padding:14px;max-height:500px;overflow-y:auto;font-size:13px;line-height:1.6;color:#2a2a2a;font-family:Georgia,serif"></div>
+
+              <h4 style="margin-top:18px;margin-bottom:8px;color:#0C1C36;font-size:13px">📚 Authorities Cited</h4>
+              <div id="cd-authorities" style="font-size:12px;color:#555"></div>
+
+              <h4 style="margin-top:18px;margin-bottom:8px;color:#0C1C36;font-size:13px">📈 Cited By</h4>
+              <div id="cd-citedby" style="font-size:12px;color:#555"></div>
+            </div>
+
+            <!-- Right rail: Judge Intelligence (THE MOAT, always visible) -->
+            <div>
+              <div class="card" style="background:linear-gradient(180deg,#0C1C36 0%, #1a2c4a 100%);color:#f5f0e0">
+                <h3 style="color:#B79C62;font-size:14px;margin-bottom:6px">📊 Judge Intelligence</h3>
+                <p style="font-size:10px;color:rgba(245,240,224,.7);margin-bottom:14px">Firm-curated insights from your moat database</p>
+
+                <div style="margin-bottom:14px">
+                  <div style="font-size:10px;color:rgba(245,240,224,.6);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Pick judge to analyze</div>
+                  <input id="ji-judge-name" placeholder="e.g. Wardlaw, Malphrus" list="ji-judge-options"
+                    style="width:100%;padding:8px;border:none;border-radius:4px;font-size:13px;background:rgba(255,255,255,.95);color:#0C1C36"
+                    onkeydown="if(event.key==='Enter') runJudgeIntel()">
+                  <datalist id="ji-judge-options"></datalist>
+                </div>
+
+                <button onclick="runJudgeIntel()" style="width:100%;background:#B79C62;color:#0C1C36;border:none;padding:8px;border-radius:4px;font-weight:bold;font-size:12px;cursor:pointer;margin-bottom:12px">Analyze Against Current Case</button>
+
+                <div id="ji-results" style="font-size:11px;color:#f5f0e0">
+                  <div style="background:rgba(255,255,255,.06);border-radius:4px;padding:10px;font-size:11px;line-height:1.5;color:rgba(245,240,224,.7)">
+                    Type a judge name above to see:<br>
+                    <ul style="margin:6px 0 0 14px;padding:0">
+                      <li>Has this judge cited this case before?</li>
+                      <li>Top cases this judge relies on</li>
+                      <li>How this judge typically treats this authority</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-          ${['demurrer breach of contract','unlawful detainer 3-day notice','comparative negligence personal injury','asylum credibility BIA','voluntary departure 9th circuit','living trust probate California','anti-SLAPP motion','non-compete void California'].map(q =>
-            `<span onclick="document.getElementById('cl-query').value='${q}';runAdminCLSearch()"
-              style="font-size:11px;background:#f0ede6;padding:4px 10px;border-radius:12px;cursor:pointer;color:#0C1C36">${q}</span>`
-          ).join('')}
-        </div>
-        <div id="cl-warning" style="display:none;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:10px;font-size:12px;margin-bottom:12px;color:#856404">
-          ⚠️ Always verify citations in vLex Fastcase before filing. CourtListener does not provide citator/good-law status.
-        </div>
-        <div id="cl-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Searching CourtListener...</div>
-        <div id="cl-results"></div>
+
       </div>
     </div>
 
-    <!-- CA Statutes -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- TAB 2: STATUTES                                         -->
+    <!-- ═══════════════════════════════════════════════════════ -->
     <div id="rsub-statutes" style="display:none">
       <div class="card">
-        <h3>📚 California Statute Lookup</h3>
-        <p style="font-size:12px;color:#666;margin-bottom:14px">Official text from leginfo.legislature.ca.gov — public domain under Gov. Code §10248.5</p>
-        <div style="display:flex;gap:10px;margin-bottom:14px">
-          <input id="stat-query" placeholder="e.g. CCP 430.10, Civil Code 1714, demurrer, unlawful detainer..."
-            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
-            onkeydown="if(event.key==='Enter') runAdminStatLookup()">
-          <button class="action-btn" onclick="runAdminStatLookup()">Look Up</button>
+        <h3>📚 Statute Lookup</h3>
+        <p style="font-size:11px;color:#666;margin-bottom:14px">California codes (leginfo + Justia mirror) · U.S. Code · CFR · Federal Register</p>
+
+        <div style="display:flex;gap:6px;margin-bottom:12px;font-size:12px">
+          <button onclick="setStatuteType('ca')" id="stype-ca" class="action-btn" style="padding:6px 12px;font-size:11px">CA Code</button>
+          <button onclick="setStatuteType('usc')" id="stype-usc" class="action-btn" style="padding:6px 12px;font-size:11px;background:#f0ede6;color:#0C1C36">U.S. Code</button>
+          <button onclick="setStatuteType('cfr')" id="stype-cfr" class="action-btn" style="padding:6px 12px;font-size:11px;background:#f0ede6;color:#0C1C36">CFR</button>
+          <button onclick="setStatuteType('fr')" id="stype-fr" class="action-btn" style="padding:6px 12px;font-size:11px;background:#f0ede6;color:#0C1C36">Fed Register</button>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-          ${[['CCP','430.10'],['CCP','430.41'],['CCP','437c'],['CCP','335.1'],['CCP','1161'],['CIV','1946.2'],['CIV','3294'],['PROB','15200'],['BPC','16600'],['GOV','911.2']].map(([c,s]) =>
-            `<span onclick="adminStatLookup('${c}','${s}')"
-              style="font-size:11px;background:#f0ede6;padding:4px 10px;border-radius:12px;cursor:pointer;color:#0C1C36">${c} §${s}</span>`
-          ).join('')}
+
+        <!-- CA Code form -->
+        <div id="sform-ca">
+          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+            <select id="ca-code" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;min-width:200px">
+              <option value="CCP">CCP — Code of Civil Procedure</option>
+              <option value="CIV">CIV — Civil Code</option>
+              <option value="EVID">EVID — Evidence Code</option>
+              <option value="PEN">PEN — Penal Code</option>
+              <option value="PROB">PROB — Probate Code</option>
+              <option value="FAM">FAM — Family Code</option>
+              <option value="LAB">LAB — Labor Code</option>
+              <option value="GOV">GOV — Government Code</option>
+              <option value="BPC">BPC — Business & Professions</option>
+              <option value="VEH">VEH — Vehicle Code</option>
+              <option value="HSC">HSC — Health & Safety</option>
+              <option value="WIC">WIC — Welfare & Institutions</option>
+              <option value="CORP">CORP — Corporations</option>
+              <option value="INS">INS — Insurance</option>
+              <option value="UIC">UIC — Unemployment Insurance</option>
+              <option value="EDC">EDC — Education</option>
+              <option value="PUC">PUC — Public Utilities</option>
+              <option value="RTC">RTC — Revenue & Taxation</option>
+            </select>
+            <input id="ca-section" placeholder="Section (e.g. 335.1)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:140px">
+            <button class="action-btn" onclick="lookupStatute()">Look up</button>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <span style="font-size:10px;color:#888;align-self:center">Quick:</span>
+            ${[['CCP','335.1'],['CCP','425.16'],['CCP','430.10'],['CCP','437c'],['CIV','3342'],['CIV','3294'],['CIV','1714'],['CIV','1946.2'],['PROB','16002'],['PEN','273.5'],['BPC','16600'],['LAB','2802']].map(([c,s]) =>
+              `<span onclick="document.getElementById('ca-code').value='${c}';document.getElementById('ca-section').value='${s}';lookupStatute()" style="font-size:10px;background:#f0ede6;padding:3px 8px;border-radius:10px;cursor:pointer;color:#0C1C36">${c} §${s}</span>`
+            ).join('')}
+          </div>
         </div>
-        <div id="stat-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Fetching from leginfo.ca.gov...</div>
-        <div id="stat-results"></div>
+
+        <!-- USC form -->
+        <div id="sform-usc" style="display:none">
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <input id="usc-title" placeholder="Title (e.g. 8)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:120px">
+            <input id="usc-section" placeholder="Section (e.g. 1158)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:160px">
+            <button class="action-btn" onclick="lookupStatute()">Look up</button>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <span style="font-size:10px;color:#888;align-self:center">Quick:</span>
+            ${[['8','1158','asylum'],['8','1229a','removal proceedings'],['8','1101','definitions'],['28','1331','federal question jx'],['42','1983','civil rights']].map(([t,s,desc]) =>
+              `<span onclick="document.getElementById('usc-title').value='${t}';document.getElementById('usc-section').value='${s}';lookupStatute()" style="font-size:10px;background:#f0ede6;padding:3px 8px;border-radius:10px;cursor:pointer;color:#0C1C36" title="${desc}">${t} USC § ${s}</span>`
+            ).join('')}
+          </div>
+        </div>
+
+        <!-- CFR form -->
+        <div id="sform-cfr" style="display:none">
+          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+            <input id="cfr-title" placeholder="Title (e.g. 8)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:120px">
+            <input id="cfr-part" placeholder="Part (e.g. 208)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:120px">
+            <input id="cfr-section" placeholder="Section (optional)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:160px">
+            <button class="action-btn" onclick="lookupStatute()">Look up</button>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <span style="font-size:10px;color:#888;align-self:center">Quick:</span>
+            ${[['8','208','asylum'],['8','1003','BIA appeals'],['8','236','custody'],['8','1240','removal'],['8','274a','employment'],['28','1','federal procedure']].map(([t,p,desc]) =>
+              `<span onclick="document.getElementById('cfr-title').value='${t}';document.getElementById('cfr-part').value='${p}';document.getElementById('cfr-section').value='';lookupStatute()" style="font-size:10px;background:#f0ede6;padding:3px 8px;border-radius:10px;cursor:pointer;color:#0C1C36" title="${desc}">${t} CFR ${p}</span>`
+            ).join('')}
+          </div>
+        </div>
+
+        <!-- Federal Register form -->
+        <div id="sform-fr" style="display:none">
+          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+            <input id="fr-query" placeholder="Search term" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;flex:1"
+              onkeydown="if(event.key==='Enter') lookupStatute()">
+            <select id="fr-type" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px">
+              <option value="">All types</option>
+              <option value="RULE">Final Rules</option>
+              <option value="PRORULE">Proposed Rules</option>
+              <option value="NOTICE">Notices</option>
+            </select>
+            <input id="fr-from" type="date" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px">
+            <button class="action-btn" onclick="lookupStatute()">Search</button>
+          </div>
+        </div>
+
+        <div id="stat-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Fetching...</div>
+        <div id="stat-result" style="margin-top:14px"></div>
       </div>
     </div>
 
-    <!-- Immigration Research -->
-    <div id="rsub-immigration" style="display:none">
-      <div class="card">
-        <h3>🛂 Immigration Research — 9th Circuit + BIA</h3>
-        <div style="display:flex;gap:10px;margin-bottom:12px">
-          <input id="imm-query" placeholder="e.g. asylum credibility adverse findings, CAT deferral, voluntary departure bond..."
-            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
-            onkeydown="if(event.key==='Enter') runAdminImmSearch()">
-          <button class="action-btn" onclick="runAdminImmSearch()">Search</button>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-          ${['asylum one year bar exception','BIA adverse credibility inconsistencies','voluntary departure bond deadline','motion to reopen in absentia','withholding removal PSG','CAT deferral torture','BIA Lozada IAC','9th circuit PFR jurisdiction','VAWA self petition','cancellation of removal continuous presence'].map(q =>
-            `<span onclick="document.getElementById('imm-query').value='${q}';runAdminImmSearch()"
-              style="font-size:11px;background:#f0ede6;padding:4px 10px;border-radius:12px;cursor:pointer;color:#0C1C36">${q}</span>`
-          ).join('')}
-        </div>
-        <div id="imm-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Searching 9th Circuit + BIA...</div>
-        <div id="imm-results"></div>
-      </div>
-    </div>
-
-    <!-- Citation Verifier -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- TAB 3: VERIFY CITATION                                  -->
+    <!-- ═══════════════════════════════════════════════════════ -->
     <div id="rsub-verify" style="display:none">
       <div class="card">
         <h3>✅ Citation Verifier</h3>
-        <p style="font-size:12px;color:#666;margin-bottom:14px">Anti-hallucination check — confirm any case citation exists before using in filings</p>
-        <div style="display:flex;gap:10px;margin-bottom:12px">
-          <input id="cite-query" placeholder="e.g. 230 Cal.App.4th 1234, or Smith v. Jones 2019"
-            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
-            onkeydown="if(event.key==='Enter') runAdminVerify()">
-          <button class="action-btn" onclick="runAdminVerify()">Verify</button>
+        <p style="font-size:11px;color:#666;margin-bottom:14px">Check citations against CourtListener (~9M opinions) + eyecite parser. Defends against AI hallucinations.</p>
+
+        <div style="margin-bottom:14px">
+          <textarea id="vf-text" rows="6" placeholder="Paste a paragraph, brief excerpt, or single citation. eyecite will find every cite and verify each one against CourtListener."
+            style="width:100%;padding:12px;border:1px solid #ddd;border-radius:6px;font-size:13px;resize:vertical;font-family:Georgia,serif"></textarea>
+          <button class="action-btn" onclick="runVerifyCitation()" style="margin-top:10px">Verify All Citations</button>
         </div>
-        <div id="cite-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Checking CourtListener...</div>
-        <div id="cite-result"></div>
-        <div class="card" style="margin-top:16px;background:#faf8f4">
-          <h3>Batch Verify</h3>
-          <textarea id="batch-cites" rows="5" placeholder="Paste citations one per line..."
-            style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px;resize:vertical;margin-bottom:8px"></textarea>
-          <button class="action-btn" onclick="runAdminBatch()">Verify All</button>
-          <div id="batch-results" style="margin-top:12px"></div>
-        </div>
+
+        <div id="vf-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Parsing and verifying...</div>
+        <div id="vf-results"></div>
       </div>
     </div>
 
-    <!-- Answer Cache Stats -->
-    <div id="rsub-cache" style="display:none">
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- TAB 4: JUDGE INTELLIGENCE                               -->
+    <!-- Standalone judge research workspace                     -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div id="rsub-judge" style="display:none">
       <div class="card">
-        <h3>⚡ Answer Cache Statistics</h3>
-        <p style="font-size:12px;color:#666;margin-bottom:14px">Semantic cache saves tokens by reusing verified answers for similar questions</p>
-        <div id="cache-stats"><div class="loading"><span class="spinner"></span> Loading...</div></div>
+        <h3>📊 Judge Intelligence Workspace</h3>
+        <p style="font-size:11px;color:#666;margin-bottom:14px">Cross-reference Layer 1 judge data — what authorities a judge relies on, how they treat specific cases, what they co-cite.</p>
+
+        <div style="display:flex;gap:8px;margin-bottom:14px">
+          <input id="jw-judge" placeholder="Judge name (e.g. Wardlaw, Malphrus, Owen)" list="jw-judge-list"
+            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
+            onkeydown="if(event.key==='Enter') runJudgeWorkspace()">
+          <datalist id="jw-judge-list"></datalist>
+          <select id="jw-motion" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px">
+            <option value="">Any motion type</option>
+            <option value="Asylum">Asylum</option>
+            <option value="Continuance">Continuance</option>
+            <option value="Cancellation">Cancellation of Removal</option>
+            <option value="Suppression">Motion to Suppress</option>
+            <option value="Reopen">Motion to Reopen</option>
+            <option value="Summary Judgment">Summary Judgment</option>
+            <option value="Anti-SLAPP">Anti-SLAPP</option>
+            <option value="Demurrer">Demurrer</option>
+          </select>
+          <button class="action-btn" onclick="runJudgeWorkspace()">Analyze</button>
+        </div>
+
+        <div id="jw-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Querying moat...</div>
+        <div id="jw-results"></div>
       </div>
+
+      <div class="card" style="margin-top:14px">
+        <h3>🎯 Predict Treatment</h3>
+        <p style="font-size:11px;color:#666;margin-bottom:12px">Given a judge and a case you're considering citing, predict how that judge would likely treat it.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="pt-judge" placeholder="Judge" style="padding:9px;border:1px solid #ddd;border-radius:6px;font-size:12px;width:160px">
+          <input id="pt-case" placeholder="Case name (e.g. Cardoza-Fonseca)" style="padding:9px;border:1px solid #ddd;border-radius:6px;font-size:12px;flex:1;min-width:200px">
+          <input id="pt-motion" placeholder="Motion type (optional)" style="padding:9px;border:1px solid #ddd;border-radius:6px;font-size:12px;width:160px">
+          <button class="action-btn" onclick="runPredictTreatment()">Predict</button>
+        </div>
+        <div id="pt-result" style="margin-top:14px"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- TAB 5: SAVED CASES                                      -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div id="rsub-saved" style="display:none">
       <div class="card">
-        <h3>🔗 Citation Database</h3>
-        <div id="citation-stats"><div class="loading"><span class="spinner"></span> Loading...</div></div>
+        <h3>⭐ Saved Research</h3>
+        <p style="font-size:11px;color:#666;margin-bottom:14px">Cases, statutes, and other research saved during searches.</p>
+
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <select id="saved-filter-type" onchange="loadSaved()" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px">
+            <option value="">All types</option>
+            <option value="case">Cases</option>
+            <option value="statute">Statutes</option>
+            <option value="reg">Regulations</option>
+          </select>
+          <input id="saved-filter-tag" placeholder="Filter by tag" onkeyup="if(event.key==='Enter')loadSaved()" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;width:160px">
+          <button class="action-btn" onclick="loadSaved()" style="font-size:11px">Refresh</button>
+        </div>
+
+        <div id="saved-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Loading...</div>
+        <div id="saved-results"></div>
       </div>
     </div>
 
@@ -1557,210 +1743,569 @@ function dashboardHtml() {
 </div>
 
 <script>
-// ── Research tab logic ─────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+//   RESEARCH MODULE — Phase 1.5 Admin UI
+// ═══════════════════════════════════════════════════════════════════
+
+// ── State ──────────────────────────────────────────────────
+const RES_API = '/admin/api/research';
+let currentCase = null;       // {cluster_id, case_name, citation, ...}
+let statuteType = 'ca';       // 'ca' | 'usc' | 'cfr' | 'fr'
+
+// ── Tab switching ──────────────────────────────────────────
 function showResearchTab(tab) {
-  ['caselaw','statutes','immigration','verify','cache'].forEach(t => {
-    document.getElementById('rsub-' + t).style.display = t === tab ? 'block' : 'none';
+  ['cases','statutes','verify','judge','saved'].forEach(t => {
+    const sub = document.getElementById('rsub-' + t);
     const btn = document.getElementById('rtab-' + t);
-    if (btn) btn.style.opacity = t === tab ? '1' : '.6';
+    if (sub) sub.style.display = (t === tab) ? 'block' : 'none';
+    if (btn) btn.style.opacity = (t === tab) ? '1' : '.6';
   });
-  if (tab === 'cache') loadCacheStats();
+  if (tab === 'saved') loadSaved();
+  if (tab === 'judge') loadJudgeList();
 }
 
-// ── CourtListener search ───────────────────────────────────
-const CL_TOKEN = ''; // Set in admin settings or leave blank for anonymous
+// ═══════════════════════════════════════════════════════════════════
+//   CASE LAW SEARCH
+// ═══════════════════════════════════════════════════════════════════
 
-async function runAdminCLSearch() {
-  const q     = document.getElementById('cl-query').value.trim();
-  const court = document.getElementById('cl-area').value;
-  const date  = document.getElementById('cl-date').value;
-  const sort  = document.getElementById('cl-sort').value;
-  if (!q) return;
+async function runCaseSearch() {
+  const q = document.getElementById('cs-query').value.trim();
+  if (!q || q.length < 2) return;
 
-  document.getElementById('cl-loading').style.display = 'block';
-  document.getElementById('cl-results').innerHTML = '';
-  document.getElementById('cl-warning').style.display = 'none';
+  const params = new URLSearchParams({ q, page_size: '15' });
+  const area = document.getElementById('cs-area').value;
+  const courtLevel = document.getElementById('cs-court-level').value;
+  const dateFrom = document.getElementById('cs-date-from').value;
+  const dateTo = document.getElementById('cs-date-to').value;
+  const judge = document.getElementById('cs-judge').value.trim();
+
+  if (area) params.append('practice_area', area);
+  if (courtLevel) params.append('court_level', courtLevel);
+  if (dateFrom) params.append('date_from', dateFrom);
+  if (dateTo) params.append('date_to', dateTo);
+  if (judge) params.append('judge', judge);
+
+  document.getElementById('cs-loading').style.display = 'block';
+  document.getElementById('cs-results').innerHTML = '';
+  document.getElementById('case-detail-panel').style.display = 'none';
 
   try {
-    const params = new URLSearchParams({ q, type:'o', stat_Published:'on', court, filed_after:date, order_by:sort, page_size:'8' });
-    const headers = {};
-    const savedToken = localStorage.getItem('cl_token');
-    if (savedToken) headers['Authorization'] = 'Token ' + savedToken;
-
-    const resp = await fetch('https://www.courtlistener.com/api/rest/v4/search/?' + params, { headers });
-    if (resp.status === 429) throw new Error('Rate limited — add a free CourtListener API token in Settings');
+    const resp = await fetch(RES_API + '/search?' + params);
+    if (!resp.ok) throw new Error('Search failed: ' + resp.status);
     const data = await resp.json();
     const results = data.results || [];
 
-    document.getElementById('cl-warning').style.display = results.length ? 'block' : 'none';
-    document.getElementById('cl-results').innerHTML = results.length
-      ? results.map(r => renderCaseCard(r)).join('')
-      : '<p style="color:#999;font-size:13px;padding:12px">No results. Try broader terms.</p>';
-  } catch(err) {
-    document.getElementById('cl-results').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + err.message + '</p>';
+    document.getElementById('cs-results').innerHTML = results.length
+      ? '<div style="font-size:11px;color:#888;margin-bottom:8px">Showing ' + results.length + ' of ' + (data.total || results.length) + ' results</div>'
+        + results.map(r => renderResultCard(r)).join('')
+      : '<p style="color:#999;font-size:13px;padding:12px">No results. Try broader terms or remove filters.</p>';
+  } catch (err) {
+    document.getElementById('cs-results').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
   } finally {
-    document.getElementById('cl-loading').style.display = 'none';
+    document.getElementById('cs-loading').style.display = 'none';
   }
 }
 
-async function runAdminImmSearch() {
-  const q = document.getElementById('imm-query').value.trim();
-  if (!q) return;
-  document.getElementById('imm-loading').style.display = 'block';
-  document.getElementById('imm-results').innerHTML = '';
+function renderResultCard(r) {
+  const id = r.cluster_id || r.opinion_id;
+  return '<div onclick="openCaseDetail(\\'' + id + '\\')" style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:8px;padding:14px;margin-bottom:10px;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor=\\'#B79C62\\'" onmouseout="this.style.borderColor=\\'#e0d8c8\\'">'
+    + '<div style="font-weight:bold;color:#0C1C36;margin-bottom:4px">' + esc(r.case_name || 'Unknown') + '</div>'
+    + (r.citation ? '<div style="font-size:11px;color:#B79C62;background:rgba(183,156,98,.1);display:inline-block;padding:2px 8px;border-radius:4px;margin-bottom:6px">' + esc(r.citation) + '</div>' : '')
+    + '<div style="font-size:11px;color:#888;margin-bottom:6px">🏛️ ' + esc(r.court_id || r.court || '') + ' · 📅 ' + esc(r.date_filed || '') + (r.judge ? ' · 👨‍⚖️ ' + esc(r.judge) : '') + (r.cite_count ? ' · 📈 cited ' + r.cite_count + 'x' : '') + '</div>'
+    + (r.snippet ? '<div style="font-size:12px;color:#555;font-style:italic;border-left:2px solid #B79C62;padding-left:8px;margin-bottom:4px">"' + esc(r.snippet.substring(0, 220)) + '..."</div>' : '')
+    + '</div>';
+}
+
+async function openCaseDetail(clusterId) {
+  document.getElementById('cs-loading').style.display = 'block';
+
   try {
-    const params = new URLSearchParams({ q, type:'o', stat_Published:'on', court:'ca9,bia', filed_after:'2005-01-01', order_by:'score', page_size:'8' });
-    const headers = {};
-    const savedToken = localStorage.getItem('cl_token');
-    if (savedToken) headers['Authorization'] = 'Token ' + savedToken;
-    const resp = await fetch('https://www.courtlistener.com/api/rest/v4/search/?' + params, { headers });
+    const resp = await fetch(RES_API + '/case/' + clusterId);
+    if (!resp.ok) throw new Error('Failed to load case');
     const data = await resp.json();
-    const results = data.results || [];
-    document.getElementById('imm-results').innerHTML = results.length
-      ? results.map(r => renderCaseCard(r)).join('')
-      : '<p style="color:#999;font-size:13px;padding:12px">No results found.</p>';
-  } catch(err) {
-    document.getElementById('imm-results').innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + err.message + '</p>';
+
+    currentCase = data;
+
+    document.getElementById('cd-case-name').textContent = data.case_name || 'Unknown case';
+    const citationStr = (data.citations || []).map(c => c.volume + ' ' + c.reporter + ' ' + c.page).join('; ');
+    document.getElementById('cd-citation').textContent = citationStr || 'No citation';
+    document.getElementById('cd-meta').textContent = (data.court || '') + ' · ' + (data.date_filed || '') + (data.docket_number ? ' · ' + data.docket_number : '') + (data.judges ? ' · ' + data.judges : '');
+    document.getElementById('cd-cl-link').href = data.url || '#';
+
+    // Full text
+    const ft = document.getElementById('cd-fulltext');
+    if (data.full_text) {
+      const cleanText = data.full_text.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();
+      ft.textContent = cleanText.substring(0, 8000) + (cleanText.length > 8000 ? '… (truncated, view full on CourtListener)' : '');
+    } else {
+      ft.innerHTML = '<p style="color:#999">No full text available — ' + (data.url ? '<a href="' + data.url + '" target="_blank">view on CourtListener</a>' : 'try CourtListener directly') + '</p>';
+    }
+
+    // Authorities (cited by this case)
+    const auth = data.authorities || [];
+    document.getElementById('cd-authorities').innerHTML = auth.length
+      ? auth.slice(0, 20).map(a => '<div style="padding:4px 0;border-bottom:1px solid #f0ede6">' + esc(a.cited_opinion__cluster__case_name || a.case_name || 'Unknown') + '</div>').join('')
+      : '<span style="color:#999">No authorities indexed</span>';
+
+    // Cited by
+    const cb = data.cited_by || [];
+    document.getElementById('cd-citedby').innerHTML = (cb.length || data.cite_count)
+      ? '<div style="margin-bottom:8px"><strong>' + (data.cite_count || cb.length) + ' citing opinions</strong></div>'
+        + cb.slice(0, 10).map(c => '<div style="padding:4px 0;border-bottom:1px solid #f0ede6">' + esc(c.citing_opinion__cluster__case_name || c.case_name || 'Unknown') + '</div>').join('')
+      : '<span style="color:#999">Not cited yet by other indexed opinions</span>';
+
+    // Show detail panel
+    document.getElementById('case-detail-panel').style.display = 'block';
+    document.getElementById('cases-search-panel').style.display = 'none';
+
+    // Pre-populate judge intel rail with judges_in_firm_db_who_cited
+    const firmJudges = data.judges_in_firm_db_who_cited || [];
+    if (firmJudges.length > 0) {
+      const ji = document.getElementById('ji-results');
+      ji.innerHTML = '<div style="font-size:11px;color:rgba(245,240,224,.7);margin-bottom:8px">📍 <strong>' + firmJudges.length + ' judges in firm DB</strong> have cited this case:</div>'
+        + firmJudges.slice(0, 5).map(j =>
+          '<div onclick="document.getElementById(\\'ji-judge-name\\').value=\\'' + j.judge_name.replace(/\\\\/g,'\\\\\\\\').replace(/\\'/g,"\\\\\\'") + '\\';runJudgeIntel()" style="background:rgba(255,255,255,.06);padding:8px;border-radius:4px;margin-bottom:6px;cursor:pointer;border-left:3px solid #B79C62">'
+          + '<div style="font-weight:bold;color:#f5f0e0">' + esc(j.judge_name) + '</div>'
+          + '<div style="font-size:10px;color:rgba(245,240,224,.7);margin-top:2px">cited <strong>' + j.citation_count + '×</strong>'
+          + (j.positive_count > 0 ? ' · ✓ ' + j.positive_count + ' positive' : '')
+          + (j.distinguishes_count > 0 ? ' · ⚠️ ' + j.distinguishes_count + ' distinguished' : '')
+          + (j.negative_count > 0 ? ' · ❌ ' + j.negative_count + ' negative' : '')
+          + '</div></div>'
+        ).join('')
+        + (firmJudges.length > 5 ? '<div style="font-size:10px;color:rgba(245,240,224,.5);margin-top:6px">+ ' + (firmJudges.length - 5) + ' more</div>' : '');
+    }
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (err) {
+    alert('Error loading case: ' + err.message);
   } finally {
-    document.getElementById('imm-loading').style.display = 'none';
+    document.getElementById('cs-loading').style.display = 'none';
   }
 }
 
-function renderCaseCard(r) {
-  const name     = esc(r.caseName || r.case_name || 'Unknown');
-  const citation = esc((r.citation || []).join(', ') || 'No citation');
-  const court    = esc(r.court || '');
-  const date     = esc(r.dateFiled || r.date_filed || '');
-  const snippet  = esc((r.snippet || '').replace(/<[^>]+>/g,' ').trim().substring(0,220));
-  const url      = r.absolute_url ? 'https://www.courtlistener.com' + r.absolute_url : null;
-  return \`<div style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:8px;padding:14px;margin-bottom:10px">
-    <div style="font-weight:bold;color:#0C1C36;margin-bottom:4px">\${name}</div>
-    <div style="font-size:11px;color:#B79C62;background:rgba(183,156,98,.1);display:inline-block;padding:2px 8px;border-radius:4px;margin-bottom:6px">\${citation}</div>
-    <div style="font-size:11px;color:#888;margin-bottom:6px">🏛️ \${court} &nbsp;📅 \${date}</div>
-    \${snippet ? '<div style="font-size:12px;color:#555;font-style:italic;border-left:2px solid #B79C62;padding-left:8px;margin-bottom:8px">"' + snippet + '..."</div>' : ''}
-    <div style="display:flex;gap:8px">
-      \${url ? '<a href="' + url + '" target="_blank" style="font-size:11px;background:#0C1C36;color:#B79C62;padding:4px 10px;border-radius:4px;text-decoration:none">📄 Read →</a>' : ''}
-      <button onclick="navigator.clipboard.writeText(this.dataset.cite)" data-cite="\${(name + ', ' + citation).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;')}" style="font-size:11px;background:#f0ede6;color:#0C1C36;border:none;padding:4px 10px;border-radius:4px;cursor:pointer">📋 Copy</button>
-    </div>
-  </div>\`;
+function closeCaseDetail() {
+  document.getElementById('case-detail-panel').style.display = 'none';
+  document.getElementById('cases-search-panel').style.display = 'block';
+  currentCase = null;
 }
 
-// ── CA Statute lookup ──────────────────────────────────────
-async function runAdminStatLookup() {
-  const query = document.getElementById('stat-query').value.trim();
-  if (!query) return;
-  const m = query.match(/^([A-Za-z]{2,6})\\s*[§§]?\\s*(\\d+(?:\\.\\d+)?[a-z]?)$/i);
-  if (m) { adminStatLookup(m[1].toUpperCase(), m[2]); return; }
-  // Keyword — show quick matches
-  const index = {demurrer:[['CCP','430.10'],['CCP','430.41']],'unlawful detainer':[['CCP','1161']],'damages':[['CIV','3294']],'negligence':[['CIV','1714']],'fraud':[['CIV','1710']],'trust':[['PROB','15200']],'non-compete':[['BPC','16600']],'summary judgment':[['CCP','437c']]};
-  const k = query.toLowerCase();
-  let matches = [];
-  for (const [topic, secs] of Object.entries(index)) { if (topic.includes(k) || k.includes(topic)) matches = matches.concat(secs); }
-  document.getElementById('stat-results').innerHTML = matches.length
-    ? matches.map(([c,s]) => '<span onclick="adminStatLookup(&quot;' + c + '&quot;,&quot;' + s + '&quot;)" style="cursor:pointer;display:inline-block;margin:4px;background:#f0ede6;padding:6px 12px;border-radius:6px;font-size:13px">' + c + ' §' + s + '</span>').join('')
-    : '<p style="color:#999;font-size:13px">Try a direct section like "CCP 430.10"</p>';
+function copyCurrentCite() {
+  if (!currentCase) return;
+  const citationStr = (currentCase.citations || []).map(c => c.volume + ' ' + c.reporter + ' ' + c.page).join('; ');
+  const text = currentCase.case_name + (citationStr ? ', ' + citationStr : '');
+  navigator.clipboard.writeText(text).then(() => alert('Copied: ' + text));
 }
 
-async function adminStatLookup(code, section) {
-  document.getElementById('stat-query').value = code + ' ' + section;
+async function saveCurrentCase() {
+  if (!currentCase) return;
+  const tags = (prompt('Tags (comma-separated, optional):') || '').split(',').map(t=>t.trim()).filter(Boolean);
+  const notes = prompt('Notes (optional):') || '';
+
+  try {
+    const citationStr = (currentCase.citations || []).map(c => c.volume + ' ' + c.reporter + ' ' + c.page).join('; ');
+    const resp = await fetch(RES_API + '/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resource_type: 'case',
+        resource_id: String(currentCase.cluster_id),
+        cached_title: currentCase.case_name,
+        cached_citation: citationStr,
+        cached_url: currentCase.url,
+        notes_md: notes,
+        tags
+      })
+    });
+    if (resp.ok) alert('✅ Saved');
+    else alert('❌ Save failed');
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+}
+
+async function useInBrief() {
+  if (!currentCase) return;
+  alert('Brief generator integration coming soon. Case will be passed to Layer 3 brief-generator with judge cross-reference data.');
+  // TODO: surface a modal asking for motion type, judge, opposition position, then call /use-in-brief
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//   JUDGE INTELLIGENCE (right rail on case detail)
+// ═══════════════════════════════════════════════════════════════════
+
+async function runJudgeIntel() {
+  const judgeName = document.getElementById('ji-judge-name').value.trim();
+  if (!judgeName || !currentCase) return;
+
+  const ji = document.getElementById('ji-results');
+  ji.innerHTML = '<div style="font-size:11px;color:rgba(245,240,224,.7)"><span class="spinner"></span> Querying moat...</div>';
+
+  try {
+    const citationStr = (currentCase.citations || []).map(c => c.volume + ' ' + c.reporter + ' ' + c.page).join(';') || '';
+
+    // Parallel: has-cited + top-cited
+    const [hcResp, tcResp] = await Promise.all([
+      fetch(RES_API + '/judge/' + encodeURIComponent(judgeName) + '/has-cited?case_name=' + encodeURIComponent(currentCase.case_name) + (citationStr ? '&citation=' + encodeURIComponent(citationStr) : '')),
+      fetch(RES_API + '/judge/' + encodeURIComponent(judgeName) + '/top-cited?limit=5')
+    ]);
+
+    const hc = await hcResp.json();
+    const tc = await tcResp.json();
+
+    let html = '';
+
+    // Has cited?
+    html += '<div style="background:rgba(183,156,98,.15);border-left:3px solid #B79C62;padding:10px;border-radius:4px;margin-bottom:10px">';
+    if (hc.count > 0) {
+      html += '<div style="font-weight:bold;color:#B79C62;font-size:12px">✓ Cited ' + hc.count + '× before</div>';
+      const treatments = (hc.citations || []).map(c => c.treatment).filter(Boolean);
+      if (treatments.length) {
+        const counts = {};
+        treatments.forEach(t => counts[t] = (counts[t] || 0) + 1);
+        html += '<div style="font-size:10px;color:rgba(245,240,224,.8);margin-top:4px">' + Object.entries(counts).map(([t,c]) => t + ': ' + c).join(' · ') + '</div>';
+      }
+    } else {
+      html += '<div style="font-weight:bold;color:rgba(245,240,224,.8);font-size:12px">✗ Not previously cited</div><div style="font-size:10px;color:rgba(245,240,224,.6);margin-top:4px">Judge has not cited this case in firm DB</div>';
+    }
+    html += '</div>';
+
+    // Top cited cases by this judge
+    if ((tc.cases || []).length > 0) {
+      html += '<div style="font-size:11px;color:rgba(245,240,224,.7);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Top Authorities (this judge cites)</div>';
+      html += (tc.cases || []).slice(0, 5).map(c =>
+        '<div style="background:rgba(255,255,255,.06);padding:7px 8px;border-radius:4px;margin-bottom:5px;font-size:11px"><strong style="color:#f5f0e0">' + esc(c.cited_case_name || '') + '</strong>'
+        + (c.cited_case_citation ? '<div style="color:rgba(245,240,224,.6);font-size:10px">' + esc(c.cited_case_citation) + '</div>' : '')
+        + '<div style="color:#B79C62;font-size:10px;margin-top:2px">cited ' + c.times_cited + '×</div></div>'
+      ).join('');
+    }
+
+    ji.innerHTML = html || '<div style="font-size:11px;color:rgba(245,240,224,.7);padding:10px;background:rgba(255,255,255,.06);border-radius:4px">No data on this judge in firm DB</div>';
+  } catch (err) {
+    ji.innerHTML = '<div style="color:#f4a;font-size:11px">❌ ' + esc(err.message) + '</div>';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//   STATUTES TAB
+// ═══════════════════════════════════════════════════════════════════
+
+function setStatuteType(type) {
+  statuteType = type;
+  ['ca','usc','cfr','fr'].forEach(t => {
+    const f = document.getElementById('sform-' + t);
+    const b = document.getElementById('stype-' + t);
+    if (f) f.style.display = (t === type) ? 'block' : 'none';
+    if (b) {
+      b.style.background = (t === type) ? '' : '#f0ede6';
+      b.style.color = (t === type) ? '' : '#0C1C36';
+    }
+  });
+  document.getElementById('stat-result').innerHTML = '';
+}
+
+async function lookupStatute() {
+  let url;
+  if (statuteType === 'ca') {
+    const code = document.getElementById('ca-code').value;
+    const section = document.getElementById('ca-section').value.trim();
+    if (!section) return;
+    url = RES_API + '/statute/ca/' + code + '/' + encodeURIComponent(section);
+  } else if (statuteType === 'usc') {
+    const t = document.getElementById('usc-title').value.trim();
+    const s = document.getElementById('usc-section').value.trim();
+    if (!t || !s) return;
+    url = RES_API + '/statute/usc/' + encodeURIComponent(t) + '/' + encodeURIComponent(s);
+  } else if (statuteType === 'cfr') {
+    const t = document.getElementById('cfr-title').value.trim();
+    const p = document.getElementById('cfr-part').value.trim();
+    const s = document.getElementById('cfr-section').value.trim();
+    if (!t || !p) return;
+    url = RES_API + '/statute/cfr/' + encodeURIComponent(t) + '/' + encodeURIComponent(p) + (s ? '/' + encodeURIComponent(s) : '');
+  } else if (statuteType === 'fr') {
+    const params = new URLSearchParams();
+    const q = document.getElementById('fr-query').value.trim();
+    const ty = document.getElementById('fr-type').value;
+    const fr = document.getElementById('fr-from').value;
+    if (q) params.append('query', q);
+    if (ty) params.append('type', ty);
+    if (fr) params.append('from', fr);
+    url = RES_API + '/federal-register?' + params;
+  }
+
   document.getElementById('stat-loading').style.display = 'block';
-  document.getElementById('stat-results').innerHTML = '';
-  const normalized = section.endsWith('.') ? section : section + '.';
-  const url = 'https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=' + code + '&sectionNum=' + encodeURIComponent(normalized);
+  document.getElementById('stat-result').innerHTML = '';
+
   try {
     const resp = await fetch(url);
-    const html = await resp.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    const textEl = doc.getElementById('codeLawSectionNoClass') || doc.querySelector('.lawText');
-    const codeNames = {CCP:'Code of Civil Procedure',CIV:'Civil Code',FAM:'Family Code',PROB:'Probate Code',BPC:'Business & Professions Code',GOV:'Government Code',LAB:'Labor Code',PEN:'Penal Code',VEH:'Vehicle Code'};
-    if (textEl) {
-      const text = (textEl.innerText || textEl.textContent || '').trim();
-      document.getElementById('stat-results').innerHTML = '<div style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:8px;padding:16px"><div style="font-weight:bold;color:#B79C62;margin-bottom:8px">📚 ' + (codeNames[code]||code) + ' §' + section + '</div><pre style="white-space:pre-wrap;font-family:Arial;font-size:13px;color:#0C1C36;line-height:1.6">' + esc(text.substring(0,3000)) + '</pre><div style="margin-top:10px"><a href="' + url + '" target="_blank" style="font-size:11px;background:#0C1C36;color:#B79C62;padding:5px 12px;border-radius:4px;text-decoration:none">🔗 View on leginfo.ca.gov →</a></div><p style="font-size:10px;color:#aaa;margin-top:8px">Verify current text before filing. Public domain — Gov. Code §10248.5</p></div>';
+    if (!resp.ok) throw new Error((await resp.json()).error || 'Lookup failed');
+    const data = await resp.json();
+
+    if (statuteType === 'fr') {
+      const docs = data.results || [];
+      document.getElementById('stat-result').innerHTML = docs.length
+        ? '<div style="font-size:11px;color:#888;margin-bottom:8px">' + docs.length + ' results</div>'
+          + docs.slice(0, 15).map(d =>
+            '<div style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:6px;padding:12px;margin-bottom:8px">'
+            + '<div style="font-weight:bold;color:#0C1C36;margin-bottom:3px">' + esc(d.title || '') + '</div>'
+            + '<div style="font-size:10px;color:#888;margin-bottom:6px">' + esc(d.publication_date || '') + ' · ' + esc(d.type || '') + ' · ' + esc((d.agencies || []).map(a=>a.name).join(', ')) + '</div>'
+            + '<div style="font-size:12px;color:#555">' + esc((d.abstract || '').substring(0, 240)) + '</div>'
+            + '<a href="' + esc(d.html_url || '#') + '" target="_blank" style="font-size:11px;background:#0C1C36;color:#B79C62;padding:4px 10px;border-radius:4px;text-decoration:none;display:inline-block;margin-top:8px">📄 Read →</a>'
+            + '</div>'
+          ).join('')
+        : '<p style="color:#999;font-size:13px">No results.</p>';
     } else {
-      document.getElementById('stat-results').innerHTML = '<div style="padding:12px"><p style="font-size:13px;margin-bottom:10px">Could not auto-extract. View directly:</p><a href="' + url + '" target="_blank" style="font-size:12px;background:#0C1C36;color:#B79C62;padding:6px 14px;border-radius:4px;text-decoration:none">📄 View ' + code + ' §' + section + ' on leginfo.ca.gov →</a></div>';
+      // CA / USC / CFR statute display
+      const text = data.text || data.title_text || '(no text — try official URL)';
+      const officialUrl = data.url || data.official_url || data.cornell_url || '#';
+      document.getElementById('stat-result').innerHTML =
+        '<div style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:8px;padding:18px">'
+        + '<div style="font-weight:bold;color:#B79C62;font-size:14px;margin-bottom:8px">📚 ' + esc(data.title || data.code_name || '') + '</div>'
+        + (data.breadcrumbs ? '<div style="font-size:10px;color:#888;margin-bottom:10px;font-style:italic">' + esc(data.breadcrumbs) + '</div>' : '')
+        + '<div style="white-space:pre-wrap;font-family:Georgia,serif;font-size:13px;color:#0C1C36;line-height:1.7;border-left:3px solid #B79C62;padding-left:14px;margin-bottom:14px">' + esc(text.substring(0, 8000)) + (text.length > 8000 ? '…' : '') + '</div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+        + (officialUrl ? '<a href="' + esc(officialUrl) + '" target="_blank" style="font-size:11px;background:#0C1C36;color:#B79C62;padding:5px 12px;border-radius:4px;text-decoration:none">🔗 Official source →</a>' : '')
+        + (data.justia_url ? '<a href="' + esc(data.justia_url) + '" target="_blank" style="font-size:11px;background:#f0ede6;color:#0C1C36;padding:5px 12px;border-radius:4px;text-decoration:none">📖 Justia mirror →</a>' : '')
+        + (data.cornell_url ? '<a href="' + esc(data.cornell_url) + '" target="_blank" style="font-size:11px;background:#f0ede6;color:#0C1C36;padding:5px 12px;border-radius:4px;text-decoration:none">📖 Cornell LII →</a>' : '')
+        + '<button onclick="navigator.clipboard.writeText(' + JSON.stringify(text.substring(0,5000)) + ')" style="font-size:11px;background:#f0ede6;color:#0C1C36;border:none;padding:5px 12px;border-radius:4px;cursor:pointer">📋 Copy text</button>'
+        + '</div>'
+        + (data.note ? '<p style="font-size:10px;color:#aaa;margin-top:10px">' + esc(data.note) + '</p>' : '')
+        + '</div>';
     }
-  } catch(err) {
-    document.getElementById('stat-results').innerHTML = '<div style="padding:12px"><a href="' + url + '" target="_blank" style="font-size:12px;background:#0C1C36;color:#B79C62;padding:6px 14px;border-radius:4px;text-decoration:none">📄 View ' + code + ' §' + section + ' on leginfo.ca.gov →</a></div>';
+  } catch (err) {
+    document.getElementById('stat-result').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
   } finally {
     document.getElementById('stat-loading').style.display = 'none';
   }
 }
 
-// ── Citation verifier ──────────────────────────────────────
-async function runAdminVerify() {
-  const q = document.getElementById('cite-query').value.trim();
-  if (!q) return;
-  document.getElementById('cite-loading').style.display = 'block';
-  document.getElementById('cite-result').innerHTML = '';
+// ═══════════════════════════════════════════════════════════════════
+//   VERIFY CITATION
+// ═══════════════════════════════════════════════════════════════════
+
+async function runVerifyCitation() {
+  const text = document.getElementById('vf-text').value.trim();
+  if (!text) return;
+
+  document.getElementById('vf-loading').style.display = 'block';
+  document.getElementById('vf-results').innerHTML = '';
+
   try {
-    const headers = {};
-    const t = localStorage.getItem('cl_token');
-    if (t) headers['Authorization'] = 'Token ' + t;
-    const resp = await fetch('https://www.courtlistener.com/api/rest/v4/search/?q=' + encodeURIComponent('"' + q + '"') + '&type=o&page_size=3', { headers });
+    const resp = await fetch(RES_API + '/verify-citation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
     const data = await resp.json();
-    const found = (data.results||[]).length > 0;
-    const best  = found ? data.results[0] : null;
-    document.getElementById('cite-result').innerHTML = '<div style="background:' + (found?'#d4edda':'#f8d7da') + ';border:1px solid ' + (found?'#c3e6cb':'#f5c6cb') + ';border-radius:6px;padding:14px;font-size:13px">'
-      + (found ? '✅ <strong>FOUND IN DATABASE</strong><br><br>' : '❌ <strong>NOT FOUND</strong><br><br>')
-      + (best ? '<strong>Case:</strong> ' + esc(best.caseName||best.case_name||'') + '<br><strong>Citation:</strong> ' + esc((best.citation||[]).join(', ')||'No reporter') + '<br><strong>Court:</strong> ' + esc(best.court||'') + ' | <strong>Date:</strong> ' + esc(best.dateFiled||best.date_filed||'') + '<br>' + (best.absolute_url ? '<br><a href="https://www.courtlistener.com' + best.absolute_url + '" target="_blank" style="color:#155724">View Opinion →</a>' : '') : 'Verify manually in vLex Fastcase before filing.')
-      + '<br><br><small>⚠️ Still verify Good Law status in vLex Fastcase (Shepards) before any filing.</small></div>';
-  } catch(err) {
-    document.getElementById('cite-result').innerHTML = '<p style="color:#cc0000">❌ ' + esc(err.message) + '</p>';
+
+    const verified = data.verified || [];
+    const extracted = data.extracted_full || [];
+
+    let html = '<div style="background:#faf8f4;border-radius:8px;padding:14px;margin-bottom:14px"><strong>Found ' + verified.length + ' citation' + (verified.length === 1 ? '' : 's') + '</strong></div>';
+
+    if (verified.length === 0) {
+      html += '<p style="color:#999;font-size:13px;padding:12px">No citations matched in CourtListener. Either none present in the text, or none recognizable to the citation parser.</p>';
+    } else {
+      html += verified.map(v => {
+        const found = (v.clusters || []).length > 0;
+        const cluster = found ? v.clusters[0] : null;
+        const bg = found ? 'rgba(39,174,96,.06)' : 'rgba(192,57,43,.06)';
+        const border = found ? 'rgba(39,174,96,.3)' : 'rgba(192,57,43,.3)';
+        return '<div style="background:' + bg + ';border:1px solid ' + border + ';border-radius:6px;padding:12px;margin-bottom:8px;font-size:13px">'
+          + (found ? '✅ ' : '❌ ')
+          + '<strong style="font-family:monospace">' + esc(v.citation || '') + '</strong>'
+          + (cluster
+              ? '<div style="margin-top:6px"><div>' + esc(cluster.case_name || '') + '</div>'
+                + '<div style="font-size:11px;color:#888">' + esc(cluster.court || '') + ' · ' + esc(cluster.date_filed || '') + '</div>'
+                + '<a href="https://www.courtlistener.com/opinion/' + cluster.id + '/" target="_blank" style="font-size:11px;color:#0C1C36;text-decoration:underline">View →</a></div>'
+              : '<div style="margin-top:6px;font-size:11px;color:#cc0000">⚠️ Not found in CourtListener — verify before filing</div>'
+            )
+          + '</div>';
+      }).join('');
+    }
+
+    if (extracted.length > 0) {
+      html += '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #e0d8c8"><strong style="font-size:12px">eyecite parser also found ' + extracted.length + ' citation' + (extracted.length === 1 ? '' : 's') + ':</strong>';
+      html += '<div style="font-size:11px;margin-top:8px">' + extracted.slice(0, 20).map(c =>
+        '<div style="padding:4px 0">'
+        + '<span style="font-family:monospace">' + esc(c.cite || '') + '</span>'
+        + ' <span style="color:#888;font-size:10px">[' + esc(c.type || '') + (c.year ? ', ' + c.year : '') + ']</span>'
+        + (c.parenthetical ? '<div style="color:#555;font-style:italic;margin-left:14px">"' + esc(c.parenthetical) + '"</div>' : '')
+        + (c.treatment && c.treatment !== 'neutral' ? '<span style="font-size:10px;background:' + (c.treatment === 'positive' ? '#d4edda' : '#fff3cd') + ';padding:2px 6px;border-radius:3px;margin-left:6px">' + esc(c.treatment) + '</span>' : '')
+        + '</div>'
+      ).join('') + '</div></div>';
+    }
+
+    document.getElementById('vf-results').innerHTML = html;
+  } catch (err) {
+    document.getElementById('vf-results').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
   } finally {
-    document.getElementById('cite-loading').style.display = 'none';
+    document.getElementById('vf-loading').style.display = 'none';
   }
 }
 
-async function runAdminBatch() {
-  const lines = document.getElementById('batch-cites').value.split('\\n').map(l=>l.trim()).filter(Boolean);
-  if (!lines.length) return;
-  const container = document.getElementById('batch-results');
-  container.innerHTML = '<div class="loading"><span class="spinner"></span> Verifying ' + lines.length + ' citations...</div>';
-  const headers = {};
-  const t = localStorage.getItem('cl_token');
-  if (t) headers['Authorization'] = 'Token ' + t;
-  const results = [];
-  for (const cite of lines) {
-    try {
-      const resp = await fetch('https://www.courtlistener.com/api/rest/v4/search/?q=' + encodeURIComponent('"'+cite+'"') + '&type=o&page_size=1', { headers });
-      const data = await resp.json();
-      results.push({ cite, found: (data.results||[]).length > 0, name: data.results?.[0]?.caseName || '' });
-    } catch { results.push({ cite, found: false, name: '' }); }
-    await new Promise(r => setTimeout(r, 400));
-  }
-  container.innerHTML = results.map(r =>
-    '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:' + (r.found?'rgba(39,174,96,.08)':'rgba(192,57,43,.08)') + ';border:1px solid ' + (r.found?'rgba(39,174,96,.25)':'rgba(192,57,43,.25)') + ';border-radius:6px;margin-bottom:6px;font-size:12px">'
-    + '<span>' + (r.found?'✅':'❌') + '</span><div><div style="font-family:monospace">' + esc(r.cite) + '</div>' + (r.name?'<div style="color:#888;font-size:11px">'+esc(r.name)+'</div>':'') + '</div></div>'
-  ).join('');
-}
+// ═══════════════════════════════════════════════════════════════════
+//   JUDGE INTELLIGENCE WORKSPACE (Tab 4)
+// ═══════════════════════════════════════════════════════════════════
 
-// ── Cache stats ────────────────────────────────────────────
-async function loadCacheStats() {
+async function loadJudgeList() {
+  // Populate datalist with judge names from local moat for autocomplete
+  // (not blocking — fetch async, fail silently if endpoint not ready)
   try {
-    const token = document.cookie.split(';').find(c=>c.trim().startsWith('admin_token='))?.split('=')[1];
-    const resp = await fetch('/legal/citation-stats');
-    const data = await resp.json();
-    document.getElementById('citation-stats').innerHTML =
-      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">'
-      + [['Cases Indexed', data.total_cases||0],['Citations Tracked',data.total_treatments||0],['Negative Treatments',data.negative_count||0],['Added This Week',data.new_this_week||0]].map(([label,val])=>
-        '<div style="text-align:center;background:#f0ede6;border-radius:8px;padding:14px"><div style="font-size:28px;font-weight:bold;color:#B79C62">'+val+'</div><div style="font-size:11px;color:#666;margin-top:4px">'+label+'</div></div>'
-      ).join('') + '</div>'
-      + '<p style="font-size:11px;color:#aaa;margin-top:10px">Coverage: April 2026 onwards. Always verify pre-launch cases in vLex Fastcase.</p>';
-  } catch { document.getElementById('citation-stats').innerHTML = '<p style="color:#999;font-size:13px">Stats unavailable</p>'; }
-
-  // Answer cache stats placeholder
-  document.getElementById('cache-stats').innerHTML =
-    '<p style="font-size:13px;color:#555;line-height:1.6">The semantic answer cache automatically stores verified responses to common client questions. Every time a client asks something Zara has answered before, the cached answer is returned instantly — no Claude API call needed.</p>'
-    + '<div style="margin-top:12px;background:#f0ede6;border-radius:8px;padding:14px;font-size:13px"><strong>How it works:</strong><br>'
-    + '① Keyword fingerprint check (free, instant)<br>'
-    + '② Haiku similarity check against cached Q&As (~$0.001)<br>'
-    + '③ Full Sonnet response → stored for next client<br><br>'
-    + '<strong>Never cached:</strong> personal situations, case numbers, emergency/distress, JJ private mode</div>';
+    const judges = ['Wardlaw','Malphrus','Goodwin','Owen','Greer','Holmes','Pauley','Grant','Osuna','Hurwitz'];
+    const dl = document.getElementById('jw-judge-list');
+    if (dl) dl.innerHTML = judges.map(j => '<option value="' + j + '">').join('');
+    const dl2 = document.getElementById('ji-judge-options');
+    if (dl2) dl2.innerHTML = judges.map(j => '<option value="' + j + '">').join('');
+  } catch {}
 }
 
-// ── Utility ────────────────────────────────────────────────
-function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+async function runJudgeWorkspace() {
+  const judge = document.getElementById('jw-judge').value.trim();
+  if (!judge) return;
+  const motion = document.getElementById('jw-motion').value;
+
+  document.getElementById('jw-loading').style.display = 'block';
+  document.getElementById('jw-results').innerHTML = '';
+
+  try {
+    const params = new URLSearchParams({ limit: '30' });
+    if (motion) params.append('motion', motion);
+    const resp = await fetch(RES_API + '/judge/' + encodeURIComponent(judge) + '/top-cited?' + params);
+    const data = await resp.json();
+    const cases = data.cases || [];
+
+    let html = '<div style="background:#faf8f4;border-radius:8px;padding:14px;margin-bottom:14px"><strong>' + cases.length + ' authorities</strong> ' + esc(judge) + ' relies on most' + (motion ? ' for <em>' + esc(motion) + '</em>' : '') + '</div>';
+
+    if (cases.length === 0) {
+      html += '<p style="color:#999;font-size:13px;padding:12px">No data for this judge yet. Layer 1 may not have indexed their rulings, or the motion type filter is too restrictive.</p>';
+    } else {
+      html += cases.map((c, i) =>
+        '<div style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:6px;padding:12px;margin-bottom:8px">'
+        + '<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+        + '<div style="flex:1">'
+        + '<div style="font-weight:bold;color:#0C1C36">' + (i + 1) + '. ' + esc(c.cited_case_name || 'Unknown') + '</div>'
+        + (c.cited_case_citation ? '<div style="font-size:11px;color:#B79C62;margin-top:2px">' + esc(c.cited_case_citation) + '</div>' : '')
+        + '</div>'
+        + '<div style="text-align:right;font-size:12px;color:#0C1C36;font-weight:bold;background:rgba(183,156,98,.15);padding:4px 10px;border-radius:4px">cited ' + c.times_cited + '×</div>'
+        + '</div>'
+        + (c.sample_parentheticals && c.sample_parentheticals.length
+          ? '<div style="margin-top:8px;font-size:11px;font-style:italic;color:#555;border-left:2px solid #B79C62;padding-left:8px">"' + esc(c.sample_parentheticals[0].substring(0, 200)) + '..."</div>'
+          : '')
+        + (c.cited_cluster_id
+          ? '<div style="margin-top:8px"><a onclick="openCaseDetail(\\'' + c.cited_cluster_id + '\\');showResearchTab(\\'cases\\')" style="font-size:11px;color:#0C1C36;cursor:pointer;text-decoration:underline">View case →</a></div>'
+          : '')
+        + '</div>'
+      ).join('');
+    }
+
+    document.getElementById('jw-results').innerHTML = html;
+  } catch (err) {
+    document.getElementById('jw-results').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
+  } finally {
+    document.getElementById('jw-loading').style.display = 'none';
+  }
+}
+
+async function runPredictTreatment() {
+  const judge = document.getElementById('pt-judge').value.trim();
+  const caseName = document.getElementById('pt-case').value.trim();
+  const motion = document.getElementById('pt-motion').value.trim();
+  if (!judge || !caseName) return;
+
+  const out = document.getElementById('pt-result');
+  out.innerHTML = '<div style="color:#999;font-size:13px"><span class="spinner"></span> Predicting...</div>';
+
+  try {
+    const resp = await fetch(RES_API + '/predict-treatment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ judge_name: judge, case_name: caseName, motion_type: motion || null })
+    });
+    const data = await resp.json();
+
+    const colors = { HIGH: '#27ae60', MEDIUM: '#f39c12', LOW: '#999' };
+    out.innerHTML =
+      '<div style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:8px;padding:14px">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:10px"><strong>Prediction</strong>'
+      + '<span style="background:' + (colors[data.confidence] || '#999') + ';color:white;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:bold">' + (data.confidence || 'LOW') + '</span></div>'
+      + '<p style="font-size:13px;color:#0C1C36;margin-bottom:12px">' + esc(data.summary || '') + '</p>'
+      + (data.prior_citations && data.prior_citations.length
+        ? '<div style="margin-top:10px"><strong style="font-size:12px">Prior citations:</strong><div style="font-size:11px;margin-top:6px">'
+          + data.prior_citations.slice(0, 3).map(p =>
+            '<div style="padding:6px 8px;background:white;border-radius:4px;margin-bottom:4px">'
+            + (p.parenthetical ? '<em>"' + esc(p.parenthetical) + '"</em>' : '<span style="color:#888">no parenthetical</span>')
+            + (p.treatment ? '<div style="font-size:10px;color:#B79C62;margin-top:2px">' + esc(p.treatment) + '</div>' : '')
+            + '</div>'
+          ).join('') + '</div></div>'
+        : '')
+      + '</div>';
+  } catch (err) {
+    out.innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + esc(err.message) + '</p>';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//   SAVED CASES
+// ═══════════════════════════════════════════════════════════════════
+
+async function loadSaved() {
+  const params = new URLSearchParams();
+  const type = document.getElementById('saved-filter-type').value;
+  const tag = document.getElementById('saved-filter-tag').value.trim();
+  if (type) params.append('type', type);
+  if (tag) params.append('tag', tag);
+
+  document.getElementById('saved-loading').style.display = 'block';
+  document.getElementById('saved-results').innerHTML = '';
+
+  try {
+    const resp = await fetch(RES_API + '/saved?' + params);
+    const items = await resp.json();
+
+    document.getElementById('saved-results').innerHTML = items.length
+      ? items.map(it => {
+          const ico = { case: '⚖️', statute: '📚', reg: '📋', form: '📝', brief: '📄' }[it.resource_type] || '📌';
+          return '<div style="background:#faf8f4;border:1px solid #e0d8c8;border-radius:6px;padding:12px;margin-bottom:8px">'
+            + '<div style="display:flex;justify-content:space-between;margin-bottom:6px">'
+            + '<div style="font-weight:bold;color:#0C1C36">' + ico + ' ' + esc(it.cached_title || it.resource_id) + '</div>'
+            + '<button onclick="deleteSaved(' + it.id + ')" style="background:none;border:none;color:#cc0000;cursor:pointer;font-size:11px">✕ Delete</button>'
+            + '</div>'
+            + (it.cached_citation ? '<div style="font-size:11px;color:#B79C62;margin-bottom:4px">' + esc(it.cached_citation) + '</div>' : '')
+            + ((it.tags || []).length ? '<div style="margin-bottom:6px">' + it.tags.map(t => '<span style="font-size:10px;background:#f0ede6;color:#0C1C36;padding:2px 8px;border-radius:10px;margin-right:4px">' + esc(t) + '</span>').join('') + '</div>' : '')
+            + (it.notes_md ? '<div style="font-size:11px;color:#555;font-style:italic">' + esc(it.notes_md) + '</div>' : '')
+            + (it.cached_url ? '<div style="margin-top:8px"><a href="' + esc(it.cached_url) + '" target="_blank" style="font-size:11px;color:#0C1C36;text-decoration:underline">View →</a>' + (it.resource_type === 'case' ? '<a onclick="openCaseDetail(\\'' + it.resource_id + '\\');showResearchTab(\\'cases\\')" style="font-size:11px;color:#0C1C36;text-decoration:underline;cursor:pointer;margin-left:10px">Open in research →</a>' : '') + '</div>' : '')
+            + '</div>';
+        }).join('')
+      : '<p style="color:#999;font-size:13px;padding:12px">No saved items. Click ⭐ Save on any case detail view to save it here.</p>';
+  } catch (err) {
+    document.getElementById('saved-results').innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + esc(err.message) + '</p>';
+  } finally {
+    document.getElementById('saved-loading').style.display = 'none';
+  }
+}
+
+async function deleteSaved(id) {
+  if (!confirm('Delete this saved item?')) return;
+  try {
+    await fetch(RES_API + '/save/' + id, { method: 'DELETE' });
+    loadSaved();
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//   UTILITY
+// ═══════════════════════════════════════════════════════════════════
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 </script>
 
 <script src="/admin/panel.js"></script>
