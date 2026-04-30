@@ -66,6 +66,7 @@ let state = {
     4: { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0 },
     5: { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0, fetched_chars: 0 },
     6: { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0 },
+    7: { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0 },
   },
   current_phase: null,
 };
@@ -780,6 +781,155 @@ async function phase6_extractParentheticalsRerun() {
 }
 
 // ============================================================
+//  PHASE 7 — Parenthetical Extraction Without ruling_id
+//
+//  Phase 2/6 couldn't extract parentheticals because the moat was
+//  built from judge_insights (aggregated per judge × motion_type),
+//  so citation_edges_internal.ruling_id is always NULL — no specific
+//  source opinion to parse.
+//
+//  This phase works around that by: for each edge, searching the
+//  full_text of ALL rulings by that judge for the cited case name,
+//  then extracting the parenthetical from wherever it appears.
+//
+//  Strategy:
+//    1. Group edges by (judge_profile_id, cited_case_name)
+//       — same case cited by same judge only needs one search
+//    2. For each group, fetch judge_rulings.full_text WHERE
+//       judge_profile_id matches AND full_text ILIKE '%case_name%'
+//    3. Run regex on the matching ruling text to extract parenthetical
+//    4. Update ALL edges in the group at once
+// ============================================================
+
+async function phase7_parentheticalsByJudgeText() {
+  log("===== PHASE 7: Extracting parentheticals via judge full_text scan =====");
+  state.current_phase = 7;
+  state.phases[7].status = "running";
+
+  // Count distinct (judge_profile_id, cited_case_name) groups missing parenthetical
+  const countQuery = await db.query(`
+    SELECT COUNT(*) FROM (
+      SELECT DISTINCT judge_profile_id, cited_case_name
+      FROM citation_edges_internal
+      WHERE parenthetical IS NULL
+        AND cited_case_name IS NOT NULL
+        AND length(cited_case_name) > 4
+        AND judge_profile_id IS NOT NULL
+    ) g
+  `);
+  state.phases[7].total = parseInt(countQuery.rows[0].count);
+  log(`[phase7] ${state.phases[7].total} unique (judge × case) pairs to extract`);
+
+  if (state.phases[7].total === 0) {
+    state.phases[7].status = "complete";
+    saveCheckpoint();
+    return;
+  }
+
+  // Process in batches by judge to leverage full_text caching per judge
+  const BATCH_PAIRS = 500;
+  let lastProfileId = state.phases[7].last_id || 0;
+
+  while (true) {
+    if (!checkRuntimeBudget()) {
+      state.phases[7].status = "paused_budget";
+      saveCheckpoint();
+      return;
+    }
+
+    // Get next batch of (judge × case) pairs
+    const groups = await db.query(`
+      SELECT DISTINCT judge_profile_id, cited_case_name
+      FROM citation_edges_internal
+      WHERE parenthetical IS NULL
+        AND cited_case_name IS NOT NULL
+        AND length(cited_case_name) > 4
+        AND judge_profile_id IS NOT NULL
+        AND judge_profile_id > $1
+      ORDER BY judge_profile_id ASC, cited_case_name ASC
+      LIMIT $2
+    `, [lastProfileId, BATCH_PAIRS]);
+
+    if (groups.rows.length === 0) break;
+
+    // Cache full_text per judge to avoid re-fetching in inner loop
+    const fullTextCache = new Map();
+
+    for (const g of groups.rows) {
+      try {
+        // Fetch all this judge's rulings' full_text (cached)
+        let rulings = fullTextCache.get(g.judge_profile_id);
+        if (!rulings) {
+          const r = await db.query(`
+            SELECT id, full_text
+            FROM judge_rulings
+            WHERE judge_profile_id = $1
+              AND full_text IS NOT NULL
+              AND length(full_text) > 500
+          `, [g.judge_profile_id]);
+          rulings = r.rows;
+          fullTextCache.set(g.judge_profile_id, rulings);
+        }
+
+        // Search each ruling for the cited case name
+        let found = null;
+        for (const r of rulings) {
+          const result = await extractParentheticalForCitation(
+            r.full_text,
+            g.cited_case_name,
+            null  // We only have case name, not citation, at this stage
+          );
+          if (result.parenthetical || result.treatment || result.pin_cite) {
+            found = { ...result, ruling_id: r.id };
+            break;
+          }
+        }
+
+        if (found) {
+          // Update ALL edges with this judge × case combo
+          await db.query(`
+            UPDATE citation_edges_internal
+            SET parenthetical = COALESCE($1, parenthetical),
+                treatment     = COALESCE($2, treatment),
+                pin_cite      = COALESCE($3, pin_cite),
+                ruling_id     = COALESCE(ruling_id, $4)
+            WHERE judge_profile_id = $5
+              AND cited_case_name = $6
+              AND parenthetical IS NULL
+          `, [found.parenthetical, found.treatment, found.pin_cite, found.ruling_id, g.judge_profile_id, g.cited_case_name]);
+        }
+      } catch (err) {
+        state.phases[7].errors++;
+      }
+
+      state.phases[7].processed++;
+      lastProfileId = g.judge_profile_id;
+      state.phases[7].last_id = lastProfileId;
+
+      if (state.phases[7].processed % SAVE_CHECKPOINT_EVERY === 0) {
+        saveCheckpoint();
+        log(`[phase7] ${state.phases[7].processed}/${state.phases[7].total} pairs processed (${state.phases[7].errors} errors)`);
+      }
+    }
+  }
+
+  state.phases[7].status = "complete";
+  saveCheckpoint();
+
+  // Report what was extracted
+  const finalStat = await db.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE parenthetical IS NOT NULL) AS with_parenthetical,
+      COUNT(*) FILTER (WHERE treatment IS NOT NULL) AS with_treatment,
+      COUNT(*) FILTER (WHERE pin_cite IS NOT NULL) AS with_pin_cite
+    FROM citation_edges_internal
+  `);
+  const fs = finalStat.rows[0];
+  log(`[phase7] ✅ Complete. ${state.phases[7].processed} pairs scanned. ` +
+      `Now have ${fs.with_parenthetical} parentheticals, ${fs.with_treatment} treatments, ${fs.with_pin_cite} pin cites`);
+}
+
+// ============================================================
 //  FINAL REPORT
 // ============================================================
 
@@ -888,7 +1038,7 @@ async function generateReport() {
 async function main() {
   // Parse CLI args
   const args = process.argv.slice(2);
-  let phasesToRun = [1, 2, 3, 4, 5, 6];
+  let phasesToRun = [1, 2, 3, 4, 5, 6, 7];
   for (const arg of args) {
     if (arg.startsWith("--phase=")) {
       phasesToRun = [parseInt(arg.split("=")[1])];
@@ -910,6 +1060,7 @@ async function main() {
     // Ensure phases 5 and 6 exist if checkpoint is from older version
     if (!state.phases[5]) state.phases[5] = { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0, fetched_chars: 0 };
     if (!state.phases[6]) state.phases[6] = { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0 };
+    if (!state.phases[7]) state.phases[7] = { status: "pending", processed: 0, total: 0, errors: 0, last_id: 0 };
     log(`[init] Resumed: ${JSON.stringify(state.phases, null, 2)}`);
   } else {
     state.job_id = `overnight-${Date.now()}`;
@@ -934,6 +1085,9 @@ async function main() {
     }
     if (phasesToRun.includes(6) && state.phases[6].status !== "complete") {
       await phase6_extractParentheticalsRerun();
+    }
+    if (phasesToRun.includes(7) && state.phases[7].status !== "complete") {
+      await phase7_parentheticalsByJudgeText();
     }
 
     await generateReport();
@@ -960,5 +1114,6 @@ module.exports = {
   phase4_motionIntel,
   phase5_backfillFullText,
   phase6_extractParentheticalsRerun,
+  phase7_parentheticalsByJudgeText,
   generateReport
 };
