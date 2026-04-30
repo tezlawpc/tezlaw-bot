@@ -512,6 +512,23 @@ function isMetadataParen(text) {
     return true;
   }
 
+  // 9th Circuit Rule 36-3 unpublished disposition footnote — appears at TOP of every
+  // unpublished opinion. Sometimes the regex captures this as the first paren after a case name.
+  // Pattern: starts with "9th" or "Cir." or "*" and contains "Rule 36-3" or "not appropriate for publication"
+  if (/(?:Rule\s+36[-\u2013]3|not\s+appropriate\s+for\s+publication|not\s+precedent\s+except|panel\s+unanimously\s+concludes)/i.test(t)) {
+    return true;
+  }
+
+  // Other circuits' unpublished-opinion boilerplate
+  if (/(?:Local\s+Rule\s+\d|unpublished\s+(?:disposition|opinion)|nonprecedential)/i.test(t)) {
+    return true;
+  }
+
+  // Suitable-for-decision-without-oral-argument boilerplate
+  if (/^(?:suitable\s+for\s+decision\s+without\s+oral\s+argument|case\s+is\s+suitable\s+for)/i.test(t)) {
+    return true;
+  }
+
   return false;
 }
 
@@ -532,8 +549,18 @@ function classifyTreatment(parenthetical) {
   for (const [k, rx] of Object.entries(POS)) {
     if (rx.test(parenthetical)) return k;
   }
-  // Holding/explanatory language is "neutral"
-  if (/\bheld\b|\bholding\b|\bnoting\b|\bexplaining\b|\bstating\b/i.test(parenthetical)) {
+  // Substantive descriptive language → "neutral"
+  // Includes: signal verbs, direct quotes, "the X requires/must/shall" patterns
+  if (
+    // Bluebook signal verbs (broader list)
+    /\b(?:held|holding|noting|explaining|stating|finding|concluding|reasoning|describing|recognizing|reaffirming|interpret(?:ing|ed)?|construing|emphasiz(?:ing|ed)|observing|determining|setting forth|establish(?:ing|ed))\b/i.test(parenthetical)
+    // Direct quotes (curly or straight, including smart quotes)
+    || /^[\u201C\u2018"']/.test(parenthetical.trim())
+    // Sentences in third person describing rule of law
+    || /^[Tt]he\s+\w+\s+(?:is|was|requires|must|shall|cannot|may|does|did|provides|prohibits|permits|defines|imposes)\b/.test(parenthetical)
+    // Common "court did X" patterns
+    || /\b(?:the\s+(?:court|panel|majority|dissent|judge)\s+(?:held|found|concluded|ruled|determined))\b/i.test(parenthetical)
+  ) {
     return "neutral";
   }
   return null;  // truly indeterminate
