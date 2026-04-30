@@ -158,49 +158,75 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 //  COURTLISTENER FETCHER
 // ============================================================
 
-async function fetchBatch(courtCode, nextUrl, dateAfter) {
+async function fetchBatch(courtCode, nextUrl, dateAfter, retries = 3) {
   const headers = { Authorization: `Token ${COURTLISTENER_TOKEN}` };
 
-  try {
-    const resp = nextUrl
-      ? await axios.get(nextUrl, { headers, timeout: 30000 })
-      : await axios.get("https://www.courtlistener.com/api/rest/v4/opinions/", {
-          params: {
-            cluster__docket__court:    courtCode,
-            cluster__date_filed__gte:  dateAfter,
-            order_by:                  "-id",
-            page_size:                 CL_PAGE_SIZE,
-          },
-          headers,
-          timeout: 30000,
-        });
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const resp = nextUrl
+        ? await axios.get(nextUrl, { headers, timeout: 30000 })
+        : await axios.get("https://www.courtlistener.com/api/rest/v4/opinions/", {
+            params: {
+              cluster__docket__court:    courtCode,
+              cluster__date_filed__gte:  dateAfter,
+              order_by:                  "-id",
+              page_size:                 CL_PAGE_SIZE,
+            },
+            headers,
+            timeout: 30000,
+          });
 
-    const results = (resp.data?.results || []).map(op => ({
-      cluster_id:   op.cluster_id || op.id,
-      opinionId:    op.id,
-      judge:        (op.author_str || op.joined_by_str || "").trim(),
-      dateFiled:    op.date_created?.split("T")[0] || "",
-      absolute_url: op.absolute_url || "",
-      _text:        op.plain_text || op.html_with_citations || op.xml_harvard || "",
-    }));
+      const results = (resp.data?.results || []).map(op => ({
+        cluster_id:   op.cluster_id || op.id,
+        opinionId:    op.id,
+        judge:        (op.author_str || op.joined_by_str || "").trim(),
+        dateFiled:    op.date_created?.split("T")[0] || "",
+        absolute_url: op.absolute_url || "",
+        _text:        op.plain_text || op.html_with_citations || op.xml_harvard || "",
+      }));
 
-    return {
-      results,
-      count: resp.data?.count || 0,
-      next:  resp.data?.next  || null,
-    };
-  } catch (err) {
-    if (err.response?.status === 429) {
-      log(`[CL] Rate limited — sleeping 60s`);
-      await sleep(60000);
-      return { results: [], count: 0, next: null };
+      return {
+        results,
+        count: resp.data?.count || 0,
+        next:  resp.data?.next  || null,
+        ok:    true,                  // signal: real success
+      };
+    } catch (err) {
+      const status = err.response?.status;
+
+      // 429 — rate limited, slow retry
+      if (status === 429) {
+        log(`[CL] Rate limited — sleeping 60s (attempt ${attempt + 1}/${retries})`);
+        await sleep(60000);
+        continue;  // retry
+      }
+
+      // 4xx (auth/bad request) — permanent, abort court
+      if (status === 401 || status === 403) {
+        throw new Error(`CL auth error: ${status}`);
+      }
+      if (status === 400 || status === 404) {
+        log(`[CL] ${status} for court ${courtCode} — likely invalid court ID, aborting`);
+        return { results: [], count: 0, next: null, ok: false, abort: true };
+      }
+
+      // 5xx (server error) or network — transient, retry with backoff
+      const isTransient = !status || (status >= 500 && status < 600) || err.code === "ECONNRESET" || err.code === "ETIMEDOUT" || err.code === "ECONNABORTED";
+      if (isTransient && attempt < retries - 1) {
+        const backoff = Math.min(60000, 5000 * Math.pow(2, attempt));  // 5s, 10s, 20s
+        log(`[CL] Transient error (${status || err.code}) for ${courtCode} — retry ${attempt + 1}/${retries} in ${backoff/1000}s`);
+        await sleep(backoff);
+        continue;  // retry
+      }
+
+      // Final attempt failed — but DON'T claim "no more data". Mark as transient_error.
+      log(`[CL] Fetch error (${courtCode}) after ${retries} attempts: ${err.message}`);
+      return { results: [], count: 0, next: nextUrl, ok: false, transient: true };
     }
-    if (err.response?.status === 401 || err.response?.status === 403) {
-      throw new Error(`CL auth error: ${err.response.status}`);
-    }
-    log(`[CL] Fetch error (${courtCode}): ${err.message}`);
-    return { results: [], count: 0, next: null };
   }
+
+  // Shouldn't reach here, but defensive
+  return { results: [], count: 0, next: nextUrl, ok: false, transient: true };
 }
 
 // ============================================================
@@ -456,6 +482,7 @@ async function scanCourt(courtKey) {
   log(`╚═════════════════════════════════════╝`);
 
   const keywords = court.immigrationOnly ? IMMIGRATION_KEYWORDS : PRACTICE_KEYWORDS;
+  let consecutiveErrors = 0;
 
   while (true) {
     if (!checkBudget()) {
@@ -466,7 +493,38 @@ async function scanCourt(courtKey) {
     }
 
     const batch = await fetchBatch(court.clCourt, cs.cursor, cs.dateAfter);
-    if (!batch.results.length) break;
+
+    // Permanent abort (4xx) — stop this court entirely
+    if (batch.abort) {
+      log(`[${courtKey}] aborting — permanent error`);
+      cs.status = "aborted";
+      saveCheckpoint();
+      return;
+    }
+
+    // Transient error after retries exhausted — pause this court, move to next
+    // Don't terminate as "complete" — leave cursor so we can resume
+    if (batch.transient) {
+      consecutiveErrors++;
+      if (consecutiveErrors >= 3) {
+        log(`[${courtKey}] 3 consecutive transient errors — pausing this court, will resume on next run`);
+        cs.status = "paused_errors";
+        saveCheckpoint();
+        return;
+      }
+      log(`[${courtKey}] transient error #${consecutiveErrors} — sleeping 30s before next page`);
+      await sleep(30000);
+      continue;  // try again with same cursor
+    }
+
+    // Real success
+    consecutiveErrors = 0;
+
+    // Real empty (200 OK with no results) — end of pagination
+    if (batch.ok && !batch.results.length) {
+      log(`[${courtKey}] no more results — court fully scanned`);
+      break;
+    }
 
     cs.page++;
     cs.totalFound += batch.results.length;
@@ -635,9 +693,17 @@ async function main() {
       log(`[main] Budget exhausted — stopping`);
       break;
     }
-    if (state.courts[courtKey]?.status === "complete") {
+    const existing = state.courts[courtKey];
+    if (existing?.status === "complete") {
       log(`[${courtKey}] already complete — skipping`);
       continue;
+    }
+    if (existing?.status === "aborted") {
+      log(`[${courtKey}] previously aborted (permanent error) — skipping`);
+      continue;
+    }
+    if (existing?.cursor) {
+      log(`[${courtKey}] resuming from page ${existing.page || "?"} (status was: ${existing.status})`);
     }
     try {
       await scanCourt(courtKey);
