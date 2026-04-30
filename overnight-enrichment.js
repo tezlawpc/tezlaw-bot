@@ -392,28 +392,127 @@ async function extractParentheticalForCitation(opinionText, caseName, citation) 
   const anchor = citation || caseName;
   const escapedAnchor = anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-  // Look for: anchor [, pin] ( parenthetical text )
-  // Allow up to 250 chars of intermediate text for the parenthetical
-  const rx = new RegExp(
-    `${escapedAnchor}` +
-    `(?:,\\s*(\\d+))?` +              // optional pin cite
-    `[^()]{0,200}?` +                  // some intermediate text
-    `\\(([^)]{10,400})\\)`,            // the parenthetical content
-    "i"
-  );
+  // Find every occurrence of the anchor, then walk forward looking for parentheticals.
+  // Court+year parens like "(9th Cir. 2020)" or "(2007)" or "(en banc)" come FIRST and
+  // should be SKIPPED. The substantive parenthetical comes AFTER them, if at all.
+  const anchorRx = new RegExp(escapedAnchor, "ig");
+  let match;
 
-  const match = opinionText.match(rx);
-  if (!match) {
+  // We may need to try multiple occurrences — pick the one with the richest follow-on text
+  const candidates = [];
+
+  while ((match = anchorRx.exec(opinionText)) !== null) {
+    const startIdx = match.index + match[0].length;
+    // Look ahead up to 800 chars after this anchor
+    const lookAhead = opinionText.substring(startIdx, startIdx + 800);
+
+    // Try to extract: optional ", PIN_CITE" then a sequence of (parens), pick the SUBSTANTIVE one
+    const result = parseAfterAnchor(lookAhead);
+    if (result.parenthetical) {
+      candidates.push(result);
+    }
+
+    // Don't run away on huge texts
+    if (candidates.length >= 5) break;
+  }
+
+  // Prefer candidates whose parenthetical contains signal verbs (richer content)
+  const SIGNAL_VERBS = /\b(?:held|holding|noting|explaining|stating|finding|concluding|reasoning|describing|recognizing|reaffirming|distinguishing|criticiz|reversing|overruling|abrogat|affirm)/i;
+  candidates.sort((a, b) => {
+    const aHasSignal = SIGNAL_VERBS.test(a.parenthetical) ? 1 : 0;
+    const bHasSignal = SIGNAL_VERBS.test(b.parenthetical) ? 1 : 0;
+    if (aHasSignal !== bHasSignal) return bHasSignal - aHasSignal;
+    return b.parenthetical.length - a.parenthetical.length;  // tie-break: longer = richer
+  });
+
+  if (candidates.length === 0) {
     return { parenthetical: null, treatment: null, pin_cite: null };
   }
 
-  const pinCite      = match[1] || null;
-  const parenthetical = match[2].trim();
+  const best = candidates[0];
+  return {
+    parenthetical: best.parenthetical,
+    treatment:     classifyTreatment(best.parenthetical),
+    pin_cite:      best.pin_cite,
+  };
+}
 
-  // Classify treatment via Bluebook signal phrases
-  const treatment = classifyTreatment(parenthetical);
+/**
+ * After a case-name anchor, parse:
+ *   - optional ", PIN_CITE" (digits, possibly with letter suffix like "440 n.5")
+ *   - zero or more "skip parens" like (9th Cir. 2020) or (en banc)
+ *   - then the SUBSTANTIVE parenthetical: ( signal verb + text )
+ *
+ * Returns { parenthetical, pin_cite } or empty if no substantive paren found.
+ */
+function parseAfterAnchor(text) {
+  // Match an optional pin cite: ", 440" or ", 440 n.5" or ", at 12"
+  const pinMatch = text.match(/^[\s,]*(?:at\s+)?(\d+(?:\s*n\.?\s*\d+)?)/i);
+  let pinCite = pinMatch ? pinMatch[1].trim() : null;
 
-  return { parenthetical, treatment, pin_cite: pinCite };
+  // Now scan parentheticals one by one, skipping court+year, picking substantive
+  const parenRx = /\(([^()]{2,500})\)/g;
+  let m;
+  while ((m = parenRx.exec(text)) !== null) {
+    const inner = m[1].trim();
+
+    // Skip court+year metadata parentheticals:
+    //   "9th Cir. 2020", "2d Cir. 1995", "Cal. 2018", "U.S. 2010", "2007"
+    //   "en banc", "per curiam", "plurality opinion"
+    //   "Stevens, J., concurring", "Roberts, C.J., dissenting"
+    if (isMetadataParen(inner)) continue;
+
+    // Skip very short non-substantive parens
+    if (inner.length < 10) continue;
+
+    // Skip parens that are JUST another citation (e.g., "Cardoza-Fonseca, 480 U.S. 421")
+    if (/^[A-Z][a-zA-Z]+(?:\s+v\.\s+|,\s*\d)/.test(inner) && !/\b(?:held|holding|noting|explaining|stating|finding)/i.test(inner)) {
+      continue;
+    }
+
+    // This looks substantive — return it
+    return { parenthetical: inner, pin_cite: pinCite };
+  }
+
+  return { parenthetical: null, pin_cite: pinCite };
+}
+
+/**
+ * Detect court+year and other metadata parentheticals that should be SKIPPED.
+ */
+function isMetadataParen(text) {
+  const t = text.trim();
+
+  // Pure year: "(2007)"
+  if (/^\d{4}$/.test(t)) return true;
+
+  // Court abbreviation + year: "(9th Cir. 2020)", "(2d Cir. 1995)", "(Cal.App. 2018)"
+  if (/^(?:U\.S\.|F\.\s*\d|S\.\s*Ct|L\.\s*Ed|Cal|N\.Y|Tex|Fla|Ariz|Wash|D\.C\.|\d+(?:st|nd|rd|th)?\s*(?:Cir|Dist|App)|en\s+banc|per\s+curiam|plurality)/i.test(t)
+      && /\d{4}/.test(t)
+      && t.length < 80) {
+    return true;
+  }
+
+  // Court only: "(en banc)", "(per curiam)", "(plurality opinion)"
+  if (/^(?:en\s+banc|per\s+curiam|plurality(?:\s+opinion)?|concurring|dissenting)$/i.test(t)) {
+    return true;
+  }
+
+  // Judge designation: "Stevens, J., concurring" or "Roberts, C.J., dissenting"
+  // Pattern: CapitalizedName, comma, 1-3 letter title with periods, comma, opinion role
+  if (/^[A-Z][A-Za-z]+,\s*[A-Z]\.(?:[A-Z]\.)?(?:\s*[A-Z]\.)?,\s*(?:concurring|dissenting|joining)/i.test(t)) {
+    return true;
+  }
+
+  // Just a docket number: "(No. 19-1234)"
+  if (/^No\.\s*\d/.test(t)) return true;
+
+  // Just "internal citations omitted", "footnote omitted", "alteration in original"
+  if (/^(?:internal\s+(?:citations?|quotation\s+marks?)\s+omitted|footnotes?\s+omitted|emphasis\s+(?:added|omitted)|alterations?\s+(?:in\s+original|omitted)|citations?\s+omitted|quoting\s|quotation\s+marks?\s+omitted)/i.test(t)) {
+    return true;
+  }
+
+  return false;
 }
 
 function classifyTreatment(parenthetical) {
