@@ -445,24 +445,24 @@ async function filterAlreadyIndexed(clusters) {
   if (!clusters.length) return [];
 
   const urls = clusters.map(c => c.absolute_url ? `https://www.courtlistener.com${c.absolute_url}` : null).filter(Boolean);
-  const clusterIds = clusters.map(c => c.cluster_id).filter(Boolean);
+  const clusterIds = clusters.map(c => c.cluster_id ? String(c.cluster_id) : null).filter(Boolean);
 
   const [byUrl, byClusterId] = await Promise.all([
     urls.length
       ? db.query(`SELECT url FROM judge_rulings WHERE url = ANY($1::text[])`, [urls])
       : Promise.resolve({ rows: [] }),
     clusterIds.length
-      ? db.query(`SELECT cluster_id FROM judge_rulings WHERE cluster_id = ANY($1::int[])`, [clusterIds])
+      ? db.query(`SELECT cluster_id FROM judge_rulings WHERE cluster_id::text = ANY($1::text[])`, [clusterIds])
       : Promise.resolve({ rows: [] }),
   ]);
 
   const existingUrls = new Set(byUrl.rows.map(r => r.url));
-  const existingClusterIds = new Set(byClusterId.rows.map(r => r.cluster_id));
+  const existingClusterIds = new Set(byClusterId.rows.map(r => String(r.cluster_id)));
 
   return clusters.filter(c => {
     const url = c.absolute_url ? `https://www.courtlistener.com${c.absolute_url}` : null;
     if (url && existingUrls.has(url)) return false;
-    if (c.cluster_id && existingClusterIds.has(c.cluster_id)) return false;
+    if (c.cluster_id && existingClusterIds.has(String(c.cluster_id))) return false;
     return true;
   });
 }
