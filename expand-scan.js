@@ -1,24 +1,45 @@
 // ============================================================
-//  expand-scan.js
-//  Aggressive moat expansion scan.
-//  Targets all major jurisdictions, deeper history, with cost optimizations.
+//  expand-scan.js — Multi-Session Moat Expansion
+//
+//  No artificial caps. Each court runs from latest opinion back
+//  to its dateStop, then stops naturally. Run one court (or a few)
+//  per session for predictable results.
 //
 //  OPTIMIZATIONS:
 //    1. Pre-filter: skip already-indexed URLs
 //    2. Concurrency: 5 parallel Claude calls
 //    3. Prompt caching: schema portion cached across calls
 //    4. Checkpointing: survives restart, resumes per court
-//    5. Truncated input: 3,500 chars per ruling (already in original)
-//
-//  ESTIMATED:
-//    ~10,000-15,000 opinions fetched, ~6,000-9,000 Claude calls
-//    Runtime ~2-3 hours with parallelization
-//    Cost ~$5-12 in Haiku 4.5 API
+//    5. Truncated input: 3,500 chars per ruling
+//    6. Per-court dateStop: stops naturally on old data (3 pages all-below-stop)
 //
 //  USAGE:
+//    # Default — runs all courts in priority order, no time cap
 //    nohup node expand-scan.js > /tmp/expand-stdout.log 2>&1 &
-//    # OR specific courts only:
-//    nohup node expand-scan.js --courts=ca9,bia > /tmp/expand-stdout.log 2>&1 &
+//
+//    # One court at a time (recommended for predictable runs)
+//    nohup node expand-scan.js --courts=bia > /tmp/expand-stdout.log 2>&1 &
+//
+//    # Multiple specific courts
+//    nohup node expand-scan.js --courts=bia,scotus,ca9 > /tmp/expand-stdout.log 2>&1 &
+//
+//    # Override dateStop (go further back in history)
+//    nohup node expand-scan.js --courts=bia --stop-year=1980 > /tmp/expand-stdout.log 2>&1 &
+//
+//    # Time-cap for safety (stop after N hours)
+//    nohup node expand-scan.js --courts=bia --max-hours=12 > /tmp/expand-stdout.log 2>&1 &
+//
+//    # Re-scan a court that was previously marked complete
+//    nohup node expand-scan.js --courts=ca9 --rescan > /tmp/expand-stdout.log 2>&1 &
+//
+//  RECOMMENDED SESSION SCHEDULE (over 1-2 weeks):
+//    Session 1: bia (~6-12h)
+//    Session 2: ca9 (~6-12h)
+//    Session 3: scotus + ag (~3-4h combined)
+//    Session 4: ca5,ca11 (immigration, ~4-6h)
+//    Session 5: ca1,ca2 (immigration, ~3-5h)
+//    Session 6: cal + calctapp (~6-10h, calctapp may already be deep)
+//    Session 7: caed,cand,casd (~6-10h)
 // ============================================================
 
 const fs    = require("fs");
@@ -36,13 +57,22 @@ const ANTHROPIC_API_KEY   = process.env.ANTHROPIC_API_KEY;
 if (!COURTLISTENER_TOKEN) { console.error("Missing COURTLISTENER_TOKEN"); process.exit(1); }
 if (!ANTHROPIC_API_KEY)   { console.error("Missing ANTHROPIC_API_KEY");   process.exit(1); }
 
+// ============================================================
+//  CONFIG — multi-session architecture
+//
+//  No artificial caps. Each court runs from latest opinion back
+//  to its dateStop, then stops naturally. Run one court per session
+//  for predictable runtimes.
+// ============================================================
+
 const STORAGE_DIR     = process.env.PERSISTENT_STORAGE_DIR || "/tmp";
 const CHECKPOINT_FILE = path.join(STORAGE_DIR, "expand-checkpoint.json");
 const REPORT_FILE     = path.join(STORAGE_DIR, "expand-report.json");
 const LOG_FILE        = path.join(STORAGE_DIR, "expand-progress.log");
 const STARTED_AT      = Date.now();
 
-const MAX_RUNTIME_HOURS    = 3.5;
+// Default: NO time cap. Override with --max-hours=N for safety.
+let MAX_RUNTIME_HOURS = Infinity;
 const CONCURRENCY          = 5;          // parallel Claude calls
 const CL_PAGE_SIZE         = 50;         // larger pages = fewer round-trips
 const CL_PAUSE_EVERY       = 10;         // pause 5s every N pages
@@ -56,36 +86,47 @@ const MAX_PROMPT_CHARS     = 3500;       // truncate input to Claude
 //  Aggressive: deeper dates, more courts, fixed calctapp ID
 // ============================================================
 
+// ============================================================
+//  COURTS — Per-court config
+//
+//  dateStop  = oldest year to scan (older opinions skipped)
+//  priority  = lower number runs first (when multiple in --courts arg)
+//  immigrationOnly = only store rulings matching immigration keywords
+//
+//  For "expansive" coverage, dateStops are aggressive (deep history).
+//  Adjust per court as needed.
+// ============================================================
+
 const COURTS = {
-  // ── Existing courts with deeper history ──
-  ca9:      { name: "9th Circuit",                  clCourt: "ca9",      type: "appellate",   startYear: 1990 },
-  bia:      { name: "Board of Immigration Appeals", clCourt: "bia",      type: "immigration", startYear: 1995 },
-  cacd:     { name: "Central District CA",          clCourt: "cacd",     type: "federal",     startYear: 2000 },
-  caed:     { name: "Eastern District CA",          clCourt: "caed",     type: "federal",     startYear: 2000 },
-  cand:     { name: "Northern District CA",         clCourt: "cand",     type: "federal",     startYear: 2000 },
-  casd:     { name: "Southern District CA",         clCourt: "casd",     type: "federal",     startYear: 2000 },
-  cal:      { name: "California Supreme Court",     clCourt: "cal",      type: "appellate",   startYear: 1980 },
+  // ── HIGHEST PRIORITY: Immigration core ──
+  bia:      { name: "Board of Immigration Appeals", clCourt: "bia",      type: "immigration", dateStop: 1990, priority: 10 },
+  ag:       { name: "Attorney General",             clCourt: "ag",       type: "immigration", dateStop: 1990, priority: 11 },
 
-  // ── FIXED calctapp ID (was suspicious comma-separated, now single ID) ──
-  calctapp: { name: "California Courts of Appeal",  clCourt: "calctapp", type: "appellate",   startYear: 1995 },
+  // ── HIGH PRIORITY: SCOTUS + 9th Cir ──
+  scotus:   { name: "U.S. Supreme Court",           clCourt: "scotus",   type: "scotus",      dateStop: 1980, priority: 20 },
+  ca9:      { name: "9th Circuit",                  clCourt: "ca9",      type: "appellate",   dateStop: 1985, priority: 21 },
 
-  // ── New courts ──
-  scotus:   { name: "U.S. Supreme Court",            clCourt: "scotus",   type: "scotus",      startYear: 1990 },
-  ag:       { name: "Attorney General (immigration)", clCourt: "ag",      type: "immigration", startYear: 1995 },
-  ca1:      { name: "1st Circuit",                   clCourt: "ca1",      type: "appellate",   startYear: 1995, immigrationOnly: true },
-  ca2:      { name: "2nd Circuit",                   clCourt: "ca2",      type: "appellate",   startYear: 1995, immigrationOnly: true },
-  ca5:      { name: "5th Circuit",                   clCourt: "ca5",      type: "appellate",   startYear: 1995, immigrationOnly: true },
-  ca11:     { name: "11th Circuit",                  clCourt: "ca11",     type: "appellate",   startYear: 1995, immigrationOnly: true },
+  // ── MEDIUM-HIGH: Other federal circuits (immigration only) ──
+  ca5:      { name: "5th Circuit",                  clCourt: "ca5",      type: "appellate",   dateStop: 1995, priority: 30, immigrationOnly: true },
+  ca11:     { name: "11th Circuit",                 clCourt: "ca11",     type: "appellate",   dateStop: 1995, priority: 31, immigrationOnly: true },
+  ca2:      { name: "2nd Circuit",                  clCourt: "ca2",      type: "appellate",   dateStop: 1995, priority: 32, immigrationOnly: true },
+  ca1:      { name: "1st Circuit",                  clCourt: "ca1",      type: "appellate",   dateStop: 1995, priority: 33, immigrationOnly: true },
+
+  // ── MEDIUM: California state courts ──
+  cal:      { name: "California Supreme Court",     clCourt: "cal",      type: "appellate",   dateStop: 1975, priority: 40 },
+  calctapp: { name: "California Courts of Appeal",  clCourt: "calctapp", type: "appellate",   dateStop: 1990, priority: 41 },
+
+  // ── MEDIUM: California federal districts ──
+  cacd:     { name: "Central District CA",          clCourt: "cacd",     type: "federal",     dateStop: 2000, priority: 50 },
+  cand:     { name: "Northern District CA",         clCourt: "cand",     type: "federal",     dateStop: 2000, priority: 51 },
+  caed:     { name: "Eastern District CA",          clCourt: "caed",     type: "federal",     dateStop: 2000, priority: 52 },
+  casd:     { name: "Southern District CA",         clCourt: "casd",     type: "federal",     dateStop: 2000, priority: 53 },
 };
 
-const DEFAULT_SCAN_ORDER = [
-  "calctapp",   // FIRST — debug fixed ID, fail fast
-  "scotus", "ag",
-  "ca9", "bia",
-  "ca1", "ca2", "ca5", "ca11",  // immigration-only filter on these
-  "cacd", "caed", "cand", "casd",
-  "cal",
-];
+// When --courts not specified, run all in priority order
+const DEFAULT_SCAN_ORDER = Object.entries(COURTS)
+  .sort((a, b) => (a[1].priority || 100) - (b[1].priority || 100))
+  .map(([k]) => k);
 
 // ============================================================
 //  PRACTICE KEYWORDS (subset of original — fast pre-filter)
@@ -468,18 +509,28 @@ async function scanCourt(courtKey) {
   const court = COURTS[courtKey];
   if (!court) { log(`Unknown court: ${courtKey}`); return; }
 
+  const dateStopStr = `${court.dateStop}-01-01`;
+
   const cs = state.courts[courtKey] = state.courts[courtKey] || {
     status: "running", page: 0, totalFound: 0, processed: 0, errors: 0, skipped: 0,
-    cursor: null, dateAfter: `${court.startYear}-01-01`,
+    cursor: null,
+    dateAfter: dateStopStr,         // CourtListener filter: opinions filed >= this date
+    dateStop: dateStopStr,          // remember target stop date for this court
+    earliestSeen: null,             // track oldest opinion date encountered
+    pagesUnder: 0,                  // pages where ALL opinions were below dateStop (signals end)
   };
+
+  // Backfill new fields if resuming from older checkpoint format
+  if (!cs.dateStop) cs.dateStop = dateStopStr;
+  if (cs.pagesUnder === undefined) cs.pagesUnder = 0;
 
   cs.status = "running";
   state.current_court = courtKey;
 
-  log(`╔═════════════════════════════════════╗`);
-  log(`║ ${court.name.padEnd(35)} ║`);
-  log(`║ from ${cs.dateAfter}, immigration_only=${court.immigrationOnly ? "YES" : "no"}${" ".repeat(8)}║`);
-  log(`╚═════════════════════════════════════╝`);
+  log(`╔═════════════════════════════════════════╗`);
+  log(`║ ${court.name.padEnd(39)} ║`);
+  log(`║ stops at ${cs.dateStop}, imm_only=${court.immigrationOnly ? "YES" : "no"}${" ".repeat(15)}║`);
+  log(`╚═════════════════════════════════════════╝`);
 
   const keywords = court.immigrationOnly ? IMMIGRATION_KEYWORDS : PRACTICE_KEYWORDS;
   let consecutiveErrors = 0;
@@ -530,16 +581,53 @@ async function scanCourt(courtKey) {
     cs.totalFound += batch.results.length;
     state.totals.fetched += batch.results.length;
 
+    // Track earliest opinion date in this batch
+    let pageEarliest = null;
+    let pageLatest   = null;
+    let allBelowStop = true;
+    for (const op of batch.results) {
+      if (!op.dateFiled) continue;
+      const yyyy = parseInt((op.dateFiled || "").substring(0, 4));
+      if (!yyyy) continue;
+      if (yyyy >= court.dateStop) allBelowStop = false;
+      if (!pageEarliest || op.dateFiled < pageEarliest) pageEarliest = op.dateFiled;
+      if (!pageLatest   || op.dateFiled > pageLatest)   pageLatest   = op.dateFiled;
+    }
+    if (pageEarliest) {
+      cs.earliestSeen = (!cs.earliestSeen || pageEarliest < cs.earliestSeen) ? pageEarliest : cs.earliestSeen;
+    }
+
+    // If entire page is below dateStop, increment counter; bail after 3 such pages
+    if (allBelowStop && batch.results.length > 0) {
+      cs.pagesUnder = (cs.pagesUnder || 0) + 1;
+      log(`[${courtKey}] page ${cs.page}: ALL opinions below dateStop ${court.dateStop} (range ${pageEarliest}..${pageLatest}, pagesUnder=${cs.pagesUnder})`);
+      if (cs.pagesUnder >= 3) {
+        log(`[${courtKey}] reached dateStop ${court.dateStop} — finishing court`);
+        break;
+      }
+      // Skip processing this page since all opinions are too old
+      saveCheckpoint();
+      if (!batch.next) break;
+      cs.cursor = batch.next;
+      continue;
+    } else {
+      cs.pagesUnder = 0;
+    }
+
     // Pre-filter: skip already-indexed
     const fresh = await filterAlreadyIndexed(batch.results);
     cs.skipped += (batch.results.length - fresh.length);
     state.totals.skipped += (batch.results.length - fresh.length);
 
-    log(`[${courtKey}] page ${cs.page}: ${batch.results.length} fetched, ${fresh.length} new, ${batch.results.length - fresh.length} already-indexed`);
+    log(`[${courtKey}] page ${cs.page}: ${batch.results.length} fetched (${pageLatest || "?"}..${pageEarliest || "?"}), ${fresh.length} new, ${batch.results.length - fresh.length} already-indexed`);
 
-    // Pre-filter by keyword relevance
+    // Pre-filter by keyword relevance + dateStop
     const candidates = [];
     for (const op of fresh) {
+      // Skip if individual opinion is below dateStop
+      const yyyy = parseInt((op.dateFiled || "").substring(0, 4));
+      if (yyyy && yyyy < court.dateStop) continue;
+
       const fullText = (op._text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
       if (fullText.length < MIN_TEXT_LENGTH) {
         // Save minimal profile if we have a judge name
@@ -596,7 +684,7 @@ async function scanCourt(courtKey) {
 
     // Update progress
     saveCheckpoint();
-    log(`[${courtKey}] page ${cs.page} done: total ${cs.processed} processed, ${cs.skipped} skipped`);
+    log(`[${courtKey}] page ${cs.page} done: total ${cs.processed} processed, ${cs.skipped} skipped, earliest=${cs.earliestSeen}`);
 
     // Pause every N pages
     if (cs.page % CL_PAUSE_EVERY === 0) {
@@ -667,15 +755,30 @@ async function generateReport() {
 async function main() {
   const args = process.argv.slice(2);
   let courtsToRun = DEFAULT_SCAN_ORDER;
+  let rescan = false;          // --rescan re-runs courts marked complete
+  let overrideStop = null;     // --override-stop=YYYY override per-court dateStop
+
   for (const a of args) {
-    if (a.startsWith("--courts=")) courtsToRun = a.split("=")[1].split(",");
+    if (a.startsWith("--courts="))         courtsToRun = a.split("=")[1].split(",");
+    else if (a.startsWith("--max-hours=")) MAX_RUNTIME_HOURS = parseFloat(a.split("=")[1]);
+    else if (a === "--rescan")             rescan = true;
+    else if (a.startsWith("--rescan="))    courtsToRun = a.split("=")[1].split(",") , rescan = true;
+    else if (a.startsWith("--stop-year=")) overrideStop = parseInt(a.split("=")[1]);
+  }
+
+  if (overrideStop) {
+    for (const k of courtsToRun) {
+      if (COURTS[k]) COURTS[k].dateStop = overrideStop;
+    }
   }
 
   log("═".repeat(60));
-  log("AGGRESSIVE MOAT EXPANSION SCAN");
+  log("MOAT EXPANSION SCAN — Multi-Session Architecture");
   log("═".repeat(60));
   log(`Courts: ${courtsToRun.join(", ")}`);
-  log(`Max runtime: ${MAX_RUNTIME_HOURS}h`);
+  log(`Per-court dateStop: ${courtsToRun.map(k => k + "→" + (COURTS[k]?.dateStop || "?")).join(", ")}`);
+  log(`Max runtime: ${MAX_RUNTIME_HOURS === Infinity ? "UNLIMITED" : MAX_RUNTIME_HOURS + "h"}`);
+  log(`Rescan complete courts: ${rescan ? "YES" : "no"}`);
   log(`Concurrency: ${CONCURRENCY} parallel Claude calls`);
   log("");
 
@@ -688,14 +791,25 @@ async function main() {
     saveCheckpoint();
   }
 
+  // If --rescan, clear completed status for the requested courts
+  if (rescan) {
+    for (const k of courtsToRun) {
+      if (state.courts[k]) {
+        log(`[init] --rescan: clearing prior status for ${k}`);
+        delete state.courts[k];
+      }
+    }
+    saveCheckpoint();
+  }
+
   for (const courtKey of courtsToRun) {
     if (!checkBudget()) {
-      log(`[main] Budget exhausted — stopping`);
+      log(`[main] Runtime budget exhausted — stopping`);
       break;
     }
     const existing = state.courts[courtKey];
     if (existing?.status === "complete") {
-      log(`[${courtKey}] already complete — skipping`);
+      log(`[${courtKey}] already complete — skipping (use --rescan to redo)`);
       continue;
     }
     if (existing?.status === "aborted") {
