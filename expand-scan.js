@@ -65,6 +65,7 @@ const STARTED_AT      = Date.now();
 let MAX_RUNTIME_HOURS    = Infinity;
 let MAX_CLUSTERS_PER_COURT = Infinity;
 let INCLUDE_UNPUBLISHED  = false;
+let USE_KEYWORD_FILTER   = false;       // default: collect ALL — Claude will reject pure procedural
 
 const CONCURRENCY            = 5;
 const SUB_OPINION_CONCURRENCY = 5;
@@ -265,23 +266,37 @@ async function fetchSubOpinion(opinionUrl) {
 
 const STATIC_SCHEMA_PROMPT = `You are extracting structured data from a court ruling for a judge intelligence database at a California law firm.
 
-Extract ONLY if this is a civil motion ruling (demurrer, MSJ, motion to strike, motion to compel, UD, anti-SLAPP, PI/injunction, discovery, sanctions, or immigration motion).
+Extract data for ANY substantive judge ruling — including:
+- Civil motion rulings (demurrer, MSJ, motion to strike, motion to compel, UD, anti-SLAPP, PI/injunction, discovery, sanctions)
+- Appellate decisions (affirmance, reversal, remand)
+- Constitutional rulings, statutory interpretation
+- Habeas petitions, removal/asylum decisions, criminal motions
+- Class certification, Rule 12(b)(6), summary judgment review
+- Any order or opinion deciding a contested legal issue
 
-Respond with JSON only (empty object {} if not a relevant civil ruling):
+ONLY return {} for: pure procedural orders without legal reasoning (e.g., scheduling orders, certificate of service, simple cert grants/denials with no opinion text), opinions under 800 chars, or content that is clearly not a judicial ruling.
+
+Respond with JSON only:
 {
-  "judge_name": "exact name from ruling",
-  "motion_type": "Demurrer|MSJ|Motion to Strike|Motion to Compel|Unlawful Detainer|Anti-SLAPP|Preliminary Injunction|Discovery Motion|Sanctions|Asylum|Removal|Other",
-  "result": "Sustained|Overruled|Granted|Denied|Continued|Mixed",
+  "judge_name": "exact name of authoring judge or panel",
+  "ruling_type": "Demurrer|MSJ|Motion to Strike|Motion to Compel|Unlawful Detainer|Anti-SLAPP|Preliminary Injunction|Discovery|Sanctions|Asylum|Removal|Cancellation|Habeas|Class Cert|Appeal|Constitutional|Statutory Interpretation|Criminal Motion|Other",
+  "motion_type": "same as ruling_type, kept for backwards-compat",
+  "result": "Granted|Denied|Sustained|Overruled|Affirmed|Reversed|Remanded|Vacated|Mixed|Continued|Dismissed",
   "key_phrases": ["exact phrases judge used in reasoning, max 5, under 15 words each"],
   "accepted_args": ["specific arguments/grounds judge agreed with, max 4"],
   "rejected_args": ["specific arguments judge rejected with brief reason, max 4"],
-  "cited_statutes": ["CCP 430.10", "CCP 437c"],
-  "cited_cases": ["case names only, max 4"],
-  "leave_to_amend": true,
-  "legal_standard": "exact standard applied e.g. 'Iqbal/Twombly' or 'CCP 430.10(e)'",
+  "cited_statutes": ["CCP 430.10", "8 U.S.C. § 1158", etc., max 6],
+  "cited_cases": ["case names only, max 6"],
+  "holding": "the rule of law established or applied, in one sentence (e.g., 'Asylum requires nexus between persecution and a protected ground')",
+  "legal_standard": "exact standard applied (e.g., 'Iqbal/Twombly', 'CCP 430.10(e)', 'reasonable possibility of persecution')",
   "decisive_factor": "the single most important reason for the ruling in one sentence",
-  "reasoning_notes": "2 sentence summary: what the judge required and why this motion won/lost"
-}`;
+  "reasoning_notes": "2 sentence summary: what the judge required and why the case came out this way",
+  "leave_to_amend": true
+}
+
+For appellate/SCOTUS opinions: ruling_type = "Appeal" or "Constitutional", result = "Affirmed/Reversed/Remanded", and "holding" should capture the rule of law most likely to be cited later.
+For BIA/immigration: ruling_type = "Asylum/Removal/Cancellation", capture the procedural posture.
+For trial court motions: ruling_type matches the motion (Demurrer, MSJ, etc.).`;
 
 async function analyzeWithClaude(ruling) {
   if (!ruling.full_text || ruling.full_text.length < MIN_TEXT_LENGTH) return null;
@@ -654,10 +669,14 @@ async function scanCourt(courtKey) {
         const clusterYear = parseInt((cluster.date_filed || "").substring(0, 4));
         if (clusterYear && clusterYear < court.dateStop) continue;
 
-        // Keyword filter
-        const lower = opinion.full_text.toLowerCase();
-        const isRelevant = keywords.some(kw => lower.includes(kw));
-        if (!isRelevant) continue;
+        // Keyword filter — default OFF (collect all). Enabled if --keyword-filter
+        // OR if court is immigration-only (filters general circuit cases to immigration matters)
+        const useKeywordFilter = USE_KEYWORD_FILTER || court.immigrationOnly;
+        if (useKeywordFilter) {
+          const lower = opinion.full_text.toLowerCase();
+          const isRelevant = keywords.some(kw => lower.includes(kw));
+          if (!isRelevant) continue;
+        }
 
         const judgeNames = extractJudgeNames(opinion.full_text, cluster, opinion);
 
@@ -782,6 +801,7 @@ async function main() {
     else if (a.startsWith("--max-hours="))    MAX_RUNTIME_HOURS = parseFloat(a.split("=")[1]);
     else if (a.startsWith("--max-clusters=")) MAX_CLUSTERS_PER_COURT = parseInt(a.split("=")[1]);
     else if (a === "--include-unpublished")   INCLUDE_UNPUBLISHED = true;
+    else if (a === "--keyword-filter")        USE_KEYWORD_FILTER = true;
     else if (a === "--rescan")                rescan = true;
     else if (a.startsWith("--rescan="))      { courtsToRun = a.split("=")[1].split(","); rescan = true; }
     else if (a.startsWith("--stop-year="))    overrideStop = parseInt(a.split("=")[1]);
@@ -799,6 +819,7 @@ async function main() {
   log(`Max runtime: ${MAX_RUNTIME_HOURS === Infinity ? "UNLIMITED" : MAX_RUNTIME_HOURS + "h"}`);
   log(`Max clusters per court: ${MAX_CLUSTERS_PER_COURT === Infinity ? "UNLIMITED" : MAX_CLUSTERS_PER_COURT}`);
   log(`Include unpublished: ${INCLUDE_UNPUBLISHED ? "YES" : "no (Published only)"}`);
+  log(`Keyword filter: ${USE_KEYWORD_FILTER ? "YES (only ruling-keyword matches)" : "no (analyze all opinions; immigration courts still filter)"}`);
   log(`Rescan complete courts: ${rescan ? "YES" : "no"}`);
   log(`Concurrency: ${CONCURRENCY} Claude calls + ${SUB_OPINION_CONCURRENCY} sub-opinion fetches`);
   log("");
