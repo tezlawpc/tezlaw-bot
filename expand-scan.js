@@ -1,43 +1,30 @@
 // ============================================================
-//  expand-scan.js v2 — Multi-Session Moat Expansion
+//  expand-scan.js v3 — Year-Windowed Multi-Session Moat Expansion
 //
-//  CRITICAL FIX (v2): Uses /clusters/ endpoint instead of /opinions/.
-//  The /opinions/ endpoint:
-//    - Has only `date_created` (CL ingestion date), NOT `date_filed`
-//    - Cannot filter or sort by real filing date
-//  The /clusters/ endpoint:
-//    - Has real `date_filed` field
-//    - Supports `date_filed__gte`, `date_filed__lte`, `precedential_status` filters
-//    - Each cluster has `sub_opinions` array (URLs to full-text opinions)
+//  v3 CHANGES vs v2:
+//    - Year-windowed pagination (avoids CL deep-cursor timeouts)
+//    - Each year scanned independently via date_filed__gte + date_filed__lt
+//    - Fast queries (small result sets per year) — no 30s timeouts
+//    - Per-window cursor, per-year completion tracking
+//    - Auto-skip year on persistent errors (5+) instead of pausing whole court
+//
+//  USES /clusters/ endpoint (not /opinions/) — has real date_filed.
 //
 //  ARCHITECTURE:
-//    1. Fetch clusters with date_filed filter + precedential_status=Published
-//    2. For each cluster: fetch its first sub_opinion to get full_text
-//    3. Pre-filter (already-indexed, length, keywords)
-//    4. Analyze with Claude (Haiku 4.5, prompt-cached schema)
-//    5. Store in judge_rulings + judge_insights
+//    1. For each court, iterate years from current down to dateStop
+//    2. For each year window: fetch clusters with date_filed in that year
+//    3. Paginate within year via cursor (small, fast queries)
+//    4. Per-cluster: fetch first sub_opinion, get full text
+//    5. Pre-filter (already-indexed, length, optional keywords)
+//    6. Analyze with Claude (Haiku 4.5, prompt-cached schema)
+//    7. Store in judge_rulings + judge_insights
 //
 //  USAGE:
-//    # All courts in priority order (no time cap, autonomous)
-//    nohup node expand-scan.js > /tmp/expand-stdout.log 2>&1 &
+//    nohup node expand-scan.js --courts=ca9 > /tmp/expand-stdout.log 2>&1 &
+//    nohup node expand-scan.js --courts=scotus --max-clusters=10000 ...
+//    nohup node expand-scan.js --courts=ca9 --keyword-filter ...  # narrow to civil motion keywords
 //
-//    # One court at a time (recommended for predictable runs)
-//    nohup node expand-scan.js --courts=bia > /tmp/expand-stdout.log 2>&1 &
-//
-//    # Override dateStop
-//    nohup node expand-scan.js --courts=bia --stop-year=1985 > /tmp/expand-stdout.log 2>&1 &
-//
-//    # Cap total clusters per court (safety on huge corpora like ca5)
-//    nohup node expand-scan.js --courts=scotus --max-clusters=10000 > /tmp/expand-stdout.log 2>&1 &
-//
-//    # Time-cap for safety
-//    nohup node expand-scan.js --courts=ca9 --max-hours=12 > /tmp/expand-stdout.log 2>&1 &
-//
-//    # Re-scan a court
-//    nohup node expand-scan.js --courts=bia --rescan > /tmp/expand-stdout.log 2>&1 &
-//
-//    # Include unpublished too (default is Published only)
-//    nohup node expand-scan.js --courts=cacd --include-unpublished > /tmp/expand-stdout.log 2>&1 &
+//  RESUMABLE: cursor + currentWindowYear preserved in checkpoint.
 // ============================================================
 
 const fs    = require("fs");
@@ -168,23 +155,24 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 //  COURTLISTENER FETCHERS
 // ============================================================
 
-async function fetchClusterPage(courtCode, dateStopStr, nextUrl, retries = 3) {
+async function fetchClusterPage(courtCode, dateAfter, dateBefore, nextUrl, retries = 3) {
   const headers = { Authorization: `Token ${COURTLISTENER_TOKEN}` };
 
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       const resp = nextUrl
-        ? await axios.get(nextUrl, { headers, timeout: 60000 })
+        ? await axios.get(nextUrl, { headers, timeout: 90000 })
         : await axios.get("https://www.courtlistener.com/api/rest/v4/clusters/", {
             params: {
               docket__court:      courtCode,
-              date_filed__gte:    dateStopStr,
+              date_filed__gte:    dateAfter,
+              ...(dateBefore ? { date_filed__lt: dateBefore } : {}),
               order_by:           "-date_filed",
               page_size:          CL_PAGE_SIZE,
               ...(INCLUDE_UNPUBLISHED ? {} : { precedential_status: "Published" }),
             },
             headers,
-            timeout: 60000,
+            timeout: 90000,
           });
 
       const results = (resp.data?.results || []).map(c => ({
@@ -521,6 +509,7 @@ async function scanCourt(courtKey) {
   if (!court) { log(`Unknown court: ${courtKey}`); return; }
 
   const dateStopStr = `${court.dateStop}-01-01`;
+  const currentYear = new Date().getFullYear();
 
   const cs = state.courts[courtKey] = state.courts[courtKey] || {
     status: "running",
@@ -530,15 +519,20 @@ async function scanCourt(courtKey) {
     errors: 0,
     skipped: 0,
     cursor: null,
+    currentWindowYear: currentYear + 1,  // start above current year (covers all of currentYear)
     dateAfter: dateStopStr,
     dateStop: dateStopStr,
     earliestSeen: null,
     latestSeen: null,
     pagesUnder: 0,
+    yearsCompleted: [],
   };
 
+  // Backfill new fields if resuming from older checkpoint
   if (!cs.dateStop) cs.dateStop = dateStopStr;
   if (cs.pagesUnder === undefined) cs.pagesUnder = 0;
+  if (cs.currentWindowYear === undefined) cs.currentWindowYear = currentYear + 1;
+  if (!Array.isArray(cs.yearsCompleted)) cs.yearsCompleted = [];
 
   cs.status = "running";
   state.current_court = courtKey;
@@ -546,12 +540,14 @@ async function scanCourt(courtKey) {
   log(`╔═════════════════════════════════════════════╗`);
   log(`║ ${court.name.padEnd(43)} ║`);
   log(`║ stops at ${cs.dateStop}, imm_only=${court.immigrationOnly ? "YES" : "no "}, pub_only=${INCLUDE_UNPUBLISHED ? "no" : "YES"}${" ".repeat(2)}║`);
+  log(`║ year-windowed pagination, current window: ${cs.currentWindowYear - 1}${" ".repeat(4)}║`);
   log(`╚═════════════════════════════════════════════╝`);
 
   const keywords = court.immigrationOnly ? IMMIGRATION_KEYWORDS : PRACTICE_KEYWORDS;
   let consecutiveErrors = 0;
 
-  while (true) {
+  // YEAR WINDOW LOOP — iterate from latest year back to dateStop
+  while (cs.currentWindowYear - 1 >= court.dateStop) {
     if (!checkBudget()) {
       log(`[${courtKey}] runtime budget exceeded — pausing`);
       cs.status = "paused_budget";
@@ -566,178 +562,193 @@ async function scanCourt(courtKey) {
       return;
     }
 
-    const batch = await fetchClusterPage(court.clCourt, cs.dateAfter, cs.cursor);
+    const windowYear   = cs.currentWindowYear - 1;  // the year we're scanning
+    const windowAfter  = `${windowYear}-01-01`;
+    const windowBefore = `${windowYear + 1}-01-01`;
 
-    if (batch.abort) {
-      log(`[${courtKey}] aborting — permanent error`);
-      cs.status = "aborted";
-      saveCheckpoint();
-      return;
-    }
+    log(`[${courtKey}] ▶ window: ${windowYear} (${windowAfter} to ${windowBefore})`);
 
-    if (batch.transient) {
-      consecutiveErrors++;
-      if (consecutiveErrors >= 3) {
-        log(`[${courtKey}] 3 consecutive transient errors — pausing`);
-        cs.status = "paused_errors";
+    let windowPage = 0;
+    let windowFetched = 0;
+    let windowStored = 0;
+
+    // PAGE LOOP within this year window
+    while (true) {
+      if (!checkBudget()) {
+        log(`[${courtKey}] runtime budget exceeded mid-window — pausing`);
+        cs.status = "paused_budget";
         saveCheckpoint();
         return;
       }
-      log(`[${courtKey}] transient error #${consecutiveErrors} — sleeping 30s`);
-      await sleep(30000);
-      continue;
-    }
 
-    consecutiveErrors = 0;
+      const batch = await fetchClusterPage(court.clCourt, windowAfter, windowBefore, cs.cursor);
 
-    if (batch.ok && !batch.results.length) {
-      log(`[${courtKey}] no more results — court fully scanned`);
-      break;
-    }
-
-    cs.page++;
-    cs.totalFound += batch.results.length;
-    state.totals.fetched += batch.results.length;
-
-    let pageEarliest = null, pageLatest = null, allBelowStop = true;
-    for (const c of batch.results) {
-      if (!c.date_filed) continue;
-      const yyyy = parseInt(c.date_filed.substring(0, 4));
-      if (!yyyy) continue;
-      if (yyyy >= court.dateStop) allBelowStop = false;
-      if (!pageEarliest || c.date_filed < pageEarliest) pageEarliest = c.date_filed;
-      if (!pageLatest   || c.date_filed > pageLatest)   pageLatest   = c.date_filed;
-    }
-    if (pageEarliest) cs.earliestSeen = (!cs.earliestSeen || pageEarliest < cs.earliestSeen) ? pageEarliest : cs.earliestSeen;
-    if (pageLatest)   cs.latestSeen   = (!cs.latestSeen   || pageLatest   > cs.latestSeen)   ? pageLatest   : cs.latestSeen;
-
-    if (allBelowStop && batch.results.length > 0) {
-      cs.pagesUnder = (cs.pagesUnder || 0) + 1;
-      log(`[${courtKey}] page ${cs.page}: ALL clusters below dateStop ${court.dateStop} (range ${pageEarliest}..${pageLatest}, pagesUnder=${cs.pagesUnder})`);
-      if (cs.pagesUnder >= 3) {
-        log(`[${courtKey}] reached dateStop ${court.dateStop} — finishing court`);
-        break;
+      if (batch.abort) {
+        log(`[${courtKey}] aborting — permanent error`);
+        cs.status = "aborted";
+        saveCheckpoint();
+        return;
       }
-      saveCheckpoint();
-      if (!batch.next) break;
-      cs.cursor = batch.next;
-      continue;
-    } else {
-      cs.pagesUnder = 0;
-    }
 
-    const fresh = await filterAlreadyIndexed(batch.results);
-    cs.skipped += (batch.results.length - fresh.length);
-    state.totals.skipped += (batch.results.length - fresh.length);
+      if (batch.transient) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= 5) {
+          // After 5 consecutive errors on a window, skip to next year
+          log(`[${courtKey}] 5 consecutive errors on year ${windowYear} — skipping to next year`);
+          cs.cursor = null;  // reset cursor for next year
+          break;  // exit page loop, year loop continues
+        }
+        log(`[${courtKey}] transient error #${consecutiveErrors} on year ${windowYear} — sleeping 30s`);
+        await sleep(30000);
+        continue;  // retry same cursor
+      }
 
-    log(`[${courtKey}] page ${cs.page}: ${batch.results.length} fetched (${pageLatest}..${pageEarliest}), ${fresh.length} new, ${batch.results.length - fresh.length} already-indexed`);
+      consecutiveErrors = 0;
 
-    // Fetch sub_opinions in parallel batches, then keyword-filter, then build candidates
-    const candidates = [];
-    for (let i = 0; i < fresh.length; i += SUB_OPINION_CONCURRENCY) {
-      if (!checkBudget()) { cs.status = "paused_budget"; saveCheckpoint(); return; }
+      if (batch.ok && !batch.results.length) {
+        log(`[${courtKey}] year ${windowYear}: no more results (${windowFetched} fetched, ${windowStored} stored)`);
+        break;  // exit page loop
+      }
 
-      const slice = fresh.slice(i, i + SUB_OPINION_CONCURRENCY);
-      const opinions = await Promise.all(
-        slice.map(c => c.sub_opinions.length ? fetchSubOpinion(c.sub_opinions[0]) : null)
-      );
+      cs.page++;
+      windowPage++;
+      cs.totalFound += batch.results.length;
+      windowFetched += batch.results.length;
+      state.totals.fetched += batch.results.length;
 
-      for (let j = 0; j < slice.length; j++) {
-        const cluster = slice[j];
-        const opinion = opinions[j];
+      // Track date range
+      let pageEarliest = null, pageLatest = null;
+      for (const c of batch.results) {
+        if (!c.date_filed) continue;
+        if (!pageEarliest || c.date_filed < pageEarliest) pageEarliest = c.date_filed;
+        if (!pageLatest   || c.date_filed > pageLatest)   pageLatest   = c.date_filed;
+      }
+      if (pageEarliest) cs.earliestSeen = (!cs.earliestSeen || pageEarliest < cs.earliestSeen) ? pageEarliest : cs.earliestSeen;
+      if (pageLatest)   cs.latestSeen   = (!cs.latestSeen   || pageLatest   > cs.latestSeen)   ? pageLatest   : cs.latestSeen;
 
-        if (!opinion || !opinion.full_text || opinion.full_text.length < MIN_TEXT_LENGTH) {
-          // Save minimal judge profile if we have author from cluster
-          if (cluster.judges) {
-            const names = cluster.judges.split(/[,;]/).map(n => n.trim()).filter(n => n.length > 2);
-            for (const name of names.slice(0, 3)) {
-              try {
-                await db.query(`
-                  INSERT INTO judge_profiles (judge_name, court, court_type, total_rulings)
-                  VALUES ($1, $2, $3, 1)
-                  ON CONFLICT (judge_name, court) DO UPDATE SET
-                    total_rulings = judge_profiles.total_rulings + 1,
-                    last_updated  = NOW()
-                `, [name, court.name, court.type]);
-              } catch {}
+      const fresh = await filterAlreadyIndexed(batch.results);
+      cs.skipped += (batch.results.length - fresh.length);
+      state.totals.skipped += (batch.results.length - fresh.length);
+
+      log(`[${courtKey}] ${windowYear} page ${windowPage}: ${batch.results.length} fetched (${pageLatest}..${pageEarliest}), ${fresh.length} new, ${batch.results.length - fresh.length} already-indexed`);
+
+      // Fetch sub_opinions in parallel batches
+      const candidates = [];
+      for (let i = 0; i < fresh.length; i += SUB_OPINION_CONCURRENCY) {
+        if (!checkBudget()) { cs.status = "paused_budget"; saveCheckpoint(); return; }
+
+        const slice = fresh.slice(i, i + SUB_OPINION_CONCURRENCY);
+        const opinions = await Promise.all(
+          slice.map(c => c.sub_opinions.length ? fetchSubOpinion(c.sub_opinions[0]) : null)
+        );
+
+        for (let j = 0; j < slice.length; j++) {
+          const cluster = slice[j];
+          const opinion = opinions[j];
+
+          if (!opinion || !opinion.full_text || opinion.full_text.length < MIN_TEXT_LENGTH) {
+            // Save minimal judge profile if cluster has author
+            if (cluster.judges) {
+              const names = cluster.judges.split(/[,;]/).map(n => n.trim()).filter(n => n.length > 2);
+              for (const name of names.slice(0, 3)) {
+                try {
+                  await db.query(`
+                    INSERT INTO judge_profiles (judge_name, court, court_type, total_rulings)
+                    VALUES ($1, $2, $3, 1)
+                    ON CONFLICT (judge_name, court) DO UPDATE SET
+                      total_rulings = judge_profiles.total_rulings + 1,
+                      last_updated  = NOW()
+                  `, [name, court.name, court.type]);
+                } catch {}
+              }
+            }
+            continue;
+          }
+
+          // Date filter — skip if individual cluster is below dateStop
+          const clusterYear = parseInt((cluster.date_filed || "").substring(0, 4));
+          if (clusterYear && clusterYear < court.dateStop) continue;
+
+          // Keyword filter (default off, on for immigration-only courts)
+          const useKeywordFilter = USE_KEYWORD_FILTER || court.immigrationOnly;
+          if (useKeywordFilter) {
+            const lower = opinion.full_text.toLowerCase();
+            const isRelevant = keywords.some(kw => lower.includes(kw));
+            if (!isRelevant) continue;
+          }
+
+          const judgeNames = extractJudgeNames(opinion.full_text, cluster, opinion);
+
+          const citationStr = (cluster.citations || [])
+            .map(ct => `${ct.volume} ${ct.reporter} ${ct.page}`)
+            .filter(Boolean)
+            .join("; ");
+
+          for (const judgeName of judgeNames) {
+            candidates.push({
+              judge_name:   judgeName,
+              court:        court.name,
+              court_type:   court.type,
+              cluster_id:   cluster.cluster_id,
+              case_name:    cluster.case_name,
+              case_number:  citationStr,
+              hearing_date: cluster.date_filed,
+              full_text:    opinion.full_text,
+              url:          cluster.absolute_url ? `https://www.courtlistener.com${cluster.absolute_url}` : null,
+            });
+          }
+        }
+      }
+
+      // Process candidates with Claude (5 parallel)
+      for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+        if (!checkBudget()) { cs.status = "paused_budget"; saveCheckpoint(); return; }
+
+        const slice = candidates.slice(i, i + CONCURRENCY);
+        const analyzed = await Promise.all(
+          slice.map(c => analyzeWithClaude(c).catch(e => { state.totals.errors++; return null; }))
+        );
+
+        for (const a of analyzed) {
+          if (a) {
+            const ok = await storeRuling(a);
+            if (ok) {
+              cs.processed++;
+              windowStored++;
+              state.totals.processed++;
             }
           }
-          continue;
         }
 
-        // Date filter — skip if individual cluster is below dateStop
-        const clusterYear = parseInt((cluster.date_filed || "").substring(0, 4));
-        if (clusterYear && clusterYear < court.dateStop) continue;
-
-        // Keyword filter — default OFF (collect all). Enabled if --keyword-filter
-        // OR if court is immigration-only (filters general circuit cases to immigration matters)
-        const useKeywordFilter = USE_KEYWORD_FILTER || court.immigrationOnly;
-        if (useKeywordFilter) {
-          const lower = opinion.full_text.toLowerCase();
-          const isRelevant = keywords.some(kw => lower.includes(kw));
-          if (!isRelevant) continue;
-        }
-
-        const judgeNames = extractJudgeNames(opinion.full_text, cluster, opinion);
-
-        const citationStr = (cluster.citations || [])
-          .map(ct => `${ct.volume} ${ct.reporter} ${ct.page}`)
-          .filter(Boolean)
-          .join("; ");
-
-        for (const judgeName of judgeNames) {
-          candidates.push({
-            judge_name:   judgeName,
-            court:        court.name,
-            court_type:   court.type,
-            cluster_id:   cluster.cluster_id,
-            case_name:    cluster.case_name,
-            case_number:  citationStr,
-            hearing_date: cluster.date_filed,
-            full_text:    opinion.full_text,
-            url:          cluster.absolute_url ? `https://www.courtlistener.com${cluster.absolute_url}` : null,
-          });
-        }
-      }
-    }
-
-    // Process candidates with Claude analysis (5 parallel)
-    for (let i = 0; i < candidates.length; i += CONCURRENCY) {
-      if (!checkBudget()) { cs.status = "paused_budget"; saveCheckpoint(); return; }
-
-      const slice = candidates.slice(i, i + CONCURRENCY);
-      const analyzed = await Promise.all(
-        slice.map(c => analyzeWithClaude(c).catch(e => { state.totals.errors++; return null; }))
-      );
-
-      for (const a of analyzed) {
-        if (a) {
-          const ok = await storeRuling(a);
-          if (ok) {
-            cs.processed++;
-            state.totals.processed++;
-          }
-        }
+        if (cs.processed % SAVE_CHECKPOINT_EVERY === 0) saveCheckpoint();
       }
 
-      if (cs.processed % SAVE_CHECKPOINT_EVERY === 0) saveCheckpoint();
-    }
+      saveCheckpoint();
 
+      if (windowPage % CL_PAUSE_EVERY === 0) {
+        log(`[${courtKey}] pausing ${CL_PAUSE_MS/1000}s after page ${windowPage} of year ${windowYear}`);
+        await sleep(CL_PAUSE_MS);
+      }
+
+      // Page loop continues — move to next page within this year
+      if (!batch.next) break;  // year fully scanned
+      cs.cursor = batch.next;
+    }
+    // END page loop
+
+    // Year complete — log and move to next year
+    log(`[${courtKey}] ✓ year ${windowYear} done: ${windowFetched} fetched, ${windowStored} stored`);
+    cs.yearsCompleted.push({ year: windowYear, fetched: windowFetched, stored: windowStored });
+    cs.currentWindowYear = windowYear;  // this is the year we just completed; next iter will be year-1
+    cs.cursor = null;  // reset cursor for next year
     saveCheckpoint();
-    log(`[${courtKey}] page ${cs.page} done: total ${cs.processed} stored, ${cs.skipped} skipped, latest=${cs.latestSeen}, earliest=${cs.earliestSeen}`);
-
-    if (cs.page % CL_PAUSE_EVERY === 0) {
-      log(`[${courtKey}] pausing ${CL_PAUSE_MS/1000}s after page ${cs.page}`);
-      await sleep(CL_PAUSE_MS);
-    }
-
-    if (!batch.next) break;
-    cs.cursor = batch.next;
   }
+  // END year window loop
 
   cs.status = "complete";
   saveCheckpoint();
   log(`[${courtKey}] ✅ COMPLETE — ${cs.totalFound} fetched, ${cs.processed} stored, ${cs.skipped} skipped, range ${cs.earliestSeen}..${cs.latestSeen}`);
+  log(`[${courtKey}] Years scanned: ${cs.yearsCompleted.length}`);
 }
 
 // ============================================================
