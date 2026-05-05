@@ -1,5 +1,11 @@
 // ============================================================
-//  expand-scan.js v3 — Year-Windowed Multi-Session Moat Expansion
+//  expand-scan.js v3.1 — Year-Windowed + Resilient
+//
+//  v3.1 CHANGES vs v3:
+//    - 4xx no longer aborts the whole court — skips just that window
+//    - Tracks consecutive empty years; pauses (not aborts) if 5 in a row
+//    - Status `paused_cl_degraded` distinguishes "CL is down" from "court done"
+//    - Resumes safely from any pause
 //
 //  v3 CHANGES vs v2:
 //    - Year-windowed pagination (avoids CL deep-cursor timeouts)
@@ -203,8 +209,10 @@ async function fetchClusterPage(courtCode, dateAfter, dateBefore, nextUrl, retri
       }
       if (status === 401 || status === 403) throw new Error(`CL auth error: ${status}`);
       if (status === 400 || status === 404) {
-        log(`[CL] ${status} for court ${courtCode} — likely invalid court ID, aborting`);
-        return { results: [], next: null, ok: false, abort: true };
+        log(`[CL] ${status} for court ${courtCode} — query rejected, skipping this window`);
+        // Don't abort the whole court — return ok:true with empty results
+        // so the page loop ends naturally and we move to next year
+        return { results: [], next: null, ok: true, skipWindow: true };
       }
 
       const isTransient = !status || (status >= 500 && status < 600) || ["ECONNRESET","ETIMEDOUT","ECONNABORTED"].includes(err.code);
@@ -545,6 +553,7 @@ async function scanCourt(courtKey) {
 
   const keywords = court.immigrationOnly ? IMMIGRATION_KEYWORDS : PRACTICE_KEYWORDS;
   let consecutiveErrors = 0;
+  let consecutiveSkippedYears = 0;  // tracks how many years in a row hit skipWindow OR returned 0 fetched
 
   // YEAR WINDOW LOOP — iterate from latest year back to dateStop
   while (cs.currentWindowYear - 1 >= court.dateStop) {
@@ -741,6 +750,20 @@ async function scanCourt(courtKey) {
     cs.yearsCompleted.push({ year: windowYear, fetched: windowFetched, stored: windowStored });
     cs.currentWindowYear = windowYear;  // this is the year we just completed; next iter will be year-1
     cs.cursor = null;  // reset cursor for next year
+
+    // Track consecutive empty/skipped years — if too many in a row, CL API is likely down
+    if (windowFetched === 0) {
+      consecutiveSkippedYears++;
+      if (consecutiveSkippedYears >= 5) {
+        log(`[${courtKey}] 5 consecutive empty years (${windowYear} and 4 prior) — CL API likely degraded, pausing`);
+        cs.status = "paused_cl_degraded";
+        saveCheckpoint();
+        return;
+      }
+    } else {
+      consecutiveSkippedYears = 0;
+    }
+
     saveCheckpoint();
   }
   // END year window loop
