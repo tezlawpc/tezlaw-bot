@@ -64,6 +64,29 @@ async function main() {
     `);
     console.log("Phase 1B-rename: remaining insights renamed:", insightRename.rowCount);
 
+    // Also re-point judge_insights.judge_profile_id (if any) before profile deletes below.
+    // We do this UPDATE conservatively — only if the FK column exists. If it doesn't,
+    // this UPDATE will fail and the catch will roll back. We probe with information_schema first.
+    const hasInsightFk = await db.query(`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name='judge_insights' AND column_name='judge_profile_id'
+      LIMIT 1
+    `);
+    if (hasInsightFk.rows.length > 0) {
+      const insightsRepoint = await db.query(`
+        UPDATE judge_insights i SET
+          judge_profile_id = tgt.id
+        FROM judge_profiles src
+        JOIN judge_profiles tgt
+          ON tgt.judge_name = src.judge_name
+         AND tgt.court = '9th Circuit Court of Appeals'
+         AND tgt.id != src.id
+        WHERE src.court = '9th Circuit'
+          AND i.judge_profile_id = src.id
+      `);
+      console.log("Phase 1B-repoint: judge_insights re-pointed to surviving profile:", insightsRepoint.rowCount);
+    }
+
     // ── PHASE 1C: judge_profiles — same merge pattern ──
     const profileMerge = await db.query(`
       UPDATE judge_profiles tgt SET
@@ -75,6 +98,21 @@ async function main() {
         AND tgt.judge_name = src.judge_name
     `);
     console.log("Phase 1C-merge: judge_profiles conflicts merged:", profileMerge.rowCount);
+
+    // CRITICAL: Re-point judge_rulings.judge_profile_id from the duplicate (src) to the survivor (tgt)
+    // BEFORE deleting the duplicate, otherwise FK constraint blocks delete.
+    const rulingsRepoint = await db.query(`
+      UPDATE judge_rulings r SET
+        judge_profile_id = tgt.id
+      FROM judge_profiles src
+      JOIN judge_profiles tgt
+        ON tgt.judge_name = src.judge_name
+       AND tgt.court = '9th Circuit Court of Appeals'
+       AND tgt.id != src.id
+      WHERE src.court = '9th Circuit'
+        AND r.judge_profile_id = src.id
+    `);
+    console.log("Phase 1C-repoint: judge_rulings re-pointed to surviving profile:", rulingsRepoint.rowCount);
 
     const profileDelete = await db.query(`
       DELETE FROM judge_profiles src
