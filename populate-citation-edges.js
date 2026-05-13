@@ -95,6 +95,33 @@ function normalizeCitation(text) {
              .toLowerCase();
 }
 
+// ─── Classify parenthetical treatment ──────────────────────────────────
+// Mirrors the logic from overnight-enrichment.js classifyTreatment()
+function classifyTreatment(parenthetical) {
+  if (!parenthetical || typeof parenthetical !== "string") return null;
+  const p = parenthetical.toLowerCase();
+
+  // Direct quote indicators (smart unicode + ascii)
+  if (/[\u201C"][^\u201D"]{8,}[\u201D"]/.test(parenthetical)) return "direct_quote";
+  if (/['\u2018][^'\u2019]{8,}['\u2019]/.test(parenthetical)) return "direct_quote";
+
+  // Negative treatment
+  if (/\b(overruling|overruled|abrogating|abrogated|rejecting|disagreeing with|criticizing|declining to follow)\b/.test(p)) return "negative";
+  if (/\b(distinguish(ing|ed)|limit(ing|ed) to)\b/.test(p)) return "distinguished";
+
+  // Positive treatment
+  if (/\b(adopting|following|reaffirming|reaffirmed|approving|approved)\b/.test(p)) return "positive";
+
+  // Neutral / explanatory signals
+  if (/\b(holding|holds|finding|finds|noting|notes|stating|states|explaining|explains|recognizing|recognizes|interpreting|interprets|construing|construes|emphasizing|emphasizes|observing|observes)\b/.test(p)) return "neutral";
+  if (/\b(the\s+\w+\s+(?:requires|must|may|cannot|shall))\b/.test(p)) return "neutral";
+
+  // Citing X for Y
+  if (/^citing\b/.test(p)) return "citing";
+
+  return null;
+}
+
 // ─── Process a single ruling ───────────────────────────────────────────
 async function processRuling(ruling) {
   if (!ruling.full_text || ruling.full_text.length < 800) {
@@ -120,27 +147,62 @@ async function processRuling(ruling) {
   const seenSignatures = new Set();
 
   for (const cit of citations) {
-    // eyecite returns objects with: citation_text, case_name, plaintiff, defendant, year, etc.
-    const citationText = cit.citation_text || cit.full_citation || cit.matched || null;
-    const caseName = cit.case_name || (cit.plaintiff && cit.defendant ? `${cit.plaintiff} v. ${cit.defendant}` : null);
+    // eyecite returns: { type, cite, span, parenthetical, pin_cite, plaintiff, defendant, year, court, volume, reporter, page, extra }
+    // Filter to actual case citations (skip statutes like "15 U.S.C. § 1125", skip "unknown" markers)
+    if (cit.type !== "full_case") continue;
 
-    if (!citationText || !caseName) continue;
+    const citationText = cit.cite;
+    if (!citationText) continue;
 
-    // Dedup within this ruling (same citation cited twice = one edge)
+    // Build case name from plaintiff + defendant
+    let caseName = null;
+    if (cit.plaintiff && cit.defendant) {
+      caseName = `${cit.plaintiff} v. ${cit.defendant}`;
+    } else if (cit.defendant) {
+      caseName = cit.defendant;
+    } else if (cit.plaintiff) {
+      caseName = cit.plaintiff;
+    } else {
+      // No case name parseable — still useful as a citation reference
+      caseName = citationText;
+    }
+
+    // Dedup within this ruling
     const sig = normalizeCitation(citationText) + "|" + normalizeCitation(caseName);
     if (seenSignatures.has(sig)) continue;
     seenSignatures.add(sig);
 
-    // Try to extract a parenthetical for this citation
-    let parenResult = null;
-    try {
-      parenResult = await enrich.extractParentheticalForCitation(
-        ruling.full_text,
-        caseName,
-        citationText
-      );
-    } catch (e) {
-      // extractor errors are non-fatal — still record the edge without paren
+    // Prefer eyecite's native parenthetical; fall back to Phase 7 extractor if missing
+    let parenthetical = cit.parenthetical || null;
+    let pin_cite = cit.pin_cite || null;
+    let treatment = null;
+    let signal = null;
+    let span_start = cit.span ? cit.span[0] : null;
+    let span_end   = cit.span ? cit.span[1] : null;
+
+    if (!parenthetical && typeof enrich.extractParentheticalForCitation === "function") {
+      try {
+        const fallback = await enrich.extractParentheticalForCitation(
+          ruling.full_text,
+          caseName,
+          citationText
+        );
+        if (fallback) {
+          parenthetical = fallback.parenthetical || null;
+          pin_cite      = pin_cite || fallback.pin_cite || null;
+          treatment     = fallback.treatment || null;
+          signal        = fallback.signal || null;
+          span_start    = span_start ?? fallback.span_start ?? null;
+          span_end      = span_end   ?? fallback.span_end   ?? null;
+        }
+      } catch (e) {
+        // non-fatal
+      }
+    }
+
+    // If we have a parenthetical but no treatment yet, classify it now
+    if (parenthetical && !treatment) {
+      treatment = classifyTreatment(parenthetical);
     }
 
     edges.push({
@@ -153,16 +215,16 @@ async function processRuling(ruling) {
       cited_case_name:     caseName,
       cited_case_citation: citationText,
       cited_normalized:    normalizeCitation(citationText),
-      parenthetical:       parenResult?.parenthetical || null,
-      pin_cite:            parenResult?.pin_cite || null,
-      treatment:           parenResult?.treatment || null,
-      signal:              parenResult?.signal || null,
-      span_start:          parenResult?.span_start || null,
-      span_end:            parenResult?.span_end || null,
+      parenthetical,
+      pin_cite,
+      treatment,
+      signal,
+      span_start,
+      span_end,
     });
 
-    if (parenResult?.parenthetical) totals.parens_extracted++;
-    if (parenResult?.treatment)     totals.treatments_extracted++;
+    if (parenthetical) totals.parens_extracted++;
+    if (treatment)     totals.treatments_extracted++;
   }
 
   totals.edges_extracted += edges.length;
