@@ -101,25 +101,51 @@ function classifyTreatment(parenthetical) {
   if (!parenthetical || typeof parenthetical !== "string") return null;
   const p = parenthetical.toLowerCase();
 
-  // Direct quote indicators (smart unicode + ascii)
-  if (/[\u201C"][^\u201D"]{8,}[\u201D"]/.test(parenthetical)) return "direct_quote";
-  if (/['\u2018][^'\u2019]{8,}['\u2019]/.test(parenthetical)) return "direct_quote";
+  // Constraint-valid values: positive, neutral, distinguishes, criticizes,
+  // overrules, reverses, followed, cited, unknown
 
-  // Negative treatment
-  if (/\b(overruling|overruled|abrogating|abrogated|rejecting|disagreeing with|criticizing|declining to follow)\b/.test(p)) return "negative";
-  if (/\b(distinguish(ing|ed)|limit(ing|ed) to)\b/.test(p)) return "distinguished";
+  // Direct quote → "cited" (the parenthetical is quoting the source case)
+  if (/[\u201C"][^\u201D"]{8,}[\u201D"]/.test(parenthetical)) return "cited";
+  if (/['\u2018][^'\u2019]{8,}['\u2019]/.test(parenthetical)) return "cited";
 
-  // Positive treatment
-  if (/\b(adopting|following|reaffirming|reaffirmed|approving|approved)\b/.test(p)) return "positive";
+  // Strongest negative: overruling, abrogating → "overrules"
+  if (/\b(overruling|overruled|abrogating|abrogated)\b/.test(p)) return "overrules";
 
-  // Neutral / explanatory signals
+  // Reversing (specific) → "reverses"
+  if (/\b(reversing|reversed|vacating|vacated)\b/.test(p)) return "reverses";
+
+  // General critique → "criticizes"
+  if (/\b(rejecting|disagreeing with|criticizing|declining to follow|disapproving)\b/.test(p)) return "criticizes";
+
+  // Distinguishing → "distinguishes"
+  if (/\b(distinguish(ing|ed)|limit(ing|ed) to)\b/.test(p)) return "distinguishes";
+
+  // Following / adopting → "followed"
+  if (/\b(adopting|adopted|following|follows|reaffirming|reaffirmed|approving|approved)\b/.test(p)) return "followed";
+
+  // Explanatory signals → "neutral"
   if (/\b(holding|holds|finding|finds|noting|notes|stating|states|explaining|explains|recognizing|recognizes|interpreting|interprets|construing|construes|emphasizing|emphasizes|observing|observes)\b/.test(p)) return "neutral";
   if (/\b(the\s+\w+\s+(?:requires|must|may|cannot|shall))\b/.test(p)) return "neutral";
 
-  // Citing X for Y
-  if (/^citing\b/.test(p)) return "citing";
+  // Citing X for Y → "cited"
+  if (/^citing\b/.test(p)) return "cited";
 
+  // Unrecognized — let it be null rather than "unknown" to keep signal high
   return null;
+}
+
+// Whitelist of CHECK-constraint-allowed treatment values.
+// Any value not in this set will be coerced to null before insert,
+// so we never violate the constraint even if external code injects something.
+const ALLOWED_TREATMENTS = new Set([
+  "positive", "neutral", "distinguishes", "criticizes",
+  "overrules", "reverses", "followed", "cited", "unknown",
+]);
+
+function sanitizeTreatment(t) {
+  if (!t) return null;
+  if (typeof t !== "string") return null;
+  return ALLOWED_TREATMENTS.has(t) ? t : null;
 }
 
 // ─── Process a single ruling ───────────────────────────────────────────
@@ -204,6 +230,9 @@ async function processRuling(ruling) {
     if (parenthetical && !treatment) {
       treatment = classifyTreatment(parenthetical);
     }
+
+    // Always sanitize — anything outside the DB CHECK whitelist becomes null
+    treatment = sanitizeTreatment(treatment);
 
     edges.push({
       ruling_id:           ruling.id,
