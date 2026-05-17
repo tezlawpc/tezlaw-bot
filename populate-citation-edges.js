@@ -261,33 +261,101 @@ async function processRuling(ruling) {
   return edges;
 }
 
-// ─── Bulk insert edges ─────────────────────────────────────────────────
+// ─── Bulk insert edges (defensive) ─────────────────────────────────────
+//
+// Chunks edges into small batches. If a bulk INSERT fails, falls back to
+// per-row INSERT for that chunk so one bad row doesn't lose the rest.
+// Coerces values to safe types before binding.
+function coerceValue(v) {
+  if (v === undefined) return null;
+  if (v === null) return null;
+  if (typeof v === "object") {
+    // span_start/end sometimes came in as Array — flatten to first element if so
+    if (Array.isArray(v)) return v.length ? coerceValue(v[0]) : null;
+    return null;  // any other object — treat as null
+  }
+  if (typeof v === "number" && !isFinite(v)) return null;
+  return v;
+}
+
+async function insertOneRow(e) {
+  try {
+    await db.query(`
+      INSERT INTO citation_edges_internal
+        (ruling_id, judge_profile_id, judge_name, court, case_name,
+         citation_text, cited_case_name, cited_case_citation, cited_normalized,
+         parenthetical, pin_cite, treatment, signal, span_start, span_end, extracted_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+    `, [
+      coerceValue(e.ruling_id), coerceValue(e.judge_profile_id),
+      coerceValue(e.judge_name), coerceValue(e.court), coerceValue(e.case_name),
+      coerceValue(e.citation_text), coerceValue(e.cited_case_name),
+      coerceValue(e.cited_case_citation), coerceValue(e.cited_normalized),
+      coerceValue(e.parenthetical), coerceValue(e.pin_cite),
+      coerceValue(e.treatment), coerceValue(e.signal),
+      coerceValue(e.span_start), coerceValue(e.span_end),
+    ]);
+    return 1;
+  } catch (err) {
+    // Single-row failure: log and skip
+    totals.errors++;
+    return 0;
+  }
+}
+
 async function bulkInsertEdges(edges) {
-  if (!edges.length) return 0;
+  if (!edges || !edges.length) return 0;
 
-  // Build VALUES clause for bulk INSERT
-  const cols = [
-    "ruling_id", "judge_profile_id", "judge_name", "court", "case_name",
-    "citation_text", "cited_case_name", "cited_case_citation", "cited_normalized",
-    "parenthetical", "pin_cite", "treatment", "signal", "span_start", "span_end",
-    "extracted_at"
-  ];
+  const CHUNK = 50;
+  let inserted = 0;
 
-  const placeholders = [];
-  const values = [];
-  let p = 1;
-  for (const e of edges) {
-    placeholders.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, NOW())`);
-    values.push(
-      e.ruling_id, e.judge_profile_id, e.judge_name, e.court, e.case_name,
-      e.citation_text, e.cited_case_name, e.cited_case_citation, e.cited_normalized,
-      e.parenthetical, e.pin_cite, e.treatment, e.signal, e.span_start, e.span_end
-    );
+  for (let i = 0; i < edges.length; i += CHUNK) {
+    const chunk = edges.slice(i, i + CHUNK);
+    if (chunk.length === 0) continue;
+
+    const cols = [
+      "ruling_id", "judge_profile_id", "judge_name", "court", "case_name",
+      "citation_text", "cited_case_name", "cited_case_citation", "cited_normalized",
+      "parenthetical", "pin_cite", "treatment", "signal", "span_start", "span_end",
+      "extracted_at",
+    ];
+
+    const placeholders = [];
+    const values = [];
+    let p = 1;
+    for (const e of chunk) {
+      placeholders.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, NOW())`);
+      values.push(
+        coerceValue(e.ruling_id), coerceValue(e.judge_profile_id),
+        coerceValue(e.judge_name), coerceValue(e.court), coerceValue(e.case_name),
+        coerceValue(e.citation_text), coerceValue(e.cited_case_name),
+        coerceValue(e.cited_case_citation), coerceValue(e.cited_normalized),
+        coerceValue(e.parenthetical), coerceValue(e.pin_cite),
+        coerceValue(e.treatment), coerceValue(e.signal),
+        coerceValue(e.span_start), coerceValue(e.span_end)
+      );
+    }
+
+    // Safety: values count must equal placeholders count exactly
+    const expectedCount = chunk.length * 15;
+    if (values.length !== expectedCount) {
+      console.log(`[bulk] values count mismatch (${values.length} vs ${expectedCount}), falling back to per-row`);
+      for (const e of chunk) inserted += await insertOneRow(e);
+      continue;
+    }
+
+    try {
+      const sql = `INSERT INTO citation_edges_internal (${cols.join(", ")}) VALUES ${placeholders.join(", ")}`;
+      const r = await db.query(sql, values);
+      inserted += r.rowCount;
+    } catch (err) {
+      // Bulk failed — retry the chunk one row at a time
+      console.log(`[bulk] chunk failed (${err.message.substring(0, 100)}), falling back to per-row for ${chunk.length} edges`);
+      for (const e of chunk) inserted += await insertOneRow(e);
+    }
   }
 
-  const sql = `INSERT INTO citation_edges_internal (${cols.join(", ")}) VALUES ${placeholders.join(", ")}`;
-  const r = await db.query(sql, values);
-  return r.rowCount;
+  return inserted;
 }
 
 // ─── Main loop ─────────────────────────────────────────────────────────
