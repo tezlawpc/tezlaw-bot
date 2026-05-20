@@ -31,6 +31,9 @@ const { initCitationTables }                      = require("./citations");
 const { initJudgeProfileTables, getScanStatus }   = require("./judge-scanner");
 const { initCacheTable, getCacheStats, purgeExpiredCache } = require("./answer-cache");
 
+// Matter manager: REST routes (mounted at /admin/matters) + .ics calendar feed
+const { router: matterManagerRouter, handleCalendarFeed } = require("./matter-manager");
+
 // Research module is loaded inside admin.js so it inherits admin auth.
 
 const app = express();
@@ -39,8 +42,18 @@ app.use(express.text({ type: "text/xml" }));
 app.use(cookieParser());
 
 // ── Admin panel ───────────────────────────────────────────
+// Matter manager mounted BEFORE adminRouter so /admin/matters/* takes
+// precedence; otherwise Express would route those requests into the
+// general admin router (which has no /matters/* routes and would 404).
+app.use("/admin/matters", matterManagerRouter);
 app.use("/admin", adminRouter);
 app.get("/admin", (req, res) => res.redirect("/admin/"));
+
+// ── Calendar .ics feed (top-level, secret-protected, no admin session) ──
+// Outlook/Google Calendar fetch this URL on a refresh interval without
+// cookies. Authenticated by the per-user calendar_secret in the URL path.
+// Do NOT move this under /admin — it would break Outlook/Google subscriptions.
+app.get("/calendar/:secret", handleCalendarFeed);
 
 // ── Environment variables ─────────────────────────────────
 const {
