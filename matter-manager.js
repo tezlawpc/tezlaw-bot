@@ -15,11 +15,18 @@
 // ============================================================
 
 const express = require("express");
+const path = require("path");
 const crypto = require("crypto");
 const db = require("./db");
 const { requireAuth } = require("./admin");
 
 const router = express.Router();
+
+// ── Serve the dashboard UI at /admin/matters/ ────────────
+// Auth-protected: unauthenticated users redirect to /admin/login
+router.get("/", requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "matters.html"));
+});
 
 // ── Helper: get the current user id (single-user system) ──
 // For now, every authenticated admin session is JJ Zhang (user id 1).
