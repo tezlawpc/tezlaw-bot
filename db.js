@@ -91,6 +91,7 @@ async function initDB() {
 
     await initWave1Tables();
     await initWave2Tables();
+    await initMatterManagerTables();
     console.log("✅ DB tables ready");
   } catch (err) {
     console.error("❌ DB init error:", err.message);
@@ -490,6 +491,198 @@ async function initWave2Tables() {
   }
 }
 
+// ============================================================
+//  Matter Manager — Phase 4
+//
+//  Tables for tracking active legal matters with deadlines,
+//  notes, and document links. Distinct from the Zara intake
+//  tables above (clients, intakes, leads) which handle
+//  prospective-client communication. These tables track
+//  active engaged matters.
+//
+//  Access restricted to authenticated TEZ users only via the
+//  existing admin auth layer. Cal. Rule of Professional Conduct
+//  1.6 (confidentiality) and Cal. State Bar Formal Op. 2010-179
+//  (cloud computing duties).
+// ============================================================
+async function initMatterManagerTables() {
+  try {
+    // Shared trigger function — auto-updates updated_at on row change.
+    // CREATE OR REPLACE is idempotent.
+    await getPool().query(`
+      CREATE OR REPLACE FUNCTION set_updated_at()
+      RETURNS TRIGGER LANGUAGE plpgsql AS $$
+      BEGIN
+        NEW.updated_at = NOW();
+        RETURN NEW;
+      END;
+      $$
+    `);
+
+    // 1. users — owners of matters; each holds their own calendar secret
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id              SERIAL        PRIMARY KEY,
+        username        VARCHAR(50)   NOT NULL UNIQUE,
+        display_name    VARCHAR(200),
+        calendar_secret VARCHAR(64)   NOT NULL UNIQUE,
+        created_at      TIMESTAMPTZ   DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await getPool().query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_calendar_secret
+        ON users(calendar_secret)
+    `);
+    await getPool().query(`DROP TRIGGER IF EXISTS trg_users_updated_at ON users`);
+    await getPool().query(`
+      CREATE TRIGGER trg_users_updated_at
+        BEFORE UPDATE ON users
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at()
+    `);
+
+    // 2. matters — active engagements
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS matters (
+        id                    SERIAL        PRIMARY KEY,
+        user_id               INTEGER       NOT NULL
+                                REFERENCES users(id) ON DELETE RESTRICT,
+        client_name           VARCHAR(200)  NOT NULL,
+        matter_ref            VARCHAR(100),
+        matter_ref_normalized VARCHAR(100)
+                                GENERATED ALWAYS AS (
+                                  regexp_replace(LOWER(matter_ref), '[^a-z0-9]', '', 'g')
+                                ) STORED,
+        court                 VARCHAR(200),
+        case_type             VARCHAR(100),
+        status                VARCHAR(50)   NOT NULL DEFAULT 'active'
+                                CHECK (status IN ('active', 'closed', 'archived')),
+        dropbox_url           TEXT,
+        notes                 TEXT,
+        created_at            TIMESTAMPTZ   DEFAULT NOW(),
+        updated_at            TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_matters_user_id ON matters(user_id)
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_matters_status ON matters(status)
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_matters_user_status
+        ON matters(user_id, status)
+    `);
+    await getPool().query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_matter_ref_normalized_per_user
+        ON matters(user_id, matter_ref_normalized)
+        WHERE matter_ref IS NOT NULL
+    `);
+    await getPool().query(`DROP TRIGGER IF EXISTS trg_matters_updated_at ON matters`);
+    await getPool().query(`
+      CREATE TRIGGER trg_matters_updated_at
+        BEFORE UPDATE ON matters
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at()
+    `);
+
+    // 3. matter_deadlines — per-matter calendar entries
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS matter_deadlines (
+        id          SERIAL        PRIMARY KEY,
+        matter_id   INTEGER       NOT NULL
+                      REFERENCES matters(id) ON DELETE CASCADE,
+        title       VARCHAR(300)  NOT NULL,
+        citation    VARCHAR(200),
+        due_date    DATE          NOT NULL,
+        party       VARCHAR(20)   NOT NULL DEFAULT 'us'
+                      CHECK (party IN ('us', 'them', 'court')),
+        note        TEXT,
+        completed   BOOLEAN       NOT NULL DEFAULT FALSE,
+        created_at  TIMESTAMPTZ   DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_deadlines_matter_id
+        ON matter_deadlines(matter_id)
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_deadlines_due_date
+        ON matter_deadlines(due_date)
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_deadlines_matter_due
+        ON matter_deadlines(matter_id, due_date)
+    `);
+    await getPool().query(`DROP TRIGGER IF EXISTS trg_deadlines_updated_at ON matter_deadlines`);
+    await getPool().query(`
+      CREATE TRIGGER trg_deadlines_updated_at
+        BEFORE UPDATE ON matter_deadlines
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at()
+    `);
+
+    // 4. matter_notes — timeline of notes per matter
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS matter_notes (
+        id          SERIAL        PRIMARY KEY,
+        matter_id   INTEGER       NOT NULL
+                      REFERENCES matters(id) ON DELETE CASCADE,
+        content     TEXT          NOT NULL,
+        created_at  TIMESTAMPTZ   DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_notes_matter_id
+        ON matter_notes(matter_id)
+    `);
+    await getPool().query(`DROP TRIGGER IF EXISTS trg_notes_updated_at ON matter_notes`);
+    await getPool().query(`
+      CREATE TRIGGER trg_notes_updated_at
+        BEFORE UPDATE ON matter_notes
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at()
+    `);
+
+    // 5. matter_files — document/URL links per matter
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS matter_files (
+        id          SERIAL        PRIMARY KEY,
+        matter_id   INTEGER       NOT NULL
+                      REFERENCES matters(id) ON DELETE CASCADE,
+        filename    VARCHAR(500)  NOT NULL,
+        url         TEXT          NOT NULL,
+        created_at  TIMESTAMPTZ   DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_files_matter_id
+        ON matter_files(matter_id)
+    `);
+    await getPool().query(`DROP TRIGGER IF EXISTS trg_files_updated_at ON matter_files`);
+    await getPool().query(`
+      CREATE TRIGGER trg_files_updated_at
+        BEFORE UPDATE ON matter_files
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at()
+    `);
+
+    // Backfill: ensure JJ admin user exists with a calendar secret.
+    // ON CONFLICT (username) DO NOTHING keeps existing secret if row exists.
+    const crypto = require("crypto");
+    const freshSecret = crypto.randomBytes(32).toString("hex");
+    await getPool().query(
+      `INSERT INTO users (username, display_name, calendar_secret)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (username) DO NOTHING`,
+      ["jj", "JJ Zhang", freshSecret]
+    );
+
+    console.log("✅ Matter manager tables ready");
+  } catch (err) {
+    console.error("❌ initMatterManagerTables error:", err.message);
+  }
+}
+
 async function logAudit(actor, action, target, oldValue, newValue, ip) {
   try {
     await getPool().query(
@@ -676,7 +869,7 @@ module.exports = {
   getHistory, getClientContext, saveSummary, clearHistory,
   saveIntake, maybeAutoSummarize, saveJJMemory, getJJMemories,
   setJJSession, getJJSession, getLastMessageTime, syncIntakeToClient,
-  initWave1Tables, logAudit, createLead, updateLeadStage,
+  initWave1Tables, initMatterManagerTables, logAudit, createLead, updateLeadStage,
   runConflictCheck, logUnansweredQuestion,
   query,
 };
