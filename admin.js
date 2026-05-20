@@ -2313,4 +2313,4 @@ function esc(s) {
 </html>`;
 }
 
-module.exports = { router, handleAdminCallback, initPromptTable, getSavedPrompt };
+module.exports = { router, handleAdminCallback, initPromptTable, getSavedPrompt, requireAuth };
