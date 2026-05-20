@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Matter Manager — Tez Law P.C.</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:       #f4f1ea;
+    --paper-deep:  #ebe6dc;
+    --paper-edge:  #d9d2c4;
+    --ink:         #1a1a1a;
+    --ink-soft:    #4a4a4a;
+    --ink-faint:   #888;
+    --oxblood:     #7a1d1d;
+    --oxblood-d:   #5e1414;
+    --rule:        #c9c2b3;
+    --us:          #2d5a3d;
+    --them:        #7a1d1d;
+    --court:       #6b5a1d;
+    --urgent:      #c0392b;
+    --soon:        #d4842b;
+    --safe:        #5a7a3d;
+    --done:        #999;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--paper); color: var(--ink); }
+  body {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 18px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .label, .mono {
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  button, input, textarea, select {
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--ink);
+  }
+  a { color: var(--oxblood); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Layout ── */
+  .app { max-width: 1400px; margin: 0 auto; padding: 32px; }
+  header {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 18px;
+    margin-bottom: 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .brand h1 {
+    font-weight: 700;
+    font-size: 38px;
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+  .brand .sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--oxblood);
+    margin-top: 8px;
+  }
+  .header-actions { display: flex; gap: 12px; align-items: center; }
+  .header-actions .label { color: var(--ink-faint); }
+
+  /* ── Buttons ── */
+  .btn {
+    display: inline-block;
+    padding: 9px 18px;
+    background: var(--paper);
+    border: 1.5px solid var(--ink);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .btn:hover { background: var(--ink); color: var(--paper); }
+  .btn.primary { background: var(--oxblood); color: var(--paper); border-color: var(--oxblood); }
+  .btn.primary:hover { background: var(--oxblood-d); border-color: var(--oxblood-d); }
+  .btn.ghost { border-color: var(--rule); color: var(--ink-soft); }
+  .btn.ghost:hover { background: var(--paper-deep); color: var(--ink); border-color: var(--ink-soft); }
+  .btn.small { padding: 5px 11px; font-size: 10px; }
+  .btn.danger { color: var(--urgent); border-color: var(--urgent); background: transparent; }
+  .btn.danger:hover { background: var(--urgent); color: var(--paper); }
+
+  /* ── Tabs / Filter bar ── */
+  .filter-bar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 0;
+  }
+  .filter-bar button {
+    background: transparent;
+    border: none;
+    padding: 10px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .filter-bar button:hover { color: var(--ink); }
+  .filter-bar button.active { color: var(--oxblood); border-bottom-color: var(--oxblood); }
+  .filter-bar .count {
+    font-size: 9px;
+    background: var(--paper-edge);
+    padding: 2px 6px;
+    margin-left: 6px;
+    border-radius: 8px;
+  }
+
+  /* ── Matter list ── */
+  .matter-list { display: flex; flex-direction: column; gap: 1px; background: var(--paper-edge); padding: 1px; }
+  .matter {
+    background: var(--paper);
+    padding: 18px 22px;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 20px;
+    align-items: center;
+    transition: background 0.1s;
+  }
+  .matter:hover { background: var(--paper-deep); }
+  .matter .client {
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .matter .ref {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin-top: 3px;
+    letter-spacing: 0.02em;
+  }
+  .matter .meta {
+    font-size: 15px;
+    color: var(--ink-soft);
+    text-align: right;
+    line-height: 1.4;
+  }
+  .matter .meta .court { font-style: italic; }
+  .matter .meta .case-type { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 3px; }
+  .matter .urgency {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    padding: 6px 10px;
+    border: 1px solid var(--rule);
+    min-width: 110px;
+    text-align: center;
+  }
+  .matter .urgency.urgent { color: var(--urgent); border-color: var(--urgent); background: rgba(192,57,43,0.06); }
+  .matter .urgency.soon   { color: var(--soon);   border-color: var(--soon);   background: rgba(212,132,43,0.08); }
+  .matter .urgency.safe   { color: var(--safe);   border-color: var(--safe); }
+  .matter .urgency.none   { color: var(--ink-faint); }
+
+  /* ── Empty state ── */
+  .empty {
+    text-align: center;
+    padding: 80px 24px;
+    color: var(--ink-faint);
+    background: var(--paper);
+    border: 1px solid var(--rule);
+  }
+  .empty h2 { font-weight: 500; font-size: 26px; margin-bottom: 8px; color: var(--ink-soft); }
+  .empty p { font-size: 16px; margin-bottom: 20px; }
+
+  /* ── Modal ── */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(20,15,10,0.55);
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    z-index: 100;
+    overflow-y: auto;
+    padding: 40px 20px;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal {
+    background: var(--paper);
+    border: 1px solid var(--ink);
+    max-width: 900px;
+    width: 100%;
+    box-shadow: 0 30px 60px rgba(0,0,0,0.35);
+    position: relative;
+  }
+  .modal-head {
+    padding: 22px 28px 14px;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+  }
+  .modal-head h2 { font-weight: 600; font-size: 30px; line-height: 1.15; }
+  .modal-head .ref { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-faint); margin-top: 6px; letter-spacing: 0.04em; }
+  .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--ink-faint); padding: 4px 10px; }
+  .modal-close:hover { color: var(--oxblood); }
+  .modal-body { padding: 22px 28px; }
+  .modal-foot { padding: 16px 28px; border-top: 1px solid var(--rule); display: flex; justify-content: space-between; gap: 10px; }
+
+  /* ── Form ── */
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .form-row.full { grid-template-columns: 1fr; }
+  .field label {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 5px;
+  }
+  .field input, .field select, .field textarea {
+    width: 100%;
+    padding: 9px 11px;
+    background: white;
+    border: 1px solid var(--rule);
+    font-size: 16px;
+    font-family: inherit;
+  }
+  .field textarea { min-height: 80px; resize: vertical; }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    outline: none;
+    border-color: var(--oxblood);
+  }
+
+  /* ── Sections inside detail modal ── */
+  .sec { margin-bottom: 28px; }
+  .sec-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 6px;
+    margin-bottom: 12px;
+  }
+  .sec-head h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  /* ── Deadlines list inside detail ── */
+  .deadline {
+    display: grid;
+    grid-template-columns: 110px 1fr auto auto;
+    gap: 14px;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px dotted var(--rule);
+  }
+  .deadline:last-child { border-bottom: none; }
+  .deadline .date {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .deadline .date.urgent { color: var(--urgent); }
+  .deadline .date.soon { color: var(--soon); }
+  .deadline .date.done { color: var(--done); text-decoration: line-through; }
+  .deadline .title-cell { font-size: 16px; }
+  .deadline .title-cell.done { color: var(--done); text-decoration: line-through; }
+  .deadline .cite { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
+  .deadline .note { font-size: 14px; color: var(--ink-soft); margin-top: 3px; font-style: italic; }
+  .deadline .pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    padding: 3px 8px;
+    border: 1px solid var(--rule);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .deadline .pill.us    { color: var(--us);    border-color: var(--us);    background: rgba(45,90,61,0.06); }
+  .deadline .pill.them  { color: var(--them);  border-color: var(--them);  background: rgba(122,29,29,0.06); }
+  .deadline .pill.court { color: var(--court); border-color: var(--court); background: rgba(107,90,29,0.06); }
+
+  .add-row {
+    display: grid;
+    grid-template-columns: 130px 1fr 110px 120px auto;
+    gap: 8px;
+    margin-top: 14px;
+    align-items: end;
+  }
+  .add-row .field label { font-size: 9px; }
+  .add-row .field input, .add-row .field select { padding: 7px 9px; font-size: 14px; }
+
+  .note-row, .file-row {
+    padding: 10px 0;
+    border-bottom: 1px dotted var(--rule);
+  }
+  .note-row:last-child, .file-row:last-child { border-bottom: none; }
+  .note-row .when, .file-row .when {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-bottom: 4px;
+  }
+  .note-row .content { font-size: 15px; white-space: pre-wrap; }
+  .file-row a { font-size: 15px; }
+
+  .add-note-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; align-items: end; }
+  .add-file-row { display: grid; grid-template-columns: 1fr 2fr auto; gap: 8px; margin-top: 12px; align-items: end; }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 11px 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+    z-index: 200;
+    display: none;
+  }
+  .toast.show { display: block; }
+  .toast.err { background: var(--urgent); }
+
+  /* ── Tiny inline delete buttons ── */
+  .x-btn {
+    background: transparent;
+    border: none;
+    color: var(--ink-faint);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 2px 6px;
+  }
+  .x-btn:hover { color: var(--urgent); }
+
+  .row-actions { display: flex; gap: 4px; }
+
+  /* ── Calendar feed banner ── */
+  .calendar-banner {
+    background: var(--paper-deep);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--oxblood);
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .calendar-banner code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: white;
+    padding: 3px 7px;
+    border: 1px solid var(--rule);
+    user-select: all;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header>
+    <div class="brand">
+      <h1>Matter Manager</h1>
+      <div class="sub">Tez Law P.C. — West Covina, California</div>
+    </div>
+    <div class="header-actions">
+      <span class="label" id="user-label">Loading…</span>
+      <button class="btn primary" onclick="openNewMatter()">+ New Matter</button>
+      <a href="/admin/" class="btn ghost">Admin</a>
+    </div>
+  </header>
+
+  <div class="filter-bar">
+    <button class="active" data-status="active" onclick="setFilter('active')">Active <span class="count" id="count-active">—</span></button>
+    <button data-status="closed" onclick="setFilter('closed')">Closed <span class="count" id="count-closed">—</span></button>
+    <button data-status="archived" onclick="setFilter('archived')">Archived <span class="count" id="count-archived">—</span></button>
+    <button data-status="all" onclick="setFilter('all')">All <span class="count" id="count-all">—</span></button>
+  </div>
+
+  <div id="list-wrap">
+    <div class="empty">Loading matters…</div>
+  </div>
+
+</div>
+
+<!-- ── New / Edit matter modal ── -->
+<div class="modal-backdrop" id="matter-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2 id="mm-title">New Matter</h2>
+        <div class="ref" id="mm-ref-display"></div>
+      </div>
+      <button class="modal-close" onclick="closeMatterModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <form id="matter-form" onsubmit="return false;">
+        <input type="hidden" id="mf-id">
+        <div class="form-row">
+          <div class="field">
+            <label>Client Name *</label>
+            <input type="text" id="mf-client" required>
+          </div>
+          <div class="field">
+            <label>Case / Matter Number</label>
+            <input type="text" id="mf-ref" placeholder="A 216-866-000  ·  2:25-cv-04567  ·  etc.">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>Court / Forum</label>
+            <input type="text" id="mf-court" placeholder="U.S. Court of Appeals, 9th Cir.">
+          </div>
+          <div class="field">
+            <label>Case Type</label>
+            <input type="text" id="mf-case-type" placeholder="PFR  ·  Habeas  ·  Civil  ·  Estate">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>Status</label>
+            <select id="mf-status">
+              <option value="active">Active</option>
+              <option value="closed">Closed</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Dropbox / File Folder URL</label>
+            <input type="url" id="mf-dropbox" placeholder="https://…">
+          </div>
+        </div>
+        <div class="form-row full">
+          <div class="field">
+            <label>Notes (short)</label>
+            <textarea id="mf-notes" placeholder="One-line status note or context"></textarea>
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-foot">
+      <div>
+        <button class="btn danger" id="mm-delete-btn" onclick="deleteMatterConfirm()" style="display:none;">Delete Matter</button>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn ghost" onclick="closeMatterModal()">Cancel</button>
+        <button class="btn primary" onclick="saveMatter()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Matter detail modal ── -->
+<div class="modal-backdrop" id="detail-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2 id="dm-client">—</h2>
+        <div class="ref" id="dm-ref">—</div>
+      </div>
+      <button class="modal-close" onclick="closeDetailModal()">×</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="sec" id="dm-meta-sec">
+        <div class="sec-head"><h3>Matter Info</h3>
+          <button class="btn small ghost" onclick="editCurrentMatter()">Edit</button>
+        </div>
+        <div id="dm-meta"></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head"><h3>Deadlines</h3></div>
+        <div id="dm-deadlines"></div>
+        <div class="add-row">
+          <div class="field"><label>Due Date</label><input type="date" id="dl-date"></div>
+          <div class="field"><label>Title *</label><input type="text" id="dl-title" placeholder="Opening brief"></div>
+          <div class="field"><label>Party</label>
+            <select id="dl-party">
+              <option value="us">Us</option>
+              <option value="them">Them</option>
+              <option value="court">Court</option>
+            </select>
+          </div>
+          <div class="field"><label>Citation</label><input type="text" id="dl-cite" placeholder="FRAP 31"></div>
+          <button class="btn primary small" onclick="addDeadline()">Add</button>
+        </div>
+        <div style="margin-top:6px;">
+          <div class="field"><label>Note (optional)</label><input type="text" id="dl-note" placeholder="e.g. 60 days from filing of CAR"></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head"><h3>Notes</h3></div>
+        <div id="dm-notes"></div>
+        <div class="add-note-row">
+          <div class="field"><label>Add Note</label><textarea id="note-content" rows="2"></textarea></div>
+          <button class="btn primary small" onclick="addNote()">Add Note</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head"><h3>Files & Links</h3></div>
+        <div id="dm-files"></div>
+        <div class="add-file-row">
+          <div class="field"><label>Label</label><input type="text" id="file-name" placeholder="Opening Brief.pdf"></div>
+          <div class="field"><label>URL</label><input type="url" id="file-url" placeholder="https://www.dropbox.com/…"></div>
+          <button class="btn primary small" onclick="addFile()">Add</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+//  matters.html — front-end for /admin/matters/api/*
+//  All API calls use credentials so the admin session cookie
+//  is included automatically.
+// ============================================================
+
+const API = '/admin/matters/api';
+let currentFilter = 'active';
+let currentMatter = null;     // full detail object when detail modal is open
+let allMatters = [];          // most recent list response
+
+// ── Fetch wrapper ─────────────────────────────────────────
+async function api(path, opts = {}) {
+  const init = {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  };
+  if (init.body && typeof init.body !== 'string') {
+    init.body = JSON.stringify(init.body);
+  }
+  const r = await fetch(API + path, init);
+  if (r.status === 401) {
+    location.href = '/admin/login';
+    return null;
+  }
+  const text = await r.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
+  if (!r.ok) {
+    throw new Error(data.error || r.statusText);
+  }
+  return data;
+}
+
+// ── Toast ─────────────────────────────────────────────────
+function toast(msg, isErr) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('err', !!isErr);
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const due = new Date(dateStr + 'T00:00:00');
+  const now = new Date();
+  now.setHours(0,0,0,0);
+  return Math.floor((due - now) / 86400000);
+}
+
+function urgencyClass(days) {
+  if (days == null) return 'none';
+  if (days <= 7)  return 'urgent';
+  if (days <= 30) return 'soon';
+  return 'safe';
+}
+
+function urgencyText(days, date) {
+  if (days == null) return 'No deadlines';
+  if (days < 0) return `${-days}d overdue`;
+  if (days === 0) return 'Due today';
+  if (days === 1) return 'Due tomorrow';
+  return `${days}d · ${formatDate(date)}`;
+}
+
+function formatDate(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatDateTime(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+// ── List view ─────────────────────────────────────────────
+async function loadList() {
+  try {
+    const data = await api(`/matters?status=${currentFilter}`);
+    if (!data) return;
+    allMatters = data.matters || [];
+    renderList();
+    refreshCounts();
+  } catch (e) {
+    document.getElementById('list-wrap').innerHTML =
+      `<div class="empty"><h2>Couldn't load matters</h2><p>${esc(e.message)}</p></div>`;
+  }
+}
+
+async function refreshCounts() {
+  try {
+    const all = await api('/matters?status=all');
+    if (!all) return;
+    const m = all.matters || [];
+    document.getElementById('count-active').textContent   = m.filter(x => x.status === 'active').length;
+    document.getElementById('count-closed').textContent   = m.filter(x => x.status === 'closed').length;
+    document.getElementById('count-archived').textContent = m.filter(x => x.status === 'archived').length;
+    document.getElementById('count-all').textContent      = m.length;
+  } catch {}
+}
+
+function renderList() {
+  const wrap = document.getElementById('list-wrap');
+  if (!allMatters.length) {
+    wrap.innerHTML = `
+      <div class="empty">
+        <h2>No ${currentFilter === 'all' ? '' : currentFilter} matters</h2>
+        <p>Click <strong>+ New Matter</strong> to add one.</p>
+      </div>`;
+    return;
+  }
+
+  // Sort: by next_due date ascending, then by updated_at descending
+  const sorted = [...allMatters].sort((a, b) => {
+    if (a.next_due && b.next_due) return new Date(a.next_due) - new Date(b.next_due);
+    if (a.next_due) return -1;
+    if (b.next_due) return 1;
+    return new Date(b.updated_at) - new Date(a.updated_at);
+  });
+
+  wrap.innerHTML = `<div class="matter-list">${sorted.map(renderMatterRow).join('')}</div>`;
+}
+
+function renderMatterRow(m) {
+  const days = m.next_due ? daysUntil(m.next_due) : null;
+  const uc = urgencyClass(days);
+  return `
+    <div class="matter" onclick="openDetail(${m.id})">
+      <div>
+        <div class="client">${esc(m.client_name)}</div>
+        ${m.matter_ref ? `<div class="ref">${esc(m.matter_ref)}</div>` : ''}
+      </div>
+      <div class="meta">
+        ${m.court ? `<div class="court">${esc(m.court)}</div>` : ''}
+        ${m.case_type ? `<div class="case-type">${esc(m.case_type)}</div>` : ''}
+      </div>
+      <div class="urgency ${uc}">
+        ${urgencyText(days, m.next_due)}
+      </div>
+    </div>`;
+}
+
+function setFilter(s) {
+  currentFilter = s;
+  document.querySelectorAll('.filter-bar button').forEach(b => {
+    b.classList.toggle('active', b.dataset.status === s);
+  });
+  loadList();
+}
+
+// ── New / Edit modal ──────────────────────────────────────
+function openNewMatter() {
+  document.getElementById('mm-title').textContent = 'New Matter';
+  document.getElementById('mm-ref-display').textContent = '';
+  document.getElementById('mm-delete-btn').style.display = 'none';
+  document.getElementById('mf-id').value = '';
+  document.getElementById('mf-client').value = '';
+  document.getElementById('mf-ref').value = '';
+  document.getElementById('mf-court').value = '';
+  document.getElementById('mf-case-type').value = '';
+  document.getElementById('mf-status').value = 'active';
+  document.getElementById('mf-dropbox').value = '';
+  document.getElementById('mf-notes').value = '';
+  document.getElementById('matter-modal').classList.add('show');
+  setTimeout(() => document.getElementById('mf-client').focus(), 100);
+}
+
+function editCurrentMatter() {
+  if (!currentMatter) return;
+  const m = currentMatter.matter;
+  document.getElementById('mm-title').textContent = 'Edit Matter';
+  document.getElementById('mm-ref-display').textContent = m.matter_ref || '';
+  document.getElementById('mm-delete-btn').style.display = 'inline-block';
+  document.getElementById('mf-id').value = m.id;
+  document.getElementById('mf-client').value = m.client_name || '';
+  document.getElementById('mf-ref').value = m.matter_ref || '';
+  document.getElementById('mf-court').value = m.court || '';
+  document.getElementById('mf-case-type').value = m.case_type || '';
+  document.getElementById('mf-status').value = m.status || 'active';
+  document.getElementById('mf-dropbox').value = m.dropbox_url || '';
+  document.getElementById('mf-notes').value = m.notes || '';
+  closeDetailModal();
+  document.getElementById('matter-modal').classList.add('show');
+}
+
+function closeMatterModal() {
+  document.getElementById('matter-modal').classList.remove('show');
+}
+
+async function saveMatter() {
+  const id = document.getElementById('mf-id').value;
+  const payload = {
+    client_name: document.getElementById('mf-client').value.trim(),
+    matter_ref:  document.getElementById('mf-ref').value.trim() || null,
+    court:       document.getElementById('mf-court').value.trim() || null,
+    case_type:   document.getElementById('mf-case-type').value.trim() || null,
+    status:      document.getElementById('mf-status').value,
+    dropbox_url: document.getElementById('mf-dropbox').value.trim() || null,
+    notes:       document.getElementById('mf-notes').value.trim() || null,
+  };
+  if (!payload.client_name) { toast('Client name required', true); return; }
+
+  try {
+    if (id) {
+      await api(`/matters/${id}`, { method: 'PATCH', body: payload });
+      toast('Matter updated');
+    } else {
+      const res = await api('/matters', { method: 'POST', body: payload });
+      toast('Matter created');
+      closeMatterModal();
+      await loadList();
+      if (res && res.matter) openDetail(res.matter.id);
+      return;
+    }
+    closeMatterModal();
+    await loadList();
+    if (id) openDetail(parseInt(id));
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function deleteMatterConfirm() {
+  const id = document.getElementById('mf-id').value;
+  if (!id) return;
+  const m = currentMatter && currentMatter.matter;
+  if (!confirm(`Permanently delete "${m?.client_name || 'this matter'}" and ALL its deadlines, notes, and files? This cannot be undone.\n\nTip: setting status to "Archived" hides it without deleting.`)) return;
+  try {
+    await api(`/matters/${id}`, { method: 'DELETE' });
+    toast('Matter deleted');
+    closeMatterModal();
+    currentMatter = null;
+    loadList();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// ── Detail modal ──────────────────────────────────────────
+async function openDetail(id) {
+  try {
+    const data = await api(`/matters/${id}`);
+    if (!data) return;
+    currentMatter = data;
+    renderDetail();
+    document.getElementById('detail-modal').classList.add('show');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function closeDetailModal() {
+  document.getElementById('detail-modal').classList.remove('show');
+}
+
+function renderDetail() {
+  const { matter, deadlines, notes, files } = currentMatter;
+  document.getElementById('dm-client').textContent = matter.client_name;
+  document.getElementById('dm-ref').textContent =
+    [matter.matter_ref, matter.court, matter.case_type, `Status: ${matter.status}`].filter(Boolean).join('  ·  ');
+
+  const metaBits = [];
+  if (matter.court) metaBits.push(`<div><span class="label">Court:</span> ${esc(matter.court)}</div>`);
+  if (matter.case_type) metaBits.push(`<div><span class="label">Type:</span> ${esc(matter.case_type)}</div>`);
+  if (matter.dropbox_url) metaBits.push(`<div><span class="label">Folder:</span> <a href="${esc(matter.dropbox_url)}" target="_blank">Open folder ↗</a></div>`);
+  if (matter.notes) metaBits.push(`<div style="margin-top:8px; font-style:italic;">${esc(matter.notes)}</div>`);
+  document.getElementById('dm-meta').innerHTML = metaBits.length ? metaBits.join('') : '<div style="color:var(--ink-faint); font-style:italic;">No additional info.</div>';
+
+  // Deadlines: not-done first sorted ascending, then completed at bottom
+  const pending = deadlines.filter(d => !d.completed)
+    .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+  const done = deadlines.filter(d => d.completed)
+    .sort((a, b) => new Date(b.due_date) - new Date(a.due_date));
+  const ordered = [...pending, ...done];
+
+  document.getElementById('dm-deadlines').innerHTML = ordered.length
+    ? ordered.map(renderDeadline).join('')
+    : '<div style="color:var(--ink-faint); font-style:italic; padding:8px 0;">No deadlines yet.</div>';
+
+  document.getElementById('dm-notes').innerHTML = notes.length
+    ? notes.map(renderNote).join('')
+    : '<div style="color:var(--ink-faint); font-style:italic; padding:8px 0;">No notes yet.</div>';
+
+  document.getElementById('dm-files').innerHTML = files.length
+    ? files.map(renderFile).join('')
+    : '<div style="color:var(--ink-faint); font-style:italic; padding:8px 0;">No files linked.</div>';
+
+  // Clear add-row inputs
+  document.getElementById('dl-date').value = '';
+  document.getElementById('dl-title').value = '';
+  document.getElementById('dl-cite').value = '';
+  document.getElementById('dl-party').value = 'us';
+  document.getElementById('dl-note').value = '';
+  document.getElementById('note-content').value = '';
+  document.getElementById('file-name').value = '';
+  document.getElementById('file-url').value = '';
+}
+
+function renderDeadline(d) {
+  const days = daysUntil(d.due_date);
+  const dateClass = d.completed ? 'done' : (days != null && days <= 7 ? 'urgent' : (days != null && days <= 30 ? 'soon' : ''));
+  return `
+    <div class="deadline">
+      <div class="date ${dateClass}">${formatDate(d.due_date)}</div>
+      <div>
+        <div class="title-cell ${d.completed ? 'done' : ''}">${esc(d.title)}</div>
+        ${d.citation ? `<div class="cite">${esc(d.citation)}</div>` : ''}
+        ${d.note ? `<div class="note">${esc(d.note)}</div>` : ''}
+      </div>
+      <div class="pill ${d.party}">${d.party}</div>
+      <div class="row-actions">
+        <button class="btn small ghost" onclick="toggleDeadline(${d.id}, ${!d.completed})">${d.completed ? 'Undo' : '✓ Done'}</button>
+        <button class="x-btn" onclick="removeDeadline(${d.id})" title="Delete">×</button>
+      </div>
+    </div>`;
+}
+
+function renderNote(n) {
+  return `
+    <div class="note-row">
+      <div class="when">
+        ${formatDateTime(n.created_at)}
+        <button class="x-btn" onclick="removeNote(${n.id})" title="Delete" style="float:right;">×</button>
+      </div>
+      <div class="content">${esc(n.content)}</div>
+    </div>`;
+}
+
+function renderFile(f) {
+  return `
+    <div class="file-row">
+      <div class="when">
+        ${formatDateTime(f.created_at)}
+        <button class="x-btn" onclick="removeFile(${f.id})" title="Delete" style="float:right;">×</button>
+      </div>
+      <a href="${esc(f.url)}" target="_blank">${esc(f.filename)} ↗</a>
+    </div>`;
+}
+
+// ── Deadlines ─────────────────────────────────────────────
+async function addDeadline() {
+  const matterId = currentMatter?.matter?.id;
+  if (!matterId) return;
+  const payload = {
+    due_date: document.getElementById('dl-date').value,
+    title:    document.getElementById('dl-title').value.trim(),
+    party:    document.getElementById('dl-party').value,
+    citation: document.getElementById('dl-cite').value.trim() || null,
+    note:     document.getElementById('dl-note').value.trim() || null,
+  };
+  if (!payload.due_date) { toast('Date required', true); return; }
+  if (!payload.title)    { toast('Title required', true); return; }
+  try {
+    await api(`/matters/${matterId}/deadlines`, { method: 'POST', body: payload });
+    toast('Deadline added');
+    await openDetail(matterId);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function toggleDeadline(id, completed) {
+  const matterId = currentMatter?.matter?.id;
+  if (!matterId) return;
+  try {
+    await api(`/matters/${matterId}/deadlines/${id}`, { method: 'PATCH', body: { completed } });
+    await openDetail(matterId);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function removeDeadline(id) {
+  const matterId = currentMatter?.matter?.id;
+  if (!matterId) return;
+  if (!confirm('Delete this deadline?')) return;
+  try {
+    await api(`/matters/${matterId}/deadlines/${id}`, { method: 'DELETE' });
+    toast('Deadline deleted');
+    await openDetail(matterId);
+  } catch (e) { toast(e.message, true); }
+}
+
+// ── Notes ─────────────────────────────────────────────────
+async function addNote() {
+  const matterId = currentMatter?.matter?.id;
+  if (!matterId) return;
+  const content = document.getElementById('note-content').value.trim();
+  if (!content) { toast('Note text required', true); return; }
+  try {
+    await api(`/matters/${matterId}/notes`, { method: 'POST', body: { content } });
+    toast('Note added');
+    await openDetail(matterId);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function removeNote(id) {
+  const matterId = currentMatter?.matter?.id;
+  if (!matterId) return;
+  if (!confirm('Delete this note?')) return;
+  try {
+    await api(`/matters/${matterId}/notes/${id}`, { method: 'DELETE' });
+    await openDetail(matterId);
+  } catch (e) { toast(e.message, true); }
+}
+
+// ── Files ─────────────────────────────────────────────────
+async function addFile() {
+  const matterId = currentMatter?.matter?.id;
+  if (!matterId) return;
+  const filename = document.getElementById('file-name').value.trim();
+  const url = document.getElementById('file-url').value.trim();
+  if (!filename || !url) { toast('Label and URL required', true); return; }
+  try {
+    await api(`/matters/${matterId}/files`, { method: 'POST', body: { filename, url } });
+    toast('File added');
+    await openDetail(matterId);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function removeFile(id) {
+  const matterId = currentMatter?.matter?.id;
+  if (!matterId) return;
+  if (!confirm('Remove this file link?')) return;
+  try {
+    await api(`/matters/${matterId}/files/${id}`, { method: 'DELETE' });
+    await openDetail(matterId);
+  } catch (e) { toast(e.message, true); }
+}
+
+// ── Keyboard shortcuts ────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('matter-modal').classList.contains('show')) closeMatterModal();
+    else if (document.getElementById('detail-modal').classList.contains('show')) closeDetailModal();
+  }
+});
+
+// ── Init ──────────────────────────────────────────────────
+document.getElementById('user-label').textContent = 'JJ Zhang';
+loadList();
+</script>
+
+</body>
+</html>
