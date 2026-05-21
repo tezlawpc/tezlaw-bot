@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Matter Manager — Tez Law P.C.</title>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<title>Matter Manager &amp; Docket — Tez Law P.C.</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
     --paper:       #f4f1ea;
@@ -23,6 +23,7 @@
     --soon:        #d4842b;
     --safe:        #5a7a3d;
     --done:        #999;
+    --green-dot:   #5a7a3d;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { background: var(--paper); color: var(--ink); }
@@ -47,241 +48,331 @@
   a { color: var(--oxblood); text-decoration: none; }
   a:hover { text-decoration: underline; }
 
-  /* ── Layout ── */
-  .app { max-width: 1400px; margin: 0 auto; padding: 32px; }
-  header {
-    border-bottom: 2px solid var(--ink);
+  .app { max-width: 1400px; margin: 0 auto; padding: 36px 40px 80px; }
+
+  header.brand-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 24px;
     padding-bottom: 18px;
-    margin-bottom: 32px;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
+    border-top: 2px solid var(--ink);
+    border-bottom: 2px solid var(--ink);
+    padding-top: 18px;
+    position: relative;
   }
-  .brand h1 {
-    font-weight: 700;
-    font-size: 38px;
+  header.brand-head::before {
+    content: ""; position: absolute; top: 6px; left: 0; right: 0;
+    border-top: 1px solid var(--ink);
+  }
+  h1.title {
+    font-weight: 500;
+    font-size: 56px;
     letter-spacing: -0.01em;
     line-height: 1;
+    margin: 0;
   }
-  .brand .sub {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+  h1.title em {
     color: var(--oxblood);
-    margin-top: 8px;
+    font-style: italic;
+    font-weight: 500;
   }
-  .header-actions { display: flex; gap: 12px; align-items: center; }
-  .header-actions .label { color: var(--ink-faint); }
+  .firmline {
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    line-height: 1.6;
+  }
+  .firmline .date-row {
+    color: var(--ink-soft);
+    margin-top: 6px;
+    display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  }
+  .firmline .green-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--green-dot); display: inline-block;
+  }
 
-  /* ── Buttons ── */
+  .tabs {
+    display: flex; gap: 38px; margin-top: 30px;
+    border-bottom: 1px solid var(--rule); padding-bottom: 0;
+  }
+  .tab {
+    background: transparent; border: none;
+    padding: 12px 0 14px;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 22px; font-weight: 500;
+    color: var(--ink-faint); cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--oxblood); border-bottom-color: var(--oxblood); }
+  .tab .count {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--paper); background: var(--ink);
+    padding: 2px 8px; border-radius: 12px; font-weight: 500; letter-spacing: 0.05em;
+  }
+  .tab.active .count { background: var(--oxblood); }
+
+  .section-head {
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: end; gap: 20px; margin-top: 38px; margin-bottom: 22px;
+  }
+  .section-head h2 {
+    font-weight: 500; font-size: 38px; letter-spacing: -0.005em;
+    line-height: 1; margin: 0 0 8px;
+  }
+  .section-head .sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+
   .btn {
-    display: inline-block;
-    padding: 9px 18px;
-    background: var(--paper);
-    border: 1.5px solid var(--ink);
+    display: inline-block; padding: 10px 18px;
+    background: var(--paper); border: 1.5px solid var(--ink);
     color: var(--ink);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: all 0.12s;
+    font-size: 10px; letter-spacing: 0.14em;
+    text-transform: uppercase; cursor: pointer;
+    transition: all 0.12s; text-decoration: none; white-space: nowrap;
   }
   .btn:hover { background: var(--ink); color: var(--paper); }
-  .btn.primary { background: var(--oxblood); color: var(--paper); border-color: var(--oxblood); }
-  .btn.primary:hover { background: var(--oxblood-d); border-color: var(--oxblood-d); }
+  .btn.primary { background: var(--ink); color: var(--paper); }
+  .btn.primary:hover { background: var(--oxblood); border-color: var(--oxblood); }
   .btn.ghost { border-color: var(--rule); color: var(--ink-soft); }
   .btn.ghost:hover { background: var(--paper-deep); color: var(--ink); border-color: var(--ink-soft); }
-  .btn.small { padding: 5px 11px; font-size: 10px; }
+  .btn.small { padding: 5px 11px; font-size: 10px; letter-spacing: 0.08em; }
   .btn.danger { color: var(--urgent); border-color: var(--urgent); background: transparent; }
   .btn.danger:hover { background: var(--urgent); color: var(--paper); }
+  .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 
-  /* ── Tabs / Filter bar ── */
-  .filter-bar {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 24px;
-    border-bottom: 1px solid var(--rule);
-    padding-bottom: 0;
+  .action-row { display: flex; gap: 10px; align-items: center; }
+
+  .overview {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 14px; margin-bottom: 28px;
   }
-  .filter-bar button {
-    background: transparent;
-    border: none;
-    padding: 10px 16px;
+  @media (max-width: 1100px) { .overview { grid-template-columns: repeat(2, 1fr); } }
+  .ov-card { background: white; border: 1px solid var(--rule); padding: 18px 22px 20px; }
+  .ov-card .ov-label {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--ink-faint);
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
+    font-size: 10px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px;
   }
-  .filter-bar button:hover { color: var(--ink); }
-  .filter-bar button.active { color: var(--oxblood); border-bottom-color: var(--oxblood); }
-  .filter-bar .count {
-    font-size: 9px;
-    background: var(--paper-edge);
-    padding: 2px 6px;
-    margin-left: 6px;
-    border-radius: 8px;
+  .ov-card .ov-num {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 500; font-size: 52px; line-height: 1; color: var(--ink);
+  }
+  .ov-card .ov-num.green   { color: var(--us); }
+  .ov-card .ov-num.amber   { color: var(--soon); }
+  .ov-card .ov-num.urgent  { color: var(--urgent); }
+  .ov-card .ov-num.small   { font-size: 38px; }
+  .ov-card .ov-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--ink-faint); margin-top: 10px; letter-spacing: 0.02em;
+  }
+  .ov-card.next-up .ov-sub {
+    color: var(--ink-soft); text-transform: none; letter-spacing: 0;
+    font-family: 'Cormorant Garamond', serif; font-size: 15px;
+    font-style: italic; margin-top: 6px;
   }
 
-  /* ── Matter list ── */
-  .matter-list { display: flex; flex-direction: column; gap: 1px; background: var(--paper-edge); padding: 1px; }
-  .matter {
-    background: var(--paper);
-    padding: 18px 22px;
-    cursor: pointer;
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    gap: 20px;
-    align-items: center;
-    transition: background 0.1s;
+  .matter-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 16px;
   }
-  .matter:hover { background: var(--paper-deep); }
-  .matter .client {
-    font-size: 22px;
-    font-weight: 600;
-    line-height: 1.2;
+  .matter-card {
+    background: white; border: 1px solid var(--rule);
+    padding: 22px 24px 20px; cursor: pointer;
+    transition: all 0.12s;
+    display: flex; flex-direction: column; gap: 12px;
   }
-  .matter .ref {
+  .matter-card:hover {
+    border-color: var(--ink);
+    box-shadow: 0 2px 0 0 var(--ink);
+    transform: translateY(-1px);
+  }
+  .matter-card .court-line {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--ink-faint);
-    margin-top: 3px;
-    letter-spacing: 0.02em;
+    font-size: 10px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--oxblood); font-weight: 600;
   }
-  .matter .meta {
-    font-size: 15px;
-    color: var(--ink-soft);
-    text-align: right;
-    line-height: 1.4;
+  .matter-card .client {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic; font-weight: 500;
+    font-size: 26px; line-height: 1.15; color: var(--ink); margin: 0;
   }
-  .matter .meta .court { font-style: italic; }
-  .matter .meta .case-type { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 3px; }
-  .matter .urgency {
+  .matter-card .ref {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 0.05em;
-    padding: 6px 10px;
-    border: 1px solid var(--rule);
-    min-width: 110px;
-    text-align: center;
+    font-size: 12px; color: var(--ink-faint); letter-spacing: 0.04em; margin-top: -4px;
   }
-  .matter .urgency.urgent { color: var(--urgent); border-color: var(--urgent); background: rgba(192,57,43,0.06); }
-  .matter .urgency.soon   { color: var(--soon);   border-color: var(--soon);   background: rgba(212,132,43,0.08); }
-  .matter .urgency.safe   { color: var(--safe);   border-color: var(--safe); }
-  .matter .urgency.none   { color: var(--ink-faint); }
+  .matter-card .divider {
+    border-top: 1px dashed var(--rule); margin: 4px 0;
+  }
+  .matter-card .next-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
+  }
+  .matter-card .next-row .next-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 4px;
+  }
+  .matter-card .next-row .next-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic; font-size: 17px; line-height: 1.25; color: var(--ink);
+  }
+  .matter-card .next-row .urgency {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 600; font-size: 32px; line-height: 1; text-align: right;
+  }
+  .matter-card .urgency.urgent { color: var(--urgent); }
+  .matter-card .urgency.soon   { color: var(--soon); }
+  .matter-card .urgency.safe   { color: var(--ink); }
+  .matter-card .urgency.none   { color: var(--ink-faint); font-size: 18px; font-style: italic; font-weight: 400; }
+  .matter-card .footer {
+    display: flex; align-items: center; gap: 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--ink-faint); letter-spacing: 0.04em; margin-top: 2px;
+  }
+  .matter-card .footer .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--urgent); margin-left: auto;
+  }
+  .matter-card .footer .badge::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--urgent); display: inline-block;
+  }
 
-  /* ── Empty state ── */
   .empty {
-    text-align: center;
-    padding: 80px 24px;
-    color: var(--ink-faint);
-    background: var(--paper);
-    border: 1px solid var(--rule);
+    text-align: center; padding: 80px 24px; color: var(--ink-faint);
+    background: white; border: 1px solid var(--rule);
   }
-  .empty h2 { font-weight: 500; font-size: 26px; margin-bottom: 8px; color: var(--ink-soft); }
+  .empty h2 { font-weight: 500; font-size: 28px; margin-bottom: 8px; color: var(--ink-soft); }
   .empty p { font-size: 16px; margin-bottom: 20px; }
 
-  /* ── Modal ── */
+  .court-intro {
+    background: white; border: 1px solid var(--rule);
+    padding: 22px 26px; margin-bottom: 28px;
+  }
+  .court-intro h3 { font-weight: 600; font-size: 22px; margin-bottom: 4px; }
+  .court-intro .small-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 14px;
+  }
+  .court-intro p { margin-bottom: 12px; line-height: 1.55; }
+  .court-intro p:last-child { margin-bottom: 0; }
+
+  .court-section { margin-top: 28px; }
+  .court-section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 14px; border-bottom: 1px solid var(--rule); padding-bottom: 6px;
+  }
+  .court-section-head h3 { font-weight: 500; font-size: 26px; }
+  .court-section-head .small-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .court-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  @media (max-width: 800px) { .court-grid { grid-template-columns: 1fr; } }
+  .court-card {
+    background: white; border: 1px solid var(--rule);
+    padding: 14px 18px; transition: border-color 0.12s;
+  }
+  .court-card:hover { border-color: var(--ink); }
+  .court-card .name { font-weight: 600; font-size: 17px; margin-bottom: 3px; }
+  .court-card .desc {
+    font-size: 14px; color: var(--ink-soft);
+    margin-bottom: 6px; font-style: italic;
+  }
+  .court-card a {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; word-break: break-all;
+  }
+
+  .auth-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 1000px) { .auth-grid { grid-template-columns: 1fr; } }
+  .auth-card { background: white; border: 1px solid var(--rule); padding: 22px 26px; }
+  .auth-card h3 { font-weight: 600; font-size: 22px; line-height: 1.15; margin-bottom: 4px; }
+  .auth-card .small-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 14px;
+  }
+  .auth-card .subhead {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--oxblood);
+    margin-top: 16px; margin-bottom: 6px;
+  }
+  .auth-card .subhead:first-of-type { margin-top: 8px; }
+  .auth-card ul { list-style: disc; margin-left: 22px; margin-bottom: 4px; }
+  .auth-card li { margin-bottom: 4px; line-height: 1.45; font-size: 15.5px; }
+  .auth-card li em { font-style: italic; }
+
   .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(20,15,10,0.55);
-    display: none;
-    align-items: flex-start;
-    justify-content: center;
-    z-index: 100;
-    overflow-y: auto;
-    padding: 40px 20px;
+    position: fixed; inset: 0; background: rgba(20,15,10,0.55);
+    display: none; align-items: flex-start; justify-content: center;
+    z-index: 100; overflow-y: auto; padding: 40px 20px;
   }
   .modal-backdrop.show { display: flex; }
   .modal {
-    background: var(--paper);
-    border: 1px solid var(--ink);
-    max-width: 900px;
-    width: 100%;
-    box-shadow: 0 30px 60px rgba(0,0,0,0.35);
-    position: relative;
+    background: var(--paper); border: 1px solid var(--ink);
+    max-width: 960px; width: 100%; box-shadow: 0 30px 60px rgba(0,0,0,0.35);
   }
   .modal-head {
-    padding: 22px 28px 14px;
-    border-bottom: 1px solid var(--rule);
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 20px;
+    padding: 22px 28px 14px; border-bottom: 1px solid var(--rule);
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;
   }
-  .modal-head h2 { font-weight: 600; font-size: 30px; line-height: 1.15; }
-  .modal-head .ref { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-faint); margin-top: 6px; letter-spacing: 0.04em; }
+  .modal-head h2 { font-weight: 600; font-size: 32px; line-height: 1.15; font-style: italic; }
+  .modal-head .ref {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--ink-faint); margin-top: 6px; letter-spacing: 0.04em;
+  }
   .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--ink-faint); padding: 4px 10px; }
   .modal-close:hover { color: var(--oxblood); }
   .modal-body { padding: 22px 28px; }
   .modal-foot { padding: 16px 28px; border-top: 1px solid var(--rule); display: flex; justify-content: space-between; gap: 10px; }
 
-  /* ── Form ── */
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
   .form-row.full { grid-template-columns: 1fr; }
   .field label {
     display: block;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--ink-soft);
-    margin-bottom: 5px;
+    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink-soft); margin-bottom: 5px;
   }
   .field input, .field select, .field textarea {
-    width: 100%;
-    padding: 9px 11px;
-    background: white;
-    border: 1px solid var(--rule);
-    font-size: 16px;
-    font-family: inherit;
+    width: 100%; padding: 9px 11px; background: white;
+    border: 1px solid var(--rule); font-size: 16px; font-family: inherit;
   }
   .field textarea { min-height: 80px; resize: vertical; }
-  .field input:focus, .field select:focus, .field textarea:focus {
-    outline: none;
-    border-color: var(--oxblood);
-  }
+  .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--oxblood); }
 
-  /* ── Sections inside detail modal ── */
   .sec { margin-bottom: 28px; }
   .sec-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid var(--rule);
-    padding-bottom: 6px;
-    margin-bottom: 12px;
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--rule); padding-bottom: 6px; margin-bottom: 12px;
   }
   .sec-head h3 {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--ink);
-    font-weight: 600;
+    font-size: 12px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink); font-weight: 600;
   }
 
-  /* ── Deadlines list inside detail ── */
   .deadline {
-    display: grid;
-    grid-template-columns: 110px 1fr auto auto;
-    gap: 14px;
-    align-items: center;
-    padding: 10px 0;
+    display: grid; grid-template-columns: 110px 1fr auto auto;
+    gap: 14px; align-items: center; padding: 10px 0;
     border-bottom: 1px dotted var(--rule);
   }
   .deadline:last-child { border-bottom: none; }
   .deadline .date {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    font-weight: 500;
-    letter-spacing: 0.02em;
+    font-size: 13px; font-weight: 500; letter-spacing: 0.02em;
   }
   .deadline .date.urgent { color: var(--urgent); }
   .deadline .date.soon { color: var(--soon); }
@@ -290,38 +381,31 @@
   .deadline .title-cell.done { color: var(--done); text-decoration: line-through; }
   .deadline .cite { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
   .deadline .note { font-size: 14px; color: var(--ink-soft); margin-top: 3px; font-style: italic; }
-  .deadline .pill {
+  .pill {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    padding: 3px 8px;
-    border: 1px solid var(--rule);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: 9px; padding: 3px 8px; border: 1px solid var(--rule);
+    letter-spacing: 0.08em; text-transform: uppercase;
   }
-  .deadline .pill.us    { color: var(--us);    border-color: var(--us);    background: rgba(45,90,61,0.06); }
-  .deadline .pill.them  { color: var(--them);  border-color: var(--them);  background: rgba(122,29,29,0.06); }
-  .deadline .pill.court { color: var(--court); border-color: var(--court); background: rgba(107,90,29,0.06); }
+  .pill.us    { color: var(--us);    border-color: var(--us);    background: rgba(45,90,61,0.06); }
+  .pill.them  { color: var(--them);  border-color: var(--them);  background: rgba(122,29,29,0.06); }
+  .pill.court { color: var(--court); border-color: var(--court); background: rgba(107,90,29,0.06); }
+  .pill.high   { color: var(--us);    border-color: var(--us);   background: rgba(45,90,61,0.06); }
+  .pill.medium { color: var(--soon);  border-color: var(--soon); background: rgba(212,132,43,0.08); }
+  .pill.low    { color: var(--urgent); border-color: var(--urgent); background: rgba(192,57,43,0.06); }
 
   .add-row {
     display: grid;
     grid-template-columns: 130px 1fr 110px 120px auto;
-    gap: 8px;
-    margin-top: 14px;
-    align-items: end;
+    gap: 8px; margin-top: 14px; align-items: end;
   }
   .add-row .field label { font-size: 9px; }
   .add-row .field input, .add-row .field select { padding: 7px 9px; font-size: 14px; }
 
-  .note-row, .file-row {
-    padding: 10px 0;
-    border-bottom: 1px dotted var(--rule);
-  }
+  .note-row, .file-row { padding: 10px 0; border-bottom: 1px dotted var(--rule); }
   .note-row:last-child, .file-row:last-child { border-bottom: none; }
   .note-row .when, .file-row .when {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: var(--ink-faint);
-    margin-bottom: 4px;
+    font-size: 10px; color: var(--ink-faint); margin-bottom: 4px;
   }
   .note-row .content { font-size: 15px; white-space: pre-wrap; }
   .file-row a { font-size: 15px; }
@@ -329,163 +413,83 @@
   .add-note-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; align-items: end; }
   .add-file-row { display: grid; grid-template-columns: 1fr 2fr auto; gap: 8px; margin-top: 12px; align-items: end; }
 
-  /* ── Parser inside matter detail ── */
   .parser-warning {
     background: rgba(192,57,43,0.05);
     border-left: 3px solid var(--urgent);
-    padding: 10px 14px;
-    margin-bottom: 12px;
-    font-size: 14px;
-    line-height: 1.45;
+    padding: 10px 14px; margin-bottom: 12px;
+    font-size: 14px; line-height: 1.45;
   }
   .parser-warning strong { color: var(--urgent); }
   #order-text {
-    width: 100%;
-    min-height: 220px;
-    padding: 12px;
-    background: white;
-    border: 1px solid var(--rule);
+    width: 100%; min-height: 220px; padding: 12px;
+    background: white; border: 1px solid var(--rule);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    line-height: 1.45;
-    resize: vertical;
+    font-size: 13px; line-height: 1.45; resize: vertical;
   }
   #order-text:focus { outline: none; border-color: var(--oxblood); }
   .parser-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 10px;
-    margin-bottom: 14px;
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 10px; margin-bottom: 14px;
   }
   .parser-char-count {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--ink-faint);
+    font-size: 11px; color: var(--ink-faint);
   }
   .proposal-card {
-    background: var(--paper-deep);
-    border: 1px solid var(--rule);
-    padding: 12px 14px;
-    margin-bottom: 10px;
+    background: white; border: 1px solid var(--rule);
+    padding: 12px 14px; margin-bottom: 10px;
   }
-  .proposal-card.added {
-    background: rgba(45,90,61,0.08);
-    border-color: var(--us);
-  }
-  .proposal-card.skipped {
-    opacity: 0.4;
-  }
+  .proposal-card.added { background: rgba(45,90,61,0.06); border-color: var(--us); }
+  .proposal-card.skipped { opacity: 0.4; }
   .proposal-card .p-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 10px;
-    margin-bottom: 6px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 10px; margin-bottom: 6px;
   }
-  .proposal-card .p-title {
-    font-size: 17px;
-    font-weight: 600;
-    line-height: 1.2;
-    flex: 1;
-  }
+  .proposal-card .p-title { font-size: 17px; font-weight: 600; line-height: 1.2; flex: 1; }
   .proposal-card .p-date {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 4px 9px;
-    border: 1px solid var(--ink);
-    background: var(--paper);
+    font-size: 12px; font-weight: 600;
+    padding: 4px 9px; border: 1px solid var(--ink); background: var(--paper);
   }
   .proposal-card .p-date.no-date { color: var(--ink-faint); border-color: var(--rule); }
   .proposal-card .p-meta { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
   .proposal-card .source-excerpt {
-    background: var(--paper);
-    border-left: 3px solid var(--oxblood);
-    padding: 7px 11px;
-    font-style: italic;
-    font-size: 13px;
-    color: var(--ink-soft);
-    margin: 6px 0;
-    line-height: 1.4;
+    background: var(--paper); border-left: 3px solid var(--oxblood);
+    padding: 7px 11px; font-style: italic; font-size: 13px;
+    color: var(--ink-soft); margin: 6px 0; line-height: 1.4;
   }
   .proposal-card .source-label {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--ink-faint);
-    margin-right: 6px;
+    font-size: 9px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--ink-faint); margin-right: 6px;
   }
-  .proposal-card .p-cite {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--ink-faint);
-    margin: 4px 0;
-  }
-  .pill.high   { color: var(--us);    border-color: var(--us);   background: rgba(45,90,61,0.06); }
-  .pill.medium { color: var(--soon);  border-color: var(--soon); background: rgba(212,132,43,0.08); }
-  .pill.low    { color: var(--urgent); border-color: var(--urgent); background: rgba(192,57,43,0.06); }
+  .proposal-card .p-cite { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-faint); margin: 4px 0; }
   .p-actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
   .p-added-msg { color: var(--us); font-style: italic; font-size: 14px; }
-  .parser-loading {
-    text-align: center;
-    padding: 30px 20px;
-    color: var(--ink-soft);
-    font-style: italic;
-  }
+  .parser-loading { text-align: center; padding: 30px 20px; color: var(--ink-soft); font-style: italic; }
 
-  /* ── Toast ── */
   .toast {
-    position: fixed;
-    bottom: 28px;
-    right: 28px;
-    background: var(--ink);
-    color: var(--paper);
+    position: fixed; bottom: 28px; right: 28px;
+    background: var(--ink); color: var(--paper);
     padding: 11px 18px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    letter-spacing: 0.04em;
+    font-size: 12px; letter-spacing: 0.04em;
     box-shadow: 0 8px 20px rgba(0,0,0,0.25);
-    z-index: 200;
-    display: none;
+    z-index: 200; display: none;
   }
   .toast.show { display: block; }
   .toast.err { background: var(--urgent); }
 
-  /* ── Tiny inline delete buttons ── */
-  .x-btn {
-    background: transparent;
-    border: none;
-    color: var(--ink-faint);
-    cursor: pointer;
-    font-size: 16px;
-    padding: 2px 6px;
-  }
+  .x-btn { background: transparent; border: none; color: var(--ink-faint); cursor: pointer; font-size: 16px; padding: 2px 6px; }
   .x-btn:hover { color: var(--urgent); }
-
   .row-actions { display: flex; gap: 4px; }
 
-  /* ── Calendar feed banner ── */
-  .calendar-banner {
-    background: var(--paper-deep);
-    border: 1px solid var(--rule);
-    border-left: 4px solid var(--oxblood);
-    padding: 12px 16px;
-    margin-bottom: 20px;
-    font-size: 14px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-  }
-  .calendar-banner code {
+  .app-foot {
+    margin-top: 60px; padding-top: 20px;
+    border-top: 1px solid var(--rule); text-align: center;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    background: white;
-    padding: 3px 7px;
-    border: 1px solid var(--rule);
-    user-select: all;
+    font-size: 10px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-faint);
   }
 </style>
 </head>
@@ -493,32 +497,246 @@
 
 <div class="app">
 
-  <header>
-    <div class="brand">
-      <h1>Matter Manager</h1>
-      <div class="sub">Tez Law P.C. — West Covina, California</div>
-    </div>
-    <div class="header-actions">
-      <span class="label" id="user-label">Loading…</span>
-      <button class="btn primary" onclick="openNewMatter()">+ New Matter</button>
-      <a href="/admin/" class="btn ghost">Admin</a>
+  <header class="brand-head">
+    <h1 class="title">Matter Manager <em>&amp;</em> Docket</h1>
+    <div class="firmline">
+      <div>TEZ LAW FIRM &nbsp;·&nbsp; JJ ZHANG, ESQ. &nbsp;·&nbsp; CA #326666</div>
+      <div class="date-row">
+        <span class="green-dot"></span>
+        <span id="today-date">—</span>
+      </div>
     </div>
   </header>
 
-  <div class="filter-bar">
-    <button class="active" data-status="active" onclick="setFilter('active')">Active <span class="count" id="count-active">—</span></button>
-    <button data-status="closed" onclick="setFilter('closed')">Closed <span class="count" id="count-closed">—</span></button>
-    <button data-status="archived" onclick="setFilter('archived')">Archived <span class="count" id="count-archived">—</span></button>
-    <button data-status="all" onclick="setFilter('all')">All <span class="count" id="count-all">—</span></button>
-  </div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="active" onclick="setTab('active')">
+      Active Matters <span class="count" id="count-active">—</span>
+    </button>
+    <button class="tab" data-tab="archive" onclick="setTab('archive')">
+      Archive <span class="count" id="count-archive">—</span>
+    </button>
+    <button class="tab" data-tab="court" onclick="setTab('court')">Court Access</button>
+    <button class="tab" data-tab="authorities" onclick="setTab('authorities')">Authorities</button>
+  </nav>
 
-  <div id="list-wrap">
-    <div class="empty">Loading matters…</div>
-  </div>
+  <section id="view-active" class="tab-view">
+    <div class="section-head">
+      <div>
+        <h2>Active Matters</h2>
+        <div class="sub">All cases · sorted by next deadline</div>
+      </div>
+      <div class="action-row">
+        <button class="btn ghost" onclick="exportCalendarUrl()">Export to Calendar</button>
+        <button class="btn primary" onclick="openNewMatter()">+ New Matter</button>
+      </div>
+    </div>
+
+    <div class="overview">
+      <div class="ov-card">
+        <div class="ov-label">Active Matters</div>
+        <div class="ov-num" id="ov-active">—</div>
+        <div class="ov-sub" id="ov-archived-sub">— archived</div>
+      </div>
+      <div class="ov-card">
+        <div class="ov-label">Open Deadlines</div>
+        <div class="ov-num" id="ov-open-deadlines">—</div>
+        <div class="ov-sub">across all matters</div>
+      </div>
+      <div class="ov-card">
+        <div class="ov-label">Urgent ≤ 7d</div>
+        <div class="ov-num green" id="ov-urgent">—</div>
+        <div class="ov-sub" id="ov-urgent-sub">items need attention</div>
+      </div>
+      <div class="ov-card next-up">
+        <div class="ov-label">Next Up</div>
+        <div class="ov-num small amber" id="ov-next-num">—</div>
+        <div class="ov-sub" id="ov-next-sub">—</div>
+      </div>
+    </div>
+
+    <div id="active-list">
+      <div class="empty">Loading matters…</div>
+    </div>
+  </section>
+
+  <section id="view-archive" class="tab-view" style="display:none;">
+    <div class="section-head">
+      <div>
+        <h2>Archive</h2>
+        <div class="sub">Closed and archived matters</div>
+      </div>
+    </div>
+    <div id="archive-list">
+      <div class="empty">Loading…</div>
+    </div>
+  </section>
+
+  <section id="view-court" class="tab-view" style="display:none;">
+    <div class="section-head">
+      <div>
+        <h2>Court Access</h2>
+        <div class="sub">One-click login portals · CM/ECF · PACER</div>
+      </div>
+    </div>
+
+    <div class="court-intro">
+      <h3>How filing actually works</h3>
+      <div class="small-label">Read before assuming integration exists</div>
+      <p>There is no public API for filing documents into the federal courts. The Administrative Office of the U.S. Courts exposes only the PACER Case Locator search API and an XML upload spec for bankruptcy petitions. Every motion, brief, complaint, and exhibit in district court still requires a human to log into the court's CM/ECF web interface and click through the docket events. The links below are the shortest path to that interface for each court you commonly practice in.</p>
+      <p>For each court you intend to file in, you must hold an active PACER account, separately register as an e-filer with that court, and be admitted to practice before that bench. NextGen courts let you link PACER and filer credentials; CurrentGen still uses separate logins.</p>
+    </div>
+
+    <div class="court-section">
+      <div class="court-section-head"><h3>PACER &amp; Account Management</h3><span class="small-label">Start here</span></div>
+      <div class="court-grid">
+        <div class="court-card"><div class="name">Manage My PACER Account</div><div class="desc">Login + filing privileges</div><a href="https://pacer.uscourts.gov/" target="_blank">https://pacer.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">PACER Case Locator</div><div class="desc">Nationwide case search</div><a href="https://pcl.uscourts.gov/" target="_blank">https://pcl.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">Court CM/ECF Lookup</div><div class="desc">Find any court's filing portal</div><a href="https://pacer.uscourts.gov/file-case/court-cmecf-lookup" target="_blank">pacer.uscourts.gov/file-case/court-cmecf-lookup</a></div>
+        <div class="court-card"><div class="name">PACER Fee Schedule</div><div class="desc">$0.10/page · waived under $30/qtr</div><a href="https://pacer.uscourts.gov/help/faqs/fee-information" target="_blank">pacer.uscourts.gov/help/faqs/fee-information</a></div>
+      </div>
+    </div>
+
+    <div class="court-section">
+      <div class="court-section-head"><h3>Federal Appellate Courts</h3><span class="small-label">CM/ECF Portals</span></div>
+      <div class="court-grid">
+        <div class="court-card"><div class="name">9th Circuit Court of Appeals</div><div class="desc">CM/ECF + forms + general orders</div><a href="https://www.ca9.uscourts.gov/" target="_blank">https://www.ca9.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">9th Circuit ECF Login</div><div class="desc">Direct filing portal</div><a href="https://ecf.ca9.uscourts.gov/" target="_blank">https://ecf.ca9.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">10th Circuit (covers Okla.)</div><div class="desc">Filing portal</div><a href="https://www.ca10.uscourts.gov/" target="_blank">https://www.ca10.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">U.S. Supreme Court</div><div class="desc">Petitions for cert</div><a href="https://www.supremecourt.gov/" target="_blank">https://www.supremecourt.gov/</a></div>
+      </div>
+    </div>
+
+    <div class="court-section">
+      <div class="court-section-head"><h3>California District Courts</h3><span class="small-label">CM/ECF Portals</span></div>
+      <div class="court-grid">
+        <div class="court-card"><div class="name">C.D. Cal. (LA / Riverside / Santa Ana)</div><div class="desc">Central District</div><a href="https://www.cacd.uscourts.gov/" target="_blank">https://www.cacd.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">C.D. Cal. CM/ECF</div><div class="desc">Direct login</div><a href="https://ecf.cacd.uscourts.gov/" target="_blank">https://ecf.cacd.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">N.D. Cal. (SF / San Jose / Oakland)</div><div class="desc">Northern District</div><a href="https://www.cand.uscourts.gov/" target="_blank">https://www.cand.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">N.D. Cal. CM/ECF</div><div class="desc">Direct login</div><a href="https://ecf.cand.uscourts.gov/" target="_blank">https://ecf.cand.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">S.D. Cal. (San Diego)</div><div class="desc">Southern District</div><a href="https://www.casd.uscourts.gov/" target="_blank">https://www.casd.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">S.D. Cal. CM/ECF</div><div class="desc">Direct login</div><a href="https://ecf.casd.uscourts.gov/" target="_blank">https://ecf.casd.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">E.D. Cal. (Sacramento / Fresno)</div><div class="desc">Eastern District</div><a href="https://www.caed.uscourts.gov/" target="_blank">https://www.caed.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">E.D. Cal. CM/ECF</div><div class="desc">Direct login</div><a href="https://ecf.caed.uscourts.gov/" target="_blank">https://ecf.caed.uscourts.gov/</a></div>
+      </div>
+    </div>
+
+    <div class="court-section">
+      <div class="court-section-head"><h3>Other Frequent District Courts</h3><span class="small-label">CM/ECF Portals</span></div>
+      <div class="court-grid">
+        <div class="court-card"><div class="name">W.D. Oklahoma (covers Cimarron/Cushing)</div><div class="desc">Western Oklahoma</div><a href="https://www.okwd.uscourts.gov/" target="_blank">https://www.okwd.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">W.D. Okla. CM/ECF</div><div class="desc">Direct login</div><a href="https://ecf.okwd.uscourts.gov/" target="_blank">https://ecf.okwd.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">D. Arizona</div><div class="desc">Phoenix / Tucson</div><a href="https://www.azd.uscourts.gov/" target="_blank">https://www.azd.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">D. Nevada</div><div class="desc">Las Vegas / Reno</div><a href="https://www.nvd.uscourts.gov/" target="_blank">https://www.nvd.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">S.D.N.Y.</div><div class="desc">Manhattan</div><a href="https://www.nysd.uscourts.gov/" target="_blank">https://www.nysd.uscourts.gov/</a></div>
+        <div class="court-card"><div class="name">E.D.N.Y.</div><div class="desc">Brooklyn</div><a href="https://www.nyed.uscourts.gov/" target="_blank">https://www.nyed.uscourts.gov/</a></div>
+      </div>
+    </div>
+
+    <div class="court-section">
+      <div class="court-section-head"><h3>Immigration Agencies</h3><span class="small-label">EOIR · USCIS</span></div>
+      <div class="court-grid">
+        <div class="court-card"><div class="name">EOIR Respondent Access Portal</div><div class="desc">View immigration court files</div><a href="https://respondentaccess.eoir.justice.gov/" target="_blank">respondentaccess.eoir.justice.gov</a></div>
+        <div class="court-card"><div class="name">EOIR Automated Case Info</div><div class="desc">Hearing schedule lookup</div><a href="https://acis.eoir.justice.gov/en/" target="_blank">acis.eoir.justice.gov</a></div>
+        <div class="court-card"><div class="name">BIA / EOIR (main)</div><div class="desc">Forms + Practice Manual</div><a href="https://www.justice.gov/eoir" target="_blank">https://www.justice.gov/eoir</a></div>
+        <div class="court-card"><div class="name">USCIS Online Filing</div><div class="desc">myUSCIS account</div><a href="https://my.uscis.gov/" target="_blank">https://my.uscis.gov/</a></div>
+        <div class="court-card"><div class="name">USCIS Case Status</div><div class="desc">Receipt number lookup</div><a href="https://egov.uscis.gov/" target="_blank">https://egov.uscis.gov/</a></div>
+        <div class="court-card"><div class="name">ICE Detainee Locator</div><div class="desc">Find a client in custody</div><a href="https://locator.ice.gov/" target="_blank">https://locator.ice.gov/</a></div>
+        <div class="court-card"><div class="name">USCIS Processing Times</div><div class="desc">Mandamus delay baseline</div><a href="https://egov.uscis.gov/processing-times/" target="_blank">egov.uscis.gov/processing-times</a></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-authorities" class="tab-view" style="display:none;">
+    <div class="section-head">
+      <div>
+        <h2>Authorities &amp; Cheat Sheet</h2>
+        <div class="sub">9th Circuit · District Court · Quick citations</div>
+      </div>
+    </div>
+
+    <div class="auth-grid">
+      <div class="auth-card">
+        <h3>Ninth Circuit · Immigration PFR</h3>
+        <div class="small-label">FRAP · Circuit Rules · General Orders</div>
+
+        <div class="subhead">Rules</div>
+        <ul>
+          <li>FRAP 15 — Petitions for review of agency orders</li>
+          <li>FRAP 18 — Stay pending review of agency decision</li>
+          <li>FRAP 27 — Motions practice</li>
+          <li>FRAP 28 — Briefs</li>
+          <li>FRAP 31 — Serving and filing briefs</li>
+          <li>FRAP 32(a)(7) — Word limits (14,000 / 14,000 / 7,000)</li>
+          <li>Cir. R. 15-4 — Petition contents + Form 6</li>
+          <li>Cir. R. 27-3 — Emergency motions + Form 16</li>
+          <li>Cir. R. 27-8.2 — Stay motions: prior application + custody</li>
+          <li>Cir. R. 28-2.4(b) — Required immigration recitals</li>
+          <li>Cir. R. 28-2.7 — Addendum: orders bound with brief</li>
+          <li>Cir. R. 31-2.1 — Service and filing of briefs</li>
+          <li>Gen. Ord. 6.4(c) — Stay practice + automatic temp stay</li>
+        </ul>
+
+        <div class="subhead">Cases — Stays</div>
+        <ul>
+          <li><em>Nken v. Holder</em>, 556 U.S. 418 (2009) — four-factor test</li>
+          <li><em>Leiva-Perez v. Holder</em>, 640 F.3d 962 (9th Cir. 2011) — sliding scale</li>
+          <li><em>De Leon v. INS</em>, 115 F.3d 643 (9th Cir. 1997) — auto temp stay</li>
+        </ul>
+
+        <div class="subhead">Cases — Credibility &amp; Asylum</div>
+        <ul>
+          <li><em>Alam v. Garland</em>, 11 F.4th 1133 (9th Cir. 2021) (en banc) — totality test</li>
+          <li><em>Dong v. Garland</em>, 50 F.4th 1291 (9th Cir. 2022) — reasoned response required</li>
+          <li><em>Lalayan v. Garland</em>, 4 F.4th 822 (9th Cir. 2021) — implausibility findings</li>
+          <li><em>Munyuh v. Garland</em>, 11 F.4th 750 (9th Cir. 2021) — specific cogent reason</li>
+          <li><em>Stone v. INS</em>, 514 U.S. 386 (1995) — 30-day jurisdictional</li>
+        </ul>
+
+        <div class="subhead">Cases — CAT</div>
+        <ul>
+          <li><em>Konou v. Holder</em>, 750 F.3d 1120 (9th Cir. 2014) — CAT despite adverse credibility</li>
+          <li><em>Kamalthas v. INS</em>, 251 F.3d 1279 (9th Cir. 2001) — independent country-conditions analysis</li>
+        </ul>
+      </div>
+
+      <div class="auth-card">
+        <h3>District Court · Habeas &amp; Mandamus</h3>
+        <div class="small-label">Original jurisdiction matters</div>
+
+        <div class="subhead">Habeas — 28 U.S.C. § 2241</div>
+        <ul>
+          <li><em>Rumsfeld v. Padilla</em>, 542 U.S. 426 (2004) — district of confinement</li>
+          <li><em>Zadvydas v. Davis</em>, 533 U.S. 678 (2001) — 6-month presumption</li>
+          <li><em>Jennings v. Rodriguez</em>, 138 S. Ct. 830 (2018)</li>
+          <li><em>Rodriguez Diaz v. Garland</em>, 53 F.4th 1189 (9th Cir. 2022)</li>
+          <li><em>Demore v. Kim</em>, 538 U.S. 510 (2003) — mandatory detention</li>
+          <li>8 U.S.C. § 1252(a)(5) — REAL ID Act bar</li>
+        </ul>
+
+        <div class="subhead">Mandamus — § 1361 / APA § 706(1)</div>
+        <ul>
+          <li><em>Heckler v. Ringer</em>, 466 U.S. 602 (1984) — three-element test</li>
+          <li><em>Norton v. SUWA</em>, 542 U.S. 55 (2004) — discrete required action</li>
+          <li><em>TRAC v. FCC</em>, 750 F.2d 70 (D.C. Cir. 1984) — six-factor delay test</li>
+          <li><em>Indep. Mining Co. v. Babbitt</em>, 105 F.3d 502 (9th Cir. 1997)</li>
+          <li>8 U.S.C. § 1447(b) — N-400 jurisdiction after 120 days</li>
+        </ul>
+
+        <div class="subhead">FRCP — Service &amp; Filing</div>
+        <ul>
+          <li>FRCP 4(i) — Serving the United States</li>
+          <li>FRCP 12(a)(2) — Government 60-day response</li>
+          <li>28 U.S.C. § 1391(e) — Venue against federal officers</li>
+          <li>28 U.S.C. § 1914 — Filing fees ($405 civil / $5 habeas)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <div class="app-foot">Built for Tez Law Firm · Data persisted in Render Postgres · Admin auth required</div>
 
 </div>
 
-<!-- ── New / Edit matter modal ── -->
 <div class="modal-backdrop" id="matter-modal">
   <div class="modal">
     <div class="modal-head">
@@ -532,51 +750,30 @@
       <form id="matter-form" onsubmit="return false;">
         <input type="hidden" id="mf-id">
         <div class="form-row">
-          <div class="field">
-            <label>Client Name *</label>
-            <input type="text" id="mf-client" required>
-          </div>
-          <div class="field">
-            <label>Case / Matter Number</label>
-            <input type="text" id="mf-ref" placeholder="A 216-866-000  ·  2:25-cv-04567  ·  etc.">
-          </div>
+          <div class="field"><label>Client Name *</label><input type="text" id="mf-client" required></div>
+          <div class="field"><label>Case / Matter Number</label><input type="text" id="mf-ref" placeholder="A 216-866-000 · 2:25-cv-04567"></div>
         </div>
         <div class="form-row">
-          <div class="field">
-            <label>Court / Forum</label>
-            <input type="text" id="mf-court" placeholder="U.S. Court of Appeals, 9th Cir.">
-          </div>
-          <div class="field">
-            <label>Case Type</label>
-            <input type="text" id="mf-case-type" placeholder="PFR  ·  Habeas  ·  Civil  ·  Estate">
-          </div>
+          <div class="field"><label>Court / Forum</label><input type="text" id="mf-court" placeholder="U.S. Court of Appeals, 9th Cir."></div>
+          <div class="field"><label>Case Type</label><input type="text" id="mf-case-type" placeholder="PFR · Habeas · Civil · Estate"></div>
         </div>
         <div class="form-row">
-          <div class="field">
-            <label>Status</label>
+          <div class="field"><label>Status</label>
             <select id="mf-status">
               <option value="active">Active</option>
               <option value="closed">Closed</option>
               <option value="archived">Archived</option>
             </select>
           </div>
-          <div class="field">
-            <label>Dropbox / File Folder URL</label>
-            <input type="url" id="mf-dropbox" placeholder="https://…">
-          </div>
+          <div class="field"><label>Dropbox / Folder URL</label><input type="url" id="mf-dropbox" placeholder="https://…"></div>
         </div>
         <div class="form-row full">
-          <div class="field">
-            <label>Notes (short)</label>
-            <textarea id="mf-notes" placeholder="One-line status note or context"></textarea>
-          </div>
+          <div class="field"><label>Notes (short)</label><textarea id="mf-notes" placeholder="One-line status note or context"></textarea></div>
         </div>
       </form>
     </div>
     <div class="modal-foot">
-      <div>
-        <button class="btn danger" id="mm-delete-btn" onclick="deleteMatterConfirm()" style="display:none;">Delete Matter</button>
-      </div>
+      <div><button class="btn danger" id="mm-delete-btn" onclick="deleteMatterConfirm()" style="display:none;">Delete Matter</button></div>
       <div style="display:flex; gap:10px;">
         <button class="btn ghost" onclick="closeMatterModal()">Cancel</button>
         <button class="btn primary" onclick="saveMatter()">Save</button>
@@ -585,7 +782,6 @@
   </div>
 </div>
 
-<!-- ── Matter detail modal ── -->
 <div class="modal-backdrop" id="detail-modal">
   <div class="modal">
     <div class="modal-head">
@@ -630,12 +826,12 @@
         <div id="dm-notes"></div>
         <div class="add-note-row">
           <div class="field"><label>Add Note</label><textarea id="note-content" rows="2"></textarea></div>
-          <button class="btn primary small" onclick="addNote()">Add Note</button>
+          <button class="btn primary small" onclick="addNote()">Add</button>
         </div>
       </div>
 
       <div class="sec">
-        <div class="sec-head"><h3>Files & Links</h3></div>
+        <div class="sec-head"><h3>Files &amp; Links</h3></div>
         <div id="dm-files"></div>
         <div class="add-file-row">
           <div class="field"><label>Label</label><input type="text" id="file-name" placeholder="Opening Brief.pdf"></div>
@@ -671,186 +867,192 @@
 <div class="toast" id="toast"></div>
 
 <script>
-// ============================================================
-//  matters.html — front-end for /admin/matters/api/*
-//  All API calls use credentials so the admin session cookie
-//  is included automatically.
-// ============================================================
-
 const API = '/admin/matters/api';
-let currentFilter = 'active';
-let currentMatter = null;     // full detail object when detail modal is open
-let allMatters = [];          // most recent list response
+let currentTab = 'active';
+let currentMatter = null;
+let allMattersAll = [];
 
-// ── Fetch wrapper ─────────────────────────────────────────
+(function setTodayDate() {
+  const d = new Date();
+  const s = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase();
+  document.getElementById('today-date').textContent = s;
+})();
+
 async function api(path, opts = {}) {
-  const init = {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  };
-  if (init.body && typeof init.body !== 'string') {
-    init.body = JSON.stringify(init.body);
-  }
+  const init = { credentials: 'include', headers: { 'Content-Type': 'application/json' }, ...opts };
+  if (init.body && typeof init.body !== 'string') init.body = JSON.stringify(init.body);
   const r = await fetch(API + path, init);
-  if (r.status === 401) {
-    location.href = '/admin/login';
-    return null;
-  }
+  if (r.status === 401) { location.href = '/admin/login'; return null; }
   const text = await r.text();
-  let data;
-  try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
-  if (!r.ok) {
-    throw new Error(data.error || r.statusText);
-  }
+  let data; try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
+  if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
 }
 
-// ── Toast ─────────────────────────────────────────────────
 function toast(msg, isErr) {
   const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.toggle('err', !!isErr);
-  t.classList.add('show');
+  t.textContent = msg; t.classList.toggle('err', !!isErr); t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2400);
 }
-
 function esc(s) {
   if (s == null) return '';
-  return String(s).replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-
 function daysUntil(dateStr) {
   if (!dateStr) return null;
   const due = new Date(dateStr + 'T00:00:00');
-  const now = new Date();
-  now.setHours(0,0,0,0);
+  const now = new Date(); now.setHours(0,0,0,0);
   return Math.floor((due - now) / 86400000);
 }
-
 function urgencyClass(days) {
   if (days == null) return 'none';
-  if (days <= 7)  return 'urgent';
+  if (days < 0) return 'urgent';
+  if (days <= 7) return 'urgent';
   if (days <= 30) return 'soon';
   return 'safe';
 }
-
-function urgencyText(days, date) {
-  if (days == null) return 'No deadlines';
-  if (days < 0) return `${-days}d overdue`;
-  if (days === 0) return 'Due today';
-  if (days === 1) return 'Due tomorrow';
-  return `${days}d · ${formatDate(date)}`;
+function urgencyDisplay(days) {
+  if (days == null) return 'no date';
+  if (days < 0) return Math.abs(days) + 'd overdue';
+  if (days === 0) return 'today';
+  return days + 'd';
 }
-
 function formatDate(s) {
   if (!s) return '';
-  const d = new Date(s);
+  const d = new Date(s + (String(s).includes('T') ? '' : 'T00:00:00'));
   if (isNaN(d)) return s;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
-
 function formatDateTime(s) {
   if (!s) return '';
-  const d = new Date(s);
-  if (isNaN(d)) return s;
+  const d = new Date(s); if (isNaN(d)) return s;
   return d.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-// ── List view ─────────────────────────────────────────────
-async function loadList() {
+function setTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('view-active').style.display      = tab === 'active'      ? '' : 'none';
+  document.getElementById('view-archive').style.display     = tab === 'archive'     ? '' : 'none';
+  document.getElementById('view-court').style.display       = tab === 'court'       ? '' : 'none';
+  document.getElementById('view-authorities').style.display = tab === 'authorities' ? '' : 'none';
+  if (tab === 'active' || tab === 'archive') renderLists();
+}
+
+async function loadAll() {
   try {
-    const data = await api(`/matters?status=${currentFilter}`);
+    const data = await api('/matters?status=all');
     if (!data) return;
-    allMatters = data.matters || [];
-    renderList();
-    refreshCounts();
+    allMattersAll = data.matters || [];
+    renderCounts(); renderOverview(); renderLists();
   } catch (e) {
-    document.getElementById('list-wrap').innerHTML =
+    document.getElementById('active-list').innerHTML =
       `<div class="empty"><h2>Couldn't load matters</h2><p>${esc(e.message)}</p></div>`;
   }
 }
 
-async function refreshCounts() {
-  try {
-    const all = await api('/matters?status=all');
-    if (!all) return;
-    const m = all.matters || [];
-    document.getElementById('count-active').textContent   = m.filter(x => x.status === 'active').length;
-    document.getElementById('count-closed').textContent   = m.filter(x => x.status === 'closed').length;
-    document.getElementById('count-archived').textContent = m.filter(x => x.status === 'archived').length;
-    document.getElementById('count-all').textContent      = m.length;
-  } catch {}
+function renderCounts() {
+  const active = allMattersAll.filter(m => m.status === 'active').length;
+  const archive = allMattersAll.filter(m => m.status === 'archived' || m.status === 'closed').length;
+  document.getElementById('count-active').textContent = active;
+  document.getElementById('count-archive').textContent = archive;
 }
 
-function renderList() {
-  const wrap = document.getElementById('list-wrap');
-  if (!allMatters.length) {
-    wrap.innerHTML = `
-      <div class="empty">
-        <h2>No ${currentFilter === 'all' ? '' : currentFilter} matters</h2>
-        <p>Click <strong>+ New Matter</strong> to add one.</p>
-      </div>`;
-    return;
-  }
+function renderOverview() {
+  const active = allMattersAll.filter(m => m.status === 'active');
+  const archive = allMattersAll.filter(m => m.status === 'archived' || m.status === 'closed');
 
-  // Sort: by next_due date ascending, then by updated_at descending
-  const sorted = [...allMatters].sort((a, b) => {
+  document.getElementById('ov-active').textContent = active.length;
+  document.getElementById('ov-archived-sub').textContent = `${archive.length} archived`;
+
+  const totalOpenDeadlines = active.reduce((sum, m) => sum + (m.upcoming_deadlines || 0), 0);
+  document.getElementById('ov-open-deadlines').textContent = totalOpenDeadlines;
+
+  const urgentCount = active.reduce((sum, m) => {
+    if (!m.next_due) return sum;
+    const d = daysUntil(m.next_due);
+    return (d != null && d <= 7) ? sum + 1 : sum;
+  }, 0);
+  const urgentEl = document.getElementById('ov-urgent');
+  urgentEl.textContent = urgentCount;
+  urgentEl.className = 'ov-num ' + (urgentCount > 0 ? 'urgent' : 'green');
+  document.getElementById('ov-urgent-sub').textContent =
+    urgentCount === 0 ? 'items need attention' :
+    (urgentCount === 1 ? '1 item needs attention' : `${urgentCount} items need attention`);
+
+  const sorted = active.filter(m => m.next_due).sort((a, b) => new Date(a.next_due) - new Date(b.next_due));
+  const next = sorted[0];
+  if (next) {
+    const d = daysUntil(next.next_due);
+    document.getElementById('ov-next-num').textContent = urgencyDisplay(d);
+    document.getElementById('ov-next-num').className = 'ov-num small ' + urgencyClass(d);
+    document.getElementById('ov-next-sub').textContent = next.client_name;
+  } else {
+    document.getElementById('ov-next-num').textContent = '—';
+    document.getElementById('ov-next-num').className = 'ov-num small';
+    document.getElementById('ov-next-sub').textContent = 'No upcoming deadlines';
+  }
+}
+
+function renderLists() {
+  const active = allMattersAll.filter(m => m.status === 'active');
+  const archive = allMattersAll.filter(m => m.status === 'archived' || m.status === 'closed');
+
+  const sortByDue = (a, b) => {
     if (a.next_due && b.next_due) return new Date(a.next_due) - new Date(b.next_due);
     if (a.next_due) return -1;
     if (b.next_due) return 1;
     return new Date(b.updated_at) - new Date(a.updated_at);
-  });
+  };
+  active.sort(sortByDue);
+  archive.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
 
-  wrap.innerHTML = `<div class="matter-list">${sorted.map(renderMatterRow).join('')}</div>`;
+  document.getElementById('active-list').innerHTML = active.length
+    ? `<div class="matter-grid">${active.map(renderMatterCard).join('')}</div>`
+    : `<div class="empty"><h2>No active matters</h2><p>Click <strong>+ New Matter</strong> to add one.</p></div>`;
+
+  document.getElementById('archive-list').innerHTML = archive.length
+    ? `<div class="matter-grid">${archive.map(renderMatterCard).join('')}</div>`
+    : `<div class="empty"><h2>Nothing archived yet</h2><p>Closed and archived matters appear here.</p></div>`;
 }
 
-function renderMatterRow(m) {
+function renderMatterCard(m) {
   const days = m.next_due ? daysUntil(m.next_due) : null;
   const uc = urgencyClass(days);
+  const courtBits = [];
+  if (m.court) courtBits.push(esc(m.court).toUpperCase());
+  if (m.case_type) courtBits.push(esc(m.case_type).toUpperCase());
+  const courtLine = courtBits.length ? courtBits.join(' · ') : '';
+
   return `
-    <div class="matter" onclick="openDetail(${m.id})">
-      <div>
-        <div class="client">${esc(m.client_name)}</div>
-        ${m.matter_ref ? `<div class="ref">${esc(m.matter_ref)}</div>` : ''}
+    <div class="matter-card" onclick="openDetail(${m.id})">
+      ${courtLine ? `<div class="court-line">${courtLine}</div>` : ''}
+      <div class="client">${esc(m.client_name)}</div>
+      ${m.matter_ref ? `<div class="ref">${esc(m.matter_ref)}</div>` : ''}
+      <div class="divider"></div>
+      <div class="next-row">
+        <div>
+          <div class="next-label">${m.next_due ? 'Next' : ''}</div>
+          <div class="next-title">${m.upcoming_deadlines > 0 ? 'Upcoming deadline' : 'No open deadlines'}</div>
+        </div>
+        <div class="urgency ${uc}">${m.next_due ? urgencyDisplay(days) : '—'}</div>
       </div>
-      <div class="meta">
-        ${m.court ? `<div class="court">${esc(m.court)}</div>` : ''}
-        ${m.case_type ? `<div class="case-type">${esc(m.case_type)}</div>` : ''}
-      </div>
-      <div class="urgency ${uc}">
-        ${urgencyText(days, m.next_due)}
+      <div class="footer">
+        <span>${m.upcoming_deadlines || 0} open</span>
+        ${m.notes && m.notes.toLowerCase().includes('detain') ? `<span class="badge">Detained</span>` : ''}
       </div>
     </div>`;
 }
 
-function setFilter(s) {
-  currentFilter = s;
-  document.querySelectorAll('.filter-bar button').forEach(b => {
-    b.classList.toggle('active', b.dataset.status === s);
-  });
-  loadList();
-}
-
-// ── New / Edit modal ──────────────────────────────────────
 function openNewMatter() {
   document.getElementById('mm-title').textContent = 'New Matter';
   document.getElementById('mm-ref-display').textContent = '';
   document.getElementById('mm-delete-btn').style.display = 'none';
-  document.getElementById('mf-id').value = '';
-  document.getElementById('mf-client').value = '';
-  document.getElementById('mf-ref').value = '';
-  document.getElementById('mf-court').value = '';
-  document.getElementById('mf-case-type').value = '';
+  ['mf-id','mf-client','mf-ref','mf-court','mf-case-type','mf-dropbox','mf-notes'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('mf-status').value = 'active';
-  document.getElementById('mf-dropbox').value = '';
-  document.getElementById('mf-notes').value = '';
   document.getElementById('matter-modal').classList.add('show');
   setTimeout(() => document.getElementById('mf-client').focus(), 100);
 }
-
 function editCurrentMatter() {
   if (!currentMatter) return;
   const m = currentMatter.matter;
@@ -868,10 +1070,7 @@ function editCurrentMatter() {
   closeDetailModal();
   document.getElementById('matter-modal').classList.add('show');
 }
-
-function closeMatterModal() {
-  document.getElementById('matter-modal').classList.remove('show');
-}
+function closeMatterModal() { document.getElementById('matter-modal').classList.remove('show'); }
 
 async function saveMatter() {
   const id = document.getElementById('mf-id').value;
@@ -885,7 +1084,6 @@ async function saveMatter() {
     notes:       document.getElementById('mf-notes').value.trim() || null,
   };
   if (!payload.client_name) { toast('Client name required', true); return; }
-
   try {
     if (id) {
       await api(`/matters/${id}`, { method: 'PATCH', body: payload });
@@ -894,35 +1092,30 @@ async function saveMatter() {
       const res = await api('/matters', { method: 'POST', body: payload });
       toast('Matter created');
       closeMatterModal();
-      await loadList();
+      await loadAll();
       if (res && res.matter) openDetail(res.matter.id);
       return;
     }
     closeMatterModal();
-    await loadList();
+    await loadAll();
     if (id) openDetail(parseInt(id));
-  } catch (e) {
-    toast(e.message, true);
-  }
+  } catch (e) { toast(e.message, true); }
 }
 
 async function deleteMatterConfirm() {
   const id = document.getElementById('mf-id').value;
   if (!id) return;
   const m = currentMatter && currentMatter.matter;
-  if (!confirm(`Permanently delete "${m?.client_name || 'this matter'}" and ALL its deadlines, notes, and files? This cannot be undone.\n\nTip: setting status to "Archived" hides it without deleting.`)) return;
+  if (!confirm(`Permanently delete "${m?.client_name || 'this matter'}" and ALL its deadlines, notes, and files?\n\nTip: setting status to "Archived" hides it without deleting.`)) return;
   try {
     await api(`/matters/${id}`, { method: 'DELETE' });
     toast('Matter deleted');
     closeMatterModal();
     currentMatter = null;
-    loadList();
-  } catch (e) {
-    toast(e.message, true);
-  }
+    loadAll();
+  } catch (e) { toast(e.message, true); }
 }
 
-// ── Detail modal ──────────────────────────────────────────
 async function openDetail(id) {
   try {
     const data = await api(`/matters/${id}`);
@@ -930,14 +1123,9 @@ async function openDetail(id) {
     currentMatter = data;
     renderDetail();
     document.getElementById('detail-modal').classList.add('show');
-  } catch (e) {
-    toast(e.message, true);
-  }
+  } catch (e) { toast(e.message, true); }
 }
-
-function closeDetailModal() {
-  document.getElementById('detail-modal').classList.remove('show');
-}
+function closeDetailModal() { document.getElementById('detail-modal').classList.remove('show'); }
 
 function renderDetail() {
   const { matter, deadlines, notes, files } = currentMatter;
@@ -952,11 +1140,8 @@ function renderDetail() {
   if (matter.notes) metaBits.push(`<div style="margin-top:8px; font-style:italic;">${esc(matter.notes)}</div>`);
   document.getElementById('dm-meta').innerHTML = metaBits.length ? metaBits.join('') : '<div style="color:var(--ink-faint); font-style:italic;">No additional info.</div>';
 
-  // Deadlines: not-done first sorted ascending, then completed at bottom
-  const pending = deadlines.filter(d => !d.completed)
-    .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
-  const done = deadlines.filter(d => d.completed)
-    .sort((a, b) => new Date(b.due_date) - new Date(a.due_date));
+  const pending = deadlines.filter(d => !d.completed).sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+  const done    = deadlines.filter(d =>  d.completed).sort((a, b) => new Date(b.due_date) - new Date(a.due_date));
   const ordered = [...pending, ...done];
 
   document.getElementById('dm-deadlines').innerHTML = ordered.length
@@ -971,15 +1156,10 @@ function renderDetail() {
     ? files.map(renderFile).join('')
     : '<div style="color:var(--ink-faint); font-style:italic; padding:8px 0;">No files linked.</div>';
 
-  // Clear add-row inputs
-  document.getElementById('dl-date').value = '';
-  document.getElementById('dl-title').value = '';
-  document.getElementById('dl-cite').value = '';
+  ['dl-date','dl-title','dl-cite','dl-note','note-content','file-name','file-url'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
   document.getElementById('dl-party').value = 'us';
-  document.getElementById('dl-note').value = '';
-  document.getElementById('note-content').value = '';
-  document.getElementById('file-name').value = '';
-  document.getElementById('file-url').value = '';
 }
 
 function renderDeadline(d) {
@@ -1000,33 +1180,19 @@ function renderDeadline(d) {
       </div>
     </div>`;
 }
-
 function renderNote(n) {
-  return `
-    <div class="note-row">
-      <div class="when">
-        ${formatDateTime(n.created_at)}
-        <button class="x-btn" onclick="removeNote(${n.id})" title="Delete" style="float:right;">×</button>
-      </div>
-      <div class="content">${esc(n.content)}</div>
-    </div>`;
+  return `<div class="note-row"><div class="when">${formatDateTime(n.created_at)}
+    <button class="x-btn" onclick="removeNote(${n.id})" title="Delete" style="float:right;">×</button></div>
+    <div class="content">${esc(n.content)}</div></div>`;
 }
-
 function renderFile(f) {
-  return `
-    <div class="file-row">
-      <div class="when">
-        ${formatDateTime(f.created_at)}
-        <button class="x-btn" onclick="removeFile(${f.id})" title="Delete" style="float:right;">×</button>
-      </div>
-      <a href="${esc(f.url)}" target="_blank">${esc(f.filename)} ↗</a>
-    </div>`;
+  return `<div class="file-row"><div class="when">${formatDateTime(f.created_at)}
+    <button class="x-btn" onclick="removeFile(${f.id})" title="Delete" style="float:right;">×</button></div>
+    <a href="${esc(f.url)}" target="_blank">${esc(f.filename)} ↗</a></div>`;
 }
 
-// ── Deadlines ─────────────────────────────────────────────
 async function addDeadline() {
-  const matterId = currentMatter?.matter?.id;
-  if (!matterId) return;
+  const matterId = currentMatter?.matter?.id; if (!matterId) return;
   const payload = {
     due_date: document.getElementById('dl-date').value,
     title:    document.getElementById('dl-title').value.trim(),
@@ -1039,34 +1205,28 @@ async function addDeadline() {
   try {
     await api(`/matters/${matterId}/deadlines`, { method: 'POST', body: payload });
     toast('Deadline added');
-    await openDetail(matterId);
+    await openDetail(matterId); loadAll();
   } catch (e) { toast(e.message, true); }
 }
-
 async function toggleDeadline(id, completed) {
   const matterId = currentMatter?.matter?.id;
-  if (!matterId) return;
   try {
     await api(`/matters/${matterId}/deadlines/${id}`, { method: 'PATCH', body: { completed } });
-    await openDetail(matterId);
+    await openDetail(matterId); loadAll();
   } catch (e) { toast(e.message, true); }
 }
-
 async function removeDeadline(id) {
   const matterId = currentMatter?.matter?.id;
-  if (!matterId) return;
   if (!confirm('Delete this deadline?')) return;
   try {
     await api(`/matters/${matterId}/deadlines/${id}`, { method: 'DELETE' });
-    toast('Deadline deleted');
-    await openDetail(matterId);
+    toast('Deleted');
+    await openDetail(matterId); loadAll();
   } catch (e) { toast(e.message, true); }
 }
 
-// ── Notes ─────────────────────────────────────────────────
 async function addNote() {
   const matterId = currentMatter?.matter?.id;
-  if (!matterId) return;
   const content = document.getElementById('note-content').value.trim();
   if (!content) { toast('Note text required', true); return; }
   try {
@@ -1075,10 +1235,8 @@ async function addNote() {
     await openDetail(matterId);
   } catch (e) { toast(e.message, true); }
 }
-
 async function removeNote(id) {
   const matterId = currentMatter?.matter?.id;
-  if (!matterId) return;
   if (!confirm('Delete this note?')) return;
   try {
     await api(`/matters/${matterId}/notes/${id}`, { method: 'DELETE' });
@@ -1086,10 +1244,8 @@ async function removeNote(id) {
   } catch (e) { toast(e.message, true); }
 }
 
-// ── Files ─────────────────────────────────────────────────
 async function addFile() {
   const matterId = currentMatter?.matter?.id;
-  if (!matterId) return;
   const filename = document.getElementById('file-name').value.trim();
   const url = document.getElementById('file-url').value.trim();
   if (!filename || !url) { toast('Label and URL required', true); return; }
@@ -1099,10 +1255,8 @@ async function addFile() {
     await openDetail(matterId);
   } catch (e) { toast(e.message, true); }
 }
-
 async function removeFile(id) {
   const matterId = currentMatter?.matter?.id;
-  if (!matterId) return;
   if (!confirm('Remove this file link?')) return;
   try {
     await api(`/matters/${matterId}/files/${id}`, { method: 'DELETE' });
@@ -1110,22 +1264,17 @@ async function removeFile(id) {
   } catch (e) { toast(e.message, true); }
 }
 
-// ── Parser (embedded inside matter detail modal) ──────────
 let parserProposals = [];
-
 function toggleParser() {
   const area = document.getElementById('parser-area');
   const btn = document.getElementById('parser-toggle');
   if (area.style.display === 'none') {
-    area.style.display = 'block';
-    btn.textContent = 'Hide ▴';
+    area.style.display = 'block'; btn.textContent = 'Hide ▴';
     setTimeout(() => document.getElementById('order-text').focus(), 50);
   } else {
-    area.style.display = 'none';
-    btn.textContent = 'Show ▾';
+    area.style.display = 'none'; btn.textContent = 'Show ▾';
   }
 }
-
 function clearParser() {
   if (parserProposals.length && !confirm('Clear input and proposed deadlines?')) return;
   document.getElementById('order-text').value = '';
@@ -1133,57 +1282,43 @@ function clearParser() {
   document.getElementById('parser-results').innerHTML = '';
   parserProposals = [];
 }
-
 document.addEventListener('input', (e) => {
   if (e.target && e.target.id === 'order-text') {
     document.getElementById('parser-char-count').textContent = e.target.value.length + ' chars';
   }
 });
-
 async function parseOrderInModal() {
   const text = document.getElementById('order-text').value.trim();
   if (!text) { toast('Paste order text first', true); return; }
   if (text.length < 30) { toast('Text too short to analyze', true); return; }
-
   const btn = document.getElementById('parser-analyze-btn');
-  btn.disabled = true;
-  btn.textContent = 'Analyzing…';
-  document.getElementById('parser-results').innerHTML =
-    `<div class="parser-loading">Reading the order and extracting deadlines…</div>`;
-
+  btn.disabled = true; btn.textContent = 'Analyzing…';
+  document.getElementById('parser-results').innerHTML = `<div class="parser-loading">Reading the order and extracting deadlines…</div>`;
   try {
     const data = await api('/parse', { method: 'POST', body: { order_text: text } });
     if (!data) return;
     parserProposals = data.deadlines || [];
     renderParserProposals();
-    if (!parserProposals.length) {
-      toast('No deadlines found. Try pasting more of the document.', true);
-    } else {
-      toast(`Found ${parserProposals.length} proposed deadline${parserProposals.length === 1 ? '' : 's'}`);
-    }
+    if (!parserProposals.length) toast('No deadlines found. Try pasting more of the document.', true);
+    else toast(`Found ${parserProposals.length} proposed deadline${parserProposals.length === 1 ? '' : 's'}`);
   } catch (e) {
-    document.getElementById('parser-results').innerHTML =
-      `<div class="parser-loading">Couldn't analyze: ${esc(e.message)}</div>`;
+    document.getElementById('parser-results').innerHTML = `<div class="parser-loading">Couldn't analyze: ${esc(e.message)}</div>`;
     toast(e.message, true);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Analyze Document';
+    btn.disabled = false; btn.textContent = 'Analyze Document';
   }
 }
-
 function renderParserProposals() {
   const out = document.getElementById('parser-results');
   if (!parserProposals.length) { out.innerHTML = ''; return; }
   out.innerHTML = parserProposals.map((d, i) => renderParserCard(d, i)).join('');
 }
-
 function renderParserCard(d, idx) {
   const status = d._status || 'pending';
   const cardCls = status === 'added' ? 'added' : (status === 'skipped' ? 'skipped' : '');
-
   let actions = '';
   if (status === 'added') {
-    actions = `<span class="p-added-msg">✓ Added to ${esc(currentMatter.matter.client_name)}</span>`;
+    actions = `<span class="p-added-msg">✓ Added</span>`;
   } else if (status === 'skipped') {
     actions = `<span class="p-added-msg" style="color:var(--ink-faint)">— skipped —</span>
                <button class="btn small ghost" onclick="restoreParserCard(${idx})">Undo skip</button>`;
@@ -1193,38 +1328,23 @@ function renderParserCard(d, idx) {
       <button class="btn small ghost" onclick="skipParserCard(${idx})">Skip</button>
       <button class="btn small ghost" onclick="editParserProposal(${idx})">Edit</button>`;
   }
-
   return `
-    <div class="proposal-card ${cardCls}" id="p-card-${idx}">
+    <div class="proposal-card ${cardCls}">
       <div class="p-top">
         <div class="p-title">${esc(d.title)}</div>
-        <div class="p-date ${d.due_date ? '' : 'no-date'}">
-          ${d.due_date ? formatDate(d.due_date) : 'No date'}
-        </div>
+        <div class="p-date ${d.due_date ? '' : 'no-date'}">${d.due_date ? formatDate(d.due_date) : 'No date'}</div>
       </div>
       <div class="p-meta">
         <span class="pill ${d.party}">${esc(d.party)}</span>
         <span class="pill ${d.confidence}">${esc(d.confidence)} conf.</span>
         ${d.citation ? `<span class="p-cite">${esc(d.citation)}</span>` : ''}
       </div>
-      ${d.source_excerpt ? `
-        <div class="source-excerpt">
-          <span class="source-label">From document:</span>"${esc(d.source_excerpt)}"
-        </div>` : ''}
+      ${d.source_excerpt ? `<div class="source-excerpt"><span class="source-label">From document:</span>"${esc(d.source_excerpt)}"</div>` : ''}
       <div class="p-actions">${actions}</div>
     </div>`;
 }
-
-function skipParserCard(idx) {
-  parserProposals[idx]._status = 'skipped';
-  renderParserProposals();
-}
-
-function restoreParserCard(idx) {
-  parserProposals[idx]._status = 'pending';
-  renderParserProposals();
-}
-
+function skipParserCard(idx)    { parserProposals[idx]._status = 'skipped'; renderParserProposals(); }
+function restoreParserCard(idx) { parserProposals[idx]._status = 'pending'; renderParserProposals(); }
 async function addParserProposal(idx) {
   const d = parserProposals[idx];
   const matterId = currentMatter?.matter?.id;
@@ -1234,63 +1354,48 @@ async function addParserProposal(idx) {
     await api(`/matters/${matterId}/deadlines`, {
       method: 'POST',
       body: {
-        title: d.title,
-        due_date: d.due_date,
-        party: d.party,
+        title: d.title, due_date: d.due_date, party: d.party,
         citation: d.citation,
         note: d.source_excerpt ? `Auto-extracted. Source: "${d.source_excerpt}"` : null,
       }
     });
     parserProposals[idx]._status = 'added';
+    toast('Added');
+    await openDetail(matterId);
+    document.getElementById('parser-area').style.display = 'block';
+    document.getElementById('parser-toggle').textContent = 'Hide ▴';
     renderParserProposals();
-    toast('Added — refreshing deadlines');
-    await openDetail(matterId);   // refresh the deadline list above
-    // openDetail re-renders everything, including the parser area;
-    // restore the parser state since the textarea/proposals get wiped
-    restoreParserAfterRefresh(idx);
-  } catch (e) {
-    toast(e.message, true);
-  }
+    loadAll();
+  } catch (e) { toast(e.message, true); }
 }
-
-// After openDetail() re-renders the modal, the parser area is reset.
-// We need to re-show it, restore proposals, and mark the just-added one.
-function restoreParserAfterRefresh(addedIdx) {
-  if (addedIdx != null && parserProposals[addedIdx]) {
-    parserProposals[addedIdx]._status = 'added';
-  }
-  // Re-open parser pane and re-render
-  document.getElementById('parser-area').style.display = 'block';
-  document.getElementById('parser-toggle').textContent = 'Hide ▴';
-  renderParserProposals();
-}
-
 function editParserProposal(idx) {
   const d = parserProposals[idx];
-  const newTitle = prompt('Title:', d.title);
-  if (newTitle === null) return;
-  const newDate  = prompt('Due date (YYYY-MM-DD):', d.due_date || '');
-  if (newDate === null) return;
-  const newParty = prompt('Party (us / them / court):', d.party);
-  if (newParty === null) return;
+  const newTitle = prompt('Title:', d.title); if (newTitle === null) return;
+  const newDate  = prompt('Due date (YYYY-MM-DD):', d.due_date || ''); if (newDate === null) return;
+  const newParty = prompt('Party (us / them / court):', d.party); if (newParty === null) return;
   const newCite  = prompt('Citation (optional):', d.citation || '');
-
   if (newDate && !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) { toast('Date must be YYYY-MM-DD', true); return; }
   if (!['us', 'them', 'court'].includes(newParty)) { toast('Party must be us, them, or court', true); return; }
-
-  parserProposals[idx] = {
-    ...d,
-    title: newTitle || d.title,
-    due_date: newDate || null,
-    party: newParty,
-    citation: newCite || null,
-  };
+  parserProposals[idx] = { ...d, title: newTitle || d.title, due_date: newDate || null, party: newParty, citation: newCite || null };
   renderParserProposals();
 }
 
-// ── Init ──────────────────────────────────────────────────
-document.getElementById('user-label').textContent = 'JJ Zhang';
-loadList();
+function exportCalendarUrl() {
+  alert(
+    'Your calendar subscription URL is in Apple Passwords under "TEZ Matter Manager - Calendar Feed".\n\n' +
+    'Paste it into Outlook → Add Calendar → Subscribe from web. Deadlines refresh every 15-60 minutes automatically.\n\n' +
+    'The URL is a read-only password to your deadlines — keep it in your password manager.'
+  );
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('matter-modal').classList.contains('show')) closeMatterModal();
+    else if (document.getElementById('detail-modal').classList.contains('show')) closeDetailModal();
+  }
+});
+
+loadAll();
 </script>
 
 </body>
