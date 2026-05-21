@@ -17,6 +17,7 @@
 const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
+const https = require("https");
 const db = require("./db");
 const { requireAuth } = require("./admin");
 
@@ -26,6 +27,166 @@ const router = express.Router();
 // Auth-protected: unauthenticated users redirect to /admin/login
 router.get("/", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "matters.html"));
+});
+
+// ── Serve the order parser UI at /admin/matters/parse ────
+router.get("/parse", requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "matters-parse.html"));
+});
+
+// ─────────────────────────────────────────────────────────────
+//  ORDER PARSER — Claude-powered deadline extraction
+//
+//  POST /admin/matters/api/parse
+//  Body: { order_text: "...", matter_context: "..." (optional) }
+//  Returns: { deadlines: [...], raw_response: "..." }
+//
+//  CRITICAL DESIGN CONSTRAINT: This endpoint PROPOSES deadlines.
+//  It NEVER writes to the database. The client must explicitly
+//  POST each accepted deadline to /api/matters/:id/deadlines.
+//  This forces a human-confirmation click per deadline — the
+//  friction is intentional and prevents Claude's extraction
+//  errors from silently becoming missed court deadlines.
+// ─────────────────────────────────────────────────────────────
+
+const EXTRACTION_PROMPT = `You are a careful legal assistant extracting court-imposed deadlines from a legal document for a California immigration attorney.
+
+The document below is a court order, minute order, NEF (Notice of Electronic Filing), BIA decision, scheduling order, or similar. Extract EVERY date-certain deadline you can find.
+
+For each deadline you find, return:
+- title: short description (e.g., "Opening Brief due", "CAR due", "Response to motion to dismiss due")
+- due_date: ISO format YYYY-MM-DD. If the order says "within 30 days" without a starting date, do NOT guess — leave due_date null and explain in source_excerpt.
+- party: who must act. "us" = the attorney (petitioner/movant/appellant client side). "them" = opposing party (gov/respondent/appellee). "court" = the court itself (e.g., when the court must rule by a date).
+- citation: the rule or statute cited, if any (e.g., "FRAP 31", "8 USC § 1252(b)", "9th Cir. R. 31-2"). null if none.
+- source_excerpt: the EXACT verbatim text from the document that supports this deadline (max 200 chars). This is critical — the attorney will verify your extraction against this excerpt.
+- confidence: "high" / "medium" / "low".
+  - high: explicit date in the document with clear party and trigger
+  - medium: requires modest interpretation (e.g., computing 60 days from a stated start date)
+  - low: ambiguous trigger, contingent on event not yet occurred, or unclear party
+
+Important rules:
+1. Do NOT compute deadlines from ambiguous starting points. If "within 30 days of filing the CAR" and CAR hasn't been filed, leave due_date null.
+2. Do NOT fabricate. If you're not sure, say confidence: "low" and explain in source_excerpt.
+3. Do include deadlines for the opposing party and the court — the attorney needs full case-wide awareness.
+4. Use the calendar-day rule unless the document specifies business days. Federal: FRCP 6 / FRAP 26 generally use calendar days.
+5. If the document mentions a date but it's not a deadline (e.g., date of order issuance, date of service), do NOT include it.
+
+Return ONLY valid JSON with this exact shape, no other text:
+{
+  "deadlines": [
+    {
+      "title": "...",
+      "due_date": "YYYY-MM-DD" or null,
+      "party": "us" | "them" | "court",
+      "citation": "..." or null,
+      "source_excerpt": "...",
+      "confidence": "high" | "medium" | "low"
+    }
+  ]
+}
+
+If you find no deadlines, return {"deadlines": []}.
+
+DOCUMENT TO ANALYZE:
+---
+{ORDER_TEXT}
+---`;
+
+function callClaudeForExtraction(orderText) {
+  return new Promise((resolve, reject) => {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return reject(new Error("ANTHROPIC_API_KEY not configured"));
+
+    const prompt = EXTRACTION_PROMPT.replace("{ORDER_TEXT}", orderText);
+
+    const payload = JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 4000,
+      messages: [{ role: "user", content: prompt }]
+    });
+
+    const req = https.request({
+      hostname: "api.anthropic.com",
+      path: "/v1/messages",
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload)
+      }
+    }, (res) => {
+      let body = "";
+      res.on("data", (chunk) => body += chunk);
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(body);
+          if (data.error) return reject(new Error(data.error.message || "Claude API error"));
+          const text = data.content?.[0]?.text || "";
+          resolve(text);
+        } catch (e) {
+          reject(new Error("Failed to parse Claude response: " + e.message));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+router.post("/api/parse", requireAuth, async (req, res) => {
+  try {
+    const { order_text } = req.body || {};
+
+    if (!order_text || typeof order_text !== "string") {
+      return res.status(400).json({ error: "order_text required" });
+    }
+    if (order_text.length < 30) {
+      return res.status(400).json({ error: "Order text too short to analyze" });
+    }
+    if (order_text.length > 50000) {
+      return res.status(400).json({ error: "Order text too long (max 50k chars). Paste relevant section." });
+    }
+
+    const responseText = await callClaudeForExtraction(order_text);
+
+    // Claude should return JSON. Try to extract it even if wrapped in markdown.
+    let parsed;
+    try {
+      // Strip markdown fences if present
+      let cleaned = responseText.trim();
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Parser JSON error. Raw response:", responseText);
+      return res.status(500).json({
+        error: "Could not parse extraction. The order text may have confused the analyzer.",
+        raw: responseText.substring(0, 500)
+      });
+    }
+
+    if (!parsed.deadlines || !Array.isArray(parsed.deadlines)) {
+      return res.status(500).json({ error: "Unexpected response shape from analyzer" });
+    }
+
+    // Validate each deadline has required fields and reasonable values
+    const validated = parsed.deadlines
+      .filter(d => d && typeof d === "object")
+      .map(d => ({
+        title: String(d.title || "Untitled").substring(0, 300),
+        due_date: d.due_date && /^\d{4}-\d{2}-\d{2}$/.test(d.due_date) ? d.due_date : null,
+        party: ["us", "them", "court"].includes(d.party) ? d.party : "us",
+        citation: d.citation ? String(d.citation).substring(0, 200) : null,
+        source_excerpt: d.source_excerpt ? String(d.source_excerpt).substring(0, 400) : "",
+        confidence: ["high", "medium", "low"].includes(d.confidence) ? d.confidence : "low"
+      }));
+
+    res.json({ deadlines: validated });
+  } catch (err) {
+    console.error("POST /api/parse error:", err.message);
+    res.status(500).json({ error: err.message || "Parser error" });
+  }
 });
 
 // ── Helper: get the current user id (single-user system) ──
