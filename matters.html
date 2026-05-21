@@ -491,6 +491,35 @@
     font-size: 10px; letter-spacing: 0.14em;
     text-transform: uppercase; color: var(--ink-faint);
   }
+
+  /* ── Inline detail view ── */
+  .detail-back-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 24px;
+    margin-bottom: 14px;
+    gap: 16px;
+  }
+  .detail-back-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  #view-detail .section-head h2 {
+    font-style: italic;
+  }
+  .detail-content {
+    background: white;
+    border: 1px solid var(--rule);
+    padding: 30px 36px 36px;
+    margin-top: 8px;
+  }
+  @media (max-width: 700px) {
+    .detail-content { padding: 22px 18px; }
+  }
 </style>
 </head>
 <body>
@@ -733,70 +762,26 @@
     </div>
   </section>
 
-  <div class="app-foot">Built for Tez Law Firm · Data persisted in Render Postgres · Admin auth required</div>
-
-</div>
-
-<div class="modal-backdrop" id="matter-modal">
-  <div class="modal">
-    <div class="modal-head">
-      <div>
-        <h2 id="mm-title">New Matter</h2>
-        <div class="ref" id="mm-ref-display"></div>
-      </div>
-      <button class="modal-close" onclick="closeMatterModal()">×</button>
+  <!-- ── MATTER DETAIL VIEW (inline, replaces list when a matter is opened) ── -->
+  <section id="view-detail" class="tab-view" style="display:none;">
+    <div class="detail-back-row">
+      <button class="btn ghost" onclick="closeDetail()">← Back to Matters</button>
+      <div class="detail-back-meta" id="detail-back-meta"></div>
     </div>
-    <div class="modal-body">
-      <form id="matter-form" onsubmit="return false;">
-        <input type="hidden" id="mf-id">
-        <div class="form-row">
-          <div class="field"><label>Client Name *</label><input type="text" id="mf-client" required></div>
-          <div class="field"><label>Case / Matter Number</label><input type="text" id="mf-ref" placeholder="A 216-866-000 · 2:25-cv-04567"></div>
-        </div>
-        <div class="form-row">
-          <div class="field"><label>Court / Forum</label><input type="text" id="mf-court" placeholder="U.S. Court of Appeals, 9th Cir."></div>
-          <div class="field"><label>Case Type</label><input type="text" id="mf-case-type" placeholder="PFR · Habeas · Civil · Estate"></div>
-        </div>
-        <div class="form-row">
-          <div class="field"><label>Status</label>
-            <select id="mf-status">
-              <option value="active">Active</option>
-              <option value="closed">Closed</option>
-              <option value="archived">Archived</option>
-            </select>
-          </div>
-          <div class="field"><label>Dropbox / Folder URL</label><input type="url" id="mf-dropbox" placeholder="https://…"></div>
-        </div>
-        <div class="form-row full">
-          <div class="field"><label>Notes (short)</label><textarea id="mf-notes" placeholder="One-line status note or context"></textarea></div>
-        </div>
-      </form>
-    </div>
-    <div class="modal-foot">
-      <div><button class="btn danger" id="mm-delete-btn" onclick="deleteMatterConfirm()" style="display:none;">Delete Matter</button></div>
-      <div style="display:flex; gap:10px;">
-        <button class="btn ghost" onclick="closeMatterModal()">Cancel</button>
-        <button class="btn primary" onclick="saveMatter()">Save</button>
-      </div>
-    </div>
-  </div>
-</div>
 
-<div class="modal-backdrop" id="detail-modal">
-  <div class="modal">
-    <div class="modal-head">
+    <div class="section-head">
       <div>
         <h2 id="dm-client">—</h2>
-        <div class="ref" id="dm-ref">—</div>
+        <div class="sub" id="dm-ref">—</div>
       </div>
-      <button class="modal-close" onclick="closeDetailModal()">×</button>
+      <div class="action-row">
+        <button class="btn ghost" onclick="editCurrentMatter()">Edit Matter</button>
+      </div>
     </div>
-    <div class="modal-body">
 
+    <div class="detail-content">
       <div class="sec" id="dm-meta-sec">
-        <div class="sec-head"><h3>Matter Info</h3>
-          <button class="btn small ghost" onclick="editCurrentMatter()">Edit</button>
-        </div>
+        <div class="sec-head"><h3>Matter Info</h3></div>
         <div id="dm-meta"></div>
       </div>
 
@@ -859,7 +844,54 @@
           <div id="parser-results"></div>
         </div>
       </div>
+    </div>
+  </section>
 
+  <div class="app-foot">Built for Tez Law Firm · Data persisted in Render Postgres · Admin auth required</div>
+
+</div>
+
+<div class="modal-backdrop" id="matter-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2 id="mm-title">New Matter</h2>
+        <div class="ref" id="mm-ref-display"></div>
+      </div>
+      <button class="modal-close" onclick="closeMatterModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <form id="matter-form" onsubmit="return false;">
+        <input type="hidden" id="mf-id">
+        <div class="form-row">
+          <div class="field"><label>Client Name *</label><input type="text" id="mf-client" required></div>
+          <div class="field"><label>Case / Matter Number</label><input type="text" id="mf-ref" placeholder="A 216-866-000 · 2:25-cv-04567"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Court / Forum</label><input type="text" id="mf-court" placeholder="U.S. Court of Appeals, 9th Cir."></div>
+          <div class="field"><label>Case Type</label><input type="text" id="mf-case-type" placeholder="PFR · Habeas · Civil · Estate"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Status</label>
+            <select id="mf-status">
+              <option value="active">Active</option>
+              <option value="closed">Closed</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+          <div class="field"><label>Dropbox / Folder URL</label><input type="url" id="mf-dropbox" placeholder="https://…"></div>
+        </div>
+        <div class="form-row full">
+          <div class="field"><label>Notes (short)</label><textarea id="mf-notes" placeholder="One-line status note or context"></textarea></div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-foot">
+      <div><button class="btn danger" id="mm-delete-btn" onclick="deleteMatterConfirm()" style="display:none;">Delete Matter</button></div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn ghost" onclick="closeMatterModal()">Cancel</button>
+        <button class="btn primary" onclick="saveMatter()">Save</button>
+      </div>
     </div>
   </div>
 </div>
@@ -869,6 +901,7 @@
 <script>
 const API = '/admin/matters/api';
 let currentTab = 'active';
+let previousTab = 'active';   // tab to return to when closing detail
 let currentMatter = null;
 let allMattersAll = [];
 
@@ -930,13 +963,17 @@ function formatDateTime(s) {
 }
 
 function setTab(tab) {
+  // If switching to a regular tab while detail is open, remember nothing — just go
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.getElementById('view-active').style.display      = tab === 'active'      ? '' : 'none';
   document.getElementById('view-archive').style.display     = tab === 'archive'     ? '' : 'none';
   document.getElementById('view-court').style.display       = tab === 'court'       ? '' : 'none';
   document.getElementById('view-authorities').style.display = tab === 'authorities' ? '' : 'none';
+  // Always hide detail view when a normal tab is selected
+  document.getElementById('view-detail').style.display      = 'none';
   if (tab === 'active' || tab === 'archive') renderLists();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 async function loadAll() {
@@ -1067,7 +1104,6 @@ function editCurrentMatter() {
   document.getElementById('mf-status').value = m.status || 'active';
   document.getElementById('mf-dropbox').value = m.dropbox_url || '';
   document.getElementById('mf-notes').value = m.notes || '';
-  closeDetailModal();
   document.getElementById('matter-modal').classList.add('show');
 }
 function closeMatterModal() { document.getElementById('matter-modal').classList.remove('show'); }
@@ -1112,6 +1148,7 @@ async function deleteMatterConfirm() {
     toast('Matter deleted');
     closeMatterModal();
     currentMatter = null;
+    setTab(previousTab || 'active');
     loadAll();
   } catch (e) { toast(e.message, true); }
 }
@@ -1121,17 +1158,46 @@ async function openDetail(id) {
     const data = await api(`/matters/${id}`);
     if (!data) return;
     currentMatter = data;
+    // Remember which tab we were on so back button restores it
+    if (currentTab === 'active' || currentTab === 'archive') previousTab = currentTab;
+    // Hide all other views, show detail view
+    document.getElementById('view-active').style.display      = 'none';
+    document.getElementById('view-archive').style.display     = 'none';
+    document.getElementById('view-court').style.display       = 'none';
+    document.getElementById('view-authorities').style.display = 'none';
+    document.getElementById('view-detail').style.display      = '';
+    // Tabs lose active state visually since we're not on any of them
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     renderDetail();
-    document.getElementById('detail-modal').classList.add('show');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch (e) { toast(e.message, true); }
 }
-function closeDetailModal() { document.getElementById('detail-modal').classList.remove('show'); }
+function closeDetail() {
+  currentMatter = null;
+  // Also collapse parser & clear state so reopen feels fresh
+  const pa = document.getElementById('parser-area');
+  if (pa) pa.style.display = 'none';
+  const pt = document.getElementById('parser-toggle');
+  if (pt) pt.textContent = 'Show ▾';
+  parserProposals = [];
+  const ot = document.getElementById('order-text');
+  if (ot) ot.value = '';
+  setTab(previousTab || 'active');
+}
+// Legacy alias: some places still call closeDetailModal
+function closeDetailModal() { closeDetail(); }
 
 function renderDetail() {
   const { matter, deadlines, notes, files } = currentMatter;
   document.getElementById('dm-client').textContent = matter.client_name;
   document.getElementById('dm-ref').textContent =
     [matter.matter_ref, matter.court, matter.case_type, `Status: ${matter.status}`].filter(Boolean).join('  ·  ');
+
+  // Back-row meta: small caption above the matter name
+  const backBits = [];
+  if (matter.court) backBits.push(matter.court);
+  if (matter.case_type) backBits.push(matter.case_type);
+  document.getElementById('detail-back-meta').textContent = backBits.join(' · ');
 
   const metaBits = [];
   if (matter.court) metaBits.push(`<div><span class="label">Court:</span> ${esc(matter.court)}</div>`);
@@ -1390,8 +1456,11 @@ function exportCalendarUrl() {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (document.getElementById('matter-modal').classList.contains('show')) closeMatterModal();
-    else if (document.getElementById('detail-modal').classList.contains('show')) closeDetailModal();
+    if (document.getElementById('matter-modal').classList.contains('show')) {
+      closeMatterModal();
+    } else if (document.getElementById('view-detail').style.display !== 'none') {
+      closeDetail();
+    }
   }
 });
 
