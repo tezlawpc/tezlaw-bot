@@ -29,11 +29,6 @@ router.get("/", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "matters.html"));
 });
 
-// ── Serve the order parser UI at /admin/matters/parse ────
-router.get("/parse", requireAuth, (req, res) => {
-  res.sendFile(path.join(__dirname, "matters-parse.html"));
-});
-
 // ─────────────────────────────────────────────────────────────
 //  ORDER PARSER — Claude-powered deadline extraction
 //
