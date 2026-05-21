@@ -394,6 +394,7 @@
     </div>
     <div class="header-actions">
       <span class="label" id="user-label">Loading…</span>
+      <a href="/admin/matters/parse" class="btn ghost">📄 Parse Order</a>
       <button class="btn primary" onclick="openNewMatter()">+ New Matter</button>
       <a href="/admin/" class="btn ghost">Admin</a>
     </div>
@@ -499,7 +500,9 @@
       </div>
 
       <div class="sec">
-        <div class="sec-head"><h3>Deadlines</h3></div>
+        <div class="sec-head"><h3>Deadlines</h3>
+          <a class="btn small ghost" id="parse-order-link" href="/admin/matters/parse">📄 Parse Order → Add Here</a>
+        </div>
         <div id="dm-deadlines"></div>
         <div class="add-row">
           <div class="field"><label>Due Date</label><input type="date" id="dl-date"></div>
@@ -818,6 +821,9 @@ function renderDetail() {
   document.getElementById('dm-client').textContent = matter.client_name;
   document.getElementById('dm-ref').textContent =
     [matter.matter_ref, matter.court, matter.case_type, `Status: ${matter.status}`].filter(Boolean).join('  ·  ');
+
+  // Pre-select this matter in the parser via URL param
+  document.getElementById('parse-order-link').href = `/admin/matters/parse?matter=${matter.id}`;
 
   const metaBits = [];
   if (matter.court) metaBits.push(`<div><span class="label">Court:</span> ${esc(matter.court)}</div>`);
