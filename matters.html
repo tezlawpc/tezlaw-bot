@@ -329,6 +329,112 @@
   .add-note-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; align-items: end; }
   .add-file-row { display: grid; grid-template-columns: 1fr 2fr auto; gap: 8px; margin-top: 12px; align-items: end; }
 
+  /* ── Parser inside matter detail ── */
+  .parser-warning {
+    background: rgba(192,57,43,0.05);
+    border-left: 3px solid var(--urgent);
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .parser-warning strong { color: var(--urgent); }
+  #order-text {
+    width: 100%;
+    min-height: 220px;
+    padding: 12px;
+    background: white;
+    border: 1px solid var(--rule);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.45;
+    resize: vertical;
+  }
+  #order-text:focus { outline: none; border-color: var(--oxblood); }
+  .parser-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    margin-bottom: 14px;
+  }
+  .parser-char-count {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+  .proposal-card {
+    background: var(--paper-deep);
+    border: 1px solid var(--rule);
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .proposal-card.added {
+    background: rgba(45,90,61,0.08);
+    border-color: var(--us);
+  }
+  .proposal-card.skipped {
+    opacity: 0.4;
+  }
+  .proposal-card .p-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .proposal-card .p-title {
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.2;
+    flex: 1;
+  }
+  .proposal-card .p-date {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 9px;
+    border: 1px solid var(--ink);
+    background: var(--paper);
+  }
+  .proposal-card .p-date.no-date { color: var(--ink-faint); border-color: var(--rule); }
+  .proposal-card .p-meta { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+  .proposal-card .source-excerpt {
+    background: var(--paper);
+    border-left: 3px solid var(--oxblood);
+    padding: 7px 11px;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin: 6px 0;
+    line-height: 1.4;
+  }
+  .proposal-card .source-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-right: 6px;
+  }
+  .proposal-card .p-cite {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin: 4px 0;
+  }
+  .pill.high   { color: var(--us);    border-color: var(--us);   background: rgba(45,90,61,0.06); }
+  .pill.medium { color: var(--soon);  border-color: var(--soon); background: rgba(212,132,43,0.08); }
+  .pill.low    { color: var(--urgent); border-color: var(--urgent); background: rgba(192,57,43,0.06); }
+  .p-actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+  .p-added-msg { color: var(--us); font-style: italic; font-size: 14px; }
+  .parser-loading {
+    text-align: center;
+    padding: 30px 20px;
+    color: var(--ink-soft);
+    font-style: italic;
+  }
+
   /* ── Toast ── */
   .toast {
     position: fixed;
@@ -394,7 +500,6 @@
     </div>
     <div class="header-actions">
       <span class="label" id="user-label">Loading…</span>
-      <a href="/admin/matters/parse" class="btn ghost">📄 Parse Order</a>
       <button class="btn primary" onclick="openNewMatter()">+ New Matter</button>
       <a href="/admin/" class="btn ghost">Admin</a>
     </div>
@@ -500,9 +605,7 @@
       </div>
 
       <div class="sec">
-        <div class="sec-head"><h3>Deadlines</h3>
-          <a class="btn small ghost" id="parse-order-link" href="/admin/matters/parse">📄 Parse Order → Add Here</a>
-        </div>
+        <div class="sec-head"><h3>Deadlines</h3></div>
         <div id="dm-deadlines"></div>
         <div class="add-row">
           <div class="field"><label>Due Date</label><input type="date" id="dl-date"></div>
@@ -538,6 +641,26 @@
           <div class="field"><label>Label</label><input type="text" id="file-name" placeholder="Opening Brief.pdf"></div>
           <div class="field"><label>URL</label><input type="url" id="file-url" placeholder="https://www.dropbox.com/…"></div>
           <button class="btn primary small" onclick="addFile()">Add</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-head"><h3>Parse Court Order</h3>
+          <button class="btn small ghost" onclick="toggleParser()" id="parser-toggle">Show ▾</button>
+        </div>
+        <div id="parser-area" style="display:none;">
+          <div class="parser-warning">
+            <strong>Review each proposed deadline.</strong> Zara reads the document and drafts candidates. Verify every date against the source excerpt before clicking Add — Claude can misread dates or invent triggers.
+          </div>
+          <textarea id="order-text" placeholder="Paste the full text of the court order, minute order, NEF, BIA decision, or scheduling order here. Include the full document — court captions, dates, and context all help Claude extract accurately."></textarea>
+          <div class="parser-actions">
+            <span class="parser-char-count" id="parser-char-count">0 chars</span>
+            <div style="display:flex; gap:8px;">
+              <button class="btn ghost small" onclick="clearParser()">Clear</button>
+              <button class="btn primary small" id="parser-analyze-btn" onclick="parseOrderInModal()">Analyze Document</button>
+            </div>
+          </div>
+          <div id="parser-results"></div>
         </div>
       </div>
 
@@ -822,9 +945,6 @@ function renderDetail() {
   document.getElementById('dm-ref').textContent =
     [matter.matter_ref, matter.court, matter.case_type, `Status: ${matter.status}`].filter(Boolean).join('  ·  ');
 
-  // Pre-select this matter in the parser via URL param
-  document.getElementById('parse-order-link').href = `/admin/matters/parse?matter=${matter.id}`;
-
   const metaBits = [];
   if (matter.court) metaBits.push(`<div><span class="label">Court:</span> ${esc(matter.court)}</div>`);
   if (matter.case_type) metaBits.push(`<div><span class="label">Type:</span> ${esc(matter.case_type)}</div>`);
@@ -990,13 +1110,183 @@ async function removeFile(id) {
   } catch (e) { toast(e.message, true); }
 }
 
-// ── Keyboard shortcuts ────────────────────────────────────
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (document.getElementById('matter-modal').classList.contains('show')) closeMatterModal();
-    else if (document.getElementById('detail-modal').classList.contains('show')) closeDetailModal();
+// ── Parser (embedded inside matter detail modal) ──────────
+let parserProposals = [];
+
+function toggleParser() {
+  const area = document.getElementById('parser-area');
+  const btn = document.getElementById('parser-toggle');
+  if (area.style.display === 'none') {
+    area.style.display = 'block';
+    btn.textContent = 'Hide ▴';
+    setTimeout(() => document.getElementById('order-text').focus(), 50);
+  } else {
+    area.style.display = 'none';
+    btn.textContent = 'Show ▾';
+  }
+}
+
+function clearParser() {
+  if (parserProposals.length && !confirm('Clear input and proposed deadlines?')) return;
+  document.getElementById('order-text').value = '';
+  document.getElementById('parser-char-count').textContent = '0 chars';
+  document.getElementById('parser-results').innerHTML = '';
+  parserProposals = [];
+}
+
+document.addEventListener('input', (e) => {
+  if (e.target && e.target.id === 'order-text') {
+    document.getElementById('parser-char-count').textContent = e.target.value.length + ' chars';
   }
 });
+
+async function parseOrderInModal() {
+  const text = document.getElementById('order-text').value.trim();
+  if (!text) { toast('Paste order text first', true); return; }
+  if (text.length < 30) { toast('Text too short to analyze', true); return; }
+
+  const btn = document.getElementById('parser-analyze-btn');
+  btn.disabled = true;
+  btn.textContent = 'Analyzing…';
+  document.getElementById('parser-results').innerHTML =
+    `<div class="parser-loading">Reading the order and extracting deadlines…</div>`;
+
+  try {
+    const data = await api('/parse', { method: 'POST', body: { order_text: text } });
+    if (!data) return;
+    parserProposals = data.deadlines || [];
+    renderParserProposals();
+    if (!parserProposals.length) {
+      toast('No deadlines found. Try pasting more of the document.', true);
+    } else {
+      toast(`Found ${parserProposals.length} proposed deadline${parserProposals.length === 1 ? '' : 's'}`);
+    }
+  } catch (e) {
+    document.getElementById('parser-results').innerHTML =
+      `<div class="parser-loading">Couldn't analyze: ${esc(e.message)}</div>`;
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Analyze Document';
+  }
+}
+
+function renderParserProposals() {
+  const out = document.getElementById('parser-results');
+  if (!parserProposals.length) { out.innerHTML = ''; return; }
+  out.innerHTML = parserProposals.map((d, i) => renderParserCard(d, i)).join('');
+}
+
+function renderParserCard(d, idx) {
+  const status = d._status || 'pending';
+  const cardCls = status === 'added' ? 'added' : (status === 'skipped' ? 'skipped' : '');
+
+  let actions = '';
+  if (status === 'added') {
+    actions = `<span class="p-added-msg">✓ Added to ${esc(currentMatter.matter.client_name)}</span>`;
+  } else if (status === 'skipped') {
+    actions = `<span class="p-added-msg" style="color:var(--ink-faint)">— skipped —</span>
+               <button class="btn small ghost" onclick="restoreParserCard(${idx})">Undo skip</button>`;
+  } else {
+    actions = `
+      <button class="btn small primary" onclick="addParserProposal(${idx})">+ Add to Matter</button>
+      <button class="btn small ghost" onclick="skipParserCard(${idx})">Skip</button>
+      <button class="btn small ghost" onclick="editParserProposal(${idx})">Edit</button>`;
+  }
+
+  return `
+    <div class="proposal-card ${cardCls}" id="p-card-${idx}">
+      <div class="p-top">
+        <div class="p-title">${esc(d.title)}</div>
+        <div class="p-date ${d.due_date ? '' : 'no-date'}">
+          ${d.due_date ? formatDate(d.due_date) : 'No date'}
+        </div>
+      </div>
+      <div class="p-meta">
+        <span class="pill ${d.party}">${esc(d.party)}</span>
+        <span class="pill ${d.confidence}">${esc(d.confidence)} conf.</span>
+        ${d.citation ? `<span class="p-cite">${esc(d.citation)}</span>` : ''}
+      </div>
+      ${d.source_excerpt ? `
+        <div class="source-excerpt">
+          <span class="source-label">From document:</span>"${esc(d.source_excerpt)}"
+        </div>` : ''}
+      <div class="p-actions">${actions}</div>
+    </div>`;
+}
+
+function skipParserCard(idx) {
+  parserProposals[idx]._status = 'skipped';
+  renderParserProposals();
+}
+
+function restoreParserCard(idx) {
+  parserProposals[idx]._status = 'pending';
+  renderParserProposals();
+}
+
+async function addParserProposal(idx) {
+  const d = parserProposals[idx];
+  const matterId = currentMatter?.matter?.id;
+  if (!matterId) { toast('No matter selected', true); return; }
+  if (!d.due_date) { toast('No date — use Edit to add one, or skip', true); return; }
+  try {
+    await api(`/matters/${matterId}/deadlines`, {
+      method: 'POST',
+      body: {
+        title: d.title,
+        due_date: d.due_date,
+        party: d.party,
+        citation: d.citation,
+        note: d.source_excerpt ? `Auto-extracted. Source: "${d.source_excerpt}"` : null,
+      }
+    });
+    parserProposals[idx]._status = 'added';
+    renderParserProposals();
+    toast('Added — refreshing deadlines');
+    await openDetail(matterId);   // refresh the deadline list above
+    // openDetail re-renders everything, including the parser area;
+    // restore the parser state since the textarea/proposals get wiped
+    restoreParserAfterRefresh(idx);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// After openDetail() re-renders the modal, the parser area is reset.
+// We need to re-show it, restore proposals, and mark the just-added one.
+function restoreParserAfterRefresh(addedIdx) {
+  if (addedIdx != null && parserProposals[addedIdx]) {
+    parserProposals[addedIdx]._status = 'added';
+  }
+  // Re-open parser pane and re-render
+  document.getElementById('parser-area').style.display = 'block';
+  document.getElementById('parser-toggle').textContent = 'Hide ▴';
+  renderParserProposals();
+}
+
+function editParserProposal(idx) {
+  const d = parserProposals[idx];
+  const newTitle = prompt('Title:', d.title);
+  if (newTitle === null) return;
+  const newDate  = prompt('Due date (YYYY-MM-DD):', d.due_date || '');
+  if (newDate === null) return;
+  const newParty = prompt('Party (us / them / court):', d.party);
+  if (newParty === null) return;
+  const newCite  = prompt('Citation (optional):', d.citation || '');
+
+  if (newDate && !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) { toast('Date must be YYYY-MM-DD', true); return; }
+  if (!['us', 'them', 'court'].includes(newParty)) { toast('Party must be us, them, or court', true); return; }
+
+  parserProposals[idx] = {
+    ...d,
+    title: newTitle || d.title,
+    due_date: newDate || null,
+    party: newParty,
+    citation: newCite || null,
+  };
+  renderParserProposals();
+}
 
 // ── Init ──────────────────────────────────────────────────
 document.getElementById('user-label').textContent = 'JJ Zhang';
