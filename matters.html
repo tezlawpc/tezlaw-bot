@@ -520,6 +520,128 @@
   @media (max-width: 700px) {
     .detail-content { padding: 22px 18px; }
   }
+
+  /* ── Deadline boxes strip (Lu detail view summary) ── */
+  .deadline-boxes-section {
+    margin-bottom: 32px;
+  }
+  .deadline-boxes-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 12px;
+  }
+  .deadline-boxes-head h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .deadline-boxes-head .legend {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+    display: flex;
+    gap: 14px;
+  }
+  .deadline-boxes-head .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .deadline-boxes-head .legend .swatch {
+    width: 9px; height: 9px; display: inline-block;
+  }
+  .deadline-boxes-head .swatch.red    { background: var(--urgent); }
+  .deadline-boxes-head .swatch.orange { background: var(--soon); }
+  .deadline-boxes-head .swatch.ink    { background: var(--ink); }
+  .deadline-boxes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+  }
+  .db-box {
+    background: var(--paper);
+    border: 1.5px solid var(--rule);
+    border-left-width: 4px;
+    padding: 12px 14px 13px;
+    cursor: pointer;
+    transition: all 0.12s;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .db-box:hover {
+    background: white;
+    border-color: var(--ink);
+    transform: translateY(-1px);
+  }
+  .db-box.red    { border-left-color: var(--urgent); }
+  .db-box.orange { border-left-color: var(--soon); }
+  .db-box.ink    { border-left-color: var(--ink); }
+  .db-box .days {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 600;
+    font-size: 26px;
+    line-height: 1;
+  }
+  .db-box.red    .days { color: var(--urgent); }
+  .db-box.orange .days { color: var(--soon); }
+  .db-box.ink    .days { color: var(--ink); }
+  .db-box .db-title {
+    font-size: 15px;
+    line-height: 1.25;
+    color: var(--ink);
+    font-weight: 500;
+    /* clamp to 2 lines */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .db-box .db-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-faint);
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+  }
+  .db-box .db-date { letter-spacing: 0.02em; }
+  .db-box .db-party {
+    padding: 1px 6px;
+    border: 1px solid var(--rule);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 9px;
+  }
+  .db-box .db-party.us    { color: var(--us);    border-color: var(--us);    background: rgba(45,90,61,0.06); }
+  .db-box .db-party.them  { color: var(--them);  border-color: var(--them);  background: rgba(122,29,29,0.06); }
+  .db-box .db-party.court { color: var(--court); border-color: var(--court); background: rgba(107,90,29,0.06); }
+
+  /* Highlight animation when a deadline row is scrolled to */
+  .deadline.flash {
+    animation: deadline-flash 1.6s ease-out;
+  }
+  @keyframes deadline-flash {
+    0%   { background: rgba(212,132,43,0.20); }
+    100% { background: transparent; }
+  }
+
+  .deadline-boxes-empty {
+    background: var(--paper);
+    border: 1px dashed var(--rule);
+    padding: 22px 24px;
+    text-align: center;
+    color: var(--ink-faint);
+    font-style: italic;
+    font-size: 15px;
+  }
 </style>
 </head>
 <body>
@@ -572,7 +694,7 @@
         <div class="ov-sub">across all matters</div>
       </div>
       <div class="ov-card">
-        <div class="ov-label">Urgent ≤ 7d</div>
+        <div class="ov-label">Urgent ≤ 15d</div>
         <div class="ov-num green" id="ov-urgent">—</div>
         <div class="ov-sub" id="ov-urgent-sub">items need attention</div>
       </div>
@@ -780,6 +902,18 @@
     </div>
 
     <div class="detail-content">
+      <div class="deadline-boxes-section" id="dm-boxes-section">
+        <div class="deadline-boxes-head">
+          <h3 id="dm-boxes-head">Open Deadlines</h3>
+          <div class="legend">
+            <span><span class="swatch red"></span>≤ 7d</span>
+            <span><span class="swatch orange"></span>8–30d</span>
+            <span><span class="swatch ink"></span>30d+</span>
+          </div>
+        </div>
+        <div id="dm-boxes"></div>
+      </div>
+
       <div class="sec" id="dm-meta-sec">
         <div class="sec-head"><h3>Matter Info</h3></div>
         <div id="dm-meta"></div>
@@ -1008,7 +1142,7 @@ function renderOverview() {
   const urgentCount = active.reduce((sum, m) => {
     if (!m.next_due) return sum;
     const d = daysUntil(m.next_due);
-    return (d != null && d <= 7) ? sum + 1 : sum;
+    return (d != null && d <= 15) ? sum + 1 : sum;
   }, 0);
   const urgentEl = document.getElementById('ov-urgent');
   urgentEl.textContent = urgentCount;
@@ -1210,6 +1344,18 @@ function renderDetail() {
   const done    = deadlines.filter(d =>  d.completed).sort((a, b) => new Date(b.due_date) - new Date(a.due_date));
   const ordered = [...pending, ...done];
 
+  // ── Render deadline boxes (pending only, sorted soonest first) ──
+  const boxesEl = document.getElementById('dm-boxes');
+  const boxesHead = document.getElementById('dm-boxes-head');
+  if (pending.length) {
+    boxesHead.textContent = `Open Deadlines · ${pending.length}`;
+    boxesEl.innerHTML = '<div class="deadline-boxes">' +
+      pending.map(renderDeadlineBox).join('') + '</div>';
+  } else {
+    boxesHead.textContent = 'Open Deadlines · 0';
+    boxesEl.innerHTML = '<div class="deadline-boxes-empty">No open deadlines for this matter. Add one below.</div>';
+  }
+
   document.getElementById('dm-deadlines').innerHTML = ordered.length
     ? ordered.map(renderDeadline).join('')
     : '<div style="color:var(--ink-faint); font-style:italic; padding:8px 0;">No deadlines yet.</div>';
@@ -1228,11 +1374,37 @@ function renderDetail() {
   document.getElementById('dl-party').value = 'us';
 }
 
+function renderDeadlineBox(d) {
+  const days = daysUntil(d.due_date);
+  let colorCls = 'ink';
+  if (days != null && days <= 7) colorCls = 'red';
+  else if (days != null && days <= 30) colorCls = 'orange';
+  return `
+    <div class="db-box ${colorCls}" onclick="scrollToDeadline(${d.id})" title="Click to jump to this deadline">
+      <div class="days">${urgencyDisplay(days)}</div>
+      <div class="db-title">${esc(d.title)}</div>
+      <div class="db-foot">
+        <span class="db-date">${formatDate(d.due_date)}</span>
+        <span class="db-party ${d.party}">${d.party}</span>
+      </div>
+    </div>`;
+}
+
+function scrollToDeadline(deadlineId) {
+  const row = document.getElementById('deadline-row-' + deadlineId);
+  if (!row) return;
+  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  row.classList.remove('flash');
+  // re-trigger animation
+  void row.offsetWidth;
+  row.classList.add('flash');
+}
+
 function renderDeadline(d) {
   const days = daysUntil(d.due_date);
   const dateClass = d.completed ? 'done' : (days != null && days <= 7 ? 'urgent' : (days != null && days <= 30 ? 'soon' : ''));
   return `
-    <div class="deadline">
+    <div class="deadline" id="deadline-row-${d.id}">
       <div class="date ${dateClass}">${formatDate(d.due_date)}</div>
       <div>
         <div class="title-cell ${d.completed ? 'done' : ''}">${esc(d.title)}</div>
