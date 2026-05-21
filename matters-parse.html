@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Order Parser — Matter Manager — Tez Law P.C.</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:       #f4f1ea;
+    --paper-deep:  #ebe6dc;
+    --paper-edge:  #d9d2c4;
+    --ink:         #1a1a1a;
+    --ink-soft:    #4a4a4a;
+    --ink-faint:   #888;
+    --oxblood:     #7a1d1d;
+    --oxblood-d:   #5e1414;
+    --rule:        #c9c2b3;
+    --us:          #2d5a3d;
+    --them:        #7a1d1d;
+    --court:       #6b5a1d;
+    --urgent:      #c0392b;
+    --soon:        #d4842b;
+    --safe:        #5a7a3d;
+    --conf-high:   #2d5a3d;
+    --conf-med:    #b87f3a;
+    --conf-low:    #a83838;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--paper); color: var(--ink); }
+  body {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 18px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .label, .mono {
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  button, input, textarea, select {
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--ink);
+  }
+  a { color: var(--oxblood); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .app { max-width: 1400px; margin: 0 auto; padding: 32px; }
+  header {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 18px;
+    margin-bottom: 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .brand h1 {
+    font-weight: 700;
+    font-size: 38px;
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+  .brand .sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--oxblood);
+    margin-top: 8px;
+  }
+  .header-actions { display: flex; gap: 12px; align-items: center; }
+
+  .btn {
+    display: inline-block;
+    padding: 9px 18px;
+    background: var(--paper);
+    border: 1.5px solid var(--ink);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .btn:hover { background: var(--ink); color: var(--paper); }
+  .btn.primary { background: var(--oxblood); color: var(--paper); border-color: var(--oxblood); }
+  .btn.primary:hover { background: var(--oxblood-d); border-color: var(--oxblood-d); }
+  .btn.ghost { border-color: var(--rule); color: var(--ink-soft); }
+  .btn.ghost:hover { background: var(--paper-deep); color: var(--ink); border-color: var(--ink-soft); }
+  .btn.small { padding: 5px 11px; font-size: 10px; }
+  .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── Layout: input on left, output on right ── */
+  .work-area {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 1100px) {
+    .work-area { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 20px 22px;
+    min-height: 600px;
+  }
+  .panel h2 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink);
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  /* ── Input panel ── */
+  .target-row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .target-row label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .target-row select {
+    padding: 8px 11px;
+    background: white;
+    border: 1px solid var(--rule);
+    font-size: 15px;
+    font-family: inherit;
+    width: 100%;
+  }
+  textarea#order-text {
+    width: 100%;
+    min-height: 460px;
+    padding: 14px;
+    background: white;
+    border: 1px solid var(--rule);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--ink);
+    resize: vertical;
+  }
+  textarea#order-text:focus { outline: none; border-color: var(--oxblood); }
+  .input-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 12px;
+  }
+  .input-actions .char-count {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+
+  /* ── Output panel ── */
+  .output-empty {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--ink-faint);
+    font-style: italic;
+  }
+  .output-empty h3 { font-weight: 500; font-size: 22px; margin-bottom: 8px; color: var(--ink-soft); font-style: normal; }
+
+  .deadline-card {
+    background: var(--paper-deep);
+    border: 1px solid var(--rule);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .deadline-card.added {
+    background: rgba(45,90,61,0.08);
+    border-color: var(--us);
+  }
+  .deadline-card.skipped {
+    opacity: 0.4;
+  }
+  .deadline-card .top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .deadline-card .title {
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.2;
+    flex: 1;
+  }
+  .deadline-card .date-pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 9px;
+    border: 1px solid var(--ink);
+    background: var(--paper);
+    letter-spacing: 0.02em;
+  }
+  .deadline-card .date-pill.no-date {
+    color: var(--ink-faint);
+    border-color: var(--rule);
+  }
+  .deadline-card .meta {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    padding: 3px 8px;
+    border: 1px solid var(--rule);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .pill.us    { color: var(--us);    border-color: var(--us);    background: rgba(45,90,61,0.06); }
+  .pill.them  { color: var(--them);  border-color: var(--them);  background: rgba(122,29,29,0.06); }
+  .pill.court { color: var(--court); border-color: var(--court); background: rgba(107,90,29,0.06); }
+  .pill.high  { color: var(--conf-high); border-color: var(--conf-high); background: rgba(45,90,61,0.06); }
+  .pill.medium { color: var(--conf-med);  border-color: var(--conf-med);  background: rgba(184,127,58,0.06); }
+  .pill.low   { color: var(--conf-low);  border-color: var(--conf-low);  background: rgba(168,56,56,0.06); }
+
+  .source-excerpt {
+    background: var(--paper);
+    border-left: 3px solid var(--oxblood);
+    padding: 8px 12px;
+    font-style: italic;
+    font-size: 14px;
+    color: var(--ink-soft);
+    margin: 8px 0;
+    line-height: 1.4;
+  }
+  .source-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-right: 8px;
+  }
+  .citation {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin: 6px 0;
+  }
+  .card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    align-items: center;
+  }
+  .card-actions .added-msg {
+    color: var(--us);
+    font-style: italic;
+    font-size: 14px;
+  }
+
+  /* ── Disclaimer banner ── */
+  .disclaimer {
+    background: rgba(192,57,43,0.05);
+    border-left: 4px solid var(--urgent);
+    padding: 12px 16px;
+    margin-bottom: 24px;
+    font-size: 14px;
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  .disclaimer strong { color: var(--urgent); }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 11px 18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+    z-index: 200;
+    display: none;
+  }
+  .toast.show { display: block; }
+  .toast.err { background: var(--urgent); }
+
+  /* ── Loading state ── */
+  .loading {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--ink-soft);
+    font-style: italic;
+  }
+  .loading::after {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    text-align: left;
+    animation: dots 1.4s linear infinite;
+  }
+  @keyframes dots {
+    0%, 20% { content: ''; }
+    40% { content: '.'; }
+    60% { content: '..'; }
+    80%, 100% { content: '...'; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header>
+    <div class="brand">
+      <h1>Order Parser</h1>
+      <div class="sub">Tez Law P.C. — Court Order → Deadlines</div>
+    </div>
+    <div class="header-actions">
+      <a href="/admin/matters/" class="btn ghost">← Matters</a>
+      <a href="/admin/" class="btn ghost">Admin</a>
+    </div>
+  </header>
+
+  <div class="disclaimer">
+    <strong>Review every proposal before adding.</strong> Zara reads court orders to draft deadline candidates. It does not file your briefs. Verify each proposed date against the source excerpt shown — Claude can misread dates, miscount days, or invent triggers. You are responsible for what lands in the matter manager.
+  </div>
+
+  <div class="work-area">
+
+    <!-- ── Input panel ── -->
+    <div class="panel">
+      <h2>Paste Order Text</h2>
+
+      <div class="target-row">
+        <label for="target-matter">Target Matter:</label>
+        <select id="target-matter">
+          <option value="">— select to enable Add buttons —</option>
+        </select>
+      </div>
+
+      <textarea id="order-text" placeholder="Paste the full text of the court order, minute order, NEF, BIA decision, or scheduling order here...
+
+Tips:
+• Include the full document, not just the part with dates
+• Date of the order matters — Claude uses it as a reference point
+• If you have a PDF, open it and Cmd+A → Cmd+C the text
+• Court captions help (Claude uses them to identify the parties and court)"></textarea>
+
+      <div class="input-actions">
+        <span class="char-count" id="char-count">0 chars</span>
+        <div style="display:flex; gap:8px;">
+          <button class="btn ghost" onclick="clearAll()">Clear</button>
+          <button class="btn primary" id="parse-btn" onclick="parseOrder()">Analyze Document</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Output panel ── -->
+    <div class="panel">
+      <h2>Proposed Deadlines</h2>
+      <div id="output">
+        <div class="output-empty">
+          <h3>Awaiting input</h3>
+          <p>Paste an order on the left and click <em>Analyze Document</em>.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/admin/matters/api';
+let matters = [];
+let proposals = [];   // current set of proposed deadlines
+
+// ── Utility ───────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+function toast(msg, isErr) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('err', !!isErr);
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+function formatDate(s) {
+  if (!s) return '';
+  const d = new Date(s + 'T00:00:00');
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+async function api(path, opts = {}) {
+  const init = {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  };
+  if (init.body && typeof init.body !== 'string') {
+    init.body = JSON.stringify(init.body);
+  }
+  const r = await fetch(API + path, init);
+  if (r.status === 401) { location.href = '/admin/login'; return null; }
+  const text = await r.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+// ── Load matters into target dropdown ─────────────────────
+async function loadMatters() {
+  try {
+    const data = await api('/matters?status=active');
+    if (!data) return;
+    matters = data.matters || [];
+    const sel = document.getElementById('target-matter');
+    // Read URL ?matter=ID to pre-select if launched from a matter detail
+    const params = new URLSearchParams(location.search);
+    const preselect = params.get('matter');
+    sel.innerHTML = '<option value="">— select to enable Add buttons —</option>' +
+      matters.map(m => {
+        const label = `${esc(m.client_name)}${m.matter_ref ? ' — ' + esc(m.matter_ref) : ''}`;
+        const selected = preselect && String(m.id) === preselect ? ' selected' : '';
+        return `<option value="${m.id}"${selected}>${label}</option>`;
+      }).join('');
+  } catch (e) {
+    toast('Could not load matters: ' + e.message, true);
+  }
+}
+
+// ── Character counter ─────────────────────────────────────
+document.getElementById('order-text').addEventListener('input', (e) => {
+  document.getElementById('char-count').textContent = e.target.value.length + ' chars';
+});
+
+function clearAll() {
+  if (proposals.length && !confirm('Clear input and proposed deadlines?')) return;
+  document.getElementById('order-text').value = '';
+  document.getElementById('char-count').textContent = '0 chars';
+  proposals = [];
+  renderEmpty();
+}
+
+function renderEmpty() {
+  document.getElementById('output').innerHTML = `
+    <div class="output-empty">
+      <h3>Awaiting input</h3>
+      <p>Paste an order on the left and click <em>Analyze Document</em>.</p>
+    </div>`;
+}
+
+// ── Parse order ──────────────────────────────────────────
+async function parseOrder() {
+  const text = document.getElementById('order-text').value.trim();
+  if (!text) { toast('Paste order text first', true); return; }
+  if (text.length < 30) { toast('Text too short to analyze', true); return; }
+
+  const btn = document.getElementById('parse-btn');
+  btn.disabled = true;
+  btn.textContent = 'Analyzing…';
+  document.getElementById('output').innerHTML = `
+    <div class="loading">Reading the order and extracting deadlines</div>`;
+
+  try {
+    const data = await api('/parse', { method: 'POST', body: { order_text: text } });
+    if (!data) return;
+    proposals = data.deadlines || [];
+    renderProposals();
+    if (!proposals.length) {
+      toast('No deadlines found. Try pasting more of the document.', true);
+    } else {
+      toast(`Found ${proposals.length} proposed deadline${proposals.length === 1 ? '' : 's'}`);
+    }
+  } catch (e) {
+    document.getElementById('output').innerHTML = `
+      <div class="output-empty">
+        <h3>Couldn't analyze</h3>
+        <p>${esc(e.message)}</p>
+      </div>`;
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Analyze Document';
+  }
+}
+
+function renderProposals() {
+  const out = document.getElementById('output');
+  if (!proposals.length) { renderEmpty(); return; }
+  out.innerHTML = proposals.map((d, i) => renderCard(d, i)).join('');
+}
+
+function renderCard(d, idx) {
+  const status = d._status || 'pending';
+  const cardCls = status === 'added' ? 'added' : (status === 'skipped' ? 'skipped' : '');
+
+  let actions = '';
+  if (status === 'added') {
+    actions = `<span class="added-msg">✓ Added to matter</span>`;
+  } else if (status === 'skipped') {
+    actions = `<span class="added-msg" style="color:var(--ink-faint)">— skipped —</span>
+               <button class="btn small ghost" onclick="restoreCard(${idx})">Undo skip</button>`;
+  } else {
+    actions = `
+      <button class="btn small primary" onclick="addProposal(${idx})">+ Add to Matter</button>
+      <button class="btn small ghost" onclick="skipCard(${idx})">Skip</button>
+      <button class="btn small ghost" onclick="editProposal(${idx})">Edit before adding</button>`;
+  }
+
+  return `
+    <div class="deadline-card ${cardCls}" id="card-${idx}">
+      <div class="top">
+        <div class="title">${esc(d.title)}</div>
+        <div class="date-pill ${d.due_date ? '' : 'no-date'}">
+          ${d.due_date ? formatDate(d.due_date) : 'No date'}
+        </div>
+      </div>
+      <div class="meta">
+        <span class="pill ${d.party}">${esc(d.party)}</span>
+        <span class="pill ${d.confidence}">${esc(d.confidence)} conf.</span>
+        ${d.citation ? `<span class="citation">${esc(d.citation)}</span>` : ''}
+      </div>
+      ${d.source_excerpt ? `
+        <div class="source-excerpt">
+          <span class="source-label">From document:</span>"${esc(d.source_excerpt)}"
+        </div>` : ''}
+      <div class="card-actions">${actions}</div>
+    </div>`;
+}
+
+function skipCard(idx) {
+  proposals[idx]._status = 'skipped';
+  renderProposals();
+}
+
+function restoreCard(idx) {
+  proposals[idx]._status = 'pending';
+  renderProposals();
+}
+
+async function addProposal(idx) {
+  const d = proposals[idx];
+  const matterId = document.getElementById('target-matter').value;
+  if (!matterId) {
+    toast('Select a target matter first (top of left panel)', true);
+    return;
+  }
+  if (!d.due_date) {
+    toast('No date on this deadline — use Edit to add one, or skip', true);
+    return;
+  }
+  try {
+    await api(`/matters/${matterId}/deadlines`, {
+      method: 'POST',
+      body: {
+        title: d.title,
+        due_date: d.due_date,
+        party: d.party,
+        citation: d.citation,
+        note: d.source_excerpt ? `Auto-extracted. Source: "${d.source_excerpt}"` : null,
+      }
+    });
+    proposals[idx]._status = 'added';
+    renderProposals();
+    toast('Added');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function editProposal(idx) {
+  const d = proposals[idx];
+  const newTitle = prompt('Title:', d.title);
+  if (newTitle === null) return;
+  const newDate  = prompt('Due date (YYYY-MM-DD):', d.due_date || '');
+  if (newDate === null) return;
+  const newParty = prompt('Party (us / them / court):', d.party);
+  if (newParty === null) return;
+  const newCite  = prompt('Citation (optional):', d.citation || '');
+
+  if (newDate && !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+    toast('Date must be YYYY-MM-DD', true);
+    return;
+  }
+  if (!['us', 'them', 'court'].includes(newParty)) {
+    toast('Party must be us, them, or court', true);
+    return;
+  }
+
+  proposals[idx] = {
+    ...d,
+    title: newTitle || d.title,
+    due_date: newDate || null,
+    party: newParty,
+    citation: newCite || null,
+  };
+  renderProposals();
+}
+
+// ── Init ──────────────────────────────────────────────────
+loadMatters();
+</script>
+
+</body>
+</html>
