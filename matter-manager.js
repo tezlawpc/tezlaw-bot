@@ -216,16 +216,28 @@ router.get("/api/matters", requireAuth, async (req, res) => {
     }
 
     const whereClause = status === "all"
-      ? "WHERE user_id = $1"
-      : "WHERE user_id = $1 AND status = $2";
+      ? "WHERE m.user_id = $1"
+      : "WHERE m.user_id = $1 AND m.status = $2";
     const params = status === "all" ? [userId] : [userId, status];
 
     const r = await db.query(
-      `SELECT id, client_name, matter_ref, court, case_type, status,
-              dropbox_url, notes, created_at, updated_at
-       FROM matters
+      `SELECT m.id, m.client_name, m.matter_ref, m.court, m.case_type, m.status,
+              m.dropbox_url, m.notes, m.created_at, m.updated_at,
+              m.opened_date, m.triggering_date, m.custody_location,
+              m.petitioner_name, m.relief_sought,
+              COALESCE(cl.checklist_total, 0)     AS checklist_total,
+              COALESCE(cl.checklist_completed, 0) AS checklist_completed
+       FROM matters m
+       LEFT JOIN (
+         SELECT c.matter_id,
+                COUNT(i.id)::int                                      AS checklist_total,
+                COUNT(i.id) FILTER (WHERE i.completed = TRUE)::int    AS checklist_completed
+         FROM matter_checklists c
+         LEFT JOIN matter_checklist_items i ON i.checklist_id = c.id
+         GROUP BY c.matter_id
+       ) cl ON cl.matter_id = m.id
        ${whereClause}
-       ORDER BY updated_at DESC`,
+       ORDER BY m.updated_at DESC`,
       params
     );
 
@@ -291,11 +303,38 @@ router.get("/api/matters/:id", requireAuth, async (req, res) => {
       [matterId]
     );
 
+    // Checklists with nested items, aggregated in a single query
+    // via json_agg. Items ordered by display_order then id.
+    const cr = await db.query(
+      `SELECT
+         c.id, c.title, c.subtitle, c.display_order,
+         c.created_at, c.updated_at,
+         COALESCE(
+           json_agg(
+             json_build_object(
+               'id',            i.id,
+               'text',          i.text,
+               'citation',      i.citation,
+               'completed',     i.completed,
+               'display_order', i.display_order
+             ) ORDER BY i.display_order, i.id
+           ) FILTER (WHERE i.id IS NOT NULL),
+           '[]'::json
+         ) AS items
+       FROM matter_checklists c
+       LEFT JOIN matter_checklist_items i ON i.checklist_id = c.id
+       WHERE c.matter_id = $1
+       GROUP BY c.id
+       ORDER BY c.display_order, c.id`,
+      [matterId]
+    );
+
     res.json({
       matter: mr.rows[0],
       deadlines: dr.rows,
       notes: nr.rows,
-      files: fr.rows
+      files: fr.rows,
+      checklists: cr.rows
     });
   } catch (err) {
     console.error("GET /api/matters/:id error:", err.message);
