@@ -92,6 +92,7 @@ async function initDB() {
     await initWave1Tables();
     await initWave2Tables();
     await initMatterManagerTables();
+    await initMatterManagerV2();
     console.log("✅ DB tables ready");
   } catch (err) {
     console.error("❌ DB init error:", err.message);
@@ -683,6 +684,112 @@ async function initMatterManagerTables() {
   }
 }
 
+// ============================================================
+//  Matter Manager v2 (Phase 5) — Schema Additions
+//
+//  Adds:
+//    - 5 new columns to matters table (opened_date, triggering_date,
+//      custody_location, petitioner_name, relief_sought)
+//    - matter_checklists table (per-matter checklist headers)
+//    - matter_checklist_items table (items within each checklist)
+//
+//  All operations are additive and idempotent. Uses ALTER TABLE
+//  ADD COLUMN IF NOT EXISTS and CREATE TABLE IF NOT EXISTS so
+//  re-runs are safe. Triggers re-use the existing set_updated_at()
+//  function created by initMatterManagerTables().
+//
+//  No existing columns or tables are modified. Existing Lu v. Bondi
+//  matter data is preserved verbatim.
+// ============================================================
+async function initMatterManagerV2() {
+  try {
+    // ────────────────────────────────────────────────────────
+    //  1. New columns on matters table
+    // ────────────────────────────────────────────────────────
+    await getPool().query(`
+      ALTER TABLE matters
+        ADD COLUMN IF NOT EXISTS opened_date       DATE,
+        ADD COLUMN IF NOT EXISTS triggering_date   DATE,
+        ADD COLUMN IF NOT EXISTS custody_location  VARCHAR(300),
+        ADD COLUMN IF NOT EXISTS petitioner_name   VARCHAR(200),
+        ADD COLUMN IF NOT EXISTS relief_sought     VARCHAR(300)
+    `);
+
+    // ────────────────────────────────────────────────────────
+    //  2. matter_checklists — per-matter checklist headers
+    //
+    //  A matter can have multiple checklists (e.g. "Initial
+    //  Filing Packet" + "Opening Brief Workplan"). Each checklist
+    //  has many items (matter_checklist_items below).
+    // ────────────────────────────────────────────────────────
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS matter_checklists (
+        id            SERIAL        PRIMARY KEY,
+        matter_id     INTEGER       NOT NULL
+                        REFERENCES matters(id) ON DELETE CASCADE,
+        title         VARCHAR(200)  NOT NULL,
+        subtitle      VARCHAR(300),
+        display_order INTEGER       NOT NULL DEFAULT 0,
+        created_at    TIMESTAMPTZ   DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_checklists_matter_id
+        ON matter_checklists(matter_id)
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_checklists_matter_order
+        ON matter_checklists(matter_id, display_order)
+    `);
+    await getPool().query(`DROP TRIGGER IF EXISTS trg_checklists_updated_at ON matter_checklists`);
+    await getPool().query(`
+      CREATE TRIGGER trg_checklists_updated_at
+        BEFORE UPDATE ON matter_checklists
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at()
+    `);
+
+    // ────────────────────────────────────────────────────────
+    //  3. matter_checklist_items — individual checkbox items
+    //
+    //  text:      "Form 3 Petition for Review prepared, signed, dated"
+    //  citation:  "Cir. R. 15-4"  (optional)
+    //  completed: TRUE / FALSE
+    // ────────────────────────────────────────────────────────
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS matter_checklist_items (
+        id            SERIAL        PRIMARY KEY,
+        checklist_id  INTEGER       NOT NULL
+                        REFERENCES matter_checklists(id) ON DELETE CASCADE,
+        text          TEXT          NOT NULL,
+        citation      VARCHAR(200),
+        completed     BOOLEAN       NOT NULL DEFAULT FALSE,
+        display_order INTEGER       NOT NULL DEFAULT 0,
+        created_at    TIMESTAMPTZ   DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_checklist_items_checklist_id
+        ON matter_checklist_items(checklist_id)
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_checklist_items_checklist_order
+        ON matter_checklist_items(checklist_id, display_order)
+    `);
+    await getPool().query(`DROP TRIGGER IF EXISTS trg_checklist_items_updated_at ON matter_checklist_items`);
+    await getPool().query(`
+      CREATE TRIGGER trg_checklist_items_updated_at
+        BEFORE UPDATE ON matter_checklist_items
+        FOR EACH ROW EXECUTE FUNCTION set_updated_at()
+    `);
+
+    console.log("✅ Matter manager v2 schema ready");
+  } catch (err) {
+    console.error("❌ initMatterManagerV2 error:", err.message);
+  }
+}
+
 async function logAudit(actor, action, target, oldValue, newValue, ip) {
   try {
     await getPool().query(
@@ -869,7 +976,7 @@ module.exports = {
   getHistory, getClientContext, saveSummary, clearHistory,
   saveIntake, maybeAutoSummarize, saveJJMemory, getJJMemories,
   setJJSession, getJJSession, getLastMessageTime, syncIntakeToClient,
-  initWave1Tables, initMatterManagerTables, logAudit, createLead, updateLeadStage,
+  initWave1Tables, initMatterManagerTables, initMatterManagerV2, logAudit, createLead, updateLeadStage,
   runConflictCheck, logUnansweredQuestion,
   query,
 };
