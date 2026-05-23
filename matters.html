@@ -346,6 +346,48 @@
     display:grid; grid-template-columns:1.5fr 1fr 0.8fr 0.8fr auto; gap:8px; align-items:end; }
   @media (max-width: 800px) { .add-deadline-form { grid-template-columns:1fr 1fr; } }
 
+  /* Deadline Calculator */
+  .dl-calc { background:#fff; border:1px solid var(--rule); margin-bottom:14px; box-shadow:var(--shadow); }
+  .dl-calc-head { display:flex; align-items:center; gap:14px; padding:11px 18px; cursor:pointer;
+    background:var(--paper-2); border-bottom:1px solid transparent; user-select:none; }
+  .dl-calc-head:hover { background:var(--paper-3); }
+  .dl-calc.open .dl-calc-head { border-bottom-color:var(--rule); }
+  .dl-calc-title { font-family:var(--serif); font-size:15px; font-weight:600; color:var(--ink); }
+  .dl-calc-hint { font-family:var(--mono); font-size:9px; color:var(--muted); letter-spacing:.08em;
+    text-transform:uppercase; flex:1; }
+  .dl-calc-chev { font-family:var(--mono); font-size:14px; color:var(--muted); transition:transform .2s; }
+  .dl-calc.open .dl-calc-chev { transform:rotate(180deg); }
+
+  .dl-calc-body { padding:16px 20px 18px; }
+  .dl-calc-grid { display:grid; grid-template-columns:1.1fr 1.1fr 0.7fr 1.6fr; gap:12px; align-items:end;
+    margin-bottom:12px; }
+  @media (max-width: 800px) { .dl-calc-grid { grid-template-columns:1fr 1fr; } }
+  .dl-calc-field label { display:block; font-family:var(--mono); font-size:9px; color:var(--muted);
+    letter-spacing:.12em; text-transform:uppercase; margin-bottom:4px; }
+  .dl-calc-field input[type=date],
+  .dl-calc-field input[type=number],
+  .dl-calc-field select { width:100%; padding:6px 8px; border:1px solid var(--rule); background:#fff;
+    font-family:var(--mono); font-size:11px; color:var(--ink); }
+  .dl-calc-field input:focus, .dl-calc-field select:focus { outline:none; border-color:var(--ink); }
+  .dl-calc-field-checkbox { grid-column:1 / -1; }
+  .dl-calc-field-checkbox label { font-family:var(--mono); font-size:11px; color:var(--ink-2);
+    text-transform:none; letter-spacing:.02em; display:flex; align-items:center; gap:7px; cursor:pointer; }
+  .dl-calc-field-checkbox input[type=checkbox] { margin:0; cursor:pointer; }
+
+  .dl-calc-actions { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+
+  .dl-calc-result { background:var(--paper-2); border:1px solid var(--rule); border-left:3px solid var(--green);
+    padding:12px 16px; margin-top:8px; }
+  .dlc-result-date { font-family:var(--serif); font-size:22px; font-weight:600; color:var(--ink);
+    margin-bottom:4px; }
+  .dlc-result-explain { font-family:var(--mono); font-size:10px; color:var(--ink-2); letter-spacing:.04em;
+    line-height:1.5; margin-bottom:10px; }
+  .dlc-result-explain b { color:var(--ink); font-weight:600; }
+  .dlc-result-actions { display:flex; gap:8px; }
+
+  .dl-calc-disclaimer { font-family:var(--mono); font-size:9px; color:var(--amber); letter-spacing:.06em;
+    line-height:1.5; margin-top:10px; padding-top:10px; border-top:1px dotted var(--rule-soft); }
+
   /* Modal */
   .modal-bg { position:fixed; inset:0; background:rgba(15,20,25,.55); z-index:100; display:none;
     align-items:center; justify-content:center; backdrop-filter:blur(2px); }
@@ -520,6 +562,62 @@
       <div class="right">
         <button class="btn ghost small" id="export-matter-ics">Sync to Calendar</button>
         <span class="ord">Sorted chronologically</span>
+      </div>
+    </div>
+
+    <!-- DEADLINE CALCULATOR -->
+    <div class="dl-calc" id="dl-calc">
+      <div class="dl-calc-head" id="dl-calc-toggle">
+        <span class="dl-calc-title">🧮 Deadline Calculator</span>
+        <span class="dl-calc-hint">Fed. R. Civ. P. 6 / Fed. R. App. P. 26 — federal default rules · click to expand</span>
+        <span class="dl-calc-chev" id="dl-calc-chev">▾</span>
+      </div>
+      <div class="dl-calc-body" id="dl-calc-body" style="display:none;">
+        <div class="dl-calc-grid">
+          <div class="dl-calc-field">
+            <label>Anchor date</label>
+            <input type="date" id="dlc-anchor" />
+          </div>
+          <div class="dl-calc-field">
+            <label>Direction</label>
+            <select id="dlc-direction">
+              <option value="after">days after</option>
+              <option value="before">days before</option>
+            </select>
+          </div>
+          <div class="dl-calc-field dl-calc-field-narrow">
+            <label>Days</label>
+            <input type="number" id="dlc-count" placeholder="7" min="1" max="365" />
+          </div>
+          <div class="dl-calc-field">
+            <label>Day type</label>
+            <select id="dlc-type">
+              <option value="calendar">Calendar days</option>
+              <option value="court">Court days (excl. wknd + fed holidays)</option>
+            </select>
+          </div>
+          <div class="dl-calc-field dl-calc-field-checkbox">
+            <label>
+              <input type="checkbox" id="dlc-mail" />
+              Add 3 days for mail service (FRCP 6(d) / FRAP 26(c))
+            </label>
+          </div>
+        </div>
+        <div class="dl-calc-actions">
+          <button class="btn small" id="dlc-compute">Compute</button>
+          <button class="btn ghost small" id="dlc-clear">Clear</button>
+        </div>
+        <div class="dl-calc-result" id="dlc-result" style="display:none;">
+          <div class="dlc-result-date" id="dlc-result-date"></div>
+          <div class="dlc-result-explain" id="dlc-result-explain"></div>
+          <div class="dlc-result-actions">
+            <button class="btn ghost small" id="dlc-copy">📋 Copy date</button>
+            <button class="btn small" id="dlc-use">↓ Use in add-deadline form below</button>
+          </div>
+        </div>
+        <div class="dl-calc-disclaimer">
+          ⚠ Federal default rules only. Always verify against local rules, the order itself, and any case-specific scheduling provisions before relying on this calculation.
+        </div>
       </div>
     </div>
 
@@ -2136,6 +2234,261 @@ function renderOpProposals() {
     });
   });
 }
+
+// ============================================================
+// DEADLINE CALCULATOR (Fed. R. Civ. P. 6 / Fed. R. App. P. 26)
+// ============================================================
+
+// Federal holidays per 5 U.S.C. § 6103.
+// When a holiday falls on Saturday, observed Friday.
+// When a holiday falls on Sunday, observed Monday.
+// Inauguration Day (Jan 20 every 4 years) omitted — only for DC-area fed workers.
+//
+// IMPORTANT: This list must be kept current. Update when new years are needed.
+const FED_HOLIDAYS_BASE = {
+  // year: [ [month, day, name], ... ]  (month is 1-indexed)
+  2025: [
+    [1, 1,  "New Year's Day"],
+    [1, 20, "MLK Day"],
+    [2, 17, "Presidents Day"],
+    [5, 26, "Memorial Day"],
+    [6, 19, "Juneteenth"],
+    [7, 4,  "Independence Day"],
+    [9, 1,  "Labor Day"],
+    [10, 13,"Columbus Day"],
+    [11, 11,"Veterans Day"],
+    [11, 27,"Thanksgiving"],
+    [12, 25,"Christmas"]
+  ],
+  2026: [
+    [1, 1,  "New Year's Day"],
+    [1, 19, "MLK Day"],
+    [2, 16, "Presidents Day"],
+    [5, 25, "Memorial Day"],
+    [6, 19, "Juneteenth"],
+    [7, 3,  "Independence Day (observed)"],  // July 4 is Saturday → Friday Jul 3
+    [9, 7,  "Labor Day"],
+    [10, 12,"Columbus Day"],
+    [11, 11,"Veterans Day"],
+    [11, 26,"Thanksgiving"],
+    [12, 25,"Christmas"]
+  ],
+  2027: [
+    [1, 1,  "New Year's Day"],
+    [1, 18, "MLK Day"],
+    [2, 15, "Presidents Day"],
+    [5, 31, "Memorial Day"],
+    [6, 18, "Juneteenth (observed)"],         // June 19 is Saturday → Friday Jun 18
+    [7, 5,  "Independence Day (observed)"],   // July 4 is Sunday → Monday Jul 5
+    [9, 6,  "Labor Day"],
+    [10, 11,"Columbus Day"],
+    [11, 11,"Veterans Day"],
+    [11, 25,"Thanksgiving"],
+    [12, 24,"Christmas (observed)"]           // Dec 25 is Saturday → Friday Dec 24
+  ]
+};
+
+function holidayName(date) {
+  const y = date.getFullYear();
+  const list = FED_HOLIDAYS_BASE[y];
+  if (!list) return null;
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
+  for (const [hm, hd, name] of list) {
+    if (hm === m && hd === d) return name;
+  }
+  return null;
+}
+
+function isWeekend(date) {
+  const dow = date.getDay();
+  return dow === 0 || dow === 6;
+}
+
+function isHoliday(date) {
+  return holidayName(date) !== null;
+}
+
+function isNonBusinessDay(date) {
+  return isWeekend(date) || isHoliday(date);
+}
+
+// Roll forward to the next business day if current day is weekend/holiday.
+function rollForward(date) {
+  const d = new Date(date);
+  while (isNonBusinessDay(d)) d.setDate(d.getDate() + 1);
+  return d;
+}
+
+// Parse YYYY-MM-DD into a Date set to noon local time
+// (avoids DST/timezone shifts that can knock the day off by one).
+function parseDateInput(s) {
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0);
+}
+
+function formatDate(date) {
+  // Returns YYYY-MM-DD
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function formatDateLong(date) {
+  return date.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+}
+
+/**
+ * Core calculator.
+ * @param {Date}    anchor    The anchor date (noon local).
+ * @param {number}  count     Days to add or subtract.
+ * @param {string}  type      'calendar' | 'court'
+ * @param {string}  direction 'after' | 'before'
+ * @param {boolean} mail      Add 3 calendar days for mail service.
+ * @returns {object} { result, steps[], rolled }
+ */
+function computeDeadline(anchor, count, type, direction, mail) {
+  const steps = [];
+  const sign = (direction === 'before') ? -1 : 1;
+
+  let cur = new Date(anchor);
+  steps.push(`Starting from ${formatDateLong(cur)} (anchor)`);
+
+  if (type === 'court') {
+    // FRCP 6(a)(1)(B) / FRAP 26(a)(1)(B): for court-day periods, exclude
+    // weekends and federal holidays from the count. Don't count the
+    // anchor day itself.
+    let counted = 0;
+    let safety = 0;
+    while (counted < count && safety < 1000) {
+      cur.setDate(cur.getDate() + sign);
+      safety++;
+      if (!isNonBusinessDay(cur)) counted++;
+    }
+    steps.push(`Counted ${count} court day${count === 1 ? '' : 's'} ${direction} anchor → ${formatDate(cur)} (skipped weekends + federal holidays)`);
+  } else {
+    // Calendar-day period: count every day, anchor day NOT included.
+    cur.setDate(cur.getDate() + sign * count);
+    steps.push(`Counted ${count} calendar day${count === 1 ? '' : 's'} ${direction} anchor → ${formatDate(cur)}`);
+  }
+
+  // FRCP 6(d) / FRAP 26(c): add 3 calendar days if service by mail.
+  // (For "before" deadlines, mail service typically doesn't apply, but
+  // we still honor the user's checkbox.)
+  if (mail) {
+    cur.setDate(cur.getDate() + sign * 3);
+    steps.push(`Added 3 calendar day${''} for mail service (FRCP 6(d) / FRAP 26(c)) → ${formatDate(cur)}`);
+  }
+
+  // FRCP 6(a)(1)(C) / FRAP 26(a)(1)(C): if deadline lands on weekend
+  // or federal holiday, roll forward to next business day.
+  let rolled = false;
+  let rollNote = '';
+  if (isNonBusinessDay(cur)) {
+    const reason = isHoliday(cur) ? `federal holiday (${holidayName(cur)})` : 'weekend';
+    const rolledTo = rollForward(cur);
+    steps.push(`${formatDate(cur)} is a ${reason} — rolled forward to next business day → ${formatDate(rolledTo)}`);
+    cur = rolledTo;
+    rolled = true;
+    rollNote = reason;
+  }
+
+  return { result: cur, steps, rolled, rollNote };
+}
+
+// ── UI handlers ──────────────────────────────────────────────
+
+(function wireDeadlineCalculator() {
+  const calcBox     = document.getElementById('dl-calc');
+  const toggleHead  = document.getElementById('dl-calc-toggle');
+  const body        = document.getElementById('dl-calc-body');
+  const anchorIn    = document.getElementById('dlc-anchor');
+  const directionIn = document.getElementById('dlc-direction');
+  const countIn     = document.getElementById('dlc-count');
+  const typeIn      = document.getElementById('dlc-type');
+  const mailIn      = document.getElementById('dlc-mail');
+  const computeBtn  = document.getElementById('dlc-compute');
+  const clearBtn    = document.getElementById('dlc-clear');
+  const resultBox   = document.getElementById('dlc-result');
+  const resultDate  = document.getElementById('dlc-result-date');
+  const resultExplain = document.getElementById('dlc-result-explain');
+  const copyBtn     = document.getElementById('dlc-copy');
+  const useBtn      = document.getElementById('dlc-use');
+
+  if (!calcBox) return; // detail view not mounted yet
+
+  // Toggle open/close
+  toggleHead.addEventListener('click', () => {
+    const open = calcBox.classList.toggle('open');
+    body.style.display = open ? 'block' : 'none';
+  });
+
+  // Compute
+  function compute() {
+    const anchor = parseDateInput(anchorIn.value);
+    const count  = parseInt(countIn.value);
+    if (!anchor)          { alert('Enter an anchor date.'); anchorIn.focus(); return; }
+    if (!count || count < 1) { alert('Enter a number of days (≥ 1).'); countIn.focus(); return; }
+    if (count > 365)      { alert('Days must be ≤ 365.'); countIn.focus(); return; }
+
+    const type      = typeIn.value;
+    const direction = directionIn.value;
+    const mail      = mailIn.checked;
+
+    const calc = computeDeadline(anchor, count, type, direction, mail);
+
+    resultBox.style.display = 'block';
+    resultDate.textContent  = formatDateLong(calc.result);
+    resultExplain.innerHTML = `<b>${formatDate(calc.result)}</b> · ` +
+      calc.steps.map(s => escapeHtml(s)).join(' → ');
+
+    // Stash the formatted date for copy/use
+    resultBox.dataset.computedDate = formatDate(calc.result);
+  }
+
+  computeBtn.addEventListener('click', compute);
+  // Enter key in any input triggers compute
+  [anchorIn, countIn, directionIn, typeIn].forEach(el => {
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') compute(); });
+  });
+
+  // Clear
+  clearBtn.addEventListener('click', () => {
+    anchorIn.value = ''; countIn.value = '';
+    directionIn.value = 'after'; typeIn.value = 'calendar';
+    mailIn.checked = false;
+    resultBox.style.display = 'none';
+  });
+
+  // Copy date to clipboard
+  copyBtn.addEventListener('click', async () => {
+    const d = resultBox.dataset.computedDate;
+    if (!d) return;
+    try {
+      await navigator.clipboard.writeText(d);
+      const orig = copyBtn.textContent;
+      copyBtn.textContent = '✓ Copied';
+      setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+    } catch {
+      alert('Copy failed — date is: ' + d);
+    }
+  });
+
+  // "Use in add-deadline form" — drops the date into the form's date field
+  useBtn.addEventListener('click', () => {
+    const d = resultBox.dataset.computedDate;
+    if (!d) return;
+    const target = document.getElementById('dl-date');
+    if (target) {
+      target.value = d;
+      target.focus();
+      // Scroll to bring add-deadline-form into view if it isn't
+      target.scrollIntoView({ behavior:'smooth', block:'center' });
+    }
+  });
+})();
 
 // ============================================================
 // INBOX (proposal queue)
