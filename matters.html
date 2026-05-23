@@ -159,6 +159,16 @@
   .op-prop .op-prop-conf.high { color:var(--green); border-color:var(--green); }
   .op-prop .op-prop-conf.medium { color:var(--amber); border-color:var(--amber); }
   .op-prop .op-prop-conf.low { color:var(--accent); border-color:var(--accent); }
+  .op-prop.no-date { background:linear-gradient(to right, var(--paper-3) 0%, #fff 50%); border-left:3px solid var(--amber); }
+  .op-prop .op-prop-no-date-hint { font-family:var(--mono); font-size:9px; color:var(--amber);
+    letter-spacing:.12em; text-transform:uppercase; margin-top:6px; }
+  .op-prop .op-date-picker { display:flex; gap:6px; align-items:center; margin-top:4px; }
+  .op-prop .op-date-picker input[type=date] { font-family:var(--mono); font-size:11px; padding:5px 8px;
+    border:1px solid var(--rule); background:#fff; }
+  .op-prop .op-date-picker input[type=date]:focus { outline:none; border-color:var(--ink); }
+  .op-prop .op-date-picker .btn { padding:4px 10px; font-size:9px; }
+  .op-prop .op-set-date-btn { background:var(--amber); color:var(--ink); border-color:var(--amber); }
+  .op-prop .op-set-date-btn:hover { background:#b87410; color:#fff; }
 
   /* Inbox tab */
   .nav-btn .badge.inbox-badge { background:var(--paper-3); color:var(--ink); }
@@ -2006,50 +2016,123 @@ function renderOpProposals() {
       </div>`;
     }
     const partyLabel = p.party === 'us' ? 'Us' : p.party === 'them' ? 'Govt/Opp' : 'Court';
-    return `<div class="op-prop" data-idx="${idx}">
+    const noDate = !p.due_date;
+    const showPicker = p._showPicker === true;
+
+    // Right-side action area depends on state:
+    //   1. Has date            → green "+ Add" button (immediate add)
+    //   2. No date, no picker  → amber "📅 Set Date" button (reveal picker)
+    //   3. No date, picker shown → date input + "Add" button (user types date, then add)
+    let actionHtml;
+    if (noDate && showPicker) {
+      // Default to today
+      const today = new Date().toISOString().slice(0, 10);
+      actionHtml = `<div class="op-date-picker">
+        <input type="date" class="op-date-input" data-idx="${idx}" value="${p._draftDate || today}">
+        <button class="btn small op-add-with-date-btn" data-idx="${idx}">Add</button>
+      </div>`;
+    } else if (noDate) {
+      actionHtml = `<button class="btn small op-set-date-btn" data-idx="${idx}">📅 Set Date</button>`;
+    } else {
+      actionHtml = `<button class="btn small op-add-btn" data-idx="${idx}">+ Add</button>`;
+    }
+
+    return `<div class="op-prop ${noDate ? 'no-date' : ''}" data-idx="${idx}">
       <div class="op-prop-main">
         <h5>${escapeHtml(p.title)} <span class="op-prop-conf ${p.confidence}">${p.confidence}</span></h5>
         <div class="op-prop-meta">
-          ${escapeHtml(p.due_date || 'no date')} ·
+          ${escapeHtml(p.due_date || 'no date — relative deadline')} ·
           ${escapeHtml(partyLabel)} ·
           ${escapeHtml(p.citation || 'no cite')}
         </div>
         ${p.source_excerpt ? `<div class="op-prop-excerpt">"${escapeHtml(p.source_excerpt)}"</div>` : ''}
+        ${noDate ? '<div class="op-prop-no-date-hint">⚠ Relative deadline — compute the date and enter it manually</div>' : ''}
       </div>
-      <button class="btn small op-add-btn" data-idx="${idx}" ${!p.due_date ? 'disabled title="No date — add manually"' : ''}>+ Add</button>
+      ${actionHtml}
     </div>`;
   }).join('');
+
+  // Helper that POSTs a deadline proposal with a known due_date
+  async function postDeadline(idx, dueDate) {
+    const p = proposals[idx];
+    const m = getCurrentMatter(); if (!m || !p) return false;
+    try {
+      await api(`/matters/${m.id}/deadlines`, {
+        method: 'POST',
+        body: {
+          title: p.title,
+          citation: p.citation || '',
+          due_date: dueDate,
+          party: p.party || 'us',
+          note: p.source_excerpt || ''
+        }
+      });
+      p._added = true;
+      p._showPicker = false;
+      await reloadMatter(m.id);
+      const fresh = getCurrentMatter();
+      if (fresh) {
+        renderMatterStats(fresh);
+        renderDeadlines(fresh);
+        renderOverviewStats();
+      }
+      renderOpProposals();
+      return true;
+    } catch (e) {
+      alert('Add failed: ' + e.message);
+      return false;
+    }
+  }
+
+  // (1) Direct add — proposals that already have a date
   c.querySelectorAll('.op-add-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const idx = parseInt(btn.dataset.idx);
       const p = proposals[idx];
       if (!p || !p.due_date) return;
-      const m = getCurrentMatter(); if (!m) return;
       btn.disabled = true; btn.textContent = '…';
-      try {
-        await api(`/matters/${m.id}/deadlines`, {
-          method: 'POST',
-          body: {
-            title: p.title,
-            citation: p.citation || '',
-            due_date: p.due_date,
-            party: p.party || 'us',
-            note: p.source_excerpt || ''
-          }
-        });
-        p._added = true;
-        await reloadMatter(m.id);
-        const fresh = getCurrentMatter();
-        if (fresh) {
-          renderMatterStats(fresh);
-          renderDeadlines(fresh);
-          renderOverviewStats();
-        }
-        renderOpProposals();
-      } catch (e) {
-        btn.disabled = false; btn.textContent = '+ Add';
-        alert('Add failed: ' + e.message);
+      const ok = await postDeadline(idx, p.due_date);
+      if (!ok) { btn.disabled = false; btn.textContent = '+ Add'; }
+    });
+  });
+
+  // (2) Reveal date picker — for proposals without a date
+  c.querySelectorAll('.op-set-date-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx);
+      const p = proposals[idx];
+      if (!p) return;
+      p._showPicker = true;
+      renderOpProposals();
+      // Focus the date input after re-render
+      setTimeout(() => {
+        const inp = document.querySelector(`.op-date-input[data-idx="${idx}"]`);
+        if (inp) inp.focus();
+      }, 0);
+    });
+  });
+
+  // (3) Track date input changes so picker doesn't reset on re-render
+  c.querySelectorAll('.op-date-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const idx = parseInt(inp.dataset.idx);
+      if (proposals[idx]) proposals[idx]._draftDate = inp.value;
+    });
+  });
+
+  // (4) Add with user-supplied date
+  c.querySelectorAll('.op-add-with-date-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.idx);
+      const inp = c.querySelector(`.op-date-input[data-idx="${idx}"]`);
+      const dueDate = inp?.value;
+      if (!dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+        alert('Please enter a valid date (YYYY-MM-DD).');
+        return;
       }
+      btn.disabled = true; btn.textContent = '…';
+      const ok = await postDeadline(idx, dueDate);
+      if (!ok) { btn.disabled = false; btn.textContent = 'Add'; }
     });
   });
 }
