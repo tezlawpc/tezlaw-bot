@@ -159,6 +159,65 @@
   .op-prop .op-prop-conf.high { color:var(--green); border-color:var(--green); }
   .op-prop .op-prop-conf.medium { color:var(--amber); border-color:var(--amber); }
   .op-prop .op-prop-conf.low { color:var(--accent); border-color:var(--accent); }
+
+  /* Inbox tab */
+  .nav-btn .badge.inbox-badge { background:var(--paper-3); color:var(--ink); }
+  .nav-btn .badge.inbox-badge.has-items { background:var(--accent); color:#fff; animation:pulse 2s ease-in-out infinite; }
+  .nav-btn.active .badge.inbox-badge.has-items { background:#fff; color:var(--accent); }
+
+  .inbox-paste-bar { background:var(--paper-2); border:1px solid var(--rule); padding:18px 22px;
+    margin-bottom:24px; box-shadow:var(--shadow); }
+  .inbox-paste-bar h4 { font-family:var(--serif); font-size:18px; margin:0 0 4px; }
+  .inbox-paste-bar .sub-cite { font-family:var(--mono); font-size:10px; color:var(--muted);
+    letter-spacing:.12em; text-transform:uppercase; margin-bottom:12px; }
+  .inbox-paste-bar textarea { width:100%; min-height:80px; border:1px solid var(--rule); background:var(--paper);
+    padding:10px 12px; font-family:var(--mono); font-size:11px; line-height:1.5; color:var(--ink-2); resize:vertical; }
+  .inbox-paste-bar textarea:focus { outline:none; border-color:var(--ink); }
+  .inbox-paste-bar #inbox-paste-status { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.1em; margin-left:8px; }
+  .inbox-paste-bar #inbox-paste-status.success { color:var(--green); }
+  .inbox-paste-bar #inbox-paste-status.error { color:var(--accent); }
+
+  .inbox-group { background:#fff; border:1px solid var(--rule); padding:0 0 0 0; margin-bottom:20px;
+    box-shadow:var(--shadow); overflow:hidden; }
+  .inbox-group .group-head { background:var(--paper-2); padding:14px 22px; border-bottom:1px solid var(--rule);
+    display:flex; justify-content:space-between; align-items:baseline; }
+  .inbox-group .group-head .group-title { font-family:var(--serif); font-size:18px; }
+  .inbox-group .group-head .group-title em { color:var(--accent); font-style:italic; }
+  .inbox-group .group-head .group-meta { font-family:var(--mono); font-size:10px; color:var(--muted);
+    letter-spacing:.12em; text-transform:uppercase; }
+  .inbox-group .group-head .open-matter { font-family:var(--mono); font-size:10px;
+    color:var(--accent); cursor:pointer; letter-spacing:.1em; text-transform:uppercase; }
+  .inbox-group .group-head .open-matter:hover { text-decoration:underline; }
+
+  .inbox-prop { padding:16px 22px; border-bottom:1px dotted var(--rule-soft);
+    display:grid; grid-template-columns:auto 1fr auto; gap:14px; align-items:flex-start; }
+  .inbox-prop:last-child { border-bottom:none; }
+  .inbox-prop .prop-kind-icon { font-size:22px; line-height:1; margin-top:2px; }
+  .inbox-prop .prop-body h5 { font-family:var(--serif); font-size:17px; margin:0 0 4px; line-height:1.3; }
+  .inbox-prop .prop-body h5 em { color:var(--accent); font-style:italic; }
+  .inbox-prop .prop-meta { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.04em;
+    margin-top:2px; }
+  .inbox-prop .prop-conf { display:inline-block; padding:1px 6px; font-family:var(--mono); font-size:9px;
+    text-transform:uppercase; letter-spacing:.12em; border:1px solid var(--rule); margin-left:6px; }
+  .inbox-prop .prop-conf.high { color:var(--green); border-color:var(--green); }
+  .inbox-prop .prop-conf.medium { color:var(--amber); border-color:var(--amber); }
+  .inbox-prop .prop-conf.low { color:var(--accent); border-color:var(--accent); }
+  .inbox-prop .prop-detail { font-family:var(--serif); font-size:14px; color:var(--ink-2); margin-top:8px;
+    padding:8px 12px; background:var(--paper); border-left:2px solid var(--rule); }
+  .inbox-prop .prop-detail dt { font-family:var(--mono); font-size:9px; text-transform:uppercase;
+    letter-spacing:.12em; color:var(--muted); margin-top:6px; }
+  .inbox-prop .prop-detail dt:first-child { margin-top:0; }
+  .inbox-prop .prop-detail dd { margin:0 0 4px 0; }
+  .inbox-prop .prop-excerpt { font-style:italic; font-size:12px; color:var(--muted); margin-top:8px;
+    line-height:1.4; max-height:60px; overflow:hidden; }
+  .inbox-prop .prop-actions { display:flex; flex-direction:column; gap:6px; align-items:stretch; min-width:90px; }
+  .inbox-prop .prop-actions button { padding:6px 10px; font-size:9px; }
+
+  /* Matter-card inbox badge */
+  .matter-card .matter-inbox-badge { position:absolute; top:14px; right:14px;
+    background:var(--accent); color:#fff; padding:2px 8px;
+    font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    border-radius:0; animation:pulse 2s ease-in-out infinite; }
   .field label { display:block; font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:.18em; color:var(--muted); margin-bottom:4px; }
   .field input, .field select, .field textarea { width:100%; border:1px solid var(--rule); background:var(--paper); padding:8px 10px;
     font-family:var(--sans); font-size:13px; outline:none; }
@@ -322,6 +381,7 @@
   <!-- Nav -->
   <div class="nav">
     <button class="nav-btn active" data-view="active">Active Matters <span class="badge" id="badge-active">0</span></button>
+    <button class="nav-btn" data-view="inbox">📬 Inbox <span class="badge inbox-badge" id="badge-inbox">0</span></button>
     <button class="nav-btn" data-view="archive">Archive <span class="badge" id="badge-archive">0</span></button>
     <button class="nav-btn" data-view="courts">Court Access</button>
     <button class="nav-btn" data-view="reference">Authorities</button>
@@ -411,6 +471,32 @@
     </div>
 
     <div class="matter-list" id="matter-list"></div>
+  </section>
+
+  <!-- INBOX -->
+  <section class="panel" id="view-inbox">
+    <div class="page-head">
+      <div>
+        <h2>Inbox</h2>
+        <div class="sub">Proposed matters &amp; deadlines · review and accept</div>
+      </div>
+      <div class="actions">
+        <button class="btn ghost small" id="inbox-refresh">Refresh</button>
+      </div>
+    </div>
+
+    <div class="inbox-paste-bar">
+      <h4>Paste a CM/ECF email</h4>
+      <div class="sub-cite">Forward or paste the body of a Notice of Electronic Filing. Claude proposes — you review.</div>
+      <textarea id="inbox-paste-text" placeholder="Paste the full body of a CM/ECF email here…"></textarea>
+      <div class="parser-actions">
+        <button class="btn small" id="inbox-paste-btn">⚡ Ingest</button>
+        <button class="btn ghost small" id="inbox-paste-clear">Clear</button>
+        <span id="inbox-paste-status"></span>
+      </div>
+    </div>
+
+    <div id="inbox-content"></div>
   </section>
 
   <!-- DETAIL -->
@@ -1027,6 +1113,7 @@ function showView(view) {
   if (view === 'archive') renderArchiveList();
   if (view === 'courts') renderCourtLinks();
   if (view === 'detail') renderMatterDetail();
+  if (view === 'inbox') renderInbox();
   renderOverviewStats(); renderBadges();
 }
 document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
@@ -1091,8 +1178,13 @@ function matterCardHTML(m, next, isArchived) {
     <div class="next">
       <div><div class="next-label">Status</div><div class="next-title">No upcoming deadlines</div></div>
     </div>`;
+  const inboxCount = (state.proposalCounts?.by_matter?.[m.id]) || 0;
+  const inboxBadge = inboxCount > 0
+    ? `<div class="matter-inbox-badge" title="${inboxCount} pending proposal${inboxCount === 1 ? '' : 's'} from CM/ECF">📬 ${inboxCount}</div>`
+    : '';
   return `
     <div class="matter-card ${isArchived ? 'archived' : ''}" data-id="${m.id}">
+      ${inboxBadge}
       <div class="court">${escapeHtml(m.court)} · ${matterTypeLabel(m.type)}</div>
       <h3>${escapeHtml(caption)}</h3>
       <div class="casenum">${escapeHtml(m.casenum || '—')}</div>
@@ -1153,6 +1245,25 @@ function renderOverviewStats() {
 function renderBadges() {
   document.getElementById('badge-active').textContent = state.matters.filter(m => !m.archived).length;
   document.getElementById('badge-archive').textContent = state.matters.filter(m => m.archived).length;
+  const inboxBadge = document.getElementById('badge-inbox');
+  if (inboxBadge) {
+    const n = state.proposalCounts?.pending || 0;
+    inboxBadge.textContent = n;
+    inboxBadge.classList.toggle('has-items', n > 0);
+  }
+}
+
+// ── Load pending-proposal counts (badges) ──────────────────
+async function loadProposalCounts() {
+  try {
+    const r = await api('/proposals/count');
+    state.proposalCounts = r;
+    renderBadges();
+    // Refresh matter list if it's currently visible (so card badges update)
+    if (document.getElementById('view-active').classList.contains('active')) {
+      renderMatterList();
+    }
+  } catch (e) { console.error('loadProposalCounts failed:', e); state.proposalCounts = { pending: 0, by_matter: {} }; }
 }
 
 // ============================================================
@@ -1944,10 +2055,228 @@ function renderOpProposals() {
 }
 
 // ============================================================
+// INBOX (proposal queue)
+// ============================================================
+
+// Cache of last-loaded proposals (for accept/dismiss without refetch)
+let inboxProposals = [];
+
+async function renderInbox() {
+  const c = document.getElementById('inbox-content');
+  c.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const r = await api('/proposals?status=pending');
+    inboxProposals = r.proposals || [];
+
+    if (inboxProposals.length === 0) {
+      c.innerHTML = `<div class="empty">📭 Inbox is empty. Paste a CM/ECF email above to ingest.</div>`;
+      return;
+    }
+
+    // Group: matched (by matter_id) vs unmatched
+    const byMatter = new Map();   // matter_id -> { name, ref, props[] }
+    const unmatched = [];
+    for (const p of inboxProposals) {
+      if (p.matter_id) {
+        if (!byMatter.has(p.matter_id)) {
+          byMatter.set(p.matter_id, {
+            id: p.matter_id,
+            client_name: p.matter_client_name || `Matter #${p.matter_id}`,
+            ref: p.matter_ref || '',
+            props: []
+          });
+        }
+        byMatter.get(p.matter_id).props.push(p);
+      } else {
+        unmatched.push(p);
+      }
+    }
+
+    let html = '';
+
+    // Matched groups
+    for (const grp of byMatter.values()) {
+      html += `<div class="inbox-group">
+        <div class="group-head">
+          <div>
+            <div class="group-title">${escapeHtml(grp.client_name)}</div>
+            <div class="group-meta">${escapeHtml(grp.ref)} · ${grp.props.length} pending</div>
+          </div>
+          <span class="open-matter" data-matter-id="${grp.id}">Open matter →</span>
+        </div>
+        ${grp.props.map(renderInboxProp).join('')}
+      </div>`;
+    }
+
+    // Unmatched group
+    if (unmatched.length > 0) {
+      html += `<div class="inbox-group">
+        <div class="group-head">
+          <div>
+            <div class="group-title"><em>Unmatched</em> — no existing matter</div>
+            <div class="group-meta">${unmatched.length} pending · accept to create new matter</div>
+          </div>
+        </div>
+        ${unmatched.map(renderInboxProp).join('')}
+      </div>`;
+    }
+
+    c.innerHTML = html;
+
+    // Wire accept/dismiss buttons
+    c.querySelectorAll('.inbox-prop button.accept').forEach(btn => {
+      btn.addEventListener('click', () => handleInboxAction(parseInt(btn.dataset.propId), 'accept', btn));
+    });
+    c.querySelectorAll('.inbox-prop button.dismiss').forEach(btn => {
+      btn.addEventListener('click', () => handleInboxAction(parseInt(btn.dataset.propId), 'dismiss', btn));
+    });
+    c.querySelectorAll('.open-matter').forEach(el => {
+      el.addEventListener('click', () => {
+        currentMatterId = parseInt(el.dataset.matterId);
+        showView('detail');
+      });
+    });
+  } catch (e) {
+    c.innerHTML = `<div class="empty" style="color:var(--accent);">⚠ Failed to load inbox: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderInboxProp(p) {
+  const data = (typeof p.proposed_data === 'string') ? JSON.parse(p.proposed_data) : p.proposed_data;
+  let icon = '📋';
+  let title = 'Unknown proposal';
+  let detail = '';
+
+  if (p.kind === 'deadline') {
+    icon = '⏰';
+    title = `<em>Deadline:</em> ${escapeHtml(data.title || 'Untitled')}`;
+    detail = `<dl>
+      <dt>Due</dt><dd>${escapeHtml(data.due_date || '—')}</dd>
+      <dt>Party</dt><dd>${escapeHtml(data.party === 'us' ? 'Us' : data.party === 'them' ? 'Govt/Opp' : 'Court')}</dd>
+      ${data.citation ? `<dt>Citation</dt><dd>${escapeHtml(data.citation)}</dd>` : ''}
+    </dl>`;
+  } else if (p.kind === 'new_matter') {
+    icon = '📁';
+    const caption = data.client_name || data.petitioner_name || 'Unknown';
+    title = `<em>New Matter:</em> ${escapeHtml(caption)}`;
+    detail = `<dl>
+      <dt>Case Number</dt><dd>${escapeHtml(data.matter_ref || '—')}</dd>
+      <dt>Court</dt><dd>${escapeHtml(data.court || '—')}</dd>
+      <dt>Type</dt><dd>${escapeHtml(data.case_type || '—')}</dd>
+      <dt>Filed</dt><dd>${escapeHtml(data.opened_date || '—')}</dd>
+      ${data.petitioner_name ? `<dt>Petitioner</dt><dd>${escapeHtml(data.petitioner_name)}</dd>` : ''}
+      ${data.relief_sought ? `<dt>Relief</dt><dd>${escapeHtml(data.relief_sought)}</dd>` : ''}
+      ${data.custody_location ? `<dt>Custody</dt><dd>${escapeHtml(data.custody_location)}</dd>` : ''}
+      ${data.notes ? `<dt>Summary</dt><dd>${escapeHtml(data.notes)}</dd>` : ''}
+    </dl>`;
+  } else if (p.kind === 'field_update') {
+    icon = '✏️';
+    title = `<em>Field Update</em> proposed`;
+    const dt = Object.entries(data)
+      .filter(([k, v]) => v != null && v !== '')
+      .map(([k, v]) => `<dt>${escapeHtml(k.replace(/_/g, ' '))}</dt><dd>${escapeHtml(String(v))}</dd>`)
+      .join('');
+    detail = `<dl>${dt}</dl>`;
+  }
+
+  const confClass = p.confidence || 'low';
+  return `<div class="inbox-prop" data-prop-id="${p.id}">
+    <div class="prop-kind-icon">${icon}</div>
+    <div class="prop-body">
+      <h5>${title} <span class="prop-conf ${confClass}">${confClass}</span></h5>
+      <div class="prop-meta">Received ${new Date(p.created_at).toLocaleString('en-US')} · source: ${escapeHtml(p.source)}</div>
+      <div class="prop-detail">${detail}</div>
+      ${p.raw_excerpt ? `<div class="prop-excerpt">"${escapeHtml(p.raw_excerpt.substring(0, 220))}${p.raw_excerpt.length > 220 ? '…' : ''}"</div>` : ''}
+    </div>
+    <div class="prop-actions">
+      <button class="btn accept" data-prop-id="${p.id}">✓ Accept</button>
+      <button class="btn ghost dismiss" data-prop-id="${p.id}">✕ Dismiss</button>
+    </div>
+  </div>`;
+}
+
+async function handleInboxAction(propId, action, btn) {
+  if (action === 'dismiss' && !confirm('Dismiss this proposal? It will be hidden from the inbox.')) return;
+  btn.disabled = true;
+  btn.textContent = action === 'accept' ? 'Accepting…' : 'Dismissing…';
+  try {
+    const r = await api(`/proposals/${propId}`, {
+      method: 'PATCH',
+      body: { action }
+    });
+    if (action === 'accept' && r.kind === 'new_matter') {
+      // Reload the matter list and the proposals — new matter now exists
+      await loadState();
+      await loadProposalCounts();
+      renderInbox();
+    } else {
+      // Reload matter that got the deadline/update + proposal counts
+      if (r.matter?.id || r.deadline) {
+        const mid = r.matter?.id;
+        if (mid) await reloadMatter(mid);
+      }
+      await loadProposalCounts();
+      renderInbox();
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = action === 'accept' ? '✓ Accept' : '✕ Dismiss';
+    alert(action + ' failed: ' + e.message);
+  }
+}
+
+// ── Inbox paste-to-ingest ─────────────────────────────────
+document.getElementById('inbox-paste-clear').addEventListener('click', () => {
+  document.getElementById('inbox-paste-text').value = '';
+  const status = document.getElementById('inbox-paste-status');
+  status.textContent = ''; status.className = '';
+});
+
+document.getElementById('inbox-paste-btn').addEventListener('click', async () => {
+  const text = document.getElementById('inbox-paste-text').value.trim();
+  const status = document.getElementById('inbox-paste-status');
+  if (!text) {
+    status.textContent = 'Paste an email first';
+    status.className = 'error';
+    return;
+  }
+  status.textContent = 'Ingesting… (~5-10 sec)';
+  status.className = '';
+  const btn = document.getElementById('inbox-paste-btn');
+  btn.disabled = true;
+  try {
+    const r = await api('/ingest', {
+      method: 'POST',
+      body: { email_text: text, source: 'manual_paste' }
+    });
+    const s = r.summary || {};
+    const matched = r.matter_match
+      ? `matched to ${r.matter_match.client_name}`
+      : 'no existing matter';
+    status.textContent = `✓ ${s.proposals_created || 0} proposal(s) created · ${matched}`;
+    status.className = 'success';
+    document.getElementById('inbox-paste-text').value = '';
+    await loadProposalCounts();
+    renderInbox();
+  } catch (e) {
+    status.textContent = '⚠ ' + e.message;
+    status.className = 'error';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('inbox-refresh').addEventListener('click', async () => {
+  await loadProposalCounts();
+  renderInbox();
+});
+
+// ============================================================
 // INIT
 // ============================================================
 (async () => {
   await loadState();
+  await loadProposalCounts();
   renderOverviewStats(); renderBadges();
   renderMatterList(); renderCourtLinks();
 })();
