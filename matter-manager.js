@@ -96,15 +96,20 @@ DOCUMENT TO ANALYZE:
 ---`;
 
 function callClaudeForExtraction(orderText) {
+  const prompt = EXTRACTION_PROMPT.replace("{ORDER_TEXT}", orderText);
+  return callClaudeAPI(prompt);
+}
+
+// Generic Claude API call returning the text content.
+// Used by both order extraction and NEF intake parsing.
+function callClaudeAPI(prompt, maxTokens = 4000) {
   return new Promise((resolve, reject) => {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return reject(new Error("ANTHROPIC_API_KEY not configured"));
 
-    const prompt = EXTRACTION_PROMPT.replace("{ORDER_TEXT}", orderText);
-
     const payload = JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 4000,
+      max_tokens: maxTokens,
       messages: [{ role: "user", content: prompt }]
     });
 
@@ -188,6 +193,127 @@ router.post("/api/parse", requireAuth, async (req, res) => {
     res.json({ deadlines: validated });
   } catch (err) {
     console.error("POST /api/parse error:", err.message);
+    res.status(500).json({ error: err.message || "Parser error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  NEF INTAKE PARSER — extract matter fields from email text
+//
+//  POST /admin/matters/api/parse-intake
+//  Body: { nef_text: "..." }
+//  Returns: { fields: {...}, raw_response: "..." }
+//
+//  Same propose-only design as the order parser: this returns
+//  a proposed set of matter fields. The UI must show them in
+//  an editable form before saving — never auto-creates a matter.
+// ─────────────────────────────────────────────────────────────
+
+const INTAKE_PROMPT = `You are extracting case information from a Notice of Electronic Filing (NEF), BIA decision, court order, or similar legal document so a California immigration attorney can open a new matter.
+
+Extract these fields from the document. Be conservative — leave a field as null if not clearly present. Do NOT guess.
+
+- client_name: The case caption. Use the format "Petitioner v. Respondent" if both parties named (e.g., "Lu v. Bondi" or "Zhang v. MULLIN"). If only one party named, use that party's name.
+- petitioner_name: The full name of the petitioner/plaintiff/movant (e.g., "Guangfeng Lu", "Jiabin Zhang"). Single individual, not a caption.
+- matter_ref: The case number or A-number (e.g., "5:26-cv-02340", "A 216-866-000", "23-1234"). Preserve formatting.
+- court: Use SHORT FORM:
+  - "9th Cir." for Court of Appeals for the Ninth Circuit
+  - "C.D. Cal." for Central District of California
+  - "N.D. Cal." for Northern District of California
+  - "S.D.N.Y." for Southern District of New York
+  - "W.D. Okla." for Western District of Oklahoma
+  - "EOIR" for immigration court
+  - "BIA" for Board of Immigration Appeals
+  - "USCIS" for U.S. Citizenship and Immigration Services
+  - Use similar abbreviations for other courts
+- case_type: Pick ONE of these short-form values based on docket text:
+  - "PFR" for Petition for Review (9th Cir. immigration appeals)
+  - "Habeas" for 28 U.S.C. § 2241 habeas corpus
+  - "Mandamus" for 28 U.S.C. § 1361 mandamus
+  - "N400" for 8 U.S.C. § 1447(b) naturalization delay
+  - "APA" for Administrative Procedure Act actions
+  - "Removal" for EOIR removal proceedings
+  - "USCIS" for affirmative USCIS applications
+  - "Other" if none fit
+- opened_date: Date the case/filing was opened, in YYYY-MM-DD. Use the "filed on" or "entered" date if present.
+- triggering_date: The underlying event that triggered the case (e.g., BIA decision date for a PFR, agency denial date for an APA action, NTA date for removal). Leave null unless explicit.
+- custody_location: If the petitioner is detained, the facility name (e.g., "Cimarron Facility, Cushing OK"). Leave null if not mentioned or if petitioner is not detained.
+- relief_sought: Brief description (e.g., "Asylum / W/H / CAT", "Release from custody", "Adjudication of N-400"). Leave null if unclear.
+- notes: A 1-2 sentence summary of what the document indicates about the case posture (e.g., "PFR filed 5/4/2026 challenging BIA dismissal. Petitioner detained at Cimarron.").
+
+Return ONLY valid JSON with this exact shape, no other text:
+{
+  "fields": {
+    "client_name": "..." or null,
+    "petitioner_name": "..." or null,
+    "matter_ref": "..." or null,
+    "court": "..." or null,
+    "case_type": "..." or null,
+    "opened_date": "YYYY-MM-DD" or null,
+    "triggering_date": "YYYY-MM-DD" or null,
+    "custody_location": "..." or null,
+    "relief_sought": "..." or null,
+    "notes": "..." or null
+  },
+  "confidence": "high" | "medium" | "low"
+}
+
+DOCUMENT TO ANALYZE:
+---
+{NEF_TEXT}
+---`;
+
+router.post("/api/parse-intake", requireAuth, async (req, res) => {
+  try {
+    const { nef_text } = req.body || {};
+
+    if (!nef_text || typeof nef_text !== "string") {
+      return res.status(400).json({ error: "nef_text required" });
+    }
+    if (nef_text.length < 20) {
+      return res.status(400).json({ error: "Text too short to analyze" });
+    }
+    if (nef_text.length > 50000) {
+      return res.status(400).json({ error: "Text too long (max 50k chars). Paste relevant section." });
+    }
+
+    const prompt = INTAKE_PROMPT.replace("{NEF_TEXT}", nef_text);
+    const responseText = await callClaudeAPI(prompt, 2000);
+
+    let parsed;
+    try {
+      let cleaned = responseText.trim();
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Intake parser JSON error. Raw:", responseText);
+      return res.status(500).json({
+        error: "Could not parse extraction.",
+        raw: responseText.substring(0, 500)
+      });
+    }
+
+    const f = parsed.fields || {};
+
+    // Validate and sanitize each field
+    const validated = {
+      client_name:      f.client_name ? String(f.client_name).substring(0, 200) : null,
+      petitioner_name:  f.petitioner_name ? String(f.petitioner_name).substring(0, 200) : null,
+      matter_ref:       f.matter_ref ? String(f.matter_ref).substring(0, 100) : null,
+      court:            f.court ? String(f.court).substring(0, 100) : null,
+      case_type:        f.case_type ? String(f.case_type).substring(0, 50) : null,
+      opened_date:      f.opened_date && /^\d{4}-\d{2}-\d{2}$/.test(f.opened_date) ? f.opened_date : null,
+      triggering_date:  f.triggering_date && /^\d{4}-\d{2}-\d{2}$/.test(f.triggering_date) ? f.triggering_date : null,
+      custody_location: f.custody_location ? String(f.custody_location).substring(0, 300) : null,
+      relief_sought:    f.relief_sought ? String(f.relief_sought).substring(0, 300) : null,
+      notes:            f.notes ? String(f.notes).substring(0, 2000) : null
+    };
+
+    const confidence = ["high", "medium", "low"].includes(parsed.confidence) ? parsed.confidence : "low";
+
+    res.json({ fields: validated, confidence });
+  } catch (err) {
+    console.error("POST /api/parse-intake error:", err.message);
     res.status(500).json({ error: err.message || "Parser error" });
   }
 });
