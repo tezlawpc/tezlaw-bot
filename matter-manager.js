@@ -701,6 +701,396 @@ router.delete("/api/matters/:matterId/files/:id", requireAuth, async (req, res) 
 });
 
 // ─────────────────────────────────────────────────────────────
+//  CHECKLISTS — per-matter task lists with templates
+//
+//  Endpoints:
+//    POST   /api/matters/:matterId/checklists/template/:templateName
+//             → seed a hardcoded template (pfr, habeas, mandamus)
+//    POST   /api/matters/:matterId/checklists
+//             → create empty checklist (ad-hoc)
+//    POST   /api/checklists/:checklistId/items
+//             → add an item to an existing checklist
+//    PATCH  /api/checklist-items/:itemId
+//             → toggle completed, edit text, or edit citation
+//    DELETE /api/checklist-items/:itemId
+//             → remove an item
+//    DELETE /api/checklists/:checklistId
+//             → remove an entire checklist (cascades to items)
+//
+//  All routes require auth and verify the matter belongs to the
+//  current user (defense against IDOR / horizontal escalation).
+// ─────────────────────────────────────────────────────────────
+
+// ── Hardcoded checklist templates ────────────────────────────
+// These are reference templates for common 9th Cir. / district
+// court immigration matters. Items are inserted with display_order
+// matching their array index.
+const CHECKLIST_TEMPLATES = {
+  pfr: [
+    {
+      title: "Initial Filing Packet",
+      subtitle: "Cir. R. 15-4 · GO 6.4(c) · FRAP 15",
+      items: [
+        { text: "Form 3 Petition for Review prepared, signed, dated",                   citation: "Cir. R. 15-4" },
+        { text: "Form 6 Representation Statement bound with PFR",                        citation: "Cir. R. 15-4" },
+        { text: "BIA decision attached as exhibit",                                      citation: "" },
+        { text: "Initial Motion to Stay drafted (separate PDF)",                         citation: "FRAP 18 · GO 6.4(c)(1)" },
+        { text: "Filing fee $605 paid OR Form 4 (IFP) filed",                            citation: "28 U.S.C. § 1913" },
+        { text: "Filed within 30 days of BIA decision",                                  citation: "Stone v. INS" },
+        { text: "Certificate of Service on OIL and local DHS/ICE OCC",                   citation: "FRAP 25(d)" },
+        { text: "ECF appearance entered, attorney registration current",                 citation: "Cir. R. 46-1" },
+        { text: "Notice to ICE OGC for district of confinement (if detained)",           citation: "Best practice" },
+        { text: "Docket assigned 9th Cir. case number recorded",                         citation: "" }
+      ]
+    },
+    {
+      title: "Opening Brief Workplan",
+      subtitle: "FRAP 28 · 32 · Cir. R. 28-2.4(b) · 28-2.7",
+      items: [
+        { text: "CAR arrives — read cover-to-cover, mark indiscernibles",                 citation: "Cir. R. 17-1" },
+        { text: "Frame issues; lock argument order",                                       citation: "" },
+        { text: "Argument outline + record cites complete",                                citation: "" },
+        { text: "Statement of Case + Statement of Facts drafted",                          citation: "FRAP 28(a)(6)(7)" },
+        { text: "Summary of Argument + Argument Sections drafted",                         citation: "FRAP 28(a)(8)(9)" },
+        { text: "Full draft assembled — word count under 14,000",                          citation: "FRAP 32(a)(7)" },
+        { text: "Internal revision pass — verify all record cites",                        citation: "" },
+        { text: "Polish — Table of Authorities · Table of Contents",                       citation: "FRAP 28(a)(2)(3)" },
+        { text: "Addendum assembled: IJ + BIA decisions",                                  citation: "Cir. R. 28-2.7" },
+        { text: "Certificates: compliance · service · related cases",                      citation: "FRAP 32(g) · Cir. R. 28-2.6" },
+        { text: "File via CM/ECF on or before due date",                                   citation: "FRAP 31 · Cir. R. 31-2.1" }
+      ]
+    }
+  ],
+
+  habeas: [
+    {
+      title: "Habeas § 2241 Filing Packet",
+      subtitle: "28 U.S.C. § 2241 · FRCP 81(a)(4)",
+      items: [
+        { text: "Petition drafted — name correct custodian as respondent",                 citation: "Rumsfeld v. Padilla" },
+        { text: "Venue confirmed — district of confinement",                                citation: "28 U.S.C. § 2241(a)" },
+        { text: "Statement of facts with detention timeline",                               citation: "" },
+        { text: "Legal grounds: constitutional / statutory / treaty",                       citation: "" },
+        { text: "Exhaustion addressed or excused",                                          citation: "" },
+        { text: "Filing fee $5 paid OR IFP application filed",                              citation: "28 U.S.C. § 1914" },
+        { text: "Service: USA · AG · custodian · ICE OGC",                                  citation: "FRCP 4(i)" },
+        { text: "REAL ID jurisdictional bar reviewed",                                      citation: "8 U.S.C. § 1252(a)(5)" },
+        { text: "OSC issued / answer deadline calendared",                                  citation: "28 U.S.C. § 2243" }
+      ]
+    }
+  ],
+
+  mandamus: [
+    {
+      title: "Mandamus § 1361 Filing Packet",
+      subtitle: "28 U.S.C. § 1361 · FRCP 4(i)",
+      items: [
+        { text: "Complaint drafted with clear plaintiff/defendants",                         citation: "" },
+        { text: "Three elements pleaded: clear right · clear duty · no other remedy",       citation: "Norton v. SUWA" },
+        { text: "TRAC factors addressed (unreasonable delay)",                                citation: "TRAC v. FCC" },
+        { text: "Venue: where defendants reside OR plaintiff resides",                       citation: "28 U.S.C. § 1391(e)" },
+        { text: "Civil cover sheet + summons prepared",                                       citation: "Local Rule" },
+        { text: "Filing fee $405 paid OR IFP filed",                                          citation: "28 U.S.C. § 1914" },
+        { text: "Service on US Attorney · AG · agency",                                       citation: "FRCP 4(i)" },
+        { text: "Summons issued by clerk",                                                    citation: "FRCP 4(b)" },
+        { text: "60-day answer deadline calendared",                                          citation: "FRCP 12(a)(2)" },
+        { text: "Status of underlying agency action documented",                              citation: "" }
+      ]
+    }
+  ]
+};
+
+// ── Helper: verify matter ownership ──────────────────────────
+// Returns the matter row if the current user owns it, else null.
+// All checklist routes use this to prevent horizontal escalation.
+async function verifyMatterOwnership(matterId, userId) {
+  const r = await db.query(
+    `SELECT id FROM matters WHERE id = $1 AND user_id = $2`,
+    [matterId, userId]
+  );
+  return r.rows.length > 0;
+}
+
+// ── Helper: verify checklist ownership (via parent matter) ───
+async function verifyChecklistOwnership(checklistId, userId) {
+  const r = await db.query(
+    `SELECT c.id FROM matter_checklists c
+       JOIN matters m ON m.id = c.matter_id
+      WHERE c.id = $1 AND m.user_id = $2`,
+    [checklistId, userId]
+  );
+  return r.rows.length > 0;
+}
+
+// ── Helper: verify item ownership (via parent checklist → matter) ─
+async function verifyItemOwnership(itemId, userId) {
+  const r = await db.query(
+    `SELECT i.id FROM matter_checklist_items i
+       JOIN matter_checklists c ON c.id = i.checklist_id
+       JOIN matters m ON m.id = c.matter_id
+      WHERE i.id = $1 AND m.user_id = $2`,
+    [itemId, userId]
+  );
+  return r.rows.length > 0;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  POST /admin/matters/api/matters/:matterId/checklists/template/:templateName
+//
+//  Seed a hardcoded template (pfr, habeas, mandamus). Each
+//  template creates one or more checklists with their items.
+//  Use this on matter creation to bootstrap a standard set.
+//
+//  Does NOT clear existing checklists — call it on a fresh matter
+//  or be prepared for duplicates.
+// ─────────────────────────────────────────────────────────────
+router.post("/api/matters/:matterId/checklists/template/:templateName", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    const matterId = parseInt(req.params.matterId);
+    if (isNaN(matterId)) return res.status(400).json({ error: "Invalid matter id" });
+
+    const templateName = String(req.params.templateName || "").toLowerCase();
+    const template = CHECKLIST_TEMPLATES[templateName];
+    if (!template) {
+      return res.status(404).json({
+        error: "Template not found",
+        available: Object.keys(CHECKLIST_TEMPLATES)
+      });
+    }
+
+    if (!(await verifyMatterOwnership(matterId, userId))) {
+      return res.status(404).json({ error: "Matter not found" });
+    }
+
+    // Find highest existing display_order so new templates append
+    const ordR = await db.query(
+      `SELECT COALESCE(MAX(display_order), -1) AS max_order
+         FROM matter_checklists WHERE matter_id = $1`,
+      [matterId]
+    );
+    let nextChecklistOrder = parseInt(ordR.rows[0].max_order) + 1;
+
+    const created = [];
+    for (const checklistDef of template) {
+      const cr = await db.query(
+        `INSERT INTO matter_checklists (matter_id, title, subtitle, display_order)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, title, subtitle, display_order, created_at, updated_at`,
+        [matterId, checklistDef.title, checklistDef.subtitle || null, nextChecklistOrder]
+      );
+      const checklist = cr.rows[0];
+      nextChecklistOrder++;
+
+      const itemRows = [];
+      for (let idx = 0; idx < checklistDef.items.length; idx++) {
+        const it = checklistDef.items[idx];
+        const ir = await db.query(
+          `INSERT INTO matter_checklist_items
+             (checklist_id, text, citation, completed, display_order)
+           VALUES ($1, $2, $3, FALSE, $4)
+           RETURNING id, text, citation, completed, display_order`,
+          [checklist.id, it.text, it.citation || null, idx]
+        );
+        itemRows.push(ir.rows[0]);
+      }
+
+      created.push({ ...checklist, items: itemRows });
+    }
+
+    res.json({ checklists: created, template: templateName });
+  } catch (err) {
+    console.error("POST checklists/template error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  POST /admin/matters/api/matters/:matterId/checklists
+//
+//  Create a single empty checklist on a matter.
+//  Body: { title (required), subtitle (optional) }
+// ─────────────────────────────────────────────────────────────
+router.post("/api/matters/:matterId/checklists", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    const matterId = parseInt(req.params.matterId);
+    if (isNaN(matterId)) return res.status(400).json({ error: "Invalid matter id" });
+
+    const { title, subtitle } = req.body || {};
+    if (!title || typeof title !== "string") {
+      return res.status(400).json({ error: "title required" });
+    }
+
+    if (!(await verifyMatterOwnership(matterId, userId))) {
+      return res.status(404).json({ error: "Matter not found" });
+    }
+
+    const ordR = await db.query(
+      `SELECT COALESCE(MAX(display_order), -1) AS max_order
+         FROM matter_checklists WHERE matter_id = $1`,
+      [matterId]
+    );
+    const nextOrder = parseInt(ordR.rows[0].max_order) + 1;
+
+    const r = await db.query(
+      `INSERT INTO matter_checklists (matter_id, title, subtitle, display_order)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, title, subtitle, display_order, created_at, updated_at`,
+      [matterId, title, subtitle || null, nextOrder]
+    );
+
+    res.json({ checklist: { ...r.rows[0], items: [] } });
+  } catch (err) {
+    console.error("POST checklists error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  DELETE /admin/matters/api/checklists/:checklistId
+//
+//  Remove an entire checklist. Cascades to items.
+// ─────────────────────────────────────────────────────────────
+router.delete("/api/checklists/:checklistId", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    const checklistId = parseInt(req.params.checklistId);
+    if (isNaN(checklistId)) return res.status(400).json({ error: "Invalid checklist id" });
+
+    if (!(await verifyChecklistOwnership(checklistId, userId))) {
+      return res.status(404).json({ error: "Checklist not found" });
+    }
+
+    await db.query(`DELETE FROM matter_checklists WHERE id = $1`, [checklistId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE checklists error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  POST /admin/matters/api/checklists/:checklistId/items
+//
+//  Add a single item to a checklist.
+//  Body: { text (required), citation (optional) }
+// ─────────────────────────────────────────────────────────────
+router.post("/api/checklists/:checklistId/items", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    const checklistId = parseInt(req.params.checklistId);
+    if (isNaN(checklistId)) return res.status(400).json({ error: "Invalid checklist id" });
+
+    const { text, citation } = req.body || {};
+    if (!text || typeof text !== "string") {
+      return res.status(400).json({ error: "text required" });
+    }
+
+    if (!(await verifyChecklistOwnership(checklistId, userId))) {
+      return res.status(404).json({ error: "Checklist not found" });
+    }
+
+    const ordR = await db.query(
+      `SELECT COALESCE(MAX(display_order), -1) AS max_order
+         FROM matter_checklist_items WHERE checklist_id = $1`,
+      [checklistId]
+    );
+    const nextOrder = parseInt(ordR.rows[0].max_order) + 1;
+
+    const r = await db.query(
+      `INSERT INTO matter_checklist_items
+         (checklist_id, text, citation, completed, display_order)
+       VALUES ($1, $2, $3, FALSE, $4)
+       RETURNING id, text, citation, completed, display_order, created_at, updated_at`,
+      [checklistId, text, citation || null, nextOrder]
+    );
+
+    res.json({ item: r.rows[0] });
+  } catch (err) {
+    console.error("POST checklist items error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  PATCH /admin/matters/api/checklist-items/:itemId
+//
+//  Toggle completed status, or edit text/citation.
+//  Body: any of { completed: bool, text: string, citation: string }
+// ─────────────────────────────────────────────────────────────
+router.patch("/api/checklist-items/:itemId", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    const itemId = parseInt(req.params.itemId);
+    if (isNaN(itemId)) return res.status(400).json({ error: "Invalid item id" });
+
+    if (!(await verifyItemOwnership(itemId, userId))) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    const allowed = ["completed", "text", "citation"];
+    const fields = [];
+    const values = [itemId];
+    let i = 2;
+    for (const k of allowed) {
+      if (k in (req.body || {})) {
+        let v = req.body[k];
+        if (k === "completed") {
+          if (typeof v !== "boolean") {
+            return res.status(400).json({ error: "completed must be boolean" });
+          }
+        } else if (k === "text") {
+          if (typeof v !== "string" || !v.trim()) {
+            return res.status(400).json({ error: "text must be non-empty string" });
+          }
+        }
+        // citation: pass through; empty string allowed
+        fields.push(`${k} = $${i++}`);
+        values.push(v);
+      }
+    }
+    if (!fields.length) return res.status(400).json({ error: "No fields to update" });
+
+    const r = await db.query(
+      `UPDATE matter_checklist_items SET ${fields.join(", ")}
+       WHERE id = $1
+       RETURNING id, text, citation, completed, display_order, created_at, updated_at`,
+      values
+    );
+
+    res.json({ item: r.rows[0] });
+  } catch (err) {
+    console.error("PATCH checklist items error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  DELETE /admin/matters/api/checklist-items/:itemId
+//
+//  Remove a single item.
+// ─────────────────────────────────────────────────────────────
+router.delete("/api/checklist-items/:itemId", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    const itemId = parseInt(req.params.itemId);
+    if (isNaN(itemId)) return res.status(400).json({ error: "Invalid item id" });
+
+    if (!(await verifyItemOwnership(itemId, userId))) {
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    await db.query(`DELETE FROM matter_checklist_items WHERE id = $1`, [itemId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("DELETE checklist items error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+
+// ─────────────────────────────────────────────────────────────
 //  CALENDAR FEED — top-level, no session auth, secret-protected
 //
 //  Mounted in server.js as GET /calendar/:secret.ics
