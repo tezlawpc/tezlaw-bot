@@ -29,6 +29,14 @@ router.get("/", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "matters.html"));
 });
 
+// ── v2 dashboard at /admin/matters/v2 ─────────────────────
+// Parallel new UI. The existing /admin/matters/ route is
+// unchanged; v2 is a feature-flag preview to test the new
+// case-card + checklists layout side-by-side before promoting.
+router.get("/v2", requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "matters-v2.html"));
+});
+
 // ─────────────────────────────────────────────────────────────
 //  ORDER PARSER — Claude-powered deadline extraction
 //
