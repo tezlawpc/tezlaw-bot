@@ -483,6 +483,438 @@ router.post("/api/ingest-dry-run", requireAuth, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+//  INGEST — Phase 2: actually save proposals to the inbox
+//
+//  POST /admin/matters/api/ingest
+//  Body: { email_text: "...", source?: "manual_paste"|"email_inbound"|"api", source_ref?: "..." }
+//  Returns: { proposals: [...], matter_match, summary }
+//
+//  Does the same matching + parsing as dry-run, but writes any
+//  resulting proposals to the matter_proposals table for review.
+//
+//  Still PROPOSE-ONLY for deadlines: nothing is added to
+//  matter_deadlines. The proposal sits in 'pending' state until
+//  PATCH /api/proposals/:id with action='accept' is called.
+// ─────────────────────────────────────────────────────────────
+router.post("/api/ingest", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    if (!userId) return res.status(500).json({ error: "User not found" });
+
+    const { email_text, source, source_ref } = req.body || {};
+    if (!email_text || typeof email_text !== "string") {
+      return res.status(400).json({ error: "email_text required" });
+    }
+    if (email_text.length < 20) {
+      return res.status(400).json({ error: "Text too short to analyze" });
+    }
+    if (email_text.length > 100000) {
+      return res.status(400).json({ error: "Text too long (max 100k chars)" });
+    }
+
+    const sourceVal = ["manual_paste", "email_inbound", "api"].includes(source) ? source : "manual_paste";
+    const sourceRefVal = source_ref ? String(source_ref).substring(0, 200) : null;
+
+    // 1. Extract case numbers and find matter match
+    const candidates = extractCaseNumbers(email_text);
+    let matterMatch = null;
+
+    if (candidates.length > 0) {
+      const allMatters = await db.query(
+        `SELECT id, client_name, matter_ref, court, case_type
+           FROM matters WHERE user_id = $1 ORDER BY id ASC`,
+        [userId]
+      );
+      for (const cand of candidates) {
+        const candNorm = normalizeCaseRef(cand);
+        for (const m of allMatters.rows) {
+          const refNorm = normalizeCaseRef(m.matter_ref || "");
+          if (!refNorm) continue;
+          if (candNorm === refNorm || candNorm.includes(refNorm) || refNorm.includes(candNorm)) {
+            if (!matterMatch) {
+              matterMatch = { id: m.id, client_name: m.client_name, matter_ref: m.matter_ref };
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Run both parsers in parallel
+    const [intakeResult, orderResult] = await Promise.allSettled([
+      (async () => {
+        const prompt = INTAKE_PROMPT.replace("{NEF_TEXT}", email_text);
+        const text = await callClaudeAPI(prompt, 2000);
+        let cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+        return JSON.parse(cleaned);
+      })(),
+      (async () => {
+        const responseText = await callClaudeForExtraction(email_text);
+        let cleaned = responseText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+        return JSON.parse(cleaned);
+      })()
+    ]);
+
+    const intakeFields = intakeResult.status === "fulfilled" ? (intakeResult.value.fields || {}) : null;
+    const intakeConfidence = intakeResult.status === "fulfilled" ? intakeResult.value.confidence : null;
+    const deadlines = orderResult.status === "fulfilled" && Array.isArray(orderResult.value.deadlines)
+      ? orderResult.value.deadlines : [];
+
+    // 3. Write proposals to the inbox table
+    const excerpt = email_text.substring(0, 4000); // store first 4k chars for context
+    const created = [];
+
+    // 3a. Deadline proposals (one per extracted deadline that has a date)
+    for (const d of deadlines) {
+      if (!d.due_date) continue; // skip dateless proposals
+      const ins = await db.query(
+        `INSERT INTO matter_proposals
+           (user_id, matter_id, kind, source, source_ref,
+            proposed_data, raw_excerpt, status, confidence)
+         VALUES ($1, $2, 'deadline', $3, $4, $5, $6, 'pending', $7)
+         RETURNING id, kind, matter_id, proposed_data, confidence, created_at`,
+        [
+          userId,
+          matterMatch ? matterMatch.id : null,
+          sourceVal,
+          sourceRefVal,
+          JSON.stringify({
+            title: d.title,
+            due_date: d.due_date,
+            party: d.party || "us",
+            citation: d.citation || null,
+            source_excerpt: d.source_excerpt || null
+          }),
+          d.source_excerpt ? String(d.source_excerpt).substring(0, 2000) : excerpt.substring(0, 2000),
+          d.confidence || "low"
+        ]
+      );
+      created.push(ins.rows[0]);
+    }
+
+    // 3b. New-matter proposal (only if NO matter matched AND intake parser found enough info)
+    if (!matterMatch && intakeFields && (intakeFields.client_name || intakeFields.matter_ref)) {
+      const ins = await db.query(
+        `INSERT INTO matter_proposals
+           (user_id, matter_id, kind, source, source_ref,
+            proposed_data, raw_excerpt, status, confidence)
+         VALUES ($1, NULL, 'new_matter', $2, $3, $4, $5, 'pending', $6)
+         RETURNING id, kind, matter_id, proposed_data, confidence, created_at`,
+        [
+          userId,
+          sourceVal,
+          sourceRefVal,
+          JSON.stringify(intakeFields),
+          excerpt,
+          intakeConfidence || "low"
+        ]
+      );
+      created.push(ins.rows[0]);
+    }
+
+    // 3c. Field-update proposal (matter matched + intake parser has useful field updates)
+    if (matterMatch && intakeFields) {
+      // Only propose fields that have a non-null value
+      const meaningfulFields = Object.fromEntries(
+        Object.entries(intakeFields).filter(([k, v]) => v != null && v !== "")
+      );
+      if (Object.keys(meaningfulFields).length > 0) {
+        const ins = await db.query(
+          `INSERT INTO matter_proposals
+             (user_id, matter_id, kind, source, source_ref,
+              proposed_data, raw_excerpt, status, confidence)
+           VALUES ($1, $2, 'field_update', $3, $4, $5, $6, 'pending', $7)
+           RETURNING id, kind, matter_id, proposed_data, confidence, created_at`,
+          [
+            userId,
+            matterMatch.id,
+            sourceVal,
+            sourceRefVal,
+            JSON.stringify(meaningfulFields),
+            excerpt,
+            intakeConfidence || "low"
+          ]
+        );
+        created.push(ins.rows[0]);
+      }
+    }
+
+    res.json({
+      summary: {
+        case_numbers_found: candidates,
+        matter_matched: matterMatch ? matterMatch.id : null,
+        proposals_created: created.length,
+        deadline_proposals: created.filter(c => c.kind === "deadline").length,
+        new_matter_proposals: created.filter(c => c.kind === "new_matter").length,
+        field_update_proposals: created.filter(c => c.kind === "field_update").length
+      },
+      matter_match: matterMatch,
+      proposals: created
+    });
+  } catch (err) {
+    console.error("POST /api/ingest error:", err.message);
+    res.status(500).json({ error: err.message || "Ingest error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  GET /api/proposals — list pending proposals (the inbox)
+//  Query: ?status=pending|accepted|dismissed|all  (default: pending)
+//         ?matter_id=N  (optional filter)
+// ─────────────────────────────────────────────────────────────
+router.get("/api/proposals", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    if (!userId) return res.status(500).json({ error: "User not found" });
+
+    const statusFilter = req.query.status || "pending";
+    if (!["pending", "accepted", "dismissed", "all"].includes(statusFilter)) {
+      return res.status(400).json({ error: "Invalid status filter" });
+    }
+    const matterFilter = req.query.matter_id ? parseInt(req.query.matter_id) : null;
+    if (req.query.matter_id && isNaN(matterFilter)) {
+      return res.status(400).json({ error: "Invalid matter_id" });
+    }
+
+    const conditions = ["p.user_id = $1"];
+    const params = [userId];
+    let i = 2;
+    if (statusFilter !== "all") {
+      conditions.push(`p.status = $${i++}`);
+      params.push(statusFilter);
+    }
+    if (matterFilter !== null) {
+      conditions.push(`p.matter_id = $${i++}`);
+      params.push(matterFilter);
+    }
+
+    const r = await db.query(
+      `SELECT p.id, p.matter_id, p.kind, p.source, p.source_ref,
+              p.proposed_data, p.raw_excerpt, p.status, p.confidence,
+              p.created_at, p.resolved_at,
+              m.client_name AS matter_client_name,
+              m.matter_ref  AS matter_ref
+         FROM matter_proposals p
+         LEFT JOIN matters m ON m.id = p.matter_id
+         WHERE ${conditions.join(" AND ")}
+         ORDER BY p.created_at DESC
+         LIMIT 200`,
+      params
+    );
+
+    res.json({ proposals: r.rows });
+  } catch (err) {
+    console.error("GET /api/proposals error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  PATCH /api/proposals/:id — accept or dismiss a proposal
+//  Body: { action: 'accept' | 'dismiss', matter_id?: N (for unmatched proposals) }
+//
+//  On 'accept':
+//    - kind='deadline': creates a row in matter_deadlines
+//    - kind='new_matter': creates a row in matters
+//    - kind='field_update': applies fields to the matter row
+//  Then marks the proposal as 'accepted'.
+//
+//  On 'dismiss': just marks as 'dismissed'. No data written.
+// ─────────────────────────────────────────────────────────────
+router.patch("/api/proposals/:id", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    if (!userId) return res.status(500).json({ error: "User not found" });
+
+    const propId = parseInt(req.params.id);
+    if (isNaN(propId)) return res.status(400).json({ error: "Invalid id" });
+
+    const { action, matter_id: matterIdOverride } = req.body || {};
+    if (!["accept", "dismiss"].includes(action)) {
+      return res.status(400).json({ error: "action must be 'accept' or 'dismiss'" });
+    }
+
+    // Load the proposal (verify ownership)
+    const pr = await db.query(
+      `SELECT * FROM matter_proposals WHERE id = $1 AND user_id = $2`,
+      [propId, userId]
+    );
+    if (!pr.rows.length) return res.status(404).json({ error: "Proposal not found" });
+    const prop = pr.rows[0];
+
+    if (prop.status !== "pending") {
+      return res.status(409).json({ error: `Proposal already ${prop.status}` });
+    }
+
+    // DISMISS path — easy
+    if (action === "dismiss") {
+      await db.query(
+        `UPDATE matter_proposals SET status='dismissed', resolved_at=NOW() WHERE id=$1`,
+        [propId]
+      );
+      return res.json({ ok: true, action: "dismissed", id: propId });
+    }
+
+    // ACCEPT path — depends on kind
+    const data = typeof prop.proposed_data === "string"
+      ? JSON.parse(prop.proposed_data)
+      : prop.proposed_data;
+    const effectiveMatterId = matterIdOverride
+      ? parseInt(matterIdOverride)
+      : prop.matter_id;
+
+    if (prop.kind === "deadline") {
+      if (!effectiveMatterId) {
+        return res.status(400).json({ error: "Deadline proposal has no matter_id — pass matter_id in body" });
+      }
+      // Verify the target matter is ours
+      const mc = await db.query(
+        `SELECT id FROM matters WHERE id = $1 AND user_id = $2`,
+        [effectiveMatterId, userId]
+      );
+      if (!mc.rows.length) return res.status(404).json({ error: "Target matter not found" });
+
+      const ins = await db.query(
+        `INSERT INTO matter_deadlines (matter_id, title, citation, due_date, party, note, completed)
+         VALUES ($1, $2, $3, $4, $5, $6, FALSE)
+         RETURNING id, title, due_date`,
+        [
+          effectiveMatterId,
+          String(data.title || "Untitled").substring(0, 300),
+          data.citation ? String(data.citation).substring(0, 200) : null,
+          data.due_date,
+          ["us", "them", "court"].includes(data.party) ? data.party : "us",
+          data.source_excerpt ? String(data.source_excerpt).substring(0, 1000) : null
+        ]
+      );
+      await db.query(
+        `UPDATE matter_proposals SET status='accepted', resolved_at=NOW(), matter_id=$2 WHERE id=$1`,
+        [propId, effectiveMatterId]
+      );
+      return res.json({ ok: true, action: "accepted", kind: "deadline", deadline: ins.rows[0] });
+    }
+
+    if (prop.kind === "new_matter") {
+      // Build matter payload from intake fields
+      const finalStatus = "active";
+      const ins = await db.query(
+        `INSERT INTO matters
+           (user_id, client_name, matter_ref, court, case_type, status,
+            opened_date, triggering_date, custody_location,
+            petitioner_name, relief_sought, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING id, client_name, matter_ref`,
+        [
+          userId,
+          (data.client_name || data.petitioner_name || "Unknown").substring(0, 200),
+          data.matter_ref ? String(data.matter_ref).substring(0, 100) : null,
+          data.court ? String(data.court).substring(0, 100) : null,
+          data.case_type ? String(data.case_type).substring(0, 50) : null,
+          finalStatus,
+          data.opened_date && /^\d{4}-\d{2}-\d{2}$/.test(data.opened_date) ? data.opened_date : null,
+          data.triggering_date && /^\d{4}-\d{2}-\d{2}$/.test(data.triggering_date) ? data.triggering_date : null,
+          data.custody_location ? String(data.custody_location).substring(0, 300) : null,
+          data.petitioner_name ? String(data.petitioner_name).substring(0, 200) : null,
+          data.relief_sought ? String(data.relief_sought).substring(0, 300) : null,
+          data.notes ? String(data.notes).substring(0, 2000) : null
+        ]
+      );
+      const newMatterId = ins.rows[0].id;
+      await db.query(
+        `UPDATE matter_proposals SET status='accepted', resolved_at=NOW(), matter_id=$2 WHERE id=$1`,
+        [propId, newMatterId]
+      );
+      // Also attach any pending unmatched deadline proposals to this new matter
+      await db.query(
+        `UPDATE matter_proposals
+            SET matter_id = $1
+          WHERE user_id = $2 AND matter_id IS NULL AND kind = 'deadline' AND status = 'pending'
+            AND proposed_data->>'matter_ref' = $3`,
+        [newMatterId, userId, ins.rows[0].matter_ref || ""]
+      );
+      return res.json({ ok: true, action: "accepted", kind: "new_matter", matter: ins.rows[0] });
+    }
+
+    if (prop.kind === "field_update") {
+      if (!effectiveMatterId) {
+        return res.status(400).json({ error: "field_update proposal has no matter_id" });
+      }
+      // Apply each field as an update on the matter
+      const allowed = ["matter_ref", "court", "case_type", "petitioner_name",
+                       "opened_date", "triggering_date", "custody_location", "relief_sought"];
+      const sets = [];
+      const params = [effectiveMatterId, userId];
+      let i = 3;
+      for (const k of allowed) {
+        if (data[k] != null && data[k] !== "") {
+          sets.push(`${k} = $${i++}`);
+          params.push(data[k]);
+        }
+      }
+      if (sets.length === 0) {
+        await db.query(
+          `UPDATE matter_proposals SET status='dismissed', resolved_at=NOW() WHERE id=$1`,
+          [propId]
+        );
+        return res.json({ ok: true, action: "dismissed", reason: "no fields to apply" });
+      }
+      const upd = await db.query(
+        `UPDATE matters SET ${sets.join(", ")}
+          WHERE id = $1 AND user_id = $2
+          RETURNING id, client_name, matter_ref`,
+        params
+      );
+      if (!upd.rows.length) return res.status(404).json({ error: "Target matter not found" });
+      await db.query(
+        `UPDATE matter_proposals SET status='accepted', resolved_at=NOW() WHERE id=$1`,
+        [propId]
+      );
+      return res.json({ ok: true, action: "accepted", kind: "field_update", matter: upd.rows[0], applied_fields: Object.keys(data).filter(k => allowed.includes(k)) });
+    }
+
+    return res.status(500).json({ error: "Unknown proposal kind: " + prop.kind });
+  } catch (err) {
+    console.error("PATCH /api/proposals error:", err.message);
+    res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  GET /api/proposals/count — quick badge count for UI
+//  Returns: { pending: N, by_matter: { matter_id: count, ... } }
+// ─────────────────────────────────────────────────────────────
+router.get("/api/proposals/count", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    if (!userId) return res.status(500).json({ error: "User not found" });
+
+    const tot = await db.query(
+      `SELECT COUNT(*)::int AS n FROM matter_proposals WHERE user_id = $1 AND status = 'pending'`,
+      [userId]
+    );
+    const byMatter = await db.query(
+      `SELECT matter_id, COUNT(*)::int AS n
+         FROM matter_proposals
+        WHERE user_id = $1 AND status = 'pending'
+        GROUP BY matter_id`,
+      [userId]
+    );
+
+    const byMatterMap = {};
+    for (const row of byMatter.rows) {
+      byMatterMap[row.matter_id ?? "unmatched"] = row.n;
+    }
+
+    res.json({
+      pending: tot.rows[0].n,
+      by_matter: byMatterMap
+    });
+  } catch (err) {
+    console.error("GET /api/proposals/count error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // ── Helper: get the current user id (single-user system) ──
 // For now, every authenticated admin session is JJ Zhang (user id 1).
 // When multi-user is added later, derive this from the session token.
