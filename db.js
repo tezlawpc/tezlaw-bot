@@ -93,6 +93,7 @@ async function initDB() {
     await initWave2Tables();
     await initMatterManagerTables();
     await initMatterManagerV2();
+    await initMatterManagerV3();
     console.log("✅ DB tables ready");
   } catch (err) {
     console.error("❌ DB init error:", err.message);
@@ -790,6 +791,60 @@ async function initMatterManagerV2() {
   }
 }
 
+// ============================================================
+//  Matter Manager v3 (Phase 5 stage 2c) — Proposal Inbox
+//
+//  Adds:
+//    - matter_proposals table for pending NEF / order extractions
+//
+//  Stores deadline / field-update / new-matter proposals from
+//  CM/ECF emails (or pasted text) so the UI can show a review
+//  inbox before anything is written to live deadlines.
+//
+//  All operations additive and idempotent.
+// ============================================================
+async function initMatterManagerV3() {
+  try {
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS matter_proposals (
+        id              SERIAL        PRIMARY KEY,
+        user_id         INTEGER       NOT NULL
+                          REFERENCES users(id) ON DELETE CASCADE,
+        matter_id       INTEGER
+                          REFERENCES matters(id) ON DELETE SET NULL,
+        kind            VARCHAR(40)   NOT NULL,
+        source          VARCHAR(40)   NOT NULL DEFAULT 'manual_paste',
+        source_ref      VARCHAR(200),
+        proposed_data   JSONB         NOT NULL,
+        raw_excerpt     TEXT,
+        status          VARCHAR(20)   NOT NULL DEFAULT 'pending',
+        confidence      VARCHAR(10),
+        created_at      TIMESTAMPTZ   DEFAULT NOW(),
+        resolved_at     TIMESTAMPTZ,
+        CHECK (kind IN ('deadline', 'field_update', 'new_matter')),
+        CHECK (source IN ('manual_paste', 'email_inbound', 'api')),
+        CHECK (status IN ('pending', 'accepted', 'dismissed'))
+      )
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_proposals_user_status
+        ON matter_proposals(user_id, status)
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_proposals_matter_status
+        ON matter_proposals(matter_id, status)
+    `);
+    await getPool().query(`
+      CREATE INDEX IF NOT EXISTS idx_proposals_created
+        ON matter_proposals(created_at DESC)
+    `);
+
+    console.log("✅ Matter manager v3 schema ready (proposals inbox)");
+  } catch (err) {
+    console.error("❌ initMatterManagerV3 error:", err.message);
+  }
+}
+
 async function logAudit(actor, action, target, oldValue, newValue, ip) {
   try {
     await getPool().query(
@@ -976,7 +1031,7 @@ module.exports = {
   getHistory, getClientContext, saveSummary, clearHistory,
   saveIntake, maybeAutoSummarize, saveJJMemory, getJJMemories,
   setJJSession, getJJSession, getLastMessageTime, syncIntakeToClient,
-  initWave1Tables, initMatterManagerTables, initMatterManagerV2, logAudit, createLead, updateLeadStage,
+  initWave1Tables, initMatterManagerTables, initMatterManagerV2, initMatterManagerV3, logAudit, createLead, updateLeadStage,
   runConflictCheck, logUnansweredQuestion,
   query,
 };
