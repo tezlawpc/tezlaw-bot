@@ -115,6 +115,50 @@
   .new-matter h3 { font-family:var(--serif); font-size:22px; margin:0 0 4px; }
   .new-matter .hint { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; margin-bottom:18px; }
   .new-matter .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; }
+
+  /* NEF intake (paste an email to auto-populate) */
+  .nef-intake { background:var(--paper-3); border:1px dashed var(--rule); padding:16px 18px; margin-bottom:20px; }
+  .nef-intake .nef-label { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;
+    font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:var(--ink); }
+  .nef-intake .nef-hint { font-size:9px; color:var(--muted); letter-spacing:.12em; }
+  .nef-intake textarea { width:100%; min-height:80px; border:1px solid var(--rule); background:var(--paper);
+    padding:10px 12px; font-family:var(--mono); font-size:11px; line-height:1.5; color:var(--ink-2);
+    resize:vertical; }
+  .nef-intake textarea:focus { outline:none; border-color:var(--ink); }
+  .nef-intake .nef-actions { margin-top:10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .nef-intake #nm-nef-status { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.1em; }
+  .nef-intake #nm-nef-status.success { color:var(--green); }
+  .nef-intake #nm-nef-status.error { color:var(--accent); }
+  .nef-intake .field-flash { animation:flashFill 1.2s ease; }
+  @keyframes flashFill {
+    0% { background:rgba(122,29,29,.18); }
+    100% { background:transparent; }
+  }
+
+  /* Court Order Parser on matter detail */
+  .order-parser { background:var(--paper-2); border:1px solid var(--rule); padding:22px 26px;
+    margin-top:24px; box-shadow:var(--shadow); }
+  .order-parser h4 { font-family:var(--serif); font-size:19px; margin:0 0 4px; }
+  .order-parser .sub-cite { font-family:var(--mono); font-size:10px; color:var(--muted);
+    letter-spacing:.12em; text-transform:uppercase; margin-bottom:14px; }
+  .order-parser textarea { width:100%; min-height:120px; border:1px solid var(--rule); background:var(--paper);
+    padding:12px; font-family:var(--mono); font-size:11px; line-height:1.5; color:var(--ink-2); resize:vertical; }
+  .order-parser textarea:focus { outline:none; border-color:var(--ink); }
+  .order-parser .parser-actions { margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .order-parser #op-status { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.1em; }
+  .order-parser #op-status.error { color:var(--accent); }
+  .op-proposals { margin-top:18px; display:flex; flex-direction:column; gap:10px; }
+  .op-prop { background:var(--paper); border:1px solid var(--rule); padding:14px 16px;
+    display:grid; grid-template-columns:1fr auto; gap:12px; align-items:flex-start; }
+  .op-prop.added { opacity:.55; background:var(--paper-3); }
+  .op-prop .op-prop-main h5 { font-family:var(--serif); font-size:17px; margin:0 0 4px; }
+  .op-prop .op-prop-meta { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.04em; }
+  .op-prop .op-prop-excerpt { font-style:italic; font-size:13px; color:var(--ink-2); margin-top:6px; line-height:1.4; }
+  .op-prop .op-prop-conf { display:inline-block; padding:2px 6px; font-family:var(--mono); font-size:9px;
+    text-transform:uppercase; letter-spacing:.12em; border:1px solid var(--rule); margin-left:6px; }
+  .op-prop .op-prop-conf.high { color:var(--green); border-color:var(--green); }
+  .op-prop .op-prop-conf.medium { color:var(--amber); border-color:var(--amber); }
+  .op-prop .op-prop-conf.low { color:var(--accent); border-color:var(--accent); }
   .field label { display:block; font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:.18em; color:var(--muted); margin-bottom:4px; }
   .field input, .field select, .field textarea { width:100%; border:1px solid var(--rule); background:var(--paper); padding:8px 10px;
     font-family:var(--sans); font-size:13px; outline:none; }
@@ -304,6 +348,20 @@
       <div class="new-matter">
         <h3>Open a New Matter</h3>
         <div class="hint">Client name is required · everything else can be edited later</div>
+
+        <div class="nef-intake">
+          <div class="nef-label">
+            <span>📋 Paste NEF / BIA decision / court email here to auto-populate fields</span>
+            <span class="nef-hint">optional · review fields before saving</span>
+          </div>
+          <textarea id="nm-nef-text" placeholder="Paste the full Notice of Electronic Filing email, BIA decision text, or court order here. Claude will extract case name, number, court, type, dates, and custody."></textarea>
+          <div class="nef-actions">
+            <button class="btn small" id="nm-nef-parse">⚡ Parse &amp; Populate</button>
+            <button class="btn ghost small" id="nm-nef-clear">Clear</button>
+            <span id="nm-nef-status"></span>
+          </div>
+        </div>
+
         <div class="grid">
           <div class="field"><label>Client / Petitioner</label><input type="text" id="nm-client" placeholder="e.g., Lu, Guangfeng" /></div>
           <div class="field"><label>Adverse Party</label><input type="text" id="nm-adverse" placeholder="e.g., Bondi" /></div>
@@ -342,6 +400,8 @@
           <div class="field"><label>Adverse Party Detained?</label>
             <select id="nm-detained"><option value="no">No</option><option value="yes">Yes</option><option value="na">N/A</option></select>
           </div>
+          <div class="field"><label>Custody Facility (if detained)</label><input type="text" id="nm-custody" placeholder="e.g., Cimarron Facility, Cushing OK" /></div>
+          <div class="field"><label>Relief Sought</label><input type="text" id="nm-relief" placeholder="e.g., Asylum / W/H / CAT" /></div>
         </div>
         <div class="actions">
           <button class="btn" id="nm-save">Open Matter</button>
@@ -402,6 +462,18 @@
       <h4 id="checklist-heading">Standard Filings</h4>
       <div class="sub-cite" id="checklist-cite"></div>
       <ul class="check" id="matter-checklist"></ul>
+    </div>
+
+    <div class="order-parser">
+      <h4>⚡ Parse Court Order</h4>
+      <div class="sub-cite">Paste a scheduling order, NEF, BIA decision, or court text — Claude proposes deadlines you can review and add</div>
+      <textarea id="op-text" placeholder="Paste the order text here. Claude will extract every date-certain deadline, identify who must act (us / govt / court), and cite the rule."></textarea>
+      <div class="parser-actions">
+        <button class="btn small" id="op-parse">⚡ Analyze</button>
+        <button class="btn ghost small" id="op-clear">Clear</button>
+        <span id="op-status"></span>
+      </div>
+      <div class="op-proposals" id="op-proposals"></div>
     </div>
   </section>
 
@@ -1092,26 +1164,31 @@ document.getElementById('show-new-matter').addEventListener('click', () => {
 });
 document.getElementById('nm-cancel').addEventListener('click', () => {
   document.getElementById('new-matter-form').style.display = 'none';
-  ['nm-client','nm-adverse','nm-casenum','nm-trigger','nm-dropbox'].forEach(id => document.getElementById(id).value = '');
+  ['nm-client','nm-adverse','nm-casenum','nm-trigger','nm-dropbox','nm-custody','nm-relief','nm-nef-text']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const status = document.getElementById('nm-nef-status');
+  if (status) { status.textContent = ''; status.className = ''; }
 });
 document.getElementById('nm-save').addEventListener('click', async () => {
   const client = document.getElementById('nm-client').value.trim();
   if (!client) { alert('Client name is required.'); return; }
   const adverse = document.getElementById('nm-adverse').value.trim();
+  const detained = document.getElementById('nm-detained').value;
+  const custody = document.getElementById('nm-custody').value.trim();
   const newMatterLocal = {
     client, adverse,
     court: document.getElementById('nm-court').value,
     type: document.getElementById('nm-type').value,
     casenum: document.getElementById('nm-casenum').value.trim(),
     trigger: document.getElementById('nm-trigger').value,
-    detained: document.getElementById('nm-detained').value,
-    detentionFacility: '',
+    detained: detained,
+    detentionFacility: custody,
     dropbox: document.getElementById('nm-dropbox').value.trim(),
     notes: '',
     created: new Date().toISOString().slice(0,10),
     archived: false,
     petitioner: client,
-    relief: ''
+    relief: document.getElementById('nm-relief').value.trim()
   };
   try {
     const payload = matterPayloadToDb(newMatterLocal);
@@ -1126,6 +1203,100 @@ document.getElementById('nm-save').addEventListener('click', async () => {
   }
 });
 
+// ── NEF Intake: paste email -> Claude extracts -> auto-populate form ─
+document.getElementById('nm-nef-clear').addEventListener('click', () => {
+  document.getElementById('nm-nef-text').value = '';
+  const status = document.getElementById('nm-nef-status');
+  status.textContent = ''; status.className = '';
+});
+
+document.getElementById('nm-nef-parse').addEventListener('click', async () => {
+  const text = document.getElementById('nm-nef-text').value.trim();
+  const status = document.getElementById('nm-nef-status');
+  if (!text) {
+    status.textContent = 'Paste some text first';
+    status.className = 'error';
+    return;
+  }
+  status.textContent = 'Analyzing… (~5 sec)'; status.className = '';
+  const btn = document.getElementById('nm-nef-parse');
+  btn.disabled = true;
+  try {
+    const r = await api('/parse-intake', { method: 'POST', body: { nef_text: text } });
+    const f = r.fields || {};
+    const conf = r.confidence || 'low';
+
+    // Populate fields, only if extracted (don't blow away user edits)
+    function setIf(id, val) {
+      if (val == null || val === '') return;
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.value = val;
+      el.classList.remove('field-flash');
+      void el.offsetWidth; // force reflow
+      el.classList.add('field-flash');
+    }
+
+    // Split client_name "X v. Y" into client + adverse
+    if (f.client_name) {
+      const vMatch = f.client_name.match(/^(.+?)\s+v\.?\s+(.+)$/i);
+      if (vMatch) {
+        setIf('nm-client', vMatch[1].trim());
+        setIf('nm-adverse', vMatch[2].trim());
+      } else {
+        setIf('nm-client', f.client_name);
+      }
+    }
+    // Override client with petitioner_name if more specific
+    if (f.petitioner_name && !document.getElementById('nm-client').value) {
+      setIf('nm-client', f.petitioner_name);
+    }
+    setIf('nm-casenum', f.matter_ref);
+    setIf('nm-trigger', f.triggering_date);
+    setIf('nm-custody', f.custody_location);
+    setIf('nm-relief', f.relief_sought);
+
+    // Set select values if matching option exists
+    if (f.court) {
+      const sel = document.getElementById('nm-court');
+      for (const opt of sel.options) {
+        if (opt.value === f.court || opt.text.includes(f.court)) {
+          sel.value = opt.value;
+          sel.classList.add('field-flash');
+          setTimeout(() => sel.classList.remove('field-flash'), 1200);
+          break;
+        }
+      }
+    }
+    if (f.case_type) {
+      const sel = document.getElementById('nm-type');
+      for (const opt of sel.options) {
+        if (opt.value === f.case_type) {
+          sel.value = opt.value;
+          sel.classList.add('field-flash');
+          setTimeout(() => sel.classList.remove('field-flash'), 1200);
+          break;
+        }
+      }
+    }
+    if (f.custody_location) {
+      const sel = document.getElementById('nm-detained');
+      sel.value = 'yes';
+      sel.classList.add('field-flash');
+      setTimeout(() => sel.classList.remove('field-flash'), 1200);
+    }
+
+    const filled = Object.values(f).filter(v => v != null && v !== '').length;
+    status.textContent = `✓ Populated ${filled} field${filled === 1 ? '' : 's'} · confidence ${conf} · review before saving`;
+    status.className = 'success';
+  } catch (e) {
+    status.textContent = '⚠ ' + e.message;
+    status.className = 'error';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // ============================================================
 // MATTER DETAIL
 // ============================================================
@@ -1137,6 +1308,15 @@ function getCurrentMatter() { return state.matters.find(m => m.id === currentMat
 function renderMatterDetail() {
   const m = getCurrentMatter();
   if (!m) { showView('active'); return; }
+  // Reset order parser when entering a detail view
+  const opText = document.getElementById('op-text');
+  const opProp = document.getElementById('op-proposals');
+  const opStat = document.getElementById('op-status');
+  if (opText) opText.value = '';
+  if (opProp) opProp.innerHTML = '';
+  if (opStat) { opStat.textContent = ''; opStat.className = ''; }
+  window._opProposals = [];
+
   const head = document.getElementById('matter-head');
   const caption = `${m.client} v. ${m.adverse || '—'}`;
   head.innerHTML = `
@@ -1657,6 +1837,111 @@ function exportMatterToICS() {
 
 document.getElementById('export-all-ics-btn').addEventListener('click', exportAllToICS);
 document.getElementById('export-matter-ics').addEventListener('click', exportMatterToICS);
+
+// ============================================================
+// COURT ORDER PARSER (detail view)
+// ============================================================
+document.getElementById('op-clear').addEventListener('click', () => {
+  document.getElementById('op-text').value = '';
+  document.getElementById('op-proposals').innerHTML = '';
+  const status = document.getElementById('op-status');
+  status.textContent = ''; status.className = '';
+});
+
+document.getElementById('op-parse').addEventListener('click', async () => {
+  const m = getCurrentMatter(); if (!m) return;
+  const text = document.getElementById('op-text').value.trim();
+  const status = document.getElementById('op-status');
+  if (!text) {
+    status.textContent = 'Paste an order first';
+    status.className = 'error';
+    return;
+  }
+  status.textContent = 'Analyzing… (~5-10 sec)'; status.className = '';
+  document.getElementById('op-proposals').innerHTML = '';
+  const btn = document.getElementById('op-parse');
+  btn.disabled = true;
+  try {
+    const r = await api('/parse', { method: 'POST', body: { order_text: text } });
+    const proposals = r.deadlines || [];
+    if (proposals.length === 0) {
+      status.textContent = 'No deadlines proposed.';
+      status.className = '';
+      return;
+    }
+    status.textContent = `Found ${proposals.length} deadline${proposals.length === 1 ? '' : 's'} · review and add`;
+    status.className = 'success';
+    window._opProposals = proposals;
+    renderOpProposals();
+  } catch (e) {
+    status.textContent = '⚠ ' + e.message;
+    status.className = 'error';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function renderOpProposals() {
+  const proposals = window._opProposals || [];
+  const c = document.getElementById('op-proposals');
+  c.innerHTML = proposals.map((p, idx) => {
+    if (p._added) {
+      return `<div class="op-prop added" data-idx="${idx}">
+        <div class="op-prop-main">
+          <h5>✓ Added: ${escapeHtml(p.title)}</h5>
+          <div class="op-prop-meta">${escapeHtml(p.due_date || 'no date')} · ${escapeHtml(p.party)}</div>
+        </div>
+        <div></div>
+      </div>`;
+    }
+    const partyLabel = p.party === 'us' ? 'Us' : p.party === 'them' ? 'Govt/Opp' : 'Court';
+    return `<div class="op-prop" data-idx="${idx}">
+      <div class="op-prop-main">
+        <h5>${escapeHtml(p.title)} <span class="op-prop-conf ${p.confidence}">${p.confidence}</span></h5>
+        <div class="op-prop-meta">
+          ${escapeHtml(p.due_date || 'no date')} ·
+          ${escapeHtml(partyLabel)} ·
+          ${escapeHtml(p.citation || 'no cite')}
+        </div>
+        ${p.source_excerpt ? `<div class="op-prop-excerpt">"${escapeHtml(p.source_excerpt)}"</div>` : ''}
+      </div>
+      <button class="btn small op-add-btn" data-idx="${idx}" ${!p.due_date ? 'disabled title="No date — add manually"' : ''}>+ Add</button>
+    </div>`;
+  }).join('');
+  c.querySelectorAll('.op-add-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.idx);
+      const p = proposals[idx];
+      if (!p || !p.due_date) return;
+      const m = getCurrentMatter(); if (!m) return;
+      btn.disabled = true; btn.textContent = '…';
+      try {
+        await api(`/matters/${m.id}/deadlines`, {
+          method: 'POST',
+          body: {
+            title: p.title,
+            citation: p.citation || '',
+            due_date: p.due_date,
+            party: p.party || 'us',
+            note: p.source_excerpt || ''
+          }
+        });
+        p._added = true;
+        await reloadMatter(m.id);
+        const fresh = getCurrentMatter();
+        if (fresh) {
+          renderMatterStats(fresh);
+          renderDeadlines(fresh);
+          renderOverviewStats();
+        }
+        renderOpProposals();
+      } catch (e) {
+        btn.disabled = false; btn.textContent = '+ Add';
+        alert('Add failed: ' + e.message);
+      }
+    });
+  });
+}
 
 // ============================================================
 // INIT
