@@ -981,7 +981,9 @@ function mapMatterFromDb(dbm, deadlines, files, notes, checklists) {
       dbId: d.id,
       title: d.title,
       cite: d.citation || '',
-      date: d.due_date,                          // YYYY-MM-DD
+      // Normalize date: DB returns either "YYYY-MM-DD" (DATE column) or
+      // "YYYY-MM-DDTHH:MM:SS.sssZ" (TIMESTAMP). Slice to date only.
+      date: d.due_date ? String(d.due_date).slice(0, 10) : '',
       party: d.party || 'us',
       note: d.note || '',
       done: !!d.completed
@@ -1195,7 +1197,13 @@ const COURT_LINKS = {
 // HELPERS
 // ============================================================
 const TODAY = new Date(); TODAY.setHours(0,0,0,0);
-function parseDate(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+function parseDate(s) {
+  if (!s) return new Date(NaN);
+  // Accept "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM:SS.sssZ" — take only the date part
+  const datePart = String(s).slice(0, 10);
+  const [y,m,d] = datePart.split('-').map(Number);
+  return new Date(y, m-1, d);
+}
 function fmtDate(d) { return d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' }); }
 function daysUntil(d) { return Math.round((d - TODAY)/86400000); }
 function urgencyClass(days) { if (days < 0) return 'passed'; if (days <= 7) return 'urgent'; if (days <= 21) return 'warn'; return 'safe'; }
