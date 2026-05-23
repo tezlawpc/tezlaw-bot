@@ -1,1537 +1,1671 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Matter Manager &amp; Docket — Tez Law P.C. · v2</title>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TEZ Law Firm — Matter Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=JetBrains+Mono:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --paper:       #f4f1ea;
-    --paper-deep:  #ebe6dc;
-    --paper-edge:  #d9d2c4;
-    --ink:         #1a1a1a;
-    --ink-soft:    #4a4a4a;
-    --ink-faint:   #888;
-    --oxblood:     #7a1d1d;
-    --oxblood-d:   #5e1414;
-    --rule:        #c9c2b3;
-    --us:          #2d5a3d;
-    --them:        #7a1d1d;
-    --court:       #6b5a1d;
-    --urgent:      #c0392b;
-    --soon:        #d4842b;
-    --safe:        #5a7a3d;
-    --done:        #999;
-    --green-dot:   #5a7a3d;
+    --ink:        #0f1419;
+    --ink-2:      #2a2f36;
+    --paper:      #f4f1ea;
+    --paper-2:    #ebe6dc;
+    --paper-3:    #e2dccd;
+    --rule:       #bcb59f;
+    --rule-soft:  #d6cfbb;
+    --accent:     #7a1d1d;
+    --accent-2:   #a23030;
+    --gold:       #8a6a1f;
+    --green:      #2f5d3b;
+    --amber:      #b87333;
+    --muted:      #6b6557;
+    --shadow:     0 1px 0 rgba(15,20,25,.04), 0 10px 30px -12px rgba(15,20,25,.18);
+    --serif:      'Cormorant Garamond', Georgia, serif;
+    --sans:       'Inter Tight', system-ui, sans-serif;
+    --mono:       'JetBrains Mono', 'SF Mono', Menlo, monospace;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { background: var(--paper); color: var(--ink); }
-  body {
-    font-family: 'Cormorant Garamond', Georgia, serif;
-    font-size: 18px;
-    line-height: 1.5;
-    min-height: 100vh;
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--paper); color:var(--ink); font-family:var(--sans); font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  body::before {
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(circle at 20% 10%, rgba(138,106,31,.04), transparent 40%),
+      radial-gradient(circle at 80% 60%, rgba(122,29,29,.03), transparent 50%),
+      repeating-linear-gradient(0deg, transparent 0, transparent 2px, rgba(0,0,0,.012) 2px, rgba(0,0,0,.012) 3px);
   }
-  .label, .mono {
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--ink-soft);
-  }
-  button, input, textarea, select {
-    font-family: inherit;
-    font-size: 16px;
-    color: var(--ink);
-  }
-  a { color: var(--oxblood); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  .app { position:relative; z-index:1; max-width:1400px; margin:0 auto; padding:28px 36px 80px; }
 
-  .app { max-width: 1400px; margin: 0 auto; padding: 36px 40px 80px; }
+  /* Masthead */
+  .masthead { border-top:3px double var(--ink); border-bottom:3px double var(--ink); padding:18px 0 14px; margin-bottom:22px;
+    display:flex; justify-content:space-between; align-items:baseline; gap:24px; flex-wrap:wrap; }
+  .masthead h1 { font-family:var(--serif); font-weight:600; font-size:38px; letter-spacing:.02em; margin:0; line-height:1; }
+  .masthead h1 .amp { font-style:italic; color:var(--accent); font-weight:500; padding:0 4px; }
+  .masthead .meta { font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.18em; color:var(--muted); text-align:right; }
+  .masthead .meta .firm { color:var(--ink); font-weight:600; }
+  .masthead .meta .live::before { content:"●"; color:var(--green); margin-right:6px; animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 
-  /* ── V2 BANNER ──────────────────────────────────────────── */
-  .v2-banner {
-    background: #fff8e6;
-    border: 1px solid #d4842b;
-    color: #6b4a1c;
-    padding: 8px 14px;
-    margin-bottom: 18px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  }
-  .v2-banner a { color: var(--oxblood); font-weight: 600; }
+  /* Nav */
+  .nav { display:flex; gap:0; border-bottom:1px solid var(--rule); margin-bottom:28px; overflow-x:auto; }
+  .nav-btn { appearance:none; background:transparent; border:none; border-bottom:2px solid transparent;
+    padding:14px 22px 12px; font-family:var(--serif); font-size:18px; color:var(--muted); cursor:pointer;
+    transition:color .15s, border-color .15s; white-space:nowrap; letter-spacing:.01em; }
+  .nav-btn:hover { color:var(--ink); }
+  .nav-btn.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+  .nav-btn .badge { display:inline-block; font-family:var(--mono); font-size:10px;
+    background:var(--ink); color:var(--paper); padding:1px 7px; margin-left:8px; border-radius:10px;
+    vertical-align:middle; font-weight:500; letter-spacing:.06em; }
+  .nav-btn.active .badge { background:var(--accent); }
 
-  /* ── Header ─────────────────────────────────────────────── */
-  header.brand-head {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: end;
-    gap: 24px;
-    padding-bottom: 18px;
-    border-top: 2px solid var(--ink);
-    border-bottom: 2px solid var(--ink);
-    padding-top: 18px;
-    position: relative;
-  }
-  header.brand-head::before {
-    content: ""; position: absolute; top: 6px; left: 0; right: 0;
-    border-top: 1px solid var(--ink);
-  }
-  h1.title {
-    font-weight: 500;
-    font-size: 56px;
-    letter-spacing: -0.01em;
-    line-height: 1;
-    margin: 0;
-  }
-  h1.title em {
-    color: var(--oxblood);
-    font-style: italic;
-    font-weight: 500;
-  }
-  .firmline {
-    text-align: right;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    line-height: 1.6;
-  }
-  .firmline .date-row {
-    color: var(--ink-soft);
-    margin-top: 6px;
-    display: flex; align-items: center; justify-content: flex-end; gap: 8px;
-  }
-  .firmline .green-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--green-dot); display: inline-block;
-  }
+  .panel { display:none; }
+  .panel.active { display:block; animation:fadeIn .25s ease; }
+  @keyframes fadeIn { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:translateY(0)} }
 
-  /* ── Tabs ───────────────────────────────────────────────── */
-  .tabs {
-    display: flex; gap: 38px; margin-top: 30px;
-    border-bottom: 1px solid var(--rule); padding-bottom: 0;
-  }
-  .tab {
-    background: none; border: none; padding: 0 0 12px 0; cursor: pointer;
-    font-size: 22px; color: var(--ink-faint);
-    border-bottom: 2px solid transparent;
-    transition: color 0.15s, border-color 0.15s;
-    font-family: inherit;
-  }
-  .tab:hover { color: var(--ink-soft); }
-  .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
-  .tab .count {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px; color: var(--ink-faint);
-    margin-left: 6px; vertical-align: middle;
-  }
+  /* Page header */
+  .page-head { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px; gap:16px; flex-wrap:wrap; }
+  .page-head h2 { font-family:var(--serif); font-size:32px; margin:0; letter-spacing:.01em; }
+  .page-head .sub { font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:.16em; text-transform:uppercase; margin-top:6px; }
+  .page-head .actions { display:flex; gap:10px; flex-wrap:wrap; }
 
-  .section { display: none; margin-top: 30px; }
-  .section.active { display: block; }
+  .btn { appearance:none; background:var(--ink); color:var(--paper); border:none;
+    padding:10px 18px; font-family:var(--mono); font-size:10px;
+    text-transform:uppercase; letter-spacing:.18em; cursor:pointer; transition:background .15s; }
+  .btn:hover { background:var(--accent); }
+  .btn.ghost { background:transparent; color:var(--ink); border:1px solid var(--ink); }
+  .btn.ghost:hover { background:var(--ink); color:var(--paper); }
+  .btn.danger { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  .btn.danger:hover { background:var(--accent); color:var(--paper); }
+  .btn.small { padding:6px 12px; font-size:9px; }
 
-  /* ── List View ──────────────────────────────────────────── */
-  .list-header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 22px;
-  }
-  .list-header h2 {
-    font-size: 28px; font-weight: 500; letter-spacing: -0.005em;
-  }
-  .btn {
-    background: var(--paper);
-    border: 1.5px solid var(--ink);
-    padding: 8px 18px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    cursor: pointer;
-    color: var(--ink);
-    transition: background 0.12s, color 0.12s;
-  }
-  .btn:hover { background: var(--ink); color: var(--paper); }
-  .btn.btn-primary {
-    background: var(--ink); color: var(--paper);
-  }
-  .btn.btn-primary:hover { background: var(--oxblood); border-color: var(--oxblood); }
-  .btn.btn-danger { border-color: var(--oxblood); color: var(--oxblood); }
-  .btn.btn-danger:hover { background: var(--oxblood); color: var(--paper); }
-  .btn.btn-small { padding: 5px 12px; font-size: 10px; }
+  /* Stats */
+  .stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:14px; margin-bottom:28px; }
+  .stat { background:#fff; border:1px solid var(--rule); padding:16px 20px; box-shadow:var(--shadow); }
+  .stat .lbl { font-family:var(--mono); font-size:9px; letter-spacing:.2em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+  .stat .val { font-family:var(--serif); font-size:34px; font-weight:600; line-height:1; }
+  .stat .val.alarm { color:var(--accent); }
+  .stat .val.safe { color:var(--green); }
+  .stat .val.warn { color:var(--amber); }
+  .stat .sub { font-family:var(--mono); font-size:10px; color:var(--muted); margin-top:6px; }
 
-  .matter-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-    gap: 18px;
-  }
-  .matter-card {
-    background: var(--paper-deep);
-    border: 1px solid var(--paper-edge);
-    padding: 22px;
-    cursor: pointer;
-    transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
-  }
-  .matter-card:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 18px rgba(0,0,0,0.06);
-    border-color: var(--ink-soft);
-  }
-  .matter-card .court-line {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--oxblood); margin-bottom: 10px;
-  }
-  .matter-card .client {
-    font-style: italic; font-size: 26px; line-height: 1.1;
-    margin-bottom: 4px;
-  }
-  .matter-card .ref {
-    font-family: 'JetBrains Mono', monospace; font-size: 12px;
-    color: var(--ink-soft); margin-bottom: 14px;
-  }
-  .matter-card .footer {
-    margin-top: 14px; padding-top: 12px;
-    border-top: 1px dashed var(--rule);
-    display: flex; justify-content: space-between; align-items: center;
-    font-family: 'JetBrains Mono', monospace; font-size: 10px;
-    letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--ink-soft);
-  }
-  .matter-card .checklist-frag { color: var(--ink); }
+  /* Matter cards */
+  .matter-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); gap:18px; }
+  .matter-card { background:#fff; border:1px solid var(--rule); padding:20px 22px; position:relative; cursor:pointer;
+    transition:transform .15s, box-shadow .15s, border-color .15s; box-shadow:var(--shadow); }
+  .matter-card:hover { transform:translateY(-2px); box-shadow:0 1px 0 rgba(15,20,25,.04), 0 18px 40px -16px rgba(15,20,25,.28); border-color:var(--ink); }
+  .matter-card .court { font-family:var(--mono); font-size:9px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); margin-bottom:6px; }
+  .matter-card h3 { font-family:var(--serif); font-size:22px; font-style:italic; margin:0 0 4px; line-height:1.2; }
+  .matter-card .casenum { font-family:var(--mono); font-size:11px; color:var(--muted); margin-bottom:14px; }
+  .matter-card .next { border-top:1px dashed var(--rule); padding-top:12px; display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .matter-card .next-label { font-family:var(--mono); font-size:9px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); }
+  .matter-card .next-title { font-family:var(--serif); font-size:15px; font-style:italic; flex:1; margin:0 8px; }
+  .matter-card .next-days { font-family:var(--serif); font-size:28px; font-weight:600; line-height:1; }
+  .matter-card .next-days.urgent { color:var(--accent); }
+  .matter-card .next-days.warn { color:var(--amber); }
+  .matter-card .next-days.safe { color:var(--green); }
+  .matter-card .meta-row { display:flex; justify-content:space-between; align-items:center; margin-top:12px;
+    font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.06em; }
+  .matter-card.archived { opacity:.6; background:var(--paper-3); }
+  .matter-card.archived h3 { text-decoration:line-through; }
 
-  .empty {
-    text-align: center; padding: 60px 20px;
-    color: var(--ink-faint); font-style: italic;
-  }
+  /* New matter form */
+  .new-matter { background:var(--paper-2); border:1px solid var(--rule); padding:24px 28px; margin-bottom:24px; box-shadow:var(--shadow); }
+  .new-matter h3 { font-family:var(--serif); font-size:22px; margin:0 0 4px; }
+  .new-matter .hint { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; margin-bottom:18px; }
+  .new-matter .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; }
+  .field label { display:block; font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:.18em; color:var(--muted); margin-bottom:4px; }
+  .field input, .field select, .field textarea { width:100%; border:1px solid var(--rule); background:var(--paper); padding:8px 10px;
+    font-family:var(--sans); font-size:13px; outline:none; }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color:var(--ink); }
+  .new-matter .actions { margin-top:18px; display:flex; gap:10px; }
 
-  /* ── DETAIL VIEW — the heart of v2 ─────────────────────── */
-  .back-row {
-    margin-bottom: 20px;
-    display: flex; justify-content: space-between; align-items: center;
-  }
-  .back-link {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--ink-soft); background: none; border: none;
-    cursor: pointer; padding: 0;
-  }
-  .back-link:hover { color: var(--oxblood); }
+  /* Matter detail */
+  .back-link { display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:10px;
+    color:var(--muted); letter-spacing:.18em; text-transform:uppercase; cursor:pointer;
+    margin-bottom:16px; background:none; border:none; padding:0; }
+  .back-link:hover { color:var(--accent); }
+  .matter-head { background:var(--paper-2); border:1px solid var(--rule); padding:24px 28px; margin-bottom:24px; position:relative; box-shadow:var(--shadow); }
+  .matter-head::before { content:""; position:absolute; inset:6px; border:1px solid var(--rule-soft); pointer-events:none; }
+  .matter-head .court-line { font-family:var(--mono); font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); margin-bottom:6px; }
+  .matter-head h2 { font-family:var(--serif); font-size:34px; font-style:italic; margin:0 0 6px; line-height:1.1; }
+  .matter-head .casenum { font-family:var(--mono); font-size:12px; color:var(--muted); }
+  .matter-head .info-grid { margin-top:18px; padding-top:18px; border-top:1px solid var(--rule-soft);
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px 28px; }
+  .matter-head .info-grid dt { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.16em; color:var(--muted); margin-bottom:2px; }
+  .matter-head .info-grid dd { margin:0; font-family:var(--serif); font-size:16px; }
+  .matter-head .head-actions { position:absolute; top:18px; right:18px; display:flex; gap:8px; z-index:1; flex-wrap:wrap; justify-content:flex-end; max-width:50%; }
 
-  /* Case header card */
-  .case-card {
-    border: 1px solid var(--paper-edge);
-    background: var(--paper-deep);
-    padding: 28px 32px;
-    margin-bottom: 26px;
-    position: relative;
-  }
-  .case-card .case-court-line {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--oxblood); margin-bottom: 14px;
-  }
-  .case-card .case-actions {
-    position: absolute; top: 28px; right: 32px;
-    display: flex; gap: 8px;
-  }
-  .case-card h2.case-title {
-    font-style: italic; font-weight: 500; font-size: 40px;
-    line-height: 1; margin-bottom: 6px;
-  }
-  .case-card .case-ref {
-    font-family: 'JetBrains Mono', monospace; font-size: 13px;
-    color: var(--ink-soft);
-  }
-  .case-card hr.case-rule {
-    border: none;
-    border-top: 1px solid var(--paper-edge);
-    margin: 22px 0 22px 0;
-  }
-  .case-fields {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 22px 40px;
-  }
-  .case-field .field-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--ink-soft); margin-bottom: 5px;
-  }
-  .case-field .field-value {
-    font-size: 19px; color: var(--ink);
-  }
-  .case-field .field-value.empty-val { color: var(--ink-faint); font-style: italic; }
+  /* Section title */
+  .section-title { font-family:var(--serif); font-size:24px; margin:32px 0 14px; padding-bottom:8px; border-bottom:1px solid var(--rule);
+    display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .section-title .right { display:flex; align-items:center; gap:12px; }
+  .section-title .ord { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.2em; text-transform:uppercase; }
 
-  /* Stat boxes (4 across) */
-  .stat-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 14px;
-    margin-bottom: 36px;
-  }
-  .stat-box {
-    border: 1px solid var(--paper-edge);
-    padding: 16px 18px;
-    background: var(--paper);
-  }
-  .stat-box .stat-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--ink-soft); margin-bottom: 6px;
-  }
-  .stat-box .stat-num {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 36px; line-height: 1; margin-bottom: 4px;
-  }
-  .stat-box .stat-num.urgent { color: var(--soon); }
-  .stat-box .stat-num.safe { color: var(--safe); }
-  .stat-box .stat-num.dim { color: var(--ink-soft); }
-  .stat-box .stat-sub {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px; color: var(--ink-soft);
-  }
+  /* Deadlines */
+  .deadlines { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:16px; }
+  .deadline { background:#fff; border:1px solid var(--rule); padding:18px 20px 16px; position:relative;
+    transition:transform .15s, box-shadow .15s; box-shadow:var(--shadow); }
+  .deadline:hover { transform:translateY(-2px); box-shadow:0 1px 0 rgba(15,20,25,.04), 0 18px 40px -16px rgba(15,20,25,.28); }
+  .deadline .pill { position:absolute; top:-10px; left:16px; font-family:var(--mono); font-size:9px; text-transform:uppercase;
+    letter-spacing:.2em; background:var(--paper); border:1px solid var(--rule); padding:3px 10px; color:var(--ink); }
+  .deadline .pill.us { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .deadline .pill.them { background:var(--ink-2); color:var(--paper); border-color:var(--ink-2); }
+  .deadline .pill.court { background:var(--gold); color:#fff; border-color:var(--gold); }
+  .deadline h4 { font-family:var(--serif); font-size:19px; margin:6px 0 4px; line-height:1.2; }
+  .deadline .citation { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.04em; margin-bottom:14px; min-height:14px; }
+  .deadline .date { font-family:var(--mono); font-size:20px; font-weight:600; }
+  .deadline .countdown { margin-top:10px; padding-top:10px; border-top:1px dashed var(--rule); display:flex; gap:12px; align-items:baseline; }
+  .deadline .days { font-family:var(--serif); font-size:38px; font-weight:600; line-height:1; color:var(--green); }
+  .deadline .days-label { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.18em; color:var(--muted); }
+  .deadline.urgent .days { color:var(--accent); animation:throb 1.6s ease-in-out infinite; }
+  .deadline.warn .days { color:var(--amber); }
+  .deadline.passed .days { color:var(--muted); text-decoration:line-through; }
+  .deadline.done { background:var(--paper-3); opacity:.7; }
+  .deadline.done h4 { text-decoration:line-through; }
+  @keyframes throb { 0%,100%{opacity:1} 50%{opacity:.6} }
+  .deadline .note { margin-top:10px; font-size:12px; color:var(--muted); font-style:italic; line-height:1.4; }
+  .deadline .actions { margin-top:12px; display:flex; gap:6px; flex-wrap:wrap; }
+  .deadline .actions button { appearance:none; background:transparent; border:1px solid var(--rule); padding:4px 10px;
+    font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.12em; color:var(--muted);
+    cursor:pointer; transition:all .15s; }
+  .deadline .actions button:hover { background:var(--ink); color:var(--paper); border-color:var(--ink); }
 
-  /* Deadlines section */
-  .section-block { margin-bottom: 40px; }
-  .section-block .section-head {
-    display: flex; justify-content: space-between; align-items: baseline;
-    margin-bottom: 18px;
-  }
-  .section-block .section-head h3 {
-    font-size: 30px; font-weight: 500; letter-spacing: -0.005em;
-  }
-  .section-block .section-head .head-meta {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px; color: var(--ink-faint);
-    letter-spacing: 0.08em; text-transform: uppercase;
-  }
+  /* Two col */
+  .two-col { display:grid; grid-template-columns:1.4fr 1fr; gap:22px; }
+  @media (max-width: 900px) { .two-col { grid-template-columns:1fr; } }
 
-  /* Add-deadline form */
-  .add-deadline-form {
-    background: var(--paper-deep);
-    border: 1px solid var(--paper-edge);
-    padding: 18px;
-    margin-bottom: 18px;
-    display: grid;
-    grid-template-columns: 1.5fr 1fr 0.8fr 0.6fr auto;
-    gap: 12px;
-    align-items: end;
-  }
-  .add-deadline-form .field-mini { display: flex; flex-direction: column; gap: 4px; }
-  .add-deadline-form .field-mini .label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; color: var(--ink-soft);
-  }
-  .add-deadline-form input, .add-deadline-form select {
-    background: var(--paper); border: 1px solid var(--paper-edge);
-    padding: 8px 10px;
-  }
+  /* Cards */
+  .card { background:#fff; border:1px solid var(--rule); padding:22px 26px; box-shadow:var(--shadow); }
+  .card h4 { font-family:var(--serif); font-size:19px; margin:0 0 4px; }
+  .card .sub-cite { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; margin-bottom:16px; }
 
-  /* Deadline 2-col grid */
-  .deadlines-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
-  }
-  .deadline-card {
-    background: var(--paper);
-    border: 1px solid var(--paper-edge);
-    padding: 26px 22px 20px;
-    position: relative;
-  }
-  .deadline-card.completed { opacity: 0.55; }
-  .deadline-card.completed .dl-title { text-decoration: line-through; }
-  .deadline-card .party-pill {
-    position: absolute; top: -10px; left: 20px;
-    background: var(--paper);
-    border: 1px solid var(--paper-edge);
-    padding: 3px 9px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
-    color: var(--ink-soft);
-  }
-  .deadline-card.party-us .party-pill { color: var(--us); border-color: var(--us); }
-  .deadline-card.party-them .party-pill { color: var(--them); border-color: var(--them); }
-  .deadline-card.party-court .party-pill { color: var(--court); border-color: var(--court); }
-  .deadline-card .dl-title {
-    font-size: 22px; font-weight: 500; line-height: 1.15;
-    margin-bottom: 4px;
-  }
-  .deadline-card .dl-citation {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px; color: var(--ink-soft);
-    margin-bottom: 12px;
-  }
-  .deadline-card .dl-date {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 18px; font-weight: 500; color: var(--ink);
-    margin-bottom: 14px;
-  }
-  .deadline-card hr {
-    border: none; border-top: 1px dashed var(--paper-edge); margin: 10px 0;
-  }
-  .deadline-card .dl-countdown {
-    display: flex; align-items: baseline; gap: 8px;
-    margin-bottom: 10px;
-  }
-  .deadline-card .dl-days {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 38px; line-height: 1; color: var(--safe);
-  }
-  .deadline-card.urgent .dl-days { color: var(--urgent); }
-  .deadline-card.soon .dl-days { color: var(--soon); }
-  .deadline-card .dl-remaining-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--ink-soft);
-  }
-  .deadline-card .dl-note {
-    font-style: italic; color: var(--ink-soft);
-    font-size: 15px; margin-bottom: 14px; line-height: 1.4;
-  }
-  .deadline-card .dl-actions {
-    display: flex; gap: 8px;
-  }
+  /* Checklist */
+  ul.check { list-style:none; padding:0; margin:0; }
+  ul.check li { display:flex; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px dotted var(--rule-soft); cursor:pointer; transition:background .12s; }
+  ul.check li:last-child { border-bottom:none; }
+  ul.check li:hover { background:var(--paper); }
+  ul.check .box { flex:0 0 16px; height:16px; border:1.5px solid var(--ink); margin-top:2px; position:relative; transition:background .15s; }
+  ul.check li.done .box { background:var(--ink); }
+  ul.check li.done .box::after { content:"✓"; color:var(--paper); position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; }
+  ul.check .item-text { font-size:14px; line-height:1.5; flex:1; }
+  ul.check li.done .item-text { color:var(--muted); text-decoration:line-through; }
+  ul.check .cite { font-family:var(--mono); font-size:10px; color:var(--muted); margin-left:6px; }
 
-  /* Files + Notes side-by-side */
-  .files-notes {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 22px;
-    margin-bottom: 40px;
-  }
-  .panel {
-    background: var(--paper-deep);
-    border: 1px solid var(--paper-edge);
-    padding: 22px;
-  }
-  .panel h3 {
-    font-size: 22px; font-weight: 500; margin-bottom: 4px;
-  }
-  .panel .panel-sub {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--ink-soft); margin-bottom: 16px;
-  }
-  .panel .empty-msg {
-    font-style: italic; color: var(--ink-faint);
-    font-size: 14px; padding: 10px 0;
-  }
-  .file-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 8px 0; border-bottom: 1px dashed var(--paper-edge);
-    font-size: 15px;
-  }
-  .file-row:last-child { border-bottom: none; }
-  .file-row a { color: var(--oxblood); }
-  .file-row .file-remove {
-    background: none; border: none; color: var(--ink-faint);
-    cursor: pointer; font-size: 14px; padding: 0 4px;
-  }
-  .file-row .file-remove:hover { color: var(--oxblood); }
+  /* Notes */
+  .notes-area textarea { width:100%; min-height:180px; border:1px dashed var(--rule); background:var(--paper); padding:12px;
+    font-family:var(--serif); font-size:16px; line-height:1.5; resize:vertical; outline:none; color:var(--ink); }
+  .notes-area textarea:focus { border-color:var(--ink); }
+  .saved-tag { font-family:var(--mono); font-size:9px; color:var(--green); letter-spacing:.18em; text-transform:uppercase; opacity:0; transition:opacity .3s; }
+  .saved-tag.show { opacity:1; }
 
-  .file-add-row {
-    margin-top: 14px;
-    display: grid;
-    grid-template-columns: 1fr 1.5fr auto;
-    gap: 8px;
-    border-top: 1px solid var(--paper-edge);
-    padding-top: 14px;
-  }
-  .file-add-row input {
-    background: var(--paper); border: 1px solid var(--paper-edge);
-    padding: 8px 10px;
-  }
+  /* Files */
+  .files-card .link-row { display:flex; gap:10px; align-items:center; padding:12px 0; border-bottom:1px dotted var(--rule-soft); }
+  .files-card .link-row:last-child { border-bottom:none; }
+  .files-card .link-row .icon { flex:0 0 36px; height:36px; background:var(--paper-2); border:1px solid var(--rule); display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:11px; color:var(--accent); font-weight:600; }
+  .files-card .link-row .meta { flex:1; min-width:0; }
+  .files-card .link-row .meta .name { font-family:var(--serif); font-size:16px; font-weight:500;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .files-card .link-row .meta .url { font-family:var(--mono); font-size:10px; color:var(--muted);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .files-card .link-row a.open { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.16em;
+    text-decoration:none; color:var(--ink); border:1px solid var(--ink); padding:5px 12px; transition:all .15s; }
+  .files-card .link-row a.open:hover { background:var(--ink); color:var(--paper); }
+  .files-card .link-row button.del { appearance:none; background:transparent; border:none; color:var(--muted); cursor:pointer;
+    font-family:var(--mono); font-size:14px; padding:0 6px; }
+  .files-card .link-row button.del:hover { color:var(--accent); }
+  .add-link-form { display:grid; grid-template-columns:1fr 2fr auto; gap:8px; margin-top:14px; padding-top:14px; border-top:1px solid var(--rule-soft); }
+  @media (max-width: 700px) { .add-link-form { grid-template-columns:1fr; } }
 
-  .notes-textarea {
-    width: 100%;
-    min-height: 280px;
-    background: var(--paper);
-    border: 1px dashed var(--paper-edge);
-    padding: 14px;
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 16px; line-height: 1.5;
-    color: var(--ink);
-    resize: vertical;
-  }
-  .notes-list { margin-bottom: 14px; }
-  .note-item {
-    background: var(--paper);
-    border: 1px solid var(--paper-edge);
-    padding: 10px 12px;
-    margin-bottom: 8px;
-    font-size: 15px;
-    position: relative;
-  }
-  .note-item .note-meta {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px; color: var(--ink-faint);
-    letter-spacing: 0.1em; text-transform: uppercase;
-    margin-top: 6px;
-  }
-  .note-item .note-remove {
-    position: absolute; top: 8px; right: 10px;
-    background: none; border: none; color: var(--ink-faint);
-    cursor: pointer; font-size: 14px;
-  }
-  .note-item .note-remove:hover { color: var(--oxblood); }
+  /* Court access */
+  .court-access { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px; }
+  .court-link { background:#fff; border:1px solid var(--rule); padding:14px 18px; text-decoration:none; color:var(--ink); display:block; transition:all .15s; }
+  .court-link:hover { border-color:var(--accent); transform:translateY(-1px); }
+  .court-link .court-name { font-family:var(--serif); font-size:17px; font-weight:600; margin-bottom:4px; }
+  .court-link .court-sub { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.04em; }
+  .court-link .court-url { font-family:var(--mono); font-size:10px; color:var(--accent); margin-top:6px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-  /* Checklists */
-  .checklist-block {
-    margin-bottom: 30px;
-    border: 1px solid var(--paper-edge);
-    background: var(--paper-deep);
-    padding: 24px 26px;
-  }
-  .checklist-head {
-    display: flex; justify-content: space-between; align-items: baseline;
-    margin-bottom: 4px;
-  }
-  .checklist-head h3 {
-    font-size: 24px; font-weight: 500;
-  }
-  .checklist-head .checklist-progress {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px; color: var(--ink-soft);
-    letter-spacing: 0.08em; text-transform: uppercase;
-  }
-  .checklist-sub {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; color: var(--ink-soft);
-    letter-spacing: 0.1em; text-transform: uppercase;
-    margin-bottom: 18px;
-  }
-  .checklist-items { list-style: none; padding: 0; margin: 0; }
-  .checklist-item {
-    display: flex; align-items: flex-start; gap: 14px;
-    padding: 12px 0;
-    border-bottom: 1px dashed var(--paper-edge);
-    cursor: pointer;
-    transition: background 0.1s;
-  }
-  .checklist-item:last-child { border-bottom: none; }
-  .checklist-item:hover { background: rgba(0,0,0,0.02); }
-  .checklist-item .check-box {
-    flex: 0 0 18px;
-    width: 18px; height: 18px;
-    border: 1.5px solid var(--ink);
-    background: var(--paper);
-    display: flex; align-items: center; justify-content: center;
-    margin-top: 2px;
-    transition: background 0.12s;
-  }
-  .checklist-item.done .check-box {
-    background: var(--ink);
-    color: var(--paper);
-  }
-  .checklist-item.done .check-box::after {
-    content: "✓"; font-size: 13px; line-height: 1;
-  }
-  .checklist-item .item-text {
-    flex: 1;
-    font-size: 16px;
-    line-height: 1.4;
-  }
-  .checklist-item.done .item-text { color: var(--ink-faint); text-decoration: line-through; }
-  .checklist-item .item-citation {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; color: var(--ink-soft);
-    margin-left: 8px;
-  }
+  /* Add deadline form */
+  .add-deadline-form { background:var(--paper-3); border:1px solid var(--rule); padding:14px 18px; margin-bottom:16px;
+    display:grid; grid-template-columns:1.5fr 1fr 0.8fr 0.8fr auto; gap:8px; align-items:end; }
+  @media (max-width: 800px) { .add-deadline-form { grid-template-columns:1fr 1fr; } }
 
-  .template-pick-bar {
-    display: flex; align-items: center; gap: 10px;
-    margin-bottom: 24px;
-    padding: 14px 18px;
-    background: var(--paper-deep);
-    border: 1px dashed var(--paper-edge);
-  }
-  .template-pick-bar .lbl {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--ink-soft);
-  }
+  /* Modal */
+  .modal-bg { position:fixed; inset:0; background:rgba(15,20,25,.55); z-index:100; display:none;
+    align-items:center; justify-content:center; backdrop-filter:blur(2px); }
+  .modal-bg.open { display:flex; }
+  .modal { background:var(--paper); border:1px solid var(--ink); max-width:560px; width:90%; padding:32px;
+    box-shadow:0 30px 80px -20px rgba(0,0,0,.4); position:relative; max-height:80vh; overflow-y:auto; }
+  .modal h3 { font-family:var(--serif); font-size:24px; margin:0 0 8px; }
+  .modal p { color:var(--muted); margin-bottom:14px; }
+  .modal .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+  .modal .info-section { background:var(--paper-2); border-left:3px solid var(--accent); padding:14px 18px; margin:14px 0;
+    font-family:var(--serif); font-size:15px; line-height:1.55; color:var(--ink); }
+  .modal .info-section strong { font-family:var(--sans); font-size:13px; text-transform:uppercase; letter-spacing:.12em; color:var(--accent); display:block; margin-bottom:6px; }
+  .modal ol { padding-left:22px; margin:6px 0; }
+  .modal ol li { margin-bottom:6px; font-family:var(--serif); font-size:15px; }
 
-  /* Parse Court Order section */
-  .parser-block {
-    border: 1px solid var(--paper-edge);
-    background: var(--paper-deep);
-    padding: 22px 24px;
-    margin-bottom: 30px;
-  }
-  .parser-block h3 {
-    font-size: 22px; font-weight: 500; margin-bottom: 4px;
-  }
-  .parser-block .parser-sub {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; color: var(--ink-soft);
-    letter-spacing: 0.1em; text-transform: uppercase;
-    margin-bottom: 14px;
-  }
-  .parser-block textarea {
-    width: 100%; min-height: 120px;
-    background: var(--paper); border: 1px solid var(--paper-edge);
-    padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 13px;
-    line-height: 1.5; color: var(--ink);
-    resize: vertical;
-  }
-  .parser-actions {
-    display: flex; gap: 8px; margin-top: 12px;
-  }
-  .parser-proposals { margin-top: 16px; }
-  .proposal-card {
-    background: var(--paper); border: 1px solid var(--paper-edge);
-    padding: 12px 14px; margin-bottom: 10px;
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 10px;
-    align-items: center;
-  }
-  .proposal-card .prop-title { font-size: 17px; font-weight: 500; }
-  .proposal-card .prop-meta {
-    font-family: 'JetBrains Mono', monospace; font-size: 10px;
-    color: var(--ink-soft); margin-top: 4px;
-  }
+  /* Empty */
+  .empty { text-align:center; padding:60px 24px; color:var(--muted); font-family:var(--serif); font-style:italic; font-size:18px;
+    border:1px dashed var(--rule); background:var(--paper-2); }
 
-  /* Modals */
-  .modal-backdrop {
-    display: none; position: fixed; inset: 0;
-    background: rgba(0,0,0,0.4);
-    align-items: center; justify-content: center;
-    z-index: 100;
-  }
-  .modal-backdrop.show { display: flex; }
-  .modal {
-    background: var(--paper); border: 1px solid var(--ink);
-    padding: 26px 30px;
-    width: 92%; max-width: 580px;
-    max-height: 90vh; overflow-y: auto;
-  }
-  .modal-head {
-    display: flex; justify-content: space-between; align-items: baseline;
-    margin-bottom: 18px;
-    border-bottom: 1px solid var(--rule); padding-bottom: 10px;
-  }
-  .modal-head h3 { font-size: 24px; font-weight: 500; }
-  .field { margin-bottom: 14px; }
-  .field label {
-    display: block;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--ink-soft); margin-bottom: 4px;
-  }
-  .field input, .field select, .field textarea {
-    width: 100%;
-    background: var(--paper-deep); border: 1px solid var(--paper-edge);
-    padding: 8px 10px;
-  }
-  .field textarea { min-height: 70px; resize: vertical; }
-  .modal-actions {
-    display: flex; gap: 8px; justify-content: flex-end;
-    margin-top: 20px; padding-top: 14px;
-    border-top: 1px solid var(--rule);
-  }
+  /* Reference panel */
+  .ref-body { font-family:var(--serif); font-size:15px; line-height:1.6; }
+  .ref-body h5 { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.2em; color:var(--accent); margin:18px 0 6px; }
+  .ref-body ul { padding-left:18px; margin:0; }
+  .ref-body li { margin-bottom:4px; }
 
-  /* Toast */
-  #toast {
-    position: fixed; bottom: 28px; right: 28px;
-    background: var(--ink); color: var(--paper);
-    padding: 10px 18px;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px;
-    letter-spacing: 0.08em; text-transform: uppercase;
-    opacity: 0; transform: translateY(10px);
-    transition: opacity 0.18s, transform 0.18s;
-    z-index: 200;
-  }
-  #toast.show { opacity: 1; transform: translateY(0); }
-  #toast.err { background: var(--oxblood); }
-
-  /* Court access / authorities (lightweight) */
-  .court-section { margin-bottom: 28px; }
-  .court-section h3 {
-    font-size: 20px; font-weight: 500; margin-bottom: 10px;
-  }
-  .court-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 12px;
-  }
-  .court-card {
-    background: var(--paper-deep);
-    border: 1px solid var(--paper-edge);
-    padding: 14px 16px;
-  }
-  .court-card .court-name {
-    font-size: 17px; font-weight: 500; margin-bottom: 4px;
-  }
-  .court-card .desc {
-    font-size: 14px; color: var(--ink-soft); margin: 4px 0 8px;
-  }
-
-  @media (max-width: 900px) {
-    .case-fields { grid-template-columns: 1fr; }
-    .stat-row { grid-template-columns: repeat(2, 1fr); }
-    .deadlines-grid { grid-template-columns: 1fr; }
-    .files-notes { grid-template-columns: 1fr; }
-    .add-deadline-form { grid-template-columns: 1fr 1fr; }
-    h1.title { font-size: 40px; }
-  }
+  footer { margin-top:60px; padding-top:20px; border-top:1px solid var(--rule);
+    font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; text-align:center; }
+  footer .links { margin-top:6px; }
 </style>
 </head>
 <body>
-
 <div class="app">
 
-  <!-- v2 banner -->
-  <div class="v2-banner">
-    <span>📋 You're viewing the new matter manager (v2)</span>
-    <span><a href="/admin/matters/">← back to original view</a></span>
-  </div>
-
-  <!-- Brand header -->
-  <header class="brand-head">
-    <h1 class="title">Matter Manager <em>&amp;</em> Docket</h1>
-    <div class="firmline">
-      <div>TEZ LAW FIRM · JJ ZHANG, ESQ. · CA #326666</div>
-      <div class="date-row">
-        <span class="green-dot"></span>
-        <span id="today-date"></span>
-      </div>
-    </div>
-  </header>
-
-  <!-- Tabs -->
-  <div class="tabs" id="tabs">
-    <button class="tab active" data-tab="active" onclick="setTab('active')">Active Matters <span class="count" id="count-active">0</span></button>
-    <button class="tab" data-tab="archive" onclick="setTab('archive')">Archive <span class="count" id="count-archive">0</span></button>
-    <button class="tab" data-tab="court" onclick="setTab('court')">Court Access</button>
-    <button class="tab" data-tab="authorities" onclick="setTab('authorities')">Authorities</button>
-  </div>
-
-  <!-- ACTIVE MATTERS LIST -->
-  <section class="section active" id="sec-active">
-    <div class="list-header">
-      <h2>Active Matters</h2>
-      <button class="btn btn-primary" onclick="openNewMatter()">+ New Matter</button>
-    </div>
-    <div class="matter-grid" id="active-list">
-      <div class="empty">Loading…</div>
-    </div>
-  </section>
-
-  <!-- ARCHIVE LIST -->
-  <section class="section" id="sec-archive">
-    <div class="list-header">
-      <h2>Archived</h2>
-    </div>
-    <div class="matter-grid" id="archive-list">
-      <div class="empty">No archived matters.</div>
-    </div>
-  </section>
-
-  <!-- COURT ACCESS (lightweight v2 — placeholder) -->
-  <section class="section" id="sec-court">
-    <div class="court-section">
-      <h3>Court Access — Quick Reference</h3>
-      <div class="court-grid">
-        <div class="court-card">
-          <div class="court-name">9th Cir. CM/ECF</div>
-          <div class="desc">Petitions for review, briefs, motions</div>
-          <a href="https://ecf.ca9.uscourts.gov" target="_blank">ecf.ca9.uscourts.gov</a>
-        </div>
-        <div class="court-card">
-          <div class="court-name">C.D. Cal. CM/ECF</div>
-          <div class="desc">Habeas (§ 2241), Mandamus (§ 1361), civil</div>
-          <a href="https://ecf.cacd.uscourts.gov" target="_blank">ecf.cacd.uscourts.gov</a>
-        </div>
-        <div class="court-card">
-          <div class="court-name">PACER</div>
-          <div class="desc">Federal docket lookup, all districts</div>
-          <a href="https://pacer.uscourts.gov" target="_blank">pacer.uscourts.gov</a>
-        </div>
-        <div class="court-card">
-          <div class="court-name">9th Cir. General Orders</div>
-          <div class="desc">GO 6.4 stay procedures, briefing schedule</div>
-          <a href="https://www.ca9.uscourts.gov/general-orders/" target="_blank">ca9.uscourts.gov/general-orders</a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- AUTHORITIES (lightweight v2 placeholder) -->
-  <section class="section" id="sec-authorities">
-    <div class="court-section">
-      <h3>Key Authorities — 9th Cir. Immigration</h3>
-      <div class="court-grid">
-        <div class="court-card">
-          <div class="court-name">Nken v. Holder, 556 U.S. 418 (2009)</div>
-          <div class="desc">Four-factor test for stay of removal pending PFR</div>
-        </div>
-        <div class="court-card">
-          <div class="court-name">Leiva-Perez v. Holder, 640 F.3d 962</div>
-          <div class="desc">9th Cir. application of Nken; sliding scale</div>
-        </div>
-        <div class="court-card">
-          <div class="court-name">Stone v. INS, 514 U.S. 386 (1995)</div>
-          <div class="desc">30-day jurisdictional limit for PFR filing</div>
-        </div>
-        <div class="court-card">
-          <div class="court-name">Rumsfeld v. Padilla, 542 U.S. 426</div>
-          <div class="desc">Habeas — proper respondent is immediate custodian</div>
-        </div>
-        <div class="court-card">
-          <div class="court-name">Dong v. Garland, 50 F.4th 1291 (9th Cir.)</div>
-          <div class="desc">Adverse credibility — specific reasoning required</div>
-        </div>
-        <div class="court-card">
-          <div class="court-name">Norton v. SUWA, 542 U.S. 55 (2004)</div>
-          <div class="desc">Mandamus — clear right, clear duty, no other remedy</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- DETAIL VIEW (replaces all sections when matter is open) -->
-  <section class="section" id="sec-detail">
-    <div class="back-row">
-      <button class="back-link" onclick="closeDetail()">← Back to Matters</button>
-      <div style="display: flex; gap: 8px;">
-        <button class="btn btn-small" onclick="editCurrentMatter()">Edit Matter</button>
-        <button class="btn btn-small btn-danger" onclick="archiveCurrentMatter()">✓ Close &amp; Archive</button>
-      </div>
-    </div>
-
-    <div id="detail-content">
-      <!-- populated by renderDetail() -->
-    </div>
-  </section>
-
-</div>
-
-<!-- New / Edit Matter Modal -->
-<div class="modal-backdrop" id="matter-modal">
-  <div class="modal">
-    <div class="modal-head">
-      <h3 id="matter-modal-title">New Matter</h3>
-    </div>
-    <div class="field">
-      <label>Client / Case Name</label>
-      <input type="text" id="f-client-name" placeholder="e.g. Lu, Guangfeng v. Bondi">
-    </div>
-    <div class="field">
-      <label>Case Number / Matter Ref</label>
-      <input type="text" id="f-matter-ref" placeholder="e.g. A 216-866-000 or 5:26-cv-02340">
-    </div>
-    <div class="field">
-      <label>Court</label>
-      <input type="text" id="f-court" placeholder="e.g. 9th Cir. or C.D. Cal.">
-    </div>
-    <div class="field">
-      <label>Case Type</label>
-      <input type="text" id="f-case-type" placeholder="e.g. Asylum, Habeas § 2241, Mandamus § 1361">
-    </div>
-    <div class="field">
-      <label>Petitioner / Plaintiff Name</label>
-      <input type="text" id="f-petitioner-name" placeholder="e.g. Guangfeng Lu">
-    </div>
-    <div class="field">
-      <label>Opened Date (YYYY-MM-DD)</label>
-      <input type="text" id="f-opened-date" placeholder="2026-05-13">
-    </div>
-    <div class="field">
-      <label>Triggering Date (YYYY-MM-DD) — BIA decision, agency action, etc.</label>
-      <input type="text" id="f-triggering-date" placeholder="2026-04-15">
-    </div>
-    <div class="field">
-      <label>Custody Location (if detained)</label>
-      <input type="text" id="f-custody" placeholder="e.g. Cimarron Facility, Cushing OK">
-    </div>
-    <div class="field">
-      <label>Relief Sought</label>
-      <input type="text" id="f-relief" placeholder="e.g. Asylum / W/H / CAT">
-    </div>
-    <div class="field">
-      <label>Dropbox URL (optional)</label>
-      <input type="text" id="f-dropbox" placeholder="https://www.dropbox.com/...">
-    </div>
-    <div class="field">
-      <label>Notes</label>
-      <textarea id="f-notes" placeholder="Initial notes on the matter…"></textarea>
-    </div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeMatterModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveMatter()">Save Matter</button>
+  <!-- Masthead -->
+  <div class="masthead">
+    <h1>Matter Manager <span class="amp">&amp;</span> Docket</h1>
+    <div class="meta">
+      <div class="firm">TEZ Law Firm · JJ Zhang, Esq. · CA #326666</div>
+      <div class="live" id="now-clock">Loading…</div>
     </div>
   </div>
-</div>
 
-<div id="toast"></div>
+  <!-- Nav -->
+  <div class="nav">
+    <button class="nav-btn active" data-view="active">Active Matters <span class="badge" id="badge-active">0</span></button>
+    <button class="nav-btn" data-view="archive">Archive <span class="badge" id="badge-archive">0</span></button>
+    <button class="nav-btn" data-view="courts">Court Access</button>
+    <button class="nav-btn" data-view="reference">Authorities</button>
+  </div>
 
-<script>
-  const API = '/admin/matters/api';
-
-  let activeTab = 'active';
-  let currentDetailId = null;
-  let currentDetail = null;   // { matter, deadlines, notes, files, checklists }
-  let allMattersActive = [];
-  let allMattersArchive = [];
-
-  // Render today's date in header
-  (function setTodayDate() {
-    const d = new Date();
-    const s = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase();
-    document.getElementById('today-date').textContent = s;
-  })();
-
-  // ── API helper ────────────────────────────────────────────
-  async function api(path, opts = {}) {
-    const init = { credentials: 'include', headers: { 'Content-Type': 'application/json' }, ...opts };
-    if (init.body && typeof init.body !== 'string') init.body = JSON.stringify(init.body);
-    const r = await fetch(API + path, init);
-    if (r.status === 401) { location.href = '/admin/login'; return null; }
-    const text = await r.text();
-    let data; try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
-    if (!r.ok) throw new Error(data.error || r.statusText);
-    return data;
-  }
-
-  // ── Utility functions ─────────────────────────────────────
-  function toast(msg, isErr) {
-    const t = document.getElementById('toast');
-    t.textContent = msg; t.classList.toggle('err', !!isErr); t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 2400);
-  }
-  function esc(s) {
-    if (s == null) return '';
-    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
-  function daysUntil(dateStr) {
-    if (!dateStr) return null;
-    const due = new Date(dateStr + 'T00:00:00');
-    const now = new Date(); now.setHours(0,0,0,0);
-    return Math.floor((due - now) / 86400000);
-  }
-  function urgencyClass(days) {
-    if (days == null) return 'safe';
-    if (days < 0) return 'urgent';
-    if (days <= 14) return 'urgent';
-    if (days <= 30) return 'soon';
-    return 'safe';
-  }
-  function urgencyDisplay(days) {
-    if (days == null) return '—';
-    if (days < 0) return Math.abs(days) + 'd overdue';
-    if (days === 0) return 'today';
-    return days + 'd';
-  }
-  function formatDate(s) {
-    if (!s) return '';
-    const d = new Date(s + (String(s).includes('T') ? '' : 'T00:00:00'));
-    if (isNaN(d)) return s;
-    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-  }
-  function formatDateShort(s) {
-    if (!s) return '';
-    const d = new Date(s + (String(s).includes('T') ? '' : 'T00:00:00'));
-    if (isNaN(d)) return s;
-    return d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
-  }
-
-  // ── Tab switching ─────────────────────────────────────────
-  function setTab(tab) {
-    activeTab = tab;
-    currentDetailId = null;
-    currentDetail = null;
-    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    document.getElementById('sec-' + tab).classList.add('active');
-  }
-
-  // ── Initial load ──────────────────────────────────────────
-  async function loadAll() {
-    try {
-      const [act, arch] = await Promise.all([
-        api('/matters?status=active'),
-        api('/matters?status=archived')
-      ]);
-      allMattersActive = act?.matters || [];
-      allMattersArchive = arch?.matters || [];
-      document.getElementById('count-active').textContent = allMattersActive.length;
-      document.getElementById('count-archive').textContent = allMattersArchive.length;
-      renderLists();
-    } catch (e) {
-      console.error(e);
-      toast('Failed to load: ' + e.message, true);
-    }
-  }
-
-  function renderLists() {
-    const a = document.getElementById('active-list');
-    a.innerHTML = allMattersActive.length === 0
-      ? '<div class="empty">No active matters yet. Click + New Matter to start.</div>'
-      : allMattersActive.map(renderMatterCard).join('');
-
-    const ar = document.getElementById('archive-list');
-    ar.innerHTML = allMattersArchive.length === 0
-      ? '<div class="empty">No archived matters.</div>'
-      : allMattersArchive.map(renderMatterCard).join('');
-  }
-
-  function renderMatterCard(m) {
-    const court = m.court || 'No court';
-    const caseType = m.case_type || '';
-    const days = daysUntil(m.next_due);
-    const urgency = urgencyClass(days);
-    const nextLine = m.next_due
-      ? `${formatDateShort(m.next_due)} · ${urgencyDisplay(days)}`
-      : 'No upcoming deadlines';
-    const checklistFrag = (m.checklist_total > 0)
-      ? `Checklist ${m.checklist_completed}/${m.checklist_total}`
-      : '';
-    return `
-      <div class="matter-card" onclick="openDetail(${m.id})">
-        <div class="court-line">${esc(court)} · ${esc(caseType)}</div>
-        <div class="client">${esc(m.client_name)}</div>
-        <div class="ref">${esc(m.matter_ref || '—')}</div>
-        <div class="footer">
-          <span>${esc(nextLine)}</span>
-          <span class="checklist-frag">${esc(checklistFrag)}</span>
-        </div>
+  <!-- ACTIVE MATTERS -->
+  <section class="panel active" id="view-active">
+    <div class="page-head">
+      <div>
+        <h2>Active Matters</h2>
+        <div class="sub">All cases · sorted by next deadline</div>
       </div>
-    `;
-  }
-
-  // ── New / Edit Matter ─────────────────────────────────────
-  let editingMatterId = null;
-
-  function openNewMatter() {
-    editingMatterId = null;
-    document.getElementById('matter-modal-title').textContent = 'New Matter';
-    ['client-name','matter-ref','court','case-type','petitioner-name',
-     'opened-date','triggering-date','custody','relief','dropbox','notes'
-    ].forEach(k => { document.getElementById('f-' + k).value = ''; });
-    document.getElementById('matter-modal').classList.add('show');
-  }
-
-  function editCurrentMatter() {
-    if (!currentDetail) return;
-    const m = currentDetail.matter;
-    editingMatterId = m.id;
-    document.getElementById('matter-modal-title').textContent = 'Edit Matter';
-    document.getElementById('f-client-name').value = m.client_name || '';
-    document.getElementById('f-matter-ref').value = m.matter_ref || '';
-    document.getElementById('f-court').value = m.court || '';
-    document.getElementById('f-case-type').value = m.case_type || '';
-    document.getElementById('f-petitioner-name').value = m.petitioner_name || '';
-    document.getElementById('f-opened-date').value = m.opened_date || '';
-    document.getElementById('f-triggering-date').value = m.triggering_date || '';
-    document.getElementById('f-custody').value = m.custody_location || '';
-    document.getElementById('f-relief').value = m.relief_sought || '';
-    document.getElementById('f-dropbox').value = m.dropbox_url || '';
-    document.getElementById('f-notes').value = m.notes || '';
-    document.getElementById('matter-modal').classList.add('show');
-  }
-
-  function closeMatterModal() {
-    document.getElementById('matter-modal').classList.remove('show');
-  }
-
-  async function saveMatter() {
-    const payload = {
-      client_name:      document.getElementById('f-client-name').value.trim(),
-      matter_ref:       document.getElementById('f-matter-ref').value.trim(),
-      court:            document.getElementById('f-court').value.trim(),
-      case_type:        document.getElementById('f-case-type').value.trim(),
-      petitioner_name:  document.getElementById('f-petitioner-name').value.trim(),
-      opened_date:      document.getElementById('f-opened-date').value.trim(),
-      triggering_date:  document.getElementById('f-triggering-date').value.trim(),
-      custody_location: document.getElementById('f-custody').value.trim(),
-      relief_sought:    document.getElementById('f-relief').value.trim(),
-      dropbox_url:      document.getElementById('f-dropbox').value.trim(),
-      notes:            document.getElementById('f-notes').value
-    };
-    if (!payload.client_name) { toast('Client name required', true); return; }
-    try {
-      if (editingMatterId) {
-        const r = await api('/matters/' + editingMatterId, { method: 'PATCH', body: payload });
-        toast('Matter updated');
-        closeMatterModal();
-        await loadAll();
-        if (currentDetailId === editingMatterId) await openDetail(editingMatterId);
-      } else {
-        const r = await api('/matters', { method: 'POST', body: payload });
-        toast('Matter created');
-        closeMatterModal();
-        await loadAll();
-        if (r?.matter?.id) await openDetail(r.matter.id);
-      }
-    } catch (e) {
-      toast('Save failed: ' + e.message, true);
-    }
-  }
-
-  async function archiveCurrentMatter() {
-    if (!currentDetail) return;
-    if (!confirm('Archive this matter? You can find it under the Archive tab later.')) return;
-    try {
-      await api('/matters/' + currentDetail.matter.id, { method: 'PATCH', body: { status: 'archived' } });
-      toast('Matter archived');
-      closeDetail();
-      await loadAll();
-    } catch (e) {
-      toast('Archive failed: ' + e.message, true);
-    }
-  }
-
-  // ── Open / close detail ───────────────────────────────────
-  async function openDetail(id) {
-    try {
-      const data = await api('/matters/' + id);
-      currentDetailId = id;
-      currentDetail = data;
-      document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-      document.getElementById('sec-detail').classList.add('active');
-      renderDetail();
-    } catch (e) {
-      toast('Could not load matter: ' + e.message, true);
-    }
-  }
-
-  function closeDetail() {
-    currentDetailId = null;
-    currentDetail = null;
-    setTab(activeTab || 'active');
-  }
-
-  // ── Render detail view ────────────────────────────────────
-  function renderDetail() {
-    if (!currentDetail) return;
-    const { matter: m, deadlines, notes, files, checklists } = currentDetail;
-    const c = document.getElementById('detail-content');
-
-    // Compute stats
-    const open = deadlines.filter(d => !d.completed).length;
-    const completed = deadlines.filter(d => d.completed).length;
-    const upcoming = deadlines.filter(d => !d.completed && d.due_date)
-      .sort((a, b) => a.due_date.localeCompare(b.due_date));
-    const next = upcoming[0];
-    const nextDays = next ? daysUntil(next.due_date) : null;
-    const checklistTotal = checklists.reduce((a, cl) => a + (cl.items?.length || 0), 0);
-    const checklistDone = checklists.reduce((a, cl) => a + (cl.items?.filter(i => i.completed).length || 0), 0);
-
-    const courtCaseType = [m.court, m.case_type].filter(Boolean).join(' · ').toUpperCase();
-
-    c.innerHTML = `
-      <!-- Case header card -->
-      <div class="case-card">
-        <div class="case-court-line">● ${esc(courtCaseType || 'NO COURT INFO')}</div>
-        <h2 class="case-title">${esc(m.client_name)}</h2>
-        <div class="case-ref">${esc(m.matter_ref || '—')}</div>
-        <hr class="case-rule">
-        <div class="case-fields">
-          <div class="case-field">
-            <div class="field-label">Opened</div>
-            <div class="field-value ${m.opened_date ? '' : 'empty-val'}">${m.opened_date ? formatDateShort(m.opened_date) : 'not set'}</div>
-          </div>
-          <div class="case-field">
-            <div class="field-label">Triggering Date</div>
-            <div class="field-value ${m.triggering_date ? '' : 'empty-val'}">${m.triggering_date ? formatDateShort(m.triggering_date) : 'not set'}</div>
-          </div>
-          <div class="case-field">
-            <div class="field-label">Custody</div>
-            <div class="field-value ${m.custody_location ? '' : 'empty-val'}">${esc(m.custody_location) || 'not detained'}</div>
-          </div>
-          <div class="case-field">
-            <div class="field-label">Dropbox</div>
-            <div class="field-value ${m.dropbox_url ? '' : 'empty-val'}">${m.dropbox_url ? `<a href="${esc(m.dropbox_url)}" target="_blank">linked folder ↗</a>` : 'none linked'}</div>
-          </div>
-          <div class="case-field">
-            <div class="field-label">Petitioner</div>
-            <div class="field-value ${m.petitioner_name ? '' : 'empty-val'}">${esc(m.petitioner_name) || 'not set'}</div>
-          </div>
-          <div class="case-field">
-            <div class="field-label">Relief Sought</div>
-            <div class="field-value ${m.relief_sought ? '' : 'empty-val'}">${esc(m.relief_sought) || 'not set'}</div>
-          </div>
-        </div>
+      <div class="actions">
+        <button class="btn ghost" id="export-all-ics-btn">Export All to Calendar</button>
+        <button class="btn ghost" id="export-btn">Backup JSON</button>
+        <button class="btn ghost" id="import-btn">Restore</button>
+        <button class="btn" id="show-new-matter">+ New Matter</button>
       </div>
+    </div>
 
-      <!-- Stat row -->
-      <div class="stat-row">
-        <div class="stat-box">
-          <div class="stat-label">Next Deadline</div>
-          <div class="stat-num ${urgencyClass(nextDays)}">${next ? urgencyDisplay(nextDays) : '—'}</div>
-          <div class="stat-sub">${next ? esc(next.title) : 'no upcoming'}</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">Open</div>
-          <div class="stat-num">${open}</div>
-          <div class="stat-sub">remaining</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">Completed</div>
-          <div class="stat-num safe">${completed}</div>
-          <div class="stat-sub">items done</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">Checklist</div>
-          <div class="stat-num ${checklistTotal > 0 ? '' : 'dim'}">${checklistDone}/${checklistTotal}</div>
-          <div class="stat-sub">filing tasks</div>
-        </div>
-      </div>
+    <div class="stats" id="overview-stats"></div>
 
-      <!-- Deadlines -->
-      <div class="section-block">
-        <div class="section-head">
-          <h3>Deadlines</h3>
-          <div style="display: flex; gap: 12px; align-items: center;">
-            <span class="head-meta">Sorted chronologically</span>
-          </div>
-        </div>
-
-        <div class="add-deadline-form">
-          <div class="field-mini">
-            <div class="label">Description</div>
-            <input type="text" id="add-dl-title" placeholder="e.g. Opening brief due">
-          </div>
-          <div class="field-mini">
-            <div class="label">Citation</div>
-            <input type="text" id="add-dl-citation" placeholder="FRAP 31">
-          </div>
-          <div class="field-mini">
-            <div class="label">Date</div>
-            <input type="date" id="add-dl-date">
-          </div>
-          <div class="field-mini">
-            <div class="label">Party</div>
-            <select id="add-dl-party">
-              <option value="us">Us</option>
-              <option value="them">Govt/Opp</option>
-              <option value="court">Court</option>
+    <div id="new-matter-form" style="display:none;">
+      <div class="new-matter">
+        <h3>Open a New Matter</h3>
+        <div class="hint">Client name is required · everything else can be edited later</div>
+        <div class="grid">
+          <div class="field"><label>Client / Petitioner</label><input type="text" id="nm-client" placeholder="e.g., Lu, Guangfeng" /></div>
+          <div class="field"><label>Adverse Party</label><input type="text" id="nm-adverse" placeholder="e.g., Bondi" /></div>
+          <div class="field"><label>Court</label>
+            <select id="nm-court">
+              <option value="9th Cir.">9th Circuit Court of Appeals</option>
+              <option value="C.D. Cal.">U.S. District Court · C.D. Cal.</option>
+              <option value="N.D. Cal.">U.S. District Court · N.D. Cal.</option>
+              <option value="S.D. Cal.">U.S. District Court · S.D. Cal.</option>
+              <option value="E.D. Cal.">U.S. District Court · E.D. Cal.</option>
+              <option value="W.D. Okla.">U.S. District Court · W.D. Okla.</option>
+              <option value="Other">Other federal court</option>
+              <option value="BIA">BIA / EOIR</option>
+              <option value="USCIS">USCIS</option>
+              <option value="State">State court</option>
             </select>
           </div>
-          <button class="btn btn-primary btn-small" onclick="addDeadline()">+ Add</button>
-        </div>
-
-        <div class="deadlines-grid">
-          ${deadlines.length === 0
-            ? '<div class="empty" style="grid-column: 1 / -1;">No deadlines yet.</div>'
-            : deadlines.map(renderDeadlineCard).join('')}
-        </div>
-      </div>
-
-      <!-- Files + Notes side-by-side -->
-      <div class="files-notes">
-        <div class="panel">
-          <h3>Case Files</h3>
-          <div class="panel-sub">Dropbox · Google Drive · External Links</div>
-          ${files.length === 0
-            ? '<div class="empty-msg">No files linked yet. Paste a link below.</div>'
-            : files.map(renderFile).join('')}
-          <div class="file-add-row">
-            <input type="text" id="add-file-name" placeholder="File or folder name">
-            <input type="text" id="add-file-url" placeholder="https://...">
-            <button class="btn btn-small" onclick="addFile()">+ Add</button>
+          <div class="field"><label>Matter Type</label>
+            <select id="nm-type">
+              <option value="PFR">Petition for Review (9th Cir.)</option>
+              <option value="Habeas">Habeas Corpus § 2241</option>
+              <option value="Mandamus">Writ of Mandamus § 1361</option>
+              <option value="N400">N-400 § 1447(b)</option>
+              <option value="APA">APA Action</option>
+              <option value="Removal">Removal / EOIR</option>
+              <option value="USCIS">USCIS Application</option>
+              <option value="Business">Business Litigation</option>
+              <option value="RealEstate">Real Estate / Landlord-Tenant</option>
+              <option value="Estate">Estate Planning</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="field"><label>Case Number / Agency No.</label><input type="text" id="nm-casenum" placeholder="A-Number, docket #, etc." /></div>
+          <div class="field"><label>Triggering Date</label><input type="date" id="nm-trigger" /></div>
+          <div class="field"><label>Dropbox Folder URL</label><input type="url" id="nm-dropbox" placeholder="https://www.dropbox.com/scl/fo/…" /></div>
+          <div class="field"><label>Adverse Party Detained?</label>
+            <select id="nm-detained"><option value="no">No</option><option value="yes">Yes</option><option value="na">N/A</option></select>
           </div>
         </div>
-
-        <div class="panel">
-          <h3>Case Notes</h3>
-          <div class="panel-sub">Quick reference · attorney work product</div>
-          <div class="notes-list">
-            ${notes.length === 0
-              ? '<div class="empty-msg">No notes yet.</div>'
-              : notes.map(renderNote).join('')}
-          </div>
-          <textarea id="add-note-text" class="notes-textarea" placeholder="Add a new note (Ctrl+Enter to save)…" onkeydown="if(event.ctrlKey && event.key==='Enter') addNote();"></textarea>
-          <div style="margin-top: 8px; text-align: right;">
-            <button class="btn btn-small" onclick="addNote()">+ Add Note</button>
-          </div>
+        <div class="actions">
+          <button class="btn" id="nm-save">Open Matter</button>
+          <button class="btn ghost" id="nm-cancel">Cancel</button>
         </div>
       </div>
+    </div>
 
-      <!-- Filing Checklists -->
-      <div class="section-block">
-        <div class="section-head">
-          <h3>Filing Checklist</h3>
-          <span class="head-meta">${checklists.length === 0 ? 'No template applied' : 'Templated by matter type'}</span>
-        </div>
+    <div class="matter-list" id="matter-list"></div>
+  </section>
 
-        ${checklists.length === 0 ? `
-          <div class="template-pick-bar">
-            <span class="lbl">Apply a template:</span>
-            <button class="btn btn-small" onclick="applyTemplate('pfr')">PFR (9th Cir.)</button>
-            <button class="btn btn-small" onclick="applyTemplate('habeas')">Habeas § 2241</button>
-            <button class="btn btn-small" onclick="applyTemplate('mandamus')">Mandamus § 1361</button>
-          </div>
-        ` : ''}
+  <!-- DETAIL -->
+  <section class="panel" id="view-detail">
+    <button class="back-link" id="back-to-list">← All Matters</button>
+    <div class="matter-head" id="matter-head"></div>
+    <div class="stats" id="matter-stats"></div>
 
-        ${checklists.map(renderChecklist).join('')}
+    <div class="section-title">
+      <span>Deadlines</span>
+      <div class="right">
+        <button class="btn ghost small" id="export-matter-ics">Sync to Calendar</button>
+        <span class="ord">Sorted chronologically</span>
+      </div>
+    </div>
+
+    <form class="add-deadline-form" id="add-deadline" onsubmit="return false;">
+      <div class="field"><label>Description</label><input type="text" id="dl-desc" placeholder="e.g., Opening brief due" /></div>
+      <div class="field"><label>Citation</label><input type="text" id="dl-cite" placeholder="FRAP 31" /></div>
+      <div class="field"><label>Date</label><input type="date" id="dl-date" /></div>
+      <div class="field"><label>Party</label>
+        <select id="dl-party"><option value="us">Us</option><option value="them">Govt/Opp</option><option value="court">Court</option></select>
+      </div>
+      <button class="btn" id="dl-add">+ Add</button>
+    </form>
+
+    <div class="deadlines" id="matter-deadlines"></div>
+
+    <div class="two-col" style="margin-top:32px;">
+      <div class="card files-card">
+        <h4>Case Files</h4>
+        <div class="sub-cite">Dropbox · Google Drive · external links</div>
+        <div id="matter-files"></div>
+        <form class="add-link-form" onsubmit="return false;">
+          <input type="text" id="file-name" placeholder="File or folder name" />
+          <input type="url" id="file-url" placeholder="https://www.dropbox.com/…" />
+          <button class="btn" id="file-add">+ Add</button>
+        </form>
+      </div>
+      <div class="card notes-area">
+        <h4>Case Notes <span class="saved-tag" id="matter-saved">Saved</span></h4>
+        <div class="sub-cite">Autosaves locally</div>
+        <textarea id="matter-notes" placeholder="Strategy · witness contacts · transcript page refs · ECF receipts…"></textarea>
+      </div>
+    </div>
+
+    <div class="section-title"><span>Filing Checklist</span><span class="ord">Templated by matter type</span></div>
+    <div class="card">
+      <h4 id="checklist-heading">Standard Filings</h4>
+      <div class="sub-cite" id="checklist-cite"></div>
+      <ul class="check" id="matter-checklist"></ul>
+    </div>
+  </section>
+
+  <!-- ARCHIVE -->
+  <section class="panel" id="view-archive">
+    <div class="page-head">
+      <div>
+        <h2>Closed &amp; Archived Matters</h2>
+        <div class="sub">Restore or permanently delete</div>
+      </div>
+    </div>
+    <div class="matter-list" id="archive-list"></div>
+  </section>
+
+  <!-- COURT ACCESS -->
+  <section class="panel" id="view-courts">
+    <div class="page-head">
+      <div>
+        <h2>Court Access</h2>
+        <div class="sub">One-click login portals · CM/ECF · PACER</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:24px; background:var(--paper-2);">
+      <h4>How filing actually works</h4>
+      <div class="sub-cite">Read before assuming integration exists</div>
+      <p style="font-family:var(--serif); font-size:16px; line-height:1.6; margin-top:8px;">
+        There is no public API for filing documents into the federal courts. The Administrative Office of the U.S. Courts exposes only the PACER Case Locator search API and an XML upload spec for bankruptcy petitions. Every motion, brief, complaint, and exhibit in district court still requires a human to log into the court's CM/ECF web interface and click through the docket events. The links below are the shortest path to that interface for each court you commonly practice in.
+      </p>
+      <p style="font-family:var(--serif); font-size:16px; line-height:1.6;">
+        For each court you intend to file in, you must hold an active PACER account, separately register as an e-filer with that court, and be admitted to practice before that bench. NextGen courts let you link PACER and filer credentials; CurrentGen still uses separate logins.
+      </p>
+    </div>
+
+    <div class="section-title"><span>PACER &amp; Account Management</span><span class="ord">Start here</span></div>
+    <div class="court-access" id="pacer-links"></div>
+
+    <div class="section-title"><span>Federal Appellate Courts</span><span class="ord">CM/ECF Portals</span></div>
+    <div class="court-access" id="appellate-links"></div>
+
+    <div class="section-title"><span>California District Courts</span><span class="ord">CM/ECF Portals</span></div>
+    <div class="court-access" id="ca-district-links"></div>
+
+    <div class="section-title"><span>Other Frequent District Courts</span><span class="ord">CM/ECF Portals</span></div>
+    <div class="court-access" id="other-district-links"></div>
+
+    <div class="section-title"><span>Immigration Agencies</span><span class="ord">EOIR · USCIS</span></div>
+    <div class="court-access" id="agency-links"></div>
+  </section>
+
+  <!-- AUTHORITIES -->
+  <section class="panel" id="view-reference">
+    <div class="page-head">
+      <div>
+        <h2>Authorities &amp; Cheat Sheet</h2>
+        <div class="sub">9th Circuit · District Court · Quick Citations</div>
+      </div>
+    </div>
+    <div class="two-col">
+      <div class="card ref-body">
+        <h4>Ninth Circuit · Immigration PFR</h4>
+        <div class="sub-cite">FRAP · Circuit Rules · General Orders</div>
+        <h5>Rules</h5>
+        <ul>
+          <li>FRAP 15 — Petitions for review of agency orders</li>
+          <li>FRAP 18 — Stay pending review of agency decision</li>
+          <li>FRAP 27 — Motions practice</li>
+          <li>FRAP 28 — Briefs</li>
+          <li>FRAP 31 — Serving and filing briefs</li>
+          <li>FRAP 32(a)(7) — Word limits (14,000 / 14,000 / 7,000)</li>
+          <li>Cir. R. 15-4 — Petition contents + Form 6</li>
+          <li>Cir. R. 27-3 — Emergency motions + Form 16</li>
+          <li>Cir. R. 27-8.2 — Stay motions: prior application + custody</li>
+          <li>Cir. R. 28-2.4(b) — Required immigration recitals</li>
+          <li>Cir. R. 28-2.7 — Addendum: orders bound with brief</li>
+          <li>Cir. R. 31-2.1 — Service and filing of briefs</li>
+          <li>Gen. Ord. 6.4(c) — Stay practice + automatic temp stay</li>
+        </ul>
+        <h5>Cases — Stays</h5>
+        <ul>
+          <li><em>Nken v. Holder</em>, 556 U.S. 418 (2009) — four-factor test</li>
+          <li><em>Leiva-Perez v. Holder</em>, 640 F.3d 962 (9th Cir. 2011) — sliding scale</li>
+          <li><em>De Leon v. INS</em>, 115 F.3d 643 (9th Cir. 1997) — auto temp stay</li>
+        </ul>
+        <h5>Cases — Credibility &amp; Asylum</h5>
+        <ul>
+          <li><em>Alam v. Garland</em>, 11 F.4th 1133 (9th Cir. 2021) (en banc) — totality test</li>
+          <li><em>Dong v. Garland</em>, 50 F.4th 1291 (9th Cir. 2022) — reasoned response required</li>
+          <li><em>Lalayan v. Garland</em>, 4 F.4th 822 (9th Cir. 2021) — implausibility findings</li>
+          <li><em>Munyuh v. Garland</em>, 11 F.4th 750 (9th Cir. 2021) — specific cogent reason</li>
+          <li><em>Stone v. INS</em>, 514 U.S. 386 (1995) — 30-day jurisdictional</li>
+        </ul>
+        <h5>Cases — CAT</h5>
+        <ul>
+          <li><em>Konou v. Holder</em>, 750 F.3d 1120 (9th Cir. 2014) — CAT despite adverse credibility</li>
+          <li><em>Kamalthas v. INS</em>, 251 F.3d 1279 (9th Cir. 2001) — independent country-conditions analysis</li>
+        </ul>
+      </div>
+      <div class="card ref-body">
+        <h4>District Court · Habeas &amp; Mandamus</h4>
+        <div class="sub-cite">Original jurisdiction matters</div>
+        <h5>Habeas — 28 U.S.C. § 2241</h5>
+        <ul>
+          <li><em>Rumsfeld v. Padilla</em>, 542 U.S. 426 (2004) — district of confinement</li>
+          <li><em>Zadvydas v. Davis</em>, 533 U.S. 678 (2001) — 6-month presumption</li>
+          <li><em>Jennings v. Rodriguez</em>, 138 S. Ct. 830 (2018)</li>
+          <li><em>Rodriguez Diaz v. Garland</em>, 53 F.4th 1189 (9th Cir. 2022)</li>
+          <li><em>Demore v. Kim</em>, 538 U.S. 510 (2003) — mandatory detention</li>
+          <li>8 U.S.C. § 1252(a)(5) — REAL ID Act bar</li>
+        </ul>
+        <h5>Mandamus — § 1361 / APA § 706(1)</h5>
+        <ul>
+          <li><em>Heckler v. Ringer</em>, 466 U.S. 602 (1984) — three-element test</li>
+          <li><em>Norton v. SUWA</em>, 542 U.S. 55 (2004) — discrete required action</li>
+          <li><em>TRAC v. FCC</em>, 750 F.2d 70 (D.C. Cir. 1984) — six-factor delay test</li>
+          <li><em>Indep. Mining Co. v. Babbitt</em>, 105 F.3d 502 (9th Cir. 1997)</li>
+          <li>8 U.S.C. § 1447(b) — N-400 jurisdiction after 120 days</li>
+        </ul>
+        <h5>FRCP — Service &amp; Filing</h5>
+        <ul>
+          <li>FRCP 4(i) — Serving the United States</li>
+          <li>FRCP 12(a)(2) — Government 60-day response</li>
+          <li>28 U.S.C. § 1391(e) — Venue against federal officers</li>
+          <li>28 U.S.C. § 1914 — Filing fees ($405 civil / $5 habeas)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Confirm modal -->
+  <div class="modal-bg" id="modal">
+    <div class="modal">
+      <h3 id="modal-title">Confirm</h3>
+      <p id="modal-body">Are you sure?</p>
+      <div id="modal-extra"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="modal-cancel">Cancel</button>
+        <button class="btn danger" id="modal-confirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calendar info modal -->
+  <div class="modal-bg" id="cal-modal">
+    <div class="modal">
+      <h3>Sync to Outlook / Google Calendar / Apple Calendar</h3>
+      <p>An <code>.ics</code> file with <span id="cal-count">all</span> deadline(s) has been downloaded. Each event includes the citation, party, and case notes in the body, plus two reminders (7 days and 1 day prior).</p>
+
+      <div class="info-section">
+        <strong>Outlook (Desktop)</strong>
+        <ol>
+          <li>Open the downloaded <code>.ics</code> file. Outlook will prompt to import it.</li>
+          <li>Or in Outlook: <em>File → Open &amp; Export → Import/Export → Import an iCalendar file</em>.</li>
+          <li>Choose <strong>Import</strong> (events merge into your default calendar) or <strong>Open as New</strong> (separate read-only calendar). Import is usually what you want.</li>
+        </ol>
       </div>
 
-      <!-- Parse Court Order -->
-      <div class="parser-block">
-        <h3>Parse Court Order</h3>
-        <div class="parser-sub">Paste a scheduling order — Claude proposes deadlines for you to add</div>
-        <textarea id="parser-input" placeholder="Paste court order or scheduling text here…"></textarea>
-        <div class="parser-actions">
-          <button class="btn btn-primary btn-small" onclick="parseOrder()">Analyze</button>
-          <button class="btn btn-small" onclick="clearParser()">Clear</button>
-        </div>
-        <div class="parser-proposals" id="parser-proposals"></div>
+      <div class="info-section">
+        <strong>Outlook (Web · outlook.com / Microsoft 365)</strong>
+        <ol>
+          <li>Go to <em>Calendar → Add calendar → Upload from file</em>.</li>
+          <li>Select the <code>.ics</code> file and choose which calendar to merge into.</li>
+        </ol>
       </div>
-    `;
-  }
 
-  // ── Deadline card ─────────────────────────────────────────
-  function renderDeadlineCard(d) {
-    const days = daysUntil(d.due_date);
-    const uClass = urgencyClass(days);
-    const partyClass = d.party === 'us' ? 'party-us' : (d.party === 'them' ? 'party-them' : 'party-court');
-    const partyLabel = d.party === 'us' ? 'US' : (d.party === 'them' ? 'GOVT/OPP' : 'COURT');
-    const completedClass = d.completed ? 'completed' : '';
-    return `
-      <div class="deadline-card ${uClass} ${partyClass} ${completedClass}">
-        <div class="party-pill">${partyLabel}</div>
-        <div class="dl-title">${esc(d.title)}</div>
-        <div class="dl-citation">${esc(d.citation || '')}</div>
-        <div class="dl-date">${formatDate(d.due_date)}</div>
-        <hr>
-        <div class="dl-countdown">
-          <span class="dl-days">${urgencyDisplay(days)}</span>
-          <span class="dl-remaining-label">remaining</span>
-        </div>
-        ${d.note ? `<div class="dl-note">${esc(d.note)}</div>` : ''}
-        <div class="dl-actions">
-          <button class="btn btn-small" onclick="toggleDeadline(${d.id}, ${!d.completed})">${d.completed ? 'Reopen' : 'Mark Done'}</button>
-          <button class="btn btn-small btn-danger" onclick="removeDeadline(${d.id})">Remove</button>
-        </div>
+      <div class="info-section">
+        <strong>Google Calendar</strong>
+        <ol>
+          <li>Open Google Calendar in a browser.</li>
+          <li><em>Settings (⚙) → Import &amp; export → Import</em>.</li>
+          <li>Select the <code>.ics</code> file and the target calendar.</li>
+        </ol>
       </div>
-    `;
-  }
 
-  function renderFile(f) {
-    return `
-      <div class="file-row">
-        <a href="${esc(f.url)}" target="_blank">${esc(f.filename)} ↗</a>
-        <button class="file-remove" onclick="removeFile(${f.id})">✕</button>
+      <div class="info-section">
+        <strong>Apple Calendar (macOS)</strong>
+        <ol>
+          <li>Double-click the <code>.ics</code> file. Calendar prompts for the target calendar; click <strong>OK</strong>.</li>
+        </ol>
       </div>
-    `;
-  }
 
-  function renderNote(n) {
-    const text = (n.content || '').replace(/\n/g, '<br>');
-    return `
-      <div class="note-item">
-        <button class="note-remove" onclick="removeNote(${n.id})">✕</button>
-        <div>${text}</div>
-        <div class="note-meta">${formatDate(n.created_at)}</div>
+      <p style="margin-top:14px;"><em>Re-import after schedule changes — events with the same UID will update, not duplicate.</em></p>
+
+      <div class="modal-actions">
+        <button class="btn" id="cal-modal-close">Got it</button>
       </div>
-    `;
+    </div>
+  </div>
+
+  <footer>
+    Built for TEZ Law Firm · Data persisted to server
+    <div class="links"><span id="last-saved-info">Loading…</span></div>
+  </footer>
+</div>
+
+<script>
+// ============================================================
+// STORAGE — API-backed (Tez Law backend)
+// ============================================================
+// Wired to /admin/matters/api endpoints.
+// state shape is preserved (matters[], with deadlines/files/etc nested)
+// so all render functions work as written. We translate between
+// DB column names <-> this file's expected field names.
+
+const API_BASE = '/admin/matters/api';
+
+// API helper — wraps fetch with cookie auth + JSON
+async function api(path, opts = {}) {
+  const init = {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    ...opts
+  };
+  if (init.body && typeof init.body !== 'string') {
+    init.body = JSON.stringify(init.body);
+  }
+  const r = await fetch(API_BASE + path, init);
+  if (r.status === 401) { location.href = '/admin/login'; return null; }
+  const text = await r.text();
+  let data; try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+// Map a DB matter row (with deadlines/files/notes/checklists nested)
+// into the shape this file's render functions expect.
+function mapMatterFromDb(dbm, deadlines, files, notes, checklists) {
+  // Try to derive "adverse party" from client_name "Lu, Guangfeng v. Bondi"
+  let client = dbm.client_name || '';
+  let adverse = '';
+  const vMatch = client.match(/^(.+?)\s+v\.?\s+(.+)$/i);
+  if (vMatch) {
+    client = vMatch[1].trim();
+    adverse = vMatch[2].trim();
   }
 
-  // ── Checklists ────────────────────────────────────────────
-  function renderChecklist(cl) {
-    const total = cl.items?.length || 0;
-    const done = cl.items?.filter(i => i.completed).length || 0;
-    const items = (cl.items || []).map(i => `
-      <li class="checklist-item ${i.completed ? 'done' : ''}" onclick="toggleChecklistItem(${i.id}, ${!i.completed})">
-        <div class="check-box"></div>
-        <div class="item-text">
-          ${esc(i.text)}
-          ${i.citation ? `<span class="item-citation">${esc(i.citation)}</span>` : ''}
-        </div>
-      </li>
-    `).join('');
-    return `
-      <div class="checklist-block">
-        <div class="checklist-head">
-          <h3>${esc(cl.title)}</h3>
-          <span class="checklist-progress">${done}/${total} done</span>
-        </div>
-        ${cl.subtitle ? `<div class="checklist-sub">${esc(cl.subtitle)}</div>` : ''}
-        <ul class="checklist-items">${items || '<li class="empty-msg" style="padding:10px 0;">No items.</li>'}</ul>
-      </div>
-    `;
+  // Map case_type back to template key (PFR / Habeas / etc.) when possible
+  const typeRaw = String(dbm.case_type || '');
+  const typeStr = typeRaw.toLowerCase();
+  let typeKey = typeRaw || 'Other';
+  // Short-form direct matches first (from the form's <select> values)
+  if (['pfr','habeas','mandamus','n400','apa','removal','uscis','business','realestate','estate','other'].includes(typeStr)) {
+    typeKey = typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1).toLowerCase();
+    if (typeStr === 'pfr') typeKey = 'PFR';
+    else if (typeStr === 'apa') typeKey = 'APA';
+    else if (typeStr === 'uscis') typeKey = 'USCIS';
+    else if (typeStr === 'n400') typeKey = 'N400';
+    else if (typeStr === 'realestate') typeKey = 'RealEstate';
+  } else if (/petition for review|pfr/.test(typeStr) || /asylum|w\/h|withholding|cat/.test(typeStr)) typeKey = 'PFR';
+  else if (/habeas|2241/.test(typeStr)) typeKey = 'Habeas';
+  else if (/mandamus|1361/.test(typeStr)) typeKey = 'Mandamus';
+  else if (/1447|n[-]?400/.test(typeStr)) typeKey = 'N400';
+  else if (/^apa/.test(typeStr)) typeKey = 'APA';
+  else if (/removal/.test(typeStr)) typeKey = 'Removal';
+  else if (/uscis/.test(typeStr)) typeKey = 'USCIS';
+
+  // Pick scalar notes content. The DB has a notes column on matters
+  // (scratch text) AND a matter_notes table (legacy timestamped notes).
+  // We prefer the scalar; if it's empty but matter_notes rows exist,
+  // join them. This file's UI treats notes as a single autosave textarea.
+  let notesScalar = dbm.notes || '';
+  if (!notesScalar && Array.isArray(notes) && notes.length) {
+    notesScalar = notes.map(n => n.content).filter(Boolean).join('\n\n');
   }
 
-  async function applyTemplate(name) {
-    if (!currentDetailId) return;
-    try {
-      await api(`/matters/${currentDetailId}/checklists/template/${name}`, { method: 'POST', body: {} });
-      toast('Template applied');
-      await openDetail(currentDetailId);
-      await loadAll();
-    } catch (e) {
-      toast('Apply failed: ' + e.message, true);
-    }
-  }
-
-  async function toggleChecklistItem(itemId, newCompleted) {
-    try {
-      await api(`/checklist-items/${itemId}`, { method: 'PATCH', body: { completed: newCompleted } });
-      // Update in-place rather than refetching to keep scroll position
-      currentDetail.checklists.forEach(cl => {
-        cl.items?.forEach(it => {
-          if (it.id === itemId) it.completed = newCompleted;
-        });
-      });
-      renderDetail();
-      // Soft refresh stats in list view
-      loadAll();
-    } catch (e) {
-      toast('Toggle failed: ' + e.message, true);
-    }
-  }
-
-  // ── Deadlines ─────────────────────────────────────────────
-  async function addDeadline() {
-    const payload = {
-      title:    document.getElementById('add-dl-title').value.trim(),
-      citation: document.getElementById('add-dl-citation').value.trim(),
-      due_date: document.getElementById('add-dl-date').value,
-      party:    document.getElementById('add-dl-party').value
-    };
-    if (!payload.title || !payload.due_date) { toast('Title and date required', true); return; }
-    try {
-      await api(`/matters/${currentDetailId}/deadlines`, { method: 'POST', body: payload });
-      toast('Deadline added');
-      await openDetail(currentDetailId);
-    } catch (e) {
-      toast('Add failed: ' + e.message, true);
-    }
-  }
-
-  async function toggleDeadline(id, newCompleted) {
-    try {
-      await api(`/matters/${currentDetailId}/deadlines/${id}`, { method: 'PATCH', body: { completed: newCompleted } });
-      await openDetail(currentDetailId);
-    } catch (e) {
-      toast('Toggle failed: ' + e.message, true);
-    }
-  }
-
-  async function removeDeadline(id) {
-    if (!confirm('Remove this deadline?')) return;
-    try {
-      await api(`/matters/${currentDetailId}/deadlines/${id}`, { method: 'DELETE' });
-      toast('Deadline removed');
-      await openDetail(currentDetailId);
-    } catch (e) {
-      toast('Remove failed: ' + e.message, true);
-    }
-  }
-
-  // ── Notes ─────────────────────────────────────────────────
-  async function addNote() {
-    const text = document.getElementById('add-note-text').value.trim();
-    if (!text) return;
-    try {
-      await api(`/matters/${currentDetailId}/notes`, { method: 'POST', body: { content: text } });
-      document.getElementById('add-note-text').value = '';
-      await openDetail(currentDetailId);
-    } catch (e) {
-      toast('Note save failed: ' + e.message, true);
-    }
-  }
-
-  async function removeNote(id) {
-    if (!confirm('Remove this note?')) return;
-    try {
-      await api(`/matters/${currentDetailId}/notes/${id}`, { method: 'DELETE' });
-      await openDetail(currentDetailId);
-    } catch (e) {
-      toast('Remove failed: ' + e.message, true);
-    }
-  }
-
-  // ── Files ─────────────────────────────────────────────────
-  async function addFile() {
-    const filename = document.getElementById('add-file-name').value.trim();
-    const url = document.getElementById('add-file-url').value.trim();
-    if (!filename || !url) { toast('Name and URL required', true); return; }
-    try {
-      await api(`/matters/${currentDetailId}/files`, { method: 'POST', body: { filename, url } });
-      document.getElementById('add-file-name').value = '';
-      document.getElementById('add-file-url').value = '';
-      await openDetail(currentDetailId);
-    } catch (e) {
-      toast('Add failed: ' + e.message, true);
-    }
-  }
-
-  async function removeFile(id) {
-    if (!confirm('Remove this file link?')) return;
-    try {
-      await api(`/matters/${currentDetailId}/files/${id}`, { method: 'DELETE' });
-      await openDetail(currentDetailId);
-    } catch (e) {
-      toast('Remove failed: ' + e.message, true);
-    }
-  }
-
-  // ── Parser ────────────────────────────────────────────────
-  function clearParser() {
-    document.getElementById('parser-input').value = '';
-    document.getElementById('parser-proposals').innerHTML = '';
-  }
-
-  async function parseOrder() {
-    const text = document.getElementById('parser-input').value.trim();
-    if (!text) { toast('Paste some text first', true); return; }
-    document.getElementById('parser-proposals').innerHTML = '<div class="empty-msg">Analyzing…</div>';
-    try {
-      const r = await api('/parse', { method: 'POST', body: { order_text: text } });
-      const proposals = r.deadlines || [];
-      if (proposals.length === 0) {
-        document.getElementById('parser-proposals').innerHTML = '<div class="empty-msg">No deadlines proposed.</div>';
-        return;
-      }
-      document.getElementById('parser-proposals').innerHTML = proposals.map((p, idx) => `
-        <div class="proposal-card">
-          <div>
-            <div class="prop-title">${esc(p.title || 'Untitled')}</div>
-            <div class="prop-meta">${esc(p.due_date || 'no date')} · ${esc(p.party || 'us')} · ${esc(p.citation || '')}</div>
-            ${p.source_excerpt ? `<div class="prop-meta" style="font-style: italic; margin-top:6px;">${esc(p.source_excerpt)}</div>` : ''}
-          </div>
-          <button class="btn btn-primary btn-small" onclick='addProposal(${idx})' data-idx="${idx}">+ Add</button>
-        </div>
-      `).join('');
-      window._proposals = proposals;
-    } catch (e) {
-      document.getElementById('parser-proposals').innerHTML = '<div class="empty-msg" style="color: var(--oxblood)">Parse failed: ' + esc(e.message) + '</div>';
-    }
-  }
-
-  async function addProposal(idx) {
-    const p = window._proposals?.[idx];
-    if (!p || !currentDetailId) return;
-    try {
-      await api(`/matters/${currentDetailId}/deadlines`, {
-        method: 'POST',
-        body: {
-          title: p.title,
-          citation: p.citation || '',
-          due_date: p.due_date,
-          party: p.party || 'us',
-          note: p.source_excerpt || ''
+  // Build checklist completion map keyed by template item id (e.g. "pfr-1")
+  // We match by item TEXT (since template ids are local strings, not DB ids).
+  // For each completed DB item, find the template item with the same text.
+  const checklistMap = {};
+  if (Array.isArray(checklists)) {
+    for (const cl of checklists) {
+      for (const it of (cl.items || [])) {
+        if (it.completed) {
+          // Try to find a matching template item by text across all templates
+          for (const tplKey of Object.keys(CHECKLISTS)) {
+            const tpl = CHECKLISTS[tplKey];
+            const match = tpl.items.find(ti => ti.text === it.text);
+            if (match) { checklistMap[match.id] = true; break; }
+          }
         }
-      });
-      toast('Deadline added');
-      await openDetail(currentDetailId);
-    } catch (e) {
-      toast('Add failed: ' + e.message, true);
+      }
     }
   }
 
-  // ── Boot ──────────────────────────────────────────────────
-  loadAll();
-</script>
+  return {
+    id: dbm.id,                                  // integer DB id
+    dbId: dbm.id,                                // alias for clarity
+    client: client,
+    adverse: adverse,
+    court: dbm.court || '',
+    type: typeKey,
+    casenum: dbm.matter_ref || '',
+    created: dbm.opened_date || (dbm.created_at ? dbm.created_at.slice(0,10) : ''),
+    trigger: dbm.triggering_date || '',
+    detained: dbm.custody_location ? 'yes' : 'no',
+    detentionFacility: dbm.custody_location || '',
+    dropbox: dbm.dropbox_url || '',
+    notes: notesScalar,
+    archived: dbm.status === 'archived',
+    archivedDate: null,                          // not tracked in DB yet
+    petitioner: dbm.petitioner_name || '',
+    relief: dbm.relief_sought || '',
+    files: (files || []).map(f => ({
+      id: f.id,
+      dbId: f.id,
+      name: f.filename,
+      url: f.url
+    })),
+    deadlines: (deadlines || []).map(d => ({
+      id: d.id,                                  // integer DB id (NOT string)
+      dbId: d.id,
+      title: d.title,
+      cite: d.citation || '',
+      date: d.due_date,                          // YYYY-MM-DD
+      party: d.party || 'us',
+      note: d.note || '',
+      done: !!d.completed
+    })),
+    checklist: checklistMap,
+    // Keep raw nested DB data so we can find DB ids when toggling checklist
+    _dbChecklists: checklists || []
+  };
+}
 
+// Map our state field -> DB column names for write
+function matterPayloadToDb(m) {
+  return {
+    client_name: m.adverse ? `${m.client} v. ${m.adverse}` : m.client,
+    matter_ref: m.casenum || '',
+    court: m.court || '',
+    case_type: m.type || '',
+    status: m.archived ? 'archived' : 'active',
+    dropbox_url: m.dropbox || '',
+    notes: m.notes || '',
+    opened_date: m.created || '',
+    triggering_date: m.trigger || '',
+    custody_location: m.detained === 'yes' ? (m.detentionFacility || 'Detained') : '',
+    petitioner_name: m.petitioner || m.client || '',
+    relief_sought: m.relief || ''
+  };
+}
+
+let state = { matters: [] };
+
+// Pull all matters (active + archived) on boot
+async function loadState() {
+  try {
+    const [act, arch] = await Promise.all([
+      api('/matters?status=active'),
+      api('/matters?status=archived')
+    ]);
+    const all = [...(act?.matters || []), ...(arch?.matters || [])];
+    // Fetch full detail for each so we have deadlines/files/notes/checklists
+    const detailed = await Promise.all(all.map(async (m) => {
+      const d = await api('/matters/' + m.id);
+      return mapMatterFromDb(d.matter, d.deadlines, d.files, d.notes, d.checklists);
+    }));
+    state.matters = detailed;
+    const el = document.getElementById('last-saved-info');
+    if (el) el.textContent = `Loaded ${detailed.length} matter${detailed.length === 1 ? '' : 's'} from server`;
+  } catch (e) {
+    console.error('loadState failed:', e);
+    const el = document.getElementById('last-saved-info');
+    if (el) el.textContent = `⚠ Could not load: ${e.message}`;
+    state.matters = [];
+  }
+}
+
+// save() is now a no-op shim — writes happen synchronously via
+// the specific saveMatter / saveDeadline / etc. helpers below.
+// We keep save() callable so the rest of the code compiles
+// unchanged, but it just refreshes the "last saved" indicator.
+function save() {
+  const el = document.getElementById('last-saved-info');
+  if (el) el.textContent = `Last sync: ${new Date().toLocaleTimeString()}`;
+}
+
+// Reload one matter from server and replace it in state[]
+async function reloadMatter(matterId) {
+  try {
+    const d = await api('/matters/' + matterId);
+    const idx = state.matters.findIndex(m => m.id === matterId);
+    const fresh = mapMatterFromDb(d.matter, d.deadlines, d.files, d.notes, d.checklists);
+    if (idx >= 0) state.matters[idx] = fresh;
+    else state.matters.push(fresh);
+    return fresh;
+  } catch (e) { console.error('reloadMatter failed:', e); return null; }
+}
+
+// ============================================================
+// CHECKLIST TEMPLATES
+// ============================================================
+const CHECKLISTS = {
+  PFR: { heading:"Petition for Review · Filing Packet", cite:"Cir. R. 15-4 · GO 6.4(c) · FRAP 15", items:[
+    { id:"pfr-1", text:"Form 3 Petition for Review prepared, signed, dated", cite:"Cir. R. 15-4" },
+    { id:"pfr-2", text:"Form 6 Representation Statement bound with PFR",     cite:"Cir. R. 15-4" },
+    { id:"pfr-3", text:"BIA decision attached as exhibit",                   cite:"" },
+    { id:"pfr-4", text:"Initial Motion to Stay drafted (separate PDF)",      cite:"FRAP 18 · GO 6.4(c)(1)" },
+    { id:"pfr-5", text:"Filing fee $605 paid OR Form 4 (IFP) filed",         cite:"28 U.S.C. § 1913" },
+    { id:"pfr-6", text:"Filed within 30 days of BIA decision",               cite:"Stone v. INS" },
+    { id:"pfr-7", text:"Certificate of Service on OIL and local DHS/ICE OCC", cite:"FRAP 25(d)" },
+    { id:"pfr-8", text:"ECF appearance entered, attorney registration current", cite:"Cir. R. 46-1" },
+    { id:"pfr-9", text:"Notice to ICE OGC for district of confinement (if detained)", cite:"Best practice" },
+    { id:"pfr-10", text:"Docket assigned 9th Cir. case number recorded",      cite:"" }
+  ]},
+  Habeas: { heading:"§ 2241 Habeas Corpus · Filing Packet", cite:"28 U.S.C. § 2241 · FRCP 4(i)", items:[
+    { id:"hab-1",  text:"Petition for Writ of Habeas Corpus drafted",            cite:"§ 2241" },
+    { id:"hab-2",  text:"Verified venue = district of physical confinement",     cite:"Rumsfeld v. Padilla" },
+    { id:"hab-3",  text:"Named respondent = immediate custodian (warden)",       cite:"Padilla" },
+    { id:"hab-4",  text:"Statement of facts and custody chronology drafted",     cite:"" },
+    { id:"hab-5",  text:"Legal grounds identified (Zadvydas / Jennings / etc.)", cite:"" },
+    { id:"hab-6",  text:"Filing fee $5 OR IFP application filed",                cite:"§ 1914(a)" },
+    { id:"hab-7",  text:"Service on warden, U.S. Attorney, AG, ICE OCC",         cite:"FRCP 4(i)" },
+    { id:"hab-8",  text:"CONFIRM not challenging removal order itself",          cite:"§ 1252(a)(5)" },
+    { id:"hab-9",  text:"OSC issued by court · calendar return date",            cite:"Habeas Rule 4" }
+  ]},
+  Mandamus: { heading:"§ 1361 Writ of Mandamus · Filing Packet", cite:"28 U.S.C. § 1361 · APA § 706(1)", items:[
+    { id:"mand-1",  text:"Complaint for Writ of Mandamus drafted",                  cite:"§ 1361" },
+    { id:"mand-2",  text:"Three elements pleaded: right · duty · no adequate alt.", cite:"Heckler v. Ringer" },
+    { id:"mand-3",  text:"TRAC factors pleaded if unreasonable delay theory",       cite:"TRAC v. FCC" },
+    { id:"mand-4",  text:"Venue confirmed under 28 U.S.C. § 1391(e)",               cite:"" },
+    { id:"mand-5",  text:"Filing fee $405 paid",                                    cite:"§ 1914" },
+    { id:"mand-6",  text:"Service on U.S. Attorney for district",                   cite:"FRCP 4(i)(1)(A)" },
+    { id:"mand-7",  text:"Service on Attorney General by certified mail",           cite:"FRCP 4(i)(1)(B)" },
+    { id:"mand-8",  text:"Service on named agency or officer",                      cite:"FRCP 4(i)(2)" },
+    { id:"mand-9",  text:"Summons issued and returns of service filed",             cite:"FRCP 4(l)" },
+    { id:"mand-10", text:"Calendar 60-day government response date",                cite:"FRCP 12(a)(2)" }
+  ]},
+  N400: { heading:"§ 1447(b) N-400 Action", cite:"8 U.S.C. § 1447(b)", items:[
+    { id:"n400-1", text:"N-400 interview completed >120 days ago (verify)", cite:"§ 1447(b)" },
+    { id:"n400-2", text:"Complaint or Petition for Hearing drafted",        cite:"" },
+    { id:"n400-3", text:"Venue in district where applicant resides",        cite:"" },
+    { id:"n400-4", text:"Service on U.S. Attorney, AG, USCIS Director",     cite:"FRCP 4(i)" },
+    { id:"n400-5", text:"Filing fee $405 paid",                             cite:"§ 1914" }
+  ]},
+  APA: { heading:"APA Action", cite:"5 U.S.C. §§ 701-706", items:[
+    { id:"apa-1", text:"Final agency action identified",                  cite:"§ 704" },
+    { id:"apa-2", text:"Complaint drafted (arbitrary/capricious / ultra vires)", cite:"§ 706" },
+    { id:"apa-3", text:"Standing pleaded",                                cite:"Lujan" },
+    { id:"apa-4", text:"Service on U.S. Attorney, AG, named agency",      cite:"FRCP 4(i)" },
+    { id:"apa-5", text:"Filing fee $405 paid",                            cite:"§ 1914" }
+  ]},
+  Removal: { heading:"Removal Proceedings · EOIR", cite:"8 C.F.R. Part 1003", items:[
+    { id:"rem-1", text:"E-28 / Notice of Appearance filed", cite:"" },
+    { id:"rem-2", text:"Master calendar date docketed",     cite:"" },
+    { id:"rem-3", text:"Pleadings prepared (admit/deny NTA charges)", cite:"" },
+    { id:"rem-4", text:"Relief applications filed (I-589 / I-485 / etc.)", cite:"" },
+    { id:"rem-5", text:"Country conditions evidence gathered", cite:"" },
+    { id:"rem-6", text:"Individual hearing date docketed",   cite:"" }
+  ]},
+  USCIS: { heading:"USCIS Application", cite:"", items:[
+    { id:"uscis-1", text:"Application form completed and signed",  cite:"" },
+    { id:"uscis-2", text:"Supporting evidence gathered",           cite:"" },
+    { id:"uscis-3", text:"Filing fee paid or fee waiver requested", cite:"" },
+    { id:"uscis-4", text:"G-28 Notice of Entry of Appearance filed", cite:"" },
+    { id:"uscis-5", text:"Receipt notice docketed",                cite:"" },
+    { id:"uscis-6", text:"Biometrics appointment docketed",        cite:"" },
+    { id:"uscis-7", text:"Interview scheduled / completed",        cite:"" }
+  ]},
+  Business: { heading:"Business Litigation", cite:"", items:[
+    { id:"biz-1", text:"Engagement letter signed",        cite:"" },
+    { id:"biz-2", text:"Conflict check completed",        cite:"" },
+    { id:"biz-3", text:"Initial pleading drafted/served", cite:"" },
+    { id:"biz-4", text:"Initial disclosures exchanged",   cite:"FRCP 26(a) / state equiv." },
+    { id:"biz-5", text:"Discovery plan filed",            cite:"" }
+  ]},
+  RealEstate: { heading:"Real Estate / Landlord-Tenant", cite:"", items:[
+    { id:"re-1", text:"Engagement letter signed",                       cite:"" },
+    { id:"re-2", text:"Title / lease / underlying documents reviewed",  cite:"" },
+    { id:"re-3", text:"Statutory notices served (if eviction)",         cite:"CCP § 1161 et seq." },
+    { id:"re-4", text:"Complaint or response filed",                    cite:"" }
+  ]},
+  Estate: { heading:"Estate Planning", cite:"", items:[
+    { id:"est-1", text:"Intake questionnaire completed",      cite:"" },
+    { id:"est-2", text:"Documents drafted (will/trust/POAs/AHCD)", cite:"" },
+    { id:"est-3", text:"Documents signed and notarized",      cite:"" },
+    { id:"est-4", text:"Trust funded / asset retitling complete", cite:"" }
+  ]},
+  Other: { heading:"Custom Matter", cite:"", items:[] }
+};
+
+const COURT_LINKS = {
+  pacer: [
+    { name:"Manage My PACER Account",   sub:"Login + filing privileges",         url:"https://pacer.uscourts.gov/" },
+    { name:"PACER Case Locator",        sub:"Nationwide case search",            url:"https://pcl.uscourts.gov/" },
+    { name:"Court CM/ECF Lookup",       sub:"Find any court's filing portal",    url:"https://pacer.uscourts.gov/file-case/court-cmecf-lookup" },
+    { name:"PACER Fee Schedule",        sub:"$0.10/page · waived under $30/qtr", url:"https://pacer.uscourts.gov/help/faqs/fee-information" }
+  ],
+  appellate: [
+    { name:"9th Circuit Court of Appeals", sub:"CM/ECF + forms + general orders", url:"https://www.ca9.uscourts.gov/" },
+    { name:"9th Circuit ECF Login",        sub:"Direct filing portal",           url:"https://ecf.ca9.uscourts.gov/" },
+    { name:"10th Circuit (covers Okla.)",  sub:"Filing portal",                  url:"https://www.ca10.uscourts.gov/" },
+    { name:"U.S. Supreme Court",           sub:"Petitions for cert",             url:"https://www.supremecourt.gov/" }
+  ],
+  caDistrict: [
+    { name:"C.D. Cal. (LA / Riverside / Santa Ana)", sub:"Central District",  url:"https://www.cacd.uscourts.gov/" },
+    { name:"C.D. Cal. CM/ECF",                       sub:"Direct login",      url:"https://ecf.cacd.uscourts.gov/" },
+    { name:"N.D. Cal. (SF / San Jose / Oakland)",    sub:"Northern District", url:"https://www.cand.uscourts.gov/" },
+    { name:"N.D. Cal. CM/ECF",                       sub:"Direct login",      url:"https://ecf.cand.uscourts.gov/" },
+    { name:"S.D. Cal. (San Diego)",                  sub:"Southern District", url:"https://www.casd.uscourts.gov/" },
+    { name:"S.D. Cal. CM/ECF",                       sub:"Direct login",      url:"https://ecf.casd.uscourts.gov/" },
+    { name:"E.D. Cal. (Sacramento / Fresno)",        sub:"Eastern District",  url:"https://www.caed.uscourts.gov/" },
+    { name:"E.D. Cal. CM/ECF",                       sub:"Direct login",      url:"https://ecf.caed.uscourts.gov/" }
+  ],
+  otherDistrict: [
+    { name:"W.D. Oklahoma (covers Cimarron/Cushing)", sub:"Western Oklahoma", url:"https://www.okwd.uscourts.gov/" },
+    { name:"W.D. Okla. CM/ECF",                       sub:"Direct login",    url:"https://ecf.okwd.uscourts.gov/" },
+    { name:"D. Arizona",                              sub:"Phoenix / Tucson", url:"https://www.azd.uscourts.gov/" },
+    { name:"D. Nevada",                               sub:"Las Vegas / Reno", url:"https://www.nvd.uscourts.gov/" },
+    { name:"S.D.N.Y.",                                sub:"Manhattan",        url:"https://www.nysd.uscourts.gov/" },
+    { name:"E.D.N.Y.",                                sub:"Brooklyn",         url:"https://www.nyed.uscourts.gov/" }
+  ],
+  agency: [
+    { name:"EOIR Respondent Access Portal", sub:"View immigration court files",  url:"https://respondentaccess.eoir.justice.gov/" },
+    { name:"EOIR Automated Case Info",      sub:"Hearing schedule lookup",       url:"https://acis.eoir.justice.gov/en/" },
+    { name:"BIA / EOIR (main)",             sub:"Forms + Practice Manual",       url:"https://www.justice.gov/eoir" },
+    { name:"USCIS Online Filing",           sub:"myUSCIS account",               url:"https://my.uscis.gov/" },
+    { name:"USCIS Case Status",             sub:"Receipt number lookup",         url:"https://egov.uscis.gov/" },
+    { name:"ICE Detainee Locator",          sub:"Find a client in custody",      url:"https://locator.ice.gov/" },
+    { name:"USCIS Processing Times",        sub:"Mandamus delay baseline",       url:"https://egov.uscis.gov/processing-times/" }
+  ]
+};
+
+// ============================================================
+// HELPERS
+// ============================================================
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+function parseDate(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+function fmtDate(d) { return d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' }); }
+function daysUntil(d) { return Math.round((d - TODAY)/86400000); }
+function urgencyClass(days) { if (days < 0) return 'passed'; if (days <= 7) return 'urgent'; if (days <= 21) return 'warn'; return 'safe'; }
+function escapeHtml(s) { return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s) { return escapeHtml(s); }
+
+function updateClock() {
+  document.getElementById('now-clock').textContent =
+    new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+}
+updateClock(); setInterval(updateClock, 60000);
+
+// ============================================================
+// ROUTING
+// ============================================================
+let currentMatterId = null;
+
+function showView(view) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('view-' + view).classList.add('active');
+  if (view === 'active') renderMatterList();
+  if (view === 'archive') renderArchiveList();
+  if (view === 'courts') renderCourtLinks();
+  if (view === 'detail') renderMatterDetail();
+  renderOverviewStats(); renderBadges();
+}
+document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+
+// ============================================================
+// MATTER LIST
+// ============================================================
+function nextDeadlineFor(matter) {
+  if (!matter.deadlines || matter.deadlines.length === 0) return null;
+  const future = matter.deadlines
+    .filter(d => !d.done)
+    .map(d => ({ ...d, days: daysUntil(parseDate(d.date)) }))
+    .filter(d => d.days >= 0)
+    .sort((a,b) => a.days - b.days);
+  return future[0] || null;
+}
+
+function renderMatterList() {
+  const list = document.getElementById('matter-list');
+  const active = state.matters.filter(m => !m.archived);
+  if (active.length === 0) {
+    list.innerHTML = `<div class="empty">No active matters. Click <strong>+ New Matter</strong> above to open your first case.</div>`;
+    return;
+  }
+  const decorated = active.map(m => ({ m, next: nextDeadlineFor(m) }));
+  decorated.sort((a,b) => {
+    if (!a.next && !b.next) return 0;
+    if (!a.next) return 1;
+    if (!b.next) return -1;
+    return a.next.days - b.next.days;
+  });
+  list.innerHTML = decorated.map(({m, next}) => matterCardHTML(m, next, false)).join('');
+  list.querySelectorAll('.matter-card').forEach(c => {
+    c.addEventListener('click', () => { currentMatterId = parseInt(c.dataset.id); showView('detail'); });
+  });
+}
+
+function renderArchiveList() {
+  const list = document.getElementById('archive-list');
+  const archived = state.matters.filter(m => m.archived);
+  if (archived.length === 0) {
+    list.innerHTML = `<div class="empty">No archived matters yet.</div>`;
+    return;
+  }
+  archived.sort((a,b) => (b.archivedDate || '').localeCompare(a.archivedDate || ''));
+  list.innerHTML = archived.map(m => matterCardHTML(m, null, true)).join('');
+  list.querySelectorAll('.matter-card').forEach(c => {
+    c.addEventListener('click', () => { currentMatterId = parseInt(c.dataset.id); showView('detail'); });
+  });
+}
+
+function matterCardHTML(m, next, isArchived) {
+  const caption = `${m.client} v. ${m.adverse || '—'}`;
+  const nextHtml = next ? `
+    <div class="next">
+      <div><div class="next-label">Next</div><div class="next-title">${escapeHtml(next.title)}</div></div>
+      <div class="next-days ${urgencyClass(next.days)}">${next.days === 0 ? 'TODAY' : next.days + 'd'}</div>
+    </div>` : isArchived ? `
+    <div class="next">
+      <div><div class="next-label">Closed</div><div class="next-title">${m.archivedDate ? new Date(m.archivedDate).toLocaleDateString('en-US') : '—'}</div></div>
+    </div>` : `
+    <div class="next">
+      <div><div class="next-label">Status</div><div class="next-title">No upcoming deadlines</div></div>
+    </div>`;
+  return `
+    <div class="matter-card ${isArchived ? 'archived' : ''}" data-id="${m.id}">
+      <div class="court">${escapeHtml(m.court)} · ${matterTypeLabel(m.type)}</div>
+      <h3>${escapeHtml(caption)}</h3>
+      <div class="casenum">${escapeHtml(m.casenum || '—')}</div>
+      ${nextHtml}
+      <div class="meta-row">
+        <span>${m.deadlines ? m.deadlines.filter(d => !d.done).length : 0} open</span>
+        <span>${m.deadlines ? m.deadlines.filter(d => d.done).length : 0} done</span>
+        ${m.detained === 'yes' ? '<span style="color:var(--accent);">● Detained</span>' : ''}
+      </div>
+    </div>`;
+}
+
+function matterTypeLabel(t) {
+  const map = { PFR:'Petition for Review', Habeas:'Habeas § 2241', Mandamus:'Mandamus § 1361',
+    N400:'§ 1447(b)', APA:'APA', Removal:'Removal', USCIS:'USCIS', Business:'Business Lit',
+    RealEstate:'Real Estate', Estate:'Estate Planning', Other:'Other' };
+  return map[t] || t;
+}
+
+function renderOverviewStats() {
+  const c = document.getElementById('overview-stats');
+  const active = state.matters.filter(m => !m.archived);
+  const totalDL = active.reduce((s,m) => s + (m.deadlines || []).filter(d => !d.done).length, 0);
+  let urgentCount = 0, nextDays = null, nextLabel = '—';
+  active.forEach(m => {
+    (m.deadlines || []).filter(d => !d.done).forEach(d => {
+      const days = daysUntil(parseDate(d.date));
+      if (days >= 0 && days <= 7) urgentCount++;
+      if (days >= 0 && (nextDays === null || days < nextDays)) {
+        nextDays = days;
+        nextLabel = `${m.client} · ${d.title}`;
+      }
+    });
+  });
+  c.innerHTML = `
+    <div class="stat">
+      <div class="lbl">Active Matters</div>
+      <div class="val">${active.length}</div>
+      <div class="sub">${state.matters.filter(m => m.archived).length} archived</div>
+    </div>
+    <div class="stat">
+      <div class="lbl">Open Deadlines</div>
+      <div class="val">${totalDL}</div>
+      <div class="sub">across all matters</div>
+    </div>
+    <div class="stat">
+      <div class="lbl">Urgent ≤ 7d</div>
+      <div class="val ${urgentCount > 0 ? 'alarm' : 'safe'}">${urgentCount}</div>
+      <div class="sub">${urgentCount === 1 ? 'item needs attention' : 'items need attention'}</div>
+    </div>
+    <div class="stat">
+      <div class="lbl">Next Up</div>
+      <div class="val ${nextDays !== null && nextDays <= 7 ? 'alarm' : (nextDays !== null && nextDays <= 21 ? 'warn' : '')}">${nextDays === null ? '—' : (nextDays === 0 ? 'TODAY' : nextDays + 'd')}</div>
+      <div class="sub" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(nextLabel)}</div>
+    </div>`;
+}
+
+function renderBadges() {
+  document.getElementById('badge-active').textContent = state.matters.filter(m => !m.archived).length;
+  document.getElementById('badge-archive').textContent = state.matters.filter(m => m.archived).length;
+}
+
+// ============================================================
+// NEW MATTER
+// ============================================================
+document.getElementById('show-new-matter').addEventListener('click', () => {
+  document.getElementById('new-matter-form').style.display = 'block';
+  document.getElementById('nm-client').focus();
+});
+document.getElementById('nm-cancel').addEventListener('click', () => {
+  document.getElementById('new-matter-form').style.display = 'none';
+  ['nm-client','nm-adverse','nm-casenum','nm-trigger','nm-dropbox'].forEach(id => document.getElementById(id).value = '');
+});
+document.getElementById('nm-save').addEventListener('click', async () => {
+  const client = document.getElementById('nm-client').value.trim();
+  if (!client) { alert('Client name is required.'); return; }
+  const adverse = document.getElementById('nm-adverse').value.trim();
+  const newMatterLocal = {
+    client, adverse,
+    court: document.getElementById('nm-court').value,
+    type: document.getElementById('nm-type').value,
+    casenum: document.getElementById('nm-casenum').value.trim(),
+    trigger: document.getElementById('nm-trigger').value,
+    detained: document.getElementById('nm-detained').value,
+    detentionFacility: '',
+    dropbox: document.getElementById('nm-dropbox').value.trim(),
+    notes: '',
+    created: new Date().toISOString().slice(0,10),
+    archived: false,
+    petitioner: client,
+    relief: ''
+  };
+  try {
+    const payload = matterPayloadToDb(newMatterLocal);
+    const r = await api('/matters', { method: 'POST', body: payload });
+    if (!r?.matter?.id) throw new Error('No id returned');
+    await reloadMatter(r.matter.id);
+    document.getElementById('nm-cancel').click();
+    currentMatterId = r.matter.id;
+    showView('detail');
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
+});
+
+// ============================================================
+// MATTER DETAIL
+// ============================================================
+document.getElementById('back-to-list').addEventListener('click', () => {
+  showView(state.matters.find(m => m.id === currentMatterId)?.archived ? 'archive' : 'active');
+});
+function getCurrentMatter() { return state.matters.find(m => m.id === currentMatterId); }
+
+function renderMatterDetail() {
+  const m = getCurrentMatter();
+  if (!m) { showView('active'); return; }
+  const head = document.getElementById('matter-head');
+  const caption = `${m.client} v. ${m.adverse || '—'}`;
+  head.innerHTML = `
+    <div class="head-actions">
+      ${m.archived
+        ? `<button class="btn ghost small" id="restore-btn">Restore</button>
+           <button class="btn danger small" id="delete-btn">Delete Forever</button>`
+        : `<button class="btn ghost small" id="archive-btn">✓ Close &amp; Archive</button>`}
+    </div>
+    <div class="court-line">${escapeHtml(m.court)} · ${matterTypeLabel(m.type)} ${m.archived ? '· ARCHIVED' : ''}</div>
+    <h2>${escapeHtml(caption)}</h2>
+    <div class="casenum">${escapeHtml(m.casenum || '—')}</div>
+    <dl class="info-grid">
+      <div><dt>Opened</dt><dd>${m.created ? new Date(m.created).toLocaleDateString('en-US') : '—'}</dd></div>
+      <div><dt>Triggering Date</dt><dd>${m.trigger ? new Date(m.trigger).toLocaleDateString('en-US') : '—'}</dd></div>
+      <div><dt>Custody</dt><dd>${m.detained === 'yes' ? (m.detentionFacility || 'Detained') : (m.detained === 'no' ? 'At liberty' : 'N/A')}</dd></div>
+      <div><dt>Dropbox</dt><dd>${m.dropbox ? `<a href="${escapeAttr(m.dropbox)}" target="_blank" rel="noopener" style="color:var(--accent);">Open folder ↗</a>` : '<span style="color:var(--muted); font-style:italic;">none linked</span>'}</dd></div>
+      ${m.archived ? `<div><dt>Closed</dt><dd>${new Date(m.archivedDate).toLocaleDateString('en-US')}</dd></div>` : ''}
+    </dl>`;
+  if (m.archived) {
+    document.getElementById('restore-btn').addEventListener('click', async () => {
+      try {
+        await api('/matters/' + m.id, { method: 'PATCH', body: { status: 'active' } });
+        await reloadMatter(m.id);
+        renderMatterDetail(); renderBadges(); save();
+      } catch (e) { alert('Restore failed: ' + e.message); }
+    });
+    document.getElementById('delete-btn').addEventListener('click', () => {
+      openModal('Delete this matter forever?',
+        'This permanently removes the matter and all its data. This cannot be undone.',
+        async () => {
+          try {
+            await api('/matters/' + m.id, { method: 'DELETE' });
+            state.matters = state.matters.filter(x => x.id !== m.id);
+            save();
+            showView('archive');
+          } catch (e) { alert('Delete failed: ' + e.message); }
+        });
+    });
+  } else {
+    document.getElementById('archive-btn').addEventListener('click', () => {
+      const open = (m.deadlines || []).filter(d => !d.done).length;
+      const msg = open > 0 ? `This matter has ${open} open deadline${open === 1 ? '' : 's'}. Close and archive anyway?` : 'Mark this matter complete and move it to the archive?';
+      openModal('Close & Archive', msg, async () => {
+        try {
+          await api('/matters/' + m.id, { method: 'PATCH', body: { status: 'archived' } });
+          await reloadMatter(m.id);
+          save();
+          showView('archive');
+        } catch (e) { alert('Archive failed: ' + e.message); }
+      });
+    });
+  }
+  renderMatterStats(m); renderDeadlines(m); renderFiles(m); renderNotes(m); renderChecklist(m);
+}
+
+function renderMatterStats(m) {
+  const c = document.getElementById('matter-stats');
+  const open = (m.deadlines || []).filter(d => !d.done);
+  const done = (m.deadlines || []).filter(d => d.done);
+  const next = nextDeadlineFor(m);
+  const tpl = CHECKLISTS[m.type] || CHECKLISTS.Other;
+  const checkDone = tpl.items.filter(i => m.checklist && m.checklist[i.id]).length;
+  c.innerHTML = `
+    <div class="stat"><div class="lbl">Next Deadline</div>
+      <div class="val ${next ? (urgencyClass(next.days) === 'urgent' ? 'alarm' : urgencyClass(next.days) === 'warn' ? 'warn' : '') : ''}">${next ? (next.days === 0 ? 'TODAY' : next.days + 'd') : '—'}</div>
+      <div class="sub">${next ? escapeHtml(next.title) : 'all clear'}</div></div>
+    <div class="stat"><div class="lbl">Open</div><div class="val">${open.length}</div><div class="sub">remaining</div></div>
+    <div class="stat"><div class="lbl">Completed</div><div class="val safe">${done.length}</div><div class="sub">items done</div></div>
+    <div class="stat"><div class="lbl">Checklist</div><div class="val ${checkDone === tpl.items.length && tpl.items.length > 0 ? 'safe' : ''}">${checkDone}/${tpl.items.length}</div><div class="sub">filing tasks</div></div>`;
+}
+
+function renderDeadlines(m) {
+  const c = document.getElementById('matter-deadlines');
+  const sorted = [...(m.deadlines || [])].sort((a,b) => parseDate(a.date) - parseDate(b.date));
+  if (sorted.length === 0) { c.innerHTML = `<div class="empty">No deadlines yet — add one above.</div>`; return; }
+  c.innerHTML = sorted.map(d => {
+    const days = daysUntil(parseDate(d.date));
+    return `
+      <div class="deadline ${urgencyClass(days)} ${d.done ? 'done' : ''}" data-id="${d.id}">
+        <span class="pill ${d.party}">${d.party === 'us' ? 'Us' : d.party === 'them' ? 'Govt/Opp' : 'Court'}</span>
+        <h4>${escapeHtml(d.title)}</h4>
+        <div class="citation">${escapeHtml(d.cite || '')}</div>
+        <div class="date">${fmtDate(parseDate(d.date))}</div>
+        <div class="countdown">
+          <span class="days">${days < 0 ? Math.abs(days) + 'd ago' : days === 0 ? 'TODAY' : days + 'd'}</span>
+          <span class="days-label">${days < 0 ? 'passed' : 'remaining'}</span>
+        </div>
+        ${d.note ? `<div class="note">${escapeHtml(d.note)}</div>` : ''}
+        <div class="actions">
+          <button class="toggle">${d.done ? 'Reopen' : 'Mark Done'}</button>
+          <button class="remove">Remove</button>
+        </div>
+      </div>`;
+  }).join('');
+  c.querySelectorAll('.deadline').forEach(card => {
+    const id = parseInt(card.dataset.id);
+    card.querySelector('.toggle').addEventListener('click', async () => {
+      const d = m.deadlines.find(x => x.id === id);
+      if (!d) return;
+      try {
+        await api(`/matters/${m.id}/deadlines/${id}`, {
+          method: 'PATCH', body: { completed: !d.done }
+        });
+        d.done = !d.done; save();
+        renderMatterStats(m); renderDeadlines(m); renderOverviewStats();
+      } catch (e) { alert('Update failed: ' + e.message); }
+    });
+    card.querySelector('.remove').addEventListener('click', () => {
+      const target = m.deadlines.find(x => x.id === id);
+      openModal('Remove deadline?', `This will delete "${target?.title || 'this deadline'}". You can re-add it later.`, async () => {
+        try {
+          await api(`/matters/${m.id}/deadlines/${id}`, { method: 'DELETE' });
+          m.deadlines = m.deadlines.filter(x => x.id !== id); save();
+          renderMatterStats(m); renderDeadlines(m); renderOverviewStats();
+        } catch (e) { alert('Remove failed: ' + e.message); }
+      });
+    });
+  });
+}
+
+document.getElementById('dl-add').addEventListener('click', async () => {
+  const m = getCurrentMatter(); if (!m) return;
+  const desc = document.getElementById('dl-desc').value.trim();
+  const cite = document.getElementById('dl-cite').value.trim();
+  const date = document.getElementById('dl-date').value;
+  const party = document.getElementById('dl-party').value;
+  if (!desc || !date) { alert('Description and date are required.'); return; }
+  try {
+    await api(`/matters/${m.id}/deadlines`, {
+      method: 'POST',
+      body: { title: desc, citation: cite, due_date: date, party, note: '' }
+    });
+    await reloadMatter(m.id);
+    ['dl-desc','dl-cite','dl-date'].forEach(id => document.getElementById(id).value = '');
+    const fresh = getCurrentMatter();
+    if (fresh) { renderMatterStats(fresh); renderDeadlines(fresh); renderOverviewStats(); }
+    save();
+  } catch (e) { alert('Add failed: ' + e.message); }
+});
+
+// ============================================================
+// FILES
+// ============================================================
+function renderFiles(m) {
+  const c = document.getElementById('matter-files');
+  if (!m.files) m.files = [];
+  let folderRow = '';
+  if (m.dropbox) {
+    folderRow = `
+      <div class="link-row">
+        <div class="icon">📁</div>
+        <div class="meta">
+          <div class="name">Main Dropbox Folder</div>
+          <div class="url">${escapeHtml(m.dropbox)}</div>
+        </div>
+        <a class="open" href="${escapeAttr(m.dropbox)}" target="_blank" rel="noopener">Open ↗</a>
+      </div>`;
+  }
+  const rows = m.files.map(f => `
+    <div class="link-row" data-id="${f.id}">
+      <div class="icon">${fileIcon(f.url)}</div>
+      <div class="meta"><div class="name">${escapeHtml(f.name)}</div><div class="url">${escapeHtml(f.url)}</div></div>
+      <a class="open" href="${escapeAttr(f.url)}" target="_blank" rel="noopener">Open ↗</a>
+      <button class="del" title="Remove">✕</button>
+    </div>`).join('');
+  c.innerHTML = (folderRow + rows) || `<div style="font-family:var(--serif); font-style:italic; color:var(--muted); padding:12px 0;">No files linked yet. Paste a Dropbox share link below.</div>`;
+  c.querySelectorAll('.link-row .del').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.preventDefault(); e.stopPropagation();
+      const id = parseInt(btn.closest('.link-row').dataset.id);
+      if (isNaN(id)) return;
+      try {
+        await api(`/matters/${m.id}/files/${id}`, { method: 'DELETE' });
+        m.files = m.files.filter(f => f.id !== id); save(); renderFiles(m);
+      } catch (e) { alert('Remove failed: ' + e.message); }
+    });
+  });
+}
+function fileIcon(url) {
+  const u = (url || '').toLowerCase();
+  if (u.includes('dropbox')) return 'DBX';
+  if (u.includes('drive.google') || u.includes('docs.google')) return 'GDR';
+  if (u.includes('onedrive') || u.includes('sharepoint')) return 'OD';
+  if (u.includes('box.com')) return 'BOX';
+  if (u.endsWith('.pdf')) return 'PDF';
+  if (u.endsWith('.docx') || u.endsWith('.doc')) return 'DOC';
+  return 'URL';
+}
+document.getElementById('file-add').addEventListener('click', async () => {
+  const m = getCurrentMatter(); if (!m) return;
+  const name = document.getElementById('file-name').value.trim();
+  const url = document.getElementById('file-url').value.trim();
+  if (!name || !url) { alert('Name and URL are both required.'); return; }
+  try { new URL(url); } catch (e) { alert('Please enter a valid URL.'); return; }
+  try {
+    await api(`/matters/${m.id}/files`, {
+      method: 'POST', body: { filename: name, url }
+    });
+    await reloadMatter(m.id);
+    document.getElementById('file-name').value = '';
+    document.getElementById('file-url').value = '';
+    const fresh = getCurrentMatter();
+    if (fresh) renderFiles(fresh);
+    save();
+  } catch (e) { alert('Add failed: ' + e.message); }
+});
+
+// ============================================================
+// NOTES
+// ============================================================
+function renderNotes(m) {
+  const ta = document.getElementById('matter-notes');
+  ta.value = m.notes || ''; ta.oninput = null;
+  let timer; const tag = document.getElementById('matter-saved');
+  ta.addEventListener('input', () => {
+    m.notes = ta.value; clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        await api('/matters/' + m.id, { method: 'PATCH', body: { notes: m.notes } });
+        save(); tag.classList.add('show'); setTimeout(() => tag.classList.remove('show'), 1200);
+      } catch (e) {
+        console.error('notes save failed:', e);
+        tag.textContent = '⚠ save failed'; tag.classList.add('show');
+      }
+    }, 600);
+  });
+}
+
+// ============================================================
+// CHECKLIST — backed by matter_checklists / matter_checklist_items
+// ============================================================
+// The template (CHECKLISTS[m.type]) defines the canonical ITEM TEXT.
+// On first click, we apply the template via API (server creates the
+// checklist + all items as DB rows). On subsequent clicks, we toggle
+// the matching DB row's completed flag by matching on item text.
+
+// Map template names (local) to API template route names (lowercase)
+const TEMPLATE_API_NAMES = {
+  PFR: 'pfr', Habeas: 'habeas', Mandamus: 'mandamus'
+  // N400/APA/Removal/USCIS don't have API templates yet; fall back to local-only UI
+};
+
+// Find the DB checklist item id whose text matches a template item's text
+function findDbItemId(m, templateItemText) {
+  for (const cl of (m._dbChecklists || [])) {
+    for (const it of (cl.items || [])) {
+      if (it.text === templateItemText) return it.id;
+    }
+  }
+  return null;
+}
+
+function renderChecklist(m) {
+  const tpl = CHECKLISTS[m.type] || CHECKLISTS.Other;
+  document.getElementById('checklist-heading').textContent = tpl.heading;
+  document.getElementById('checklist-cite').textContent = tpl.cite;
+  const ul = document.getElementById('matter-checklist');
+  if (!m.checklist) m.checklist = {};
+  if (tpl.items.length === 0) {
+    ul.innerHTML = `<li style="cursor:default;"><div class="item-text" style="color:var(--muted); font-style:italic;">No standard checklist for this matter type. Use the notes box.</div></li>`;
+    return;
+  }
+  ul.innerHTML = tpl.items.map(i => `
+    <li class="${m.checklist[i.id] ? 'done' : ''}" data-id="${i.id}">
+      <div class="box"></div>
+      <div class="item-text">${escapeHtml(i.text)}${i.cite ? `<span class="cite">${escapeHtml(i.cite)}</span>` : ''}</div>
+    </li>`).join('');
+  ul.querySelectorAll('li').forEach(li => {
+    if (!li.dataset.id) return;
+    li.addEventListener('click', async () => {
+      const localId = li.dataset.id;
+      const tplItem = tpl.items.find(x => x.id === localId);
+      if (!tplItem) return;
+      const newDone = !m.checklist[localId];
+
+      // Optimistic update for snappy UI
+      m.checklist[localId] = newDone;
+      renderChecklist(m); renderMatterStats(m);
+
+      try {
+        // If the matter has no DB checklists yet, seed the template first.
+        if ((m._dbChecklists || []).length === 0) {
+          const apiName = TEMPLATE_API_NAMES[m.type];
+          if (apiName) {
+            await api(`/matters/${m.id}/checklists/template/${apiName}`, { method: 'POST', body: {} });
+            await reloadMatter(m.id);
+          } else {
+            // No API template available for this matter type — keep local-only
+            save();
+            return;
+          }
+        }
+        // Find the DB row matching this template item
+        const fresh = getCurrentMatter();
+        const dbItemId = findDbItemId(fresh, tplItem.text);
+        if (!dbItemId) {
+          // Fallback: re-apply template if we can't find item (data drift)
+          console.warn('No matching DB item for', tplItem.text);
+          save();
+          return;
+        }
+        await api(`/checklist-items/${dbItemId}`, { method: 'PATCH', body: { completed: newDone } });
+        // Sync the local _dbChecklists state without full reload
+        for (const cl of (fresh._dbChecklists || [])) {
+          for (const it of (cl.items || [])) {
+            if (it.id === dbItemId) it.completed = newDone;
+          }
+        }
+        save();
+      } catch (e) {
+        // Roll back optimistic update
+        m.checklist[localId] = !newDone;
+        renderChecklist(m); renderMatterStats(m);
+        alert('Checklist update failed: ' + e.message);
+      }
+    });
+  });
+}
+
+// ============================================================
+// COURT LINKS
+// ============================================================
+function renderCourtLinks() {
+  [['pacer-links', COURT_LINKS.pacer], ['appellate-links', COURT_LINKS.appellate],
+   ['ca-district-links', COURT_LINKS.caDistrict], ['other-district-links', COURT_LINKS.otherDistrict],
+   ['agency-links', COURT_LINKS.agency]
+  ].forEach(([id, links]) => {
+    document.getElementById(id).innerHTML = links.map(l => `
+      <a class="court-link" href="${escapeAttr(l.url)}" target="_blank" rel="noopener">
+        <div class="court-name">${escapeHtml(l.name)}</div>
+        <div class="court-sub">${escapeHtml(l.sub)}</div>
+        <div class="court-url">${escapeHtml(l.url)}</div>
+      </a>`).join('');
+  });
+}
+
+// ============================================================
+// MODAL
+// ============================================================
+let modalCallback = null;
+function openModal(title, body, onConfirm) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').textContent = body;
+  document.getElementById('modal-extra').innerHTML = '';
+  modalCallback = onConfirm;
+  document.getElementById('modal').classList.add('open');
+}
+document.getElementById('modal-cancel').addEventListener('click', () => {
+  document.getElementById('modal').classList.remove('open'); modalCallback = null;
+});
+document.getElementById('modal-confirm').addEventListener('click', () => {
+  document.getElementById('modal').classList.remove('open');
+  if (modalCallback) modalCallback(); modalCallback = null;
+});
+
+document.getElementById('cal-modal-close').addEventListener('click', () => {
+  document.getElementById('cal-modal').classList.remove('open');
+});
+
+// ============================================================
+// EXPORT / IMPORT JSON
+// ============================================================
+document.getElementById('export-btn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json' });
+  triggerDownload(blob, `tez-matter-backup-${new Date().toISOString().slice(0,10)}.json`);
+});
+document.getElementById('import-btn').addEventListener('click', () => {
+  alert('Import is disabled in the server-backed version — data lives in the database. Use the new-matter form to add cases.');
+});
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+// ============================================================
+// ICS CALENDAR EXPORT
+// ============================================================
+
+// Folds long lines per RFC 5545 (max 75 octets per line, continuation with leading space).
+function foldICSLine(line) {
+  const max = 73;
+  if (line.length <= max) return line;
+  const parts = [];
+  let i = 0;
+  while (i < line.length) {
+    parts.push((i === 0 ? '' : ' ') + line.substring(i, i + max));
+    i += max;
+  }
+  return parts.join('\r\n');
+}
+
+function escICS(s) {
+  if (s === undefined || s === null) return '';
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
+}
+
+function dateToICS(s) {
+  // s = YYYY-MM-DD; emit YYYYMMDD (DATE value type for all-day events)
+  return s.replace(/-/g, '');
+}
+
+function timestampUTC(d) {
+  // YYYYMMDDTHHMMSSZ
+  const pad = n => String(n).padStart(2, '0');
+  return d.getUTCFullYear() + pad(d.getUTCMonth() + 1) + pad(d.getUTCDate())
+       + 'T' + pad(d.getUTCHours()) + pad(d.getUTCMinutes()) + pad(d.getUTCSeconds()) + 'Z';
+}
+
+function buildICS(matters) {
+  // matters: array of matter objects. We emit one VEVENT per non-done deadline.
+  const now = timestampUTC(new Date());
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//TEZ Law Firm//Matter Manager//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'X-WR-CALNAME:TEZ Law Firm — Matter Deadlines',
+    'X-WR-CALDESC:Federal court deadlines exported from the TEZ Matter Manager.',
+    'X-WR-TIMEZONE:America/Los_Angeles'
+  ];
+
+  matters.forEach(m => {
+    const caption = `${m.client}${m.adverse ? ' v. ' + m.adverse : ''}`;
+    (m.deadlines || []).filter(d => !d.done).forEach(d => {
+      // Stable UID so re-imports update rather than duplicate
+      const uid = `${m.id}-${d.id}@tez-matter-manager`;
+      const startDate = dateToICS(d.date);
+      // All-day events: DTEND is the day AFTER (per RFC 5545)
+      const endDateObj = parseDate(d.date);
+      endDateObj.setDate(endDateObj.getDate() + 1);
+      const endDate = endDateObj.getFullYear()
+        + String(endDateObj.getMonth() + 1).padStart(2, '0')
+        + String(endDateObj.getDate()).padStart(2, '0');
+
+      const partyLabel = d.party === 'us' ? 'TEZ' : d.party === 'them' ? 'Opposing' : 'Court';
+      const summary = `[${partyLabel}] ${caption}: ${d.title}`;
+
+      const descParts = [
+        `Matter: ${caption}`,
+        `Court: ${m.court || 'N/A'}`,
+        m.casenum ? `Case No.: ${m.casenum}` : null,
+        m.type ? `Type: ${matterTypeLabel(m.type)}` : null,
+        '',
+        `Filing party: ${partyLabel}`,
+        d.cite ? `Citation: ${d.cite}` : null,
+        d.note ? `Note: ${d.note}` : null,
+        m.detained === 'yes' ? `Client detained at: ${m.detentionFacility || 'detention facility'}` : null,
+        m.dropbox ? `Dropbox: ${m.dropbox}` : null
+      ].filter(Boolean).join('\n');
+
+      const categories = ['TEZ Law Firm', m.court || '', matterTypeLabel(m.type)]
+        .filter(Boolean).join(',');
+
+      const evtLines = [
+        'BEGIN:VEVENT',
+        `UID:${uid}`,
+        `DTSTAMP:${now}`,
+        `DTSTART;VALUE=DATE:${startDate}`,
+        `DTEND;VALUE=DATE:${endDate}`,
+        `SUMMARY:${escICS(summary)}`,
+        `DESCRIPTION:${escICS(descParts)}`,
+        `CATEGORIES:${escICS(categories)}`,
+        `STATUS:CONFIRMED`,
+        `TRANSP:OPAQUE`,
+        // 7 days before alarm
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        `DESCRIPTION:${escICS('7 days until: ' + d.title)}`,
+        'TRIGGER:-P7D',
+        'END:VALARM',
+        // 1 day before alarm
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        `DESCRIPTION:${escICS('TOMORROW: ' + d.title)}`,
+        'TRIGGER:-P1D',
+        'END:VALARM',
+        'END:VEVENT'
+      ];
+      evtLines.forEach(l => lines.push(foldICSLine(l)));
+    });
+  });
+
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n');
+}
+
+function exportAllToICS() {
+  const active = state.matters.filter(m => !m.archived);
+  const totalDeadlines = active.reduce((s,m) => s + (m.deadlines||[]).filter(d => !d.done).length, 0);
+  if (totalDeadlines === 0) { alert('No open deadlines to export.'); return; }
+  const ics = buildICS(active);
+  const blob = new Blob([ics], { type:'text/calendar;charset=utf-8' });
+  triggerDownload(blob, `TEZ-all-deadlines-${new Date().toISOString().slice(0,10)}.ics`);
+  document.getElementById('cal-count').textContent = totalDeadlines;
+  document.getElementById('cal-modal').classList.add('open');
+}
+
+function exportMatterToICS() {
+  const m = getCurrentMatter(); if (!m) return;
+  const open = (m.deadlines || []).filter(d => !d.done);
+  if (open.length === 0) { alert('No open deadlines to export for this matter.'); return; }
+  const ics = buildICS([m]);
+  const blob = new Blob([ics], { type:'text/calendar;charset=utf-8' });
+  const safeName = (m.client || 'matter').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+  triggerDownload(blob, `TEZ-${safeName}-deadlines.ics`);
+  document.getElementById('cal-count').textContent = open.length;
+  document.getElementById('cal-modal').classList.add('open');
+}
+
+document.getElementById('export-all-ics-btn').addEventListener('click', exportAllToICS);
+document.getElementById('export-matter-ics').addEventListener('click', exportMatterToICS);
+
+// ============================================================
+// INIT
+// ============================================================
+(async () => {
+  await loadState();
+  renderOverviewStats(); renderBadges();
+  renderMatterList(); renderCourtLinks();
+})();
+</script>
 </body>
 </html>
