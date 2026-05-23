@@ -351,7 +351,9 @@ router.post("/api/matters", requireAuth, async (req, res) => {
 
     const {
       client_name, matter_ref, court, case_type,
-      status, dropbox_url, notes
+      status, dropbox_url, notes,
+      opened_date, triggering_date, custody_location,
+      petitioner_name, relief_sought
     } = req.body || {};
 
     if (!client_name || typeof client_name !== "string") {
@@ -363,13 +365,34 @@ router.post("/api/matters", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Invalid status" });
     }
 
+    // Normalize date inputs: empty string → null. Postgres rejects "".
+    // Validate ISO YYYY-MM-DD if provided (allow Postgres to do final check).
+    const normDate = (v) => {
+      if (v === undefined || v === null || v === "") return null;
+      if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+        throw new Error("Invalid date format (expected YYYY-MM-DD)");
+      }
+      return v;
+    };
+
+    let openedDateVal, triggeringDateVal;
+    try {
+      openedDateVal = normDate(opened_date);
+      triggeringDateVal = normDate(triggering_date);
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+
     const r = await db.query(
       `INSERT INTO matters
-         (user_id, client_name, matter_ref, court, case_type, status, dropbox_url, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         (user_id, client_name, matter_ref, court, case_type, status, dropbox_url, notes,
+          opened_date, triggering_date, custody_location, petitioner_name, relief_sought)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
       [userId, client_name, matter_ref || null, court || null, case_type || null,
-       finalStatus, dropbox_url || null, notes || null]
+       finalStatus, dropbox_url || null, notes || null,
+       openedDateVal, triggeringDateVal,
+       custody_location || null, petitioner_name || null, relief_sought || null]
     );
 
     res.json({ matter: r.rows[0] });
@@ -391,7 +414,10 @@ router.patch("/api/matters/:id", requireAuth, async (req, res) => {
     if (isNaN(matterId)) return res.status(400).json({ error: "Invalid id" });
 
     const allowed = ["client_name", "matter_ref", "court", "case_type",
-                     "status", "dropbox_url", "notes"];
+                     "status", "dropbox_url", "notes",
+                     "opened_date", "triggering_date", "custody_location",
+                     "petitioner_name", "relief_sought"];
+    const dateFields = new Set(["opened_date", "triggering_date"]);
     const fields = [];
     const values = [matterId, userId];
     let i = 3;
@@ -400,8 +426,19 @@ router.patch("/api/matters/:id", requireAuth, async (req, res) => {
         if (k === "status" && !["active", "closed", "archived"].includes(req.body[k])) {
           return res.status(400).json({ error: "Invalid status" });
         }
+        let v = req.body[k];
+        // Normalize date inputs: empty string → null
+        if (dateFields.has(k)) {
+          if (v === "" || v === undefined) {
+            v = null;
+          } else if (v !== null) {
+            if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+              return res.status(400).json({ error: `Invalid date format for ${k} (expected YYYY-MM-DD)` });
+            }
+          }
+        }
         fields.push(`${k} = $${i++}`);
-        values.push(req.body[k]);
+        values.push(v);
       }
     }
     if (!fields.length) return res.status(400).json({ error: "No fields to update" });
