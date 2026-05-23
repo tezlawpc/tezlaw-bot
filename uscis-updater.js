@@ -20,7 +20,7 @@ const path  = require("path");
 
 // ── Config ─────────────────────────────────────────────────
 const LOCAL_PATH    = process.env.USCIS_DATA_PATH || "/var/data/uscis-times.json";
-const GITHUB_RAW    = "https://raw.githubusercontent.com/tezlawpc/tezlaw-telegram-bot/main/uscis-times.json";
+const GITHUB_RAW    = "https://raw.githubusercontent.com/tezlawpc/tezlaw-bot/main/uscis-times.json";
 const REFRESH_MS    = 6 * 60 * 60 * 1000; // re-read every 6 hours
 
 // ── The forms Tez Law cares about ──────────────────────────
