@@ -318,6 +318,171 @@ router.post("/api/parse-intake", requireAuth, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+//  INGEST DRY-RUN — Phase 0 validation for auto-NEF pipeline
+//
+//  POST /admin/matters/api/ingest-dry-run
+//  Body: { email_text: "..." }
+//  Returns: {
+//    case_numbers_found: [...],
+//    matter_match: { id, client_name, matter_ref } | null,
+//    proposed_deadlines: [...],
+//    proposed_fields: {...},
+//    raw_match_attempts: [...]
+//  }
+//
+//  PURE READ — never writes to the database. The point is to
+//  validate (a) we can extract case numbers from real CM/ECF
+//  emails and (b) we can match them to existing matters in
+//  the user's account.
+// ─────────────────────────────────────────────────────────────
+
+// Normalize a case number for fuzzy matching:
+// "5:26-cv-02340" -> "526cv02340"
+// "23-1234"       -> "231234"
+// "A 216-866-000" -> "a216866000"
+function normalizeCaseRef(s) {
+  return String(s || "").toLowerCase().replace(/[\s\-:\.\/]/g, "");
+}
+
+// Extract candidate case numbers from CM/ECF email text.
+// Returns array of distinct candidates (max 8) in order of appearance.
+// Patterns covered:
+//  - District: 5:26-cv-02340, 2:23-cr-00100, etc.
+//  - Circuit:  23-1234, 26-12345
+//  - A-number: A 216-866-000, A216-866-000
+//  - BIA:      File: A 216 866 000
+function extractCaseNumbers(text) {
+  const seen = new Set();
+  const out = [];
+  const push = (s) => {
+    const norm = normalizeCaseRef(s);
+    if (norm && !seen.has(norm)) { seen.add(norm); out.push(s.trim()); }
+  };
+  // District court: D:YY-{cv,cr,mj,mc,ml}-NNNNN (with optional spaces)
+  const districtRe = /\b\d{1,2}\s*:\s*\d{2}\s*-\s*(?:cv|cr|mj|mc|ml|bk)\s*-\s*\d{4,6}\b/gi;
+  // Circuit: YY-NNNN or YY-NNNNN
+  const circuitRe = /(?:^|\s|No\.\s*|Case\s*Number:\s*|Case\s*No\.\s*)(\d{2}-\d{4,5})(?=\b)/gi;
+  // A-number: A followed by 8-9 digits with optional spaces/dashes
+  const aNumRe = /A[\s\-]*\d{3}[\s\-]*\d{3}[\s\-]*\d{3}\b/gi;
+
+  let m;
+  while ((m = districtRe.exec(text)) !== null) push(m[0]);
+  while ((m = circuitRe.exec(text)) !== null) push(m[1]);
+  while ((m = aNumRe.exec(text)) !== null) push(m[0]);
+
+  return out.slice(0, 8);
+}
+
+router.post("/api/ingest-dry-run", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    if (!userId) return res.status(500).json({ error: "User not found" });
+
+    const { email_text } = req.body || {};
+    if (!email_text || typeof email_text !== "string") {
+      return res.status(400).json({ error: "email_text required" });
+    }
+    if (email_text.length < 20) {
+      return res.status(400).json({ error: "Text too short to analyze" });
+    }
+    if (email_text.length > 100000) {
+      return res.status(400).json({ error: "Text too long (max 100k chars)" });
+    }
+
+    // 1. Extract candidate case numbers
+    const candidates = extractCaseNumbers(email_text);
+
+    // 2. Try to match against existing matters
+    let matterMatch = null;
+    const matchAttempts = [];
+
+    if (candidates.length > 0) {
+      const allMatters = await db.query(
+        `SELECT id, client_name, matter_ref, court, case_type
+           FROM matters
+          WHERE user_id = $1
+          ORDER BY id ASC`,
+        [userId]
+      );
+
+      for (const cand of candidates) {
+        const candNorm = normalizeCaseRef(cand);
+        for (const m of allMatters.rows) {
+          const refNorm = normalizeCaseRef(m.matter_ref || "");
+          if (!refNorm) continue;
+          // Match if either contains the other (handles "5:26-cv-02340" vs "26-2340")
+          if (candNorm === refNorm || candNorm.includes(refNorm) || refNorm.includes(candNorm)) {
+            matchAttempts.push({ candidate: cand, matched_matter_id: m.id, matched_ref: m.matter_ref, strategy: "normalized contains" });
+            if (!matterMatch) {
+              matterMatch = {
+                id: m.id,
+                client_name: m.client_name,
+                matter_ref: m.matter_ref,
+                court: m.court,
+                case_type: m.case_type
+              };
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Run both parsers in parallel (proposals only — no writes)
+    const [intakeResult, orderResult] = await Promise.allSettled([
+      (async () => {
+        const prompt = INTAKE_PROMPT.replace("{NEF_TEXT}", email_text);
+        const text = await callClaudeAPI(prompt, 2000);
+        let cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+        return JSON.parse(cleaned);
+      })(),
+      (async () => {
+        const responseText = await callClaudeForExtraction(email_text);
+        let cleaned = responseText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+        return JSON.parse(cleaned);
+      })()
+    ]);
+
+    const proposedFields = intakeResult.status === "fulfilled" ? (intakeResult.value.fields || {}) : null;
+    const intakeConfidence = intakeResult.status === "fulfilled" ? intakeResult.value.confidence : null;
+    const intakeError = intakeResult.status === "rejected" ? intakeResult.reason.message : null;
+
+    const proposedDeadlines = orderResult.status === "fulfilled" && Array.isArray(orderResult.value.deadlines)
+      ? orderResult.value.deadlines
+      : [];
+    const orderError = orderResult.status === "rejected" ? orderResult.reason.message : null;
+
+    res.json({
+      // === Phase 0 validation report ===
+      summary: {
+        case_numbers_found: candidates.length,
+        matter_matched: matterMatch ? true : false,
+        proposed_deadline_count: proposedDeadlines.length,
+        proposed_field_count: proposedFields ? Object.values(proposedFields).filter(v => v != null && v !== "").length : 0,
+        intake_confidence: intakeConfidence
+      },
+      case_numbers_found: candidates,
+      matter_match: matterMatch,
+      match_attempts: matchAttempts,
+      proposed_deadlines: proposedDeadlines,
+      proposed_fields: proposedFields,
+      errors: {
+        intake_parser: intakeError,
+        order_parser: orderError
+      },
+      // What WOULD happen if this were live (not a dry run):
+      would_do: matterMatch
+        ? `Attach ${proposedDeadlines.length} proposed deadline(s) to matter #${matterMatch.id} (${matterMatch.client_name}) for review`
+        : (proposedFields && proposedFields.matter_ref)
+          ? `No matter match — would queue ${proposedDeadlines.length} deadline(s) + matter draft for "${proposedFields.client_name || 'unknown'}" pending your confirmation`
+          : `No matter match and no extractable case number — would queue email body in inbox for manual review`
+    });
+  } catch (err) {
+    console.error("POST /api/ingest-dry-run error:", err.message);
+    res.status(500).json({ error: err.message || "Dry-run error" });
+  }
+});
+
 // ── Helper: get the current user id (single-user system) ──
 // For now, every authenticated admin session is JJ Zhang (user id 1).
 // When multi-user is added later, derive this from the session token.
