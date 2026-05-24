@@ -473,8 +473,9 @@ If ADDRESSEE TYPE is "entity":
  - For Mandarin: do NOT use 先生/女士; address the company directly (e.g., 致[公司名]：)
 
 If ADDRESSEE TYPE is "individual":
- - Use Mr./Ms. + surname in the salutation as provided
- - For Mandarin: use 先生/女士 with surname as provided
+ - Use the client's name in the salutation as provided (no Mr./Ms. — already determined for you)
+ - Do NOT add any honorific or gendered title anywhere in the letter
+ - For Mandarin: address the client by name as provided; do NOT add 先生/女士
 
 DO NOT:
  - Make legal predictions ("we will likely win", "your case is strong")
@@ -575,17 +576,15 @@ router.post("/api/matters/:id/client-summary", requireAuth, async (req, res) => 
       salutationEn = `Dear ${addresseeName}:`;
       salutationZh = `致${addresseeName}：`;
     } else {
-      // Derive surname: handle "Last, First" (comma form, common in legal notation)
-      // and "First Last" (space form)
-      let lastName = addresseeName;
+      // For individuals: use the full client name (no Mr./Ms. — JJ preference)
+      // For "Last, First" format, render as "First Last" for natural greeting
+      let display = addresseeName;
       if (addresseeName.includes(",")) {
-        lastName = addresseeName.split(",")[0].trim();
-      } else {
-        const parts = addresseeName.split(/\s+/).filter(Boolean);
-        if (parts.length >= 2) lastName = parts[parts.length - 1];
+        const [last, ...rest] = addresseeName.split(",").map(s => s.trim());
+        if (rest.length && rest[0]) display = `${rest.join(", ")} ${last}`;
       }
-      salutationEn = `Dear Mr./Ms. ${lastName}:`;
-      salutationZh = `致${lastName}先生/女士：`;
+      salutationEn = `Dear ${display}:`;
+      salutationZh = `致${display}：`;
     }
 
     const prompt = CLIENT_SUMMARY_PROMPT
