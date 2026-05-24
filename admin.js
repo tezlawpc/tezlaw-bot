@@ -79,7 +79,7 @@ function getPool() {
 // ── Session helpers ───────────────────────────────────────
 async function createSession(userId) {
   const token = crypto.randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000); // 8 hours
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
   try {
     await getPool().query(
       `INSERT INTO admin_sessions (token, user_id, expires_at) VALUES ($1, $2, $3)
@@ -878,7 +878,7 @@ function loginPageHtml() {
         if (data.status === 'approved') {
           clearInterval(pollInterval);
           // Store token in cookie
-          document.cookie = 'admin_token=' + data.token + '; path=/; max-age=28800; SameSite=Strict';
+          document.cookie = 'admin_token=' + data.token + '; path=/; max-age=2592000; SameSite=Strict';
           status.className = 'status success';
           status.textContent = '✅ Approved! Redirecting...';
           setTimeout(() => window.location.href = '/admin/', 800);
