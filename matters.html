@@ -626,6 +626,9 @@
               <option value="APA">APA Action</option>
               <option value="Removal">Removal / EOIR</option>
               <option value="USCIS">USCIS Application</option>
+              <option value="Trademark">Trademark (USPTO)</option>
+              <option value="Patent">Patent (USPTO)</option>
+              <option value="Copyright">Copyright (USCO)</option>
               <option value="Business">Business Litigation</option>
               <option value="RealEstate">Real Estate / Landlord-Tenant</option>
               <option value="Estate">Estate Planning</option>
@@ -1035,7 +1038,7 @@ function mapMatterFromDb(dbm, deadlines, files, notes, checklists) {
   const typeStr = typeRaw.toLowerCase();
   let typeKey = typeRaw || 'Other';
   // Short-form direct matches first (from the form's <select> values)
-  if (['pfr','habeas','mandamus','n400','apa','removal','uscis','business','realestate','estate','other'].includes(typeStr)) {
+  if (['pfr','habeas','mandamus','n400','apa','removal','uscis','trademark','patent','copyright','business','realestate','estate','other'].includes(typeStr)) {
     typeKey = typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1).toLowerCase();
     if (typeStr === 'pfr') typeKey = 'PFR';
     else if (typeStr === 'apa') typeKey = 'APA';
@@ -1049,6 +1052,9 @@ function mapMatterFromDb(dbm, deadlines, files, notes, checklists) {
   else if (/^apa/.test(typeStr)) typeKey = 'APA';
   else if (/removal/.test(typeStr)) typeKey = 'Removal';
   else if (/uscis/.test(typeStr)) typeKey = 'USCIS';
+  else if (/trademark|service mark/.test(typeStr)) typeKey = 'Trademark';
+  else if (/^patent/.test(typeStr)) typeKey = 'Patent';
+  else if (/copyright/.test(typeStr)) typeKey = 'Copyright';
 
   // Pick scalar notes content. The DB has a notes column on matters
   // (scratch text) AND a matter_notes table (legacy timestamped notes).
@@ -1255,6 +1261,41 @@ const CHECKLISTS = {
     { id:"uscis-6", text:"Biometrics appointment docketed",        cite:"" },
     { id:"uscis-7", text:"Interview scheduled / completed",        cite:"" }
   ]},
+  Trademark: { heading:"Trademark · USPTO Prosecution", cite:"15 U.S.C. § 1051 · TMEP", items:[
+    { id:"tm-1",  text:"Conflict / clearance search completed (TESS + common law)",         cite:"TMEP §§ 1207-1208" },
+    { id:"tm-2",  text:"Application drafted (TEAS Plus or Standard)",                        cite:"15 U.S.C. § 1051(a)/(b)" },
+    { id:"tm-3",  text:"Goods/services per ID Manual; class(es) confirmed",                  cite:"TMEP § 1402" },
+    { id:"tm-4",  text:"Filing basis selected: 1(a) / 1(b) / 44(e) / 66(a)",                 cite:"15 U.S.C. § 1051" },
+    { id:"tm-5",  text:"Specimen acceptable (1(a) only)",                                    cite:"TMEP § 904" },
+    { id:"tm-6",  text:"Filing fee paid; serial number saved",                                cite:"" },
+    { id:"tm-7",  text:"Examining attorney assigned; OA review calendared",                   cite:"15 U.S.C. § 1062" },
+    { id:"tm-8",  text:"Notice of Publication received; opposition window monitored",        cite:"15 U.S.C. § 1063" },
+    { id:"tm-9",  text:"NOA (1(b)) OR Registration certificate (1(a)) received",             cite:"" },
+    { id:"tm-10", text:"SOU + extensions calendared if 1(b)",                                 cite:"15 U.S.C. § 1051(d)" },
+    { id:"tm-11", text:"Maintenance: § 8 (yr 5-6), § 9 renewal (yr 9-10) calendared",        cite:"15 U.S.C. § 1058 · § 1059" }
+  ]},
+  Patent: { heading:"Patent · USPTO Prosecution", cite:"35 U.S.C. · MPEP", items:[
+    { id:"pat-1",  text:"Invention disclosure + prior-art search completed",                  cite:"" },
+    { id:"pat-2",  text:"Provisional/Non-provisional decision; foreign strategy",             cite:"35 U.S.C. § 111 · § 119(e)" },
+    { id:"pat-3",  text:"Specification + claims + drawings drafted",                          cite:"35 U.S.C. § 112" },
+    { id:"pat-4",  text:"Inventor declaration / ADS filed",                                   cite:"37 C.F.R. § 1.63 · § 1.76" },
+    { id:"pat-5",  text:"Filing + search + examination fee paid; receipt saved",               cite:"37 C.F.R. § 1.16" },
+    { id:"pat-6",  text:"First Office Action — 3-mo response calendared",                     cite:"37 C.F.R. § 1.134" },
+    { id:"pat-7",  text:"IDS filed within 3 mo of awareness",                                 cite:"37 C.F.R. § 1.97" },
+    { id:"pat-8",  text:"Final OA decision: RCE / appeal / abandon",                          cite:"37 C.F.R. § 1.114; § 41" },
+    { id:"pat-9",  text:"Notice of Allowance — 3-mo issue fee deadline calendared",          cite:"37 C.F.R. § 1.311" },
+    { id:"pat-10", text:"Maintenance fees at 3.5, 7.5, 11.5 yrs calendared",                   cite:"35 U.S.C. § 41(b)" }
+  ]},
+  Copyright: { heading:"Copyright · USCO Registration", cite:"17 U.S.C. · Circular 1", items:[
+    { id:"cr-1", text:"Work type identified (literary / visual / sound / etc.)",             cite:"17 U.S.C. § 102" },
+    { id:"cr-2", text:"Authorship + chain of title confirmed",                                cite:"17 U.S.C. § 201 · § 204" },
+    { id:"cr-3", text:"eCO application filed (Form TX / VA / PA / SR)",                       cite:"37 C.F.R. § 202" },
+    { id:"cr-4", text:"Deposit copies submitted within 3 mo of publication",                  cite:"17 U.S.C. § 408(b)" },
+    { id:"cr-5", text:"Filing fee paid; registration certificate received",                   cite:"" },
+    { id:"cr-6", text:"Pre-suit registration confirmed if litigation anticipated",            cite:"17 U.S.C. § 411(a)" },
+    { id:"cr-7", text:"Transfers/assignments recorded with USCO",                              cite:"17 U.S.C. § 205" },
+    { id:"cr-8", text:"Termination right calendared if post-1977 grant (35-40 yrs)",          cite:"17 U.S.C. § 203" }
+  ]},
   Business: { heading:"Business Litigation", cite:"", items:[
     { id:"biz-1", text:"Engagement letter signed",        cite:"" },
     { id:"biz-2", text:"Conflict check completed",        cite:"" },
@@ -1441,8 +1482,9 @@ function matterCardHTML(m, next, isArchived) {
 
 function matterTypeLabel(t) {
   const map = { PFR:'Petition for Review', Habeas:'Habeas § 2241', Mandamus:'Mandamus § 1361',
-    N400:'§ 1447(b)', APA:'APA', Removal:'Removal', USCIS:'USCIS', Business:'Business Lit',
-    RealEstate:'Real Estate', Estate:'Estate Planning', Other:'Other' };
+    N400:'§ 1447(b)', APA:'APA', Removal:'Removal', USCIS:'USCIS',
+    Trademark:'Trademark', Patent:'Patent', Copyright:'Copyright',
+    Business:'Business Lit', RealEstate:'Real Estate', Estate:'Estate Planning', Other:'Other' };
   return map[t] || t;
 }
 
