@@ -820,165 +820,222 @@ router.post("/api/ingest-dry-run", requireAuth, async (req, res) => {
 //  matter_deadlines. The proposal sits in 'pending' state until
 //  PATCH /api/proposals/:id with action='accept' is called.
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  ingestEmailText() — SHARED PARSING + PROPOSAL CREATION
+//
+//  Called by both:
+//    - POST /api/ingest (manual paste, user-authenticated)
+//    - POST /webhook/inbound-email (SendGrid auto-ingest)
+//
+//  Inputs:
+//    userId       (int)    — owner of any proposals created
+//    emailText    (string) — full email body text
+//    opts (obj):
+//      source     ('manual_paste' | 'email_inbound' | 'api')
+//      source_ref (string)  — origin label (subject, "from: name", etc.)
+//      message_id (string)  — original Message-ID header (for dedup; null OK)
+//
+//  Returns: { ok, summary, matter_match, proposals, error?, duplicate? }
+//    - duplicate=true if message_id already exists in proposals table
+// ─────────────────────────────────────────────────────────────
+async function ingestEmailText(userId, emailText, opts = {}) {
+  if (!emailText || typeof emailText !== "string") {
+    return { ok: false, error: "email_text required", proposals: [] };
+  }
+  if (emailText.length < 20) {
+    return { ok: false, error: "Text too short to analyze", proposals: [] };
+  }
+  if (emailText.length > 100000) {
+    return { ok: false, error: "Text too long (max 100k chars)", proposals: [] };
+  }
+
+  const sourceVal = ["manual_paste", "email_inbound", "api"].includes(opts.source) ? opts.source : "manual_paste";
+  const sourceRefVal = opts.source_ref ? String(opts.source_ref).substring(0, 200) : null;
+  const messageId = opts.message_id ? String(opts.message_id).substring(0, 500) : null;
+
+  // Idempotency: if we've already seen this Message-ID, skip silently.
+  // (Same email forwarded twice should not create duplicate proposals.)
+  if (messageId) {
+    const dup = await db.query(
+      `SELECT id FROM matter_proposals WHERE message_id = $1 LIMIT 1`,
+      [messageId]
+    );
+    if (dup.rows.length > 0) {
+      return { ok: true, duplicate: true, existing_proposal_id: dup.rows[0].id, proposals: [] };
+    }
+  }
+
+  // 1. Extract case numbers and find matter match
+  const candidates = extractCaseNumbers(emailText);
+  let matterMatch = null;
+
+  if (candidates.length > 0) {
+    const allMatters = await db.query(
+      `SELECT id, client_name, matter_ref, court, case_type
+         FROM matters WHERE user_id = $1 ORDER BY id ASC`,
+      [userId]
+    );
+    for (const cand of candidates) {
+      const candNorm = normalizeCaseRef(cand);
+      for (const m of allMatters.rows) {
+        const refNorm = normalizeCaseRef(m.matter_ref || "");
+        if (!refNorm) continue;
+        if (candNorm === refNorm || candNorm.includes(refNorm) || refNorm.includes(candNorm)) {
+          if (!matterMatch) {
+            matterMatch = { id: m.id, client_name: m.client_name, matter_ref: m.matter_ref };
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Run both parsers in parallel
+  const [intakeResult, orderResult] = await Promise.allSettled([
+    (async () => {
+      const prompt = INTAKE_PROMPT.replace("{NEF_TEXT}", emailText);
+      const text = await callClaudeAPI(prompt, 2000);
+      let cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      return JSON.parse(cleaned);
+    })(),
+    (async () => {
+      const responseText = await callClaudeForExtraction(emailText);
+      let cleaned = responseText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      return JSON.parse(cleaned);
+    })()
+  ]);
+
+  const intakeFields = intakeResult.status === "fulfilled" ? (intakeResult.value.fields || {}) : null;
+  const intakeConfidence = intakeResult.status === "fulfilled" ? intakeResult.value.confidence : null;
+  const deadlines = orderResult.status === "fulfilled" && Array.isArray(orderResult.value.deadlines)
+    ? orderResult.value.deadlines : [];
+
+  // Both parsers failed: tell caller so it can decide whether to file a "raw" proposal
+  const parserFailed = intakeResult.status === "rejected" && orderResult.status === "rejected";
+
+  // 3. Write proposals to the inbox table
+  const excerpt = emailText.substring(0, 4000);
+  const created = [];
+
+  // 3a. Deadline proposals (one per extracted deadline that has a date)
+  for (const d of deadlines) {
+    if (!d.due_date) continue;
+    const ins = await db.query(
+      `INSERT INTO matter_proposals
+         (user_id, matter_id, kind, source, source_ref,
+          proposed_data, raw_excerpt, status, confidence, message_id)
+       VALUES ($1, $2, 'deadline', $3, $4, $5, $6, 'pending', $7, $8)
+       RETURNING id, kind, matter_id, proposed_data, confidence, created_at`,
+      [
+        userId,
+        matterMatch ? matterMatch.id : null,
+        sourceVal,
+        sourceRefVal,
+        JSON.stringify(d),
+        excerpt,
+        d.confidence || intakeConfidence || "low",
+        messageId
+      ]
+    );
+    created.push(ins.rows[0]);
+  }
+
+  // 3b. New-matter proposal if no match and intake parser found case info
+  if (!matterMatch && intakeFields && (intakeFields.matter_ref || intakeFields.case_type || intakeFields.client_name)) {
+    const ins = await db.query(
+      `INSERT INTO matter_proposals
+         (user_id, kind, source, source_ref, proposed_data, raw_excerpt, status, confidence, message_id)
+       VALUES ($1, 'new_matter', $2, $3, $4, $5, 'pending', $6, $7)
+       RETURNING id, kind, matter_id, proposed_data, confidence, created_at`,
+      [
+        userId,
+        sourceVal,
+        sourceRefVal,
+        JSON.stringify(intakeFields),
+        excerpt,
+        intakeConfidence || "low",
+        messageId
+      ]
+    );
+    created.push(ins.rows[0]);
+  }
+
+  // 3c. Field-update proposal if matter matched and intake parser found new fields
+  if (matterMatch && intakeFields) {
+    const meaningfulFields = Object.fromEntries(
+      Object.entries(intakeFields).filter(([k, v]) => v != null && v !== "")
+    );
+    if (Object.keys(meaningfulFields).length > 0) {
+      const ins = await db.query(
+        `INSERT INTO matter_proposals
+           (user_id, matter_id, kind, source, source_ref,
+            proposed_data, raw_excerpt, status, confidence, message_id)
+         VALUES ($1, $2, 'field_update', $3, $4, $5, $6, 'pending', $7, $8)
+         RETURNING id, kind, matter_id, proposed_data, confidence, created_at`,
+        [
+          userId,
+          matterMatch.id,
+          sourceVal,
+          sourceRefVal,
+          JSON.stringify(meaningfulFields),
+          excerpt,
+          intakeConfidence || "low",
+          messageId
+        ]
+      );
+      created.push(ins.rows[0]);
+    }
+  }
+
+  return {
+    ok: true,
+    parser_failed: parserFailed,
+    summary: {
+      case_numbers_found: candidates,
+      matter_matched: matterMatch ? matterMatch.id : null,
+      proposals_created: created.length,
+      deadline_proposals: created.filter(c => c.kind === "deadline").length,
+      new_matter_proposals: created.filter(c => c.kind === "new_matter").length,
+      field_update_proposals: created.filter(c => c.kind === "field_update").length
+    },
+    matter_match: matterMatch,
+    proposals: created
+  };
+}
+
 router.post("/api/ingest", requireAuth, async (req, res) => {
   try {
     const userId = await getCurrentUserId(req);
     if (!userId) return res.status(500).json({ error: "User not found" });
 
     const { email_text, source, source_ref } = req.body || {};
-    if (!email_text || typeof email_text !== "string") {
-      return res.status(400).json({ error: "email_text required" });
+    const result = await ingestEmailText(userId, email_text, {
+      source: source || "manual_paste",
+      source_ref
+    });
+
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error });
     }
-    if (email_text.length < 20) {
-      return res.status(400).json({ error: "Text too short to analyze" });
+    if (result.duplicate) {
+      return res.json({
+        summary: { case_numbers_found: [], matter_matched: null, proposals_created: 0 },
+        matter_match: null,
+        proposals: [],
+        duplicate: true,
+        existing_proposal_id: result.existing_proposal_id
+      });
     }
-    if (email_text.length > 100000) {
-      return res.status(400).json({ error: "Text too long (max 100k chars)" });
-    }
-
-    const sourceVal = ["manual_paste", "email_inbound", "api"].includes(source) ? source : "manual_paste";
-    const sourceRefVal = source_ref ? String(source_ref).substring(0, 200) : null;
-
-    // 1. Extract case numbers and find matter match
-    const candidates = extractCaseNumbers(email_text);
-    let matterMatch = null;
-
-    if (candidates.length > 0) {
-      const allMatters = await db.query(
-        `SELECT id, client_name, matter_ref, court, case_type
-           FROM matters WHERE user_id = $1 ORDER BY id ASC`,
-        [userId]
-      );
-      for (const cand of candidates) {
-        const candNorm = normalizeCaseRef(cand);
-        for (const m of allMatters.rows) {
-          const refNorm = normalizeCaseRef(m.matter_ref || "");
-          if (!refNorm) continue;
-          if (candNorm === refNorm || candNorm.includes(refNorm) || refNorm.includes(candNorm)) {
-            if (!matterMatch) {
-              matterMatch = { id: m.id, client_name: m.client_name, matter_ref: m.matter_ref };
-            }
-          }
-        }
-      }
-    }
-
-    // 2. Run both parsers in parallel
-    const [intakeResult, orderResult] = await Promise.allSettled([
-      (async () => {
-        const prompt = INTAKE_PROMPT.replace("{NEF_TEXT}", email_text);
-        const text = await callClaudeAPI(prompt, 2000);
-        let cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-        return JSON.parse(cleaned);
-      })(),
-      (async () => {
-        const responseText = await callClaudeForExtraction(email_text);
-        let cleaned = responseText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-        return JSON.parse(cleaned);
-      })()
-    ]);
-
-    const intakeFields = intakeResult.status === "fulfilled" ? (intakeResult.value.fields || {}) : null;
-    const intakeConfidence = intakeResult.status === "fulfilled" ? intakeResult.value.confidence : null;
-    const deadlines = orderResult.status === "fulfilled" && Array.isArray(orderResult.value.deadlines)
-      ? orderResult.value.deadlines : [];
-
-    // 3. Write proposals to the inbox table
-    const excerpt = email_text.substring(0, 4000); // store first 4k chars for context
-    const created = [];
-
-    // 3a. Deadline proposals (one per extracted deadline that has a date)
-    for (const d of deadlines) {
-      if (!d.due_date) continue; // skip dateless proposals
-      const ins = await db.query(
-        `INSERT INTO matter_proposals
-           (user_id, matter_id, kind, source, source_ref,
-            proposed_data, raw_excerpt, status, confidence)
-         VALUES ($1, $2, 'deadline', $3, $4, $5, $6, 'pending', $7)
-         RETURNING id, kind, matter_id, proposed_data, confidence, created_at`,
-        [
-          userId,
-          matterMatch ? matterMatch.id : null,
-          sourceVal,
-          sourceRefVal,
-          JSON.stringify({
-            title: d.title,
-            due_date: d.due_date,
-            party: d.party || "us",
-            citation: d.citation || null,
-            source_excerpt: d.source_excerpt || null
-          }),
-          d.source_excerpt ? String(d.source_excerpt).substring(0, 2000) : excerpt.substring(0, 2000),
-          d.confidence || "low"
-        ]
-      );
-      created.push(ins.rows[0]);
-    }
-
-    // 3b. New-matter proposal (only if NO matter matched AND intake parser found enough info)
-    if (!matterMatch && intakeFields && (intakeFields.client_name || intakeFields.matter_ref)) {
-      const ins = await db.query(
-        `INSERT INTO matter_proposals
-           (user_id, matter_id, kind, source, source_ref,
-            proposed_data, raw_excerpt, status, confidence)
-         VALUES ($1, NULL, 'new_matter', $2, $3, $4, $5, 'pending', $6)
-         RETURNING id, kind, matter_id, proposed_data, confidence, created_at`,
-        [
-          userId,
-          sourceVal,
-          sourceRefVal,
-          JSON.stringify(intakeFields),
-          excerpt,
-          intakeConfidence || "low"
-        ]
-      );
-      created.push(ins.rows[0]);
-    }
-
-    // 3c. Field-update proposal (matter matched + intake parser has useful field updates)
-    if (matterMatch && intakeFields) {
-      // Only propose fields that have a non-null value
-      const meaningfulFields = Object.fromEntries(
-        Object.entries(intakeFields).filter(([k, v]) => v != null && v !== "")
-      );
-      if (Object.keys(meaningfulFields).length > 0) {
-        const ins = await db.query(
-          `INSERT INTO matter_proposals
-             (user_id, matter_id, kind, source, source_ref,
-              proposed_data, raw_excerpt, status, confidence)
-           VALUES ($1, $2, 'field_update', $3, $4, $5, $6, 'pending', $7)
-           RETURNING id, kind, matter_id, proposed_data, confidence, created_at`,
-          [
-            userId,
-            matterMatch.id,
-            sourceVal,
-            sourceRefVal,
-            JSON.stringify(meaningfulFields),
-            excerpt,
-            intakeConfidence || "low"
-          ]
-        );
-        created.push(ins.rows[0]);
-      }
-    }
-
     res.json({
-      summary: {
-        case_numbers_found: candidates,
-        matter_matched: matterMatch ? matterMatch.id : null,
-        proposals_created: created.length,
-        deadline_proposals: created.filter(c => c.kind === "deadline").length,
-        new_matter_proposals: created.filter(c => c.kind === "new_matter").length,
-        field_update_proposals: created.filter(c => c.kind === "field_update").length
-      },
-      matter_match: matterMatch,
-      proposals: created
+      summary: result.summary,
+      matter_match: result.matter_match,
+      proposals: result.proposals
     });
   } catch (err) {
     console.error("POST /api/ingest error:", err.message);
     res.status(500).json({ error: err.message || "Ingest error" });
   }
 });
+
 
 // ─────────────────────────────────────────────────────────────
 //  GET /api/proposals — list pending proposals (the inbox)
@@ -2455,4 +2512,4 @@ async function handleCalendarFeed(req, res) {
   }
 }
 
-module.exports = { router, handleCalendarFeed };
+module.exports = { router, handleCalendarFeed, ingestEmailText };
