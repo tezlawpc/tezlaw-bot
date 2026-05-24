@@ -1,5 +1,14 @@
 // ============================================================
-//  expand-scan.js v3.1 — Year-Windowed + Resilient
+//  expand-scan.js v3.2 — Year-Windowed + Resilient + DB-checkpoint
+//
+//  v3.2 CHANGES vs v3.1:
+//    - Postgres-backed checkpoint via cleanup_checkpoint table
+//      (job_name = "expand_scan:{courts}"). Survives Render redeploys
+//      and /tmp/ wipes.
+//    - /tmp/ checkpoint kept as low-latency local cache; DB write is
+//      fire-and-forget async (no impact on existing sync call sites).
+//    - On startup, prefer DB checkpoint over /tmp/ if both exist.
+//    - Compatible with v3.1 /tmp/-only checkpoints (auto-migrates on load).
 //
 //  v3.1 CHANGES vs v3:
 //    - 4xx no longer aborts the whole court — skips just that window
@@ -30,7 +39,9 @@
 //    nohup node expand-scan.js --courts=scotus --max-clusters=10000 ...
 //    nohup node expand-scan.js --courts=ca9 --keyword-filter ...  # narrow to civil motion keywords
 //
-//  RESUMABLE: cursor + currentWindowYear preserved in checkpoint.
+//  RESUMABLE: cursor + currentWindowYear + completedCourts preserved
+//             in BOTH /tmp/expand-checkpoint.json AND Postgres
+//             cleanup_checkpoint table. Either alone is enough to resume.
 // ============================================================
 
 const fs    = require("fs");
@@ -127,18 +138,105 @@ let state = {
   totals:        { fetched: 0, claude_calls: 0, processed: 0, skipped: 0, errors: 0, sub_opinion_fetches: 0 },
 };
 
-function loadCheckpoint() {
+// ============================================================
+//  CHECKPOINT — dual-write to /tmp/ (fast) + Postgres (durable)
+//
+//  Reads: prefer DB if present (survives Render redeploy/tmp wipe);
+//         fall back to /tmp/ for v3.1 compatibility.
+//  Writes: write /tmp/ synchronously (existing behavior), then fire
+//          DB write asynchronously (no await needed at call sites).
+//
+//  DB table: cleanup_checkpoint (same one Stage 2B uses).
+//    job_name TEXT PRIMARY KEY, last_id INTEGER, totals JSONB, updated_at TIMESTAMPTZ
+//    We store the full state blob in `totals`, and use job_name =
+//    "expand_scan:" + courts arg (or "expand_scan:default" if none).
+// ============================================================
+
+function getJobName() {
+  // CLI flag --courts=X[,Y,Z]
+  const courtArg = process.argv.find(a => a.startsWith("--courts="));
+  const courts = courtArg ? courtArg.replace("--courts=", "") : "default";
+  return `expand_scan:${courts}`;
+}
+
+const CHECKPOINT_JOB_NAME = getJobName();
+
+// Async DB read on startup
+async function loadCheckpointFromDB() {
+  try {
+    const r = await db.query(
+      `SELECT totals, updated_at FROM cleanup_checkpoint WHERE job_name = $1`,
+      [CHECKPOINT_JOB_NAME]
+    );
+    if (r.rows.length && r.rows[0].totals) {
+      const blob = r.rows[0].totals;
+      // The totals JSONB column holds the full state object
+      if (blob && (blob.courts || blob.current_court || blob.completed_courts)) {
+        return blob;
+      }
+    }
+  } catch (e) {
+    // Table may not exist yet, or other transient — fall back to file
+    console.error(`[checkpoint] DB read error (will fall back to file):`, e.message);
+  }
+  return null;
+}
+
+// Fire-and-forget async DB write
+function saveCheckpointToDB() {
+  // Don't await — keep saveCheckpoint() synchronous-feeling at call sites
+  (async () => {
+    try {
+      await db.query(`
+        INSERT INTO cleanup_checkpoint (job_name, last_id, totals, updated_at)
+        VALUES ($1, 0, $2::jsonb, NOW())
+        ON CONFLICT (job_name) DO UPDATE
+          SET totals = EXCLUDED.totals,
+              updated_at = NOW()
+      `, [CHECKPOINT_JOB_NAME, JSON.stringify(state)]);
+    } catch (e) {
+      // Silent — /tmp/ is still our local cache, DB will retry on next save
+    }
+  })();
+}
+
+// File-based load (v3.1 compat path)
+function loadCheckpointFromFile() {
   try {
     if (fs.existsSync(CHECKPOINT_FILE)) return JSON.parse(fs.readFileSync(CHECKPOINT_FILE, "utf8"));
   } catch {}
   return null;
 }
 
+// Public: file + DB hybrid. Sync to keep existing call sites unchanged.
+// On startup we call the async loader explicitly via loadCheckpointAsync().
+function loadCheckpoint() {
+  // This sync version is only used in legacy code paths; main() calls loadCheckpointAsync.
+  return loadCheckpointFromFile();
+}
+
+// Async loader: prefer DB → fall back to file
+async function loadCheckpointAsync() {
+  const fromDB = await loadCheckpointFromDB();
+  if (fromDB) {
+    log(`[checkpoint] Loaded from Postgres (job: ${CHECKPOINT_JOB_NAME})`);
+    return fromDB;
+  }
+  const fromFile = loadCheckpointFromFile();
+  if (fromFile) {
+    log(`[checkpoint] Loaded from /tmp/ file (no DB checkpoint found)`);
+    return fromFile;
+  }
+  return null;
+}
+
+// Public: write to BOTH /tmp/ (sync, fast) and DB (async, durable)
 function saveCheckpoint() {
   try {
     fs.mkdirSync(STORAGE_DIR, { recursive: true });
     fs.writeFileSync(CHECKPOINT_FILE, JSON.stringify(state, null, 2));
   } catch {}
+  saveCheckpointToDB();
 }
 
 function log(msg) {
@@ -858,12 +956,13 @@ async function main() {
   log(`Concurrency: ${CONCURRENCY} Claude calls + ${SUB_OPINION_CONCURRENCY} sub-opinion fetches`);
   log("");
 
-  const cp = loadCheckpoint();
+  const cp = await loadCheckpointAsync();
   if (cp) {
     state = cp;
-    log(`[init] Resumed from checkpoint`);
+    log(`[init] Resumed from checkpoint (job: ${CHECKPOINT_JOB_NAME})`);
   } else {
     state.job_id = `expand-${Date.now()}`;
+    log(`[init] Starting fresh (no prior checkpoint for job: ${CHECKPOINT_JOB_NAME})`);
     saveCheckpoint();
   }
 
