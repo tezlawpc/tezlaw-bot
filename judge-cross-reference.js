@@ -1,44 +1,56 @@
 // ============================================================
-//  judge-cross-reference.js
+//  judge-cross-reference.js  (v1.1 — junk-filtered)
 //  Bridges Layer 1 (judge_rulings, judge_profiles) to Research.
 //
 //  THE COMPETITIVE MOAT — these queries cannot be replicated by
 //  Westlaw/Lexis/Fastcase because they require firm-specific data
 //  about which judges have cited which cases, with what treatment.
 //
+//  v1.1 CHANGES:
+//   - judgeTopCitedCases:  filters junk citations (broken case names,
+//                          metadata-only parens, single-cite noise)
+//   - judgesCitingCase:    same junk filter on cited_case_name
+//   - both now return negative_count (criticizes/overrules/reverses)
+//
 //  PRIMARY QUERIES:
 //    1. hasJudgeCited(judgeName, caseId)
-//       → "Has Judge X cited THIS case before, and how?"
-//
 //    2. judgesCitingCase(caseId)
-//       → "Which judges in the firm's working DB have cited this case?"
-//
 //    3. coCitedCases(caseId)
-//       → "Cases this judge cites alongside the seed case"
-//
-//    4. predictTreatment(judgeName, caseId, queryContext)
-//       → "How would Judge X likely treat this case?"
-//          (uses Layer 1 profile + cited_cases history)
+//    4. judgeTopCitedCases(judgeName, motionType, limit)
+//    5. predictTreatment(judgeName, caseId, queryContext)
 // ============================================================
 
 const db = require("./db");
+
+// SHARED JUNK FILTERS
+const JUNK_CASE_NAME_FILTER = `
+  e.cited_case_name IS NOT NULL
+  AND length(e.cited_case_name) >= 10
+  AND e.cited_case_name ~* ' v\\.? '
+  AND e.cited_case_name NOT ILIKE '— U.S.%'
+  AND e.cited_case_name NOT ILIKE '- U.S.%'
+  AND e.cited_case_name NOT ILIKE 'Inc.%'
+  AND e.cited_case_name NOT ILIKE 'States v.%'
+  AND e.cited_case_name NOT ILIKE 'LLC v.%'
+  AND e.cited_case_name NOT ILIKE 'Corp.%'
+  AND e.cited_case_name NOT ILIKE '%-- U.S.%'
+`;
+
+const PAREN_QUALITY_FILTER = `
+  e.parenthetical IS NOT NULL
+  AND length(e.parenthetical) > 20
+  AND e.parenthetical NOT ILIKE 'per curiam%'
+  AND e.parenthetical NOT ILIKE 'en banc%'
+  AND e.parenthetical !~ '^\\d{4}$'
+`;
 
 // ============================================================
 //  1. HAS JUDGE CITED THIS CASE?
 // ============================================================
 
-/**
- * Find every time a specific judge has cited a specific case.
- * Returns the parenthetical, treatment, and ruling context.
- *
- * @param {string} judgeName - case-insensitive partial match (e.g., "Wardlaw")
- * @param {Object} caseRef - { caseId?, citation?, caseName? }
- * @returns Array of citation events
- */
 async function hasJudgeCited(judgeName, caseRef) {
   if (!judgeName || !caseRef) return [];
 
-  // Build matching conditions
   const conditions = [];
   const params = [`%${judgeName}%`];
   let pi = 2;
@@ -89,13 +101,6 @@ async function hasJudgeCited(judgeName, caseRef) {
 //  2. WHICH JUDGES HAVE CITED THIS CASE?
 // ============================================================
 
-/**
- * Find every judge in the firm's working DB who has cited this case.
- * Useful for "who's friendly to this authority?" research.
- *
- * @param {Object} caseRef - { caseId?, citation?, caseName? }
- * @returns Aggregated by judge with citation count + treatment summary
- */
 async function judgesCitingCase(caseRef) {
   const conditions = [];
   const params = [];
@@ -124,11 +129,18 @@ async function judgesCitingCase(caseRef) {
       COUNT(*) FILTER (WHERE e.treatment IN ('positive','followed')) AS positive_count,
       COUNT(*) FILTER (WHERE e.treatment = 'distinguishes') AS distinguishes_count,
       COUNT(*) FILTER (WHERE e.treatment IN ('criticizes','overrules','reverses')) AS negative_count,
-      ARRAY_AGG(DISTINCT e.parenthetical) FILTER (WHERE e.parenthetical IS NOT NULL) AS sample_parentheticals,
+      ARRAY_AGG(DISTINCT e.parenthetical) FILTER (WHERE ${PAREN_QUALITY_FILTER}) AS sample_parentheticals,
       MAX(e.extracted_at) AS most_recent_citation
     FROM citation_edges_internal e
-    WHERE ${conditions.join(" OR ")}
+    WHERE (${conditions.join(" OR ")})
+      AND e.judge_name IS NOT NULL
+      AND length(e.judge_name) BETWEEN 4 AND 60
+      AND e.judge_name NOT ILIKE '%panel%'
+      AND e.judge_name NOT ILIKE '%(per curiam)%'
+      AND e.judge_name NOT ILIKE '%circuit judge%'
+      AND e.judge_name NOT IN ('Unknown', 'Unknown Judge', 'Per Curiam', 'Consideration', 'Took')
     GROUP BY e.judge_name, e.court
+    HAVING COUNT(*) >= 1
     ORDER BY citation_count DESC, most_recent_citation DESC
     LIMIT 30
   `;
@@ -143,19 +155,10 @@ async function judgesCitingCase(caseRef) {
 }
 
 // ============================================================
-//  3. CO-CITED CASES (Cases This Judge Cites Alongside Seed)
+//  3. CO-CITED CASES
 // ============================================================
 
-/**
- * Cases that frequently appear in the same rulings as the seed case.
- * Pattern: find rulings citing seedCase → list other cases in those rulings.
- *
- * @param {Object} caseRef - the seed case
- * @param {string} judgeName - optional, scope to this judge
- * @param {number} limit - default 10
- */
 async function coCitedCases(caseRef, judgeName = null, limit = 10) {
-  // Step 1: find ruling_ids that cite the seed case
   const seedConditions = [];
   const seedParams = [];
   let pi = 1;
@@ -195,10 +198,11 @@ async function coCitedCases(caseRef, judgeName = null, limit = 10) {
       COUNT(*) AS co_citation_count,
       COUNT(DISTINCT e.judge_name) AS distinct_judges,
       ARRAY_AGG(DISTINCT e.treatment) FILTER (WHERE e.treatment IS NOT NULL) AS treatments,
-      ARRAY_AGG(DISTINCT e.parenthetical) FILTER (WHERE e.parenthetical IS NOT NULL) AS sample_parentheticals
+      ARRAY_AGG(DISTINCT e.parenthetical) FILTER (WHERE ${PAREN_QUALITY_FILTER}) AS sample_parentheticals
     FROM citation_edges_internal e
     WHERE e.ruling_id IN (SELECT ruling_id FROM seed_rulings)
-      AND NOT (${seedConditions.map((c, i) => c.replace(/\$\d+/g, m => `$${parseInt(m.slice(1))}`)).join(" OR ")})
+      AND NOT (${seedConditions.map(c => c).join(" OR ")})
+      AND ${JUNK_CASE_NAME_FILTER}
     GROUP BY e.cited_case_name, e.cited_case_citation, e.cited_normalized
     HAVING COUNT(*) >= 2
     ORDER BY co_citation_count DESC, distinct_judges DESC
@@ -216,20 +220,14 @@ async function coCitedCases(caseRef, judgeName = null, limit = 10) {
 }
 
 // ============================================================
-//  4. JUDGE'S TOP CITED CASES (most authoritative for this judge)
+//  4. JUDGE'S TOP CITED CASES — JUNK-FILTERED
 // ============================================================
 
-/**
- * Get the cases a specific judge cites most often. Useful for:
- *  - "What authorities does Judge X rely on?"
- *  - Brief-writing: lead with cases this judge respects
- */
 async function judgeTopCitedCases(judgeName, motionType = null, limit = 20) {
   const params = [`%${judgeName}%`];
   let pi = 2;
   let motionFilter = "";
 
-  // Motion filter via judge_insights (since citation_edges_internal doesn't have motion_type)
   if (motionType) {
     motionFilter = ` AND EXISTS (
       SELECT 1 FROM judge_insights ji
@@ -249,12 +247,14 @@ async function judgeTopCitedCases(judgeName, motionType = null, limit = 20) {
       COUNT(*) AS times_cited,
       COUNT(*) FILTER (WHERE e.treatment IN ('positive','followed')) AS positive_count,
       COUNT(*) FILTER (WHERE e.treatment = 'distinguishes') AS distinguishes_count,
-      ARRAY_AGG(DISTINCT e.parenthetical) FILTER (WHERE e.parenthetical IS NOT NULL) AS sample_parentheticals,
+      COUNT(*) FILTER (WHERE e.treatment IN ('criticizes','overrules','reverses')) AS negative_count,
+      ARRAY_AGG(DISTINCT e.parenthetical) FILTER (WHERE ${PAREN_QUALITY_FILTER}) AS sample_parentheticals,
       MAX(e.extracted_at) AS most_recent
     FROM citation_edges_internal e
     WHERE e.judge_name ILIKE $1${motionFilter}
+      AND ${JUNK_CASE_NAME_FILTER}
     GROUP BY e.cited_case_name, e.cited_case_citation, e.cited_normalized, e.cited_cluster_id
-    HAVING COUNT(*) >= 1
+    HAVING COUNT(*) >= 2
     ORDER BY times_cited DESC, most_recent DESC
     LIMIT $${pi}
   `;
@@ -270,35 +270,17 @@ async function judgeTopCitedCases(judgeName, motionType = null, limit = 20) {
 
 // ============================================================
 //  5. PREDICT TREATMENT
-//  Uses captured judge profile + cited_cases history to predict
-//  how Judge X would likely treat caseId in the queryContext.
 // ============================================================
 
-/**
- * Build a snapshot for "how would Judge X treat this case?"
- * Returns structured data (not a Claude call — that lives in research-engine.js)
- *
- * @returns {
- *   judge: { name, court, total_rulings },
- *   prior_citations: [...],     // every prior cite of this case by this judge
- *   has_distinguished: bool,
- *   has_followed: bool,
- *   has_criticized: bool,
- *   confidence: 'HIGH' | 'MEDIUM' | 'LOW',
- *   summary: string,
- * }
- */
 async function predictionSnapshot(judgeName, caseRef, motionType = null) {
   const priors = await hasJudgeCited(judgeName, caseRef);
 
-  // Profile lookup
   const profileQuery = await db.query(
     `SELECT judge_name, court, total_rulings FROM judge_profiles WHERE judge_name ILIKE $1 ORDER BY total_rulings DESC LIMIT 1`,
     [`%${judgeName}%`]
   );
   const judgeRow = profileQuery.rows[0];
 
-  // Tally treatments
   const treatments = priors.reduce((acc, p) => {
     if (p.treatment) acc[p.treatment] = (acc[p.treatment] || 0) + 1;
     return acc;
@@ -344,29 +326,11 @@ async function predictionSnapshot(judgeName, caseRef, motionType = null) {
 
 // ============================================================
 //  6. ETL — BACKFILL citation_edges_internal FROM judge_insights.cited_cases
-//  Run once to populate the moat table from existing data.
 // ============================================================
 
-/**
- * One-time backfill: flatten judge_insights.cited_cases ARRAY into
- * citation_edges_internal table.
- *
- * judge_insights schema (per Layer 1):
- *   - judge_profile_id, judge_name, court, motion_type
- *   - cited_cases    text[]   ← array of citation strings
- *   - cited_statutes text[]
- *   - accepted_args  text[]
- *
- * cited_cases entries are strings like:
- *   "Nahrvani v. Gonzales, 399 F.3d 1148 (9th Cir. 2005)"
- *   "Mendez-Gutierrez v. Ashcroft"
- *
- * Use: node judge-cross-reference.js --backfill
- */
 async function backfillCitationEdges({ batchSize = 500, startFrom = 0 } = {}) {
   console.log(`[backfill] Starting citation edges backfill from insight_id > ${startFrom}`);
 
-  // Get total count of insights with citations
   const countResult = await db.query(
     `SELECT COUNT(*) FROM judge_insights
      WHERE cited_cases IS NOT NULL
@@ -406,10 +370,6 @@ async function backfillCitationEdges({ batchSize = 500, startFrom = 0 } = {}) {
         const trimmed = citeStr.trim();
         if (trimmed.length < 4) continue;
 
-        // Parse "Case Name, ### Reporter ### (Court Year)" pattern
-        // Two main shapes seen in the data:
-        //   Full:    "Nahrvani v. Gonzales, 399 F.3d 1148 (9th Cir. 2005)"
-        //   Short:   "Mendez-Gutierrez v. Ashcroft"
         const fullMatch = trimmed.match(/^(.+?),\s*(\d+\s+[A-Za-z.]+\s+\d+)\s*(?:\(([^)]+)\))?\s*$/);
 
         let caseName, citation;
@@ -417,7 +377,6 @@ async function backfillCitationEdges({ batchSize = 500, startFrom = 0 } = {}) {
           caseName = fullMatch[1].trim();
           citation = fullMatch[2].trim();
         } else {
-          // Short form — just the case name
           caseName = trimmed;
           citation = null;
         }
@@ -441,7 +400,7 @@ async function backfillCitationEdges({ batchSize = 500, startFrom = 0 } = {}) {
           ]);
           edgesCreated++;
         } catch (err) {
-          // Skip individual edge failures; keep going
+          // skip
         }
       }
       lastId = ins.id;
