@@ -434,6 +434,168 @@ router.post("/api/parse-uspto", requireAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+//  CLIENT STATUS SUMMARY — generate a formal status update
+//
+//  POST /admin/matters/api/matters/:id/client-summary
+//  Body: { include_mandarin?: boolean }
+//
+//  Generates a formal/businesslike English status update for the
+//  client, plus optional Mandarin translation. Draft only — never
+//  sends; user copies and forwards via their own channel.
+//
+//  Profile 2 (Formal/Businesslike) voice:
+//   - "Dear Mr./Ms. [LastName]" greeting
+//   - Procedural posture + upcoming deadlines as bulleted lists
+//   - Third-person legal references
+//   - Standard professional sign-off
+//   - AI-disclaimer + privilege footer
+// ─────────────────────────────────────────────────────────────
+const CLIENT_SUMMARY_PROMPT = `You are drafting a formal status-update letter from an attorney (JJ Zhang, CA Bar #326666, TEZ Law Firm) to a client regarding their legal matter.
+
+VOICE: Formal / businesslike. NOT warm/effusive, NOT casual. Think professional law-firm letter.
+ - Greeting: "Dear Mr./Ms. [LastName]" (use surname if you can derive it; else "Dear [ClientName]")
+ - Procedural posture in factual third-person ("The Board issued...", "A Petition for Review was filed...")
+ - Upcoming deadlines as a bulleted list
+ - Past events as a bulleted list under "Procedural posture"
+ - Sign off: "Sincerely, JJ Zhang, Attorney at Law"
+ - No emotional language, no reassurance phrases, no "I know this is difficult"
+ - Plain English — avoid jargon the client wouldn't know, but use proper procedural terms
+ - Keep total length under 350 words for English version
+
+DO NOT:
+ - Make legal predictions ("we will likely win", "your case is strong")
+ - Promise outcomes
+ - Use first-name basis with the client
+ - Speculate about events that haven't happened
+ - Reference internal strategy
+
+DO:
+ - State facts and dates as recorded in the matter notes / deadlines
+ - Identify upcoming critical dates the client should know
+ - Use the exact case caption and case number if available
+ - Note next anticipated step
+
+Matter data:
+"""
+{MATTER_DATA}
+"""
+
+Output STRICT JSON ONLY (no markdown fences, no preamble):
+{
+  "subject_line": "Status Update — [brief case identifier]",
+  "english": "Full letter body in English. Include greeting, procedural posture (bulleted), upcoming deadlines (bulleted), brief forward-look sentence, and sign-off. Do NOT include the disclaimer footer — that is added separately.",
+  "mandarin": "Standard professional Mandarin translation of the English body. Use 简体中文 (simplified Chinese). Same structure as English. Salutation: 致[姓氏]先生/女士.",
+  "warnings": ["List any factual gaps that may require attorney review before sending, e.g. 'matter notes are blank — letter may be too generic', 'no upcoming deadlines logged'"]
+}`;
+
+router.post("/api/matters/:id/client-summary", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    if (!userId) return res.status(500).json({ error: "User not found" });
+
+    const matterId = parseInt(req.params.id);
+    if (isNaN(matterId)) return res.status(400).json({ error: "Invalid id" });
+
+    // Verify ownership and load matter + deadlines + notes
+    const mRes = await db.query(
+      `SELECT * FROM matters WHERE id = $1 AND user_id = $2`,
+      [matterId, userId]
+    );
+    if (!mRes.rows.length) return res.status(404).json({ error: "Matter not found" });
+    const m = mRes.rows[0];
+
+    const dRes = await db.query(
+      `SELECT title, citation, due_date, party, note, completed
+         FROM matter_deadlines
+        WHERE matter_id = $1
+        ORDER BY due_date ASC NULLS LAST`,
+      [matterId]
+    );
+    const deadlines = dRes.rows;
+
+    // Build the data block fed to Claude
+    const today = new Date().toISOString().slice(0, 10);
+    const upcoming = deadlines.filter(d => d.due_date && String(d.due_date).slice(0, 10) >= today && !d.completed);
+    const past = deadlines.filter(d => d.due_date && String(d.due_date).slice(0, 10) < today);
+
+    const matterData = [
+      `Client: ${m.client_name || "—"}`,
+      m.petitioner_name && m.petitioner_name !== m.client_name ? `Petitioner: ${m.petitioner_name}` : null,
+      `Matter type: ${m.case_type || "—"}`,
+      `Court: ${m.court || "—"}`,
+      m.matter_ref ? `Case number: ${m.matter_ref}` : null,
+      m.opened_date ? `Matter opened: ${String(m.opened_date).slice(0,10)}` : null,
+      m.triggering_date ? `Triggering event date: ${String(m.triggering_date).slice(0,10)}` : null,
+      m.custody_location ? `Client custody: ${m.custody_location}` : null,
+      m.relief_sought ? `Relief sought: ${m.relief_sought}` : null,
+      m.mark ? `Mark / Title: ${m.mark}` : null,
+      m.serial_number ? `Serial/App/Reg: ${m.serial_number}` : null,
+      m.filing_basis ? `Filing basis: ${m.filing_basis}` : null,
+      "",
+      "Past events (recently passed deadlines):",
+      past.length === 0
+        ? "  (none recorded)"
+        : past.slice(-8).map(d => `  - ${String(d.due_date).slice(0,10)}: ${d.title}${d.completed ? " [completed]" : ""}`).join("\n"),
+      "",
+      "Upcoming deadlines:",
+      upcoming.length === 0
+        ? "  (none currently scheduled)"
+        : upcoming.slice(0, 10).map(d => `  - ${String(d.due_date).slice(0,10)}: ${d.title} (party: ${d.party || "us"})`).join("\n"),
+      "",
+      "Matter notes (most recent first, may be empty):",
+      m.notes ? String(m.notes).substring(0, 2000) : "(no notes recorded)"
+    ].filter(Boolean).join("\n");
+
+    const prompt = CLIENT_SUMMARY_PROMPT.replace("{MATTER_DATA}", matterData);
+    const responseText = await callClaudeAPI(prompt, 3000);
+
+    let parsed;
+    try {
+      let cleaned = responseText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Client summary JSON error. Raw:", responseText.substring(0, 500));
+      return res.status(500).json({
+        error: "Could not parse summary output.",
+        raw: responseText.substring(0, 500)
+      });
+    }
+
+    // Append the disclaimer footer (server-side so attorney can't accidentally remove it)
+    const DISCLAIMER_EN = "\n\n---\n*This summary may contain inaccuracies — please contact our office at (909) 374-6995 if anything is unclear or if you have questions. Confidential — Attorney-Client Privileged Communication.*";
+    const DISCLAIMER_ZH = "\n\n---\n*本摘要可能存在不准确之处——如有任何疑问或不明之处，请致电我们办公室 (909) 374-6995。机密文件——律师与委托人特权通讯。*";
+
+    const SIGNATURE_EN = "\n\nSincerely,\nJJ Zhang\nAttorney at Law · CA Bar #326666\nTEZ Law Firm\n4141 S. Nogales St., C102, West Covina, CA 91792\n(909) 374-6995 · jj@tezlawfirm.com";
+
+    // English: ensure signature is present; if Claude already included one, don't duplicate
+    let englishOut = parsed.english || "";
+    if (!/JJ Zhang/i.test(englishOut.split("\n").slice(-6).join("\n"))) {
+      englishOut += SIGNATURE_EN;
+    }
+    englishOut += DISCLAIMER_EN;
+
+    let mandarinOut = parsed.mandarin || "";
+    if (mandarinOut) {
+      // For Mandarin, append same signature block (English signature is fine — name and contact info don't translate)
+      if (!/JJ Zhang/i.test(mandarinOut.split("\n").slice(-6).join("\n"))) {
+        mandarinOut += SIGNATURE_EN;
+      }
+      mandarinOut += DISCLAIMER_ZH;
+    }
+
+    res.json({
+      subject_line: parsed.subject_line || `Status Update — ${m.client_name || "your matter"}`,
+      english: englishOut,
+      mandarin: mandarinOut,
+      warnings: Array.isArray(parsed.warnings) ? parsed.warnings : []
+    });
+  } catch (err) {
+    console.error("POST /api/matters/:id/client-summary error:", err.message);
+    res.status(500).json({ error: err.message || "Generator error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 //  INGEST DRY-RUN — Phase 0 validation for auto-NEF pipeline
 //
 //  POST /admin/matters/api/ingest-dry-run
