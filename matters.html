@@ -616,9 +616,9 @@
         </div>
 
         <div class="grid">
-          <div class="field"><label>Client / Petitioner</label><input type="text" id="nm-client" placeholder="e.g., Lu, Guangfeng" /></div>
-          <div class="field"><label>Adverse Party</label><input type="text" id="nm-adverse" placeholder="e.g., Bondi" /></div>
-          <div class="field"><label>Court</label>
+          <div class="field"><label id="nm-client-label">Client / Petitioner</label><input type="text" id="nm-client" placeholder="e.g., Lu, Guangfeng" /></div>
+          <div class="field lit-field"><label>Adverse Party</label><input type="text" id="nm-adverse" placeholder="e.g., Bondi" /></div>
+          <div class="field lit-field"><label>Court</label>
             <select id="nm-court">
               <option value="9th Cir.">9th Circuit Court of Appeals</option>
               <option value="C.D. Cal.">U.S. District Court · C.D. Cal.</option>
@@ -650,14 +650,14 @@
               <option value="Other">Other</option>
             </select>
           </div>
-          <div class="field"><label>Case Number / Agency No.</label><input type="text" id="nm-casenum" placeholder="A-Number, docket #, etc." /></div>
-          <div class="field"><label>Triggering Date</label><input type="date" id="nm-trigger" /></div>
+          <div class="field"><label id="nm-casenum-label">Case Number / Agency No.</label><input type="text" id="nm-casenum" placeholder="A-Number, docket #, etc." /></div>
+          <div class="field"><label id="nm-trigger-label">Triggering Date</label><input type="date" id="nm-trigger" /></div>
           <div class="field"><label>Dropbox Folder URL</label><input type="url" id="nm-dropbox" placeholder="https://www.dropbox.com/scl/fo/…" /></div>
-          <div class="field"><label>Adverse Party Detained?</label>
+          <div class="field lit-field"><label>Adverse Party Detained?</label>
             <select id="nm-detained"><option value="no">No</option><option value="yes">Yes</option><option value="na">N/A</option></select>
           </div>
-          <div class="field"><label>Custody Facility (if detained)</label><input type="text" id="nm-custody" placeholder="e.g., Cimarron Facility, Cushing OK" /></div>
-          <div class="field"><label>Relief Sought</label><input type="text" id="nm-relief" placeholder="e.g., Asylum / W/H / CAT" /></div>
+          <div class="field lit-field"><label>Custody Facility (if detained)</label><input type="text" id="nm-custody" placeholder="e.g., Cimarron Facility, Cushing OK" /></div>
+          <div class="field lit-field"><label id="nm-relief-label">Relief Sought</label><input type="text" id="nm-relief" placeholder="e.g., Asylum / W/H / CAT" /></div>
 
           <div class="field ip-field" style="display:none;"><label>Mark / Title</label><input type="text" id="nm-mark" placeholder="e.g., ROBOTIC CONNECTIVE NETWORK" /></div>
           <div class="field ip-field" style="display:none;"><label>Serial / App / Reg #</label><input type="text" id="nm-serial" placeholder="e.g., 99842455" /></div>
@@ -1143,6 +1143,14 @@ function mapMatterFromDb(dbm, deadlines, files, notes, checklists) {
     archivedDate: null,                          // not tracked in DB yet
     petitioner: dbm.petitioner_name || '',
     relief: dbm.relief_sought || '',
+    // IP-specific fields
+    serial_number: dbm.serial_number || '',
+    mark: dbm.mark || '',
+    mark_format: dbm.mark_format || '',
+    filing_basis: dbm.filing_basis || '',
+    intl_class: dbm.intl_class || '',
+    owner_name: dbm.owner_name || '',
+    owner_email: dbm.owner_email || '',
     files: (files || []).map(f => ({
       id: f.id,
       dbId: f.id,
@@ -1169,8 +1177,9 @@ function mapMatterFromDb(dbm, deadlines, files, notes, checklists) {
 
 // Map our state field -> DB column names for write
 function matterPayloadToDb(m) {
+  const isIp = ['Trademark','Patent','Copyright'].includes(m.type);
   return {
-    client_name: m.adverse ? `${m.client} v. ${m.adverse}` : m.client,
+    client_name: (m.adverse && !isIp) ? `${m.client} v. ${m.adverse}` : m.client,
     matter_ref: m.casenum || '',
     court: m.court || '',
     case_type: m.type || '',
@@ -1179,7 +1188,7 @@ function matterPayloadToDb(m) {
     notes: m.notes || '',
     opened_date: m.created || '',
     triggering_date: m.trigger || '',
-    custody_location: m.detained === 'yes' ? (m.detentionFacility || 'Detained') : '',
+    custody_location: (m.detained === 'yes' && !isIp) ? (m.detentionFacility || 'Detained') : '',
     petitioner_name: m.petitioner || m.client || '',
     relief_sought: m.relief || ''
   };
@@ -1490,7 +1499,10 @@ function renderArchiveList() {
 }
 
 function matterCardHTML(m, next, isArchived) {
-  const caption = `${m.client} v. ${m.adverse || '—'}`;
+  const isIp = ['Trademark','Patent','Copyright'].includes(m.type);
+  const caption = isIp
+    ? (m.mark || m.client || '—')
+    : `${m.client} v. ${m.adverse || '—'}`;
   const nextHtml = next ? `
     <div class="next">
       <div><div class="next-label">Next</div><div class="next-title">${escapeHtml(next.title)}</div></div>
@@ -1615,23 +1627,61 @@ document.getElementById('nm-cancel').addEventListener('click', () => {
 function toggleIpFields() {
   const t = document.getElementById('nm-type').value;
   const isIp = ['Trademark','Patent','Copyright'].includes(t);
+
+  // Show/hide IP-only fields
   document.querySelectorAll('.ip-field').forEach(el => {
     el.style.display = isIp ? '' : 'none';
   });
+  // Show/hide litigation-only fields (Adverse Party, Court, Detained?, Custody, Relief)
+  document.querySelectorAll('.lit-field').forEach(el => {
+    el.style.display = isIp ? 'none' : '';
+  });
+
+  // Relabel fields that have different meaning in IP context
+  const clientLabel  = document.getElementById('nm-client-label');
+  const casenumLabel = document.getElementById('nm-casenum-label');
+  const triggerLabel = document.getElementById('nm-trigger-label');
+  const reliefLabel  = document.getElementById('nm-relief-label');
+  const casenumInput = document.getElementById('nm-casenum');
+  const triggerInput = document.getElementById('nm-trigger');
+
+  if (isIp) {
+    if (clientLabel)  clientLabel.textContent = 'Client / Owner';
+    if (casenumLabel) casenumLabel.textContent = 'Serial / App / Reg No.';
+    if (casenumInput) casenumInput.placeholder = 'e.g., 99842455';
+    if (triggerLabel) triggerLabel.textContent = 'Filing / Event Date';
+    if (reliefLabel)  reliefLabel.textContent  = 'Goods / Services';
+  } else {
+    if (clientLabel)  clientLabel.textContent = 'Client / Petitioner';
+    if (casenumLabel) casenumLabel.textContent = 'Case Number / Agency No.';
+    if (casenumInput) casenumInput.placeholder = 'A-Number, docket #, etc.';
+    if (triggerLabel) triggerLabel.textContent = 'Triggering Date';
+    if (reliefLabel)  reliefLabel.textContent  = 'Relief Sought';
+  }
 }
 document.getElementById('nm-type').addEventListener('change', toggleIpFields);
 
 document.getElementById('nm-save').addEventListener('click', async () => {
   const client = document.getElementById('nm-client').value.trim();
   if (!client) { alert('Client name is required.'); return; }
-  const adverse = document.getElementById('nm-adverse').value.trim();
-  const detained = document.getElementById('nm-detained').value;
-  const custody = document.getElementById('nm-custody').value.trim();
   const type = document.getElementById('nm-type').value;
   const isIp = ['Trademark','Patent','Copyright'].includes(type);
+
+  // Litigation-only fields — skip for IP matters
+  const adverse  = isIp ? '' : document.getElementById('nm-adverse').value.trim();
+  const detained = isIp ? 'na' : document.getElementById('nm-detained').value;
+  const custody  = isIp ? '' : document.getElementById('nm-custody').value.trim();
+  const relief   = document.getElementById('nm-relief').value.trim(); // (now means "goods/services" for IP)
+
+  // Court: forced for IP matters since the picker is hidden
+  let court;
+  if (type === 'Trademark' || type === 'Patent') court = 'USPTO';
+  else if (type === 'Copyright') court = 'USCO';
+  else court = document.getElementById('nm-court').value;
+
   const newMatterLocal = {
     client, adverse,
-    court: document.getElementById('nm-court').value,
+    court,
     type,
     casenum: document.getElementById('nm-casenum').value.trim()
             || (isIp ? document.getElementById('nm-serial').value.trim() : ''),
@@ -1643,7 +1693,7 @@ document.getElementById('nm-save').addEventListener('click', async () => {
     created: new Date().toISOString().slice(0,10),
     archived: false,
     petitioner: client,
-    relief: document.getElementById('nm-relief').value.trim(),
+    relief: relief,
     // IP-specific fields
     serial_number: document.getElementById('nm-serial').value.trim() || null,
     mark:          document.getElementById('nm-mark').value.trim() || null,
@@ -1908,7 +1958,38 @@ function renderMatterDetail() {
   window._opProposals = [];
 
   const head = document.getElementById('matter-head');
-  const caption = `${m.client} v. ${m.adverse || '—'}`;
+  const isIp = ['Trademark','Patent','Copyright'].includes(m.type);
+  const caption = isIp
+    ? (m.mark || m.client)
+    : `${m.client} v. ${m.adverse || '—'}`;
+  const subline = isIp && m.mark && m.client && m.mark !== m.client
+    ? `<div class="casenum" style="margin-top:4px;">Owner: ${escapeHtml(m.client)}</div>`
+    : '';
+
+  // Info grid varies by type
+  let infoGrid;
+  if (isIp) {
+    const fmtCommerce = m.relief ? m.relief : '—';
+    const filingBasisLabel = m.filing_basis ? `§ ${m.filing_basis}` : '—';
+    infoGrid = `
+      <div><dt>${m.type === 'Trademark' ? 'Filed' : 'Filed / Recorded'}</dt><dd>${m.trigger ? new Date(m.trigger).toLocaleDateString('en-US') : (m.created ? new Date(m.created).toLocaleDateString('en-US') : '—')}</dd></div>
+      ${m.serial_number ? `<div><dt>Serial / App / Reg</dt><dd>${escapeHtml(m.serial_number)}</dd></div>` : ''}
+      ${m.intl_class ? `<div><dt>Int'l Class</dt><dd>${escapeHtml(m.intl_class)}</dd></div>` : ''}
+      ${m.filing_basis ? `<div><dt>Filing Basis</dt><dd>${filingBasisLabel}</dd></div>` : ''}
+      ${m.mark_format ? `<div><dt>Mark Format</dt><dd>${escapeHtml(m.mark_format)}</dd></div>` : ''}
+      ${m.owner_email ? `<div><dt>Owner Email</dt><dd><a href="mailto:${escapeAttr(m.owner_email)}" style="color:var(--accent);">${escapeHtml(m.owner_email)}</a></dd></div>` : ''}
+      ${m.relief ? `<div><dt>Goods / Services</dt><dd>${escapeHtml(m.relief)}</dd></div>` : ''}
+      <div><dt>Dropbox</dt><dd>${m.dropbox ? `<a href="${escapeAttr(m.dropbox)}" target="_blank" rel="noopener" style="color:var(--accent);">Open folder ↗</a>` : '<span style="color:var(--muted); font-style:italic;">none linked</span>'}</dd></div>
+      ${m.archived ? `<div><dt>Closed</dt><dd>${new Date(m.archivedDate).toLocaleDateString('en-US')}</dd></div>` : ''}`;
+  } else {
+    infoGrid = `
+      <div><dt>Opened</dt><dd>${m.created ? new Date(m.created).toLocaleDateString('en-US') : '—'}</dd></div>
+      <div><dt>Triggering Date</dt><dd>${m.trigger ? new Date(m.trigger).toLocaleDateString('en-US') : '—'}</dd></div>
+      <div><dt>Custody</dt><dd>${m.detained === 'yes' ? (m.detentionFacility || 'Detained') : (m.detained === 'no' ? 'At liberty' : 'N/A')}</dd></div>
+      <div><dt>Dropbox</dt><dd>${m.dropbox ? `<a href="${escapeAttr(m.dropbox)}" target="_blank" rel="noopener" style="color:var(--accent);">Open folder ↗</a>` : '<span style="color:var(--muted); font-style:italic;">none linked</span>'}</dd></div>
+      ${m.archived ? `<div><dt>Closed</dt><dd>${new Date(m.archivedDate).toLocaleDateString('en-US')}</dd></div>` : ''}`;
+  }
+
   head.innerHTML = `
     <div class="head-actions">
       ${m.archived
@@ -1919,13 +2000,8 @@ function renderMatterDetail() {
     <div class="court-line">${escapeHtml(m.court)} · ${matterTypeLabel(m.type)} ${m.archived ? '· ARCHIVED' : ''}</div>
     <h2>${escapeHtml(caption)}</h2>
     <div class="casenum">${escapeHtml(m.casenum || '—')}</div>
-    <dl class="info-grid">
-      <div><dt>Opened</dt><dd>${m.created ? new Date(m.created).toLocaleDateString('en-US') : '—'}</dd></div>
-      <div><dt>Triggering Date</dt><dd>${m.trigger ? new Date(m.trigger).toLocaleDateString('en-US') : '—'}</dd></div>
-      <div><dt>Custody</dt><dd>${m.detained === 'yes' ? (m.detentionFacility || 'Detained') : (m.detained === 'no' ? 'At liberty' : 'N/A')}</dd></div>
-      <div><dt>Dropbox</dt><dd>${m.dropbox ? `<a href="${escapeAttr(m.dropbox)}" target="_blank" rel="noopener" style="color:var(--accent);">Open folder ↗</a>` : '<span style="color:var(--muted); font-style:italic;">none linked</span>'}</dd></div>
-      ${m.archived ? `<div><dt>Closed</dt><dd>${new Date(m.archivedDate).toLocaleDateString('en-US')}</dd></div>` : ''}
-    </dl>`;
+    ${subline}
+    <dl class="info-grid">${infoGrid}</dl>`;
   if (m.archived) {
     document.getElementById('restore-btn').addEventListener('click', async () => {
       try {
