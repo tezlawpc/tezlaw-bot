@@ -371,6 +371,284 @@ async function tgDownloadFile(fileId) {
   return { buffer: Buffer.from(fr.data), extension: path.split(".").pop().toLowerCase() };
 }
 
+// ────────────────────────────────────────────────────────────
+//  Daily deadline summary (Telegram, sent each morning at 7am PT)
+//
+//  Pulls open (not completed) deadlines from matter_deadlines and
+//  buckets them: Overdue / Today / This Week / Next Week.
+//
+//  Excludes archived matters. Restricted to JJ_TELEGRAM_ID for now.
+// ────────────────────────────────────────────────────────────
+async function sendDailyDeadlineSummary() {
+  if (!JJ_TELEGRAM_ID) {
+    console.log("Daily summary skipped — JJ_TELEGRAM_ID not set");
+    return;
+  }
+  const db = require("./db");
+
+  // Anchor "today" in Pacific time. We compare YYYY-MM-DD strings,
+  // which avoids JS Date timezone confusion when matched against
+  // the DATE-typed due_date column.
+  const now = new Date();
+  const ptFmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric", month: "2-digit", day: "2-digit"
+  });
+  const todayStr = ptFmt.format(now); // YYYY-MM-DD in PT
+
+  // 7 days from now and 14 days, computed in PT
+  function addDaysPT(dateStr, n) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() + n);
+    return ptFmt.format(dt);
+  }
+  const in7Str  = addDaysPT(todayStr, 7);
+  const in14Str = addDaysPT(todayStr, 14);
+
+  let rows;
+  try {
+    const r = await db.query(
+      `SELECT d.id, d.title, d.party, d.due_date, d.citation,
+              m.client_name, m.matter_ref, m.id AS matter_id
+         FROM matter_deadlines d
+         JOIN matters m ON m.id = d.matter_id
+        WHERE d.completed = FALSE
+          AND m.status = 'active'
+          AND d.due_date IS NOT NULL
+          AND d.due_date::date <= $1::date
+        ORDER BY d.due_date ASC, m.client_name ASC`,
+      [in14Str]
+    );
+    rows = r.rows;
+  } catch (err) {
+    console.error("sendDailyDeadlineSummary query error:", err.message);
+    return;
+  }
+
+  // Bucket each row
+  const overdue = [];
+  const today   = [];
+  const week    = [];
+  const next    = [];
+  for (const row of rows) {
+    const due = String(row.due_date).slice(0, 10);
+    if (due < todayStr) overdue.push(row);
+    else if (due === todayStr) today.push(row);
+    else if (due <= in7Str) week.push(row);
+    else if (due <= in14Str) next.push(row);
+  }
+
+  // Format the message
+  const dateLabel = new Date().toLocaleDateString("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "long", month: "long", day: "numeric"
+  });
+
+  let msg = `📅 Daily Deadlines — ${dateLabel}\n`;
+
+  function fmtRow(r) {
+    const due = String(r.due_date).slice(0, 10);
+    const [y, m, d] = due.split("-");
+    const mmdd = `${parseInt(m)}/${parseInt(d)}`;
+    const partyTag = r.party === "us" ? "[us]"
+                   : r.party === "them" ? "[gov]"
+                   : "[ct]";
+    const caption = (r.client_name || "Unknown").substring(0, 30);
+    const title   = (r.title || "Untitled").substring(0, 60);
+    return `   • ${mmdd} ${partyTag} ${caption} — ${title}`;
+  }
+
+  if (overdue.length === 0 && today.length === 0 && week.length === 0 && next.length === 0) {
+    msg += `\nAll clear — nothing due in the next 14 days.\n\n📖 https://tezlaw-bot.onrender.com/admin/matters/`;
+  } else {
+    if (overdue.length) {
+      msg += `\n🔴 OVERDUE (${overdue.length})\n${overdue.map(fmtRow).join("\n")}\n`;
+    }
+    if (today.length) {
+      msg += `\n⚠️ TODAY (${today.length})\n${today.map(fmtRow).join("\n")}\n`;
+    }
+    if (week.length) {
+      msg += `\n📌 THIS WEEK (${week.length})\n${week.map(fmtRow).join("\n")}\n`;
+    }
+    if (next.length) {
+      msg += `\n📋 NEXT WEEK (${next.length})\n${next.map(fmtRow).join("\n")}\n`;
+    }
+    msg += `\n📖 https://tezlaw-bot.onrender.com/admin/matters/`;
+  }
+
+  try {
+    await tgSend(String(JJ_TELEGRAM_ID), msg);
+    console.log(`📅 Daily deadline summary sent — ${overdue.length} overdue, ${today.length} today, ${week.length} this week, ${next.length} next week`);
+  } catch (err) {
+    console.error("Failed to send daily summary:", err.message);
+  }
+}
+
+// ── Pending /deadline disambiguation map ──────────────────
+// Key: chatId, Value: { matches[], title, dueDate, expiresAt }
+const pendingDeadlines = new Map();
+
+// Parse a date token into YYYY-MM-DD.
+// Accepts: "8/3", "8/3/26", "8/3/2026", "2026-08-03", "8-3", "8-3-26".
+// Defaults year to current year if missing. If date is already past
+// today and only month/day given, bumps to next year.
+function parseDateToken(token) {
+  if (!token) return null;
+  const t = token.trim();
+
+  // Already YYYY-MM-DD
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) {
+    const y = parseInt(m[1]), mo = parseInt(m[2]), d = parseInt(m[3]);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    return `${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  }
+
+  // M/D, M/D/YY, M/D/YYYY (or with dashes)
+  m = t.match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?$/);
+  if (m) {
+    const mo = parseInt(m[1]);
+    const d  = parseInt(m[2]);
+    let y;
+    if (m[3]) {
+      y = parseInt(m[3]);
+      if (y < 100) y += 2000;
+    } else {
+      // Default to current year in PT
+      const now = new Date();
+      const ptYear = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric" }).format(now);
+      y = parseInt(ptYear);
+      // If the resulting date is already in the past, bump to next year
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+      const candidate = `${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      if (candidate < today) y += 1;
+    }
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    return `${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  }
+
+  return null;
+}
+
+// Handle `/deadline ...` from JJ. Parses last token as date,
+// first token as matter search, middle as title.
+async function handleDeadlineCommand(chatId, text) {
+  const db = require("./db");
+
+  // Strip leading "/deadline"
+  const rest = text.replace(/^\/deadline\s*/i, "").trim();
+
+  if (!rest || rest === "cancel") {
+    if (pendingDeadlines.has(chatId)) {
+      pendingDeadlines.delete(chatId);
+      await tgSend(chatId, "✕ Pending /deadline cancelled.");
+    } else {
+      await tgSend(chatId,
+        "Usage: /deadline <matter> <title> <date>\n" +
+        "Example: /deadline Lu opening brief 8/3\n" +
+        "Dates: M/D, M/D/YY, M/D/YYYY, YYYY-MM-DD"
+      );
+    }
+    return;
+  }
+
+  // Split on whitespace, isolate last token as date
+  const parts = rest.split(/\s+/);
+  if (parts.length < 3) {
+    await tgSend(chatId, "Need at least: <matter> <title> <date>. Example: /deadline Lu opening brief 8/3");
+    return;
+  }
+  const dateToken = parts[parts.length - 1];
+  const dueDate = parseDateToken(dateToken);
+  if (!dueDate) {
+    await tgSend(chatId, `❌ Couldn't parse "${dateToken}" as a date. Try: M/D, M/D/YYYY, or YYYY-MM-DD`);
+    return;
+  }
+  const matterSearch = parts[0];
+  const title = parts.slice(1, -1).join(" ").trim();
+  if (!title) {
+    await tgSend(chatId, "❌ Need a title between matter and date. Example: /deadline Lu opening brief 8/3");
+    return;
+  }
+
+  // Find matching matters for JJ (user_id 1)
+  let matches;
+  try {
+    const r = await db.query(
+      `SELECT id, client_name, matter_ref FROM matters
+        WHERE user_id = 1 AND status = 'active'
+          AND (client_name ILIKE $1 OR matter_ref ILIKE $1 OR petitioner_name ILIKE $1)
+        ORDER BY updated_at DESC NULLS LAST, id DESC
+        LIMIT 10`,
+      [`%${matterSearch}%`]
+    );
+    matches = r.rows;
+  } catch (err) {
+    console.error("/deadline matter search error:", err.message);
+    await tgSend(chatId, "❌ Database error. Try again.");
+    return;
+  }
+
+  if (matches.length === 0) {
+    await tgSend(chatId, `❌ No active matter found matching "${matterSearch}".`);
+    return;
+  }
+
+  if (matches.length === 1) {
+    await insertDeadlineFromCommand(chatId, matches[0], title, dueDate);
+    return;
+  }
+
+  // Multiple matches → ask user to pick a number
+  pendingDeadlines.set(chatId, {
+    matches, title, dueDate,
+    expiresAt: Date.now() + 5 * 60 * 1000 // 5 min
+  });
+  let msg = `Multiple matters matched "${matterSearch}". Reply with a number:\n\n`;
+  matches.forEach((m, i) => {
+    msg += `${i + 1}. ${m.client_name}${m.matter_ref ? " — " + m.matter_ref : ""}\n`;
+  });
+  msg += `\n(or /deadline cancel)`;
+  await tgSend(chatId, msg);
+}
+
+async function resolveDeadlineChoice(chatId, choice, pending) {
+  if (choice < 1 || choice > pending.matches.length) {
+    await tgSend(chatId, `❌ Choose 1–${pending.matches.length}.`);
+    return;
+  }
+  pendingDeadlines.delete(chatId);
+  const matter = pending.matches[choice - 1];
+  await insertDeadlineFromCommand(chatId, matter, pending.title, pending.dueDate);
+}
+
+async function insertDeadlineFromCommand(chatId, matter, title, dueDate) {
+  const db = require("./db");
+  try {
+    const r = await db.query(
+      `INSERT INTO matter_deadlines (matter_id, title, citation, due_date, party, note, completed)
+       VALUES ($1, $2, NULL, $3, 'us', NULL, FALSE)
+       RETURNING id`,
+      [matter.id, title, dueDate]
+    );
+    db.logAudit("jj", "create_deadline_telegram", `matter:${matter.id}/deadline:${r.rows[0].id}`,
+                null, JSON.stringify({title, dueDate}), null).catch(() => {});
+    const dateLabel = new Date(dueDate + "T12:00:00").toLocaleDateString("en-US", {
+      weekday: "short", month: "short", day: "numeric", year: "numeric"
+    });
+    await tgSend(chatId,
+      `✅ Added to ${matter.client_name}:\n` +
+      `   "${title}"\n` +
+      `   Due ${dateLabel}\n\n` +
+      `📖 https://tezlaw-bot.onrender.com/admin/matters/`
+    );
+  } catch (err) {
+    console.error("insertDeadlineFromCommand error:", err.message);
+    await tgSend(chatId, "❌ Couldn't save deadline. Try the web dashboard.");
+  }
+}
+
 app.post("/telegram", async (req, res) => {
   res.sendStatus(200);
   const update = req.body;
@@ -432,6 +710,46 @@ app.post("/telegram", async (req, res) => {
     }
     if (text === "/contact") { await tgSend(chatId, CONTACT_MESSAGE); return; }
     if (text === "/reset") { await clearHistory("telegram", chatId); await tgSend(chatId, "✅ Reset! How can I help?"); return; }
+
+    // ── Matter Manager commands (JJ-only) ─────────────────
+    if (text === "/today" || text.startsWith("/deadline") || text === "/help_matters") {
+      const isJJ = JJ_TELEGRAM_ID && String(chatId) === String(JJ_TELEGRAM_ID);
+      if (!isJJ) {
+        await tgSend(chatId, "Sorry, that command is restricted.");
+        return;
+      }
+      if (text === "/today") {
+        await sendDailyDeadlineSummary();
+        return;
+      }
+      if (text === "/help_matters") {
+        await tgSend(chatId,
+          "📚 Matter Manager Commands\n\n" +
+          "/today — Send today's deadline summary now\n" +
+          "/deadline <matter> <title> <date>\n" +
+          "   e.g. /deadline Lu opening brief 8/3\n" +
+          "   Dates: M/D, M/D/YY, M/D/YYYY, YYYY-MM-DD\n" +
+          "/deadline cancel — Cancel a pending command"
+        );
+        return;
+      }
+      // /deadline command
+      await handleDeadlineCommand(chatId, text);
+      return;
+    }
+
+    // If there's a pending /deadline disambiguation, treat a bare number as the choice
+    if (pendingDeadlines.has(chatId) && /^\d+$/.test(text.trim())) {
+      const pending = pendingDeadlines.get(chatId);
+      if (Date.now() > pending.expiresAt) {
+        pendingDeadlines.delete(chatId);
+        await tgSend(chatId, "⏱️ That selection expired. Please re-run /deadline.");
+        return;
+      }
+      await resolveDeadlineChoice(chatId, parseInt(text.trim()), pending);
+      return;
+    }
+
     // Send "thinking" message if Claude takes more than 5 seconds
     let thinkingMsg = null;
     const thinkingTimer = setTimeout(async () => {
@@ -1011,5 +1329,16 @@ app.listen(PORT, async () => {
     console.log("📰 Legal digest scheduler started (6:00 AM Pacific).");
   } catch (e) {
     console.error("❌ Legal digest scheduler failed:", e.message);
+  }
+
+  // ── Matter Manager — Daily deadline summary (7:00 AM PT) ─
+  try {
+    const { default: cron } = await import("node-cron").catch(() => ({ default: require("node-cron") }));
+    cron.schedule("0 7 * * *", () => {
+      sendDailyDeadlineSummary().catch(err => console.error("Daily deadline summary error:", err.message));
+    }, { timezone: "America/Los_Angeles" });
+    console.log("📅 Daily deadline summary scheduled (7:00 AM PT).");
+  } catch (e) {
+    console.error("❌ Daily deadline summary scheduler failed:", e.message);
   }
 });
