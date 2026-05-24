@@ -59,6 +59,9 @@
     background:var(--ink); color:var(--paper); padding:1px 7px; margin-left:8px; border-radius:10px;
     vertical-align:middle; font-weight:500; letter-spacing:.06em; }
   .nav-btn.active .badge { background:var(--accent); }
+  .nav-btn.nav-link-admin { margin-left:auto; text-decoration:none; font-size:14px;
+    color:var(--muted); opacity:.75; border-left:1px dotted var(--rule); padding-left:18px; }
+  .nav-btn.nav-link-admin:hover { color:var(--ink); opacity:1; }
 
   .panel { display:none; }
   .panel.active { display:block; animation:fadeIn .25s ease; }
@@ -441,6 +444,7 @@
     <button class="nav-btn" data-view="archive">Archive <span class="badge" id="badge-archive">0</span></button>
     <button class="nav-btn" data-view="courts">Court Access</button>
     <button class="nav-btn" data-view="reference">Authorities</button>
+    <a href="/admin/" class="nav-btn nav-link-admin" title="Switch to Zara Admin Panel">📊 → Admin</a>
   </div>
 
   <!-- ACTIVE MATTERS -->
