@@ -423,6 +423,124 @@
   footer { margin-top:60px; padding-top:20px; border-top:1px solid var(--rule);
     font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; text-align:center; }
   footer .links { margin-top:6px; }
+
+  /* ─── Mobile (≤ 700px) ──────────────────────────────────── */
+  @media (max-width: 700px) {
+    .app { padding: 16px 14px; }
+
+    /* Header */
+    header { flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 18px; }
+    header .firm { font-size: 22px; }
+    header .sub { font-size: 10px; }
+    header .actions { width: 100%; display: flex; gap: 8px; flex-wrap: wrap; }
+    header .actions .btn { flex: 1; min-width: 0; font-size: 11px; padding: 8px 10px; }
+
+    /* Nav: smaller buttons, allow horizontal scroll smoothly */
+    .nav { gap: 0; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+    .nav-btn { font-size: 14px; padding: 10px 14px 8px; }
+    .nav-btn.nav-link-admin { padding-left: 14px; border-left: none;
+      margin-left: 8px; font-size: 12px; }
+
+    /* Overview stats bar (top of active matters) */
+    .overview { grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px; }
+    .overview .stat { padding: 8px 10px; }
+    .overview .stat .val { font-size: 24px; }
+    .overview .stat .lbl { font-size: 9px; }
+
+    /* Matter cards: full width, smaller padding */
+    .matter-list { grid-template-columns: 1fr; gap: 14px; }
+    .matter-card { padding: 18px 16px; }
+    .matter-card h3 { font-size: 22px; }
+    .matter-card .court { font-size: 9px; }
+    .matter-card .matter-inbox-badge { top: 10px; right: 10px; }
+
+    /* New-matter form: single column */
+    .new-matter-form { grid-template-columns: 1fr; padding: 16px; }
+    .new-matter-form .field { width: 100%; }
+    .nef-intake { padding: 12px 14px; }
+
+    /* Detail view */
+    .back-link { font-size: 11px; }
+    .matter-head { padding: 22px 18px 18px; }
+    .matter-head h2 { font-size: 26px; }
+    .matter-head .casenum { font-size: 11px; }
+    .matter-head .meta-grid { grid-template-columns: 1fr; gap: 10px; }
+    .matter-head .meta-grid > div { padding: 0; border: none; }
+
+    /* Stats row in detail */
+    .stats { grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px; }
+    .stats .stat { padding: 8px 10px; }
+    .stats .stat .val { font-size: 24px; }
+    .stats .stat .sub { font-size: 10px; }
+
+    /* Section titles */
+    .section-title { flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 22px; }
+    .section-title span { font-size: 18px; }
+    .section-title .right { width: 100%; display: flex; justify-content: space-between; align-items: center; }
+
+    /* Deadline calculator: collapse to single column */
+    .dl-calc-head { padding: 10px 14px; gap: 8px; }
+    .dl-calc-title { font-size: 13px; }
+    .dl-calc-hint { font-size: 8px; }
+    .dl-calc-body { padding: 14px; }
+    .dl-calc-grid { grid-template-columns: 1fr; gap: 10px; }
+    .dlc-result-date { font-size: 18px; }
+    .dlc-result-explain { font-size: 9px; }
+
+    /* Add-deadline form: single column on mobile */
+    .add-deadline-form { grid-template-columns: 1fr; gap: 10px; padding: 12px; }
+
+    /* Deadline cards: tighter layout */
+    .deadline { padding: 14px 14px 12px; }
+    .deadline h4 { font-size: 16px; }
+    .deadline .date { font-size: 16px; }
+    .deadline .countdown .days { font-size: 22px; }
+    .deadline .citation { font-size: 10px; }
+    .deadline .note { font-size: 12px; }
+    .deadline .actions { flex-wrap: wrap; gap: 6px; }
+    .deadline .actions button { font-size: 10px; padding: 5px 10px; }
+
+    /* Two-col files+notes: stack */
+    .two-col { grid-template-columns: 1fr; gap: 16px; }
+
+    /* Inbox */
+    .inbox-paste-bar { padding: 14px; }
+    .inbox-paste-bar h4 { font-size: 16px; }
+    .inbox-prop { grid-template-columns: 1fr; gap: 10px; padding: 14px; }
+    .inbox-prop .prop-actions { flex-direction: row; min-width: 0; }
+    .inbox-prop .prop-actions button { flex: 1; }
+    .inbox-group .group-head { padding: 12px 14px; flex-wrap: wrap; gap: 6px; }
+    .inbox-group .group-head .group-title { font-size: 16px; }
+
+    /* Court order parser result cards */
+    .op-prop { padding: 12px; }
+    .op-prop h5 { font-size: 14px; }
+
+    /* Forms — inputs touch-friendly */
+    input[type=text], input[type=date], input[type=number], input[type=url],
+    select, textarea { font-size: 16px !important; padding: 10px 12px !important; }
+    /* (16px prevents iOS auto-zoom on focus) */
+
+    /* Buttons more tappable */
+    .btn { padding: 10px 16px; font-size: 12px; min-height: 40px; }
+    .btn.small { padding: 6px 12px; font-size: 10px; min-height: 32px; }
+    .btn.ghost.small { min-height: 32px; }
+
+    /* Modal: full-width */
+    .modal { width: 96%; max-width: none; padding: 24px 20px; max-height: 88vh; }
+    .modal h3 { font-size: 20px; }
+
+    /* Hide the "Sorted chronologically" hint to save space */
+    .section-title .ord { display: none; }
+  }
+
+  /* ─── Tiny phones (≤ 380px) ─────────────────────────────── */
+  @media (max-width: 380px) {
+    .overview { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: 1fr 1fr; }
+    .matter-card h3 { font-size: 20px; }
+    .matter-head h2 { font-size: 22px; }
+  }
 </style>
 </head>
 <body>
