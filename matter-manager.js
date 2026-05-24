@@ -841,7 +841,9 @@ router.patch("/api/proposals/:id", requireAuth, async (req, res) => {
       }
       // Apply each field as an update on the matter
       const allowed = ["matter_ref", "court", "case_type", "petitioner_name",
-                       "opened_date", "triggering_date", "custody_location", "relief_sought"];
+                       "opened_date", "triggering_date", "custody_location", "relief_sought",
+                       "serial_number", "mark", "mark_format", "filing_basis",
+                       "intl_class", "owner_name", "owner_email"];
       const sets = [];
       const params = [effectiveMatterId, userId];
       let i = 3;
@@ -956,6 +958,8 @@ router.get("/api/matters", requireAuth, async (req, res) => {
               m.dropbox_url, m.notes, m.created_at, m.updated_at,
               m.opened_date, m.triggering_date, m.custody_location,
               m.petitioner_name, m.relief_sought,
+              m.serial_number, m.mark, m.mark_format, m.filing_basis,
+              m.intl_class, m.owner_name, m.owner_email,
               COALESCE(cl.checklist_total, 0)     AS checklist_total,
               COALESCE(cl.checklist_completed, 0) AS checklist_completed
        FROM matters m
@@ -1084,7 +1088,9 @@ router.post("/api/matters", requireAuth, async (req, res) => {
       client_name, matter_ref, court, case_type,
       status, dropbox_url, notes,
       opened_date, triggering_date, custody_location,
-      petitioner_name, relief_sought
+      petitioner_name, relief_sought,
+      serial_number, mark, mark_format, filing_basis,
+      intl_class, owner_name, owner_email
     } = req.body || {};
 
     if (!client_name || typeof client_name !== "string") {
@@ -1117,13 +1123,21 @@ router.post("/api/matters", requireAuth, async (req, res) => {
     const r = await db.query(
       `INSERT INTO matters
          (user_id, client_name, matter_ref, court, case_type, status, dropbox_url, notes,
-          opened_date, triggering_date, custody_location, petitioner_name, relief_sought)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          opened_date, triggering_date, custody_location, petitioner_name, relief_sought,
+          serial_number, mark, mark_format, filing_basis, intl_class, owner_name, owner_email)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
        RETURNING *`,
       [userId, client_name, matter_ref || null, court || null, case_type || null,
        finalStatus, dropbox_url || null, notes || null,
        openedDateVal, triggeringDateVal,
-       custody_location || null, petitioner_name || null, relief_sought || null]
+       custody_location || null, petitioner_name || null, relief_sought || null,
+       serial_number ? String(serial_number).substring(0, 40) : null,
+       mark ? String(mark).substring(0, 300) : null,
+       mark_format ? String(mark_format).substring(0, 40) : null,
+       filing_basis ? String(filing_basis).substring(0, 20) : null,
+       intl_class ? String(intl_class).substring(0, 40) : null,
+       owner_name ? String(owner_name).substring(0, 200) : null,
+       owner_email ? String(owner_email).substring(0, 200) : null]
     );
 
     res.json({ matter: r.rows[0] });
@@ -1147,7 +1161,9 @@ router.patch("/api/matters/:id", requireAuth, async (req, res) => {
     const allowed = ["client_name", "matter_ref", "court", "case_type",
                      "status", "dropbox_url", "notes",
                      "opened_date", "triggering_date", "custody_location",
-                     "petitioner_name", "relief_sought"];
+                     "petitioner_name", "relief_sought",
+                     "serial_number", "mark", "mark_format", "filing_basis",
+                     "intl_class", "owner_name", "owner_email"];
     const dateFields = new Set(["opened_date", "triggering_date"]);
     const fields = [];
     const values = [matterId, userId];
@@ -1526,6 +1542,128 @@ const CHECKLIST_TEMPLATES = {
         { text: "Summons issued by clerk",                                                    citation: "FRCP 4(b)" },
         { text: "60-day answer deadline calendared",                                          citation: "FRCP 12(a)(2)" },
         { text: "Status of underlying agency action documented",                              citation: "" }
+      ]
+    }
+  ],
+
+  trademark: [
+    {
+      title: "Trademark Filing — Initial",
+      subtitle: "USPTO TMEP · 15 U.S.C. § 1051",
+      items: [
+        { text: "Conflict / clearance search completed (USPTO TESS + common law)",            citation: "TMEP §§ 1207-1208" },
+        { text: "Trademark/Service Mark application drafted (TEAS Plus or Standard)",         citation: "15 U.S.C. § 1051(a)/(b)" },
+        { text: "Goods/services identification matches USPTO ID Manual",                       citation: "TMEP § 1402" },
+        { text: "International class(es) confirmed",                                            citation: "Nice Agreement" },
+        { text: "Filing basis selected: 1(a) in-use / 1(b) ITU / 44(e) / 66(a)",               citation: "15 U.S.C. § 1051(a)/(b), § 1126(e)" },
+        { text: "Specimen acceptable (if 1(a)) — actual use in commerce",                      citation: "TMEP § 904" },
+        { text: "Declaration signed by authorized party",                                       citation: "37 C.F.R. § 2.20" },
+        { text: "Filing fee paid (TEAS Plus $250/class, Standard $350/class)",                  citation: "" },
+        { text: "Filing receipt + serial number saved to matter",                               citation: "" },
+        { text: "Engagement letter signed; conflict checked; client billed",                    citation: "" }
+      ]
+    },
+    {
+      title: "Examination & Prosecution",
+      subtitle: "TMEP §§ 700-1400 · 37 C.F.R. Part 2",
+      items: [
+        { text: "Examining attorney assigned (typically 8-12 months after filing)",            citation: "" },
+        { text: "Office Action received — review & calendar 6-month response deadline",        citation: "15 U.S.C. § 1062(b)" },
+        { text: "OA response drafted with arguments & amendments as needed",                    citation: "" },
+        { text: "OA response filed before deadline; new examiner review if needed",             citation: "" },
+        { text: "Notice of Publication received (after approval)",                              citation: "TMEP § 1502" },
+        { text: "Publication in Official Gazette — monitor 30-day opposition window",          citation: "15 U.S.C. § 1063(a)" },
+        { text: "Confirm no opposition / extension of time to oppose filed",                    citation: "" }
+      ]
+    },
+    {
+      title: "Post-Approval (depends on filing basis)",
+      subtitle: "Section 1(b) → SOU · Section 1(a) → Registration",
+      items: [
+        { text: "[1(b)] Notice of Allowance received — calendar SOU deadline (6 mo)",          citation: "15 U.S.C. § 1051(d)" },
+        { text: "[1(b)] Statement of Use filed OR Extension Request (each 6 mo, max 5 ext)",   citation: "15 U.S.C. § 1051(d)(2)" },
+        { text: "[1(a)] Registration Certificate issued — save copy",                          citation: "" },
+        { text: "Owner notified; registration recorded internally",                             citation: "" }
+      ]
+    },
+    {
+      title: "Maintenance & Renewal",
+      subtitle: "15 U.S.C. § 1058 · § 1059",
+      items: [
+        { text: "Section 8 affidavit of continued use filed (between 5th and 6th year)",       citation: "15 U.S.C. § 1058(a)" },
+        { text: "Section 15 incontestability filed (optional, between 5th & 6th year)",        citation: "15 U.S.C. § 1065" },
+        { text: "Combined § 8 & § 9 renewal filed (between 9th and 10th year)",                 citation: "15 U.S.C. § 1058 · § 1059" },
+        { text: "Each subsequent 10-year renewal calendared",                                   citation: "" },
+        { text: "Specimens current at each maintenance filing",                                 citation: "TMEP § 904" }
+      ]
+    }
+  ],
+
+  patent: [
+    {
+      title: "Patent Filing",
+      subtitle: "35 U.S.C. · 37 C.F.R. Part 1",
+      items: [
+        { text: "Invention disclosure documented; prior-art search completed",                  citation: "" },
+        { text: "Provisional or Non-provisional decision; foreign filing strategy",             citation: "35 U.S.C. § 111 · § 119(e)" },
+        { text: "Specification + claims + drawings drafted",                                    citation: "35 U.S.C. § 112" },
+        { text: "Inventor declaration signed (or assignee substitute statement)",               citation: "37 C.F.R. § 1.63" },
+        { text: "Application Data Sheet (ADS) prepared",                                        citation: "37 C.F.R. § 1.76" },
+        { text: "Filing fee + search fee + examination fee paid",                               citation: "37 C.F.R. § 1.16" },
+        { text: "Application filed via Patent Center; filing receipt saved",                    citation: "" },
+        { text: "Engagement + assignment recorded (USPTO assignment within 3 mo)",              citation: "35 U.S.C. § 261" }
+      ]
+    },
+    {
+      title: "Prosecution",
+      subtitle: "MPEP · 37 C.F.R. § 1.111-1.116",
+      items: [
+        { text: "Application published 18 months from earliest priority (unless opted out)",    citation: "35 U.S.C. § 122(b)" },
+        { text: "First Office Action received — calendar 3-month statutory response (6 max)",  citation: "37 C.F.R. § 1.134-1.136" },
+        { text: "Information Disclosure Statement (IDS) filed within 3 mo of awareness",        citation: "37 C.F.R. § 1.97-1.98" },
+        { text: "OA response: claim amendments + arguments + Examiner interview if helpful",   citation: "" },
+        { text: "Final OA → RCE / appeal / abandonment decision; calendar deadlines",          citation: "37 C.F.R. § 1.114; § 41" },
+        { text: "Notice of Allowance → calendar 3-month non-extendable issue fee deadline",    citation: "37 C.F.R. § 1.311" }
+      ]
+    },
+    {
+      title: "Post-Issuance & Maintenance",
+      subtitle: "35 U.S.C. § 41(b) · 37 C.F.R. § 1.20-1.27",
+      items: [
+        { text: "Patent grant received — save certificate, update docket",                      citation: "" },
+        { text: "Foreign filing under Paris Convention (12 mo) or PCT (30 mo)",                 citation: "35 U.S.C. § 119; PCT" },
+        { text: "Maintenance fee — 3.5 years (with 6-month surcharge grace)",                   citation: "35 U.S.C. § 41(b)" },
+        { text: "Maintenance fee — 7.5 years",                                                   citation: "35 U.S.C. § 41(b)" },
+        { text: "Maintenance fee — 11.5 years",                                                  citation: "35 U.S.C. § 41(b)" },
+        { text: "Assignments recorded promptly (priority within 3 months)",                      citation: "35 U.S.C. § 261" }
+      ]
+    }
+  ],
+
+  copyright: [
+    {
+      title: "Copyright Registration",
+      subtitle: "17 U.S.C. · Copyright Office Circular 1",
+      items: [
+        { text: "Work identified — type (literary / visual / sound / etc.)",                    citation: "17 U.S.C. § 102" },
+        { text: "Authorship confirmed (sole / joint / work-for-hire)",                           citation: "17 U.S.C. § 201" },
+        { text: "Chain of title cleared (any prior transfers documented)",                       citation: "17 U.S.C. § 204" },
+        { text: "eCO registration filed (Form TX / VA / PA / SR as applicable)",                citation: "37 C.F.R. § 202" },
+        { text: "Deposit copies submitted within 3 months of publication",                       citation: "17 U.S.C. § 408(b)" },
+        { text: "Filing fee paid ($45 single author / $65 standard / $125 paper)",              citation: "" },
+        { text: "Registration certificate received and filed",                                   citation: "" },
+        { text: "Pre-suit registration confirmed if litigation anticipated",                     citation: "17 U.S.C. § 411(a)" }
+      ]
+    },
+    {
+      title: "Post-Registration",
+      subtitle: "Maintenance & enforcement",
+      items: [
+        { text: "Notice of copyright displayed on published copies (©, year, owner)",            citation: "17 U.S.C. § 401" },
+        { text: "Transfers / assignments recorded with Copyright Office",                        citation: "17 U.S.C. § 205" },
+        { text: "Renewal not required for works ≥ 1978 (auto by statute)",                       citation: "17 U.S.C. § 304" },
+        { text: "Termination of transfer right calendared (35-40 yrs from grant, post-1977)",   citation: "17 U.S.C. § 203" },
+        { text: "DMCA enforcement contacts documented if needed",                                 citation: "17 U.S.C. § 512" }
       ]
     }
   ]
