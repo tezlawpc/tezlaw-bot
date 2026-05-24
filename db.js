@@ -95,6 +95,7 @@ async function initDB() {
     await initMatterManagerV2();
     await initMatterManagerV3();
     await initMatterManagerV4();
+    await initMatterManagerV5();
     console.log("✅ DB tables ready");
   } catch (err) {
     console.error("❌ DB init error:", err.message);
@@ -892,6 +893,61 @@ async function initMatterManagerV4() {
   }
 }
 
+// ============================================================
+//  Matter Manager v5 (Phase 7 — auto-email-ingest)
+//
+//  Adds:
+//    - matter_proposals.message_id  (UNIQUE — dedup against duplicate forwards)
+//    - inbound_email_log            (every webhook hit, accepted or rejected,
+//                                     for debugging + abuse forensics)
+// ============================================================
+async function initMatterManagerV5() {
+  try {
+    // Idempotency: SendGrid passes the original email Message-ID header.
+    // Two forwards of the same email = same Message-ID = dedup at the DB layer.
+    // Nullable because existing rows (created via paste before v5) won't have one.
+    await getPool().query(
+      `ALTER TABLE matter_proposals ADD COLUMN IF NOT EXISTS message_id VARCHAR(500)`
+    );
+    await getPool().query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_message_id
+         ON matter_proposals(message_id)
+         WHERE message_id IS NOT NULL`
+    );
+
+    // Audit log: every inbound email attempt, including rejections.
+    // Lets you debug "why didn't that email land in my inbox?" + spots abuse.
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS inbound_email_log (
+        id              SERIAL PRIMARY KEY,
+        received_at     TIMESTAMPTZ DEFAULT NOW(),
+        from_email      VARCHAR(300),
+        to_email        VARCHAR(300),
+        subject         VARCHAR(500),
+        message_id      VARCHAR(500),
+        outcome         VARCHAR(40) NOT NULL,
+        reason          TEXT,
+        proposal_id     INTEGER REFERENCES matter_proposals(id) ON DELETE SET NULL,
+        body_size       INTEGER,
+        CHECK (outcome IN (
+          'accepted_parsed', 'accepted_raw', 'rejected_sender', 'rejected_duplicate',
+          'rejected_auth', 'rejected_empty', 'parser_error'
+        ))
+      )
+    `);
+    await getPool().query(
+      `CREATE INDEX IF NOT EXISTS idx_inbound_log_received ON inbound_email_log(received_at DESC)`
+    );
+    await getPool().query(
+      `CREATE INDEX IF NOT EXISTS idx_inbound_log_outcome ON inbound_email_log(outcome, received_at DESC)`
+    );
+
+    console.log("✅ Matter manager v5 schema ready (auto-email-ingest)");
+  } catch (err) {
+    console.error("❌ initMatterManagerV5 error:", err.message);
+  }
+}
+
 async function logAudit(actor, action, target, oldValue, newValue, ip) {
   try {
     await getPool().query(
@@ -1078,7 +1134,7 @@ module.exports = {
   getHistory, getClientContext, saveSummary, clearHistory,
   saveIntake, maybeAutoSummarize, saveJJMemory, getJJMemories,
   setJJSession, getJJSession, getLastMessageTime, syncIntakeToClient,
-  initWave1Tables, initMatterManagerTables, initMatterManagerV2, initMatterManagerV3, initMatterManagerV4, logAudit, createLead, updateLeadStage,
+  initWave1Tables, initMatterManagerTables, initMatterManagerV2, initMatterManagerV3, initMatterManagerV4, initMatterManagerV5, logAudit, createLead, updateLeadStage,
   runConflictCheck, logUnansweredQuestion,
   query,
 };
