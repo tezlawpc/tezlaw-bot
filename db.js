@@ -94,6 +94,7 @@ async function initDB() {
     await initMatterManagerTables();
     await initMatterManagerV2();
     await initMatterManagerV3();
+    await initMatterManagerV4();
     console.log("✅ DB tables ready");
   } catch (err) {
     console.error("❌ DB init error:", err.message);
@@ -845,6 +846,52 @@ async function initMatterManagerV3() {
   }
 }
 
+// ============================================================
+//  Matter Manager v4 (Phase 6 — IP / USPTO support)
+//
+//  Adds:
+//    - matters.serial_number    (USPTO serial / patent app number / copyright reg)
+//    - matters.mark             (trademark text, invention title, or work title)
+//    - matters.mark_format      (standard / design / sound, etc. — TM only)
+//    - matters.filing_basis     ('1(a)' / '1(b)' / '44(e)' / '66(a)' — TM only)
+//    - matters.intl_class       (TM class, e.g. "041")
+//    - matters.owner_name       (TM/patent owner / copyright claimant)
+//    - matters.owner_email      (optional, for future reminders)
+//    - matter_ip_reminders     (track which ITU/SOU reminders already fired,
+//                                so the daily cron doesn't re-send)
+// ============================================================
+async function initMatterManagerV4() {
+  try {
+    const additions = [
+      ["serial_number", "VARCHAR(40)"],
+      ["mark",          "VARCHAR(300)"],
+      ["mark_format",   "VARCHAR(40)"],
+      ["filing_basis",  "VARCHAR(20)"],
+      ["intl_class",    "VARCHAR(40)"],
+      ["owner_name",    "VARCHAR(200)"],
+      ["owner_email",   "VARCHAR(200)"]
+    ];
+    for (const [col, type] of additions) {
+      await getPool().query(
+        `ALTER TABLE matters ADD COLUMN IF NOT EXISTS ${col} ${type}`
+      );
+    }
+    await getPool().query(`
+      CREATE TABLE IF NOT EXISTS matter_ip_reminders (
+        id           SERIAL PRIMARY KEY,
+        matter_id    INTEGER NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
+        deadline_id  INTEGER NOT NULL REFERENCES matter_deadlines(id) ON DELETE CASCADE,
+        days_out     INTEGER NOT NULL,
+        sent_at      TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(deadline_id, days_out)
+      )
+    `);
+    console.log("✅ Matter manager v4 schema ready (IP / USPTO)");
+  } catch (err) {
+    console.error("❌ initMatterManagerV4 error:", err.message);
+  }
+}
+
 async function logAudit(actor, action, target, oldValue, newValue, ip) {
   try {
     await getPool().query(
@@ -1031,7 +1078,7 @@ module.exports = {
   getHistory, getClientContext, saveSummary, clearHistory,
   saveIntake, maybeAutoSummarize, saveJJMemory, getJJMemories,
   setJJSession, getJJSession, getLastMessageTime, syncIntakeToClient,
-  initWave1Tables, initMatterManagerTables, initMatterManagerV2, initMatterManagerV3, logAudit, createLead, updateLeadStage,
+  initWave1Tables, initMatterManagerTables, initMatterManagerV2, initMatterManagerV3, initMatterManagerV4, logAudit, createLead, updateLeadStage,
   runConflictCheck, logUnansweredQuestion,
   query,
 };
