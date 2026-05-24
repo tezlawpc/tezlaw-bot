@@ -32,7 +32,13 @@ const { initJudgeProfileTables, getScanStatus }   = require("./judge-scanner");
 const { initCacheTable, getCacheStats, purgeExpiredCache } = require("./answer-cache");
 
 // Matter manager: REST routes (mounted at /admin/matters) + .ics calendar feed
-const { router: matterManagerRouter, handleCalendarFeed } = require("./matter-manager");
+const { router: matterManagerRouter, handleCalendarFeed, ingestEmailText } = require("./matter-manager");
+const multer  = require("multer");
+const { getPool } = require("./db");
+
+// In-memory multer for SendGrid inbound webhook (multipart/form-data).
+// 10MB cap is plenty for plain-text bodies; we drop attachments anyway in v1.
+const sendgridUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // Research module is loaded inside admin.js so it inherits admin auth.
 
@@ -48,6 +54,250 @@ app.use(cookieParser());
 app.use("/admin/matters", matterManagerRouter);
 app.use("/admin", adminRouter);
 app.get("/admin", (req, res) => res.redirect("/admin/"));
+
+// ──────────────────────────────────────────────────────────────
+//  SENDGRID INBOUND-EMAIL WEBHOOK (auto-ingest)
+//
+//  How it works:
+//    1. SendGrid forwards every email arriving at *@inbound.tezlawfirm.com
+//       to this URL via POST multipart/form-data.
+//    2. The URL itself contains a long secret (env var INBOUND_WEBHOOK_SECRET).
+//       Anyone hitting the URL without the right secret gets 401. Equivalent
+//       to a shared-secret bearer token but encoded in the path so SendGrid
+//       doesn't need custom-header support.
+//    3. We check the sender domain against an allowlist (court / gov senders
+//       and your own address). Everything else gets logged and dropped.
+//    4. We dedup against the Message-ID header — same email forwarded twice
+//       doesn't create duplicate proposals.
+//    5. We pass the email body to ingestEmailText() which creates proposals
+//       in the existing inbox queue. You review and accept manually. NEVER
+//       auto-creates matters or deadlines.
+//    6. If parsing fails, we file a "raw" proposal so the email is at
+//       least visible in your inbox for manual review.
+//    7. Every webhook hit (accepted or rejected) is logged to inbound_email_log
+//       for debugging and abuse forensics.
+//
+//  Setup checklist (you do these on your side):
+//    [ ] Generate INBOUND_WEBHOOK_SECRET env var (32+ random hex chars)
+//    [ ] Add MX record on tezlawfirm.com pointing inbound.tezlawfirm.com → mx.sendgrid.net
+//    [ ] In SendGrid Inbound Parse settings, point inbound.tezlawfirm.com →
+//        https://tezlaw-bot.onrender.com/webhook/inbound-email/{SECRET}
+//    [ ] Forward a court email to dockets@inbound.tezlawfirm.com to test
+// ──────────────────────────────────────────────────────────────
+
+// Sender allowlist — only emails FROM these domains/addresses are accepted.
+// Wildcard prefix '*@' = any user at that domain.
+const INBOUND_SENDER_ALLOWLIST = [
+  "*@uscourts.gov",
+  "*@usdoj.gov",
+  "*@uspto.gov",
+  "*@dhs.gov",
+  "*@ice.dhs.gov",
+  "*@cbp.dhs.gov",
+  "*@uscis.dhs.gov",
+  "*@ecf.ca9.uscourts.gov",
+  "*@ecf.cacd.uscourts.gov",
+  "*@ecf.cand.uscourts.gov",
+  "*@ecf.casd.uscourts.gov",
+  "*@ecf.caed.uscourts.gov",
+  // SendGrid sometimes wraps via subdomain; allow forwarded items from your own address
+  "jj@tezlawfirm.com"
+];
+
+function senderAllowed(fromAddr) {
+  if (!fromAddr) return false;
+  const addr = String(fromAddr).toLowerCase().trim();
+  // Pull the actual email out of "Name <addr@example.com>" if needed
+  const m = addr.match(/<([^>]+)>/);
+  const cleanAddr = (m ? m[1] : addr).trim();
+  for (const rule of INBOUND_SENDER_ALLOWLIST) {
+    if (rule.startsWith("*@")) {
+      const domain = rule.slice(2);
+      if (cleanAddr.endsWith("@" + domain)) return true;
+    } else if (rule.toLowerCase() === cleanAddr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Find which user owns the inbound flow. v1 = single-user (JJ).
+// Future: route by To: address (lu-bondi@inbound... → JJ matter X).
+async function getInboundOwnerUserId() {
+  try {
+    const r = await getPool().query(
+      `SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+      ["jj@tezlawfirm.com"]
+    );
+    return r.rows[0]?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+// Log every webhook attempt for forensics
+async function logInbound(fields, outcome, reason, proposalId) {
+  try {
+    await getPool().query(
+      `INSERT INTO inbound_email_log
+        (from_email, to_email, subject, message_id, outcome, reason, proposal_id, body_size)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        (fields.from || "").substring(0, 300),
+        (fields.to || "").substring(0, 300),
+        (fields.subject || "").substring(0, 500),
+        (fields.messageId || "").substring(0, 500),
+        outcome,
+        reason ? String(reason).substring(0, 2000) : null,
+        proposalId,
+        fields.bodySize || 0
+      ]
+    );
+  } catch (err) {
+    console.error("logInbound error:", err.message);
+  }
+}
+
+app.post("/webhook/inbound-email/:secret", sendgridUpload.any(), async (req, res) => {
+  // ── Step 1: Secret check (path-token auth) ──
+  const expected = process.env.INBOUND_WEBHOOK_SECRET;
+  if (!expected || expected.length < 16) {
+    console.error("INBOUND_WEBHOOK_SECRET not set or too short");
+    return res.status(500).send("Server not configured");
+  }
+  if (req.params.secret !== expected) {
+    // Don't log the secret attempted; just count the rejection
+    console.warn("Inbound webhook: bad secret from", req.ip);
+    return res.status(401).send("unauthorized");
+  }
+
+  // ── Step 2: Pull fields from SendGrid multipart form ──
+  // SendGrid sends these keys when "Send Raw, full MIME message" is OFF:
+  //   from, to, subject, text, html, attachments, charsets, envelope, dkim, SPF, headers
+  // We use `text` (plain-text body) per Q5 in the planning conversation.
+  const fields = {
+    from:      req.body?.from      || "",
+    to:        req.body?.to        || "",
+    subject:   req.body?.subject   || "",
+    text:      req.body?.text      || req.body?.html || "",
+    headers:   req.body?.headers   || "",
+    envelope:  req.body?.envelope  || "",
+    bodySize:  (req.body?.text || "").length
+  };
+
+  // Extract Message-ID from headers blob if present
+  // Headers come as one big string: "Header-Name: value\r\nHeader-Name: value\r\n..."
+  let messageId = null;
+  const midMatch = fields.headers.match(/^Message-ID:\s*(<[^>]+>|[^\r\n]+)/im);
+  if (midMatch) messageId = midMatch[1].trim();
+  fields.messageId = messageId;
+
+  // ── Step 3: Sender allowlist ──
+  if (!senderAllowed(fields.from)) {
+    await logInbound(fields, "rejected_sender", `From not on allowlist: ${fields.from}`, null);
+    // Return 200 so SendGrid doesn't retry. Email is silently dropped — that's intentional.
+    return res.status(200).send("dropped: sender not allowed");
+  }
+
+  // ── Step 4: Body validation ──
+  if (!fields.text || fields.text.length < 20) {
+    await logInbound(fields, "rejected_empty", "Body too short or missing", null);
+    return res.status(200).send("dropped: empty body");
+  }
+
+  // ── Step 5: Resolve owner ──
+  const userId = await getInboundOwnerUserId();
+  if (!userId) {
+    await logInbound(fields, "rejected_auth", "No owner user found", null);
+    return res.status(500).send("server: owner unresolved");
+  }
+
+  // ── Step 6: Run the shared ingest pipeline ──
+  // Source-ref encodes useful provenance: "From X · Subject: Y" so you can see at a glance where it came from
+  const sourceRef = `email · From ${fields.from} · ${fields.subject || "(no subject)"}`;
+  let result;
+  try {
+    result = await ingestEmailText(userId, fields.text, {
+      source: "email_inbound",
+      source_ref: sourceRef,
+      message_id: messageId
+    });
+  } catch (err) {
+    console.error("Inbound webhook ingest error:", err.message);
+    await logInbound(fields, "parser_error", err.message, null);
+    // 200 so SendGrid doesn't retry; we have the audit log
+    return res.status(200).send("error: parser failed");
+  }
+
+  // ── Step 7: Handle outcomes ──
+  if (!result.ok) {
+    await logInbound(fields, "parser_error", result.error, null);
+    return res.status(200).send(`error: ${result.error}`);
+  }
+
+  if (result.duplicate) {
+    await logInbound(fields, "rejected_duplicate", `Already ingested as proposal ${result.existing_proposal_id}`, result.existing_proposal_id);
+    return res.status(200).send("dropped: duplicate");
+  }
+
+  // If parsers ran but produced zero proposals, file a "raw" proposal so the
+  // email isn't lost — you can still see and manually action it in the inbox.
+  let firstProposalId = result.proposals?.[0]?.id || null;
+  if (result.proposals.length === 0 || result.parser_failed) {
+    try {
+      const ins = await getPool().query(
+        `INSERT INTO matter_proposals
+           (user_id, kind, source, source_ref, proposed_data, raw_excerpt, status, confidence, message_id)
+         VALUES ($1, 'new_matter', 'email_inbound', $2, $3, $4, 'pending', 'low', $5)
+         RETURNING id`,
+        [
+          userId,
+          sourceRef,
+          JSON.stringify({
+            _raw: true,
+            _note: "Parser produced no structured fields — review email body manually.",
+            subject: fields.subject,
+            from: fields.from
+          }),
+          fields.text.substring(0, 4000),
+          messageId
+        ]
+      );
+      firstProposalId = ins.rows[0]?.id || firstProposalId;
+      await logInbound(fields, "accepted_raw", "Filed as raw proposal for manual review", firstProposalId);
+    } catch (err) {
+      console.error("Raw proposal insert error:", err.message);
+      await logInbound(fields, "parser_error", `Raw insert failed: ${err.message}`, null);
+    }
+  } else {
+    await logInbound(
+      fields,
+      "accepted_parsed",
+      `Created ${result.proposals.length} proposal(s); matter_matched=${result.summary?.matter_matched || "none"}`,
+      firstProposalId
+    );
+  }
+
+  return res.status(200).send("ok");
+});
+
+// Admin-side: simple log viewer so you can debug "why didn't that email land in my inbox?"
+app.get("/admin/inbound-log", async (req, res) => {
+  // Hooked into admin auth via cookie — same gate as admin panel
+  const isAdmin = req.cookies && req.cookies.admin_auth === process.env.ADMIN_PASSWORD;
+  if (!isAdmin) return res.status(401).send("unauthorized");
+  try {
+    const r = await getPool().query(
+      `SELECT id, received_at, from_email, to_email, subject, outcome, reason, proposal_id, body_size
+         FROM inbound_email_log
+        ORDER BY received_at DESC
+        LIMIT 100`
+    );
+    res.json({ entries: r.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── Calendar .ics feed (top-level, secret-protected, no admin session) ──
 // Outlook/Google Calendar fetch this URL on a refresh interval without
