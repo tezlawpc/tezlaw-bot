@@ -267,6 +267,10 @@
   .deadline .pill.them { background:var(--ink-2); color:var(--paper); border-color:var(--ink-2); }
   .deadline .pill.court { background:var(--gold); color:#fff; border-color:var(--gold); }
   .deadline h4 { font-family:var(--serif); font-size:19px; margin:6px 0 4px; line-height:1.2; }
+  .deadline .dl-title-display { cursor:text; padding:2px 4px; margin-left:-4px; border-bottom:1px dotted transparent; }
+  .deadline .dl-title-display:hover { border-bottom-color:var(--rule); background:var(--paper-3); }
+  .deadline .dl-date-display { cursor:text; padding:2px 4px; margin-left:-4px; border-bottom:1px dotted transparent; display:inline-block; }
+  .deadline .dl-date-display:hover { border-bottom-color:var(--rule); background:var(--paper-3); }
   .deadline .citation { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.04em; margin-bottom:14px; min-height:14px; }
   .deadline .date { font-family:var(--mono); font-size:20px; font-weight:600; }
   .deadline .countdown { margin-top:10px; padding-top:10px; border-top:1px dashed var(--rule); display:flex; gap:12px; align-items:baseline; }
@@ -1625,9 +1629,9 @@ function renderDeadlines(m) {
     return `
       <div class="deadline ${urgencyClass(days)} ${d.done ? 'done' : ''}" data-id="${d.id}">
         <span class="pill ${d.party}">${d.party === 'us' ? 'Us' : d.party === 'them' ? 'Govt/Opp' : 'Court'}</span>
-        <h4>${escapeHtml(d.title)}</h4>
+        <h4 class="dl-title-display" title="Click to edit">${escapeHtml(d.title)}</h4>
         <div class="citation">${escapeHtml(d.cite || '')}</div>
-        <div class="date">${fmtDate(parseDate(d.date))}</div>
+        <div class="date dl-date-display" title="Click to edit">${fmtDate(parseDate(d.date))}</div>
         <div class="countdown">
           <span class="days">${days < 0 ? Math.abs(days) + 'd ago' : days === 0 ? 'TODAY' : days + 'd'}</span>
           <span class="days-label">${days < 0 ? 'passed' : 'remaining'}</span>
@@ -1641,6 +1645,70 @@ function renderDeadlines(m) {
   }).join('');
   c.querySelectorAll('.deadline').forEach(card => {
     const id = parseInt(card.dataset.id);
+
+    // ── Inline edit: title ──
+    const titleEl = card.querySelector('.dl-title-display');
+    titleEl.addEventListener('click', () => {
+      const d = m.deadlines.find(x => x.id === id);
+      if (!d) return;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'dl-title-edit';
+      input.value = d.title;
+      input.style.cssText = 'font-family:var(--serif);font-size:18px;font-weight:600;border:1px solid var(--ink);background:var(--paper);padding:4px 6px;width:100%;box-sizing:border-box;';
+      titleEl.replaceWith(input);
+      input.focus(); input.select();
+      let committed = false;
+      const commit = async () => {
+        if (committed) return; committed = true;
+        const newTitle = input.value.trim();
+        if (!newTitle || newTitle === d.title) { renderDeadlines(m); return; }
+        try {
+          await api(`/matters/${m.id}/deadlines/${id}`, { method:'PATCH', body:{ title:newTitle } });
+          d.title = newTitle;
+          renderMatterStats(m); renderDeadlines(m); renderOverviewStats();
+        } catch (e) { alert('Title save failed: ' + e.message); renderDeadlines(m); }
+      };
+      input.addEventListener('blur', commit);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        else if (e.key === 'Escape') { committed = true; renderDeadlines(m); }
+      });
+    });
+
+    // ── Inline edit: date ──
+    const dateEl = card.querySelector('.dl-date-display');
+    dateEl.addEventListener('click', () => {
+      const d = m.deadlines.find(x => x.id === id);
+      if (!d) return;
+      const input = document.createElement('input');
+      input.type = 'date';
+      input.className = 'dl-date-edit';
+      input.value = String(d.date || '').slice(0, 10);
+      input.style.cssText = 'font-family:var(--mono);font-size:12px;border:1px solid var(--ink);background:var(--paper);padding:4px 6px;';
+      dateEl.replaceWith(input);
+      input.focus();
+      let committed = false;
+      const commit = async () => {
+        if (committed) return; committed = true;
+        const newDate = input.value;
+        if (!newDate || !/^\d{4}-\d{2}-\d{2}$/.test(newDate) || newDate === String(d.date).slice(0,10)) {
+          renderDeadlines(m); return;
+        }
+        try {
+          await api(`/matters/${m.id}/deadlines/${id}`, { method:'PATCH', body:{ due_date:newDate } });
+          d.date = newDate;
+          renderMatterStats(m); renderDeadlines(m); renderOverviewStats();
+        } catch (e) { alert('Date save failed: ' + e.message); renderDeadlines(m); }
+      };
+      input.addEventListener('blur', commit);
+      input.addEventListener('change', commit);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        else if (e.key === 'Escape') { committed = true; renderDeadlines(m); }
+      });
+    });
+
     card.querySelector('.toggle').addEventListener('click', async () => {
       const d = m.deadlines.find(x => x.id === id);
       if (!d) return;
