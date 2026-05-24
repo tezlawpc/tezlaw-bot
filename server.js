@@ -417,6 +417,7 @@ async function sendDailyDeadlineSummary() {
           AND m.status = 'active'
           AND d.due_date IS NOT NULL
           AND d.due_date::date <= $1::date
+          AND (d.party IS NULL OR d.party <> 'them')
         ORDER BY d.due_date ASC, m.client_name ASC`,
       [in14Str]
     );
