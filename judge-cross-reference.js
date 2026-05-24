@@ -1,16 +1,19 @@
 // ============================================================
-//  judge-cross-reference.js  (v1.1 — junk-filtered)
+//  judge-cross-reference.js  (v1.2 — parallel-citation dedup)
 //  Bridges Layer 1 (judge_rulings, judge_profiles) to Research.
 //
-//  THE COMPETITIVE MOAT — these queries cannot be replicated by
-//  Westlaw/Lexis/Fastcase because they require firm-specific data
-//  about which judges have cited which cases, with what treatment.
+//  v1.2 CHANGES:
+//   - judgeTopCitedCases:  groups by case name only (not by citation).
+//     Three parallel cites of "Anders v. California" (US Reports +
+//     S.Ct. + L.Ed.) now collapse into one entry. mode() picks the
+//     most-frequent citation form to display. all_citations array
+//     includes every parallel form found.
+//   - judgesCitingCase: documented behavior (already correct).
 //
-//  v1.1 CHANGES:
-//   - judgeTopCitedCases:  filters junk citations (broken case names,
-//                          metadata-only parens, single-cite noise)
-//   - judgesCitingCase:    same junk filter on cited_case_name
-//   - both now return negative_count (criticizes/overrules/reverses)
+//  v1.1 BASELINE:
+//   - junk filter on cited_case_name (excludes broken/truncated)
+//   - paren quality filter (drops per curiam, en banc, year-only)
+//   - negative_count returned
 //
 //  PRIMARY QUERIES:
 //    1. hasJudgeCited(judgeName, caseId)
@@ -99,6 +102,12 @@ async function hasJudgeCited(judgeName, caseRef) {
 
 // ============================================================
 //  2. WHICH JUDGES HAVE CITED THIS CASE?
+//
+//  Already groups by (judge_name, court) so parallel citations
+//  don't split the result. The WHERE clause matches any citation
+//  form, so a judge who cited via 386 U.S. 738 + 87 S.Ct. 1396 is
+//  counted twice in citation_count, which is correct (they cited
+//  it twice in the same opinion).
 // ============================================================
 
 async function judgesCitingCase(caseRef) {
@@ -220,7 +229,12 @@ async function coCitedCases(caseRef, judgeName = null, limit = 10) {
 }
 
 // ============================================================
-//  4. JUDGE'S TOP CITED CASES — JUNK-FILTERED
+//  4. JUDGE'S TOP CITED CASES — JUNK-FILTERED + DEDUPED PARALLELS
+//
+//  v1.2: Groups by cited_case_name only (not by citation), so the
+//  three parallel cites of "Anders v. California" (US Reports + S.Ct.
+//  + L.Ed.) collapse into one entry. The displayed citation is the
+//  most common form (likely US Reports, the canonical reporter).
 // ============================================================
 
 async function judgeTopCitedCases(judgeName, motionType = null, limit = 20) {
@@ -238,22 +252,43 @@ async function judgeTopCitedCases(judgeName, motionType = null, limit = 20) {
   }
   params.push(limit);
 
+  // Group by case name only — collapses parallel citations.
+  // Use mode() to pick the most-frequent citation as the displayed primary.
+  // Use SUM(times_cited) from the inner query so the count reflects ALL parallels combined.
   const query = `
+    WITH per_citation AS (
+      SELECT
+        e.cited_case_name,
+        e.cited_case_citation,
+        e.cited_normalized,
+        e.cited_cluster_id,
+        e.parenthetical,
+        e.treatment,
+        e.extracted_at
+      FROM citation_edges_internal e
+      WHERE e.judge_name ILIKE $1${motionFilter}
+        AND ${JUNK_CASE_NAME_FILTER}
+    )
     SELECT
-      e.cited_case_name,
-      e.cited_case_citation,
-      e.cited_normalized,
-      e.cited_cluster_id,
+      cited_case_name,
+      mode() WITHIN GROUP (ORDER BY cited_case_citation) AS cited_case_citation,
+      mode() WITHIN GROUP (ORDER BY cited_normalized) AS cited_normalized,
+      mode() WITHIN GROUP (ORDER BY cited_cluster_id) AS cited_cluster_id,
       COUNT(*) AS times_cited,
-      COUNT(*) FILTER (WHERE e.treatment IN ('positive','followed')) AS positive_count,
-      COUNT(*) FILTER (WHERE e.treatment = 'distinguishes') AS distinguishes_count,
-      COUNT(*) FILTER (WHERE e.treatment IN ('criticizes','overrules','reverses')) AS negative_count,
-      ARRAY_AGG(DISTINCT e.parenthetical) FILTER (WHERE ${PAREN_QUALITY_FILTER}) AS sample_parentheticals,
-      MAX(e.extracted_at) AS most_recent
-    FROM citation_edges_internal e
-    WHERE e.judge_name ILIKE $1${motionFilter}
-      AND ${JUNK_CASE_NAME_FILTER}
-    GROUP BY e.cited_case_name, e.cited_case_citation, e.cited_normalized, e.cited_cluster_id
+      COUNT(*) FILTER (WHERE treatment IN ('positive','followed')) AS positive_count,
+      COUNT(*) FILTER (WHERE treatment = 'distinguishes') AS distinguishes_count,
+      COUNT(*) FILTER (WHERE treatment IN ('criticizes','overrules','reverses')) AS negative_count,
+      ARRAY_AGG(DISTINCT parenthetical) FILTER (
+        WHERE parenthetical IS NOT NULL
+          AND length(parenthetical) > 20
+          AND parenthetical NOT ILIKE 'per curiam%'
+          AND parenthetical NOT ILIKE 'en banc%'
+          AND parenthetical !~ '^\\d{4}$'
+      ) AS sample_parentheticals,
+      ARRAY_AGG(DISTINCT cited_case_citation) FILTER (WHERE cited_case_citation IS NOT NULL) AS all_citations,
+      MAX(extracted_at) AS most_recent
+    FROM per_citation
+    GROUP BY cited_case_name
     HAVING COUNT(*) >= 2
     ORDER BY times_cited DESC, most_recent DESC
     LIMIT $${pi}
