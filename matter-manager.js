@@ -319,6 +319,121 @@ router.post("/api/parse-intake", requireAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+//  USPTO PARSER — Trademark / Patent / Copyright intake
+//
+//  POST /admin/matters/api/parse-uspto
+//  Body: { uspto_text: "..." }
+//
+//  USPTO emails are highly structured (fixed-position fields,
+//  consistent labels). Higher-confidence than the court order
+//  parser. Used to pre-populate the new-matter form.
+// ─────────────────────────────────────────────────────────────
+const USPTO_PROMPT = `You are extracting structured fields from a USPTO (U.S. Patent and Trademark Office) or U.S. Copyright Office (USCO) email or filing receipt. The output goes into a California attorney's matter management system.
+
+The email/receipt:
+"""
+{USPTO_TEXT}
+"""
+
+Identify what KIND of USPTO/USCO document this is and extract the relevant fields. Return STRICT JSON only — no markdown fences, no preamble.
+
+JSON shape:
+{
+  "doc_type": "trademark_filing_receipt" | "trademark_office_action" | "trademark_publication_notice" | "trademark_notice_of_allowance" | "trademark_registration_certificate" | "trademark_other" | "patent_filing_receipt" | "patent_office_action" | "patent_notice_of_allowance" | "patent_other" | "copyright_certificate" | "copyright_other" | "unknown",
+  "case_type": "Trademark" | "Patent" | "Copyright",
+  "fields": {
+    "client_name": "...",         // The owner/applicant/registrant. Use the owner_name. For TM filings this is the entity, not the attorney.
+    "owner_name": "...",          // Full owner/applicant name (e.g., "Techforce Robotics Inc.")
+    "owner_email": "...",         // Owner's primary email if visible
+    "serial_number": "...",       // USPTO serial number (TM, 8-digit), patent application number, or USCO registration number
+    "matter_ref": "...",          // Same as serial_number — used as the searchable case reference
+    "mark": "...",                // Trademark text, patent invention title, or copyright work title
+    "mark_format": "...",         // "Standard character" / "Stylized" / "Design" / "Sound" / "Standard" (for non-TM, leave null)
+    "filing_basis": "...",        // TM: "1(a)" / "1(b)" / "44(e)" / "66(a)". For non-TM, null.
+    "intl_class": "...",          // TM: e.g. "041" or "041, 042". For non-TM, null.
+    "opened_date": "YYYY-MM-DD",  // Filing date if visible (the date the application/registration was received/recorded)
+    "triggering_date": "YYYY-MM-DD",  // Office Action issue date, Publication date, NOA date — whichever event the email represents. Null for filing receipts.
+    "court": "USPTO" | "USCO",    // Always one of these for IP docs.
+    "relief_sought": "...",       // For TM: brief description of goods/services. For patent: brief abstract. For copyright: work type.
+    "notes": "..."                // 1-2 sentence summary capturing the most important context (e.g. "Trademark application filed for Robotic Connective Network in Class 041 on Section 1(b) intent-to-use basis").
+  },
+  "confidence": "high" | "medium" | "low"
+}
+
+Rules:
+- Use null for any field you cannot find with confidence — DO NOT GUESS.
+- Dates MUST be YYYY-MM-DD format. If the source says "May 23, 2026", output "2026-05-23".
+- For trademarks: "Section 1(b)" → filing_basis "1(b)"; "Section 1(a)" → filing_basis "1(a)".
+- mark text should be exactly as it appears (preserve case for stylized; uppercase for standard character).
+- owner_name should be the legal name of the applicant/owner, not the attorney.
+- For Office Actions, set triggering_date to the OA issue date so the 6-month response can be calculated.
+- For Notices of Allowance, set triggering_date to the NOA mailing date so the 6-month SOU window can be calculated.
+- confidence "high" if all key fields (serial, mark, owner, dates) are clearly stated.
+
+Return ONLY the JSON.`;
+
+router.post("/api/parse-uspto", requireAuth, async (req, res) => {
+  try {
+    const { uspto_text } = req.body || {};
+
+    if (!uspto_text || typeof uspto_text !== "string") {
+      return res.status(400).json({ error: "uspto_text required" });
+    }
+    if (uspto_text.length < 20) {
+      return res.status(400).json({ error: "Text too short to analyze" });
+    }
+    if (uspto_text.length > 60000) {
+      return res.status(400).json({ error: "Text too long (max 60k chars). Paste relevant section." });
+    }
+
+    const prompt = USPTO_PROMPT.replace("{USPTO_TEXT}", uspto_text);
+    const responseText = await callClaudeAPI(prompt, 2000);
+
+    let parsed;
+    try {
+      let cleaned = responseText.trim();
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      console.error("USPTO parser JSON error. Raw:", responseText);
+      return res.status(500).json({
+        error: "Could not parse extraction.",
+        raw: responseText.substring(0, 500)
+      });
+    }
+
+    const f = parsed.fields || {};
+
+    // Validate and sanitize each field
+    const validated = {
+      client_name:     f.client_name ? String(f.client_name).substring(0, 200) : (f.owner_name ? String(f.owner_name).substring(0, 200) : null),
+      owner_name:      f.owner_name ? String(f.owner_name).substring(0, 200) : null,
+      owner_email:     f.owner_email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.owner_email) ? f.owner_email.substring(0, 200) : null,
+      serial_number:   f.serial_number ? String(f.serial_number).substring(0, 40) : null,
+      matter_ref:      f.matter_ref ? String(f.matter_ref).substring(0, 100) : (f.serial_number ? String(f.serial_number).substring(0, 100) : null),
+      mark:            f.mark ? String(f.mark).substring(0, 300) : null,
+      mark_format:     f.mark_format ? String(f.mark_format).substring(0, 40) : null,
+      filing_basis:    f.filing_basis ? String(f.filing_basis).substring(0, 20) : null,
+      intl_class:      f.intl_class ? String(f.intl_class).substring(0, 40) : null,
+      court:           f.court ? String(f.court).substring(0, 100) : null,
+      case_type:       parsed.case_type && ["Trademark","Patent","Copyright"].includes(parsed.case_type) ? parsed.case_type : null,
+      opened_date:     f.opened_date && /^\d{4}-\d{2}-\d{2}$/.test(f.opened_date) ? f.opened_date : null,
+      triggering_date: f.triggering_date && /^\d{4}-\d{2}-\d{2}$/.test(f.triggering_date) ? f.triggering_date : null,
+      relief_sought:   f.relief_sought ? String(f.relief_sought).substring(0, 300) : null,
+      notes:           f.notes ? String(f.notes).substring(0, 2000) : null
+    };
+
+    const confidence = ["high", "medium", "low"].includes(parsed.confidence) ? parsed.confidence : "low";
+    const docType = parsed.doc_type || "unknown";
+
+    res.json({ fields: validated, confidence, doc_type: docType });
+  } catch (err) {
+    console.error("POST /api/parse-uspto error:", err.message);
+    res.status(500).json({ error: err.message || "Parser error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 //  INGEST DRY-RUN — Phase 0 validation for auto-NEF pipeline
 //
 //  POST /admin/matters/api/ingest-dry-run
