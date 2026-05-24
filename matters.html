@@ -322,6 +322,34 @@
   .saved-tag { font-family:var(--mono); font-size:9px; color:var(--green); letter-spacing:.18em; text-transform:uppercase; opacity:0; transition:opacity .3s; }
   .saved-tag.show { opacity:1; }
 
+  /* Client status summary card */
+  .cs-card { background:#fff; border:1px solid var(--rule); padding:0; margin-bottom:24px; box-shadow:var(--shadow); }
+  .cs-card .cs-head { background:var(--paper-2); padding:12px 18px; border-bottom:1px solid var(--rule);
+    display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+  .cs-card .cs-head-title { font-family:var(--serif); font-size:17px; }
+  .cs-card .cs-head-meta { font-family:var(--mono); font-size:9px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; }
+  .cs-card .cs-head-actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .cs-card .cs-body { padding:18px 22px; }
+  .cs-card .cs-subject { font-family:var(--mono); font-size:11px; color:var(--ink); margin-bottom:12px; padding:8px 12px;
+    background:var(--paper-3); border-left:2px solid var(--rule); }
+  .cs-card .cs-subject .cs-subject-label { color:var(--muted); letter-spacing:.14em; text-transform:uppercase; font-size:9px; margin-right:6px; }
+  .cs-tabs { display:flex; gap:0; border-bottom:1px solid var(--rule); margin-bottom:14px; }
+  .cs-tab { background:transparent; border:none; border-bottom:2px solid transparent; padding:8px 16px;
+    font-family:var(--serif); font-size:14px; color:var(--muted); cursor:pointer; letter-spacing:.02em; }
+  .cs-tab:hover { color:var(--ink); }
+  .cs-tab.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+  .cs-pane { display:none; }
+  .cs-pane.active { display:block; }
+  .cs-pane textarea { width:100%; min-height:340px; border:1px solid var(--rule); background:var(--paper); padding:14px 16px;
+    font-family:var(--serif); font-size:14px; line-height:1.6; color:var(--ink); resize:vertical; outline:none; box-sizing:border-box; }
+  .cs-pane textarea:focus { border-color:var(--ink); }
+  .cs-pane .cs-copy { margin-top:10px; }
+  .cs-warnings { background:#fff4d6; border-left:3px solid var(--amber); padding:10px 14px; margin-top:12px;
+    font-family:var(--mono); font-size:10px; color:#7a4d10; line-height:1.5; }
+  .cs-warnings .cs-warn-title { font-weight:600; letter-spacing:.1em; text-transform:uppercase; margin-bottom:4px; }
+  .cs-warnings ul { margin:4px 0 0; padding-left:18px; }
+  .cs-loading { padding:30px; text-align:center; font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; }
+
   /* Files */
   .files-card .link-row { display:flex; gap:10px; align-items:center; padding:12px 0; border-bottom:1px dotted var(--rule-soft); }
   .files-card .link-row:last-child { border-bottom:none; }
@@ -820,6 +848,15 @@
         <textarea id="matter-notes" placeholder="Strategy · witness contacts · transcript page refs · ECF receipts…"></textarea>
       </div>
     </div>
+
+    <div class="section-title">
+      <span>Client Communication</span>
+      <div class="right">
+        <button class="btn small" id="gen-client-summary">📝 Generate Client Status Update</button>
+        <span class="ord">Drafts only — copy &amp; forward via your own channel</span>
+      </div>
+    </div>
+    <div id="client-summary-container" style="display:none;"></div>
 
     <div class="section-title"><span>Filing Checklist</span><span class="ord">Templated by matter type</span></div>
     <div class="card">
@@ -1957,6 +1994,10 @@ function renderMatterDetail() {
   if (opStat) { opStat.textContent = ''; opStat.className = ''; }
   window._opProposals = [];
 
+  // Reset client summary panel
+  const csContainer = document.getElementById('client-summary-container');
+  if (csContainer) { csContainer.style.display = 'none'; csContainer.innerHTML = ''; }
+
   const head = document.getElementById('matter-head');
   const isIp = ['Trademark','Patent','Copyright'].includes(m.type);
   const caption = isIp
@@ -3000,6 +3041,126 @@ function computeDeadline(anchor, count, type, direction, mail) {
     }
   });
 })();
+
+// ============================================================
+// CLIENT STATUS SUMMARY GENERATOR
+// ============================================================
+document.getElementById('gen-client-summary').addEventListener('click', async () => {
+  const m = getCurrentMatter();
+  if (!m) return;
+  const container = document.getElementById('client-summary-container');
+  const btn = document.getElementById('gen-client-summary');
+  container.style.display = 'block';
+  container.innerHTML = '<div class="cs-card"><div class="cs-loading">⏳ Generating summary… (~10-15 sec)</div></div>';
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = 'Generating…';
+
+  try {
+    const r = await api(`/matters/${m.id}/client-summary`, {
+      method: 'POST',
+      body: { include_mandarin: true }
+    });
+
+    renderClientSummary(r);
+  } catch (e) {
+    container.innerHTML = `<div class="cs-card"><div class="cs-loading" style="color:var(--accent);">⚠ ${escapeHtml(e.message)}</div></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+});
+
+function renderClientSummary(r) {
+  const container = document.getElementById('client-summary-container');
+  const subject = r.subject_line || 'Status Update';
+  const englishHtml = `<textarea class="cs-text-en">${escapeHtml(r.english || '')}</textarea>
+    <div class="cs-copy">
+      <button class="btn small cs-copy-btn" data-pane="en">📋 Copy English</button>
+      <button class="btn ghost small cs-copy-btn" data-pane="en-subject">📋 Copy Subject + Body</button>
+    </div>`;
+  const mandarinHtml = r.mandarin
+    ? `<textarea class="cs-text-zh">${escapeHtml(r.mandarin)}</textarea>
+       <div class="cs-copy">
+         <button class="btn small cs-copy-btn" data-pane="zh">📋 复制中文</button>
+       </div>`
+    : `<div style="padding:20px; color:var(--muted); font-style:italic;">No Mandarin version generated.</div>`;
+
+  const warnings = (r.warnings || []).filter(w => w && w.length > 0);
+  const warningsHtml = warnings.length > 0
+    ? `<div class="cs-warnings">
+        <div class="cs-warn-title">⚠ Review before sending</div>
+        <ul>${warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
+       </div>`
+    : '';
+
+  container.innerHTML = `
+    <div class="cs-card">
+      <div class="cs-head">
+        <div>
+          <div class="cs-head-title">Status Update — Draft for Client</div>
+          <div class="cs-head-meta">Edit before forwarding · attorney-client privileged</div>
+        </div>
+        <div class="cs-head-actions">
+          <button class="btn ghost small" id="cs-regenerate">🔄 Regenerate</button>
+          <button class="btn ghost small" id="cs-close">✕ Close</button>
+        </div>
+      </div>
+      <div class="cs-body">
+        <div class="cs-subject"><span class="cs-subject-label">Subject:</span>${escapeHtml(subject)}</div>
+        <div class="cs-tabs">
+          <button class="cs-tab active" data-pane="en">English</button>
+          <button class="cs-tab" data-pane="zh">中文 · Mandarin</button>
+        </div>
+        <div class="cs-pane active" data-pane="en">${englishHtml}</div>
+        <div class="cs-pane" data-pane="zh">${mandarinHtml}</div>
+        ${warningsHtml}
+      </div>
+    </div>`;
+
+  // Wire tabs
+  container.querySelectorAll('.cs-tab').forEach(t => {
+    t.addEventListener('click', () => {
+      const target = t.dataset.pane;
+      container.querySelectorAll('.cs-tab').forEach(x => x.classList.toggle('active', x.dataset.pane === target));
+      container.querySelectorAll('.cs-pane').forEach(p => p.classList.toggle('active', p.dataset.pane === target));
+    });
+  });
+
+  // Wire copy buttons
+  container.querySelectorAll('.cs-copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      let text = '';
+      const target = btn.dataset.pane;
+      if (target === 'en') {
+        text = container.querySelector('.cs-text-en')?.value || '';
+      } else if (target === 'zh') {
+        text = container.querySelector('.cs-text-zh')?.value || '';
+      } else if (target === 'en-subject') {
+        const subj = subject;
+        const body = container.querySelector('.cs-text-en')?.value || '';
+        text = `Subject: ${subj}\n\n${body}`;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        const orig = btn.textContent;
+        btn.textContent = '✓ Copied';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      } catch {
+        alert('Copy failed. Select the text manually and copy.');
+      }
+    });
+  });
+
+  // Wire close + regenerate
+  container.querySelector('#cs-close').addEventListener('click', () => {
+    container.style.display = 'none';
+    container.innerHTML = '';
+  });
+  container.querySelector('#cs-regenerate').addEventListener('click', () => {
+    document.getElementById('gen-client-summary').click();
+  });
+}
 
 // ============================================================
 // INBOX (proposal queue)
