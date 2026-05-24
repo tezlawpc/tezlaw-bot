@@ -283,7 +283,21 @@
   .deadline .days-label { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.18em; color:var(--muted); }
   .deadline.urgent .days { color:var(--accent); animation:throb 1.6s ease-in-out infinite; }
   .deadline.warn .days { color:var(--amber); }
-  .deadline.passed .days { color:var(--muted); text-decoration:line-through; }
+  /* Informational: Govt/Opp deadlines you track but don't action.
+     Quieter background, smaller countdown, no throb, no red border. */
+  .deadline.informational { background:var(--paper-3); opacity:.85; }
+  .deadline.informational .days { font-size:22px; color:var(--muted); animation:none !important; }
+  .deadline.informational .days-label { color:var(--muted); font-style:italic; }
+  .deadline.informational h4 { color:var(--ink); opacity:.8; }
+  /* Override any urgent/passed throb if also informational */
+  .deadline.informational:not(.done) { border-left:1px solid var(--rule); background:var(--paper-3); }
+  /* Past-due but NOT marked complete = URGENT, not faded.
+     Apply only when the card is NOT also .done (when done, the .done rule below softens it). */
+  .deadline.passed:not(.done) { border-left:3px solid var(--accent); background:linear-gradient(to right, rgba(180,90,60,.06), #fff 60%); }
+  .deadline.passed:not(.done) .days { color:var(--accent); animation:throb 1.6s ease-in-out infinite; }
+  .deadline.passed:not(.done) .days-label { color:var(--accent); font-weight:600; }
+  /* Only struck-through when actually marked done */
+  .deadline.passed.done .days { color:var(--muted); text-decoration:line-through; }
   .deadline.done { background:var(--paper-3); opacity:.7; }
   .deadline.done h4 { text-decoration:line-through; }
   @keyframes throb { 0%,100%{opacity:1} 50%{opacity:.6} }
@@ -1493,12 +1507,13 @@ document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', (
 // ============================================================
 function nextDeadlineFor(matter) {
   if (!matter.deadlines || matter.deadlines.length === 0) return null;
-  const future = matter.deadlines
-    .filter(d => !d.done)
+  // Surface YOUR work and court events; skip Govt/Opp items (informational only).
+  // Past-due ranks ahead of upcoming (most-negative first).
+  const open = matter.deadlines
+    .filter(d => !d.done && d.date && d.party !== 'them')
     .map(d => ({ ...d, days: daysUntil(parseDate(d.date)) }))
-    .filter(d => d.days >= 0)
-    .sort((a,b) => a.days - b.days);
-  return future[0] || null;
+    .sort((a, b) => a.days - b.days);
+  return open[0] || null;
 }
 
 function renderMatterList() {
@@ -1540,10 +1555,17 @@ function matterCardHTML(m, next, isArchived) {
   const caption = isIp
     ? (m.mark || m.client || '—')
     : `${m.client} v. ${m.adverse || '—'}`;
+  // Format the days display based on past-due / today / future
+  function fmtDays(d) {
+    if (d < 0)   return `${Math.abs(d)}d OVERDUE`;
+    if (d === 0) return 'TODAY';
+    return `${d}d`;
+  }
+  const nextLabel = next ? (next.days < 0 ? 'Overdue' : 'Next') : null;
   const nextHtml = next ? `
     <div class="next">
-      <div><div class="next-label">Next</div><div class="next-title">${escapeHtml(next.title)}</div></div>
-      <div class="next-days ${urgencyClass(next.days)}">${next.days === 0 ? 'TODAY' : next.days + 'd'}</div>
+      <div><div class="next-label">${nextLabel}</div><div class="next-title">${escapeHtml(next.title)}</div></div>
+      <div class="next-days ${urgencyClass(next.days)}">${fmtDays(next.days)}</div>
     </div>` : isArchived ? `
     <div class="next">
       <div><div class="next-label">Closed</div><div class="next-title">${m.archivedDate ? new Date(m.archivedDate).toLocaleDateString('en-US') : '—'}</div></div>
@@ -1581,18 +1603,43 @@ function matterTypeLabel(t) {
 function renderOverviewStats() {
   const c = document.getElementById('overview-stats');
   const active = state.matters.filter(m => !m.archived);
+  // Open-deadline count includes everything (so the firm knows total workload),
+  // but overdue/urgent/next exclude Govt/Opp (those aren't your action items).
   const totalDL = active.reduce((s,m) => s + (m.deadlines || []).filter(d => !d.done).length, 0);
-  let urgentCount = 0, nextDays = null, nextLabel = '—';
+  let overdueCount = 0, urgentCount = 0, nextDays = null, nextLabel = '—';
   active.forEach(m => {
-    (m.deadlines || []).filter(d => !d.done).forEach(d => {
+    (m.deadlines || []).filter(d => !d.done && d.date && d.party !== 'them').forEach(d => {
       const days = daysUntil(parseDate(d.date));
+      if (days < 0)  overdueCount++;
       if (days >= 0 && days <= 7) urgentCount++;
-      if (days >= 0 && (nextDays === null || days < nextDays)) {
+      if (nextDays === null || days < nextDays) {
         nextDays = days;
         nextLabel = `${m.client} · ${d.title}`;
       }
     });
   });
+  function fmtOverviewDays(d) {
+    if (d < 0)   return `${Math.abs(d)}d OVERDUE`;
+    if (d === 0) return 'TODAY';
+    return `${d}d`;
+  }
+  // Show overdue tile if any; otherwise show urgent ≤7d tile (preserves existing UX when nothing overdue)
+  const middleTile = overdueCount > 0
+    ? `<div class="stat">
+        <div class="lbl">Overdue</div>
+        <div class="val alarm">${overdueCount}</div>
+        <div class="sub">${overdueCount === 1 ? 'item past due' : 'items past due'}</div>
+      </div>`
+    : `<div class="stat">
+        <div class="lbl">Urgent ≤ 7d</div>
+        <div class="val ${urgentCount > 0 ? 'alarm' : 'safe'}">${urgentCount}</div>
+        <div class="sub">${urgentCount === 1 ? 'item needs attention' : 'items need attention'}</div>
+      </div>`;
+  // Next-up tile classification
+  const nextValClass = nextDays === null ? ''
+    : nextDays < 0 ? 'alarm'
+    : nextDays <= 7 ? 'alarm'
+    : nextDays <= 21 ? 'warn' : '';
   c.innerHTML = `
     <div class="stat">
       <div class="lbl">Active Matters</div>
@@ -1604,14 +1651,10 @@ function renderOverviewStats() {
       <div class="val">${totalDL}</div>
       <div class="sub">across all matters</div>
     </div>
+    ${middleTile}
     <div class="stat">
-      <div class="lbl">Urgent ≤ 7d</div>
-      <div class="val ${urgentCount > 0 ? 'alarm' : 'safe'}">${urgentCount}</div>
-      <div class="sub">${urgentCount === 1 ? 'item needs attention' : 'items need attention'}</div>
-    </div>
-    <div class="stat">
-      <div class="lbl">Next Up</div>
-      <div class="val ${nextDays !== null && nextDays <= 7 ? 'alarm' : (nextDays !== null && nextDays <= 21 ? 'warn' : '')}">${nextDays === null ? '—' : (nextDays === 0 ? 'TODAY' : nextDays + 'd')}</div>
+      <div class="lbl">${nextDays !== null && nextDays < 0 ? 'Most Overdue' : 'Next Up'}</div>
+      <div class="val ${nextValClass}">${nextDays === null ? '—' : fmtOverviewDays(nextDays)}</div>
       <div class="sub" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(nextLabel)}</div>
     </div>`;
 }
@@ -2087,9 +2130,19 @@ function renderMatterStats(m) {
   const next = nextDeadlineFor(m);
   const tpl = CHECKLISTS[m.type] || CHECKLISTS.Other;
   const checkDone = tpl.items.filter(i => m.checklist && m.checklist[i.id]).length;
+  function fmtStatDays(d) {
+    if (d < 0)   return `${Math.abs(d)}d OVERDUE`;
+    if (d === 0) return 'TODAY';
+    return `${d}d`;
+  }
+  // Past-due deadlines get the strongest visual treatment.
+  // alarm = red (urgent/today/overdue), warn = amber, default = normal.
+  const valClass = next
+    ? (next.days < 0 ? 'alarm' : urgencyClass(next.days) === 'urgent' ? 'alarm' : urgencyClass(next.days) === 'warn' ? 'warn' : '')
+    : '';
   c.innerHTML = `
-    <div class="stat"><div class="lbl">Next Deadline</div>
-      <div class="val ${next ? (urgencyClass(next.days) === 'urgent' ? 'alarm' : urgencyClass(next.days) === 'warn' ? 'warn' : '') : ''}">${next ? (next.days === 0 ? 'TODAY' : next.days + 'd') : '—'}</div>
+    <div class="stat"><div class="lbl">${next && next.days < 0 ? 'Overdue' : 'Next Deadline'}</div>
+      <div class="val ${valClass}">${next ? fmtStatDays(next.days) : '—'}</div>
       <div class="sub">${next ? escapeHtml(next.title) : 'all clear'}</div></div>
     <div class="stat"><div class="lbl">Open</div><div class="val">${open.length}</div><div class="sub">remaining</div></div>
     <div class="stat"><div class="lbl">Completed</div><div class="val safe">${done.length}</div><div class="sub">items done</div></div>
@@ -2102,15 +2155,20 @@ function renderDeadlines(m) {
   if (sorted.length === 0) { c.innerHTML = `<div class="empty">No deadlines yet — add one above.</div>`; return; }
   c.innerHTML = sorted.map(d => {
     const days = daysUntil(parseDate(d.date));
+    const isThem = d.party === 'them';
+    // Govt/Opp items are informational — quieter visual, no urgent throb
+    const urgency = isThem ? '' : urgencyClass(days);
+    const informationalClass = isThem ? 'informational' : '';
+    const partyLabel = d.party === 'us' ? 'Us' : d.party === 'them' ? 'Govt/Opp' : 'Court';
     return `
-      <div class="deadline ${urgencyClass(days)} ${d.done ? 'done' : ''}" data-id="${d.id}">
-        <span class="pill ${d.party}">${d.party === 'us' ? 'Us' : d.party === 'them' ? 'Govt/Opp' : 'Court'}</span>
+      <div class="deadline ${urgency} ${informationalClass} ${d.done ? 'done' : ''}" data-id="${d.id}">
+        <span class="pill ${d.party}">${partyLabel}${isThem ? ' · informational' : ''}</span>
         <h4 class="dl-title-display" title="Click to edit">${escapeHtml(d.title)}</h4>
         <div class="citation">${escapeHtml(d.cite || '')}</div>
         <div class="date dl-date-display" title="Click to edit">${fmtDate(parseDate(d.date))}</div>
         <div class="countdown">
           <span class="days">${days < 0 ? Math.abs(days) + 'd ago' : days === 0 ? 'TODAY' : days + 'd'}</span>
-          <span class="days-label">${days < 0 ? 'passed' : 'remaining'}</span>
+          <span class="days-label">${isThem ? 'tracked (not your action)' : (days < 0 ? 'passed' : 'remaining')}</span>
         </div>
         ${d.note ? `<div class="note">${escapeHtml(d.note)}</div>` : ''}
         <div class="actions">
