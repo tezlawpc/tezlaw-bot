@@ -453,7 +453,7 @@ router.post("/api/parse-uspto", requireAuth, async (req, res) => {
 const CLIENT_SUMMARY_PROMPT = `You are drafting a formal status-update letter from an attorney (JJ Zhang, CA Bar #326666, TEZ Law Firm) to a client regarding their legal matter.
 
 VOICE: Formal / businesslike. NOT warm/effusive, NOT casual. Think professional law-firm letter.
- - Greeting: "Dear Mr./Ms. [LastName]" (use surname if you can derive it; else "Dear [ClientName]")
+ - Greeting: USE EXACTLY the salutation provided in REQUIRED_SALUTATION below. Do not modify it or substitute your own. Use it verbatim as the first line of the letter.
  - Procedural posture in factual third-person ("The Board issued...", "A Petition for Review was filed...")
  - Upcoming deadlines as a bulleted list
  - Past events as a bulleted list under "Procedural posture"
@@ -461,6 +461,20 @@ VOICE: Formal / businesslike. NOT warm/effusive, NOT casual. Think professional 
  - No emotional language, no reassurance phrases, no "I know this is difficult"
  - Plain English — avoid jargon the client wouldn't know, but use proper procedural terms
  - Keep total length under 350 words for English version
+
+ADDRESSEE TYPE: {ENTITY_TYPE}
+REQUIRED_SALUTATION (English): {SALUTATION_EN}
+REQUIRED_SALUTATION (Mandarin): {SALUTATION_ZH}
+
+If ADDRESSEE TYPE is "entity":
+ - Do NOT use "Mr." or "Ms." or any gendered title
+ - Refer to the addressee as the company/entity throughout, not as a person
+ - Avoid phrasing like "you personally" — say "your company" or use the entity name
+ - For Mandarin: do NOT use 先生/女士; address the company directly (e.g., 致[公司名]：)
+
+If ADDRESSEE TYPE is "individual":
+ - Use Mr./Ms. + surname in the salutation as provided
+ - For Mandarin: use 先生/女士 with surname as provided
 
 DO NOT:
  - Make legal predictions ("we will likely win", "your case is strong")
@@ -531,6 +545,7 @@ router.post("/api/matters/:id/client-summary", requireAuth, async (req, res) => 
       m.mark ? `Mark / Title: ${m.mark}` : null,
       m.serial_number ? `Serial/App/Reg: ${m.serial_number}` : null,
       m.filing_basis ? `Filing basis: ${m.filing_basis}` : null,
+      m.owner_name ? `Owner: ${m.owner_name}` : null,
       "",
       "Past events (recently passed deadlines):",
       past.length === 0
@@ -546,7 +561,39 @@ router.post("/api/matters/:id/client-summary", requireAuth, async (req, res) => 
       m.notes ? String(m.notes).substring(0, 2000) : "(no notes recorded)"
     ].filter(Boolean).join("\n");
 
-    const prompt = CLIENT_SUMMARY_PROMPT.replace("{MATTER_DATA}", matterData);
+    // ── Detect entity vs. individual to drive the salutation ──
+    // Strip the " v. X" caption for litigation matters; that's the adverse party.
+    let addresseeName = (m.client_name || "").split(/\s+v\.\s+/)[0].trim();
+    // For IP matters, owner_name is more accurate than the (often-mark-name) client_name
+    if (m.owner_name) addresseeName = m.owner_name;
+
+    const ENTITY_SUFFIX = /\b(inc\.?|incorporated|llc|l\.l\.c\.?|ltd\.?|limited|corp\.?|corporation|company|co\.?|gmbh|s\.a\.?|s\.l\.?|lp|l\.p\.?|llp|l\.l\.p\.?|plc|trust|foundation|association|partners|partnership|group|holdings|enterprises|industries|technologies)\b/i;
+    const isEntity = ENTITY_SUFFIX.test(addresseeName);
+
+    let salutationEn, salutationZh;
+    if (isEntity) {
+      salutationEn = `Dear ${addresseeName}:`;
+      salutationZh = `致${addresseeName}：`;
+    } else {
+      // Derive surname: handle "Last, First" (comma form, common in legal notation)
+      // and "First Last" (space form)
+      let lastName = addresseeName;
+      if (addresseeName.includes(",")) {
+        lastName = addresseeName.split(",")[0].trim();
+      } else {
+        const parts = addresseeName.split(/\s+/).filter(Boolean);
+        if (parts.length >= 2) lastName = parts[parts.length - 1];
+      }
+      salutationEn = `Dear Mr./Ms. ${lastName}:`;
+      salutationZh = `致${lastName}先生/女士：`;
+    }
+
+    const prompt = CLIENT_SUMMARY_PROMPT
+      .replace("{MATTER_DATA}", matterData)
+      .replace("{ENTITY_TYPE}", isEntity ? "entity" : "individual")
+      .replace("{SALUTATION_EN}", salutationEn)
+      .replace("{SALUTATION_ZH}", salutationZh);
+
     const responseText = await callClaudeAPI(prompt, 3000);
 
     let parsed;
