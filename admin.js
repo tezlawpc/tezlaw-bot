@@ -221,6 +221,78 @@ router.get("/login", (req, res) => {
   res.send(loginPageHtml());
 });
 
+// Post-login chooser
+router.get("/choose", requireAuth, (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>TEZ Law — Choose Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; background:#f4ede0;
+    font-family:'Inter Tight', sans-serif; color:#2a2520;
+    display:flex; align-items:center; justify-content:center;
+    background-image:radial-gradient(circle at 20% 30%, rgba(180,90,60,.04) 0%, transparent 60%),
+                     radial-gradient(circle at 80% 70%, rgba(60,80,120,.04) 0%, transparent 60%); }
+  .container { max-width:760px; width:90%; padding:48px 36px; }
+  .header { text-align:center; margin-bottom:48px; }
+  h1 { font-family:'Cormorant Garamond', serif; font-size:48px; font-weight:600; margin:0 0 12px;
+    letter-spacing:-.5px; }
+  .sub { font-family:'JetBrains Mono', monospace; font-size:11px; color:#665d52;
+    letter-spacing:.18em; text-transform:uppercase; }
+  .panels { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width:700px) { .panels { grid-template-columns:1fr; } }
+  .panel-card { background:#fbf6ec; border:1px solid #c8bda8; padding:36px 30px;
+    text-decoration:none; color:inherit;
+    box-shadow:0 1px 0 rgba(0,0,0,.04), 0 8px 24px -10px rgba(0,0,0,.08);
+    transition:transform .15s, box-shadow .15s, border-color .15s; }
+  .panel-card:hover { transform:translateY(-3px); border-color:#8a7a5e;
+    box-shadow:0 4px 0 rgba(0,0,0,.04), 0 16px 36px -10px rgba(0,0,0,.14); }
+  .panel-card .icon { font-size:42px; line-height:1; margin-bottom:14px; }
+  .panel-card h2 { font-family:'Cormorant Garamond', serif; font-size:26px; margin:0 0 8px;
+    font-weight:600; }
+  .panel-card .meta { font-family:'JetBrains Mono', monospace; font-size:10px; color:#8a7a5e;
+    letter-spacing:.15em; text-transform:uppercase; margin-bottom:14px; }
+  .panel-card p { font-size:14px; line-height:1.5; color:#4a4239; margin:0 0 14px; }
+  .panel-card .enter { font-family:'JetBrains Mono', monospace; font-size:11px;
+    letter-spacing:.12em; text-transform:uppercase; color:#2a2520; }
+  .panel-card.matters { border-left:3px solid #8a4f3a; }
+  .panel-card.admin { border-left:3px solid #3a4a6a; }
+  .footer { text-align:center; margin-top:36px; font-family:'JetBrains Mono', monospace;
+    font-size:10px; color:#8a7a5e; letter-spacing:.14em; }
+  .footer a { color:#8a4f3a; text-decoration:none; }
+  .footer a:hover { text-decoration:underline; }
+</style></head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Welcome back, JJ</h1>
+      <div class="sub">Choose a workspace</div>
+    </div>
+    <div class="panels">
+      <a href="/admin/matters/" class="panel-card matters">
+        <div class="icon">⚖️</div>
+        <div class="meta">Practice management</div>
+        <h2>Matter Manager</h2>
+        <p>Active matters, deadlines, court parsers, CM/ECF inbox, calendar feed.</p>
+        <div class="enter">Enter →</div>
+      </a>
+      <a href="/admin/" class="panel-card admin">
+        <div class="icon">📊</div>
+        <div class="meta">Zara &amp; firm analytics</div>
+        <h2>Admin Panel</h2>
+        <p>Leads, conflicts, SOL tracker, drip campaigns, intake compliance, prompt history.</p>
+        <div class="enter">Enter →</div>
+      </a>
+    </div>
+    <div class="footer">
+      <a href="/admin/api/logout" onclick="event.preventDefault(); fetch('/admin/api/logout',{method:'POST',credentials:'include'}).then(()=>window.location.href='/admin/login');">Log out</a>
+    </div>
+  </div>
+</body></html>`);
+});
+
 // Initiate Telegram auth
 router.post("/api/auth/request", async (req, res) => {
   const requestId = crypto.randomBytes(16).toString("hex");
@@ -881,7 +953,7 @@ function loginPageHtml() {
           document.cookie = 'admin_token=' + data.token + '; path=/; max-age=2592000; SameSite=Strict';
           status.className = 'status success';
           status.textContent = '✅ Approved! Redirecting...';
-          setTimeout(() => window.location.href = '/admin/', 800);
+          setTimeout(() => window.location.href = '/admin/choose', 800);
         } else if (data.status === 'denied') {
           clearInterval(pollInterval);
           status.className = 'status error';
@@ -1037,6 +1109,9 @@ function dashboardHtml() {
     <h2>Zara</h2>
     <p>Admin Panel</p>
   </div>
+  <a href="/admin/matters/" class="nav-item" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); text-decoration:none; border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">⚖️</span><span>→ Matter Manager</span>
+  </a>
   <div class="nav-item active" onclick="showPage('dashboard')" id="nav-dashboard">
     <span class="icon">📊</span><span>Dashboard</span>
   </div>
