@@ -1095,9 +1095,21 @@ function dashboardHtml() {
     .score-high{background:#d4edda;color:#155724}.score-mid{background:#fff3cd;color:#856404}.score-low{background:#f8d7da;color:#721c24}
     .needs-review{border-left-color:#cc0000!important;background:#fff8f8!important}
     @media (max-width: 768px) {
-      .sidebar { width: 60px; }
-      .sidebar-logo p, .nav-item span { display: none; }
-      .main { margin-left: 60px; }
+      .sidebar { width: 56px; padding: 0; }
+      .sidebar-logo { padding: 14px 8px; text-align: center; border-bottom: 1px solid rgba(183,156,98,.3); }
+      .sidebar-logo img { width: 36px !important; margin: 0 auto 4px !important; }
+      .sidebar-logo h2 { font-size: 11px; letter-spacing: .04em; }
+      .sidebar-logo p { display: none; }
+      .nav-item { padding: 12px 0; text-align: center; font-size: 16px; }
+      .nav-item span:not(.icon) { display: none; }
+      .nav-item .icon { margin-right: 0; font-size: 18px; }
+      .main { margin-left: 56px; padding: 16px 12px; }
+      .page-header { flex-wrap: wrap; gap: 10px; }
+      .page-header h1 { font-size: 18px; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+      .stat-card { padding: 14px; }
+      .stat-num { font-size: 24px; }
+      .card { padding: 16px; }
     }
   </style>
 </head>
