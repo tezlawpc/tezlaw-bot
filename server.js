@@ -122,12 +122,12 @@ function senderAllowed(fromAddr) {
 }
 
 // Find which user owns the inbound flow. v1 = single-user (JJ).
-// Future: route by To: address (lu-bondi@inbound... → JJ matter X).
+// Matches the same lookup used by getCurrentUserId() in matter-manager.js
+// so the auto-ingest pipeline writes proposals to the same user as paste-ingest.
 async function getInboundOwnerUserId() {
   try {
     const r = await getPool().query(
-      `SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
-      ["jj@tezlawfirm.com"]
+      `SELECT id FROM users WHERE username = 'jj' LIMIT 1`
     );
     return r.rows[0]?.id || null;
   } catch {
