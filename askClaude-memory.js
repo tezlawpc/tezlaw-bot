@@ -9,7 +9,7 @@ const { checkIntake, resetIntake } = require("./intake");
 const { checkJJMode, getJJPublicContext } = require("./jj-mode");
 const { detectPracticeArea, buildAgentPrompt } = require("./agents");
 const { extractReceiptNumber, getCaseStatus, formatCaseStatusMessage } = require("./uscis");
-const { checkAnswerCache, storeCachedAnswer, detectPracticeArea: cacheDetectArea } = require("./answer-cache");
+const { checkAnswerCache, storeCachedAnswer, detectPracticeArea: cacheDetectArea, appendSourceUrl } = require("./answer-cache");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -192,9 +192,12 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
 
         if (cached) {
           console.log(`[cache] ⚡ Cache hit (${cached.source}) — skipping Claude entirely`);
+          // Append blog URL when the cached answer came from a daily blog post.
+          // JJ mode never reaches here (short-circuits above), so isJJMode=false.
+          const finalAnswer = appendSourceUrl(cached, false);
           await db.saveMessage(platform, platformId, "user", userMessage);
-          await db.saveMessage(platform, platformId, "assistant", cached.answer);
-          return cached.answer;
+          await db.saveMessage(platform, platformId, "assistant", finalAnswer);
+          return finalAnswer;
         }
       } catch (cacheErr) {
         // Cache errors are non-fatal — fall through to Claude
