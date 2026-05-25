@@ -1650,6 +1650,348 @@ router.post("/api/matters/:matterId/deadlines", requireAuth, async (req, res) =>
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+//  IP LIFECYCLE DEADLINE GENERATOR
+//
+//  POST /admin/matters/api/matters/:matterId/lifecycle
+//  Body: { event: '<event_key>', anchor_date: 'YYYY-MM-DD' }
+//
+//  Generates a pre-defined set of deadlines anchored to a key event in
+//  the IP lifecycle (TM examination, TM NOA, TM registration, Patent OA,
+//  Patent NOA, Patent issue, Copyright registration).
+//
+//  Idempotent: if a deadline with the same title already exists on this
+//  matter (case-insensitive), skip it. So clicking the button twice won't
+//  duplicate. (Returns counts of added vs. skipped.)
+//
+//  Informational events use party='them' so they render as quieter cards
+//  and don't surface as overdue/urgent on the dashboard.
+//
+//  WARNING: patent issue-fee is 3-month NON-EXTENDABLE. Missing it
+//  abandons the patent. Title clearly marks this.
+// ─────────────────────────────────────────────────────────────
+
+// Helper: add N months to a YYYY-MM-DD string, return new YYYY-MM-DD.
+// Uses calendar months (Jan 31 + 1 mo = Feb 28/29) consistent with USPTO/FRAP.
+function addMonths(yyyymmdd, months) {
+  const [y, m, d] = yyyymmdd.split("-").map(Number);
+  const base = new Date(Date.UTC(y, m - 1, d));
+  // Move month forward
+  const targetMonth = base.getUTCMonth() + months;
+  const targetDate = new Date(Date.UTC(base.getUTCFullYear(), targetMonth, base.getUTCDate()));
+  // If overflow (e.g. Jan 31 + 1 = Mar 3), back up to last day of intended month
+  if (targetDate.getUTCMonth() !== ((targetMonth % 12) + 12) % 12) {
+    targetDate.setUTCDate(0); // last day of previous month
+  }
+  return targetDate.toISOString().slice(0, 10);
+}
+
+// Helper: add N years
+function addYears(yyyymmdd, years) {
+  return addMonths(yyyymmdd, years * 12);
+}
+
+// Event definitions. Each returns an array of deadline templates from the anchor date.
+// title MUST be unique-per-event so idempotency check works.
+function lifecycleDeadlines(eventKey, anchorDate) {
+  const events = {
+    // ── TRADEMARK ──────────────────────────────────────────────
+    tm_examination: () => [
+      {
+        title: "USPTO: Expected first Office Action (informational)",
+        citation: "TMEP §§ 700-1400",
+        due_date: addMonths(anchorDate, 8),
+        party: "them",
+        note: "USPTO examination typically begins 8-12 months after filing. Watch for office action; you'll have 6 months from issue to respond."
+      },
+      {
+        title: "USPTO: Watch for Publication Notice (informational)",
+        citation: "15 U.S.C. § 1062 · TMEP § 1502",
+        due_date: addMonths(anchorDate, 12),
+        party: "them",
+        note: "If approved, USPTO publishes for opposition. 30-day opposition window starts on publication date."
+      },
+      {
+        title: "USPTO: Opposition window closes (informational)",
+        citation: "15 U.S.C. § 1063",
+        due_date: addMonths(anchorDate, 13),
+        party: "them",
+        note: "30 days from publication. If no opposition filed, application proceeds to NOA (1(b)) or registration (1(a))."
+      }
+    ],
+    tm_noa: () => [
+      // Six SOU/extension deadlines from NOA date.
+      // SOU initial: 6 months from NOA. Then 5 six-month extension periods.
+      // Each is the FILING deadline for either SOU or next extension.
+      {
+        title: "TM: Statement of Use OR 1st Extension Request due",
+        citation: "15 U.S.C. § 1051(d)(1)",
+        due_date: addMonths(anchorDate, 6),
+        party: "us",
+        note: "6 months from NOA. File SOU (if mark is in use) OR file 1st 6-month Extension Request with $125/class fee."
+      },
+      {
+        title: "TM: SOU OR 2nd Extension Request due",
+        citation: "15 U.S.C. § 1051(d)(2)",
+        due_date: addMonths(anchorDate, 12),
+        party: "us",
+        note: "12 months from NOA. Each extension requires good-cause statement after the 1st."
+      },
+      {
+        title: "TM: SOU OR 3rd Extension Request due",
+        citation: "15 U.S.C. § 1051(d)(2)",
+        due_date: addMonths(anchorDate, 18),
+        party: "us",
+        note: "18 months from NOA."
+      },
+      {
+        title: "TM: SOU OR 4th Extension Request due",
+        citation: "15 U.S.C. § 1051(d)(2)",
+        due_date: addMonths(anchorDate, 24),
+        party: "us",
+        note: "24 months from NOA."
+      },
+      {
+        title: "TM: SOU OR 5th Extension Request due",
+        citation: "15 U.S.C. § 1051(d)(2)",
+        due_date: addMonths(anchorDate, 30),
+        party: "us",
+        note: "30 months from NOA. Penultimate extension."
+      },
+      {
+        title: "TM: SOU due — FINAL (no further extensions)",
+        citation: "15 U.S.C. § 1051(d)(2)",
+        due_date: addMonths(anchorDate, 36),
+        party: "us",
+        note: "36 months from NOA. ABSOLUTE DEADLINE. No more extensions. If SOU not filed by this date, application is ABANDONED."
+      }
+    ],
+    tm_registration: () => [
+      {
+        title: "TM: Section 8 affidavit of continued use — window opens",
+        citation: "15 U.S.C. § 1058(a)",
+        due_date: addYears(anchorDate, 5),
+        party: "us",
+        note: "Filing window: between 5th and 6th anniversary of registration. 6-month grace period available with surcharge. Missing this CANCELS the registration."
+      },
+      {
+        title: "TM: Section 8 affidavit — window CLOSES",
+        citation: "15 U.S.C. § 1058(a)",
+        due_date: addYears(anchorDate, 6),
+        party: "us",
+        note: "Last day of regular window (6-year anniversary). 6-month grace period thereafter with surcharge. Set internal deadline before this date."
+      },
+      {
+        title: "TM: Combined § 8 & § 9 renewal — window opens",
+        citation: "15 U.S.C. § 1058 + § 1059",
+        due_date: addYears(anchorDate, 9),
+        party: "us",
+        note: "Filing window: between 9th and 10th anniversary of registration."
+      },
+      {
+        title: "TM: Combined § 8 & § 9 renewal — window CLOSES",
+        citation: "15 U.S.C. § 1058 + § 1059",
+        due_date: addYears(anchorDate, 10),
+        party: "us",
+        note: "Last day to file regular renewal. 6-month grace period available with surcharge. Missing this CANCELS the registration."
+      }
+    ],
+
+    // ── PATENT ─────────────────────────────────────────────────
+    pat_examination: () => [
+      {
+        title: "Patent: 18-month publication date (informational)",
+        citation: "35 U.S.C. § 122(b)",
+        due_date: addMonths(anchorDate, 18),
+        party: "them",
+        note: "Application published 18 months from earliest priority date unless non-publication request filed. Public can begin to assert prior user rights from this date."
+      },
+      {
+        title: "Patent: Expected first Office Action (informational)",
+        citation: "MPEP § 707",
+        due_date: addMonths(anchorDate, 16),
+        party: "them",
+        note: "Average time to first OA is ~16 months but varies by art unit. Monitor PAIR for OA arrival."
+      }
+    ],
+    pat_first_oa: () => [
+      {
+        title: "Patent: OA response due (3-month statutory)",
+        citation: "37 C.F.R. § 1.134",
+        due_date: addMonths(anchorDate, 3),
+        party: "us",
+        note: "Statutory 3 months from OA mailing date. Extendable to 6 months total with monthly extension fees ($240-$1,500). Beyond 6 months: ABANDONMENT."
+      },
+      {
+        title: "Patent: OA response — final extendable deadline",
+        citation: "37 C.F.R. § 1.136(a)",
+        due_date: addMonths(anchorDate, 6),
+        party: "us",
+        note: "Maximum extension. ABSOLUTE DEADLINE — beyond this the application is abandoned and only revivable in limited circumstances."
+      }
+    ],
+    pat_noa: () => [
+      {
+        title: "Patent: Issue Fee due — NON-EXTENDABLE",
+        citation: "37 C.F.R. § 1.311",
+        due_date: addMonths(anchorDate, 3),
+        party: "us",
+        note: "⚠ 3 months from NOA mailing date. NO EXTENSIONS AVAILABLE. Missing this abandons the application. Issue fee + publication fee due. Consider also filing IDS if any new prior art surfaced."
+      }
+    ],
+    pat_issue: () => [
+      {
+        title: "Patent: 3.5-year maintenance fee window opens",
+        citation: "35 U.S.C. § 41(b) · 37 C.F.R. § 1.20",
+        due_date: addMonths(anchorDate, 36),
+        party: "us",
+        note: "Filing window opens 3 years from issue. Without surcharge: pay between 3-3.5 years. With surcharge: pay between 3.5-4 years (6-mo grace)."
+      },
+      {
+        title: "Patent: 3.5-year maintenance fee window CLOSES (with surcharge)",
+        citation: "35 U.S.C. § 41(b)",
+        due_date: addMonths(anchorDate, 48),
+        party: "us",
+        note: "Absolute deadline (4 years from issue). Missing this: patent EXPIRES."
+      },
+      {
+        title: "Patent: 7.5-year maintenance fee window opens",
+        citation: "35 U.S.C. § 41(b)",
+        due_date: addMonths(anchorDate, 84),
+        party: "us",
+        note: "Filing window opens 7 years from issue. Pay between 7-7.5 years without surcharge."
+      },
+      {
+        title: "Patent: 7.5-year maintenance fee window CLOSES (with surcharge)",
+        citation: "35 U.S.C. § 41(b)",
+        due_date: addMonths(anchorDate, 96),
+        party: "us",
+        note: "Absolute deadline (8 years from issue). Missing this: patent EXPIRES."
+      },
+      {
+        title: "Patent: 11.5-year maintenance fee window opens",
+        citation: "35 U.S.C. § 41(b)",
+        due_date: addMonths(anchorDate, 132),
+        party: "us",
+        note: "Filing window opens 11 years from issue. Final maintenance fee. Pay between 11-11.5 years without surcharge."
+      },
+      {
+        title: "Patent: 11.5-year maintenance fee window CLOSES (with surcharge)",
+        citation: "35 U.S.C. § 41(b)",
+        due_date: addMonths(anchorDate, 144),
+        party: "us",
+        note: "Absolute deadline (12 years from issue). Missing this: patent EXPIRES. No further maintenance fees after this."
+      }
+    ],
+
+    // ── COPYRIGHT ──────────────────────────────────────────────
+    cr_registration: () => [
+      {
+        title: "Copyright: Termination of Transfer — window opens",
+        citation: "17 U.S.C. § 203(a)(3)",
+        due_date: addYears(anchorDate, 35),
+        party: "us",
+        note: "For post-1977 grants: author or heirs may terminate transfers between 35-40 years from grant. Notice required 2-10 years before effective date. Plan early."
+      },
+      {
+        title: "Copyright: Termination of Transfer — window CLOSES",
+        citation: "17 U.S.C. § 203(a)(3)",
+        due_date: addYears(anchorDate, 40),
+        party: "us",
+        note: "Absolute deadline. If not exercised by 40 years from grant, termination right is lost forever."
+      }
+    ]
+  };
+
+  const fn = events[eventKey];
+  if (!fn) return null;
+  return fn();
+}
+
+router.post("/api/matters/:matterId/lifecycle", requireAuth, async (req, res) => {
+  try {
+    const userId = await getCurrentUserId(req);
+    const matterId = parseInt(req.params.matterId);
+    if (isNaN(matterId)) return res.status(400).json({ error: "Invalid matter id" });
+
+    // Verify user owns this matter
+    const mr = await db.query(
+      `SELECT id, case_type, filing_basis FROM matters WHERE id = $1 AND user_id = $2`,
+      [matterId, userId]
+    );
+    if (!mr.rows.length) return res.status(404).json({ error: "Matter not found" });
+    const matter = mr.rows[0];
+
+    const { event, anchor_date } = req.body || {};
+    if (!event || typeof event !== "string") {
+      return res.status(400).json({ error: "event required" });
+    }
+    if (!anchor_date || !/^\d{4}-\d{2}-\d{2}$/.test(anchor_date)) {
+      return res.status(400).json({ error: "anchor_date required (YYYY-MM-DD)" });
+    }
+
+    // Validate event for matter type
+    const validForType = {
+      Trademark: ["tm_examination", "tm_noa", "tm_registration"],
+      Patent:    ["pat_examination", "pat_first_oa", "pat_noa", "pat_issue"],
+      Copyright: ["cr_registration"]
+    };
+    const allowed = validForType[matter.case_type] || [];
+    if (!allowed.includes(event)) {
+      return res.status(400).json({
+        error: `Event '${event}' not valid for ${matter.case_type || "unknown"} matters`
+      });
+    }
+
+    // Extra rule: tm_noa only makes sense for 1(b)
+    if (event === "tm_noa" && matter.filing_basis && matter.filing_basis !== "1(b)") {
+      return res.status(400).json({
+        error: "NOA is only relevant for Section 1(b) intent-to-use applications. This matter's filing basis is " + matter.filing_basis
+      });
+    }
+
+    const templates = lifecycleDeadlines(event, anchor_date);
+    if (!templates || templates.length === 0) {
+      return res.status(500).json({ error: "No deadlines generated for that event" });
+    }
+
+    // Pull existing deadline titles to dedupe (case-insensitive)
+    const existing = await db.query(
+      `SELECT LOWER(title) AS lt FROM matter_deadlines WHERE matter_id = $1`,
+      [matterId]
+    );
+    const existingTitles = new Set(existing.rows.map(r => r.lt));
+
+    const added = [];
+    const skipped = [];
+    for (const t of templates) {
+      if (existingTitles.has(t.title.toLowerCase())) {
+        skipped.push(t.title);
+        continue;
+      }
+      const ins = await db.query(
+        `INSERT INTO matter_deadlines (matter_id, title, citation, due_date, party, note)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, title, due_date, party`,
+        [matterId, t.title, t.citation, t.due_date, t.party, t.note]
+      );
+      added.push(ins.rows[0]);
+    }
+
+    res.json({
+      event,
+      anchor_date,
+      added_count: added.length,
+      skipped_count: skipped.length,
+      added,
+      skipped
+    });
+  } catch (err) {
+    console.error("POST lifecycle error:", err.message);
+    res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
 // PATCH /admin/matters/api/matters/:matterId/deadlines/:id
 router.patch("/api/matters/:matterId/deadlines/:id", requireAuth, async (req, res) => {
   try {
