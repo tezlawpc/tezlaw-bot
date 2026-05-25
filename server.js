@@ -34,7 +34,7 @@ const { initCacheTable, getCacheStats, purgeExpiredCache } = require("./answer-c
 // Matter manager: REST routes (mounted at /admin/matters) + .ics calendar feed
 const { router: matterManagerRouter, handleCalendarFeed, ingestEmailText } = require("./matter-manager");
 const multer  = require("multer");
-const { getPool } = require("./db");
+const db      = require("./db");
 
 // In-memory multer for SendGrid inbound webhook (multipart/form-data).
 // 10MB cap is plenty for plain-text bodies; we drop attachments anyway in v1.
@@ -126,7 +126,7 @@ function senderAllowed(fromAddr) {
 // so the auto-ingest pipeline writes proposals to the same user as paste-ingest.
 async function getInboundOwnerUserId() {
   try {
-    const r = await getPool().query(
+    const r = await db.query(
       `SELECT id FROM users WHERE username = 'jj' LIMIT 1`
     );
     return r.rows[0]?.id || null;
@@ -138,7 +138,7 @@ async function getInboundOwnerUserId() {
 // Log every webhook attempt for forensics
 async function logInbound(fields, outcome, reason, proposalId) {
   try {
-    await getPool().query(
+    await db.query(
       `INSERT INTO inbound_email_log
         (from_email, to_email, subject, message_id, outcome, reason, proposal_id, body_size)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -245,7 +245,7 @@ app.post("/webhook/inbound-email/:secret", sendgridUpload.any(), async (req, res
   let firstProposalId = result.proposals?.[0]?.id || null;
   if (result.proposals.length === 0 || result.parser_failed) {
     try {
-      const ins = await getPool().query(
+      const ins = await db.query(
         `INSERT INTO matter_proposals
            (user_id, kind, source, source_ref, proposed_data, raw_excerpt, status, confidence, message_id)
          VALUES ($1, 'new_matter', 'email_inbound', $2, $3, $4, 'pending', 'low', $5)
@@ -287,7 +287,7 @@ app.get("/admin/inbound-log", async (req, res) => {
   const isAdmin = req.cookies && req.cookies.admin_auth === process.env.ADMIN_PASSWORD;
   if (!isAdmin) return res.status(401).send("unauthorized");
   try {
-    const r = await getPool().query(
+    const r = await db.query(
       `SELECT id, received_at, from_email, to_email, subject, outcome, reason, proposal_id, body_size
          FROM inbound_email_log
         ORDER BY received_at DESC
