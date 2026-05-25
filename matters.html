@@ -364,6 +364,17 @@
   .cs-warnings ul { margin:4px 0 0; padding-left:18px; }
   .cs-loading { padding:30px; text-align:center; font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; }
 
+  /* IP Lifecycle buttons */
+  #ip-lifecycle-buttons { display:flex; flex-wrap:wrap; gap:10px; padding:18px; }
+  .lc-btn-group { display:flex; flex-direction:column; gap:6px; padding:12px 14px; border:1px solid var(--rule); background:var(--paper); min-width:240px; flex:1; }
+  .lc-btn-group .lc-label { font-family:var(--mono); font-size:9px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; }
+  .lc-btn-group .lc-title { font-family:var(--serif); font-size:14px; color:var(--ink); margin-bottom:6px; }
+  .lc-btn-group .lc-action { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .lc-btn-group input[type="date"] { font-family:var(--mono); font-size:11px; padding:5px 8px; border:1px solid var(--rule); background:var(--paper); }
+  .lc-btn-group .lc-status { font-family:var(--mono); font-size:10px; letter-spacing:.1em; padding-top:4px; min-height:14px; }
+  .lc-btn-group .lc-status.ok { color:var(--green); }
+  .lc-btn-group .lc-status.err { color:var(--accent); }
+
   /* Files */
   .files-card .link-row { display:flex; gap:10px; align-items:center; padding:12px 0; border-bottom:1px dotted var(--rule-soft); }
   .files-card .link-row:last-child { border-bottom:none; }
@@ -862,6 +873,12 @@
         <textarea id="matter-notes" placeholder="Strategy · witness contacts · transcript page refs · ECF receipts…"></textarea>
       </div>
     </div>
+
+    <div class="section-title ip-lifecycle-section" style="display:none;">
+      <span>IP Lifecycle Events</span>
+      <span class="ord">Anchor a key event date → auto-generates downstream deadlines</span>
+    </div>
+    <div class="card ip-lifecycle-section" id="ip-lifecycle-buttons" style="display:none;"></div>
 
     <div class="section-title">
       <span>Client Communication</span>
@@ -2120,7 +2137,138 @@ function renderMatterDetail() {
       });
     });
   }
-  renderMatterStats(m); renderDeadlines(m); renderFiles(m); renderNotes(m); renderChecklist(m);
+  renderMatterStats(m); renderDeadlines(m); renderFiles(m); renderNotes(m); renderChecklist(m); renderIpLifecycle(m);
+}
+
+// ============================================================
+// IP LIFECYCLE BUTTONS (Trademark / Patent / Copyright only)
+// ============================================================
+function renderIpLifecycle(m) {
+  const sections = document.querySelectorAll('.ip-lifecycle-section');
+  const container = document.getElementById('ip-lifecycle-buttons');
+  if (!container) return;
+
+  const isIp = ['Trademark','Patent','Copyright'].includes(m.type);
+  sections.forEach(s => s.style.display = isIp ? '' : 'none');
+  if (!isIp) return;
+
+  // Per-type button definitions
+  // Each button has: id, event_key, title, hint, defaultAnchor (function(m) -> date string)
+  let buttons = [];
+
+  if (m.type === 'Trademark') {
+    buttons.push({
+      event: 'tm_examination',
+      label: 'Filing Watch',
+      title: '🔍 Add Examination Watch Events',
+      hint: 'Informational events: expected OA, publication, opposition window',
+      defaultAnchor: m.trigger || m.created || ''
+    });
+    // Only show NOA button if filing basis is 1(b) or unset
+    if (!m.filing_basis || m.filing_basis === '1(b)') {
+      buttons.push({
+        event: 'tm_noa',
+        label: 'NOA Received',
+        title: '📬 Record NOA Date',
+        hint: 'Generates 6 SOU/extension deadlines (6, 12, 18, 24, 30, 36 mo from NOA)',
+        defaultAnchor: ''
+      });
+    }
+    buttons.push({
+      event: 'tm_registration',
+      label: 'Registered',
+      title: '📜 Record Registration Date',
+      hint: 'Generates § 8 (yr 5-6) and § 8/§ 9 renewal (yr 9-10) deadlines',
+      defaultAnchor: ''
+    });
+  } else if (m.type === 'Patent') {
+    buttons.push({
+      event: 'pat_examination',
+      label: 'Filing Watch',
+      title: '🔍 Add Examination Watch Events',
+      hint: 'Informational: 18-mo publication, expected first OA',
+      defaultAnchor: m.trigger || m.created || ''
+    });
+    buttons.push({
+      event: 'pat_first_oa',
+      label: 'OA Received',
+      title: '📋 Record First Office Action Date',
+      hint: '3-mo statutory response + 6-mo final extension',
+      defaultAnchor: ''
+    });
+    buttons.push({
+      event: 'pat_noa',
+      label: 'NOA Received',
+      title: '📬 Record Patent NOA Date',
+      hint: '⚠ 3-month NON-EXTENDABLE issue fee deadline',
+      defaultAnchor: ''
+    });
+    buttons.push({
+      event: 'pat_issue',
+      label: 'Patent Issued',
+      title: '📜 Record Issue Date',
+      hint: 'Maintenance fees at 3.5, 7.5, 11.5 years',
+      defaultAnchor: ''
+    });
+  } else if (m.type === 'Copyright') {
+    buttons.push({
+      event: 'cr_registration',
+      label: 'Registered',
+      title: '📜 Record Registration Date',
+      hint: 'Termination of transfer right (yr 35-40)',
+      defaultAnchor: ''
+    });
+  }
+
+  container.innerHTML = buttons.map((b, idx) => `
+    <div class="lc-btn-group">
+      <span class="lc-label">${escapeHtml(b.label)}</span>
+      <span class="lc-title">${escapeHtml(b.title)}</span>
+      <div class="lc-action">
+        <input type="date" class="lc-date" data-idx="${idx}" value="${escapeHtml(b.defaultAnchor)}" />
+        <button class="btn small lc-go" data-event="${b.event}" data-idx="${idx}">Add deadlines</button>
+      </div>
+      <span class="ord" style="font-size:10px;">${escapeHtml(b.hint)}</span>
+      <span class="lc-status" id="lc-status-${idx}"></span>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('.lc-go').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = btn.dataset.idx;
+      const event = btn.dataset.event;
+      const dateInput = container.querySelector(`.lc-date[data-idx="${idx}"]`);
+      const statusEl  = container.querySelector(`#lc-status-${idx}`);
+      const anchor    = dateInput.value;
+      if (!anchor) {
+        statusEl.textContent = '⚠ Pick a date first';
+        statusEl.className = 'lc-status err';
+        return;
+      }
+      statusEl.textContent = 'Adding…';
+      statusEl.className = 'lc-status';
+      btn.disabled = true;
+
+      try {
+        const r = await api(`/matters/${m.id}/lifecycle`, {
+          method: 'POST',
+          body: { event, anchor_date: anchor }
+        });
+        const msg = r.skipped_count > 0
+          ? `✓ Added ${r.added_count}, skipped ${r.skipped_count} duplicate${r.skipped_count === 1 ? '' : 's'}`
+          : `✓ Added ${r.added_count} deadline${r.added_count === 1 ? '' : 's'}`;
+        statusEl.textContent = msg;
+        statusEl.className = 'lc-status ok';
+        // Refresh the matter so the new deadlines appear
+        await reloadMatter(m.id);
+      } catch (e) {
+        statusEl.textContent = '⚠ ' + e.message;
+        statusEl.className = 'lc-status err';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
 }
 
 function renderMatterStats(m) {
