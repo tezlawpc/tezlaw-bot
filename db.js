@@ -904,13 +904,24 @@ async function initMatterManagerV4() {
 async function initMatterManagerV5() {
   try {
     // Idempotency: SendGrid passes the original email Message-ID header.
-    // Two forwards of the same email = same Message-ID = dedup at the DB layer.
+    // Two forwards of the same email = same Message-ID = dedup at the helper layer.
     // Nullable because existing rows (created via paste before v5) won't have one.
+    //
+    // NOTE: A SINGLE email often spawns MULTIPLE proposals (one per extracted
+    // deadline + a field-update proposal). They all share the same Message-ID.
+    // So we DON'T enforce uniqueness at the DB layer — instead, ingestEmailText()
+    // does a SELECT-before-INSERT check on Message-ID and short-circuits the whole
+    // ingest if any proposal with that ID exists. This is the correct semantic.
     await getPool().query(
       `ALTER TABLE matter_proposals ADD COLUMN IF NOT EXISTS message_id VARCHAR(500)`
     );
+    // If the broken UNIQUE index from an earlier deploy exists, drop it.
     await getPool().query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_message_id
+      `DROP INDEX IF EXISTS idx_proposals_message_id`
+    );
+    // Non-unique index for fast dedup lookups.
+    await getPool().query(
+      `CREATE INDEX IF NOT EXISTS idx_proposals_message_id_lookup
          ON matter_proposals(message_id)
          WHERE message_id IS NOT NULL`
     );
