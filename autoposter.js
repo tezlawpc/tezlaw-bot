@@ -208,7 +208,24 @@ async function publishAllLanguages(post, notifyPrefix, state) {
     console.log("⚠️ Skipping WP duplicate:", post.title);
     return 0;
   }
-  try { const p = await publishToWordPress(post); results.push({ lang: "English", link: p.link }); }
+  try {
+    const p = await publishToWordPress(post);
+    results.push({ lang: "English", link: p.link });
+
+    // 🧠 Feed Zara's memory — seed cache + jj_memory with this post's FAQs
+    // Non-blocking; failures don't affect publishing.
+    try {
+      const { seedCacheFromBlogPost } = require("./legal-digest");
+      await seedCacheFromBlogPost({
+        title:       post.title,
+        htmlContent: post.content,
+        url:         p.link,
+        category:    post.category,
+      });
+    } catch (seedErr) {
+      console.error("[autoposter] Blog→cache seed error:", seedErr.message);
+    }
+  }
   catch (e) { console.error("English publish failed:", e.message); }
 
   // Chinese — check both WP and local history before publishing
