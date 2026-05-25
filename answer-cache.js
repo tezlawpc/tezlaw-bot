@@ -236,8 +236,18 @@ async function initCacheTable() {
         created_at      TIMESTAMPTZ DEFAULT NOW(),
         expires_at      TIMESTAMPTZ,
         is_time_sensitive BOOLEAN DEFAULT FALSE,
-        language        TEXT DEFAULT 'en'
+        language        TEXT DEFAULT 'en',
+        source_type     TEXT DEFAULT 'client',
+        source_url      TEXT
       )
+    `);
+
+    // Idempotent migration for existing deployments — adds source columns
+    // if they don't exist yet. Safe to run on every startup.
+    await db.query(`
+      ALTER TABLE answer_cache
+        ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'client',
+        ADD COLUMN IF NOT EXISTS source_url  TEXT
     `);
 
     await db.query(`
@@ -267,7 +277,8 @@ async function fingerprintLookup(message, practiceArea) {
   try {
     // Check global cache first, then practice-area cache
     const result = await db.query(`
-      SELECT id, answer, hit_count, practice_area, cache_layer, language
+      SELECT id, answer, hit_count, practice_area, cache_layer, language,
+             source_type, source_url
       FROM answer_cache
       WHERE fingerprint = $1
         AND expires_at > NOW()
@@ -289,7 +300,13 @@ async function fingerprintLookup(message, practiceArea) {
     );
 
     console.log(`[cache] ✅ Fingerprint hit (${cached.cache_layer}/${cached.practice_area}) hits:${cached.hit_count + 1}`);
-    return { answer: cached.answer, source: "fingerprint", hitCount: cached.hit_count + 1 };
+    return {
+      answer:     cached.answer,
+      source:     "fingerprint",
+      hitCount:   cached.hit_count + 1,
+      sourceType: cached.source_type || "client",
+      sourceUrl:  cached.source_url || null,
+    };
 
   } catch (err) {
     console.error("[cache] Fingerprint lookup error:", err.message);
@@ -304,7 +321,7 @@ async function haikuSimilarityCheck(message, practiceArea, language = "en") {
   try {
     // Load top cached Q&As for this practice area + global
     const cached = await db.query(`
-      SELECT question_sample, answer, id, hit_count
+      SELECT question_sample, answer, id, hit_count, source_type, source_url
       FROM answer_cache
       WHERE expires_at > NOW()
         AND hit_count >= 2
@@ -364,7 +381,13 @@ Answer (number or NONE):`,
     );
 
     console.log(`[cache] ✅ Haiku similarity hit — matched question #${idx + 1}, hits:${match.hit_count + 1}`);
-    return { answer: match.answer, source: "similarity", hitCount: match.hit_count + 1 };
+    return {
+      answer:     match.answer,
+      source:     "similarity",
+      hitCount:   match.hit_count + 1,
+      sourceType: match.source_type || "client",
+      sourceUrl:  match.source_url || null,
+    };
 
   } catch (err) {
     console.error("[cache] Haiku similarity error:", err.message);
@@ -375,7 +398,7 @@ Answer (number or NONE):`,
 // ============================================================
 //  STORE NEW Q&A IN CACHE
 // ============================================================
-async function storeCachedAnswer(message, answer, practiceArea, language = "en") {
+async function storeCachedAnswer(message, answer, practiceArea, language = "en", sourceMeta = {}) {
   // Double-check it's cacheable before storing
   if (!isCacheable(message)) return;
 
@@ -397,6 +420,9 @@ async function storeCachedAnswer(message, answer, practiceArea, language = "en")
   const fingerprint   = buildFingerprint(message);
   const timeSensitive = isTimeSensitive(message);
 
+  // Source tagging: 'client' (default), 'digest' (court opinion), 'blog' (autoposter)
+  const { sourceType = "client", sourceUrl = null } = sourceMeta;
+
   // TTL: time-sensitive = 7 days, immigration = 14, everything else = 30
   // Multilingual answers get same TTL — language is encoded in fingerprint
   const ttlDays   = timeSensitive ? TTL.fees : (TTL[practiceArea] || TTL.general);
@@ -413,8 +439,9 @@ async function storeCachedAnswer(message, answer, practiceArea, language = "en")
     await db.query(`
       INSERT INTO answer_cache
         (fingerprint, question_sample, answer, practice_area, cache_layer,
-         hit_count, expires_at, is_time_sensitive, language)
-      VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8)
+         hit_count, expires_at, is_time_sensitive, language,
+         source_type, source_url)
+      VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8, $9, $10)
       ON CONFLICT DO NOTHING
     `, [
       fingerprint || null,
@@ -425,9 +452,12 @@ async function storeCachedAnswer(message, answer, practiceArea, language = "en")
       expiresAt,
       timeSensitive,
       language,
+      sourceType,
+      sourceUrl,
     ]);
 
-    console.log(`[cache] 💾 Stored (${cacheLayer}/${practiceArea}, TTL ${ttlDays}d, lang:${language})`);
+    const sourceLabel = sourceType !== "client" ? ` source:${sourceType}` : "";
+    console.log(`[cache] 💾 Stored (${cacheLayer}/${practiceArea}, TTL ${ttlDays}d, lang:${language}${sourceLabel})`);
   } catch (err) {
     console.error("[cache] Store error:", err.message);
   }
@@ -450,6 +480,86 @@ async function checkAnswerCache(message, practiceArea, language = "en") {
   if (similarHit) return similarHit;
 
   return null;
+}
+
+// ============================================================
+//  FIND CACHED ANSWER FOR CONTRADICTION GATE (used by legal-digest)
+//  Like checkAnswerCache but does NOT increment hit_count and
+//  ALWAYS returns sourceType/sourceUrl. Used by digest + blog
+//  seeding to detect contradictions before overwriting.
+// ============================================================
+async function findCachedAnswer(question, practiceArea, language = "en") {
+  // Try fingerprint match first
+  const fingerprint = buildFingerprint(question);
+  if (fingerprint && fingerprint !== "general:") {
+    try {
+      const result = await db.query(`
+        SELECT question_sample, answer, source_type, source_url, practice_area, cache_layer
+        FROM answer_cache
+        WHERE fingerprint = $1
+          AND expires_at > NOW()
+          AND language = $2
+          AND (cache_layer = 'global' OR practice_area = $3)
+        ORDER BY
+          CASE WHEN practice_area = $3 THEN 0 ELSE 1 END,
+          hit_count DESC
+        LIMIT 1
+      `, [fingerprint, language, practiceArea || "general"]);
+
+      if (result.rows.length) {
+        const row = result.rows[0];
+        return {
+          question:   row.question_sample,
+          answer:     row.answer,
+          sourceType: row.source_type || "client",
+          sourceUrl:  row.source_url || null,
+        };
+      }
+    } catch (_) { /* fall through */ }
+  }
+
+  // Fallback: ILIKE on first 40 chars of question
+  try {
+    const result = await db.query(
+      `SELECT question_sample, answer, source_type, source_url
+       FROM answer_cache
+       WHERE expires_at > NOW()
+         AND language = $1
+         AND ($2::text IS NULL OR practice_area = $2 OR cache_layer = 'global')
+         AND question_sample ILIKE '%' || $3 || '%'
+       ORDER BY hit_count DESC
+       LIMIT 1`,
+      [language, practiceArea || null, question.substring(0, 40)]
+    );
+
+    if (result.rows.length) {
+      const row = result.rows[0];
+      return {
+        question:   row.question_sample,
+        answer:     row.answer,
+        sourceType: row.source_type || "client",
+        sourceUrl:  row.source_url || null,
+      };
+    }
+  } catch (_) { /* table may not be ready yet */ }
+
+  return null;
+}
+
+// ============================================================
+//  APPEND BLOG URL (called from askClaude-memory.js after a hit)
+//  Adds a "Read more" link when the cached answer came from a
+//  daily blog post. JJ mode is kept clean — no link appended.
+// ============================================================
+function appendSourceUrl(cacheHit, isJJMode = false) {
+  if (!cacheHit || !cacheHit.answer) return cacheHit?.answer || "";
+  if (isJJMode) return cacheHit.answer;
+
+  if (cacheHit.sourceType === "blog" && cacheHit.sourceUrl) {
+    return `${cacheHit.answer}\n\n📖 Read more on our blog: ${cacheHit.sourceUrl}`;
+  }
+
+  return cacheHit.answer;
 }
 
 // ============================================================
@@ -505,6 +615,8 @@ module.exports = {
   initCacheTable,
   checkAnswerCache,
   storeCachedAnswer,
+  findCachedAnswer,
+  appendSourceUrl,
   getCacheStats,
   purgeExpiredCache,
   isCacheable,
