@@ -399,8 +399,14 @@ Answer (number or NONE):`,
 //  STORE NEW Q&A IN CACHE
 // ============================================================
 async function storeCachedAnswer(message, answer, practiceArea, language = "en", sourceMeta = {}) {
-  // Double-check it's cacheable before storing
-  if (!isCacheable(message)) return;
+  // Source tagging: 'client' (default), 'digest' (court opinion), 'blog' (autoposter)
+  const { sourceType = "client", sourceUrl = null, bypassCacheableCheck = false } = sourceMeta;
+
+  // Double-check it's cacheable before storing.
+  // Blog seeds bypass this check because content is JJ-reviewed and
+  // educational framing ("what should I do if...") shouldn't trigger
+  // the personal-distress filter.
+  if (!bypassCacheableCheck && !isCacheable(message)) return;
 
   // Don't cache very short answers (likely errors or deflections)
   if (!answer || answer.length < 50) return;
@@ -419,9 +425,6 @@ async function storeCachedAnswer(message, answer, practiceArea, language = "en",
 
   const fingerprint   = buildFingerprint(message);
   const timeSensitive = isTimeSensitive(message);
-
-  // Source tagging: 'client' (default), 'digest' (court opinion), 'blog' (autoposter)
-  const { sourceType = "client", sourceUrl = null } = sourceMeta;
 
   // TTL: time-sensitive = 7 days, immigration = 14, everything else = 30
   // Multilingual answers get same TTL — language is encoded in fingerprint
