@@ -462,10 +462,210 @@ async function storeCitationsFromOpinions(opinions) {
 }
 
 // ============================================================
+//  ADDITION 3 — CONTRADICTION DETECTION + APPROVAL QUEUE
+//  Before writing a new Q&A to answer_cache, check whether
+//  a similar question already has a DIFFERENT answer. If so,
+//  divert to pending_cache_updates and alert JJ on Telegram.
+//  JJ replies /approve <id> or /reject <id> from his phone.
+// ============================================================
+async function initPendingUpdatesTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS pending_cache_updates (
+        id              SERIAL PRIMARY KEY,
+        question        TEXT NOT NULL,
+        old_answer      TEXT,
+        new_answer      TEXT NOT NULL,
+        practice_area   TEXT,
+        opinion_title   TEXT,
+        opinion_url     TEXT,
+        opinion_court   TEXT,
+        opinion_date    TEXT,
+        status          TEXT DEFAULT 'pending',
+        created_at      TIMESTAMPTZ DEFAULT NOW(),
+        decided_at      TIMESTAMPTZ
+      )
+    `);
+    console.log("[digest] ✅ pending_cache_updates table ready");
+  } catch (err) {
+    console.error("[digest] pending_cache_updates init error:", err.message);
+  }
+}
+
+// Look up existing cached answer for a similar question.
+// Uses the same lookup answer-cache.js uses for client queries,
+// so we catch the exact entry a client would have received.
+async function findExistingCachedAnswer(question, practiceArea) {
+  try {
+    const { findCachedAnswer } = require("./answer-cache");
+    if (typeof findCachedAnswer === "function") {
+      const hit = await findCachedAnswer(question, practiceArea, "en");
+      if (hit && hit.answer) return hit;
+    }
+  } catch (_) { /* fall through to direct query */ }
+
+  // Fallback: direct DB lookup using the correct column name.
+  try {
+    const result = await db.query(
+      `SELECT question_sample AS question, answer FROM answer_cache
+       WHERE language = 'en'
+         AND expires_at > NOW()
+         AND ($1::text IS NULL OR practice_area = $1 OR cache_layer = 'global')
+         AND question_sample ILIKE '%' || $2 || '%'
+       ORDER BY hit_count DESC
+       LIMIT 1`,
+      [practiceArea || null, question.substring(0, 40)]
+    );
+    if (result.rows.length && result.rows[0].answer) {
+      return { question: result.rows[0].question, answer: result.rows[0].answer };
+    }
+  } catch (_) { /* table may not exist yet */ }
+  return null;
+}
+
+// Heuristic: do two answers materially disagree?
+// We let Claude Haiku decide because phrasing varies wildly
+// ("2 years" vs "two-year statute" vs "24 months" all agree).
+async function answersContradict(oldAnswer, newAnswer) {
+  if (!oldAnswer || !newAnswer) return false;
+
+  // Cheap pre-check: if they're nearly identical, skip the API call.
+  const norm = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+  if (norm(oldAnswer) === norm(newAnswer)) return false;
+
+  try {
+    const resp = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      {
+        model:      "claude-haiku-4-5-20251001",
+        max_tokens: 50,
+        messages: [{
+          role:    "user",
+          content: `Do these two legal answers materially CONTRADICT each other (state different rules, holdings, deadlines, or outcomes)? Different wording or extra detail is NOT a contradiction.
+
+OLD: ${oldAnswer}
+NEW: ${newAnswer}
+
+Reply with one word: YES or NO.`,
+        }],
+      },
+      {
+        headers: {
+          "x-api-key":         ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "Content-Type":      "application/json",
+        },
+        timeout: 10000,
+      }
+    );
+    const verdict = (resp.data.content[0]?.text || "").trim().toUpperCase();
+    return verdict.startsWith("YES");
+  } catch (err) {
+    console.error("[digest] Contradiction check error:", err.message);
+    // On error, fail SAFE: treat as contradiction → goes to JJ for approval.
+    return true;
+  }
+}
+
+// Queue a pending update and alert JJ on Telegram with approve/reject buttons.
+async function queuePendingUpdate({ question, oldAnswer, newAnswer, practiceArea, opinion }) {
+  try {
+    const result = await db.query(
+      `INSERT INTO pending_cache_updates
+        (question, old_answer, new_answer, practice_area,
+         opinion_title, opinion_url, opinion_court, opinion_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [
+        question,
+        oldAnswer,
+        newAnswer,
+        practiceArea || "general",
+        opinion.title,
+        opinion.url || null,
+        opinion.court || null,
+        opinion.date || null,
+      ]
+    );
+    const id = result.rows[0].id;
+
+    if (TELEGRAM_TOKEN && JJ_TELEGRAM_ID) {
+      const msg = [
+        `⚠️ <b>Cache update needs your approval</b>`,
+        ``,
+        `<b>Q:</b> ${question}`,
+        ``,
+        `<b>OLD answer (currently cached):</b>`,
+        `${oldAnswer.substring(0, 400)}`,
+        ``,
+        `<b>NEW answer (from ${opinion.court || "new opinion"}):</b>`,
+        `${newAnswer.substring(0, 400)}`,
+        ``,
+        opinion.url ? `📄 <a href="${opinion.url}">Read opinion</a>` : "",
+        ``,
+        `Reply: <code>/approve ${id}</code> or <code>/reject ${id}</code>`,
+      ].filter(Boolean).join("\n");
+
+      await axios.post(
+        `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+        {
+          chat_id:    JJ_TELEGRAM_ID,
+          text:       msg,
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        }
+      ).catch(err => console.error("[digest] Pending alert error:", err.message));
+    }
+
+    console.log(`[digest] ⚠️  Contradiction queued (id=${id}): "${question.substring(0, 60)}"`);
+    return id;
+  } catch (err) {
+    console.error("[digest] Pending queue error:", err.message);
+    return null;
+  }
+}
+
+// Apply (approve) or discard (reject) a pending update.
+// Called from jj-mode.js when JJ replies /approve <id> or /reject <id>.
+async function decidePendingUpdate(id, decision) {
+  const { storeCachedAnswer } = require("./answer-cache");
+  try {
+    const row = await db.query(
+      `SELECT * FROM pending_cache_updates WHERE id = $1 AND status = 'pending'`,
+      [id]
+    );
+    if (!row.rows.length) {
+      return { ok: false, msg: `No pending update with id ${id} (already decided?)` };
+    }
+    const p = row.rows[0];
+
+    if (decision === "approve") {
+      await storeCachedAnswer(p.question, p.new_answer, p.practice_area, "en");
+      await db.query(
+        `UPDATE pending_cache_updates SET status='approved', decided_at=NOW() WHERE id=$1`,
+        [id]
+      );
+      return { ok: true, msg: `✅ Approved #${id} — cache updated for "${p.question.substring(0, 60)}"` };
+    } else {
+      await db.query(
+        `UPDATE pending_cache_updates SET status='rejected', decided_at=NOW() WHERE id=$1`,
+        [id]
+      );
+      return { ok: true, msg: `🚫 Rejected #${id} — old cached answer kept` };
+    }
+  } catch (err) {
+    console.error("[digest] decidePendingUpdate error:", err.message);
+    return { ok: false, msg: `Error: ${err.message}` };
+  }
+}
+
+// ============================================================
 //  ADDITION 1 — SEED ANSWER CACHE FROM HIGH-RELEVANCE OPINIONS
 //  For any opinion scoring 8+, generate 3-5 Q&A pairs and
 //  pre-load them into the answer cache so clients get
 //  accurate, up-to-date answers before they even ask.
+//  CONTRADICTIONS are diverted to pending_cache_updates
+//  and require JJ's /approve to take effect.
 // ============================================================
 async function seedCacheFromOpinion(opinion) {
   if (!opinion || (opinion.relevanceScore || 0) < 8) return 0;
@@ -535,6 +735,20 @@ Respond ONLY with JSON array (empty array [] if no good FAQs):
       const finalAnswer = safetyCheck.addDisclaimer
         ? `${answer} ${safetyCheck.disclaimer}`
         : answer;
+
+      // Contradiction gate: if a similar Q already has a DIFFERENT answer,
+      // queue for JJ approval instead of silently overwriting.
+      const existing = await findExistingCachedAnswer(pair.q, practiceArea);
+      if (existing && await answersContradict(existing.answer, finalAnswer)) {
+        await queuePendingUpdate({
+          question:     pair.q,
+          oldAnswer:    existing.answer,
+          newAnswer:    finalAnswer,
+          practiceArea,
+          opinion,
+        });
+        continue; // do NOT write to cache — JJ must /approve first
+      }
 
       await storeCachedAnswer(pair.q, finalAnswer, practiceArea, "en");
       seeded++;
@@ -615,6 +829,130 @@ async function saveResearchNoteToJJMemory(opinion) {
   } catch (err) {
     console.error("[digest] JJ memory save error:", err.message);
   }
+}
+
+// ============================================================
+//  ADDITION 4 — SEED ANSWER CACHE FROM DAILY BLOG POSTS
+//  Called by autoposter.js right after a successful English
+//  publish. Extracts FAQ Q&As directly from the post HTML
+//  (no extra API call — the autoposter already structured them),
+//  runs them through the SAME contradiction gate as digest seeds,
+//  and tags them with the blog URL so Zara can link back.
+// ============================================================
+function extractFAQsFromBlogHTML(html) {
+  if (!html) return [];
+
+  // The autoposter generates FAQs as:
+  //   <div class="faq-item"><h3>Question?</h3><p>Answer</p></div>
+  const pairs = [];
+  const faqRegex = /<div[^>]*class=["'][^"']*faq-item[^"']*["'][^>]*>\s*<h3[^>]*>([\s\S]*?)<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>\s*<\/div>/gi;
+
+  let match;
+  while ((match = faqRegex.exec(html)) !== null) {
+    const q = match[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    const a = match[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    if (q.length >= 10 && a.length >= 20) {
+      pairs.push({ q, a });
+    }
+  }
+
+  return pairs;
+}
+
+// Map autoposter category names to answer_cache practice areas
+function normalizeBlogCategory(category) {
+  if (!category) return "general";
+  const c = category.toLowerCase();
+  if (c.includes("immigration"))     return "immigration";
+  if (c.includes("personal injury")) return "personal_injury";
+  if (c.includes("business"))        return "business";
+  if (c.includes("trademark"))       return "trademark";
+  if (c.includes("estate"))          return "estate_planning";
+  return "general";
+}
+
+async function seedCacheFromBlogPost({ title, htmlContent, url, category }) {
+  if (!htmlContent || !url) {
+    console.log("[blog-seed] Skipped — missing content or URL");
+    return 0;
+  }
+
+  const { storeCachedAnswer } = require("./answer-cache");
+  const practiceArea = normalizeBlogCategory(category);
+
+  // Extract FAQs from the post (no API call needed — they're structured)
+  const faqs = extractFAQsFromBlogHTML(htmlContent);
+
+  if (faqs.length === 0) {
+    console.log(`[blog-seed] No FAQs found in "${title.substring(0, 50)}" — skipping`);
+    return 0;
+  }
+
+  console.log(`[blog-seed] Found ${faqs.length} FAQs in "${title.substring(0, 50)}"`);
+
+  let seeded = 0;
+  let queued = 0;
+
+  for (const pair of faqs) {
+    // Layer 4 safety: validate citations in answer text
+    const safetyCheck = isSafeToCache(pair.q, pair.a);
+    if (!safetyCheck.safe) {
+      console.log(`[blog-seed] 🚫 Skipping — ${safetyCheck.reason}`);
+      continue;
+    }
+
+    const finalAnswer = safetyCheck.addDisclaimer
+      ? `${pair.a} ${safetyCheck.disclaimer}`
+      : pair.a;
+
+    // Contradiction gate (same as digest pipeline)
+    const existing = await findExistingCachedAnswer(pair.q, practiceArea);
+    if (existing && await answersContradict(existing.answer, finalAnswer)) {
+      await queuePendingUpdate({
+        question:     pair.q,
+        oldAnswer:    existing.answer,
+        newAnswer:    finalAnswer,
+        practiceArea,
+        opinion: {
+          title,
+          url,
+          court: "Tez Law Blog",
+          date:  new Date().toISOString().split("T")[0],
+        },
+      });
+      queued++;
+      continue;
+    }
+
+    // Write to cache with blog source tagging
+    // (answer-cache.js handles the source_type + source_url columns)
+    await storeCachedAnswer(
+      pair.q,
+      finalAnswer,
+      practiceArea,
+      "en",
+      { sourceType: "blog", sourceUrl: url }
+    );
+    seeded++;
+  }
+
+  // Save a research note to jj_memory so JJ mode knows about the post
+  try {
+    const topicsList = faqs.slice(0, 3).map(f => f.q).join(" | ");
+    await db.query(
+      `INSERT INTO jj_memory (timestamp, jj_said, zara_said) VALUES ($1, $2, $3)`,
+      [
+        new Date().toISOString(),
+        `[BLOG] Published: ${title}`,
+        `URL: ${url} | Practice: ${practiceArea} | Topics: ${topicsList}`.substring(0, 2000),
+      ]
+    );
+  } catch (err) {
+    console.error("[blog-seed] jj_memory write error:", err.message);
+  }
+
+  console.log(`[blog-seed] ✅ Seeded ${seeded} | Queued ${queued} for approval | Post: ${url}`);
+  return seeded;
 }
 
 // ── Initialize citation table in PostgreSQL ──────────────────
@@ -763,16 +1101,20 @@ function scheduleDigest() {
 
   console.log("[digest] 📅 Daily digest scheduled for 6:00 AM Pacific");
 
-  // Initialize citation table on startup
+  // Initialize tables on startup
   initCitationTable();
+  initPendingUpdatesTable();
 }
 
 module.exports = {
   scheduleDigest,
   runDailyDigest,
   initCitationTable,
+  initPendingUpdatesTable,
   fetchNewOpinions,
   scoreRelevance,
   seedCacheFromOpinion,
   saveResearchNoteToJJMemory,
+  seedCacheFromBlogPost,
+  decidePendingUpdate,
 };
