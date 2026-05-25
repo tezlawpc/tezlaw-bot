@@ -624,11 +624,35 @@ async function tgDownloadFile(fileId) {
 // ────────────────────────────────────────────────────────────
 //  Daily deadline summary (Telegram, sent each morning at 7am PT)
 //
-//  Pulls open (not completed) deadlines from matter_deadlines and
-//  buckets them: Overdue / Today / This Week / Next Week.
+//  Two parts:
+//    1. CRITICAL THRESHOLDS HIT TODAY — IP deadlines (TM, Patent, Copyright)
+//       that just crossed a 30/14/7/1-day threshold. Tracked in
+//       matter_ip_reminders so each (deadline, threshold) only fires once.
+//    2. Standard 14-day rolling summary (Overdue / Today / Week / Next Week).
 //
-//  Excludes archived matters. Restricted to JJ_TELEGRAM_ID for now.
+//  Excludes archived matters and party='them' (informational) deadlines.
+//  Restricted to JJ_TELEGRAM_ID.
 // ────────────────────────────────────────────────────────────
+
+// IP deadline reminder thresholds (Checkpoint 4)
+// Standard 30/14/7/1 for most IP deadlines.
+// Patent issue fee gets the 3-day touch because it's non-extendable.
+const IP_REMINDER_THRESHOLDS = [30, 14, 7, 1];
+const PATENT_ISSUE_FEE_THRESHOLDS = [30, 14, 7, 3, 1];
+
+// Identify whether a deadline is an IP-type one we should track for
+// threshold reminders. Done by inspecting the parent matter's case_type.
+// Caller passes case_type and title; returns the threshold array.
+function thresholdsForDeadline(caseType, title) {
+  if (!["Trademark", "Patent", "Copyright"].includes(caseType)) return null;
+  const lowerTitle = (title || "").toLowerCase();
+  // Patent issue fee gets the extra 3-day touch
+  if (lowerTitle.includes("issue fee") && caseType === "Patent") {
+    return PATENT_ISSUE_FEE_THRESHOLDS;
+  }
+  return IP_REMINDER_THRESHOLDS;
+}
+
 async function sendDailyDeadlineSummary() {
   if (!JJ_TELEGRAM_ID) {
     console.log("Daily summary skipped — JJ_TELEGRAM_ID not set");
@@ -655,7 +679,104 @@ async function sendDailyDeadlineSummary() {
   }
   const in7Str  = addDaysPT(todayStr, 7);
   const in14Str = addDaysPT(todayStr, 14);
+  const in30Str = addDaysPT(todayStr, 30);
 
+  // Helper: compute days between two YYYY-MM-DD strings (PT-anchored).
+  function daysBetween(fromStr, toStr) {
+    const [fy, fm, fd] = fromStr.split("-").map(Number);
+    const [ty, tm, td] = toStr.split("-").map(Number);
+    const f = Date.UTC(fy, fm - 1, fd);
+    const t = Date.UTC(ty, tm - 1, td);
+    return Math.round((t - f) / 86400000);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  //  PART 1: Critical IP threshold check
+  //  Find IP deadlines whose days-until matches a threshold AND we
+  //  haven't already sent a reminder for that (deadline, threshold).
+  // ─────────────────────────────────────────────────────────
+  let ipRows = [];
+  try {
+    const r = await db.query(
+      `SELECT d.id, d.title, d.party, d.due_date, d.citation,
+              m.client_name, m.matter_ref, m.case_type, m.id AS matter_id, m.mark
+         FROM matter_deadlines d
+         JOIN matters m ON m.id = d.matter_id
+        WHERE d.completed = FALSE
+          AND m.status = 'active'
+          AND m.case_type IN ('Trademark', 'Patent', 'Copyright')
+          AND d.due_date IS NOT NULL
+          AND d.due_date::date >= $1::date
+          AND d.due_date::date <= $2::date
+          AND (d.party IS NULL OR d.party = 'us')`,
+      [todayStr, in30Str]
+    );
+    ipRows = r.rows;
+  } catch (err) {
+    console.error("sendDailyDeadlineSummary IP query error:", err.message);
+    // Continue — we can still send the standard summary
+  }
+
+  // For each IP deadline, check if today crosses (or just crossed) any threshold
+  // and we haven't sent that reminder before. Insert tracker row + push to alerts.
+  const criticalAlerts = [];
+  for (const row of ipRows) {
+    const dueStr = String(row.due_date).slice(0, 10);
+    const daysLeft = daysBetween(todayStr, dueStr);
+    if (daysLeft < 0) continue; // shouldn't happen given query, but safe
+
+    const thresholds = thresholdsForDeadline(row.case_type, row.title);
+    if (!thresholds) continue;
+
+    // Determine the SMALLEST threshold that's been crossed but not yet fired.
+    // Crossed = daysLeft <= threshold. We fire the smallest such threshold first
+    // so we don't double-alert (e.g. firing 30+14+7+1 all at once for a deadline
+    // that's been ignored for a month). Tracker prevents re-firing same threshold.
+    let firedThreshold = null;
+    for (const threshold of thresholds.slice().sort((a, b) => a - b)) {
+      if (daysLeft > threshold) continue;
+      // Check if we've already sent THIS threshold for THIS deadline
+      let alreadySent = false;
+      try {
+        const r2 = await db.query(
+          `SELECT 1 FROM matter_ip_reminders
+            WHERE deadline_id = $1 AND days_out = $2
+            LIMIT 1`,
+          [row.id, threshold]
+        );
+        alreadySent = r2.rows.length > 0;
+      } catch (err) {
+        console.error("matter_ip_reminders lookup error:", err.message);
+        alreadySent = true; // fail-safe: don't spam if DB is broken
+      }
+      if (!alreadySent) {
+        firedThreshold = threshold;
+        break; // fire smallest unsent threshold; stop here
+      }
+    }
+
+    if (firedThreshold !== null) {
+      // Record the reminder BEFORE we add to outgoing alerts so a Telegram-send
+      // failure doesn't cause re-fire next day. Worst case: we logged but failed
+      // to send — you'll catch the deadline in the next day's standard summary.
+      try {
+        await db.query(
+          `INSERT INTO matter_ip_reminders (matter_id, deadline_id, days_out)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (deadline_id, days_out) DO NOTHING`,
+          [row.matter_id, row.id, firedThreshold]
+        );
+      } catch (err) {
+        console.error("matter_ip_reminders insert error:", err.message);
+        continue; // skip this alert; don't risk double-firing
+      }
+      criticalAlerts.push({ row, daysLeft, threshold: firedThreshold });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  //  PART 2: Standard 14-day rolling summary (unchanged from before)
+  // ─────────────────────────────────────────────────────────
   let rows;
   try {
     const r = await db.query(
@@ -710,8 +831,27 @@ async function sendDailyDeadlineSummary() {
     return `   • ${mmdd} ${partyTag} ${caption} — ${title}`;
   }
 
+  function fmtCritical(alert) {
+    const { row, daysLeft, threshold } = alert;
+    const caption = (row.mark || row.client_name || "Unknown").substring(0, 40);
+    const title   = (row.title || "Untitled").substring(0, 80);
+    const dayLabel = daysLeft === 0 ? "TODAY" :
+                     daysLeft === 1 ? "TOMORROW" :
+                     `in ${daysLeft} days`;
+    return `   • ${title}\n     ${caption} · ${dayLabel} · ${threshold}-day threshold`;
+  }
+
+  // Critical alerts go FIRST — they're the most important
+  if (criticalAlerts.length > 0) {
+    msg += `\n🚨 CRITICAL THRESHOLDS HIT (${criticalAlerts.length})\n${criticalAlerts.map(fmtCritical).join("\n")}\n`;
+  }
+
   if (overdue.length === 0 && today.length === 0 && week.length === 0 && next.length === 0) {
-    msg += `\nAll clear — nothing due in the next 14 days.\n\n📖 https://tezlaw-bot.onrender.com/admin/matters/`;
+    if (criticalAlerts.length === 0) {
+      msg += `\nAll clear — nothing due in the next 14 days.\n\n📖 https://tezlaw-bot.onrender.com/admin/matters/`;
+    } else {
+      msg += `\n(Nothing else due in next 14 days.)\n\n📖 https://tezlaw-bot.onrender.com/admin/matters/`;
+    }
   } else {
     if (overdue.length) {
       msg += `\n🔴 OVERDUE (${overdue.length})\n${overdue.map(fmtRow).join("\n")}\n`;
@@ -730,7 +870,7 @@ async function sendDailyDeadlineSummary() {
 
   try {
     await tgSend(String(JJ_TELEGRAM_ID), msg);
-    console.log(`📅 Daily deadline summary sent — ${overdue.length} overdue, ${today.length} today, ${week.length} this week, ${next.length} next week`);
+    console.log(`📅 Daily deadline summary sent — ${criticalAlerts.length} critical, ${overdue.length} overdue, ${today.length} today, ${week.length} this week, ${next.length} next week`);
   } catch (err) {
     console.error("Failed to send daily summary:", err.message);
   }
