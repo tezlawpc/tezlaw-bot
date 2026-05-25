@@ -125,6 +125,58 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
 async function handleJJSession(platform, userId, userMessage, options = {}) {
   const lower = userMessage.toLowerCase().trim();
 
+  // ── /approve <id>, /reject <id>, /pending — cache update approvals ──
+  // These come from legal-digest contradiction detection. JJ taps these
+  // from his phone to approve or reject auto-detected cache updates.
+  const approvalMatch = lower.match(/^\/(approve|reject)\s+(\d+)\b/);
+  if (approvalMatch) {
+    try {
+      const { decidePendingUpdate } = require("./legal-digest");
+      const decision = approvalMatch[1];
+      const id       = parseInt(approvalMatch[2], 10);
+      const result   = await decidePendingUpdate(id, decision);
+      return { handled: true, message: result.msg };
+    } catch (err) {
+      console.error("[JJ-Mode] Approval handler error:", err.message);
+      return { handled: true, message: `❌ Approval error: ${err.message}` };
+    }
+  }
+
+  if (lower === "/pending" || lower === "pending updates" || lower === "show pending") {
+    try {
+      const result = await db.query(
+        `SELECT id, question, opinion_court, opinion_date, created_at
+         FROM pending_cache_updates
+         WHERE status = 'pending'
+         ORDER BY created_at DESC
+         LIMIT 20`
+      );
+
+      if (!result.rows.length) {
+        return { handled: true, message: "✅ No pending cache updates." };
+      }
+
+      const lines = result.rows.map(r => {
+        const q = r.question.length > 70 ? r.question.substring(0, 70) + "..." : r.question;
+        const meta = [r.opinion_court, r.opinion_date].filter(Boolean).join(" • ");
+        return `#${r.id} — ${q}${meta ? "\n   " + meta : ""}`;
+      });
+
+      const msg = [
+        `⚠️ ${result.rows.length} pending cache update(s):`,
+        "",
+        lines.join("\n\n"),
+        "",
+        "Reply /approve <id> or /reject <id>",
+      ].join("\n");
+
+      return { handled: true, message: msg };
+    } catch (err) {
+      console.error("[JJ-Mode] /pending error:", err.message);
+      return { handled: true, message: `❌ Error fetching pending updates: ${err.message}` };
+    }
+  }
+
   // Exit JJ mode
   if (["exit", "logout", "exit jj mode", "back to public", "退出"].includes(lower)) {
     delete jjSessions[`${platform}:${userId}`];
