@@ -372,6 +372,64 @@ Rules:
 
 Return ONLY the JSON.`;
 
+// ─────────────────────────────────────────────────────────────
+//  EOIR HEARING NOTICE PROMPT (Phase 8 — auto-calendaring)
+//
+//  EOIR (Executive Office for Immigration Review) sends notices via email
+//  with PDF attachments. Both the email body and PDF text are passed in
+//  combined form. The prompt below extracts hearing dates and the call-up
+//  date for additional documents.
+//
+//  Real-stakes parser. Missing a master/individual hearing means
+//  in absentia removal for the client. Every field must be extracted
+//  exactly as written — confidence 'high' ONLY when the date is unambiguous.
+// ─────────────────────────────────────────────────────────────
+const EOIR_PROMPT = `You are extracting structured fields from a Notice of Hearing from the U.S. Department of Justice's Executive Office for Immigration Review (EOIR) sent to a California immigration attorney.
+
+Document (may include both email body AND extracted PDF attachment text):
+"""
+{EOIR_TEXT}
+"""
+
+Identify hearing information and return STRICT JSON only — no markdown fences, no preamble.
+
+JSON shape:
+{
+  "doc_type": "eoir_hearing_notice" | "eoir_other",
+  "case_type": "Removal",
+  "fields": {
+    "client_name": "...",         // Respondent name as written (e.g., "ZHANG, YONG"). Preserve "LAST, FIRST" format if that's how it appears.
+    "alien_number": "...",        // A-number, normalized to format "A###-###-###" (e.g., "A246-723-217"). If "LEAD FILE" or "RE:" line shows "246-723-217", normalize to "A246-723-217".
+    "matter_ref": "...",          // Same as alien_number — used as the searchable case reference
+    "hearing_date": "YYYY-MM-DD", // Date of the hearing. NEVER guess. If unclear, set null.
+    "hearing_time": "...",        // Time as written (e.g., "10:30 A.M. AZT", "9:00 AM EST"). Preserve time zone abbreviation.
+    "hearing_type": "Master" | "Individual" | "Bond" | "Unknown",
+                                  // "Master" if "MASTER" appears; "Individual" if "INDIVIDUAL" or "Merits" appears; "Bond" for bond hearings.
+    "is_internet_based": true | false,  // True if "Internet-Based Hearing" or "Webex" appears.
+    "court_address": "...",       // Full court address as printed
+    "court_name": "...",          // e.g., "Eloy Immigration Court", "Los Angeles Immigration Court"
+    "webex_url": "...",           // URL if internet-based, else null
+    "ij_name": "...",             // Immigration Judge name if visible (sometimes in URL like "IJ.ZHANG" → "Judge Zhang"), else null
+    "callup_date": "YYYY-MM-DD",  // The "Call up for additional documents" date if present in the header. Null if not.
+    "notice_date": "YYYY-MM-DD",  // When the notice was issued (the "DATE:" header)
+    "court": "EOIR",              // Always "EOIR" for these
+    "notes": "..."                // 1-2 sentence summary: hearing type, date, court, any unusual flags
+  },
+  "confidence": "high" | "medium" | "low"
+}
+
+CRITICAL Rules:
+- Use null for any field you cannot find with confidence — DO NOT GUESS dates.
+- All dates MUST be YYYY-MM-DD format. "Jun 10, 2026" → "2026-06-10". "5/22/26" → "2026-05-22".
+- For partial dates like "6/3/26" assume 20XX (so "6/3/26" → "2026-06-03").
+- alien_number MUST start with "A" and use hyphens: "246-723-217" → "A246-723-217".
+- hearing_type: "INDIVIDUAL" in the notice text → "Individual"; "MASTER" → "Master"; "BOND" → "Bond". Default "Unknown" if ambiguous.
+- Confidence "high" if date, time, type, and court are all clearly stated. "medium" if one is inferred. "low" if any is missing.
+- The callup_date is BURIED in the header ("Call up for additional documents: 6/3/26"). It is separate from the hearing date. If you see both, capture both.
+- If the document is NOT an EOIR hearing notice, return doc_type: "eoir_other" and leave hearing_date/hearing_time null.
+
+Return ONLY the JSON.`;
+
 router.post("/api/parse-uspto", requireAuth, async (req, res) => {
   try {
     const { uspto_text } = req.body || {};
@@ -889,8 +947,25 @@ async function ingestEmailText(userId, emailText, opts = {}) {
     }
   }
 
-  // 2. Run both parsers in parallel
-  const [intakeResult, orderResult] = await Promise.allSettled([
+  // EOIR DETECTION ─ Is this an immigration court hearing notice?
+  // Look for distinctive EOIR markers in the text. Reliable signals:
+  //   - "EXECUTIVE OFFICE FOR IMMIGRATION REVIEW"
+  //   - "Notice of ... Hearing" (Internet-Based, In-Person, Telephonic)
+  //   - "LEAD FILE:" (only EOIR uses this term)
+  // We require at least 2 markers to reduce false positives.
+  const eoirMarkers = [
+    /executive office for immigration review/i,
+    /eoir/i,
+    /notice of\s+(internet-based|in-person|telephonic|master|individual|bond)?\s*hearing/i,
+    /lead file\s*:/i,
+    /immigration court/i,
+    /immigration judge/i
+  ];
+  const matchedMarkers = eoirMarkers.filter(rx => rx.test(emailText)).length;
+  const isEoir = matchedMarkers >= 2;
+
+  // 2. Run parsers in parallel — always intake + order, plus EOIR if detected
+  const parserPromises = [
     (async () => {
       const prompt = INTAKE_PROMPT.replace("{NEF_TEXT}", emailText);
       const text = await callClaudeAPI(prompt, 2000);
@@ -902,12 +977,97 @@ async function ingestEmailText(userId, emailText, opts = {}) {
       let cleaned = responseText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
       return JSON.parse(cleaned);
     })()
-  ]);
+  ];
+  if (isEoir) {
+    parserPromises.push((async () => {
+      const prompt = EOIR_PROMPT.replace("{EOIR_TEXT}", emailText);
+      const text = await callClaudeAPI(prompt, 2000);
+      let cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      return JSON.parse(cleaned);
+    })());
+  }
+  const results = await Promise.allSettled(parserPromises);
+  const intakeResult = results[0];
+  const orderResult  = results[1];
+  const eoirResult   = isEoir ? results[2] : null;
 
   const intakeFields = intakeResult.status === "fulfilled" ? (intakeResult.value.fields || {}) : null;
   const intakeConfidence = intakeResult.status === "fulfilled" ? intakeResult.value.confidence : null;
   const deadlines = orderResult.status === "fulfilled" && Array.isArray(orderResult.value.deadlines)
     ? orderResult.value.deadlines : [];
+
+  // EOIR-specific extraction. If we detected EOIR markers AND the parser succeeded,
+  // generate hearing+callup deadline templates that get inserted just like the
+  // order-parser deadlines. The "matterMatch" check below uses the A-number from
+  // the EOIR fields to attempt to attribute to an existing matter.
+  let eoirFields = null;
+  if (eoirResult && eoirResult.status === "fulfilled") {
+    eoirFields = eoirResult.value.fields || null;
+    const eoirConf = eoirResult.value.confidence || "low";
+
+    // If EOIR parser found an A-number and we haven't already matched a matter,
+    // try matching against the A-number directly.
+    if (!matterMatch && eoirFields && eoirFields.alien_number) {
+      const aNorm = normalizeCaseRef(eoirFields.alien_number);
+      const allMatters2 = await db.query(
+        `SELECT id, client_name, matter_ref FROM matters WHERE user_id = $1`,
+        [userId]
+      );
+      for (const m of allMatters2.rows) {
+        const refNorm = normalizeCaseRef(m.matter_ref || "");
+        if (refNorm && (refNorm === aNorm || refNorm.includes(aNorm) || aNorm.includes(refNorm))) {
+          matterMatch = { id: m.id, client_name: m.client_name, matter_ref: m.matter_ref };
+          break;
+        }
+      }
+    }
+
+    // Build hearing-specific deadlines and merge into the deadlines array.
+    // These flow through the standard deadline-proposal insert path below.
+    if (eoirFields && eoirFields.hearing_date && /^\d{4}-\d{2}-\d{2}$/.test(eoirFields.hearing_date)) {
+      const type = eoirFields.hearing_type || "Unknown";
+      const courtName = eoirFields.court_name || "Immigration Court";
+      const title = type === "Master"     ? `Master Calendar Hearing — ${courtName}`
+                  : type === "Individual" ? `Individual Hearing (Merits) — ${courtName}`
+                  : type === "Bond"       ? `Bond Hearing — ${courtName}`
+                  : `Immigration Hearing — ${courtName}`;
+      const noteLines = [];
+      if (eoirFields.hearing_time)     noteLines.push(`Time: ${eoirFields.hearing_time}`);
+      if (eoirFields.is_internet_based) noteLines.push(`Internet-based (Webex)`);
+      if (eoirFields.webex_url)        noteLines.push(`URL: ${eoirFields.webex_url}`);
+      if (eoirFields.court_address)    noteLines.push(`Address: ${eoirFields.court_address}`);
+      if (eoirFields.ij_name)          noteLines.push(`IJ: ${eoirFields.ij_name}`);
+      if (eoirFields.alien_number)     noteLines.push(`A#: ${eoirFields.alien_number}`);
+      if (type === "Master") {
+        noteLines.push("Block: 1 hour. Standard procedural hearing.");
+      } else if (type === "Individual") {
+        noteLines.push("Block: 4 hours. Merits/evidentiary hearing — full prep required.");
+      }
+      deadlines.push({
+        title,
+        citation: "8 C.F.R. § 1003.18",
+        due_date: eoirFields.hearing_date,
+        party: "court",
+        note: noteLines.join(" · "),
+        confidence: eoirConf,
+        _eoir_hearing: true
+      });
+
+      // Add callup deadline if present (always a "us" party action — submit
+      // additional documents by this date if any are coming)
+      if (eoirFields.callup_date && /^\d{4}-\d{2}-\d{2}$/.test(eoirFields.callup_date)) {
+        deadlines.push({
+          title: `Call-up: Additional documents due — ${courtName}`,
+          citation: "Immigration Court Practice Manual Ch. 3",
+          due_date: eoirFields.callup_date,
+          party: "us",
+          note: `Pre-hearing call-up for ${type} hearing on ${eoirFields.hearing_date}. Submit any additional briefs/exhibits by this date.`,
+          confidence: eoirConf,
+          _eoir_callup: true
+        });
+      }
+    }
+  }
 
   // Both parsers failed: tell caller so it can decide whether to file a "raw" proposal
   const parserFailed = intakeResult.status === "rejected" && orderResult.status === "rejected";
