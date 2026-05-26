@@ -35,10 +35,27 @@ const { initCacheTable, getCacheStats, purgeExpiredCache } = require("./answer-c
 const { router: matterManagerRouter, handleCalendarFeed, ingestEmailText } = require("./matter-manager");
 const multer  = require("multer");
 const db      = require("./db");
+const pdfParse = require("pdf-parse");
 
 // In-memory multer for SendGrid inbound webhook (multipart/form-data).
-// 10MB cap is plenty for plain-text bodies; we drop attachments anyway in v1.
-const sendgridUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// 25MB per file, 50MB per request total — handles typical EOIR PDFs (usually <2MB)
+// with plenty of headroom for unusual cases.
+const sendgridUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 20 }
+});
+
+// Extract text from a PDF buffer. Returns "" on error (so a corrupted PDF
+// doesn't tank the whole ingest — we keep the email body for parsing).
+async function extractPdfText(buffer, filename) {
+  try {
+    const data = await pdfParse(buffer);
+    return data.text || "";
+  } catch (err) {
+    console.warn(`PDF extraction failed for ${filename}:`, err.message);
+    return "";
+  }
+}
 
 // Research module is loaded inside admin.js so it inherits admin auth.
 
@@ -203,6 +220,34 @@ app.post("/webhook/inbound-email/:secret", sendgridUpload.any(), async (req, res
   if (!fields.text || fields.text.length < 20) {
     await logInbound(fields, "rejected_empty", "Body too short or missing", null);
     return res.status(200).send("dropped: empty body");
+  }
+
+  // ── Step 4.5: Extract PDF attachments ──
+  // SendGrid sends attachments as fields named attachment1, attachment2, etc.,
+  // each containing the binary file. multer.any() puts these in req.files.
+  // We extract text from each PDF and append it to fields.text so the parser
+  // sees both the email body AND the PDF contents in one combined input.
+  let pdfsExtracted = 0;
+  let pdfChars = 0;
+  if (Array.isArray(req.files) && req.files.length > 0) {
+    const pdfTexts = [];
+    for (const file of req.files) {
+      // SendGrid prepends "attachment" to all attachment field names. Filter to PDFs.
+      const isPdf = (file.mimetype === "application/pdf") ||
+                    (file.originalname && file.originalname.toLowerCase().endsWith(".pdf"));
+      if (!isPdf) continue;
+      const text = await extractPdfText(file.buffer, file.originalname || file.fieldname);
+      if (text && text.length > 20) {
+        pdfTexts.push(`\n\n--- PDF ATTACHMENT: ${file.originalname || file.fieldname} ---\n${text}`);
+        pdfsExtracted++;
+        pdfChars += text.length;
+      }
+    }
+    if (pdfTexts.length > 0) {
+      fields.text = fields.text + pdfTexts.join("");
+      fields.bodySize = fields.text.length;
+      console.log(`Inbound webhook: extracted ${pdfsExtracted} PDF(s), +${pdfChars} chars`);
+    }
   }
 
   // ── Step 5: Resolve owner ──
@@ -639,14 +684,25 @@ async function tgDownloadFile(fileId) {
 // Patent issue fee gets the 3-day touch because it's non-extendable.
 const IP_REMINDER_THRESHOLDS = [30, 14, 7, 1];
 const PATENT_ISSUE_FEE_THRESHOLDS = [30, 14, 7, 3, 1];
+// Hearings get a more aggressive cadence — missing one means in absentia removal.
+const HEARING_THRESHOLDS = [60, 30, 14, 7, 3, 1];
 
-// Identify whether a deadline is an IP-type one we should track for
-// threshold reminders. Done by inspecting the parent matter's case_type.
-// Caller passes case_type and title; returns the threshold array.
-function thresholdsForDeadline(caseType, title) {
-  if (!["Trademark", "Patent", "Copyright"].includes(caseType)) return null;
+// Identify whether a deadline should get threshold reminders.
+// Returns an array of threshold days (smallest fires first), or null if no reminders.
+//
+// Trigger rules:
+//   - party='court' AND title implies hearing → HEARING_THRESHOLDS (60/30/14/7/3/1)
+//   - IP matter + patent issue fee → PATENT_ISSUE_FEE_THRESHOLDS (30/14/7/3/1)
+//   - IP matter (TM/Patent/Copyright) → IP_REMINDER_THRESHOLDS (30/14/7/1)
+//   - Everything else → null (no threshold reminders; standard daily summary still covers it)
+function thresholdsForDeadline(caseType, title, party) {
   const lowerTitle = (title || "").toLowerCase();
-  // Patent issue fee gets the extra 3-day touch
+  // Hearings: party='court' AND title contains "hearing" (covers Master / Individual / Bond / etc.)
+  if (party === "court" && lowerTitle.includes("hearing")) {
+    return HEARING_THRESHOLDS;
+  }
+  // IP-specific reminders
+  if (!["Trademark", "Patent", "Copyright"].includes(caseType)) return null;
   if (lowerTitle.includes("issue fee") && caseType === "Patent") {
     return PATENT_ISSUE_FEE_THRESHOLDS;
   }
@@ -695,6 +751,17 @@ async function sendDailyDeadlineSummary() {
   //  Find IP deadlines whose days-until matches a threshold AND we
   //  haven't already sent a reminder for that (deadline, threshold).
   // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────
+  //  PART 1: Critical threshold check
+  //  Finds:
+  //   - IP deadlines (TM/Patent/Copyright) with us-party
+  //   - Immigration/litigation hearings (court-party, "hearing" in title)
+  //  Tracks each (deadline, threshold) in matter_ip_reminders so we
+  //  don't re-fire. The table name keeps "ip" for legacy reasons; it
+  //  now covers both IP and hearing thresholds.
+  //  Pulls in up to 60 days out so hearing 60-day threshold can fire.
+  // ─────────────────────────────────────────────────────────
+  const in60Str = addDaysPT(todayStr, 60);
   let ipRows = [];
   try {
     const r = await db.query(
@@ -704,20 +771,25 @@ async function sendDailyDeadlineSummary() {
          JOIN matters m ON m.id = d.matter_id
         WHERE d.completed = FALSE
           AND m.status = 'active'
-          AND m.case_type IN ('Trademark', 'Patent', 'Copyright')
           AND d.due_date IS NOT NULL
           AND d.due_date::date >= $1::date
           AND d.due_date::date <= $2::date
-          AND (d.party IS NULL OR d.party = 'us')`,
-      [todayStr, in30Str]
+          AND (
+            -- IP us-party deadlines
+            (m.case_type IN ('Trademark', 'Patent', 'Copyright') AND (d.party IS NULL OR d.party = 'us'))
+            OR
+            -- Court-party hearings (any matter type)
+            (d.party = 'court' AND LOWER(d.title) LIKE '%hearing%')
+          )`,
+      [todayStr, in60Str]
     );
     ipRows = r.rows;
   } catch (err) {
-    console.error("sendDailyDeadlineSummary IP query error:", err.message);
+    console.error("sendDailyDeadlineSummary threshold query error:", err.message);
     // Continue — we can still send the standard summary
   }
 
-  // For each IP deadline, check if today crosses (or just crossed) any threshold
+  // For each deadline, check if today crosses (or just crossed) any threshold
   // and we haven't sent that reminder before. Insert tracker row + push to alerts.
   const criticalAlerts = [];
   for (const row of ipRows) {
@@ -725,7 +797,7 @@ async function sendDailyDeadlineSummary() {
     const daysLeft = daysBetween(todayStr, dueStr);
     if (daysLeft < 0) continue; // shouldn't happen given query, but safe
 
-    const thresholds = thresholdsForDeadline(row.case_type, row.title);
+    const thresholds = thresholdsForDeadline(row.case_type, row.title, row.party);
     if (!thresholds) continue;
 
     // Determine the SMALLEST threshold that's been crossed but not yet fired.
