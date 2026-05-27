@@ -398,21 +398,23 @@ JSON shape:
   "doc_type": "eoir_hearing_notice" | "eoir_other",
   "case_type": "Removal",
   "fields": {
-    "client_name": "...",         // Respondent name as written (e.g., "ZHANG, YONG"). Preserve "LAST, FIRST" format if that's how it appears.
-    "alien_number": "...",        // A-number, normalized to format "A###-###-###" (e.g., "A246-723-217"). If "LEAD FILE" or "RE:" line shows "246-723-217", normalize to "A246-723-217".
+    "client_name": "...",         // Respondent name as written (e.g., "ZHANG, YONG"). Preserve "LAST, FIRST" format if that's how it appears. If multiple respondents listed in RE: lines, use the FIRST one (lead respondent).
+    "co_respondents": "...",      // Other respondent names + A-numbers listed in the RE: section if any. Null if single respondent. Example: "YE YE, PAULO BO TAO (A216-203-625)".
+    "alien_number": "...",        // A-number, normalized to format "A###-###-###" (e.g., "A246-723-217"). If "LEAD FILE" or "RE:" line shows "246-723-217", normalize to "A246-723-217". Use the LEAD FILE number, not co-respondent numbers.
     "matter_ref": "...",          // Same as alien_number — used as the searchable case reference
     "hearing_date": "YYYY-MM-DD", // Date of the hearing. NEVER guess. If unclear, set null.
     "hearing_time": "...",        // Time as written (e.g., "10:30 A.M. AZT", "9:00 AM EST"). Preserve time zone abbreviation.
     "hearing_type": "Master" | "Individual" | "Bond" | "Unknown",
                                   // "Master" if "MASTER" appears; "Individual" if "INDIVIDUAL" or "Merits" appears; "Bond" for bond hearings.
-    "is_internet_based": true | false,  // True if "Internet-Based Hearing" or "Webex" appears.
-    "court_address": "...",       // Full court address as printed
+    "is_internet_based": true | false,  // True if "Internet-Based Hearing" or "Webex" appears in the actual notice (NOT in boilerplate). Look at the heading "Notice of [X] Hearing".
+    "court_address": "...",       // Full court address as printed (may span multiple lines — concatenate with commas)
     "court_name": "...",          // e.g., "Eloy Immigration Court", "Los Angeles Immigration Court"
     "webex_url": "...",           // URL if internet-based, else null
     "ij_name": "...",             // Immigration Judge name if visible (sometimes in URL like "IJ.ZHANG" → "Judge Zhang"), else null
-    "callup_date": "YYYY-MM-DD",  // The "Call up for additional documents" date if present in the header. Null if not.
+    "callup_date": "YYYY-MM-DD",  // The "Call up for additional documents" date if present in the header. Null if not present.
     "notice_date": "YYYY-MM-DD",  // When the notice was issued (the "DATE:" header)
     "court": "EOIR",              // Always "EOIR" for these
+    "orders_or_instructions": "...",  // Verbatim text of any standing orders, special instructions, or specific filing requirements present in this notice (NOT the generic boilerplate about Failure to Appear, Change of Address, In-Person/Internet-Based Hearings, etc.). Most notices have none — return null. Only populate when the notice contains a specific custom instruction from the IJ for this case.
     "notes": "..."                // 1-2 sentence summary: hearing type, date, court, any unusual flags
   },
   "confidence": "high" | "medium" | "low"
@@ -420,12 +422,14 @@ JSON shape:
 
 CRITICAL Rules:
 - Use null for any field you cannot find with confidence — DO NOT GUESS dates.
-- All dates MUST be YYYY-MM-DD format. "Jun 10, 2026" → "2026-06-10". "5/22/26" → "2026-05-22".
+- All dates MUST be YYYY-MM-DD format. "Jun 10, 2026" → "2026-06-10". "Nov 5, 2029" → "2029-11-05". "5/22/26" → "2026-05-22".
 - For partial dates like "6/3/26" assume 20XX (so "6/3/26" → "2026-06-03").
 - alien_number MUST start with "A" and use hyphens: "246-723-217" → "A246-723-217".
 - hearing_type: "INDIVIDUAL" in the notice text → "Individual"; "MASTER" → "Master"; "BOND" → "Bond". Default "Unknown" if ambiguous.
 - Confidence "high" if date, time, type, and court are all clearly stated. "medium" if one is inferred. "low" if any is missing.
-- The callup_date is BURIED in the header ("Call up for additional documents: 6/3/26"). It is separate from the hearing date. If you see both, capture both.
+- The callup_date is BURIED in the header ("Call up for additional documents: 6/3/26"). If not present in the header section, return null — DO NOT confuse with the "DATE:" line which is just the notice issue date.
+- IGNORE all boilerplate sections: "Representation:", "Failure to Appear:", "Change of Address:", "Internet-Based Hearings:", "In-Person Hearings:", "For information about your case", "Certificate of Service". These are generic text on every notice, NOT case-specific orders.
+- orders_or_instructions should be populated ONLY for genuinely case-specific instructions (e.g., an IJ requiring exhibits filed in a specific format by a specific date). Default null.
 - If the document is NOT an EOIR hearing notice, return doc_type: "eoir_other" and leave hearing_date/hearing_time null.
 
 Return ONLY the JSON.`;
@@ -964,20 +968,32 @@ async function ingestEmailText(userId, emailText, opts = {}) {
   const matchedMarkers = eoirMarkers.filter(rx => rx.test(emailText)).length;
   const isEoir = matchedMarkers >= 2;
 
-  // 2. Run parsers in parallel — always intake + order, plus EOIR if detected
+  // 2. Run parsers in parallel.
+  //   - Always run INTAKE (for matter attribution + new-matter proposals)
+  //   - Run ORDER (generic deadline extraction) ONLY if NOT EOIR.
+  //     The generic order parser hallucinates deadlines from EOIR boilerplate
+  //     (e.g., "fifteen days before hearing", "within five days of receipt") —
+  //     things that are not actual deadlines, just procedural prose. The EOIR
+  //     parser knows the document structure and produces only real hearings.
+  //   - Run EOIR if EOIR markers detected.
   const parserPromises = [
     (async () => {
       const prompt = INTAKE_PROMPT.replace("{NEF_TEXT}", emailText);
       const text = await callClaudeAPI(prompt, 2000);
       let cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
       return JSON.parse(cleaned);
-    })(),
-    (async () => {
+    })()
+  ];
+  if (!isEoir) {
+    parserPromises.push((async () => {
       const responseText = await callClaudeForExtraction(emailText);
       let cleaned = responseText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
       return JSON.parse(cleaned);
-    })()
-  ];
+    })());
+  } else {
+    // Placeholder so result indices remain consistent
+    parserPromises.push(Promise.resolve({ deadlines: [] }));
+  }
   if (isEoir) {
     parserPromises.push((async () => {
       const prompt = EOIR_PROMPT.replace("{EOIR_TEXT}", emailText);
@@ -1038,10 +1054,19 @@ async function ingestEmailText(userId, emailText, opts = {}) {
       if (eoirFields.court_address)    noteLines.push(`Address: ${eoirFields.court_address}`);
       if (eoirFields.ij_name)          noteLines.push(`IJ: ${eoirFields.ij_name}`);
       if (eoirFields.alien_number)     noteLines.push(`A#: ${eoirFields.alien_number}`);
+      if (eoirFields.co_respondents)   noteLines.push(`Co-respondent(s): ${eoirFields.co_respondents}`);
       if (type === "Master") {
         noteLines.push("Block: 1 hour. Standard procedural hearing.");
       } else if (type === "Individual") {
         noteLines.push("Block: 4 hours. Merits/evidentiary hearing — full prep required.");
+      }
+      // Append any case-specific orders/instructions if Claude found them in the notice
+      // (NOT boilerplate — only genuinely specific instructions from the IJ).
+      if (eoirFields.orders_or_instructions &&
+          typeof eoirFields.orders_or_instructions === "string" &&
+          eoirFields.orders_or_instructions.trim() &&
+          eoirFields.orders_or_instructions.trim().toLowerCase() !== "null") {
+        noteLines.push(`Orders/Instructions: ${eoirFields.orders_or_instructions.trim()}`);
       }
       deadlines.push({
         title,
