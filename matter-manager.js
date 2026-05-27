@@ -1075,6 +1075,7 @@ async function ingestEmailText(userId, emailText, opts = {}) {
         party: "court",
         note: noteLines.join(" · "),
         confidence: eoirConf,
+        matter_ref: eoirFields.alien_number || eoirFields.matter_ref || null,
         _eoir_hearing: true
       });
 
@@ -1088,6 +1089,7 @@ async function ingestEmailText(userId, emailText, opts = {}) {
           party: "us",
           note: `Pre-hearing call-up for ${type} hearing on ${eoirFields.hearing_date}. Submit any additional briefs/exhibits by this date.`,
           confidence: eoirConf,
+          matter_ref: eoirFields.alien_number || eoirFields.matter_ref || null,
           _eoir_callup: true
         });
       }
@@ -1389,12 +1391,26 @@ router.patch("/api/proposals/:id", requireAuth, async (req, res) => {
         `UPDATE matter_proposals SET status='accepted', resolved_at=NOW(), matter_id=$2 WHERE id=$1`,
         [propId, newMatterId]
       );
-      // Also attach any pending unmatched deadline proposals to this new matter
+      // Also attach any pending unmatched deadline proposals to this new matter.
+      // Match by normalized matter_ref. Normalization:
+      //   - Lower-case
+      //   - Strip all non-alphanumeric (spaces, hyphens, dots, parens)
+      //   - Strip leading "a" prefix (so "216-203-622" matches "A216-203-622")
+      // This way the intake parser's "A 216-203-622" matches the EOIR parser's
+      // "A216-203-622" matches the raw notice "216-203-622".
       await db.query(
         `UPDATE matter_proposals
             SET matter_id = $1
           WHERE user_id = $2 AND matter_id IS NULL AND kind = 'deadline' AND status = 'pending'
-            AND proposed_data->>'matter_ref' = $3`,
+            AND regexp_replace(
+                  regexp_replace(LOWER(COALESCE(proposed_data->>'matter_ref', '')), '[^a-z0-9]', '', 'g'),
+                  '^a', '', 'g'
+                )
+              = regexp_replace(
+                  regexp_replace(LOWER(COALESCE($3, '')), '[^a-z0-9]', '', 'g'),
+                  '^a', '', 'g'
+                )
+            AND COALESCE(proposed_data->>'matter_ref', '') <> ''`,
         [newMatterId, userId, ins.rows[0].matter_ref || ""]
       );
       return res.json({ ok: true, action: "accepted", kind: "new_matter", matter: ins.rows[0] });
