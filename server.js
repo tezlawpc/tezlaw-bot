@@ -684,21 +684,37 @@ async function tgDownloadFile(fileId) {
 // Patent issue fee gets the 3-day touch because it's non-extendable.
 const IP_REMINDER_THRESHOLDS = [30, 14, 7, 1];
 const PATENT_ISSUE_FEE_THRESHOLDS = [30, 14, 7, 3, 1];
-// Hearings get a more aggressive cadence — missing one means in absentia removal.
-const HEARING_THRESHOLDS = [60, 30, 14, 7, 3, 1];
+// EOIR hearings: 60/30/14 — wider lead time but no aggressive ramp.
+// (Per JJ preference 2026-05-27 — daily summary still surfaces hearings in
+// the 14-day rolling window, so no risk of going silent close to hearing.)
+const HEARING_THRESHOLDS = [60, 30, 14];
 
 // Identify whether a deadline should get threshold reminders.
 // Returns an array of threshold days (smallest fires first), or null if no reminders.
 //
 // Trigger rules:
-//   - party='court' AND title implies hearing → HEARING_THRESHOLDS (60/30/14/7/3/1)
+//   - EOIR hearings → HEARING_THRESHOLDS (60/30/14)
+//     Detection: case_type='Removal' AND party='court' AND title contains 'hearing',
+//     OR title produced by the EOIR parser (Master / Individual / Bond / Immigration).
+//     Non-EOIR court hearings (9th Cir oral argument, district court hearings, etc.)
+//     get NO threshold reminders — daily summary covers them.
 //   - IP matter + patent issue fee → PATENT_ISSUE_FEE_THRESHOLDS (30/14/7/3/1)
 //   - IP matter (TM/Patent/Copyright) → IP_REMINDER_THRESHOLDS (30/14/7/1)
 //   - Everything else → null (no threshold reminders; standard daily summary still covers it)
 function thresholdsForDeadline(caseType, title, party) {
   const lowerTitle = (title || "").toLowerCase();
-  // Hearings: party='court' AND title contains "hearing" (covers Master / Individual / Bond / etc.)
-  if (party === "court" && lowerTitle.includes("hearing")) {
+  // EOIR hearings — recognized either by case_type or by the title strings
+  // the EOIR parser produces.
+  const isEoirHearing =
+    party === "court" && lowerTitle.includes("hearing") && (
+      caseType === "Removal" ||
+      lowerTitle.includes("master calendar") ||
+      lowerTitle.includes("individual hearing") ||
+      lowerTitle.includes("bond hearing") ||
+      lowerTitle.includes("immigration hearing") ||
+      lowerTitle.includes("immigration court")
+    );
+  if (isEoirHearing) {
     return HEARING_THRESHOLDS;
   }
   // IP-specific reminders
