@@ -3,12 +3,23 @@
 //  Runs every morning at 6:00 AM Pacific
 //  Sends JJ a Telegram digest of new legal developments
 //
-//  SOURCES:
-//  - CA courts.ca.gov — same-day CA Supreme + Courts of Appeal
-//  - CourtListener — 9th Circuit + BIA published decisions
-//  - justice.gov/eoir — BIA precedent decisions + policy memos
-//  - uscis.gov — USCIS policy manual updates
-//  - leginfo.legislature.ca.gov — CA bill status (practice areas)
+//  v2 CHANGES (2026-07-01):
+//   - runDailyDigest: split CL multi-court call into per-court calls
+//     (CL returns 400 for comma-separated docket__court values)
+//   - Removed CA courts RSS + EOIR memos from active fetch path
+//     (courts.ca.gov RSS 404; justice.gov 403). Functions kept as
+//     exports for manual re-enable if endpoints recover.
+//   - Added dedup pass on combined opinion list to catch overlapping
+//     CA appellate results.
+//
+//  ACTIVE SOURCES:
+//  - CourtListener (cal + calctapp_1st..6th) — CA Supreme + Courts of Appeal
+//  - CourtListener (ca9) — 9th Circuit published
+//  - CourtListener (bia) — BIA precedential
+//
+//  DEPRECATED/DEAD (removed from parallel fetch):
+//  - courts.ca.gov RSS (404 as of 2026-07-01)
+//  - justice.gov/eoir memos scrape (403 as of 2026-07-01)
 //
 //  HOW IT WORKS:
 //  1. Pulls new opinions from all sources since yesterday
@@ -989,24 +1000,47 @@ async function runDailyDigest(forceRun = false) {
 
   try {
     // ── Fetch from all sources in parallel ──────────────────
+    //
+    // v2 fix (2026-07-01): CourtListener rejects comma-separated court codes
+    // in docket__court (returns 400). Split into per-court calls and gather.
+    //
+    // Removed sources (dead endpoints):
+    //   - fetchCACourtsRSS()  → courts.ca.gov RSS 404 (site reorganized)
+    //   - fetchEOIRMemos()    → justice.gov 403 (scraping blocked)
+    // Both still exported for manual use if URLs recover.
+    //
     console.log("[digest] Fetching new opinions...");
-    const [caOpinions, ninthCircuit, biaOpinions, caCourtsRSS, eoirMemos] = await Promise.all([
-      fetchNewOpinions("cal,calctapp_1st,calctapp_2nd,calctapp_3rd,calctapp_4th,calctapp_5th,calctapp_6th"),
-      fetchNewOpinions("ca9"),
-      fetchNewOpinions("bia"),
-      fetchCACourtsRSS(),
-      fetchEOIRMemos(),
-    ]);
 
-    const allOpinions = [
-      ...caOpinions,
-      ...ninthCircuit,
-      ...biaOpinions,
-      ...caCourtsRSS,
-      ...eoirMemos,
+    const CA_COURTS = [
+      "cal",           // CA Supreme Court
+      "calctapp_1st",  // 1st District Court of Appeal
+      "calctapp_2nd",
+      "calctapp_3rd",
+      "calctapp_4th",
+      "calctapp_5th",
+      "calctapp_6th",
     ];
 
-    console.log(`[digest] Fetched ${allOpinions.length} total items`);
+    const [caResults, ninthCircuit, biaOpinions] = await Promise.all([
+      Promise.all(CA_COURTS.map(c => fetchNewOpinions(c))),
+      fetchNewOpinions("ca9"),
+      fetchNewOpinions("bia"),
+    ]);
+
+    const caOpinions = caResults.flat();
+
+    // De-duplicate by cluster_id (in case multiple CA divisions returned the same case,
+    // or overlapping fetches otherwise)
+    const seen = new Set();
+    const allOpinions = [];
+    for (const op of [...caOpinions, ...ninthCircuit, ...biaOpinions]) {
+      const key = String(op.id || op.url || op.title);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      allOpinions.push(op);
+    }
+
+    console.log(`[digest] Fetched ${allOpinions.length} total items (${caOpinions.length} CA state, ${ninthCircuit.length} 9th Cir, ${biaOpinions.length} BIA, deduped)`);
 
     if (allOpinions.length === 0 && !forceRun) {
       console.log("[digest] No new opinions found — skipping digest");
