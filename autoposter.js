@@ -109,7 +109,7 @@ function loadSources() {
 function saveSources(sources) { try { fs.writeFileSync(SOURCES_FILE, JSON.stringify(sources, null, 2)); } catch (e) {} }
 
 async function askClaude(prompt, useWebSearch = false, retries = 3) {
-  const body = { model: "claude-sonnet-4-20250514", max_tokens: 4096, messages: [{ role: "user", content: prompt }] };
+  const body = { model: "claude-sonnet-4-6", max_tokens: 4096, messages: [{ role: "user", content: prompt }] };
   if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
