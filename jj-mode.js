@@ -197,7 +197,48 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
 
   // Build JJ-specific system prompt
   const jjContext = await getJJContext();
-  const jjSystemPrompt = buildJJSystemPrompt(jjContext);
+  let jjSystemPrompt = buildJJSystemPrompt(jjContext);
+
+  // ─── Phase D: LEVEL 3 RAG MOAT INJECTION ───────────────────
+  // For substantive text questions, semantically search the paren
+  // moat and prepend relevant precedent to the system prompt.
+  // Fails open — if moat is unavailable or returns nothing, JJ mode
+  // continues normally.
+  if (!options.isPdf && !options.isImage && userMessage && userMessage.length >= 40) {
+    const lowerMsg = userMessage.trim().toLowerCase();
+    const isCommand = /^\/(approve|reject|status|pending|help|logout|exit)/.test(lowerMsg);
+    const isAckOnly = /^(yes|no|ok|okay|continue|go|good|thanks|thank you|great|nice|cool|got it)[.!?]?$/.test(lowerMsg);
+
+    if (!isCommand && !isAckOnly) {
+      try {
+        const { searchParensBySimilarity, formatMoatContext } = require("./judge-cross-reference");
+        const moatStart = Date.now();
+        const results = await searchParensBySimilarity(userMessage, {
+          limit: 15,
+          minSimilarity: 0.35,
+          excludeGenericParens: true,
+        });
+        const moatMs = Date.now() - moatStart;
+
+        if (results && results.length) {
+          const moatContext = formatMoatContext(results, { maxLength: 4500 });
+          jjSystemPrompt = jjSystemPrompt +
+            "\n\n" + moatContext +
+            "\n\nIMPORTANT: The precedent above comes from Tez Law's proprietary moat — real parentheticals from real 9th Cir, BIA, CA state, and other opinions we've indexed. " +
+            "When your answer draws on legal precedent, CITE specific cases by name from this moat. Do NOT fabricate cases. " +
+            "If the moat doesn't cover the question, say so and rely on your general legal knowledge, but clearly indicate which claims are moat-backed vs. general knowledge. " +
+            "For adjustment-of-status questions, ALWAYS check whether 245(i) grandfathering applies (petition filed on or before April 30, 2001, and physically present Dec 21, 2000). " +
+            "For any waiver question, consider ALL alternative paths (245(i), U visa, T visa, VAWA, SIJS, cancellation of removal, humanitarian parole) not just the ones the user named.";
+          console.log(`[JJ-Mode] 🎯 Moat: ${results.length} results in ${moatMs}ms, top sim ${(results[0].similarity * 100).toFixed(0)}%`);
+        } else {
+          console.log(`[JJ-Mode] 🎯 Moat: 0 results (${moatMs}ms) — no relevant precedent found`);
+        }
+      } catch (e) {
+        console.error("[JJ-Mode] Moat search failed (fail-open):", e.message);
+      }
+    }
+  }
+  // ─── END MOAT INJECTION ────────────────────────────────────
 
   // Build message content — handle documents and images
   let messageContent;
@@ -338,12 +379,39 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     // Send voice reply async — non-blocking, text already returned
     sendVoiceReply(platform, userId, reply).catch(() => {});
 
-    // Truncate for Telegram's 4096-char limit; voice reply has full analysis
+    // ── PHASE E: MESSAGE CHUNKING ─────────────────────────
+    // WhatsApp: 4096-char limit. Telegram: 4096. Messenger: 2000.
+    // Instead of truncating, split at natural paragraph boundaries
+    // and send as multiple messages. Return the first chunk normally;
+    // send subsequent chunks async via the sendFn passed into
+    // processMessage in askClaude-memory.js.
     const fullMessage = "🔒 [JJ Mode]\n\n" + docNote + reply;
-    const finalMessage = fullMessage.length > 3900
-      ? fullMessage.substring(0, 3800) + "\n\n...\n\n[Response truncated - voice reply has full analysis]"
-      : fullMessage;
-    return { handled: true, message: finalMessage };
+    const CHUNK_LIMIT = platform === "messenger" ? 1900 : 3900;
+
+    if (fullMessage.length <= CHUNK_LIMIT) {
+      return { handled: true, message: fullMessage };
+    }
+
+    // Multi-message split
+    const chunks = splitMessageForPlatform(fullMessage, CHUNK_LIMIT);
+    console.log(`[JJ-Mode] 📮 Split ${fullMessage.length} chars into ${chunks.length} messages`);
+
+    // Return first chunk; hand rest to caller via options.sendFn (if provided)
+    if (options.sendFn && chunks.length > 1) {
+      // Fire subsequent chunks async — small delays so client shows them in order
+      (async () => {
+        for (let i = 1; i < chunks.length; i++) {
+          await new Promise(r => setTimeout(r, 800));
+          try {
+            await options.sendFn(chunks[i]);
+          } catch (e) {
+            console.error(`[JJ-Mode] Chunk ${i + 1}/${chunks.length} send failed:`, e.message);
+          }
+        }
+      })();
+    }
+
+    return { handled: true, message: chunks[0] };
   } catch (err) {
     console.error("JJ mode Claude error:", err.message);
     return { handled: true, message: "Sorry JJ, I had a technical issue. Please try again." };
@@ -462,10 +530,54 @@ function isResearchRequest(message) {
     lower.includes("find information") || lower.includes("search for ");
 }
 
+// ── PHASE E: Message chunking helper ─────────────────────
+// Splits a long message into platform-safe chunks at natural
+// boundaries (paragraph > sentence > word > hard cut).
+// Prepends "(N/M)" continuation markers to help readers.
+function splitMessageForPlatform(text, limit = 3900) {
+  if (text.length <= limit) return [text];
+
+  const chunks = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= limit) {
+      chunks.push(remaining);
+      break;
+    }
+
+    // Prefer double-newline (paragraph) breaks
+    let cutAt = remaining.lastIndexOf("\n\n", limit);
+    // Fall back to single newline
+    if (cutAt < limit * 0.5) cutAt = remaining.lastIndexOf("\n", limit);
+    // Fall back to sentence end
+    if (cutAt < limit * 0.5) {
+      const sentenceEnd = remaining.substring(0, limit).lastIndexOf(". ");
+      if (sentenceEnd >= limit * 0.5) cutAt = sentenceEnd + 1;
+    }
+    // Fall back to word boundary
+    if (cutAt < limit * 0.5) cutAt = remaining.lastIndexOf(" ", limit);
+    // Absolute fallback: hard cut
+    if (cutAt < limit * 0.5) cutAt = limit;
+
+    chunks.push(remaining.substring(0, cutAt).trim());
+    remaining = remaining.substring(cutAt).trim();
+  }
+
+  // Prepend continuation markers "(N/M)" to chunks 2..N
+  if (chunks.length > 1) {
+    return chunks.map((c, i) =>
+      i === 0 ? c : `(${i + 1}/${chunks.length}) ${c}`
+    );
+  }
+  return chunks;
+}
+
 module.exports = {
   checkJJMode,
   isJJAuthenticated,
   isJJAuthenticatedAsync,
   getJJPublicContext,
   isResearchRequest,
+  splitMessageForPlatform,
 };
