@@ -40,10 +40,10 @@ const db    = require("./db");
 // ── CONFIG ────────────────────────────────────────────────────
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const MODEL      = "text-embedding-3-large";  // 3072 dim
-const BATCH_SIZE = 200;                        // parens per API call (bumped from 100)
+const BATCH_SIZE = 100;                        // parens per API call (reduced from 200 to fit TPM limits)
 const CHECKPOINT_JOB = "embed_parens:all";
 const COST_PER_1M    = 0.13;                   // $ per 1M input tokens
-const RATE_LIMIT_RPM = 2000;                   // stay well under 5K
+const MS_BETWEEN_BATCHES = 500;                // 500ms = ~120 batches/min = ~12K rows/min pace
 
 // CLI args
 const args = process.argv.slice(2);
@@ -120,17 +120,28 @@ async function embedBatch(texts, retryCount = 0) {
         timeout: 60000,
       }
     );
-    // r.data.data = array of { embedding: [...], index: N }
     state.api_calls++;
     state.tokens_used += r.data.usage.total_tokens || 0;
     state.cost_usd = (state.tokens_used / 1e6) * COST_PER_1M;
     return r.data.data.map(d => d.embedding);
   } catch (e) {
-    // Retry logic: 429 (rate limit) or 5xx (server) get exponential backoff
     const status = e.response?.status;
-    if ((status === 429 || (status >= 500 && status < 600)) && retryCount < 5) {
-      const backoff = Math.min(60000, 1000 * Math.pow(2, retryCount));
-      console.log(`  ⏸  ${status} — retry ${retryCount + 1}/5 in ${backoff/1000}s`);
+    const retryAfterHeader = e.response?.headers?.["retry-after"];
+
+    if ((status === 429 || (status >= 500 && status < 600)) && retryCount < 8) {
+      // For 429s, respect the retry-after header if present.
+      // Otherwise use slow exponential backoff (30s, 60s, 120s...)
+      let backoff;
+      if (retryAfterHeader) {
+        backoff = parseInt(retryAfterHeader, 10) * 1000;
+      } else if (status === 429) {
+        // 429 = TPM/RPM limit hit → wait for the minute boundary to reset
+        backoff = Math.min(120000, 30000 + retryCount * 15000);
+      } else {
+        // 5xx = server error → shorter backoff
+        backoff = Math.min(60000, 1000 * Math.pow(2, retryCount));
+      }
+      console.log(`  ⏸  ${status} — retry ${retryCount + 1}/8 in ${(backoff/1000).toFixed(0)}s`);
       await new Promise(r => setTimeout(r, backoff));
       return embedBatch(texts, retryCount + 1);
     }
@@ -215,7 +226,7 @@ async function run() {
   console.log("  Level 3 RAG — Phase B: Embed 311K Parens");
   console.log("  Model:", MODEL, "(3072 dim)");
   console.log("  Batch size:", BATCH_SIZE);
-  console.log("  Rate target: ~", RATE_LIMIT_RPM, "RPM");
+  console.log("  Throttle:", MS_BETWEEN_BATCHES, "ms between batches");
   if (LIMIT) console.log("  Limit:", LIMIT, "(test mode)");
   console.log("═══════════════════════════════════════════════════════\n");
 
@@ -266,6 +277,11 @@ async function run() {
 
     batchNum++;
     const texts = rows.map(r => r.parenthetical);
+
+    // Explicit throttle between API calls — smoother TPM usage
+    if (batchNum > 1) {
+      await new Promise(r => setTimeout(r, MS_BETWEEN_BATCHES));
+    }
 
     let embeddings;
     try {
