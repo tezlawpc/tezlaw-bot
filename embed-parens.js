@@ -40,7 +40,7 @@ const db    = require("./db");
 // ── CONFIG ────────────────────────────────────────────────────
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const MODEL      = "text-embedding-3-large";  // 3072 dim
-const BATCH_SIZE = 100;                        // parens per API call
+const BATCH_SIZE = 200;                        // parens per API call (bumped from 100)
 const CHECKPOINT_JOB = "embed_parens:all";
 const COST_PER_1M    = 0.13;                   // $ per 1M input tokens
 const RATE_LIMIT_RPM = 2000;                   // stay well under 5K
@@ -283,15 +283,14 @@ async function run() {
     const pairs = rows.map((r, i) => ({ id: r.id, embedding: embeddings[i] }));
     await saveEmbeddings(pairs);
 
-    // Also apply to sibling rows with same paren text
+    // NOTE: Sibling dedup was removed for speed.
+    // The per-row UPDATE loop with WHERE parenthetical = ... was doing
+    // full table scans (no index on parenthetical text). Sequential embed
+    // costs ~$0.90 total (~5x more) but runs in ~15 min vs ~20 hours.
+    // If we need dedup later, batch it as a post-process pass after full embed.
     let siblingCount = 0;
-    for (let i = 0; i < rows.length; i++) {
-      const vec = vectorToString(embeddings[i]);
-      const n = await applyEmbeddingToSiblings(rows[i].id, vec);
-      siblingCount += n;
-    }
-    state.cache_hits += siblingCount;
 
+    state.cache_hits += siblingCount;
     state.processed += rows.length + siblingCount;
     state.last_id = rows[rows.length - 1].id;
 
