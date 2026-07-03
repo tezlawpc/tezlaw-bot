@@ -1,24 +1,23 @@
 // ============================================================
-//  migration-vector-v2.js
-//  UPDATE from v1: Add halfvec column for HNSW indexing
+//  migration-vector.js
+//  Level 3 RAG — Enable pgvector + add halfvec embedding column
 //
-//  Problem: pgvector 0.8.1 HNSW indexes have a 2000-dimension limit.
-//  text-embedding-3-large is 3072 dim, so vector(3072) CAN'T be
-//  HNSW-indexed. Sequential scan on 300K rows would take seconds
-//  per query — too slow for JJ mode.
+//  Uses halfvec(3072) because pgvector 0.8.1 HNSW indexes have
+//  a 2000-dimension limit. text-embedding-3-large is 3072 dim,
+//  so a vector(3072) column CAN'T be HNSW-indexed. halfvec(3072)
+//  uses 16-bit floats — supports HNSW up to 4000 dim, halves the
+//  storage, negligible recall loss for RAG.
 //
-//  Solution: halfvec(3072) — 16-bit floats. HNSW supports it up to
-//  4000 dimensions. Storage halved, quality loss negligible for RAG.
-//
-//  This migration is IDEMPOTENT and can run over the v1 result.
-//  If v1 already ran and added vector(3072), we add halfvec(3072)
-//  as a second column and use that for indexing.
+//  Idempotent — safe to run multiple times.
+//  If an old vector(3072) column exists from a prior run,
+//  drops it and replaces with halfvec (only if no embeddings
+//  have been written yet).
 // ============================================================
 
 const db = require("./db");
 
 async function run() {
-  console.log("=== Level 3 RAG — Migration v2 (halfvec) ===\n");
+  console.log("=== Level 3 RAG — Migration (halfvec) ===\n");
 
   try {
     // Step 1: Ensure pgvector extension exists
@@ -105,7 +104,7 @@ async function run() {
     console.log("  Already embedded: ", s.embedded);
     console.log("  Remaining to embed:", s.to_embed);
 
-    console.log("\n✅ Migration v2 complete. Next: node embed-parens.js");
+    console.log("\n✅ Migration complete. Next: node embed-parens.js");
     process.exit(0);
   } catch (err) {
     console.error("\n❌ Migration failed:", err.message);
