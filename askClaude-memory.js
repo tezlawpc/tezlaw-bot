@@ -135,7 +135,8 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
     // 1. Check JJ private mode FIRST — passes docs/images through too
     const jj = await checkJJMode(platform, platformId, userMessage, {
       isPdf, pdfData: options.pdfData,
-      isImage, imageData: options.imageData, imageMediaType: options.imageMediaType
+      isImage, imageData: options.imageData, imageMediaType: options.imageMediaType,
+      sendFn: options.sendFn,   // ← for JJ Mode multi-message chunking (Phase E)
     });
     if (jj.handled) {
       await db.saveMessage(platform, platformId, "user", isPdf ? "[PDF uploaded]" : isImage ? "[Image uploaded]" : userMessage);
