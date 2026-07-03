@@ -458,15 +458,209 @@ module.exports = {
   judgeTopCitedCases,
   predictionSnapshot,
   backfillCitationEdges,
+  searchParensBySimilarity,
+  embedQueryText,
 };
+
+// ────────────────────────────────────────────────────────────────
+//  PHASE C: SEMANTIC SEARCH (Level 3 RAG)
+//  ────────────────────────────────────────────────────────────
+//  searchParensBySimilarity — semantic vector search on the moat.
+//  embedQueryText — OpenAI embedding call for a search query.
+//
+//  These require: (a) pgvector installed, (b) embedding halfvec(3072)
+//  column populated (see embed-parens.js), (c) OPENAI_API_KEY env.
+// ────────────────────────────────────────────────────────────────
+
+const axios = require("axios");
+const OPENAI_MODEL = "text-embedding-3-large";  // must match embed-parens.js
+
+async function embedQueryText(text) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY not set");
+  }
+  const r = await axios.post(
+    "https://api.openai.com/v1/embeddings",
+    { input: text, model: OPENAI_MODEL, encoding_format: "float" },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      timeout: 15000,
+    }
+  );
+  return r.data.data[0].embedding;
+}
+
+/**
+ * Semantic search on the parenthetical moat.
+ *
+ * @param {string} queryText  — Natural-language search (e.g. "245(i) grandfathering after overstay")
+ * @param {object} options
+ *   - limit: number of results (default 15, max 100)
+ *   - court: filter to specific court (e.g. 'ca9', 'bia')
+ *   - judge: filter to specific judge (partial match)
+ *   - minSimilarity: filter results below this (0-1 scale, default 0.4)
+ *   - excludeGenericParens: skip "per curiam" and similar (default true)
+ * @returns {Promise<Array>} rows with paren, cited case, judge, similarity
+ */
+async function searchParensBySimilarity(queryText, options = {}) {
+  const {
+    limit = 15,
+    court = null,
+    judge = null,
+    minSimilarity = 0.4,
+    excludeGenericParens = true,
+  } = options;
+
+  if (!queryText || queryText.trim().length < 3) {
+    throw new Error("queryText must be at least 3 chars");
+  }
+
+  // 1. Embed the query
+  const qEmbedding = await embedQueryText(queryText);
+  const qVec = "[" + qEmbedding.join(",") + "]";
+
+  // 2. Vector similarity search
+  //    Uses cosine distance operator <=>. Similarity = 1 - distance.
+  //    HNSW index (built after embedding) makes this fast.
+  const clauses = ["e.embedding IS NOT NULL"];
+  const params = [qVec];
+  let paramIdx = 2;
+
+  if (court) {
+    clauses.push(`e.court = $${paramIdx++}`);
+    params.push(court);
+  }
+  if (judge) {
+    clauses.push(`e.judge_name ILIKE $${paramIdx++}`);
+    params.push("%" + judge + "%");
+  }
+  if (excludeGenericParens) {
+    clauses.push(`length(e.parenthetical) > 40`);
+    clauses.push(`e.parenthetical NOT ILIKE '%per curiam%'`);
+    clauses.push(`e.parenthetical NOT ILIKE '%unpublished%'`);
+  }
+
+  const whereSql = clauses.join(" AND ");
+
+  const sql = `
+    SELECT
+      e.id,
+      e.parenthetical,
+      e.cited_case_name,
+      e.cited_case_citation,
+      e.treatment,
+      e.signal,
+      e.judge_name,
+      e.court,
+      e.case_name AS ruling_case_name,
+      r.motion_type AS ruling_motion_type,
+      r.url        AS ruling_url,
+      r.hearing_date,
+      1 - (e.embedding <=> $1::halfvec) AS similarity
+    FROM citation_edges_internal e
+    LEFT JOIN judge_rulings r ON r.id = e.ruling_id
+    WHERE ${whereSql}
+    ORDER BY e.embedding <=> $1::halfvec
+    LIMIT $${paramIdx}
+  `;
+  params.push(Math.min(limit, 100));
+
+  const result = await db.query(sql, params);
+
+  // 3. Filter by minimum similarity (post-query since HNSW ORDER BY is distance-based)
+  const rows = result.rows.filter(r => r.similarity >= minSimilarity);
+
+  return rows;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Format helper: produce a text block for prompt context
+// ────────────────────────────────────────────────────────────────
+function formatMoatContext(searchResults, options = {}) {
+  const {
+    header = "═══ RELEVANT PRECEDENT FROM YOUR MOAT ═══",
+    maxLength = 6000,   // don't blow prompt budget
+    includeUrls = false,
+  } = options;
+
+  if (!searchResults || !searchResults.length) return "";
+
+  const lines = [header, ""];
+  let charBudget = maxLength - header.length - 200;
+
+  for (let i = 0; i < searchResults.length; i++) {
+    const r = searchResults[i];
+    const sim = (r.similarity * 100).toFixed(0);
+    const caseLine = `${i + 1}. ${r.cited_case_name || "Unknown"}${r.cited_case_citation ? " (" + r.cited_case_citation + ")" : ""}`;
+    const meta = `   Court: ${r.court || "?"} | Judge: ${r.judge_name || "?"} | Similarity: ${sim}%`;
+    const parenLine = `   Paren: "${r.parenthetical}"`;
+
+    let entry = caseLine + "\n" + meta + "\n" + parenLine;
+    if (r.treatment) entry += `\n   Treatment: ${r.treatment}`;
+    if (includeUrls && r.ruling_url) entry += `\n   Ruling: ${r.ruling_url}`;
+    entry += "\n";
+
+    if (entry.length > charBudget) break;
+    lines.push(entry);
+    charBudget -= entry.length;
+  }
+
+  lines.push("═══ END PRECEDENT ═══");
+  return lines.join("\n");
+}
+
+// Also export the formatter
+module.exports.formatMoatContext = formatMoatContext;
+
 
 // CLI mode
 if (require.main === module) {
   const args = process.argv.slice(2);
+
   if (args.includes("--backfill")) {
     backfillCitationEdges().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
-  } else {
-    console.log("Usage: node judge-cross-reference.js --backfill");
+  }
+  else if (args.includes("--search")) {
+    // node judge-cross-reference.js --search "extreme hardship waiver 601"
+    const queryIdx = args.indexOf("--search");
+    const query = args[queryIdx + 1];
+    if (!query) {
+      console.error("Usage: node judge-cross-reference.js --search \"your query text\" [--court ca9] [--limit 15]");
+      process.exit(1);
+    }
+    const courtIdx = args.indexOf("--court");
+    const limitIdx = args.indexOf("--limit");
+    const opts = {
+      court: courtIdx >= 0 ? args[courtIdx + 1] : null,
+      limit: limitIdx >= 0 ? parseInt(args[limitIdx + 1], 10) : 15,
+    };
+
+    console.log(`\nSearching for: "${query}"${opts.court ? " (court: " + opts.court + ")" : ""}\n`);
+
+    searchParensBySimilarity(query, opts)
+      .then(results => {
+        console.log(`Found ${results.length} results\n`);
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          const sim = (r.similarity * 100).toFixed(1);
+          console.log(`${i + 1}. [${sim}%] ${r.cited_case_name || "Unknown"}`);
+          if (r.cited_case_citation) console.log(`   Cite: ${r.cited_case_citation}`);
+          console.log(`   Court: ${r.court || "?"} | Judge: ${r.judge_name || "?"}`);
+          console.log(`   Paren: "${r.parenthetical}"`);
+          if (r.treatment) console.log(`   Treatment: ${r.treatment}`);
+          console.log("");
+        }
+        process.exit(0);
+      })
+      .catch(e => { console.error("Search failed:", e.message); console.error(e.stack); process.exit(1); });
+  }
+  else {
+    console.log("Usage:");
+    console.log("  node judge-cross-reference.js --backfill");
+    console.log("  node judge-cross-reference.js --search \"query text\" [--court ca9] [--limit 15]");
     process.exit(0);
   }
 }
