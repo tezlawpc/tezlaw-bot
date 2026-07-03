@@ -145,18 +145,22 @@ function vectorToString(vec) {
 }
 
 // ── FETCH BATCH OF UNEMBEDDED PARENS ─────────────────────────
+// Uses the partial index idx_cei_embedded_at WHERE embedded_at IS NULL
+// for O(1) lookup, independent of how many rows are already embedded.
+// This is critical because sibling dedup embeds rows scattered across
+// the ID space, so `WHERE id > last_id` would force scanning past all
+// the sibling-embedded rows.
 async function fetchNextBatch() {
   const q = `
     SELECT id, parenthetical
     FROM citation_edges_internal
-    WHERE id > $1
+    WHERE embedded_at IS NULL
       AND parenthetical IS NOT NULL
       AND length(parenthetical) > 20
-      AND embedding IS NULL
     ORDER BY id
-    LIMIT $2
+    LIMIT $1
   `;
-  const r = await db.query(q, [state.last_id, BATCH_SIZE]);
+  const r = await db.query(q, [BATCH_SIZE]);
   return r.rows;
 }
 
