@@ -191,6 +191,16 @@ async function scanCourt(court) {
   );
 }
 
+/** Runs populate-citation-edges to extract edges/parens from any new rulings. */
+async function runCitationExtraction() {
+  return runNodeScript(
+    "./populate-citation-edges.js",
+    ["--commit", `--limit=1000`],  // safety cap: process at most 1000 rulings per run
+    EMBED_TIMEOUT_MS,
+    "extract-citations"
+  );
+}
+
 /** Runs embed-parens for all unembedded rows. */
 async function runEmbedNewParens() {
   return runNodeScript(
@@ -303,7 +313,16 @@ async function weeklyMoatUpdate() {
       }
     }
 
-    // ── Step 3: Embed any new parens ──────────────────────
+    // ── Step 3: Extract citations from new rulings ────────
+    console.log("[weekly-moat] Running populate-citation-edges.js...");
+    const extractResult = await runCitationExtraction();
+    scanResults.extract = {
+      exitCode: extractResult.code,
+      timedOut: extractResult.timedOut,
+      durMin:   (extractResult.durMs / 60000).toFixed(1),
+    };
+
+    // ── Step 4: Embed any new parens ──────────────────────
     console.log("[weekly-moat] Running embed-parens.js...");
     const embedResult = await runEmbedNewParens();
     scanResults.embed = {
