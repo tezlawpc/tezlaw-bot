@@ -88,26 +88,42 @@ async function snapshotMoat() {
   };
 }
 
-/** Ensure moat_update_history table exists. */
+/** Ensure moat_update_history table exists. Race-safe. */
 async function ensureHistoryTable() {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS moat_update_history (
-      id             SERIAL PRIMARY KEY,
-      started_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      completed_at   TIMESTAMPTZ,
-      status         TEXT NOT NULL DEFAULT 'running',  -- running | success | failed | skipped
-      before_snap    JSONB,
-      after_snap     JSONB,
-      delta          JSONB,
-      cost_usd       NUMERIC(10, 4) DEFAULT 0,
-      duration_sec   INTEGER,
-      error_message  TEXT,
-      courts_scanned TEXT[]
-    );
+  // Note: CREATE TABLE IF NOT EXISTS is not fully race-safe in Postgres
+  // due to catalog-lock semantics — two concurrent runs can still hit
+  // "duplicate key value violates unique constraint pg_type_typname_nsp_index".
+  // We swallow that specific error (23505) since it means the table already exists.
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS moat_update_history (
+        id             SERIAL PRIMARY KEY,
+        started_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        completed_at   TIMESTAMPTZ,
+        status         TEXT NOT NULL DEFAULT 'running',
+        before_snap    JSONB,
+        after_snap     JSONB,
+        delta          JSONB,
+        cost_usd       NUMERIC(10, 4) DEFAULT 0,
+        duration_sec   INTEGER,
+        error_message  TEXT,
+        courts_scanned TEXT[]
+      )
+    `);
+  } catch (e) {
+    // 23505 = unique_violation. Happens when two processes race the CREATE.
+    if (e.code !== "23505") throw e;
+    // Table already exists — that's fine.
+  }
 
-    CREATE INDEX IF NOT EXISTS idx_moat_update_started
-      ON moat_update_history (started_at DESC);
-  `);
+  try {
+    await db.query(`
+      CREATE INDEX IF NOT EXISTS idx_moat_update_started
+        ON moat_update_history (started_at DESC)
+    `);
+  } catch (e) {
+    if (e.code !== "23505") throw e;
+  }
 }
 
 /** Spawn a node subprocess with a timeout. Returns { code, timedOut, stdout, stderr }. */
