@@ -270,7 +270,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
           "https://api.anthropic.com/v1/messages",
           {
             model: "claude-sonnet-4-6",
-            max_tokens: 2048,
+            max_tokens: 8192,
             system: jjSystemPrompt,
             tools: allTools,
             messages: loopMessages,
