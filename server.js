@@ -1810,6 +1810,14 @@ app.listen(PORT, async () => {
     console.error("❌ Legal digest scheduler failed:", e.message);
   }
 
+  // ── Self-Learning: Weekly Moat Update (Sat 11pm PT) ──────
+  try {
+    const { scheduleWeekly } = require("./weekly-moat-update");
+    scheduleWeekly();
+  } catch (e) {
+    console.error("❌ Weekly moat scheduler failed:", e.message);
+  }
+
   // ── Matter Manager — Daily deadline summary (7:00 AM PT) ─
   try {
     const { default: cron } = await import("node-cron").catch(() => ({ default: require("node-cron") }));
