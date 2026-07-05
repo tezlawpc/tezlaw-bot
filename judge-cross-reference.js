@@ -614,6 +614,208 @@ function formatMoatContext(searchResults, options = {}) {
 
 // Also export the formatter
 module.exports.formatMoatContext = formatMoatContext;
+module.exports.searchParensHybrid = searchParensHybrid;
+module.exports.extractLegalKeywords = extractLegalKeywords;
+
+// ────────────────────────────────────────────────────────────────
+//  HYBRID KEYWORD+VECTOR SEARCH
+//  ────────────────────────────────────────────────────────────
+//  Works WITHOUT an HNSW/IVFFlat index (Render Basic tier can't
+//  build one). Instead:
+//  1. Extract legal keywords from query using Haiku
+//  2. Postgres ILIKE filter narrows to ~1-3K candidate parens
+//  3. Load those rows' embeddings into JS
+//  4. Rank by cosine similarity in JS (in-memory, ~50ms for 3K rows)
+//
+//  Total time: 500ms-2s per query (vs 94s without index).
+//  Cost per query: ~$0.0004 (Haiku keyword extraction + one query embedding)
+// ────────────────────────────────────────────────────────────────
+
+const ANTHROPIC_MODEL_HAIKU = "claude-haiku-4-5-20251001";
+
+async function extractLegalKeywords(queryText) {
+  // Small Haiku call — asks for 5-10 legal terms to keyword-match
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY not set");
+  }
+
+  const prompt = `Extract 5-10 legal keywords/phrases from this question. Return ONLY a JSON array of strings — words that would appear literally in court parentheticals about this topic. Prefer statutes (§ 245(i), 8 USC 1101), case name fragments (Cardoza, Landin), doctrinal terms (extreme hardship, adjustment of status), and specific concepts. Skip generic words (the, a, court, ruling).
+
+Question: "${queryText}"
+
+Output JSON only, no explanation. Example: ["245(i)", "grandfathering", "adjustment of status", "unlawful presence", "B-2 visa", "overstay", "waiver", "immediate relative"]`;
+
+  const r = await axios.post(
+    "https://api.anthropic.com/v1/messages",
+    {
+      model: ANTHROPIC_MODEL_HAIKU,
+      max_tokens: 300,
+      messages: [{ role: "user", content: prompt }],
+    },
+    {
+      headers: {
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      timeout: 10000,
+    }
+  );
+
+  const text = r.data.content.filter(b => b.type === "text").map(b => b.text).join("");
+  // Extract JSON array — may be wrapped in code fences
+  const jsonMatch = text.match(/\[[\s\S]*?\]/);
+  if (!jsonMatch) throw new Error("Haiku didn't return JSON array. Got: " + text.substring(0, 200));
+
+  const keywords = JSON.parse(jsonMatch[0]);
+  if (!Array.isArray(keywords) || keywords.length === 0) throw new Error("Invalid keywords");
+
+  // Sanitize — remove empty, dedupe, limit to 10
+  return [...new Set(keywords.filter(k => k && typeof k === "string" && k.trim().length > 1))].slice(0, 10);
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Parse pgvector's halfvec text format into a JS Float32Array
+//  Input: "[0.123,-0.456,...]"
+// ────────────────────────────────────────────────────────────────
+function parseVec(vecStr) {
+  // pgvector returns as string like "[0.123,-0.456,...]"
+  const stripped = vecStr.replace(/^\[|\]$/g, "");
+  const parts = stripped.split(",");
+  const arr = new Float32Array(parts.length);
+  for (let i = 0; i < parts.length; i++) arr[i] = parseFloat(parts[i]);
+  return arr;
+}
+
+// Cosine similarity of two Float32Arrays (assumes both are normalized —
+// text-embedding-3-large returns normalized vectors, so this is just dot product)
+function cosineSim(a, b) {
+  let dot = 0;
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) dot += a[i] * b[i];
+  return dot;
+}
+
+/**
+ * Hybrid keyword+vector search — the production entry point for JJ mode.
+ *
+ * @param {string} queryText — the user's question
+ * @param {object} options
+ *   - limit: max results (default 15)
+ *   - candidatePoolSize: max SQL rows before ranking (default 3000)
+ *   - courts: array of courts to restrict search to (default: immigration-relevant courts)
+ *   - minSimilarity: filter results below this (default 0.4)
+ *   - keywordsOverride: skip Haiku extraction, use these keywords instead
+ * @returns {Promise<Array>}
+ */
+async function searchParensHybrid(queryText, options = {}) {
+  const {
+    limit = 15,
+    candidatePoolSize = 3000,
+    courts = [
+      "9th Circuit Court of Appeals",
+      "Board of Immigration Appeals",
+      "U.S. Supreme Court",
+      "5th Circuit",
+      "11th Circuit",
+    ],
+    minSimilarity = 0.4,
+    keywordsOverride = null,
+  } = options;
+
+  if (!queryText || queryText.trim().length < 3) {
+    throw new Error("queryText must be at least 3 chars");
+  }
+
+  const startTotal = Date.now();
+
+  // Step 1: Extract keywords
+  const kwStart = Date.now();
+  const keywords = keywordsOverride || await extractLegalKeywords(queryText);
+  const kwMs = Date.now() - kwStart;
+  console.log(`[hybrid] keywords (${kwMs}ms):`, keywords);
+
+  // Step 2: Embed query
+  const embStart = Date.now();
+  const qEmbedding = await embedQueryText(queryText);
+  const qVec = new Float32Array(qEmbedding);
+  const embMs = Date.now() - embStart;
+
+  // Step 3: SQL keyword prefilter
+  // Build OR clause across keywords, ILIKE match on parenthetical
+  const params = [];
+  const kwClauses = keywords.map((k, i) => {
+    params.push("%" + k + "%");
+    return `e.parenthetical ILIKE $${params.length}`;
+  });
+
+  // Courts filter — using ANY
+  params.push(courts);
+
+  const sqlStart = Date.now();
+  const sql = `
+    SELECT
+      e.id,
+      e.parenthetical,
+      e.cited_case_name,
+      e.cited_case_citation,
+      e.treatment,
+      e.signal,
+      e.judge_name,
+      e.court,
+      e.case_name AS ruling_case_name,
+      e.embedding::text AS emb_text
+    FROM citation_edges_internal e
+    WHERE e.embedding IS NOT NULL
+      AND e.court = ANY($${params.length})
+      AND length(e.parenthetical) > 40
+      AND e.parenthetical NOT ILIKE '%per curiam%'
+      AND (${kwClauses.join(" OR ")})
+    LIMIT ${candidatePoolSize}
+  `;
+
+  const rows = await db.query(sql, params);
+  const sqlMs = Date.now() - sqlStart;
+  console.log(`[hybrid] SQL prefilter (${sqlMs}ms): ${rows.rows.length} candidates`);
+
+  if (rows.rows.length === 0) {
+    return [];
+  }
+
+  // Step 4: Rank in JS by cosine similarity
+  const rankStart = Date.now();
+  const scored = [];
+  for (const row of rows.rows) {
+    try {
+      const vec = parseVec(row.emb_text);
+      const sim = cosineSim(qVec, vec);
+      if (sim >= minSimilarity) {
+        scored.push({
+          id: row.id,
+          parenthetical: row.parenthetical,
+          cited_case_name: row.cited_case_name,
+          cited_case_citation: row.cited_case_citation,
+          treatment: row.treatment,
+          signal: row.signal,
+          judge_name: row.judge_name,
+          court: row.court,
+          ruling_case_name: row.ruling_case_name,
+          similarity: sim,
+        });
+      }
+    } catch (e) {
+      // Skip rows with parse errors
+    }
+  }
+
+  scored.sort((a, b) => b.similarity - a.similarity);
+  const rankMs = Date.now() - rankStart;
+
+  const totalMs = Date.now() - startTotal;
+  console.log(`[hybrid] Ranked ${scored.length}/${rows.rows.length} candidates (${rankMs}ms). Total: ${totalMs}ms | Query embed: ${embMs}ms`);
+
+  return scored.slice(0, limit);
+}
 
 
 // CLI mode
@@ -656,6 +858,38 @@ if (require.main === module) {
         process.exit(0);
       })
       .catch(e => { console.error("Search failed:", e.message); console.error(e.stack); process.exit(1); });
+  }
+  else if (args.includes("--hybrid")) {
+    // node judge-cross-reference.js --hybrid "245(i) grandfathering B-2 overstay"
+    const queryIdx = args.indexOf("--hybrid");
+    const query = args[queryIdx + 1];
+    if (!query) {
+      console.error("Usage: node judge-cross-reference.js --hybrid \"your query text\" [--limit 15]");
+      process.exit(1);
+    }
+    const limitIdx = args.indexOf("--limit");
+    const opts = {
+      limit: limitIdx >= 0 ? parseInt(args[limitIdx + 1], 10) : 15,
+    };
+
+    console.log(`\n=== HYBRID SEARCH: "${query}" ===\n`);
+
+    searchParensHybrid(query, opts)
+      .then(results => {
+        console.log(`\nFound ${results.length} results\n`);
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          const sim = (r.similarity * 100).toFixed(1);
+          console.log(`${i + 1}. [${sim}%] ${r.cited_case_name || "Unknown"}`);
+          if (r.cited_case_citation) console.log(`   Cite: ${r.cited_case_citation}`);
+          console.log(`   Court: ${r.court || "?"} | Judge: ${r.judge_name || "?"}`);
+          console.log(`   Paren: "${r.parenthetical}"`);
+          if (r.treatment) console.log(`   Treatment: ${r.treatment}`);
+          console.log("");
+        }
+        process.exit(0);
+      })
+      .catch(e => { console.error("Hybrid search failed:", e.message); console.error(e.stack); process.exit(1); });
   }
   else {
     console.log("Usage:");
