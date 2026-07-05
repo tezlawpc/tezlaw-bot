@@ -225,6 +225,46 @@ async function publishAllLanguages(post, notifyPrefix, state) {
     } catch (seedErr) {
       console.error("[autoposter] Blog→cache seed error:", seedErr.message);
     }
+
+    // 🏛️ Ingest full post as a firm document (Phase 2 self-learning)
+    // Non-blocking; failures don't affect publishing.
+    try {
+      const { ingestDocument } = require("./firm-documents");
+      // Strip HTML tags for cleaner extraction, keep basic structure
+      const plainText = String(post.content || "")
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      // Prepend title so extraction has context
+      const fullText = "Title: " + post.title + "\n\n" + plainText;
+
+      // Only ingest if substantive (skip tiny posts)
+      if (fullText.length >= 500) {
+        const result = await ingestDocument({
+          text: fullText,
+          sourceUrl: p.link,
+          matterLabelOverride: post.title,
+          allowPrivate: false,
+          actorId: "autoposter",
+        });
+        if (result.ok) {
+          console.log(`[autoposter] 🏛️ Ingested to firm_documents #${result.docId}: ${result.matterLabel}`);
+        } else {
+          console.log(`[autoposter] 🏛️ Firm doc ingest skipped: ${result.reason}`);
+        }
+      }
+    } catch (firmErr) {
+      console.error("[autoposter] Blog→firm_docs error:", firmErr.message);
+    }
   }
   catch (e) { console.error("English publish failed:", e.message); }
 
