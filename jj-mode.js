@@ -211,12 +211,12 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
 
     if (!isCommand && !isAckOnly) {
       try {
-        const { searchParensBySimilarity, formatMoatContext } = require("./judge-cross-reference");
+        const { searchParensHybrid, formatMoatContext } = require("./judge-cross-reference");
         const moatStart = Date.now();
-        const results = await searchParensBySimilarity(userMessage, {
+        const results = await searchParensHybrid(userMessage, {
           limit: 15,
           minSimilarity: 0.35,
-          excludeGenericParens: true,
+          candidatePoolSize: 3000,
         });
         const moatMs = Date.now() - moatStart;
 
