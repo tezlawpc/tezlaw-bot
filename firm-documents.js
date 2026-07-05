@@ -526,7 +526,7 @@ async function listFirmDocs(options = {}) {
   const r = await db.query(`
     SELECT id, matter_label, document_type, practice_area, court_or_agency,
            filing_date, outcome, uploaded_at,
-           array_length(key_arguments::jsonb::text[], 1) AS args_count
+           jsonb_array_length(COALESCE(key_arguments, '[]'::jsonb)) AS args_count
     FROM firm_documents
     ${where}
     ORDER BY uploaded_at DESC
