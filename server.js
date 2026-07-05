@@ -1165,7 +1165,19 @@ app.post("/telegram", async (req, res) => {
       await axios.post(`${TELEGRAM_API}/sendChatAction`, { chat_id: chatId, action: "typing" });
       const { buffer } = await tgDownloadFile(msg.document.file_id);
       if (msg.document.mime_type === "application/pdf") {
-        const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "Analyze this PDF.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), { isPdf:true, pdfData:buffer.toString("base64") });
+        const caption = msg.caption || "Analyze this PDF.";
+        const opts = { isPdf: true, pdfData: buffer.toString("base64") };
+        // For /brief command, also extract plaintext so firm-documents can ingest it
+        if (/^\/brief\b/i.test(caption)) {
+          try {
+            const pdfData = await pdfParse(buffer);
+            opts.pdfText = pdfData.text || "";
+            console.log(`[telegram] /brief PDF extracted: ${opts.pdfText.length} chars`);
+          } catch (e) {
+            console.error("[telegram] /brief PDF text extraction failed:", e.message);
+          }
+        }
+        const reply = await askClaudeWithMemory("telegram", chatId, caption, buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), opts);
         await tgSend(chatId, reply);
       } else {
         await tgSend(chatId, "I can read images and PDFs. Please resend in one of those formats.");
@@ -1330,7 +1342,18 @@ app.post("/whatsapp", async (req, res) => {
       if (message.type === "document") {
         const { buffer, mimeType } = await waDownloadMedia(message.document.id);
         if (mimeType === "application/pdf") {
-          const reply = await askClaudeWithMemory("whatsapp", from, message.document.caption || "Analyze this PDF.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), { isPdf:true, pdfData:buffer.toString("base64") });
+          const caption = message.document.caption || "Analyze this PDF.";
+          const opts = { isPdf: true, pdfData: buffer.toString("base64") };
+          if (/^\/brief\b/i.test(caption)) {
+            try {
+              const pdfData = await pdfParse(buffer);
+              opts.pdfText = pdfData.text || "";
+              console.log(`[whatsapp] /brief PDF extracted: ${opts.pdfText.length} chars`);
+            } catch (e) {
+              console.error("[whatsapp] /brief PDF text extraction failed:", e.message);
+            }
+          }
+          const reply = await askClaudeWithMemory("whatsapp", from, caption, buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), opts);
           await waSend(from, reply);
         } else { await waSend(from, "I can read images and PDFs. Please resend in one of those formats."); }
         return;
