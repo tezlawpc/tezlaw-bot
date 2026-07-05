@@ -195,6 +195,178 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     };
   }
 
+  // ── /brief — Ingest a firm document into moat (Phase 2) ──
+  //  Usage:
+  //    /brief <optional source URL>
+  //    (as text): full document text
+  //    (as PDF attachment): PDF is auto-extracted
+  //
+  //  Zara will pre-flight check public/private, redact PII, extract structure,
+  //  embed, and store. Only public documents accepted by default.
+  const briefMatch = lower.match(/^\/brief(?:\s+(.*))?$/);
+  if (briefMatch) {
+    try {
+      const { ingestDocument } = require("./firm-documents");
+      const argsText = briefMatch[1] || "";
+
+      // Parse optional URL from args
+      const urlMatch = argsText.match(/https?:\/\/\S+/);
+      const sourceUrl = urlMatch ? urlMatch[0] : null;
+      const labelHint = argsText.replace(urlMatch ? urlMatch[0] : "", "").trim();
+
+      // Get document text: either from PDF or from message body (after /brief line)
+      let docText = null;
+
+      if (options.isPdf && options.pdfText) {
+        // pdfText is expected to be pre-extracted plain text from the PDF
+        docText = options.pdfText;
+      } else if (options.pdfData) {
+        return { handled: true, message: "⚠️ PDF received but no text extracted. The upload handler needs to pass options.pdfText (extracted plaintext) for /brief to work. Alternatively, paste the document text directly." };
+      } else {
+        // Look for document text after the /brief line (multi-line message)
+        const lines = userMessage.split("\n");
+        if (lines.length > 1) {
+          docText = lines.slice(1).join("\n").trim();
+        }
+      }
+
+      if (!docText || docText.length < 200) {
+        return {
+          handled: true,
+          message: [
+            "📥 *Firm Document Ingestion*",
+            "",
+            "To upload a document to firm memory:",
+            "",
+            "*Option A* — Paste text:",
+            "```",
+            "/brief https://source-url.com (optional)",
+            "<paste full document text here>",
+            "```",
+            "",
+            "*Option B* — Attach a PDF with `/brief` as caption.",
+            "",
+            "⚠️ *ONLY public/filed documents accepted.* Zara will refuse anything that looks like private client work.",
+            "",
+            "Once ingested, Zara will search these alongside published cases in future JJ answers.",
+          ].join("\n")
+        };
+      }
+
+      // Actually ingest (async, but we wait so we can return the result)
+      const notice = "⏳ Ingesting document — pre-flight check + redaction + extraction + embedding. Takes ~30-60 seconds...";
+      // Fire-and-await
+      const result = await ingestDocument({
+        text: docText,
+        sourceUrl,
+        matterLabelOverride: labelHint || null,
+        allowPrivate: false,
+        actorId: "jj",
+      });
+
+      if (!result.ok) {
+        const preflightInfo = result.preflight
+          ? `\n\n_Preflight verdict: ${result.preflight.verdict}_\n_Reason: ${result.preflight.reason}_${
+              (result.preflight.redFlags || []).length ? "\n_Red flags: " + result.preflight.redFlags.join(", ") + "_" : ""
+            }`
+          : "";
+        return {
+          handled: true,
+          message: `❌ *Ingestion refused*\n\n${result.reason}${preflightInfo}`
+        };
+      }
+
+      return {
+        handled: true,
+        message: [
+          "✅ *Document ingested*",
+          "",
+          `📄 *${result.matterLabel}*`,
+          `Type: ${result.documentType} • Practice: ${result.practiceArea}`,
+          `Public: ${result.isPublic ? "yes" : "unclear"}`,
+          "",
+          `📊 Extracted:`,
+          `  • ${result.keyIssuesCount} legal issues`,
+          `  • ${result.keyArgumentsCount} key arguments`,
+          `  • ${result.authoritiesCount} authorities cited`,
+          `  • ${result.redactionsCount} PII items redacted`,
+          `  • Embedded: ${result.hasEmbedding ? "yes" : "no (search will still work by metadata)"}`,
+          "",
+          `Doc ID: ${result.docId}`,
+          "",
+          `_Zara will now cite this in future JJ answers when relevant._`,
+          "",
+          `Add outcome later: \`/outcome ${result.docId} won|lost|settled|pending [notes]\``,
+        ].join("\n")
+      };
+    } catch (e) {
+      console.error("[JJ-Mode] /brief error:", e.message, e.stack);
+      return { handled: true, message: `❌ /brief error: ${e.message}` };
+    }
+  }
+
+  // ── /firm — List, delete firm documents ──
+  const firmListMatch = lower.match(/^\/firm\s+(list|recent)(?:\s+(\w+))?$/);
+  if (firmListMatch) {
+    try {
+      const { listFirmDocs } = require("./firm-documents");
+      const practiceArea = firmListMatch[2] || null;
+      const rows = await listFirmDocs({ limit: 15, practiceArea });
+      if (!rows.length) {
+        return { handled: true, message: "📚 No firm documents ingested yet. Use `/brief` to add one." };
+      }
+      const lines = rows.map(r => {
+        const dt = r.uploaded_at.toISOString().split("T")[0];
+        const outc = r.outcome ? ` • outcome:${r.outcome}` : "";
+        return `#${r.id} — *${r.matter_label}*\n   ${r.document_type} • ${r.practice_area} • ${dt}${outc}`;
+      });
+      return {
+        handled: true,
+        message: `📚 *Firm documents* (${rows.length}${practiceArea ? " in " + practiceArea : ""}):\n\n${lines.join("\n\n")}`
+      };
+    } catch (e) {
+      console.error("[JJ-Mode] /firm list error:", e.message);
+      return { handled: true, message: `❌ Error: ${e.message}` };
+    }
+  }
+
+  const firmDeleteMatch = lower.match(/^\/firm\s+delete\s+(\d+)$/);
+  if (firmDeleteMatch) {
+    try {
+      const { deleteFirmDoc } = require("./firm-documents");
+      const id = parseInt(firmDeleteMatch[1], 10);
+      const result = await deleteFirmDoc(id, "jj");
+      return {
+        handled: true,
+        message: result.ok
+          ? `🗑️ Deleted #${id} — ${result.deleted}`
+          : `❌ ${result.reason}`
+      };
+    } catch (e) {
+      return { handled: true, message: `❌ Delete error: ${e.message}` };
+    }
+  }
+
+  // ── /outcome <id> <outcome> [notes] — Mark case outcome ──
+  const outcomeMatch = lower.match(/^\/outcome\s+(\d+)\s+(won|lost|settled|pending|unknown|withdrawn|dismissed)(?:\s+(.+))?$/);
+  if (outcomeMatch) {
+    try {
+      const { updateOutcome } = require("./firm-documents");
+      const id     = parseInt(outcomeMatch[1], 10);
+      const status = outcomeMatch[2];
+      const notes  = outcomeMatch[3] || null;
+      const result = await updateOutcome(id, status, notes, "jj");
+      return {
+        handled: true,
+        message: result.ok
+          ? `✅ Outcome recorded — #${id} (${result.matterLabel}): ${status}${notes ? "\n_" + notes + "_" : ""}`
+          : `❌ ${result.reason}`
+      };
+    } catch (e) {
+      return { handled: true, message: `❌ Outcome error: ${e.message}` };
+    }
+  }
+
   // Build JJ-specific system prompt
   const jjContext = await getJJContext();
   let jjSystemPrompt = buildJJSystemPrompt(jjContext);
@@ -206,7 +378,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
   // continues normally.
   if (!options.isPdf && !options.isImage && userMessage && userMessage.length >= 40) {
     const lowerMsg = userMessage.trim().toLowerCase();
-    const isCommand = /^\/(approve|reject|status|pending|help|logout|exit)/.test(lowerMsg);
+    const isCommand = /^\/(approve|reject|status|pending|help|logout|exit|brief|firm|outcome)/.test(lowerMsg);
     const isAckOnly = /^(yes|no|ok|okay|continue|go|good|thanks|thank you|great|nice|cool|got it)[.!?]?$/.test(lowerMsg);
 
     if (!isCommand && !isAckOnly) {
@@ -235,6 +407,27 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
         }
       } catch (e) {
         console.error("[JJ-Mode] Moat search failed (fail-open):", e.message);
+      }
+
+      // ─── FIRM DOCUMENTS SEARCH (Phase 2 self-learning) ────
+      try {
+        const { searchFirmDocs, formatFirmContext } = require("./firm-documents");
+        const firmStart = Date.now();
+        const firmResults = await searchFirmDocs(userMessage, { limit: 5 });
+        const firmMs = Date.now() - firmStart;
+
+        if (firmResults && firmResults.length) {
+          const firmContext = formatFirmContext(firmResults, { maxLength: 3000 });
+          jjSystemPrompt = jjSystemPrompt +
+            "\n\n" + firmContext +
+            "\n\nIMPORTANT: When drawing on 'FROM OUR FIRM'S WORK' above, phrase it as 'In our firm's prior work on [issue], we argued...' — DO NOT name specific clients, and DO NOT quote unredacted names. " +
+            "This material is from PUBLIC filings/publications only. Weight it alongside published precedent, but clearly label firm-sourced insights so JJ knows the provenance.";
+          console.log(`[JJ-Mode] 📚 Firm docs: ${firmResults.length} results in ${firmMs}ms, top sim ${(firmResults[0].similarity * 100).toFixed(0)}%`);
+        } else {
+          console.log(`[JJ-Mode] 📚 Firm docs: 0 results (${firmMs}ms)`);
+        }
+      } catch (e) {
+        console.error("[JJ-Mode] Firm docs search failed (fail-open):", e.message);
       }
     }
   }
