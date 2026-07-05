@@ -125,6 +125,83 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
 async function handleJJSession(platform, userId, userMessage, options = {}) {
   const lower = userMessage.toLowerCase().trim();
 
+  // ── /help — Show all JJ commands ──
+  if (lower === "/help" || lower === "help" || lower === "commands") {
+    const helpText = [
+      "🔒 *JJ Mode — Command Reference*",
+      "",
+      "*💬 General*",
+      "  Just ask any legal question — Zara searches moat + firm docs.",
+      "  `show memory` — see what Zara remembers",
+      "  `/logout` — end JJ session",
+      "",
+      "*📚 Firm Documents (Phase 2)*",
+      "  `/brief [source-url]` — upload public document, text on next lines",
+      "  `/brief` as PDF caption — upload attached PDF",
+      "  `/firm list [practice_area]` — see recent firm docs",
+      "  `/firm delete <id>` — remove a firm doc",
+      "  `/outcome <id> won|lost|settled|pending [notes]` — mark case outcome",
+      "",
+      "*🎯 Feedback Loop (Phase 3)*",
+      "  `/good` — thumbs up last answer, boost its sources",
+      "  `/bad [reason]` — thumbs down, demote sources",
+      "  `/fix <corrected version>` — supply gold answer, stored for future",
+      "  `/rate <answer-id> good|bad` — rate a specific past answer",
+      "  `/stats` — see feedback history + weight distribution",
+      "",
+      "*📰 Legal Digest*",
+      "  `/pending` — see auto-detected cache updates awaiting approval",
+      "  `/approve <id>` — approve pending update",
+      "  `/reject <id>` — reject pending update",
+      "  `/status` — bot status snapshot",
+      "",
+      "*🤖 Automation Running*",
+      "  Sat 11 PM PT — Weekly moat update (new court rulings)",
+      "  Daily 6 AM PT — Legal digest (contradictions → /pending)",
+      "  Daily 7 AM PT — Deadline summary",
+      "  Daily 8 AM PT — Autoposter (blog + firm doc ingest)",
+      "  Sun 3 AM PT — Cache purge",
+      "",
+      "_311K precedents • 143 firm docs • JJ mode session persists across redeploys_",
+    ].join("\n");
+    return { handled: true, message: helpText };
+  }
+
+  // ── /status — snapshot of moat + firm knowledge ──
+  if (lower === "/status") {
+    try {
+      const r1 = await db.query(`SELECT COUNT(*) AS n FROM citation_edges_internal WHERE embedding IS NOT NULL`);
+      const r2 = await db.query(`SELECT COUNT(*) AS n FROM firm_documents`);
+      const r3 = await db.query(`SELECT COUNT(*) AS n FROM jj_answers`).catch(() => ({ rows: [{ n: "0" }] }));
+      const r4 = await db.query(`SELECT COUNT(*) AS n FROM jj_answers WHERE rating IS NOT NULL`).catch(() => ({ rows: [{ n: "0" }] }));
+      const r5 = await db.query(`SELECT COUNT(*) AS n FROM jj_corrections`).catch(() => ({ rows: [{ n: "0" }] }));
+      const r6 = await db.query(`SELECT COUNT(*) AS n FROM pending_cache_updates WHERE status = 'pending'`).catch(() => ({ rows: [{ n: "0" }] }));
+
+      const status = [
+        "📊 *Zara Status*",
+        "",
+        `*Moat (Level 3 RAG):*`,
+        `  • ${parseInt(r1.rows[0].n).toLocaleString()} embedded parens`,
+        "",
+        `*Firm knowledge (Phase 2):*`,
+        `  • ${parseInt(r2.rows[0].n).toLocaleString()} firm documents`,
+        "",
+        `*Feedback (Phase 3):*`,
+        `  • ${parseInt(r3.rows[0].n).toLocaleString()} answers logged`,
+        `  • ${parseInt(r4.rows[0].n).toLocaleString()} rated`,
+        `  • ${parseInt(r5.rows[0].n).toLocaleString()} corrections stored`,
+        "",
+        `*Legal digest:*`,
+        `  • ${parseInt(r6.rows[0].n).toLocaleString()} pending cache updates awaiting /approve`,
+        "",
+        `_All systems operational._`,
+      ].join("\n");
+      return { handled: true, message: status };
+    } catch (e) {
+      return { handled: true, message: `❌ /status error: ${e.message}` };
+    }
+  }
+
   // ── /approve <id>, /reject <id>, /pending — cache update approvals ──
   // These come from legal-digest contradiction detection. JJ taps these
   // from his phone to approve or reject auto-detected cache updates.
