@@ -372,9 +372,129 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     }
   }
 
+  // ── PHASE 3 FEEDBACK COMMANDS ─────────────────────────────
+  const chatIdForFeedback = options.chatId || `${platform}:${userId}`;
+
+  // /good — thumbs up the last answer
+  if (lower === "/good") {
+    try {
+      const { getLastAnswer, rateAnswer } = require("./feedback-loop");
+      const last = await getLastAnswer(chatIdForFeedback);
+      if (!last) return { handled: true, message: "No recent answer to rate. Ask me something first." };
+      if (last.rating) return { handled: true, message: `Answer #${last.id} was already rated: ${last.rating}` };
+      const result = await rateAnswer(last.id, "good");
+      if (!result.ok) return { handled: true, message: `❌ ${result.reason}` };
+      return {
+        handled: true,
+        message: `👍 Rated answer #${last.id} as GOOD.\n\n${result.updatedSources} sources boosted. Zara will surface them more often for similar questions.`
+      };
+    } catch (e) {
+      return { handled: true, message: `❌ /good error: ${e.message}` };
+    }
+  }
+
+  // /bad [reason] — thumbs down the last answer
+  const badMatch = userMessage.match(/^\/bad(?:\s+(.+))?$/i);
+  if (badMatch) {
+    try {
+      const { getLastAnswer, rateAnswer } = require("./feedback-loop");
+      const reason = badMatch[1] || null;
+      const last = await getLastAnswer(chatIdForFeedback);
+      if (!last) return { handled: true, message: "No recent answer to rate." };
+      if (last.rating) return { handled: true, message: `Already rated: ${last.rating}` };
+      const result = await rateAnswer(last.id, "bad", reason);
+      if (!result.ok) return { handled: true, message: `❌ ${result.reason}` };
+      return {
+        handled: true,
+        message: `👎 Rated answer #${last.id} as BAD.\n\n${result.updatedSources} sources demoted.${reason ? "\n\n_Reason: " + reason + "_" : ""}`
+      };
+    } catch (e) {
+      return { handled: true, message: `❌ /bad error: ${e.message}` };
+    }
+  }
+
+  // /rate <id> <good|bad> [reason] — rate a specific answer by ID
+  const rateMatch = userMessage.match(/^\/rate\s+(\d+)\s+(good|bad)(?:\s+(.+))?$/i);
+  if (rateMatch) {
+    try {
+      const { rateAnswer } = require("./feedback-loop");
+      const id = parseInt(rateMatch[1], 10);
+      const rating = rateMatch[2].toLowerCase();
+      const reason = rateMatch[3] || null;
+      const result = await rateAnswer(id, rating, reason);
+      if (!result.ok) return { handled: true, message: `❌ ${result.reason}` };
+      return {
+        handled: true,
+        message: `${rating === "good" ? "👍" : "👎"} Rated answer #${id} as ${rating.toUpperCase()}.\n${result.updatedSources} sources updated.`
+      };
+    } catch (e) {
+      return { handled: true, message: `❌ /rate error: ${e.message}` };
+    }
+  }
+
+  // /fix <corrected version> — apply a correction
+  const fixMatch = userMessage.match(/^\/fix\b\s*([\s\S]*)$/i);
+  if (fixMatch) {
+    try {
+      const { getLastAnswer, recordCorrection } = require("./feedback-loop");
+      const correction = fixMatch[1].trim();
+      if (!correction || correction.length < 50) {
+        return {
+          handled: true,
+          message: "Usage: `/fix <your corrected version>` — supply at least a full corrected paragraph.\n\nExample:\n```\n/fix\nActually the right analysis is: [your corrected version]\n```"
+        };
+      }
+      const last = await getLastAnswer(chatIdForFeedback);
+      if (!last) return { handled: true, message: "No recent answer to fix." };
+      if (last.rating) return { handled: true, message: `Answer #${last.id} was already rated: ${last.rating}` };
+      const result = await recordCorrection(last.id, correction);
+      if (!result.ok) return { handled: true, message: `❌ ${result.reason}` };
+      return {
+        handled: true,
+        message: `🔧 Correction recorded for answer #${last.id}.\n\nWhen a similar question comes up, Zara will reference your corrected version. Sources from the original answer have been demoted.`
+      };
+    } catch (e) {
+      console.error("[JJ-Mode] /fix error:", e.message, e.stack);
+      return { handled: true, message: `❌ /fix error: ${e.message}` };
+    }
+  }
+
+  // /stats — feedback and moat statistics
+  if (lower === "/stats") {
+    try {
+      const { getFeedbackStats } = require("./feedback-loop");
+      const s = await getFeedbackStats();
+      const lines = [
+        "📊 *Feedback Loop Stats*",
+        "",
+        `*Answers:*`,
+        `  • Total: ${s.answers.total_answers}`,
+        `  • 👍 Good: ${s.answers.good_count}`,
+        `  • 👎 Bad: ${s.answers.bad_count}`,
+        `  • 🔧 Corrected: ${s.answers.corrected_count}`,
+        `  • Unrated: ${s.answers.unrated_count}`,
+        "",
+        `*Source weights:*`,
+      ];
+      for (const row of s.sources) {
+        lines.push(`  • ${row.source_type}: ${row.n} sources | avg=${row.avg_weight} | boosted=${row.boosted} | demoted=${row.demoted}`);
+      }
+      lines.push("");
+      lines.push(`*Corrections stored:* ${s.corrections}`);
+      return { handled: true, message: lines.join("\n") };
+    } catch (e) {
+      return { handled: true, message: `❌ /stats error: ${e.message}` };
+    }
+  }
+
   // Build JJ-specific system prompt
   const jjContext = await getJJContext();
   let jjSystemPrompt = buildJJSystemPrompt(jjContext);
+
+  // Track retrieved source IDs for feedback recording later
+  let retrievedMoatIds = [];
+  let retrievedFirmIds = [];
+  let correctionFound = null;
 
   // ─── Phase D: LEVEL 3 RAG MOAT INJECTION ───────────────────
   // For substantive text questions, semantically search the paren
@@ -383,19 +503,67 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
   // continues normally.
   if (!options.isPdf && !options.isImage && userMessage && userMessage.length >= 40) {
     const lowerMsg = userMessage.trim().toLowerCase();
-    const isCommand = /^\/(approve|reject|status|pending|help|logout|exit|brief|firm|outcome)/.test(lowerMsg);
+    const isCommand = /^\/(approve|reject|status|pending|help|logout|exit|brief|firm|outcome|good|bad|fix|stats|rate)/.test(lowerMsg);
     const isAckOnly = /^(yes|no|ok|okay|continue|go|good|thanks|thank you|great|nice|cool|got it)[.!?]?$/.test(lowerMsg);
 
     if (!isCommand && !isAckOnly) {
+      // ─── PHASE 3: Check for stored correction on similar question ──
+      try {
+        const { findRelevantCorrection } = require("./feedback-loop");
+        correctionFound = await findRelevantCorrection(userMessage);
+        if (correctionFound) {
+          console.log(`[JJ-Mode] 🔧 Found relevant correction (sim ${(correctionFound.similarity * 100).toFixed(0)}%): "${correctionFound.originalQuestion.substring(0, 60)}..."`);
+          jjSystemPrompt = jjSystemPrompt +
+            "\n\n═════════════════════════════════════════\n" +
+            "  JJ'S PRIOR CORRECTION ON SIMILAR QUESTION\n" +
+            "═════════════════════════════════════════\n\n" +
+            `Original question: "${correctionFound.originalQuestion}"\n\n` +
+            `JJ's corrected answer:\n${correctionFound.correction}\n\n` +
+            "IMPORTANT: JJ previously corrected an answer on a similar question. Treat his correction as the GOLD STANDARD for how to answer questions in this pattern. Adapt the reasoning to the current specific question, but do not deviate from the analytical framework JJ established.";
+        }
+      } catch (e) {
+        console.log("[JJ-Mode] Correction lookup failed (non-fatal):", e.message);
+      }
+
+      // Load weight lookup helper once
+      let getWeightMap = null;
+      try {
+        getWeightMap = require("./feedback-loop").getWeightMap;
+      } catch (_) {}
+
       try {
         const { searchParensHybrid, formatMoatContext } = require("./judge-cross-reference");
         const moatStart = Date.now();
-        const results = await searchParensHybrid(userMessage, {
-          limit: 15,
+        let results = await searchParensHybrid(userMessage, {
+          limit: 30,        // fetch more than we'll use; weighting may re-rank
           minSimilarity: 0.35,
           candidatePoolSize: 3000,
         });
         const moatMs = Date.now() - moatStart;
+
+        // Apply weight boosts if feedback-loop is available
+        if (results && results.length && getWeightMap) {
+          try {
+            const ids = results.map(r => r.id);
+            const weights = await getWeightMap("moat", ids);
+            for (const r of results) {
+              const w = weights.get(r.id);
+              if (w !== undefined) {
+                r.originalSimilarity = r.similarity;
+                r.similarity = r.similarity * w;
+                r.weightApplied = w;
+              }
+            }
+            // Re-sort by weighted similarity
+            results.sort((a, b) => b.similarity - a.similarity);
+          } catch (e) {
+            console.log("[JJ-Mode] Weight application failed (non-fatal):", e.message);
+          }
+        }
+
+        // Take top 15 after weighting
+        results = (results || []).slice(0, 15);
+        retrievedMoatIds = results.map(r => r.id);
 
         if (results && results.length) {
           const moatContext = formatMoatContext(results, { maxLength: 4500 });
@@ -418,8 +586,30 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       try {
         const { searchFirmDocs, formatFirmContext } = require("./firm-documents");
         const firmStart = Date.now();
-        const firmResults = await searchFirmDocs(userMessage, { limit: 5 });
+        let firmResults = await searchFirmDocs(userMessage, { limit: 10 });   // fetch more, weight, take top 5
         const firmMs = Date.now() - firmStart;
+
+        // Apply weight boosts
+        if (firmResults && firmResults.length && getWeightMap) {
+          try {
+            const ids = firmResults.map(r => r.id);
+            const weights = await getWeightMap("firm", ids);
+            for (const r of firmResults) {
+              const w = weights.get(r.id);
+              if (w !== undefined) {
+                r.originalSimilarity = r.similarity;
+                r.similarity = r.similarity * w;
+                r.weightApplied = w;
+              }
+            }
+            firmResults.sort((a, b) => b.similarity - a.similarity);
+          } catch (e) {
+            console.log("[JJ-Mode] Firm weight application failed (non-fatal):", e.message);
+          }
+        }
+
+        firmResults = (firmResults || []).slice(0, 5);
+        retrievedFirmIds = firmResults.map(r => r.id);
 
         if (firmResults && firmResults.length) {
           const firmContext = formatFirmContext(firmResults, { maxLength: 3000 });
@@ -577,13 +767,39 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     // Send voice reply async — non-blocking, text already returned
     sendVoiceReply(platform, userId, reply).catch(() => {});
 
+    // ── PHASE 3: Record the answer for feedback tracking ──
+    let answerId = null;
+    try {
+      const { recordAnswer } = require("./feedback-loop");
+      answerId = await recordAnswer({
+        chatId: chatIdForFeedback,
+        question: userMessage || "",
+        answer: reply,
+        moatIds: retrievedMoatIds,
+        firmDocIds: retrievedFirmIds,
+      });
+      console.log(`[JJ-Mode] 📝 Recorded answer #${answerId} for feedback (moat:${retrievedMoatIds.length} firm:${retrievedFirmIds.length})`);
+    } catch (e) {
+      console.log("[JJ-Mode] Answer recording failed (non-fatal):", e.message);
+    }
+
+    // Build source hint for JJ's rating context
+    let sourceHint = "";
+    if (answerId && (retrievedMoatIds.length || retrievedFirmIds.length || correctionFound)) {
+      const parts = [];
+      if (retrievedMoatIds.length) parts.push(`${retrievedMoatIds.length} moat`);
+      if (retrievedFirmIds.length) parts.push(`${retrievedFirmIds.length} firm`);
+      if (correctionFound)          parts.push(`prior correction (${(correctionFound.similarity * 100).toFixed(0)}%)`);
+      sourceHint = `\n\n_📊 Answer #${answerId} • Sources: ${parts.join(", ")} • Rate with /good /bad /fix_`;
+    }
+
     // ── PHASE E: MESSAGE CHUNKING ─────────────────────────
     // WhatsApp: 4096-char limit. Telegram: 4096. Messenger: 2000.
     // Instead of truncating, split at natural paragraph boundaries
     // and send as multiple messages. Return the first chunk normally;
     // send subsequent chunks async via the sendFn passed into
     // processMessage in askClaude-memory.js.
-    const fullMessage = "🔒 [JJ Mode]\n\n" + docNote + reply;
+    const fullMessage = "🔒 [JJ Mode]\n\n" + docNote + reply + sourceHint;
     const CHUNK_LIMIT = platform === "messenger" ? 1900 : 3900;
 
     if (fullMessage.length <= CHUNK_LIMIT) {
