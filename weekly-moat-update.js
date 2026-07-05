@@ -40,7 +40,40 @@ const PER_COURT_MAX_CLUSTERS = 500;
 const PER_COURT_TIMEOUT_MS = 25 * 60 * 1000;    // 25 min per court
 const EMBED_TIMEOUT_MS = 60 * 60 * 1000;         // 60 min for embed
 const HARD_BUDGET_USD = 2.00;
-const MIN_OPENAI_BALANCE = 0.50;  // skip if OpenAI has less than $0.50 (rough check)
+const MIN_OPENAI_BALANCE = 0.50;
+
+// ── Process Lock ───────────────────────────────────────────
+const LOCK_NAME = "weekly_moat_update";
+
+async function acquireLock() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS process_locks (
+      name        TEXT PRIMARY KEY,
+      pid         INTEGER,
+      hostname    TEXT,
+      acquired_at TIMESTAMPTZ DEFAULT NOW(),
+      expires_at  TIMESTAMPTZ
+    )
+  `).catch(e => { if (e.code !== "23505") throw e; });
+
+  const r = await db.query(`
+    INSERT INTO process_locks (name, pid, hostname, expires_at)
+    VALUES ($1, $2, $3, NOW() + INTERVAL '3 hours')
+    ON CONFLICT (name) DO UPDATE SET
+      pid = EXCLUDED.pid,
+      hostname = EXCLUDED.hostname,
+      acquired_at = NOW(),
+      expires_at = EXCLUDED.expires_at
+    WHERE process_locks.expires_at < NOW() OR process_locks.pid IS NULL
+    RETURNING pid
+  `, [LOCK_NAME, process.pid, require("os").hostname()]);
+
+  return r.rows.length > 0;
+}
+
+async function releaseLock() {
+  await db.query(`DELETE FROM process_locks WHERE name = $1 AND pid = $2`, [LOCK_NAME, process.pid]).catch(() => {});
+}
 
 // ── Helpers ────────────────────────────────────────────────
 
@@ -192,13 +225,42 @@ async function scanCourt(court) {
 }
 
 /** Runs populate-citation-edges to extract edges/parens from any new rulings. */
+/**
+ * Runs populate-citation-edges to extract edges/parens from any new rulings.
+ * Strategy: iterate over PRIORITY_COURTS and process each. This ensures rulings
+ * from courts we care about get processed before backlog from other courts.
+ * Court filter uses full court name (as stored in judge_rulings.court).
+ */
 async function runCitationExtraction() {
-  return runNodeScript(
-    "./populate-citation-edges.js",
-    ["--commit", `--limit=1000`],  // safety cap: process at most 1000 rulings per run
-    EMBED_TIMEOUT_MS,
-    "extract-citations"
-  );
+  const results = [];
+
+  // Map short codes to the full court names stored in judge_rulings.court
+  const courtNameMap = {
+    ca9:  "9th Circuit Court of Appeals",
+    bia:  "Board of Immigration Appeals",
+    ca5:  "5th Circuit",
+    ca11: "11th Circuit",
+  };
+
+  for (const short of PRIORITY_COURTS) {
+    const fullName = courtNameMap[short];
+    if (!fullName) continue;
+    const r = await runNodeScript(
+      "./populate-citation-edges.js",
+      ["--commit", `--limit=2000`, `--court=${fullName}`],
+      EMBED_TIMEOUT_MS,
+      `extract-${short}`
+    );
+    results.push({ court: short, ...r });
+  }
+
+  // Combined result — take max timeout status, sum durations
+  return {
+    code: results.every(r => r.code === 0) ? 0 : 1,
+    timedOut: results.some(r => r.timedOut),
+    durMs: results.reduce((s, r) => s + r.durMs, 0),
+    perCourt: results,
+  };
 }
 
 /** Runs embed-parens for all unembedded rows. */
@@ -261,6 +323,15 @@ async function weeklyMoatUpdate() {
   const overallStart = Date.now();
   await ensureHistoryTable();
 
+  // Acquire process lock — prevents concurrent runs
+  const gotLock = await acquireLock();
+  if (!gotLock) {
+    console.log("[weekly-moat] Another weekly-moat-update is running (lock held) — skipping");
+    return { status: "skipped", reason: "lock held" };
+  }
+
+  try {
+
   // Check for concurrent run
   const runningCheck = await db.query(`
     SELECT id FROM moat_update_history
@@ -270,6 +341,7 @@ async function weeklyMoatUpdate() {
   `);
   if (runningCheck.rows.length > 0) {
     console.log("[weekly-moat] Another update is running — skipping");
+    await releaseLock();
     return;
   }
 
@@ -426,6 +498,11 @@ async function weeklyMoatUpdate() {
     durationSec,
     historyId,
   };
+
+  } finally {
+    // Always release the lock, even on error
+    await releaseLock();
+  }
 }
 
 // ── Cron Scheduler ─────────────────────────────────────────
