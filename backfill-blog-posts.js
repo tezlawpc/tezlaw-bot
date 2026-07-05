@@ -21,6 +21,7 @@
 
 const axios = require("axios");
 const { ingestDocument } = require("./firm-documents");
+const db = require("./db");
 
 const WP_URL          = process.env.WP_URL || "https://tezlawfirm.com";
 const WP_USER         = process.env.WP_USER;
@@ -30,6 +31,60 @@ if (!WP_USER || !WP_APP_PASSWORD) {
   console.error("Missing WP_USER or WP_APP_PASSWORD env vars");
   process.exit(1);
 }
+
+// ── Process lock — prevents two backfills running simultaneously ──
+const LOCK_NAME = "backfill_blog_posts";
+
+async function acquireLock() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS process_locks (
+      name        TEXT PRIMARY KEY,
+      pid         INTEGER,
+      hostname    TEXT,
+      acquired_at TIMESTAMPTZ DEFAULT NOW(),
+      expires_at  TIMESTAMPTZ
+    )
+  `).catch(e => { if (e.code !== "23505") throw e; });
+
+  // Try to insert or update the lock. If someone holds it and it's not stale, fail.
+  const r = await db.query(`
+    INSERT INTO process_locks (name, pid, hostname, expires_at)
+    VALUES ($1, $2, $3, NOW() + INTERVAL '3 hours')
+    ON CONFLICT (name) DO UPDATE SET
+      pid = EXCLUDED.pid,
+      hostname = EXCLUDED.hostname,
+      acquired_at = NOW(),
+      expires_at = EXCLUDED.expires_at
+    WHERE process_locks.expires_at < NOW() OR process_locks.pid IS NULL
+    RETURNING pid, hostname, acquired_at, expires_at
+  `, [LOCK_NAME, process.pid, require("os").hostname()]);
+
+  if (r.rows.length === 0) {
+    // Lock is currently held. Show who.
+    const holder = await db.query(`SELECT pid, hostname, acquired_at, expires_at FROM process_locks WHERE name = $1`, [LOCK_NAME]);
+    return { acquired: false, holder: holder.rows[0] };
+  }
+
+  return { acquired: true, ...r.rows[0] };
+}
+
+async function releaseLock() {
+  await db.query(`DELETE FROM process_locks WHERE name = $1 AND pid = $2`, [LOCK_NAME, process.pid]);
+}
+
+// Best-effort cleanup on any exit
+process.on("exit", () => {
+  // Note: can't await here since exit is sync — release happens in finally block below
+});
+process.on("SIGINT", async () => {
+  console.log("\n\nInterrupt received, releasing lock...");
+  await releaseLock().catch(() => {});
+  process.exit(130);
+});
+process.on("SIGTERM", async () => {
+  await releaseLock().catch(() => {});
+  process.exit(143);
+});
 
 // ── Parse args ─────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -76,6 +131,24 @@ function guessLang(title) {
 (async () => {
   const auth = Buffer.from(`${WP_USER}:${WP_APP_PASSWORD}`).toString("base64");
 
+  // Acquire process lock first
+  const lock = await acquireLock();
+  if (!lock.acquired) {
+    console.error("═".repeat(60));
+    console.error("  BACKFILL ALREADY RUNNING");
+    console.error("═".repeat(60));
+    console.error(`  Current holder: PID ${lock.holder.pid} on ${lock.holder.hostname}`);
+    console.error(`  Acquired at:    ${lock.holder.acquired_at}`);
+    console.error(`  Expires at:     ${lock.holder.expires_at}`);
+    console.error("");
+    console.error("  If you're sure the other process is dead, wait for the lock to");
+    console.error("  expire (3h TTL) or manually delete it:");
+    console.error(`  node -e "require('./db').query(\\"DELETE FROM process_locks WHERE name='${LOCK_NAME}'\\").then(()=>process.exit(0))"`);
+    process.exit(1);
+  }
+  console.log(`[lock] Acquired ${LOCK_NAME} (PID ${process.pid})`);
+
+  try {
   console.log("═".repeat(60));
   console.log("  WordPress Blog Backfill → firm_documents");
   console.log("═".repeat(60));
@@ -206,8 +279,16 @@ function guessLang(title) {
   console.log(`  💰 Estimated cost:   $${estCost}`);
   console.log("═".repeat(60));
 
+  await releaseLock();
+  console.log(`[lock] Released ${LOCK_NAME}`);
   process.exit(0);
-})().catch(e => {
+  } catch (e) {
+    console.error("Main error:", e);
+    await releaseLock().catch(() => {});
+    process.exit(1);
+  }
+})().catch(async e => {
   console.error("Fatal error:", e);
+  await releaseLock().catch(() => {});
   process.exit(1);
 });
