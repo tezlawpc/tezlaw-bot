@@ -198,12 +198,17 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
   // ── /brief — Ingest a firm document into moat (Phase 2) ──
   //  Usage:
   //    /brief <optional source URL>
-  //    (as text): full document text
-  //    (as PDF attachment): PDF is auto-extracted
+  //    <document text on subsequent lines>
+  //
+  //    Or attach PDF with /brief as caption.
   //
   //  Zara will pre-flight check public/private, redact PII, extract structure,
   //  embed, and store. Only public documents accepted by default.
-  const briefMatch = lower.match(/^\/brief(?:\s+(.*))?$/);
+  //
+  //  Note: matches on the FIRST line of the message (multi-line messages have
+  //  document body on lines 2+).
+  const firstLine = lower.split("\n", 1)[0].trim();
+  const briefMatch = firstLine.match(/^\/brief(?:\s+(.*))?$/);
   if (briefMatch) {
     try {
       const { ingestDocument } = require("./firm-documents");
