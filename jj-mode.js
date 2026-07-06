@@ -149,6 +149,15 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  `/rate <answer-id> good|bad` — rate a specific past answer",
       "  `/stats` — see feedback history + weight distribution",
       "",
+      "*📝 Template Drafting (Phase 4)*",
+      "  `/template add <name>` + attach .docx — save a template",
+      "  `/template list` — see all templates",
+      "  `/template show <name>` — see a template's placeholders",
+      "  `/template delete <name>` — remove template",
+      "  `/draft <name>` [+ attach facts PDF/DOCX] — generate a filled draft",
+      "    During drafting: reply `FIELD: value` (one per line) or `confirm`",
+      "    Cancel with `cancel`",
+      "",
       "*📰 Legal Digest*",
       "  `/pending` — see auto-detected cache updates awaiting approval",
       "  `/approve <id>` — approve pending update",
@@ -252,6 +261,229 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       console.error("[JJ-Mode] /pending error:", err.message);
       return { handled: true, message: `❌ Error fetching pending updates: ${err.message}` };
     }
+  }
+
+  // ── /template add|list|show|delete <name> — Phase 4 templates ──
+  // Template management for the drafting infrastructure.
+  //   /template add <name>          — attach a .docx; Zara saves it as a template
+  //   /template list                — show all saved templates
+  //   /template show <name>         — display template's placeholders + metadata
+  //   /template delete <name>       — remove a template
+  const templateMatch = lower.match(/^\/template\s+(add|list|show|delete|del|rm)(?:\s+(.+))?$/);
+  if (templateMatch) {
+    try {
+      const dt = require("./draft-templates");
+      const action = templateMatch[1];
+      const nameArg = (templateMatch[2] || "").trim();
+
+      if (action === "list") {
+        const templates = await dt.listTemplates();
+        if (!templates.length) {
+          return { handled: true, message: "📋 No templates saved yet.\n\nTo add one:\n1. Attach a .docx file with {{PLACEHOLDER}} markers\n2. Include caption: `/template add <name>`" };
+        }
+        const lines = templates.map(t => {
+          const meta = [t.practice_area, `${t.placeholder_count} placeholders`].filter(Boolean).join(" • ");
+          return `📄 *${t.name}*\n   ${meta}${t.description ? "\n   " + t.description : ""}`;
+        });
+        return { handled: true, message: `📋 ${templates.length} template(s):\n\n${lines.join("\n\n")}\n\nUse \`/draft <name>\` to generate.` };
+      }
+
+      if (action === "show") {
+        if (!nameArg) return { handled: true, message: "Usage: `/template show <name>`" };
+        const t = await dt.getTemplate(nameArg);
+        if (!t) return { handled: true, message: `❌ Template '${nameArg}' not found.` };
+        const phs = t.placeholders || [];
+        const simple = phs.filter(p => p.type === "simple");
+        const narrative = phs.filter(p => p.type === "narrative");
+        const lines = [
+          `📄 *${t.name}*`,
+          t.practice_area ? `Practice area: ${t.practice_area}` : null,
+          t.description ? `Description: ${t.description}` : null,
+          `Uploaded: ${new Date(t.uploaded_at).toLocaleDateString()}`,
+          "",
+          `*Simple fields (${simple.length}):*`,
+          ...simple.map(p => `  • ${p.name}  (${p.count}x)`),
+          "",
+          `*Narrative fields (${narrative.length}):*`,
+          ...narrative.map(p => `  • ${p.name}  (${p.count}x)`),
+        ].filter(Boolean);
+        return { handled: true, message: lines.join("\n") };
+      }
+
+      if (action === "delete" || action === "del" || action === "rm") {
+        if (!nameArg) return { handled: true, message: "Usage: `/template delete <name>`" };
+        const ok = await dt.deleteTemplate(nameArg);
+        return { handled: true, message: ok ? `🗑️ Deleted template '${nameArg}'.` : `❌ Template '${nameArg}' not found.` };
+      }
+
+      if (action === "add") {
+        if (!nameArg) return { handled: true, message: "Usage: `/template add <name>` (attach a .docx file with this message)" };
+        if (!options.isDocx || !options.docxData) {
+          return { handled: true, message: `❌ To add a template, attach a .docx file with your \`/template add ${nameArg}\` message.` };
+        }
+        const docxBuffer = Buffer.from(options.docxData, "base64");
+        const result = await dt.saveTemplate({
+          name: nameArg,
+          docxBuffer,
+          practiceArea: options.templatePracticeArea || null,
+          description: options.templateDescription || null,
+        });
+        const simple = result.placeholders.filter(p => p.type === "simple").length;
+        const narrative = result.placeholders.filter(p => p.type === "narrative").length;
+        return { handled: true, message: `✅ Template '${result.name}' saved (#${result.id}).\n\nDetected ${result.placeholders.length} placeholders:\n  • ${simple} simple fields (auto-fill from facts)\n  • ${narrative} narrative fields (I'll draft with moat + firm docs)\n\nTo generate: \`/draft ${result.name}\` (optionally attach a facts document)` };
+      }
+    } catch (err) {
+      console.error("[JJ-Mode] /template error:", err.message);
+      return { handled: true, message: `❌ Template command error: ${err.message}` };
+    }
+  }
+
+  // ── /draft <name> — Phase 4 drafting pipeline ────────────
+  const draftMatch = lower.match(/^\/draft\s+(.+)$/);
+  if (draftMatch) {
+    try {
+      const dt = require("./draft-templates");
+      const templateName = draftMatch[1].trim();
+
+      const template = await dt.getTemplate(templateName);
+      if (!template) {
+        return { handled: true, message: `❌ Template '${templateName}' not found.\n\nUse \`/template list\` to see available templates.` };
+      }
+
+      // Extract facts document if attached
+      let factDocText = null;
+      if (options.isPdf && options.pdfData) {
+        try {
+          const buf = Buffer.from(options.pdfData, "base64");
+          factDocText = await dt.extractFactDocText(buf, "application/pdf");
+        } catch (e) { console.log("[draft] PDF extract failed:", e.message); }
+      } else if (options.isDocx && options.docxData) {
+        try {
+          const buf = Buffer.from(options.docxData, "base64");
+          factDocText = await dt.extractFactDocText(buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        } catch (e) { console.log("[draft] DOCX extract failed:", e.message); }
+      }
+
+      // Start session
+      await dt.startSession(userId, template.id, factDocText);
+
+      // Attempt to auto-fill simple placeholders from fact doc
+      let extracted = { collected: {}, notes: "" };
+      if (factDocText) {
+        extracted = await dt.autoFillSimpleFromFactDoc(template.placeholders, factDocText);
+      }
+
+      // Determine which simple fields are still missing
+      const simpleFields = template.placeholders.filter(p => p.type === "simple");
+      const collected = extracted.collected;
+      const missing = simpleFields
+        .filter(p => !collected[p.name])
+        .map(p => p.name);
+
+      await dt.updateSession(userId, {
+        collected,
+        missing_fields: missing,
+        state: missing.length ? "collecting_fields" : "awaiting_confirmation",
+      });
+
+      // Build user-facing message
+      const msgLines = [`📄 *Drafting: ${templateName}*`, ""];
+      if (factDocText) {
+        msgLines.push(`📎 Read your fact document (${factDocText.length.toLocaleString()} chars).`, "");
+      }
+
+      if (Object.keys(collected).length) {
+        msgLines.push("*Extracted values:*");
+        for (const [k, v] of Object.entries(collected)) {
+          const displayVal = v.length > 60 ? v.substring(0, 60) + "..." : v;
+          msgLines.push(`  ✓ ${dt.humanizeName(k)}: ${displayVal}`);
+        }
+        msgLines.push("");
+      }
+
+      if (missing.length) {
+        msgLines.push(`*Still needed (${missing.length}):*`);
+        for (const name of missing) {
+          msgLines.push(`  • ${dt.humanizeName(name)}  \`${name}\``);
+        }
+        msgLines.push("", "Reply with these values in the form:");
+        msgLines.push("`FIELD_NAME: value`");
+        msgLines.push("(one per line)");
+        msgLines.push("", "Or reply `skip` to leave missing fields blank and proceed.");
+      } else {
+        msgLines.push("All simple fields collected! Reply `confirm` to start drafting narrative sections, or `edit` to change values.");
+      }
+
+      return { handled: true, message: msgLines.join("\n") };
+    } catch (err) {
+      console.error("[JJ-Mode] /draft error:", err.message, err.stack);
+      return { handled: true, message: `❌ Draft error: ${err.message}` };
+    }
+  }
+
+  // ── In-session drafting handlers (multi-turn state) ──────
+  // If we have an active draft session, interpret this message as either:
+  //   - field values (FIELD: value)
+  //   - "confirm" to start drafting narratives
+  //   - "skip" to leave missing fields blank and start
+  //   - "cancel" to abort
+  try {
+    const dt = require("./draft-templates");
+    const session = await dt.getSession(userId);
+
+    if (session && ["collecting_fields", "awaiting_confirmation"].includes(session.state)) {
+      if (["cancel", "abort", "quit draft"].includes(lower)) {
+        await dt.clearSession(userId);
+        return { handled: true, message: "🛑 Draft cancelled." };
+      }
+
+      if (["confirm", "yes", "ok", "go", "proceed", "continue"].includes(lower)) {
+        return await handleDraftConfirmation(userId, session, options);
+      }
+
+      if (["skip", "skip missing", "leave blank"].includes(lower)) {
+        return await handleDraftConfirmation(userId, session, options);
+      }
+
+      // Try to parse as field values (FIELD_NAME: value, one per line)
+      const lines = userMessage.split("\n").map(l => l.trim()).filter(Boolean);
+      const updates = {};
+      for (const line of lines) {
+        const m = line.match(/^([A-Z0-9_]+)\s*[:=]\s*(.+)$/);
+        if (m) updates[m[1]] = m[2].trim();
+      }
+
+      if (Object.keys(updates).length) {
+        const collected = { ...(session.collected || {}), ...updates };
+        const templateResult = await db.query(
+          `SELECT placeholders FROM draft_templates WHERE id = $1`, [session.template_id]);
+        const placeholders = templateResult.rows[0]?.placeholders || [];
+        const simpleFields = placeholders.filter(p => p.type === "simple");
+        const missing = simpleFields.filter(p => !collected[p.name]).map(p => p.name);
+
+        await dt.updateSession(userId, {
+          collected,
+          missing_fields: missing,
+          state: missing.length ? "collecting_fields" : "awaiting_confirmation",
+        });
+
+        const msgLines = [`✓ Updated ${Object.keys(updates).length} field(s).`, ""];
+        if (missing.length) {
+          msgLines.push(`*Still needed (${missing.length}):*`);
+          for (const name of missing) {
+            msgLines.push(`  • ${dt.humanizeName(name)}  \`${name}\``);
+          }
+          msgLines.push("", "Reply with values or `skip` to proceed.");
+        } else {
+          msgLines.push("All fields collected! Reply `confirm` to start drafting narratives.");
+        }
+        return { handled: true, message: msgLines.join("\n") };
+      }
+      // else: fall through — user typed something else, treat as normal JJ chat
+    }
+  } catch (e) {
+    console.log("[JJ-Mode] Session check error:", e.message);
+    // Fall through to normal chat
   }
 
   // Exit JJ mode
@@ -1062,6 +1294,53 @@ function splitMessageForPlatform(text, limit = 3900) {
     );
   }
   return chunks;
+}
+
+// ── Draft Confirmation Handler (Phase 4) ─────────────────
+// Called when JJ says "confirm" / "skip" during a draft session.
+// Fires narrative-section drafting with progress updates and returns
+// the filled .docx via options.sendProgress + reply.attachment.
+async function handleDraftConfirmation(userId, session, options) {
+  const dt = require("./draft-templates");
+  const templateResult = await db.query(
+    `SELECT id, name, placeholders, docx_content FROM draft_templates WHERE id = $1`,
+    [session.template_id]
+  );
+
+  if (!templateResult.rows.length) {
+    await dt.clearSession(userId);
+    return { handled: true, message: "❌ Template not found. Draft cancelled." };
+  }
+
+  const t = templateResult.rows[0];
+  const sendProgress = options.sendProgress || (async (m) => console.log("[draft]", m));
+
+  await dt.updateSession(userId, { state: "drafting" });
+  await sendProgress(`⚙️ Starting draft for '${t.name}'...\n\nThis may take 2-4 minutes as I search moat + firm docs and draft each section.`);
+
+  try {
+    const filledDocx = await dt.completeDraft({
+      session,
+      template: t,
+      sendProgress,
+    });
+
+    await dt.clearSession(userId);
+
+    return {
+      handled: true,
+      message: `✅ *Draft complete for '${t.name}'*\n\nSending .docx file...`,
+      attachment: {
+        buffer: filledDocx,
+        filename: `${t.name}-${Date.now()}.docx`,
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      },
+    };
+  } catch (err) {
+    console.error("[JJ-Mode] Draft completion error:", err.message, err.stack);
+    await dt.clearSession(userId);
+    return { handled: true, message: `❌ Draft failed: ${err.message}` };
+  }
 }
 
 module.exports = {
