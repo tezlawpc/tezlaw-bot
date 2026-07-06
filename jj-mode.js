@@ -160,12 +160,14 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "    Cancel with `cancel`",
       "",
       "*📁 Case Files (persistent memory)*",
-      "  `/case add <name>` [+ attach docs, notes on next lines]",
-      "     Auto-creates the case if it doesn't exist yet.",
+      "  `#<name>` + attach doc / add notes — QUICK CASE STORAGE",
+      "     Auto-creates case if new. Example:",
+      "     `#huang-xifen` + attached PDF + notes on next lines",
+      "  `/case add <name>` — same as above, more explicit",
       "  `/case notes <name>` + notes on next lines — append notes",
       "  `/case list` — see all cases",
       "  `/case show <name>` — see stored notes + documents",
-      "  `/case delete <name>` — asks for confirmation before deleting",
+      "  `/case delete <name>` — asks for confirmation",
       "  `/case new <name>` — explicit create (errors if exists)",
       "",
       "*📰 Legal Digest*",
@@ -270,6 +272,92 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     } catch (err) {
       console.error("[JJ-Mode] /pending error:", err.message);
       return { handled: true, message: `❌ Error fetching pending updates: ${err.message}` };
+    }
+  }
+
+  // ── #<name> — Zero-friction case creation shortcut ─────────
+  //
+  // Any message starting with #<name> is treated as a case-file operation.
+  // Auto-creates the case if new, appends to it if existing.
+  //
+  // Examples:
+  //   #huang-xifen                              (with PDF attached → stores PDF)
+  //   #huang-xifen Judge errored on X, Y, Z     (short note on first line)
+  //   #huang-xifen\n<multi-line notes>          (notes on subsequent lines)
+  //   #huang-xifen (with PDF) \n<notes>         (PDF + inline notes)
+  //
+  // Requires the # to be at position 0, followed IMMEDIATELY by an
+  // alphanumeric/hyphen/underscore name (no space after #). This avoids
+  // false triggers from midtext hashtags like "look at #issue-3".
+  const firstLineHash = userMessage.split("\n", 1)[0];
+  const hashMatch = firstLineHash.match(/^#([a-z0-9][a-z0-9_\-]{1,49})(?:\s+(.*))?\s*$/i);
+  if (hashMatch) {
+    try {
+      const cf = require("./case-files");
+      const dt = require("./draft-templates");
+      const rawName = hashMatch[1].toLowerCase(); // normalize to lowercase for storage
+      const firstLineExtra = (hashMatch[2] || "").trim();
+
+      // Extract inline notes: any text after # on first line + everything after \n
+      const restLines = userMessage.split("\n").slice(1).join("\n").trim();
+      const inlineNotes = [firstLineExtra, restLines].filter(Boolean).join("\n");
+
+      // Auto-create case if new
+      let existing = await cf.getCase(rawName);
+      let autoCreated = false;
+      if (!existing) {
+        await cf.createCase(rawName, {});
+        existing = await cf.getCase(rawName);
+        autoCreated = true;
+      }
+
+      const results = [];
+
+      // Extract attached doc if present
+      if (options.isPdf && options.pdfData) {
+        const buf = Buffer.from(options.pdfData, "base64");
+        const text = await dt.extractFactDocText(buf, "application/pdf");
+        if (text) {
+          const filename = `doc-${(existing.documents || []).length + 1}.pdf`;
+          await cf.addDocument(rawName, { filename, mime: "application/pdf", text });
+          results.push(`📎 Stored document (${text.length.toLocaleString()} chars).`);
+        }
+      } else if (options.isDocx && options.docxData) {
+        const buf = Buffer.from(options.docxData, "base64");
+        const text = await dt.extractFactDocText(buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        if (text) {
+          const filename = `doc-${(existing.documents || []).length + 1}.docx`;
+          await cf.addDocument(rawName, { filename, mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", text });
+          results.push(`📎 Stored document (${text.length.toLocaleString()} chars).`);
+        }
+      }
+
+      // Add inline notes if present
+      if (inlineNotes) {
+        await cf.appendNotes(rawName, inlineNotes);
+        results.push(`📝 Stored ${inlineNotes.length.toLocaleString()} chars of notes.`);
+      }
+
+      if (!results.length) {
+        if (autoCreated) {
+          // Auto-created empty case with no content — clean up
+          await cf.deleteCase(rawName);
+          return { handled: true, message: `⚠️ No content provided.\n\nTo save something under case '${rawName}':\n• Attach a PDF/DOCX with \`#${rawName}\` caption, or\n• Type notes on the lines after \`#${rawName}\`.` };
+        }
+        // Existing case — user just typed the hashtag alone. Show it.
+        return { handled: true, message: cf.summarizeCase(existing) };
+      }
+
+      const header = autoCreated
+        ? `✅ Created new case '${rawName}':`
+        : `✅ Updated case '${rawName}':`;
+      const footer = autoCreated
+        ? `\n\n_Draft with: \`/draft <template> ${rawName}\`_`
+        : "";
+      return { handled: true, message: `${header}\n\n${results.join("\n")}${footer}` };
+    } catch (err) {
+      console.error("[JJ-Mode] # hashtag handler error:", err.message, err.stack);
+      return { handled: true, message: `❌ Case shortcut error: ${err.message}` };
     }
   }
 
