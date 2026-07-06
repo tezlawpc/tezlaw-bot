@@ -137,7 +137,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "",
       "*📚 Firm Documents (Phase 2)*",
       "  `/brief [source-url]` — upload public document, text on next lines",
-      "  `/brief` as PDF caption — upload attached PDF",
+      "  `/brief` as PDF or .docx caption — upload attached file",
       "  `/firm list [practice_area]` — see recent firm docs",
       "  `/firm delete <id>` — remove a firm doc",
       "  `/outcome <id> won|lost|settled|pending [notes]` — mark case outcome",
@@ -932,14 +932,35 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       const sourceUrl = urlMatch ? urlMatch[0] : null;
       const labelHint = argsText.replace(urlMatch ? urlMatch[0] : "", "").trim();
 
-      // Get document text: either from PDF or from message body (after /brief line)
+      // Get document text: either from PDF, DOCX, or from message body (after /brief line)
       let docText = null;
 
       if (options.isPdf && options.pdfText) {
         // pdfText is expected to be pre-extracted plain text from the PDF
         docText = options.pdfText;
-      } else if (options.pdfData) {
-        return { handled: true, message: "⚠️ PDF received but no text extracted. The upload handler needs to pass options.pdfText (extracted plaintext) for /brief to work. Alternatively, paste the document text directly." };
+      } else if (options.pdfData && !options.pdfText) {
+        // We have raw PDF bytes but no pre-extracted text — extract now
+        try {
+          const dt = require("./draft-templates");
+          const buf = Buffer.from(options.pdfData, "base64");
+          docText = await dt.extractFactDocText(buf, "application/pdf");
+        } catch (e) {
+          console.error("[/brief] PDF extract error:", e.message);
+          return { handled: true, message: `⚠️ PDF received but I couldn't extract text: ${e.message}` };
+        }
+      } else if (options.isDocx && options.docxData) {
+        // DOCX support: extract text using mammoth (via draft-templates)
+        try {
+          const dt = require("./draft-templates");
+          const buf = Buffer.from(options.docxData, "base64");
+          docText = await dt.extractFactDocText(buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+          if (!docText || docText.length < 50) {
+            return { handled: true, message: "⚠️ .docx received but no text extracted. It may be an image-only or heavily formatted document." };
+          }
+        } catch (e) {
+          console.error("[/brief] DOCX extract error:", e.message);
+          return { handled: true, message: `⚠️ .docx received but I couldn't extract text: ${e.message}` };
+        }
       } else {
         // Look for document text after the /brief line (multi-line message)
         const lines = userMessage.split("\n");
@@ -963,6 +984,8 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
             "```",
             "",
             "*Option B* — Attach a PDF with `/brief` as caption.",
+            "",
+            "*Option C* — Attach a .docx with `/brief` as caption.",
             "",
             "⚠️ *ONLY public/filed documents accepted.* Zara will refuse anything that looks like private client work.",
             "",
