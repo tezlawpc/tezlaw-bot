@@ -1350,6 +1350,78 @@ async function waDownloadMedia(mediaId) {
   return { buffer: Buffer.from(file.data), mimeType: meta.data.mime_type };
 }
 
+// Upload a media file to WhatsApp's Cloud API. Returns the media_id which
+// can then be referenced in a sendMessage document call.
+// WhatsApp requires 2-step upload: first upload media to get an ID,
+// then send a message referencing that media_id.
+async function waUploadMedia(buffer, filename, mimeType) {
+  const FormData = require("form-data");
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", mimeType);
+  form.append("file", buffer, { filename, contentType: mimeType });
+
+  const uploadResp = await axios.post(
+    `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/media`,
+    form,
+    {
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        ...form.getHeaders(),
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+    }
+  );
+  return uploadResp.data.id;
+}
+
+// Send a file attachment to a WhatsApp chat.
+// attachment = { buffer, filename, mimeType }
+async function waSendDocument(to, attachment) {
+  if (!attachment || !attachment.buffer) return;
+  try {
+    const mediaId = await waUploadMedia(
+      attachment.buffer,
+      attachment.filename || "document.docx",
+      attachment.mimeType || "application/octet-stream"
+    );
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        to,
+        type: "document",
+        document: {
+          id: mediaId,
+          filename: attachment.filename || "document.docx",
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+  } catch (err) {
+    console.error("[waSendDocument] Error:", err.response?.data || err.message);
+    await waSend(to, "⚠️ I generated the file but couldn't send it. Try /draft again.");
+  }
+}
+
+// Handle a reply that may be a string OR { text, attachment } from JJ /draft flow.
+async function waHandleReplyOrAttachment(to, reply) {
+  if (reply && typeof reply === "object" && reply.attachment) {
+    if (reply.text) await waSend(to, reply.text);
+    await waSendDocument(to, reply.attachment);
+  } else if (typeof reply === "string") {
+    await waSend(to, reply);
+  } else if (reply && reply.text) {
+    await waSend(to, reply.text);
+  }
+}
+
 // WhatsApp verification
 app.get("/whatsapp", (req, res) => {
   if (req.query["hub.verify_token"] === VERIFY_TOKEN && req.query["hub.challenge"]) {
@@ -1391,10 +1463,24 @@ app.post("/whatsapp", async (req, res) => {
       }
       if (message.type === "document") {
         const { buffer, mimeType } = await waDownloadMedia(message.document.id);
+        const docxMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        const filename = message.document.filename || "";
         if (mimeType === "application/pdf") {
-          const reply = await askClaudeWithMemory("whatsapp", from, message.document.caption || "Analyze this PDF.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), { isPdf:true, pdfData:buffer.toString("base64") });
-          await waSend(from, reply);
-        } else { await waSend(from, "I can read images and PDFs. Please resend in one of those formats."); }
+          const reply = await askClaudeWithMemory("whatsapp", from, message.document.caption || "Analyze this PDF.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), {
+            isPdf:true, pdfData:buffer.toString("base64"),
+            sendProgress: (t) => waSend(from, t),
+          });
+          await waHandleReplyOrAttachment(from, reply);
+        } else if (mimeType === docxMime || filename.toLowerCase().endsWith(".docx")) {
+          // DOCX — for /template add, /brief, /case add, or /draft with facts doc
+          const reply = await askClaudeWithMemory("whatsapp", from, message.document.caption || "", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), {
+            isDocx:true, docxData:buffer.toString("base64"),
+            sendProgress: (t) => waSend(from, t),
+          });
+          await waHandleReplyOrAttachment(from, reply);
+        } else {
+          await waSend(from, "I can read images, PDFs, and .docx files. Please resend in one of those formats.");
+        }
         return;
       }
       if (message.type === "audio") {
@@ -1403,7 +1489,11 @@ app.post("/whatsapp", async (req, res) => {
         const transcript = await transcribeAudio(buffer, `voice.${ext}`);
         if (!transcript) { await waSend(from, "Sorry, I couldn't make out that voice message. Please type instead."); return; }
         await waSend(from, `🎤 I heard: "${transcript}"\n\nLet me help...`);
-        await processMessage("whatsapp", from, transcript, (t) => waSend(from, t));
+        await processMessage("whatsapp", from, transcript, Object.assign(async (t) => {
+          await waSend(from, t);
+        }, {
+          _deliverAttachment: async (att) => { await waSendDocument(from, att); },
+        }));
         return;
       }
       if (message.type === "text") {
@@ -1411,7 +1501,11 @@ app.post("/whatsapp", async (req, res) => {
         let thinkingTimer = setTimeout(() => {
           waSend(from, "🤔 Let me think about that for a moment...").catch(() => {});
         }, 5000);
-        await processMessage("whatsapp", from, message.text.body, (t) => waSend(from, t));
+        await processMessage("whatsapp", from, message.text.body, Object.assign(async (t) => {
+          await waSend(from, t);
+        }, {
+          _deliverAttachment: async (att) => { await waSendDocument(from, att); },
+        }));
         clearTimeout(thinkingTimer);
       }
     } catch(err) {
