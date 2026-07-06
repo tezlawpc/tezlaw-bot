@@ -719,6 +719,44 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
 
       factDocText = parts.length ? parts.join("\n\n") : null;
 
+      // ── CRITICAL: Refuse to draft without adequate context ──
+      // Without case notes or documents, Zara will fabricate a fictional case.
+      // Better to refuse than to hallucinate a brief for a case that doesn't exist.
+      if (!factDocText || factDocText.trim().length < 100) {
+        return {
+          handled: true,
+          message: [
+            `⚠️ *No case context provided for drafting '${templateName}'.*`,
+            "",
+            "Drafting a substantive legal brief without your case theory, IJ decision, or facts would produce a fabricated case — not your actual case. I won't do that.",
+            "",
+            "*To draft this brief, I need at least ONE of:*",
+            "",
+            "*Option 1 — Inline notes with attached IJ decision:*",
+            "```",
+            "/draft " + templateName,
+            "Judge errored on:",
+            "1) [specific error]",
+            "2) [specific error]",
+            "```",
+            "(attach the IJ decision PDF with this message)",
+            "",
+            "*Option 2 — Use a stored case file:*",
+            "```",
+            "/draft " + templateName + " <case-name>",
+            "```",
+            "",
+            "*Option 3 — Create case first, then draft:*",
+            "```",
+            "#<case-name>",
+            "[attach IJ decision PDF]",
+            "[case theory notes on next lines]",
+            "```",
+            "then `/draft " + templateName + " <case-name>`",
+          ].join("\n"),
+        };
+      }
+
       // Start session
       await dt.startSession(userId, template.id, factDocText);
 
