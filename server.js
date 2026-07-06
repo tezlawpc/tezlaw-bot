@@ -1793,6 +1793,15 @@ app.listen(PORT, async () => {
     console.error("⚠️  Draft table init failed:", e.message);
   }
 
+  // Initialize case files table (persistent memory for drafting)
+  try {
+    const cf = require("./case-files");
+    await cf.initCaseFilesTable();
+    console.log("✅ Case files table ready");
+  } catch (e) {
+    console.error("⚠️  Case files table init failed:", e.message);
+  }
+
   // Load saved system prompt from DB (if admin has edited it)
   initPromptTable().then(() => getSavedPrompt()).then(saved => {
     if (saved) {
