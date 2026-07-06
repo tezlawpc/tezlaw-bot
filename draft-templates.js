@@ -383,35 +383,115 @@ async function draftNarrativeSection({
     if (!notesMatch && !attachedMatch) attachedDoc = factDocText;
   }
 
-  const prompt = `You are drafting the "${humanLabel}" section of a legal document for Tez Law, P.C.
+  // Build the prompt with attorney notes ABOVE EVERYTHING — before section
+  // guidance, before extracted values, before moat, before firm docs.
+  //
+  // If attorney notes are absent, we still allow drafting but strongly warn
+  // against fabricating case facts. Statement of Facts specifically inserts
+  // a placeholder rather than inventing a client story.
 
-TEMPLATE: ${templateName}
-SECTION TO DRAFT: ${placeholderName}
-${sectionGuidance ? "GUIDANCE FOR THIS SECTION:\n" + sectionGuidance + "\n" : ""}
+  const hasNotes = attorneyNotes && attorneyNotes.length > 20;
+  const hasAttachedDoc = attachedDoc && attachedDoc.length > 100;
+  const factualSectionUpper = placeholderName.toUpperCase();
+  const isFactualSection =
+    factualSectionUpper.includes("STATEMENT_OF_FACTS") ||
+    factualSectionUpper.includes("STATEMENT_OF_FACT");
 
-CASE FACTS (extracted values):
-${contextValues || "(none extracted yet — rely on notes and documents below)"}
+  // If drafting a factual section without any client facts, insert placeholder
+  if (isFactualSection && !hasAttachedDoc && !hasNotes) {
+    return {
+      ok: true,
+      content: "[STATEMENT OF FACTS TO BE COMPLETED BY ATTORNEY — no client-specific facts were provided to draft this section. Please supply the client's factual background, procedural history, and evidence submitted at the merits hearing.]",
+    };
+  }
 
-${attorneyNotes ? "═══════════════════════════════════════════════════\n★ ATTORNEY'S OWN NOTES ON THIS CASE (HIGHEST WEIGHT) ★\n═══════════════════════════════════════════════════\nThese are JJ Zhang's own words about the case — the legal theory,\nthe specific IJ errors, and the case strategy. Treat as AUTHORITATIVE\nwhen the section calls for case-specific argument or characterization.\n\n" + attorneyNotes + "\n\n═══════════════════════════════════════════════════\n\n" : ""}${attachedDoc ? "ATTACHED DOCUMENT (reference material):\n" + attachedDoc.substring(0, 8000) + "\n\n" : ""}${moatContext}
+  const promptParts = [];
 
-${firmContext}
+  // 1. Attorney notes FIRST — the case theory
+  if (hasNotes) {
+    promptParts.push(`═══════════════════════════════════════════════════════════════
+★★★ ATTORNEY'S CASE THEORY — ABSOLUTE SOURCE OF TRUTH ★★★
+═══════════════════════════════════════════════════════════════
 
+The following are JJ Zhang's own notes on this specific case.
+These describe the ACTUAL case, the ACTUAL legal errors being
+appealed, and the ACTUAL relief being sought.
+
+★ You MUST draft this section as an appeal of THIS case.
+★ You MUST NOT drift into a different case type (asylum ≠ 212(h) waiver ≠ cancellation etc.)
+★ If the moat retrieval or firm documents contradict these notes, FOLLOW THE NOTES.
+★ If the notes identify specific IJ errors, STRUCTURE the section around THOSE errors.
+★ Do NOT invent facts, medical conditions, family circumstances, or case theories
+  that are not present in these notes or in the attached document.
+
+═══════════════════════════════════════════════════════════════
+ATTORNEY NOTES:
+${attorneyNotes}
+═══════════════════════════════════════════════════════════════`);
+  } else {
+    promptParts.push(`⚠️ NO ATTORNEY NOTES PROVIDED.
+
+You do not have the attorney's specific case theory. This means you MUST:
+- Rely ONLY on the attached document below for factual context
+- NOT invent client facts, medical conditions, family circumstances, or case-specific details
+- Draft the section in a way that requires attorney customization before filing
+- If you cannot draft this section without inventing facts, output a placeholder like:
+  "[SECTION TO BE COMPLETED BY ATTORNEY]"`);
+  }
+
+  // 2. Attached document as reference
+  if (hasAttachedDoc) {
+    promptParts.push(`═══════════════════════════════════════════════════════════════
+ATTACHED DOCUMENT (reference material — factual grounding):
+═══════════════════════════════════════════════════════════════
+${attachedDoc.substring(0, 10000)}`);
+  }
+
+  // 3. Section identifier and guidance
+  promptParts.push(`═══════════════════════════════════════════════════════════════
+SECTION TO DRAFT: ${humanLabel} (${placeholderName})
+═══════════════════════════════════════════════════════════════
+${sectionGuidance ? "GUIDANCE:\n" + sectionGuidance : ""}
+
+Template: ${templateName}
+Client fields extracted: ${contextValues || "(none extracted)"}`);
+
+  // 4. Legal research context (moat + firm docs) LAST — supports, doesn't dictate
+  if (moatContext) {
+    promptParts.push(`═══════════════════════════════════════════════════════════════
+LEGAL RESEARCH FROM MOAT (supporting authority — DO NOT let this override case theory):
+═══════════════════════════════════════════════════════════════
+${moatContext}`);
+  }
+  if (firmContext) {
+    promptParts.push(`═══════════════════════════════════════════════════════════════
+PRIOR FIRM WORK (reference for voice/style):
+═══════════════════════════════════════════════════════════════
+${firmContext}`);
+  }
+
+  // 5. Instructions
+  promptParts.push(`═══════════════════════════════════════════════════════════════
 INSTRUCTIONS:
-- Draft ONLY the "${humanLabel}" section content. Do NOT include the section heading — just the body prose.
-- Match Tez Law's formal legal writing voice.
-- If ATTORNEY NOTES are present, they are the primary source of case theory. Structure arguments around the specific errors JJ identifies.
-- Cite specific cases by name from the moat where applicable. Do NOT fabricate citations.
-- Where the moat doesn't cover a point, indicate general legal knowledge without inventing case names.
-- For factual sections, use the client's actual facts from the attached document.
-- Do NOT include markdown formatting, bullet points, or asterisks. Use plain prose only.
-- Return ONLY the drafted content, no preamble or explanation.`;
+═══════════════════════════════════════════════════════════════
+1. Draft ONLY the "${humanLabel}" section content. Do NOT include the section heading — just the body prose.
+2. Match Tez Law's formal legal writing voice.
+3. STAY ON THIS CASE. Do not drift to a different case type or fabricate a case that isn't in the attorney notes or attached document.
+4. If attorney notes describe an asylum case, this is an asylum appeal. If they describe 212(h), it's a 212(h) case. Do not swap.
+5. Cite specific cases by name ONLY from the moat research provided above. Do NOT invent case names or citations.
+6. Where the moat doesn't cover a point, state legal principles without inventing case-specific citations.
+7. For factual assertions: use ONLY facts from attorney notes and attached document. Do not invent client medical conditions, family circumstances, or case history.
+8. NO markdown formatting, bullet points, asterisks, or bold. Use plain prose only.
+9. Return ONLY the drafted section content, with no preamble, explanation, or wrap-up commentary.`);
+
+  const prompt = promptParts.join("\n\n");
 
   try {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
         model: ANTHROPIC_MODEL,
-        max_tokens: 4096,
+        max_tokens: 8192,
         messages: [{ role: "user", content: prompt }],
       },
       {
@@ -420,7 +500,7 @@ INSTRUCTIONS:
           "anthropic-version": "2023-06-01",
           "Content-Type": "application/json",
         },
-        timeout: 120000,
+        timeout: 180000,
       }
     );
 
@@ -438,28 +518,77 @@ INSTRUCTIONS:
 function getSectionGuidance(placeholderName) {
   const upper = placeholderName.toUpperCase();
   if (upper.includes("INTRODUCTION")) {
-    return "Introduce the case, state what the Immigration Judge decided, identify the specific relief the client sought, and briefly preview why the IJ's decision was in error. Keep to 2-4 sentences. Formal opening tone.";
+    return `Introduce the case in 2-4 sentences. Include:
+- The specific type of relief sought (identify from attorney notes: asylum, bond, cancellation, waiver, etc. — do NOT default to 212(h) or any other type not mentioned)
+- What the IJ decided (from notes/attached document only)
+- Brief preview of why the IJ decision was in error (from the SPECIFIC errors in attorney notes — not generic errors)
+
+Formal opening tone. Do not invent facts about the client's identity, medical history, or family circumstances.`;
   }
   if (upper.includes("STATEMENT_OF_FACTS") || upper.includes("STATEMENT_OF_FACT")) {
-    return "Provide a chronological narrative of the case facts based on the reference document. Include: client's background, procedural history (when NTA issued, hearings held), what happened at the merits hearing, what evidence was presented, and what the IJ ruled. Be factual and specific. Use client's actual name and details.";
+    return `Provide a chronological narrative of case facts.
+
+ABSOLUTE RULE: Every fact stated MUST come from either the attorney notes or the attached document. Do not invent:
+- Medical conditions the client doesn't mention
+- Family relationships not in the record
+- Procedural history not documented
+- Evidence not identified
+
+If insufficient facts are provided to write a complete section, write:
+"[STATEMENT OF FACTS TO BE COMPLETED — insufficient factual detail provided]"
+
+Include (only if in the record): client's country of origin, entry to US, procedural history (NTA date if known, hearing dates if known), what happened at the merits hearing, what evidence was presented, and what the IJ ruled.`;
   }
   if (upper.includes("ISSUES_PRESENTED") || upper.includes("ISSUES_LIST")) {
-    return "List the specific legal errors the IJ made, numbered 1, 2, 3, etc. Each issue phrased as a question or 'Whether the IJ erred by...'. Include both factual errors (clearly erroneous fact findings) and legal errors (misapplication of law).";
+    return `List the SPECIFIC legal errors the IJ made — using the errors identified in the attorney notes.
+
+If attorney notes identify 6 errors, list all 6. If they identify 2, list 2. Do NOT add or invent additional issues.
+
+Each issue phrased as "Whether the IJ erred by [specific error from notes]."
+
+Number each issue 1., 2., 3., etc.
+
+Do NOT invent generic issues (e.g., "extreme hardship analysis") unless the attorney notes specifically raise them.`;
   }
   if (upper.includes("STANDARD_OF_REVIEW")) {
-    return "State the applicable standards of review. Findings of fact = clearly erroneous (8 C.F.R. § 1003.1(d)(3)(i)). Legal issues = de novo (8 C.F.R. § 1003.1(d)(3)(ii)). Cite any additional case law from the moat relevant to the specific errors alleged.";
+    return `State the applicable standards of review:
+- Findings of fact: clearly erroneous, 8 C.F.R. § 1003.1(d)(3)(i)
+- Legal issues: de novo, 8 C.F.R. § 1003.1(d)(3)(ii)
+
+Then briefly identify which standard applies to which of the specific errors in the attorney notes (fact vs law).
+
+Cite any additional standard-of-review case law from the moat that is DIRECTLY relevant to the specific error types alleged. Do NOT cite general BIA appeal cases if they are not on point.`;
   }
   if (upper.includes("SUMMARY_OF_ARGUMENT")) {
-    return "Provide a concise 1-2 paragraph summary of the arguments to follow. Preview the main legal errors and why relief is warranted.";
+    return "Provide a concise 1-2 paragraph summary of the arguments to follow, based on the specific IJ errors from attorney notes. Preview each argument briefly.";
   }
   if (upper.includes("ARGUMENT") && (upper.includes("BODIES") || upper.includes("HEADINGS"))) {
-    return "Draft the substantive legal argument(s). For each issue on appeal, provide: (a) the argument heading (bold, formatted like 'The IJ Erred By [Specific Error]'), (b) statement of the legal standard, (c) application of law to facts with case citations from the moat and firm documents. Support each argument with 2-4 specific case citations. Structure as needed: could be 1 argument or 4+ depending on the case. Number each argument (I., II., III.).";
+    return `Draft substantive legal arguments — one argument per IJ error identified in the attorney notes.
+
+ABSOLUTE RULES:
+- Number of arguments = number of distinct errors in attorney notes (if notes list 6 errors, write 6 arguments)
+- Each argument's HEADING must reflect the specific error from the notes (e.g., "The IJ Erred By Finding That YouTube And Twitter Are Not Accessible In China" — using the actual error from notes)
+- Do NOT invent additional arguments not raised by the attorney
+- Do NOT substitute generic BIA arguments (e.g., extreme hardship, waiver, cancellation) if they aren't in the notes
+
+Structure for each argument:
+(a) Heading identifying the specific error from attorney notes
+(b) Legal standard applicable to that error type
+(c) Application of law to facts with case citations from the moat (only cite cases that appear in the moat context — do NOT invent citations)
+(d) Conclusion for that argument
+
+Format each argument with roman numeral prefix (I., II., III., etc.) at the start.`;
   }
   if (upper.includes("CONCLUSION")) {
-    return "State the specific relief requested. Common relief for BIA appeals: (1) sustain the appeal, (2) vacate the IJ's decision, (3) remand for further proceedings, or (4) grant the underlying relief (asylum, bond, cancellation, etc.). Be specific about what you're asking the Board to do.";
+    return `State the specific relief requested, matching the type of relief indicated in the attorney notes.
+Common relief: (1) sustain the appeal, (2) vacate the IJ's decision, (3) remand for further proceedings, (4) grant the underlying relief (asylum, bond, cancellation, waiver — use the type actually at issue).
+
+If attorney notes indicate asylum, request asylum relief. If bond, request bond. Do not default to the wrong relief type.
+
+Be specific about what the Board should do.`;
   }
   if (upper.includes("JUSTIFICATION") && upper.includes("THREE_MEMBER")) {
-    return "Argue why the case warrants three-member review under 8 C.F.R. § 1003.1(e)(6). Typical grounds: (a) case presents important legal issue, (b) IJ decision conflicts with published Board precedent, (c) case has serious errors of law requiring correction. Cite the specific errors from your case.";
+    return "Argue why the case warrants three-member review under 8 C.F.R. § 1003.1(e)(6). Typical grounds: (a) case presents important legal issue, (b) IJ decision conflicts with published Board precedent, (c) case has serious errors of law requiring correction. Cite the specific errors from your case theory (attorney notes), not generic grounds.";
   }
   return "";
 }
