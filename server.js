@@ -638,8 +638,21 @@ async function processMessage(platform, userId, userText, sendFn) {
   }
 
   const livePrompt = buildLivePrompt(app, buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT));
-  const reply = await askClaudeWithMemory(platform, userId, userText, livePrompt);
-  await sendFn(reply);
+  const reply = await askClaudeWithMemory(platform, userId, userText, livePrompt, {
+    sendProgress: sendFn,
+  });
+
+  // Reply can be a string OR { text, attachment } — from /draft filling a .docx
+  if (reply && typeof reply === "object" && reply.attachment) {
+    await sendFn(reply.text || "");
+    // Signal to caller (Telegram handler) that an attachment needs to be sent
+    // by exposing it on sendFn if it supports it
+    if (typeof sendFn._deliverAttachment === "function") {
+      await sendFn._deliverAttachment(reply.attachment);
+    }
+  } else {
+    await sendFn(typeof reply === "string" ? reply : (reply?.text || ""));
+  }
 
   // ── PRIVACY: never forward JJ's messages to the team ──
   if (isJJAuthenticated(platform, userId)) return;
@@ -664,6 +677,41 @@ async function tgDownloadFile(fileId) {
   const path = r.data.result.file_path;
   const fr = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${path}`, { responseType: "arraybuffer" });
   return { buffer: Buffer.from(fr.data), extension: path.split(".").pop().toLowerCase() };
+}
+
+// Send a file attachment to a Telegram chat.
+// attachment = { buffer, filename, mimeType }
+async function tgSendDocument(chatId, attachment) {
+  if (!attachment || !attachment.buffer) return;
+  const FormData = require("form-data");
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append("document", attachment.buffer, {
+    filename: attachment.filename || "document.docx",
+    contentType: attachment.mimeType || "application/octet-stream",
+  });
+  try {
+    await axios.post(`${TELEGRAM_API}/sendDocument`, form, {
+      headers: form.getHeaders(),
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+    });
+  } catch (err) {
+    console.error("[tgSendDocument] Error:", err.response?.data || err.message);
+    await tgSend(chatId, "⚠️ I generated the file but couldn't send it. Try /draft again.");
+  }
+}
+
+// Handle a reply that may be a string OR { text, attachment } from JJ /draft flow.
+async function handleReplyOrAttachment(chatId, reply) {
+  if (reply && typeof reply === "object" && reply.attachment) {
+    if (reply.text) await tgSend(chatId, reply.text);
+    await tgSendDocument(chatId, reply.attachment);
+  } else if (typeof reply === "string") {
+    await tgSend(chatId, reply);
+  } else if (reply && reply.text) {
+    await tgSend(chatId, reply.text);
+  }
 }
 
 // ────────────────────────────────────────────────────────────
@@ -1164,23 +1212,23 @@ app.post("/telegram", async (req, res) => {
     if (msg.document) {
       await axios.post(`${TELEGRAM_API}/sendChatAction`, { chat_id: chatId, action: "typing" });
       const { buffer } = await tgDownloadFile(msg.document.file_id);
+      const docxMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       if (msg.document.mime_type === "application/pdf") {
-        const caption = msg.caption || "Analyze this PDF.";
-        const opts = { isPdf: true, pdfData: buffer.toString("base64") };
-        // For /brief command, also extract plaintext so firm-documents can ingest it
-        if (/^\/brief\b/i.test(caption)) {
-          try {
-            const pdfData = await pdfParse(buffer);
-            opts.pdfText = pdfData.text || "";
-            console.log(`[telegram] /brief PDF extracted: ${opts.pdfText.length} chars`);
-          } catch (e) {
-            console.error("[telegram] /brief PDF text extraction failed:", e.message);
-          }
-        }
-        const reply = await askClaudeWithMemory("telegram", chatId, caption, buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), opts);
-        await tgSend(chatId, reply);
+        const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "Analyze this PDF.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), {
+          isPdf:true, pdfData:buffer.toString("base64"),
+          sendProgress: (t) => tgSend(chatId, t),
+        });
+        await handleReplyOrAttachment(chatId, reply);
+      } else if (msg.document.mime_type === docxMime ||
+                 (msg.document.file_name && msg.document.file_name.toLowerCase().endsWith(".docx"))) {
+        // DOCX — for /template add or /draft with facts doc
+        const reply = await askClaudeWithMemory("telegram", chatId, msg.caption || "", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), {
+          isDocx:true, docxData:buffer.toString("base64"),
+          sendProgress: (t) => tgSend(chatId, t),
+        });
+        await handleReplyOrAttachment(chatId, reply);
       } else {
-        await tgSend(chatId, "I can read images and PDFs. Please resend in one of those formats.");
+        await tgSend(chatId, "I can read images, PDFs, and .docx files. Please resend in one of those formats.");
       }
       return;
     }
@@ -1253,10 +1301,12 @@ app.post("/telegram", async (req, res) => {
       } catch(e) {}
     }, 5000);
 
-    await processMessage("telegram", chatId, text, async (t) => {
+    await processMessage("telegram", chatId, text, Object.assign(async (t) => {
       lastTgReply = t;
       await tgSend(chatId, t);
-    });
+    }, {
+      _deliverAttachment: async (att) => { await tgSendDocument(chatId, att); },
+    }));
     clearTimeout(thinkingTimer);
 
     // Delete the thinking message once real reply is sent
@@ -1342,18 +1392,7 @@ app.post("/whatsapp", async (req, res) => {
       if (message.type === "document") {
         const { buffer, mimeType } = await waDownloadMedia(message.document.id);
         if (mimeType === "application/pdf") {
-          const caption = message.document.caption || "Analyze this PDF.";
-          const opts = { isPdf: true, pdfData: buffer.toString("base64") };
-          if (/^\/brief\b/i.test(caption)) {
-            try {
-              const pdfData = await pdfParse(buffer);
-              opts.pdfText = pdfData.text || "";
-              console.log(`[whatsapp] /brief PDF extracted: ${opts.pdfText.length} chars`);
-            } catch (e) {
-              console.error("[whatsapp] /brief PDF text extraction failed:", e.message);
-            }
-          }
-          const reply = await askClaudeWithMemory("whatsapp", from, caption, buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), opts);
+          const reply = await askClaudeWithMemory("whatsapp", from, message.document.caption || "Analyze this PDF.", buildLivePrompt(app, app.locals.SYSTEM_PROMPT || SYSTEM_PROMPT), { isPdf:true, pdfData:buffer.toString("base64") });
           await waSend(from, reply);
         } else { await waSend(from, "I can read images and PDFs. Please resend in one of those formats."); }
         return;
@@ -1708,6 +1747,25 @@ app.get("/legal/cache-stats", async (req, res) => {
 // ────────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.send("Tez Law P.C. — Zara running on all channels ✅"));
 
+// ── Draft templates admin ─────────────────────────────────
+// One-time initialization endpoint (idempotent) — creates the three
+// draft_templates tables. Also called automatically on server boot below.
+app.get("/admin/init-drafts", async (req, res) => {
+  try {
+    const dt = require("./draft-templates");
+    await dt.initDraftTables();
+    const templates = await dt.listTemplates();
+    res.json({
+      ok: true,
+      message: "Draft tables initialized",
+      templates: templates.length,
+    });
+  } catch (err) {
+    console.error("[/admin/init-drafts] error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Voice call routes ─────────────────────────────────────
 app.post("/voice/incoming",          (req, res) => {
   const savedPrompt = app.locals.SYSTEM_PROMPT || null;
@@ -1725,6 +1783,15 @@ app.listen(PORT, async () => {
   initDB();
   initIntakeTable();
   initComplianceTable();
+
+  // Initialize draft template tables (Phase 4)
+  try {
+    const dt = require("./draft-templates");
+    await dt.initDraftTables();
+    console.log("✅ Draft template tables ready");
+  } catch (e) {
+    console.error("⚠️  Draft table init failed:", e.message);
+  }
 
   // Load saved system prompt from DB (if admin has edited it)
   initPromptTable().then(() => getSavedPrompt()).then(saved => {
@@ -1831,14 +1898,6 @@ app.listen(PORT, async () => {
     console.log("📰 Legal digest scheduler started (6:00 AM Pacific).");
   } catch (e) {
     console.error("❌ Legal digest scheduler failed:", e.message);
-  }
-
-  // ── Self-Learning: Weekly Moat Update (Sat 11pm PT) ──────
-  try {
-    const { scheduleWeekly } = require("./weekly-moat-update");
-    scheduleWeekly();
-  } catch (e) {
-    console.error("❌ Weekly moat scheduler failed:", e.message);
   }
 
   // ── Matter Manager — Daily deadline summary (7:00 AM PT) ─
