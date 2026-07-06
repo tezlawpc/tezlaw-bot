@@ -160,12 +160,13 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "    Cancel with `cancel`",
       "",
       "*📁 Case Files (persistent memory)*",
-      "  `/case new <name>` [+ attach docs, notes on next lines] — create case",
-      "  `/case add <name>` [+ attach docs, notes on next lines] — add to case",
-      "  `/case notes <name>` + notes on next lines — append notes only",
+      "  `/case add <name>` [+ attach docs, notes on next lines]",
+      "     Auto-creates the case if it doesn't exist yet.",
+      "  `/case notes <name>` + notes on next lines — append notes",
       "  `/case list` — see all cases",
       "  `/case show <name>` — see stored notes + documents",
       "  `/case delete <name>` — asks for confirmation before deleting",
+      "  `/case new <name>` — explicit create (errors if exists)",
       "",
       "*📰 Legal Digest*",
       "  `/pending` — see auto-detected cache updates awaiting approval",
@@ -375,8 +376,15 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
 
       if (action === "add") {
         if (!nameArg) return { handled: true, message: "Usage: `/case add <name>` (attach a PDF/DOCX and/or add notes on subsequent lines)" };
-        const existing = await cf.getCase(nameArg);
-        if (!existing) return { handled: true, message: `❌ Case '${nameArg}' not found.\n\nUse \`/case new ${nameArg}\` to create it first.` };
+
+        // Auto-create if case doesn't exist yet — no need for separate /case new step
+        let existing = await cf.getCase(nameArg);
+        let autoCreated = false;
+        if (!existing) {
+          await cf.createCase(nameArg, {});
+          existing = await cf.getCase(nameArg);
+          autoCreated = true;
+        }
 
         const results = [];
 
@@ -406,23 +414,44 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
         }
 
         if (!results.length) {
+          if (autoCreated) {
+            // We auto-created an empty case but no content followed — clean up.
+            await cf.deleteCase(nameArg);
+            return { handled: true, message: `⚠️ Nothing to add. Attach a PDF/DOCX and/or provide notes on the next lines.\n\n(No case was created.)` };
+          }
           return { handled: true, message: `⚠️ Nothing to add. Attach a PDF/DOCX and/or provide notes on the next lines.` };
         }
 
-        return { handled: true, message: `✅ Updated case '${nameArg}':\n\n${results.join("\n")}` };
+        const header = autoCreated
+          ? `✅ Created new case '${nameArg}':`
+          : `✅ Updated case '${nameArg}':`;
+        return { handled: true, message: `${header}\n\n${results.join("\n")}` };
       }
 
       if (action === "notes") {
         if (!nameArg) return { handled: true, message: "Usage: `/case notes <name>` followed by notes on next lines" };
-        const existing = await cf.getCase(nameArg);
-        if (!existing) return { handled: true, message: `❌ Case '${nameArg}' not found.\n\nUse \`/case new ${nameArg}\` to create it first.` };
+
+        // Auto-create if case doesn't exist
+        let existing = await cf.getCase(nameArg);
+        let autoCreated = false;
+        if (!existing) {
+          if (!inlineNotes) {
+            return { handled: true, message: `Provide notes on the next lines. Example:\n\`\`\`\n/case notes ${nameArg}\nJudge errored on X. Also Y was wrong because Z.\n\`\`\`` };
+          }
+          await cf.createCase(nameArg, {});
+          existing = await cf.getCase(nameArg);
+          autoCreated = true;
+        }
 
         if (!inlineNotes) {
           return { handled: true, message: `Provide notes on the next lines. Example:\n\`\`\`\n/case notes ${nameArg}\nJudge errored on X. Also Y was wrong because Z.\n\`\`\`` };
         }
 
         await cf.appendNotes(nameArg, inlineNotes);
-        return { handled: true, message: `✅ Appended ${inlineNotes.length.toLocaleString()} chars of notes to '${nameArg}'.` };
+        const header = autoCreated
+          ? `✅ Created new case '${nameArg}' and added notes.`
+          : `✅ Appended ${inlineNotes.length.toLocaleString()} chars of notes to '${nameArg}'.`;
+        return { handled: true, message: header };
       }
     } catch (err) {
       console.error("[JJ-Mode] /case error:", err.message, err.stack);
