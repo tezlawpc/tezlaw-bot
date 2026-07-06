@@ -353,6 +353,8 @@ Return ONLY the JSON, no other text. Example:
 
 /**
  * Draft a single narrative placeholder using moat + firm docs grounding.
+ * If factDocText contains "=== ATTORNEY NOTES ===" section, those are treated
+ * as authoritative case theory from JJ (higher weight than attached documents).
  */
 async function draftNarrativeSection({
   placeholderName,
@@ -369,26 +371,38 @@ async function draftNarrativeSection({
 
   const sectionGuidance = getSectionGuidance(placeholderName);
 
+  // Separate attorney notes from attached documents for stronger weighting
+  let attorneyNotes = "";
+  let attachedDoc = "";
+  if (factDocText) {
+    const notesMatch = factDocText.match(/=== ATTORNEY NOTES ON CASE ===\n([\s\S]*?)(?:\n\n=== ATTACHED DOCUMENT ===|$)/);
+    const attachedMatch = factDocText.match(/=== ATTACHED DOCUMENT ===\n([\s\S]*)$/);
+    if (notesMatch) attorneyNotes = notesMatch[1].trim();
+    if (attachedMatch) attachedDoc = attachedMatch[1].trim();
+    // If no delimiters, entire text is attached doc
+    if (!notesMatch && !attachedMatch) attachedDoc = factDocText;
+  }
+
   const prompt = `You are drafting the "${humanLabel}" section of a legal document for Tez Law, P.C.
 
 TEMPLATE: ${templateName}
 SECTION TO DRAFT: ${placeholderName}
 ${sectionGuidance ? "GUIDANCE FOR THIS SECTION:\n" + sectionGuidance + "\n" : ""}
 
-CASE FACTS:
-${contextValues}
+CASE FACTS (extracted values):
+${contextValues || "(none extracted yet — rely on notes and documents below)"}
 
-${factDocText ? "REFERENCE DOCUMENT TEXT:\n" + factDocText.substring(0, 8000) + "\n\n" : ""}
-${moatContext}
+${attorneyNotes ? "═══════════════════════════════════════════════════\n★ ATTORNEY'S OWN NOTES ON THIS CASE (HIGHEST WEIGHT) ★\n═══════════════════════════════════════════════════\nThese are JJ Zhang's own words about the case — the legal theory,\nthe specific IJ errors, and the case strategy. Treat as AUTHORITATIVE\nwhen the section calls for case-specific argument or characterization.\n\n" + attorneyNotes + "\n\n═══════════════════════════════════════════════════\n\n" : ""}${attachedDoc ? "ATTACHED DOCUMENT (reference material):\n" + attachedDoc.substring(0, 8000) + "\n\n" : ""}${moatContext}
 
 ${firmContext}
 
 INSTRUCTIONS:
 - Draft ONLY the "${humanLabel}" section content. Do NOT include the section heading — just the body prose.
 - Match Tez Law's formal legal writing voice.
+- If ATTORNEY NOTES are present, they are the primary source of case theory. Structure arguments around the specific errors JJ identifies.
 - Cite specific cases by name from the moat where applicable. Do NOT fabricate citations.
 - Where the moat doesn't cover a point, indicate general legal knowledge without inventing case names.
-- For factual sections, use the client's actual facts from the reference document.
+- For factual sections, use the client's actual facts from the attached document.
 - Do NOT include markdown formatting, bullet points, or asterisks. Use plain prose only.
 - Return ONLY the drafted content, no preamble or explanation.`;
 
@@ -677,19 +691,42 @@ function buildSearchQuery(placeholderName, collected, factDocText) {
     }
   }
 
+  // Extract attorney notes if present — most valuable signal for search
+  let attorneyNotes = "";
+  if (factDocText) {
+    const notesMatch = factDocText.match(/=== ATTORNEY NOTES ON CASE ===\n([\s\S]*?)(?:\n\n=== ATTACHED|$)/);
+    if (notesMatch) attorneyNotes = notesMatch[1].trim();
+  }
+
   // Add section-specific keywords
   if (upper.includes("STANDARD_OF_REVIEW")) {
     bits.push("clearly erroneous", "de novo", "standard of review BIA");
+    // If attorney notes mention specific error types, include them
+    if (attorneyNotes) {
+      if (/credibility|credib/i.test(attorneyNotes)) bits.push("credibility finding review");
+      if (/one[\s-]?year|1[\s-]?year|MAF/i.test(attorneyNotes)) bits.push("one-year bar asylum");
+      if (/CLP|circumstances/i.test(attorneyNotes)) bits.push("CLP rule vacated");
+    }
   } else if (upper.includes("ISSUES_PRESENTED")) {
     bits.push("immigration judge error");
+    if (attorneyNotes) bits.push(attorneyNotes.substring(0, 300));
   } else if (upper.includes("ARGUMENT")) {
-    // Try to pull hints from fact doc text
-    if (factDocText) {
+    // Attorney notes are the best signal for what to search
+    if (attorneyNotes) {
+      bits.push(attorneyNotes.substring(0, 400));
+    } else if (factDocText) {
       const factSnippet = factDocText.substring(0, 500);
       bits.push(factSnippet);
     }
+  } else if (upper.includes("STATEMENT_OF_FACTS")) {
+    // Facts section: use client identifying info + country
+    if (attorneyNotes) bits.push(attorneyNotes.substring(0, 300));
+  } else if (upper.includes("INTRODUCTION")) {
+    if (attorneyNotes) bits.push(attorneyNotes.substring(0, 200));
   } else if (upper.includes("THREE_MEMBER")) {
     bits.push("three member review BIA precedent");
+  } else if (upper.includes("CONCLUSION")) {
+    if (attorneyNotes) bits.push(attorneyNotes.substring(0, 200));
   }
 
   return bits.filter(Boolean).join(" ").substring(0, 500) || placeholderName;
