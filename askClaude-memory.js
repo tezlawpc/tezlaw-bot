@@ -128,7 +128,10 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
     imageMediaType = null,
     isPdf = false,
     pdfData = null,
+    isDocx = false,
+    docxData = null,
     isVoiceTranscript = false,
+    sendProgress = null,
   } = options;
 
   try {
@@ -136,11 +139,17 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
     const jj = await checkJJMode(platform, platformId, userMessage, {
       isPdf, pdfData: options.pdfData,
       isImage, imageData: options.imageData, imageMediaType: options.imageMediaType,
-      sendFn: options.sendFn,   // ← for JJ Mode multi-message chunking (Phase E)
+      isDocx, docxData: options.docxData,
+      sendProgress,
     });
     if (jj.handled) {
-      await db.saveMessage(platform, platformId, "user", isPdf ? "[PDF uploaded]" : isImage ? "[Image uploaded]" : userMessage);
+      await db.saveMessage(platform, platformId, "user", isPdf ? "[PDF uploaded]" : isDocx ? "[DOCX uploaded]" : isImage ? "[Image uploaded]" : userMessage);
       await db.saveMessage(platform, platformId, "assistant", jj.message);
+      // If JJ mode returned an attachment (e.g., filled .docx from /draft),
+      // pass it back to caller via a special reply object.
+      if (jj.attachment) {
+        return { text: jj.message, attachment: jj.attachment };
+      }
       return jj.message;
     }
 
@@ -374,7 +383,7 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
         const resp = await axios.post(
           "https://api.anthropic.com/v1/messages",
           {
-            model:      "claude-sonnet-4-6",
+            model:      "claude-sonnet-4-20250514",
             max_tokens: 1024,
             system:     personalizedSystem,
             tools:      allTools,
