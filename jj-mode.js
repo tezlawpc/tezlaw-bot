@@ -155,8 +155,17 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  `/template show <name>` — see a template's placeholders",
       "  `/template delete <name>` — remove template",
       "  `/draft <name>` [+ attach facts PDF/DOCX] — generate a filled draft",
+      "  `/draft <name> <case-name>` — draft using stored case file",
       "    During drafting: reply `FIELD: value` (one per line) or `confirm`",
       "    Cancel with `cancel`",
+      "",
+      "*📁 Case Files (persistent memory)*",
+      "  `/case new <name>` [+ attach docs, notes on next lines] — create case",
+      "  `/case add <name>` [+ attach docs, notes on next lines] — add to case",
+      "  `/case notes <name>` + notes on next lines — append notes only",
+      "  `/case list` — see all cases",
+      "  `/case show <name>` — see stored notes + documents",
+      "  `/case delete <name>` — asks for confirmation before deleting",
       "",
       "*📰 Legal Digest*",
       "  `/pending` — see auto-detected cache updates awaiting approval",
@@ -263,13 +272,175 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     }
   }
 
+  // ── /case new|add|notes|list|show|delete <name> — Persistent case memory ──
+  //
+  // A "case file" is a named collection of attorney notes + document text
+  // that Zara remembers across sessions. Feed one to /draft to skip re-uploading.
+  //
+  //   /case new <name>           — create new case (optional: attach doc, or add notes on next lines)
+  //   /case add <name>           — attach doc and/or notes to existing case
+  //   /case notes <name>\n<...>  — append notes only
+  //   /case list                 — show all cases
+  //   /case show <name>          — show case contents
+  //   /case delete <name>        — asks for confirmation
+  //   /case delete <name> yes    — actually deletes
+  //
+  const firstLineCase = lower.split("\n", 1)[0].trim();
+  const caseMatch = firstLineCase.match(/^\/case\s+(new|add|notes|list|show|delete|del|rm)(?:\s+(\S+))?(?:\s+(yes|confirm))?\s*$/);
+  if (caseMatch) {
+    try {
+      const cf = require("./case-files");
+      const dt = require("./draft-templates");
+      const action = caseMatch[1];
+      const nameArg = (caseMatch[2] || "").trim();
+      const confirmArg = (caseMatch[3] || "").trim();
+
+      // Extract any notes provided after \n in the ORIGINAL message (not lowercased)
+      const rawLines = userMessage.split("\n");
+      const inlineNotes = rawLines.slice(1).join("\n").trim();
+
+      if (action === "list") {
+        const cases = await cf.listCases();
+        if (!cases.length) {
+          return { handled: true, message: "📁 No case files yet.\n\nCreate one with:\n`/case new <name>`\n(optionally attach a PDF/DOCX and add notes on subsequent lines)" };
+        }
+        const lines = cases.map(c => {
+          const meta = c.metadata || {};
+          const metaBits = [];
+          if (meta.client) metaBits.push(meta.client);
+          if (meta.a_number) metaBits.push(`A# ${meta.a_number}`);
+          if (meta.case_type) metaBits.push(meta.case_type);
+          const metaStr = metaBits.length ? " • " + metaBits.join(" • ") : "";
+          return `📁 *${c.name}*${metaStr}\n   ${c.doc_count} docs • ${c.notes_len.toLocaleString()} note chars • updated ${new Date(c.updated_at).toLocaleDateString()}`;
+        });
+        return { handled: true, message: `📁 ${cases.length} case file(s):\n\n${lines.join("\n\n")}\n\nUse \`/case show <name>\` to see contents, or \`/draft <template> <case-name>\` to draft with it.` };
+      }
+
+      if (action === "show") {
+        if (!nameArg) return { handled: true, message: "Usage: `/case show <name>`" };
+        const caseFile = await cf.getCase(nameArg);
+        if (!caseFile) return { handled: true, message: `❌ Case '${nameArg}' not found.` };
+        return { handled: true, message: cf.summarizeCase(caseFile) };
+      }
+
+      if (action === "delete" || action === "del" || action === "rm") {
+        if (!nameArg) return { handled: true, message: "Usage: `/case delete <name>`" };
+        const caseFile = await cf.getCase(nameArg);
+        if (!caseFile) return { handled: true, message: `❌ Case '${nameArg}' not found.` };
+
+        if (confirmArg !== "yes" && confirmArg !== "confirm") {
+          const docs = caseFile.documents || [];
+          return {
+            handled: true,
+            message: `⚠️ *Confirm delete: ${nameArg}*\n\nThis case has ${docs.length} document(s) and ${(caseFile.notes || "").length.toLocaleString()} chars of notes.\n\nThis cannot be undone. Reply:\n\`/case delete ${nameArg} yes\`\nto confirm.`,
+          };
+        }
+
+        await cf.deleteCase(nameArg);
+        return { handled: true, message: `🗑️ Deleted case '${nameArg}'.` };
+      }
+
+      if (action === "new") {
+        if (!nameArg) return { handled: true, message: "Usage: `/case new <name>` (optionally attach a PDF/DOCX and add notes on subsequent lines)" };
+        const existing = await cf.getCase(nameArg);
+        if (existing) return { handled: true, message: `❌ Case '${nameArg}' already exists.\n\nUse \`/case add ${nameArg}\` to add to it, or \`/case delete ${nameArg}\` first.` };
+
+        // Extract attached doc if present
+        let initialDoc = null;
+        if (options.isPdf && options.pdfData) {
+          const buf = Buffer.from(options.pdfData, "base64");
+          const text = await dt.extractFactDocText(buf, "application/pdf");
+          if (text) initialDoc = { filename: "attached.pdf", mime: "application/pdf", text };
+        } else if (options.isDocx && options.docxData) {
+          const buf = Buffer.from(options.docxData, "base64");
+          const text = await dt.extractFactDocText(buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+          if (text) initialDoc = { filename: "attached.docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", text };
+        }
+
+        const timestamp = new Date().toISOString().substring(0, 10);
+        const initialNotes = inlineNotes ? `[${timestamp}]\n${inlineNotes}` : "";
+
+        const result = await cf.createCase(nameArg, { initialNotes, initialDoc });
+
+        const msg = [
+          `✅ Case '${result.name}' created (#${result.id}).`,
+          "",
+          initialDoc ? `📎 Stored document (${initialDoc.text.length.toLocaleString()} chars).` : null,
+          inlineNotes ? `📝 Stored notes (${inlineNotes.length.toLocaleString()} chars).` : null,
+          "",
+          `Add more with \`/case add ${nameArg}\` or draft with \`/draft <template> ${nameArg}\`.`,
+        ].filter(Boolean).join("\n");
+        return { handled: true, message: msg };
+      }
+
+      if (action === "add") {
+        if (!nameArg) return { handled: true, message: "Usage: `/case add <name>` (attach a PDF/DOCX and/or add notes on subsequent lines)" };
+        const existing = await cf.getCase(nameArg);
+        if (!existing) return { handled: true, message: `❌ Case '${nameArg}' not found.\n\nUse \`/case new ${nameArg}\` to create it first.` };
+
+        const results = [];
+
+        // Extract attached doc if present
+        if (options.isPdf && options.pdfData) {
+          const buf = Buffer.from(options.pdfData, "base64");
+          const text = await dt.extractFactDocText(buf, "application/pdf");
+          if (text) {
+            const filename = `doc-${(existing.documents || []).length + 1}.pdf`;
+            await cf.addDocument(nameArg, { filename, mime: "application/pdf", text });
+            results.push(`📎 Added document (${text.length.toLocaleString()} chars).`);
+          }
+        } else if (options.isDocx && options.docxData) {
+          const buf = Buffer.from(options.docxData, "base64");
+          const text = await dt.extractFactDocText(buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+          if (text) {
+            const filename = `doc-${(existing.documents || []).length + 1}.docx`;
+            await cf.addDocument(nameArg, { filename, mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", text });
+            results.push(`📎 Added document (${text.length.toLocaleString()} chars).`);
+          }
+        }
+
+        // Add inline notes if present
+        if (inlineNotes) {
+          await cf.appendNotes(nameArg, inlineNotes);
+          results.push(`📝 Appended ${inlineNotes.length.toLocaleString()} chars of notes.`);
+        }
+
+        if (!results.length) {
+          return { handled: true, message: `⚠️ Nothing to add. Attach a PDF/DOCX and/or provide notes on the next lines.` };
+        }
+
+        return { handled: true, message: `✅ Updated case '${nameArg}':\n\n${results.join("\n")}` };
+      }
+
+      if (action === "notes") {
+        if (!nameArg) return { handled: true, message: "Usage: `/case notes <name>` followed by notes on next lines" };
+        const existing = await cf.getCase(nameArg);
+        if (!existing) return { handled: true, message: `❌ Case '${nameArg}' not found.\n\nUse \`/case new ${nameArg}\` to create it first.` };
+
+        if (!inlineNotes) {
+          return { handled: true, message: `Provide notes on the next lines. Example:\n\`\`\`\n/case notes ${nameArg}\nJudge errored on X. Also Y was wrong because Z.\n\`\`\`` };
+        }
+
+        await cf.appendNotes(nameArg, inlineNotes);
+        return { handled: true, message: `✅ Appended ${inlineNotes.length.toLocaleString()} chars of notes to '${nameArg}'.` };
+      }
+    } catch (err) {
+      console.error("[JJ-Mode] /case error:", err.message, err.stack);
+      return { handled: true, message: `❌ Case command error: ${err.message}` };
+    }
+  }
+
   // ── /template add|list|show|delete <name> — Phase 4 templates ──
   // Template management for the drafting infrastructure.
   //   /template add <name>          — attach a .docx; Zara saves it as a template
   //   /template list                — show all saved templates
   //   /template show <name>         — display template's placeholders + metadata
   //   /template delete <name>       — remove a template
-  const templateMatch = lower.match(/^\/template\s+(add|list|show|delete|del|rm)(?:\s+(.+))?$/);
+  //
+  // Uses first-line-only matching so multiline captions (e.g., description
+  // after the command) don't break the command parse.
+  const firstLineTpl = lower.split("\n", 1)[0].trim();
+  const templateMatch = firstLineTpl.match(/^\/template\s+(add|list|show|delete|del|rm)(?:\s+(.+))?$/);
   if (templateMatch) {
     try {
       const dt = require("./draft-templates");
@@ -338,31 +509,98 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     }
   }
 
-  // ── /draft <name> — Phase 4 drafting pipeline ────────────
-  const draftMatch = lower.match(/^\/draft\s+(.+)$/);
+  // ── /draft <template> [case-name] — Phase 4 drafting pipeline ─
+  //
+  // Accepts multiple input styles:
+  //   /draft bia-appeal                    (fresh, only inline notes/attach)
+  //   /draft bia-appeal chen-fengyu        (uses stored case file)
+  //   /draft bia-appeal chen-fengyu (+ PDF)   (case file + new attachment)
+  //   /draft bia-appeal\n<inline notes>    (inline notes only)
+  //   /draft bia-appeal chen-fengyu\n<more notes>  (case + more inline notes)
+  //
+  // The FIRST LINE must match /draft <template> [<case>]. Everything
+  // after the first newline is inline notes (folded into fact_doc_text
+  // in addition to any case file).
+  const firstLineDraft = lower.split("\n", 1)[0].trim();
+  const draftMatch = firstLineDraft.match(/^\/draft\s+(\S+)(?:\s+(\S+))?\s*$/);
   if (draftMatch) {
     try {
       const dt = require("./draft-templates");
+      const cf = require("./case-files");
       const templateName = draftMatch[1].trim();
+      const caseNameArg = (draftMatch[2] || "").trim();
 
       const template = await dt.getTemplate(templateName);
       if (!template) {
         return { handled: true, message: `❌ Template '${templateName}' not found.\n\nUse \`/template list\` to see available templates.` };
       }
 
+      // If case name provided, load it
+      let caseFile = null;
+      if (caseNameArg) {
+        caseFile = await cf.getCase(caseNameArg);
+        if (!caseFile) {
+          return { handled: true, message: `❌ Case '${caseNameArg}' not found.\n\nUse \`/case list\` to see available cases, or \`/case new ${caseNameArg}\` to create it.` };
+        }
+      }
+
+      // Parse the ORIGINAL (non-lowercased) userMessage for inline notes.
+      // Everything after the first newline in the caption is JJ's case context.
+      const rawLines = userMessage.split("\n");
+      const inlineNotes = rawLines.slice(1).join("\n").trim();
+
       // Extract facts document if attached
-      let factDocText = null;
+      let attachedDocText = null;
       if (options.isPdf && options.pdfData) {
         try {
           const buf = Buffer.from(options.pdfData, "base64");
-          factDocText = await dt.extractFactDocText(buf, "application/pdf");
+          attachedDocText = await dt.extractFactDocText(buf, "application/pdf");
         } catch (e) { console.log("[draft] PDF extract failed:", e.message); }
       } else if (options.isDocx && options.docxData) {
         try {
           const buf = Buffer.from(options.docxData, "base64");
-          factDocText = await dt.extractFactDocText(buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+          attachedDocText = await dt.extractFactDocText(buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
         } catch (e) { console.log("[draft] DOCX extract failed:", e.message); }
       }
+
+      // Build fact_doc_text from ALL sources.
+      // Priority order (highest signal first):
+      //   1. Inline notes (JJ's current case theory)
+      //   2. Stored case file notes (accumulated over time)
+      //   3. Case file documents (stored PDFs from prior sessions)
+      //   4. Newly attached document (this session)
+      let factDocText = null;
+      const parts = [];
+
+      if (inlineNotes) {
+        parts.push(`=== ATTORNEY NOTES ON CASE (this session) ===\n${inlineNotes}`);
+      }
+
+      if (caseFile) {
+        // Merge stored notes + new inline notes into a single ATTORNEY NOTES section
+        // so draftNarrativeSection's parser treats them all as high-weight
+        if (caseFile.notes && caseFile.notes.trim()) {
+          if (parts.length && parts[0].startsWith("=== ATTORNEY NOTES")) {
+            // Combine with the inline notes we just added
+            parts[0] = `=== ATTORNEY NOTES ON CASE ===\n${inlineNotes}\n\n[Prior notes from case file '${caseNameArg}']\n${caseFile.notes}`;
+          } else {
+            parts.push(`=== ATTORNEY NOTES ON CASE ===\n${caseFile.notes}`);
+          }
+        }
+
+        // Add all stored documents from the case file
+        const docs = caseFile.documents || [];
+        for (const doc of docs) {
+          if (!doc.text) continue;
+          parts.push(`=== ATTACHED DOCUMENT: ${doc.filename || 'unnamed'} (from case file) ===\n${doc.text}`);
+        }
+      }
+
+      if (attachedDocText) {
+        parts.push(`=== ATTACHED DOCUMENT (this session) ===\n${attachedDocText}`);
+      }
+
+      factDocText = parts.length ? parts.join("\n\n") : null;
 
       // Start session
       await dt.startSession(userId, template.id, factDocText);
@@ -380,6 +618,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
         .filter(p => !collected[p.name])
         .map(p => p.name);
 
+
       await dt.updateSession(userId, {
         collected,
         missing_fields: missing,
@@ -388,9 +627,19 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
 
       // Build user-facing message
       const msgLines = [`📄 *Drafting: ${templateName}*`, ""];
-      if (factDocText) {
-        msgLines.push(`📎 Read your fact document (${factDocText.length.toLocaleString()} chars).`, "");
+      if (caseFile) {
+        const docs = caseFile.documents || [];
+        msgLines.push(`📁 Loaded case file '${caseNameArg}':`);
+        msgLines.push(`   • ${(caseFile.notes || "").length.toLocaleString()} chars of stored notes`);
+        msgLines.push(`   • ${docs.length} stored document(s)`);
       }
+      if (inlineNotes) {
+        msgLines.push(`📝 Read your case notes (${inlineNotes.length.toLocaleString()} chars).`);
+      }
+      if (attachedDocText) {
+        msgLines.push(`📎 Read attached document (${attachedDocText.length.toLocaleString()} chars).`);
+      }
+      if (caseFile || inlineNotes || attachedDocText) msgLines.push("");
 
       if (Object.keys(collected).length) {
         msgLines.push("*Extracted values:*");
