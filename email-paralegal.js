@@ -1,41 +1,67 @@
 // ============================================================
-//  TEZ LAW P.C. — EMAIL PARALEGAL v1
+//  TEZ LAW P.C. — EMAIL PARALEGAL v2 (IMAP)
 //  ─────────────────────────────────────────────────────────
-//  Scans JJ's Gmail accounts every 30 min, tracks threads
-//  where JJ hasn't replied. Twice-daily WhatsApp digest at
-//  7 AM and 8 PM Pacific.
+//  IMAP-based multi-provider email scanner. Works with:
+//    - Gmail (imap.gmail.com — needs app password)
+//    - GoDaddy (imap.secureserver.net or outlook.office365.com)
+//    - Hotmail/Outlook (outlook.office365.com)
+//    - Any IMAP-compatible email provider
 //
 //  Privacy: LOCAL PATTERN-MATCHING ONLY. Email bodies never
-//  leave the server. Classification uses only:
-//    - Sender email + domain
-//    - Subject line
-//    - List-Unsubscribe / Auto-Submitted headers
-//    - Recipient count (mass emails)
-//    - Marketing/notification keywords in subject
+//  leave the server.
 //
-//  Multi-account: supports N Gmail accounts. Uses OAuth 2.0
-//  with per-account refresh tokens stored in DB.
-//
-//  Snooze/ignore: JJ can mute individual threads or add
-//  sender patterns to a permanent allow-list.
+//  Credentials: passwords encrypted at rest with AES-256-GCM.
 // ============================================================
 
-const axios = require("axios");
+const { ImapFlow } = require("imapflow");
+const crypto = require("crypto");
 const db = require("./db");
+
+// ── Encryption ──────────────────────────────────────────
+
+function getEncKey() {
+  const raw = process.env.EMAIL_ENC_KEY || process.env.JJ_MODE_PASSWORD || "tezlaw-set-EMAIL_ENC_KEY-please";
+  return crypto.createHash("sha256").update(raw).digest();
+}
+
+function encrypt(plaintext) {
+  const key = getEncKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, encrypted]).toString("base64");
+}
+
+function decrypt(ciphertext) {
+  const key = getEncKey();
+  const buf = Buffer.from(ciphertext, "base64");
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const encrypted = buf.subarray(28);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  return decrypted.toString("utf8");
+}
 
 // ── Schema ───────────────────────────────────────────────
 
 async function initEmailTables() {
   await db.query(`
-    CREATE TABLE IF NOT EXISTS gmail_accounts (
-      id             SERIAL PRIMARY KEY,
-      email          TEXT UNIQUE NOT NULL,
-      refresh_token  TEXT NOT NULL,
-      access_token   TEXT,
-      token_expiry   TIMESTAMPTZ,
-      active         BOOLEAN DEFAULT TRUE,
-      last_scan_at   TIMESTAMPTZ,
-      created_at     TIMESTAMPTZ DEFAULT NOW()
+    CREATE TABLE IF NOT EXISTS imap_accounts (
+      id                SERIAL PRIMARY KEY,
+      email             TEXT UNIQUE NOT NULL,
+      imap_host         TEXT NOT NULL,
+      imap_port         INTEGER NOT NULL DEFAULT 993,
+      imap_user         TEXT NOT NULL,
+      encrypted_pass    TEXT NOT NULL,
+      use_tls           BOOLEAN DEFAULT TRUE,
+      active            BOOLEAN DEFAULT TRUE,
+      last_scan_at      TIMESTAMPTZ,
+      last_error        TEXT,
+      display_name      TEXT,
+      created_at        TIMESTAMPTZ DEFAULT NOW()
     )
   `);
 
@@ -75,96 +101,70 @@ async function initEmailTables() {
     )
   `);
 
-  // Seed the allow-list on first run
   await seedAllowList();
 }
 
-// ── Allow-list Seed Data ─────────────────────────────────
-// These patterns catch ~80% of noise emails without needing to read bodies.
-
 async function seedAllowList() {
   const seeds = [
-    // Sender email patterns (exact or wildcards handled as substring match)
-    { pattern: "noreply@", pattern_type: "sender_contains", reason: "no-reply automation" },
-    { pattern: "no-reply@", pattern_type: "sender_contains", reason: "no-reply automation" },
-    { pattern: "donotreply@", pattern_type: "sender_contains", reason: "no-reply automation" },
-    { pattern: "do-not-reply@", pattern_type: "sender_contains", reason: "no-reply automation" },
-    { pattern: "notification@", pattern_type: "sender_contains", reason: "notification bot" },
-    { pattern: "notifications@", pattern_type: "sender_contains", reason: "notification bot" },
-    { pattern: "updates@", pattern_type: "sender_contains", reason: "update bot" },
+    { pattern: "noreply@", pattern_type: "sender_contains", reason: "no-reply" },
+    { pattern: "no-reply@", pattern_type: "sender_contains", reason: "no-reply" },
+    { pattern: "donotreply@", pattern_type: "sender_contains", reason: "no-reply" },
+    { pattern: "do-not-reply@", pattern_type: "sender_contains", reason: "no-reply" },
+    { pattern: "notification@", pattern_type: "sender_contains", reason: "notification" },
+    { pattern: "notifications@", pattern_type: "sender_contains", reason: "notification" },
+    { pattern: "updates@", pattern_type: "sender_contains", reason: "updates" },
     { pattern: "newsletter@", pattern_type: "sender_contains", reason: "newsletter" },
     { pattern: "postmaster@", pattern_type: "sender_contains", reason: "mail system" },
     { pattern: "mailer-daemon@", pattern_type: "sender_contains", reason: "mail system" },
-    { pattern: "bounce@", pattern_type: "sender_contains", reason: "bounce handler" },
-    { pattern: "bounces@", pattern_type: "sender_contains", reason: "bounce handler" },
-    { pattern: "hello@", pattern_type: "sender_contains", reason: "marketing" },
+    { pattern: "bounce@", pattern_type: "sender_contains", reason: "bounce" },
+    { pattern: "bounces@", pattern_type: "sender_contains", reason: "bounce" },
     { pattern: "marketing@", pattern_type: "sender_contains", reason: "marketing" },
     { pattern: "promo@", pattern_type: "sender_contains", reason: "promotional" },
     { pattern: "promotions@", pattern_type: "sender_contains", reason: "promotional" },
-    { pattern: "team@", pattern_type: "sender_contains", reason: "generic team" },
-    { pattern: "support@", pattern_type: "sender_contains", reason: "support system" },
-    { pattern: "help@", pattern_type: "sender_contains", reason: "support system" },
-    { pattern: "billing@", pattern_type: "sender_contains", reason: "billing (informational)" },
-    { pattern: "invoice@", pattern_type: "sender_contains", reason: "invoice (informational)" },
-    { pattern: "receipt@", pattern_type: "sender_contains", reason: "receipt (informational)" },
-    { pattern: "orders@", pattern_type: "sender_contains", reason: "order confirmation" },
-    { pattern: "confirm@", pattern_type: "sender_contains", reason: "confirmation bot" },
-    { pattern: "info@", pattern_type: "sender_contains", reason: "info blast" },
+    { pattern: "billing@", pattern_type: "sender_contains", reason: "billing" },
+    { pattern: "invoice@", pattern_type: "sender_contains", reason: "invoice" },
+    { pattern: "receipt@", pattern_type: "sender_contains", reason: "receipt" },
+    { pattern: "orders@", pattern_type: "sender_contains", reason: "order" },
     { pattern: "news@", pattern_type: "sender_contains", reason: "news blast" },
-
-    // Domain patterns
-    { pattern: "linkedin.com", pattern_type: "domain", reason: "LinkedIn notifications" },
-    { pattern: "mailchimp.com", pattern_type: "domain", reason: "mailchimp campaigns" },
-    { pattern: "constantcontact.com", pattern_type: "domain", reason: "constant contact campaigns" },
-    { pattern: "hubspot.com", pattern_type: "domain", reason: "hubspot campaigns" },
-    { pattern: "salesforce.com", pattern_type: "domain", reason: "salesforce automation" },
-    { pattern: "sendgrid.net", pattern_type: "domain", reason: "sendgrid campaigns" },
-    { pattern: "mailgun.org", pattern_type: "domain", reason: "mailgun campaigns" },
-    { pattern: "amazonses.com", pattern_type: "domain", reason: "ses campaigns" },
-    { pattern: "mail.notion.so", pattern_type: "domain", reason: "notion notifications" },
-    { pattern: "e.godaddy.com", pattern_type: "domain", reason: "godaddy marketing" },
+    { pattern: "digest@", pattern_type: "sender_contains", reason: "digest" },
+    { pattern: "linkedin.com", pattern_type: "domain", reason: "LinkedIn" },
+    { pattern: "mailchimp.com", pattern_type: "domain", reason: "mailchimp" },
+    { pattern: "constantcontact.com", pattern_type: "domain", reason: "constant contact" },
+    { pattern: "hubspot.com", pattern_type: "domain", reason: "hubspot" },
+    { pattern: "sendgrid.net", pattern_type: "domain", reason: "sendgrid" },
+    { pattern: "mailgun.org", pattern_type: "domain", reason: "mailgun" },
+    { pattern: "amazonses.com", pattern_type: "domain", reason: "ses" },
+    { pattern: "mail.notion.so", pattern_type: "domain", reason: "notion" },
     { pattern: "email.godaddy.com", pattern_type: "domain", reason: "godaddy marketing" },
-    { pattern: "e.wordpress.com", pattern_type: "domain", reason: "wordpress marketing" },
-    { pattern: "google.com", pattern_type: "domain_exact", reason: "google internal (usually notification)" },
-    { pattern: "facebookmail.com", pattern_type: "domain", reason: "facebook notifications" },
-    { pattern: "meetup.com", pattern_type: "domain", reason: "meetup notifications" },
-    { pattern: "youtube.com", pattern_type: "domain", reason: "youtube notifications" },
+    { pattern: "e.godaddy.com", pattern_type: "domain", reason: "godaddy marketing" },
+    { pattern: "e.wordpress.com", pattern_type: "domain", reason: "wordpress" },
+    { pattern: "facebookmail.com", pattern_type: "domain", reason: "facebook" },
+    { pattern: "meetup.com", pattern_type: "domain", reason: "meetup" },
+    { pattern: "youtube.com", pattern_type: "domain", reason: "youtube" },
     { pattern: "eventbrite.com", pattern_type: "domain", reason: "eventbrite" },
-    { pattern: "zoom.us", pattern_type: "domain", reason: "zoom notifications" },
-    { pattern: "docusign.net", pattern_type: "domain", reason: "docusign notifications" },
-    { pattern: "docusign.com", pattern_type: "domain", reason: "docusign notifications" },
-
-    // Subject patterns (case-insensitive substring)
-    { pattern: "unsubscribe", pattern_type: "subject_contains", reason: "unsubscribe language" },
+    { pattern: "zoom.us", pattern_type: "domain", reason: "zoom" },
+    { pattern: "docusign.net", pattern_type: "domain", reason: "docusign" },
+    { pattern: "docusign.com", pattern_type: "domain", reason: "docusign" },
+    { pattern: "clio.com", pattern_type: "domain", reason: "clio" },
+    { pattern: "mycase.com", pattern_type: "domain", reason: "mycase" },
+    { pattern: "avvo.com", pattern_type: "domain", reason: "avvo" },
+    { pattern: "unsubscribe", pattern_type: "subject_contains", reason: "unsubscribe" },
     { pattern: "newsletter", pattern_type: "subject_contains", reason: "newsletter" },
-    { pattern: "% off", pattern_type: "subject_contains", reason: "promotional" },
-    { pattern: "% OFF", pattern_type: "subject_contains", reason: "promotional" },
+    { pattern: "% off", pattern_type: "subject_contains", reason: "promo" },
     { pattern: "your receipt", pattern_type: "subject_contains", reason: "receipt" },
-    { pattern: "order confirmation", pattern_type: "subject_contains", reason: "order confirmation" },
+    { pattern: "order confirmation", pattern_type: "subject_contains", reason: "order" },
     { pattern: "your invoice", pattern_type: "subject_contains", reason: "invoice" },
     { pattern: "invoice from", pattern_type: "subject_contains", reason: "invoice" },
-    { pattern: "payment received", pattern_type: "subject_contains", reason: "payment confirmation" },
-    { pattern: "delivery update", pattern_type: "subject_contains", reason: "delivery notification" },
-    { pattern: "shipping notification", pattern_type: "subject_contains", reason: "shipping notification" },
-    { pattern: "your package", pattern_type: "subject_contains", reason: "package notification" },
-    { pattern: "webinar", pattern_type: "subject_contains", reason: "webinar promotion" },
-    { pattern: "you're invited", pattern_type: "subject_contains", reason: "generic invite" },
-    { pattern: "weekly digest", pattern_type: "subject_contains", reason: "weekly digest" },
-    { pattern: "daily digest", pattern_type: "subject_contains", reason: "daily digest" },
-    { pattern: "your daily", pattern_type: "subject_contains", reason: "daily automation" },
-    { pattern: "your weekly", pattern_type: "subject_contains", reason: "weekly automation" },
-    { pattern: "last chance", pattern_type: "subject_contains", reason: "marketing urgency" },
-    { pattern: "limited time", pattern_type: "subject_contains", reason: "marketing urgency" },
-    { pattern: "flash sale", pattern_type: "subject_contains", reason: "sale marketing" },
-    { pattern: "clearance", pattern_type: "subject_contains", reason: "sale marketing" },
-    { pattern: "expiring soon", pattern_type: "subject_contains", reason: "marketing" },
-    { pattern: "[spam]", pattern_type: "subject_contains", reason: "spam label" },
-    { pattern: "[bulk]", pattern_type: "subject_contains", reason: "bulk mail" },
-    { pattern: "unsubscribe:", pattern_type: "subject_contains", reason: "unsubscribe language" },
-    { pattern: "meeting recording", pattern_type: "subject_contains", reason: "recording notification" },
-    { pattern: "cloud recording", pattern_type: "subject_contains", reason: "recording notification" },
-    { pattern: "case status update", pattern_type: "subject_contains", reason: "mycase notification" },
-    { pattern: "clio update", pattern_type: "subject_contains", reason: "clio notification" },
+    { pattern: "payment received", pattern_type: "subject_contains", reason: "payment" },
+    { pattern: "delivery update", pattern_type: "subject_contains", reason: "delivery" },
+    { pattern: "webinar", pattern_type: "subject_contains", reason: "webinar" },
+    { pattern: "weekly digest", pattern_type: "subject_contains", reason: "digest" },
+    { pattern: "daily digest", pattern_type: "subject_contains", reason: "digest" },
+    { pattern: "flash sale", pattern_type: "subject_contains", reason: "sale" },
+    { pattern: "limited time", pattern_type: "subject_contains", reason: "sale" },
+    { pattern: "last chance", pattern_type: "subject_contains", reason: "sale" },
+    { pattern: "cloud recording", pattern_type: "subject_contains", reason: "recording" },
+    { pattern: "meeting recording", pattern_type: "subject_contains", reason: "recording" },
   ];
 
   for (const s of seeds) {
@@ -175,105 +175,86 @@ async function seedAllowList() {
          ON CONFLICT (pattern, pattern_type) DO NOTHING`,
         [s.pattern, s.pattern_type, s.reason]
       );
-    } catch (e) {
-      // ignore conflicts
-    }
+    } catch (e) { /* ignore */ }
   }
 }
 
-// ── OAuth Token Refresh ──────────────────────────────────
+// ── Address Parsing ──────────────────────────────────────
 
-async function refreshAccessToken(account) {
-  const clientId = process.env.GMAIL_CLIENT_ID;
-  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new Error("GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET must be set in Render env vars");
-  }
-
-  const resp = await axios.post(
-    "https://oauth2.googleapis.com/token",
-    new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: account.refresh_token,
-      grant_type: "refresh_token",
-    }),
-    { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-  );
-
-  const { access_token, expires_in } = resp.data;
-  const expiry = new Date(Date.now() + (expires_in - 60) * 1000); // 60s safety margin
-
-  await db.query(
-    `UPDATE gmail_accounts SET access_token = $1, token_expiry = $2 WHERE id = $3`,
-    [access_token, expiry, account.id]
-  );
-
-  return access_token;
-}
-
-async function getValidAccessToken(account) {
-  if (account.access_token && account.token_expiry && new Date(account.token_expiry) > new Date()) {
-    return account.access_token;
-  }
-  return await refreshAccessToken(account);
-}
-
-// ── Gmail API Calls ──────────────────────────────────────
-
-async function listRecentThreads(accessToken, sinceDaysAgo = 7) {
-  const sinceEpoch = Math.floor((Date.now() - sinceDaysAgo * 86400 * 1000) / 1000);
-  const query = `newer_than:${sinceDaysAgo}d`;
-
-  const resp = await axios.get(
-    "https://gmail.googleapis.com/gmail/v1/users/me/threads",
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { q: query, maxResults: 100 },
-    }
-  );
-
-  return resp.data.threads || [];
-}
-
-async function fetchThread(accessToken, threadId) {
-  const resp = await axios.get(
-    `https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}`,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: { format: "metadata", metadataHeaders: ["From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "Auto-Submitted", "Precedence"] },
-    }
-  );
-  return resp.data;
-}
-
-// ── Header Extraction Helpers ────────────────────────────
-
-function extractHeader(headers, name) {
-  if (!headers) return null;
-  const h = headers.find(x => x.name.toLowerCase() === name.toLowerCase());
-  return h ? h.value : null;
-}
-
-function parseEmailAddress(headerValue) {
-  if (!headerValue) return { name: null, email: null, domain: null };
-  // Handles: "John Doe <john@example.com>" and "john@example.com"
-  const match = headerValue.match(/^(?:"?([^"<]*)"?\s*<)?([^>]+@[^>]+?)>?$/);
-  if (!match) return { name: null, email: headerValue.toLowerCase(), domain: null };
-  const name = (match[1] || "").trim();
-  const email = match[2].trim().toLowerCase();
+function parseAddress(addrObj) {
+  if (!addrObj) return { name: null, email: null, domain: null };
+  const first = Array.isArray(addrObj) ? addrObj[0] : addrObj;
+  if (!first) return { name: null, email: null, domain: null };
+  const email = (first.address || "").toLowerCase().trim();
+  const name = (first.name || "").trim();
   const domain = email.split("@")[1] || null;
-  return { name: name || null, email, domain };
+  return { name: name || null, email: email || null, domain };
 }
 
-function countRecipients(headers) {
-  const to = extractHeader(headers, "To") || "";
-  const cc = extractHeader(headers, "Cc") || "";
-  const combined = to + "," + cc;
-  return (combined.match(/@/g) || []).length;
+function countAddresses(list) {
+  if (!list) return 0;
+  return Array.isArray(list) ? list.length : 1;
 }
 
-// ── Classification (Local Pattern Matching Only) ─────────
+// ── Header Parsing ───────────────────────────────────────
+
+function parseHeadersToMap(headersBuffer) {
+  if (!headersBuffer) return new Map();
+  if (headersBuffer instanceof Map) return headersBuffer;
+  if (Buffer.isBuffer(headersBuffer)) {
+    const text = headersBuffer.toString("utf8");
+    const map = new Map();
+    const lines = text.split(/\r?\n/);
+    let currentKey = null;
+    let currentVal = "";
+    for (const line of lines) {
+      if (/^\s/.test(line) && currentKey) {
+        currentVal += " " + line.trim();
+      } else {
+        if (currentKey) {
+          const arr = map.get(currentKey) || [];
+          arr.push(currentVal);
+          map.set(currentKey, arr);
+        }
+        const idx = line.indexOf(":");
+        if (idx > 0) {
+          currentKey = line.substring(0, idx).toLowerCase().trim();
+          currentVal = line.substring(idx + 1).trim();
+        } else {
+          currentKey = null;
+          currentVal = "";
+        }
+      }
+    }
+    if (currentKey) {
+      const arr = map.get(currentKey) || [];
+      arr.push(currentVal);
+      map.set(currentKey, arr);
+    }
+    return map;
+  }
+  return new Map();
+}
+
+function parseReferencesFromHeaders(headers) {
+  const map = parseHeadersToMap(headers);
+  const refs = map.get("references");
+  if (!refs || !refs[0]) return null;
+  return refs[0].split(/\s+/).filter(Boolean);
+}
+
+function extractInReplyTo(headers) {
+  const map = parseHeadersToMap(headers);
+  const irt = map.get("in-reply-to");
+  return irt && irt[0] ? irt[0].trim() : null;
+}
+
+function normalizeSubject(subject) {
+  if (!subject) return "";
+  return subject.replace(/^((re|fwd|fw|aw|antw|sv):\s*)+/gi, "").trim();
+}
+
+// ── Classification ───────────────────────────────────────
 
 let allowListCache = null;
 let allowListCacheAt = 0;
@@ -292,30 +273,30 @@ async function getAllowList() {
 async function shouldSkip({ senderEmail, senderDomain, subject, headers, recipientCount }) {
   const allowList = await getAllowList();
 
-  // 1. Auto-Submitted header (RFC 3834)
-  const autoSubmitted = extractHeader(headers, "Auto-Submitted");
-  if (autoSubmitted && autoSubmitted.toLowerCase() !== "no") {
-    return { skip: true, reason: `auto-submitted: ${autoSubmitted}` };
+  if (headers) {
+    const map = parseHeadersToMap(headers);
+    const autoSubmitted = map.get("auto-submitted");
+    if (autoSubmitted && autoSubmitted[0] && !/^no$/i.test(autoSubmitted[0])) {
+      return { skip: true, reason: `auto-submitted: ${autoSubmitted[0]}` };
+    }
+    const precedence = map.get("precedence");
+    if (precedence && precedence[0] && /^(bulk|list|junk)$/i.test(precedence[0])) {
+      return { skip: true, reason: `precedence: ${precedence[0]}` };
+    }
+    const listUnsub = map.get("list-unsubscribe");
+    if (listUnsub && listUnsub[0]) {
+      return { skip: true, reason: "list-unsubscribe (mailing list)" };
+    }
+    const listId = map.get("list-id");
+    if (listId && listId[0]) {
+      return { skip: true, reason: "list-id header" };
+    }
   }
 
-  // 2. Precedence: bulk / list / junk
-  const precedence = extractHeader(headers, "Precedence");
-  if (precedence && ["bulk", "list", "junk"].includes(precedence.toLowerCase())) {
-    return { skip: true, reason: `precedence: ${precedence}` };
-  }
-
-  // 3. List-Unsubscribe header (RFC 2369) — indicates mailing list
-  const listUnsub = extractHeader(headers, "List-Unsubscribe");
-  if (listUnsub) {
-    return { skip: true, reason: "has List-Unsubscribe header (mailing list)" };
-  }
-
-  // 4. Mass recipient (> 5) suggests broadcast, not personal
   if (recipientCount > 5) {
     return { skip: true, reason: `${recipientCount} recipients (mass email)` };
   }
 
-  // 5. Allow-list pattern matches
   const subjectLower = (subject || "").toLowerCase();
   const senderLower = (senderEmail || "").toLowerCase();
   const domainLower = (senderDomain || "").toLowerCase();
@@ -323,168 +304,265 @@ async function shouldSkip({ senderEmail, senderDomain, subject, headers, recipie
   for (const entry of allowList) {
     const p = entry.pattern.toLowerCase();
     if (entry.pattern_type === "sender_exact" && senderLower === p) {
-      return { skip: true, reason: `allow-list: sender=${entry.pattern}` };
+      return { skip: true, reason: `allow: sender=${entry.pattern}` };
     }
     if (entry.pattern_type === "sender_contains" && senderLower.includes(p)) {
-      return { skip: true, reason: `allow-list: sender contains ${entry.pattern}` };
+      return { skip: true, reason: `allow: sender contains ${entry.pattern}` };
     }
     if (entry.pattern_type === "domain_exact" && domainLower === p) {
-      return { skip: true, reason: `allow-list: domain=${entry.pattern}` };
+      return { skip: true, reason: `allow: domain=${entry.pattern}` };
     }
     if (entry.pattern_type === "domain" && (domainLower === p || domainLower.endsWith("." + p))) {
-      return { skip: true, reason: `allow-list: domain=${entry.pattern}` };
+      return { skip: true, reason: `allow: domain=${entry.pattern}` };
     }
     if (entry.pattern_type === "subject_contains" && subjectLower.includes(p)) {
-      return { skip: true, reason: `allow-list: subject contains "${entry.pattern}"` };
+      return { skip: true, reason: `allow: subject contains "${entry.pattern}"` };
     }
   }
 
   return { skip: false };
 }
 
-// ── Main Scan Function ───────────────────────────────────
+// ── IMAP Scan ────────────────────────────────────────────
+
+async function connectImap(account) {
+  const client = new ImapFlow({
+    host: account.imap_host,
+    port: account.imap_port || 993,
+    secure: account.use_tls !== false,
+    auth: {
+      user: account.imap_user,
+      pass: decrypt(account.encrypted_pass),
+    },
+    logger: false,
+    tls: { rejectUnauthorized: false },
+  });
+  await client.connect();
+  return client;
+}
+
+async function findSentFolder(client) {
+  const candidates = ["Sent", "[Gmail]/Sent Mail", "INBOX.Sent", "Sent Items", "Sent Mail"];
+  for (const name of candidates) {
+    try {
+      const s = await client.status(name, { messages: true });
+      if (s && s.messages !== undefined) return name;
+    } catch (_) { /* try next */ }
+  }
+  return null;
+}
+
+async function getSentMessageIds(client) {
+  const sentIds = new Set();
+  const sentFolder = await findSentFolder(client);
+  if (!sentFolder) return sentIds;
+
+  try {
+    const lock = await client.getMailboxLock(sentFolder);
+    try {
+      const since = new Date(Date.now() - 30 * 86400 * 1000);
+      const messages = client.fetch({ since }, { envelope: true, headers: ["in-reply-to", "references"] });
+      for await (const msg of messages) {
+        if (msg.envelope?.messageId) sentIds.add(msg.envelope.messageId);
+        const inReplyTo = extractInReplyTo(msg.headers);
+        if (inReplyTo) sentIds.add(inReplyTo);
+        const refs = parseReferencesFromHeaders(msg.headers);
+        if (refs) for (const r of refs) sentIds.add(r);
+      }
+    } finally {
+      lock.release();
+    }
+  } catch (e) {
+    console.log(`[imap] Sent scan error: ${e.message}`);
+  }
+  return sentIds;
+}
+
+async function getSentSubjects(client) {
+  const subjects = new Set();
+  const sentFolder = await findSentFolder(client);
+  if (!sentFolder) return subjects;
+
+  try {
+    const lock = await client.getMailboxLock(sentFolder);
+    try {
+      const since = new Date(Date.now() - 30 * 86400 * 1000);
+      const messages = client.fetch({ since }, { envelope: true });
+      for await (const msg of messages) {
+        const s = normalizeSubject(msg.envelope?.subject || "");
+        if (s) subjects.add(s.toLowerCase());
+      }
+    } finally {
+      lock.release();
+    }
+  } catch (e) { /* silent */ }
+  return subjects;
+}
 
 async function scanAccount(account) {
-  await initEmailTables();
-  const accessToken = await getValidAccessToken(account);
-
-  console.log(`[email-scanner] Scanning ${account.email}...`);
-
-  // Get the "me" email address for this account (to identify who JJ is)
-  let myEmail = account.email.toLowerCase();
+  console.log(`[imap-scanner] Scanning ${account.email}...`);
+  let stats = { total: 0, tracked: 0, autoSkipped: 0, alreadyReplied: 0, errors: 0 };
+  let client;
   try {
-    const profileResp = await axios.get(
-      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    if (profileResp.data.emailAddress) {
-      myEmail = profileResp.data.emailAddress.toLowerCase();
-    }
-  } catch (_) {}
-
-  const threads = await listRecentThreads(accessToken, 7);
-  let stats = { total: threads.length, tracked: 0, skipped: 0, alreadyReplied: 0, autoSkipped: 0 };
-
-  for (const t of threads) {
-    try {
-      const thread = await fetchThread(accessToken, t.id);
-      if (!thread.messages || !thread.messages.length) continue;
-
-      const messages = thread.messages;
-      const lastMsg = messages[messages.length - 1];
-      const lastHeaders = lastMsg.payload?.headers || [];
-      const fromHeader = extractHeader(lastHeaders, "From");
-      const parsedFrom = parseEmailAddress(fromHeader);
-
-      // Check: did JJ send the last message? If so, JJ has replied.
-      const jjIsLastSender = parsedFrom.email && parsedFrom.email === myEmail;
-      if (jjIsLastSender) {
-        // Mark any existing tracker entry for this thread as replied
-        await db.query(
-          `UPDATE email_tracker SET status = 'replied', last_checked_at = NOW()
-           WHERE account_email = $1 AND thread_id = $2 AND status = 'pending'`,
-          [account.email, t.id]
-        );
-        stats.alreadyReplied++;
-        continue;
-      }
-
-      // Check if JJ ever replied in this thread (any message sent by JJ)
-      const jjEverReplied = messages.some(m => {
-        const fh = extractHeader(m.payload?.headers || [], "From");
-        return parseEmailAddress(fh).email === myEmail;
-      });
-      if (jjEverReplied) {
-        // Thread has back-and-forth. JJ replied at some point.
-        // But the LAST message isn't from JJ, so someone re-replied.
-        // Consider this a NEW email needing a reply.
-      }
-
-      const subject = extractHeader(lastHeaders, "Subject") || "(no subject)";
-      const dateStr = extractHeader(lastHeaders, "Date");
-      const receivedAt = dateStr ? new Date(dateStr) : new Date(parseInt(lastMsg.internalDate) || Date.now());
-      const recipientCount = countRecipients(lastHeaders);
-
-      // Pattern-match allow-list check
-      const skipDecision = await shouldSkip({
-        senderEmail: parsedFrom.email,
-        senderDomain: parsedFrom.domain,
-        subject,
-        headers: lastHeaders,
-        recipientCount,
-      });
-
-      if (skipDecision.skip) {
-        stats.autoSkipped++;
-        // Still record it as 'ignored' so we don't rescan every time
-        await db.query(
-          `INSERT INTO email_tracker
-            (account_email, thread_id, message_id, sender_name, sender_email, sender_domain,
-             subject, received_at, status, last_checked_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ignored', NOW())
-           ON CONFLICT (account_email, thread_id) DO UPDATE SET
-             last_checked_at = NOW(),
-             status = CASE WHEN email_tracker.status = 'pending' THEN 'ignored' ELSE email_tracker.status END`,
-          [account.email, t.id, lastMsg.id, parsedFrom.name, parsedFrom.email, parsedFrom.domain,
-           subject, receivedAt]
-        );
-        continue;
-      }
-
-      // Insert or update as pending
-      await db.query(
-        `INSERT INTO email_tracker
-          (account_email, thread_id, message_id, sender_name, sender_email, sender_domain,
-           subject, received_at, last_checked_at, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), 'pending')
-         ON CONFLICT (account_email, thread_id) DO UPDATE SET
-           message_id      = EXCLUDED.message_id,
-           received_at     = EXCLUDED.received_at,
-           last_checked_at = NOW(),
-           status          = CASE
-             WHEN email_tracker.status IN ('ignored', 'replied') THEN 'pending'
-             ELSE email_tracker.status
-           END`,
-        [account.email, t.id, lastMsg.id, parsedFrom.name, parsedFrom.email, parsedFrom.domain,
-         subject, receivedAt]
-      );
-
-      stats.tracked++;
-    } catch (e) {
-      console.error(`[email-scanner] Error processing thread ${t.id}:`, e.message);
-    }
+    client = await connectImap(account);
+  } catch (e) {
+    console.error(`[imap-scanner] Connect failed for ${account.email}:`, e.message);
+    await db.query(`UPDATE imap_accounts SET last_error = $1 WHERE id = $2`, [e.message, account.id]);
+    return { ...stats, error: e.message };
   }
 
-  await db.query(
-    `UPDATE gmail_accounts SET last_scan_at = NOW() WHERE id = $1`,
-    [account.id]
-  );
+  try {
+    const sentMessageIds = await getSentMessageIds(client);
+    const sentSubjects = await getSentSubjects(client);
 
-  console.log(`[email-scanner] ${account.email}: ${stats.tracked} tracked, ${stats.autoSkipped} auto-skipped, ${stats.alreadyReplied} already-replied out of ${stats.total} threads`);
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      const since = new Date(Date.now() - 7 * 86400 * 1000);
+      const messages = client.fetch(
+        { since },
+        {
+          envelope: true, uid: true, flags: true,
+          headers: ["list-unsubscribe", "list-id", "auto-submitted", "precedence", "in-reply-to", "references"],
+        }
+      );
+
+      const conversationMap = new Map();
+
+      for await (const msg of messages) {
+        stats.total++;
+        try {
+          const env = msg.envelope || {};
+          const from = parseAddress(env.from);
+          const subject = env.subject || "(no subject)";
+          const messageId = env.messageId || `uid-${msg.uid}`;
+
+          if (from.email && from.email === account.email.toLowerCase()) continue;
+
+          const references = parseReferencesFromHeaders(msg.headers);
+          const inReplyTo = extractInReplyTo(msg.headers);
+          const rootMessageId = references?.[0] || inReplyTo || messageId;
+          const normalizedSubject = normalizeSubject(subject);
+          const conversationKey = rootMessageId || `subject:${normalizedSubject}:${from.email}`;
+
+          const jjReplied =
+            (references && references.some(id => sentMessageIds.has(id))) ||
+            (inReplyTo && sentMessageIds.has(inReplyTo)) ||
+            (sentMessageIds.has(messageId)) ||
+            (normalizedSubject && sentSubjects.has(normalizedSubject.toLowerCase()));
+
+          if (jjReplied) {
+            stats.alreadyReplied++;
+            await db.query(
+              `UPDATE email_tracker SET status = 'replied', last_checked_at = NOW()
+               WHERE account_email = $1 AND thread_id = $2 AND status = 'pending'`,
+              [account.email, conversationKey]
+            );
+            continue;
+          }
+
+          const existing = conversationMap.get(conversationKey);
+          const receivedAt = env.date ? new Date(env.date) : new Date();
+          if (!existing || existing.receivedAt < receivedAt) {
+            conversationMap.set(conversationKey, {
+              conversationKey, messageId, from, subject, receivedAt,
+              headers: msg.headers,
+              recipientCount: countAddresses(env.to) + countAddresses(env.cc),
+            });
+          }
+        } catch (e) {
+          console.error(`[imap-scanner] Message error: ${e.message}`);
+          stats.errors++;
+        }
+      }
+
+      for (const conv of conversationMap.values()) {
+        try {
+          const skipDecision = await shouldSkip({
+            senderEmail: conv.from.email,
+            senderDomain: conv.from.domain,
+            subject: conv.subject,
+            headers: conv.headers,
+            recipientCount: conv.recipientCount,
+          });
+
+          if (skipDecision.skip) {
+            stats.autoSkipped++;
+            await db.query(
+              `INSERT INTO email_tracker
+                (account_email, thread_id, message_id, sender_name, sender_email, sender_domain,
+                 subject, received_at, status, last_checked_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ignored', NOW())
+               ON CONFLICT (account_email, thread_id) DO UPDATE SET
+                 last_checked_at = NOW(),
+                 status = CASE WHEN email_tracker.status = 'pending' THEN 'ignored' ELSE email_tracker.status END`,
+              [account.email, conv.conversationKey, conv.messageId, conv.from.name, conv.from.email,
+               conv.from.domain, conv.subject, conv.receivedAt]
+            );
+            continue;
+          }
+
+          await db.query(
+            `INSERT INTO email_tracker
+              (account_email, thread_id, message_id, sender_name, sender_email, sender_domain,
+               subject, received_at, last_checked_at, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), 'pending')
+             ON CONFLICT (account_email, thread_id) DO UPDATE SET
+               message_id      = EXCLUDED.message_id,
+               received_at     = EXCLUDED.received_at,
+               last_checked_at = NOW(),
+               status          = CASE
+                 WHEN email_tracker.status IN ('ignored', 'replied') THEN 'pending'
+                 ELSE email_tracker.status
+               END`,
+            [account.email, conv.conversationKey, conv.messageId, conv.from.name, conv.from.email,
+             conv.from.domain, conv.subject, conv.receivedAt]
+          );
+
+          stats.tracked++;
+        } catch (e) {
+          console.error(`[imap-scanner] Insert error: ${e.message}`);
+          stats.errors++;
+        }
+      }
+    } finally {
+      lock.release();
+    }
+
+    await db.query(
+      `UPDATE imap_accounts SET last_scan_at = NOW(), last_error = NULL WHERE id = $1`,
+      [account.id]
+    );
+  } catch (e) {
+    console.error(`[imap-scanner] Scan error for ${account.email}: ${e.message}`);
+    stats.errors++;
+    stats.error = e.message;
+    await db.query(`UPDATE imap_accounts SET last_error = $1 WHERE id = $2`, [e.message, account.id]);
+  } finally {
+    try { await client.logout(); } catch (_) {}
+  }
+
+  console.log(`[imap-scanner] ${account.email}: ${stats.tracked} tracked, ${stats.autoSkipped} auto-skipped, ${stats.alreadyReplied} already-replied of ${stats.total} messages`);
   return stats;
 }
 
+// ── Public API ───────────────────────────────────────────
+
 async function scanAllAccounts() {
   await initEmailTables();
-  const accounts = await db.query(`SELECT * FROM gmail_accounts WHERE active = TRUE`);
+  const accounts = await db.query(`SELECT * FROM imap_accounts WHERE active = TRUE`);
   const allStats = [];
   for (const account of accounts.rows) {
     try {
       const stats = await scanAccount(account);
       allStats.push({ email: account.email, ...stats });
     } catch (e) {
-      console.error(`[email-scanner] Failed to scan ${account.email}:`, e.message);
+      console.error(`[imap-scanner] Failed for ${account.email}:`, e.message);
       allStats.push({ email: account.email, error: e.message });
     }
   }
   return allStats;
 }
 
-// ── Query Functions For Digest ───────────────────────────
-
-/**
- * Get all pending (unreplied) threads, grouped by urgency.
- */
 async function getPendingThreads() {
   const r = await db.query(`
     SELECT
@@ -527,9 +605,6 @@ async function ignoreThread(trackerId) {
   return r.rows[0];
 }
 
-/**
- * Add an allow-list rule at runtime (from /ignore command).
- */
 async function addAllowListPattern(pattern, patternType, reason) {
   const r = await db.query(
     `INSERT INTO email_allow_list (pattern, pattern_type, reason)
@@ -538,43 +613,71 @@ async function addAllowListPattern(pattern, patternType, reason) {
      RETURNING id`,
     [pattern, patternType, reason || "user-added"]
   );
-  allowListCache = null; // bust cache
+  allowListCache = null;
   return r.rows[0];
 }
 
-// ── Account Management ───────────────────────────────────
-
-async function addAccount(email, refreshToken) {
+async function addAccount({ email, imap_host, imap_port, imap_user, password, use_tls, display_name }) {
   await initEmailTables();
+  const encryptedPass = encrypt(password);
   const r = await db.query(
-    `INSERT INTO gmail_accounts (email, refresh_token, active)
-     VALUES ($1, $2, TRUE)
+    `INSERT INTO imap_accounts (email, imap_host, imap_port, imap_user, encrypted_pass, use_tls, display_name, active)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)
      ON CONFLICT (email) DO UPDATE SET
-       refresh_token = EXCLUDED.refresh_token,
-       active = TRUE
+       imap_host = EXCLUDED.imap_host,
+       imap_port = EXCLUDED.imap_port,
+       imap_user = EXCLUDED.imap_user,
+       encrypted_pass = EXCLUDED.encrypted_pass,
+       use_tls = EXCLUDED.use_tls,
+       display_name = EXCLUDED.display_name,
+       active = TRUE,
+       last_error = NULL
      RETURNING id, email`,
-    [email, refreshToken]
+    [email, imap_host, imap_port || 993, imap_user, encryptedPass, use_tls !== false, display_name]
   );
   return r.rows[0];
+}
+
+async function testAccount({ imap_host, imap_port, imap_user, password, use_tls }) {
+  try {
+    const client = new ImapFlow({
+      host: imap_host,
+      port: imap_port || 993,
+      secure: use_tls !== false,
+      auth: { user: imap_user, pass: password },
+      logger: false,
+      tls: { rejectUnauthorized: false },
+    });
+    await client.connect();
+    const lock = await client.getMailboxLock("INBOX");
+    try {
+      const status = await client.status("INBOX", { messages: true });
+      lock.release();
+      await client.logout();
+      return { ok: true, messageCount: status.messages };
+    } catch (e) {
+      lock.release();
+      await client.logout();
+      return { ok: false, error: `Connected but INBOX not accessible: ${e.message}` };
+    }
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 async function listAccounts() {
   await initEmailTables();
   const r = await db.query(
-    `SELECT id, email, active, last_scan_at, created_at FROM gmail_accounts ORDER BY id`
+    `SELECT id, email, imap_host, imap_port, active, last_scan_at, last_error, display_name, created_at
+     FROM imap_accounts ORDER BY id`
   );
   return r.rows;
 }
 
 async function removeAccount(email) {
-  const r = await db.query(
-    `DELETE FROM gmail_accounts WHERE email = $1 RETURNING id`,
-    [email]
-  );
+  const r = await db.query(`DELETE FROM imap_accounts WHERE email = $1 RETURNING id`, [email]);
   return r.rowCount > 0;
 }
-
-// ── Exports ──────────────────────────────────────────────
 
 module.exports = {
   initEmailTables,
@@ -586,36 +689,27 @@ module.exports = {
   ignoreThread,
   addAllowListPattern,
   addAccount,
+  testAccount,
   listAccounts,
   removeAccount,
+  encrypt,
+  decrypt,
 };
 
-// CLI mode
 if (require.main === module) {
   (async () => {
     const args = process.argv.slice(2);
     if (args.includes("--init")) {
       await initEmailTables();
-      console.log("email_tracker + gmail_accounts + email_allow_list tables ready");
+      console.log("Email tables ready");
       process.exit(0);
     }
     if (args.includes("--scan")) {
       const stats = await scanAllAccounts();
-      console.log("Scan complete:", JSON.stringify(stats, null, 2));
+      console.log(JSON.stringify(stats, null, 2));
       process.exit(0);
     }
-    if (args.includes("--accounts")) {
-      const accounts = await listAccounts();
-      console.log(accounts);
-      process.exit(0);
-    }
-    if (args.includes("--pending")) {
-      const threads = await getPendingThreads();
-      console.log(`${threads.length} pending threads:`);
-      for (const t of threads) console.log(`  ${t.account_email} | ${t.sender_email} | ${t.subject} (${Math.round(t.hours_old)}h old)`);
-      process.exit(0);
-    }
-    console.log("Usage: node email-paralegal.js [--init | --scan | --accounts | --pending]");
+    console.log("Usage: node email-paralegal.js [--init | --scan]");
     process.exit(0);
   })().catch(e => { console.error(e); process.exit(1); });
 }

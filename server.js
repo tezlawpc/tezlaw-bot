@@ -1860,87 +1860,186 @@ app.get("/admin/init-drafts", async (req, res) => {
   }
 });
 
-// ── Gmail OAuth For Email Paralegal ───────────────────────
+// ── IMAP Email Paralegal — Setup + Admin Endpoints ────────
 //
-// Step 1: JJ visits /admin/gmail-connect from a browser signed into
-//         the Gmail account he wants to link. Redirects to Google.
-// Step 2: Google prompts consent, redirects back to /admin/gmail-callback.
-// Step 3: We exchange the code for a refresh_token, store it in DB.
+// Setup: JJ visits /admin/email-setup, gets an HTML form to enter
+// IMAP credentials for each account. Zara tests the connection,
+// encrypts the password, stores in DB, and starts scanning.
 //
-// Env vars required:
-//   GMAIL_CLIENT_ID
-//   GMAIL_CLIENT_SECRET
-//   GMAIL_REDIRECT_URI  (should be: https://tezlaw-bot.onrender.com/admin/gmail-callback)
+// Common IMAP settings for JJ's providers:
+//   GoDaddy Workspace Email: imap.secureserver.net:993 (SSL)
+//   GoDaddy 365 through GoDaddy: outlook.office365.com:993 (SSL)
+//   Gmail:  imap.gmail.com:993 (SSL) — needs "App Password" from Google
+//   Hotmail/Outlook.com: outlook.office365.com:993 (SSL) — may need app password
 //
-app.get("/admin/gmail-connect", (req, res) => {
-  const clientId = process.env.GMAIL_CLIENT_ID;
-  const redirectUri = process.env.GMAIL_REDIRECT_URI ||
-    `${req.protocol}://${req.get("host")}/admin/gmail-callback`;
-  if (!clientId) return res.status(500).send("GMAIL_CLIENT_ID not set in env vars.");
 
-  const scope = "https://www.googleapis.com/auth/gmail.readonly";
-  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  authUrl.searchParams.set("client_id", clientId);
-  authUrl.searchParams.set("redirect_uri", redirectUri);
-  authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("scope", scope);
-  authUrl.searchParams.set("access_type", "offline");
-  authUrl.searchParams.set("prompt", "consent");  // force refresh_token every time
-
-  res.redirect(authUrl.toString());
-});
-
-app.get("/admin/gmail-callback", async (req, res) => {
+app.get("/admin/email-setup", async (req, res) => {
   try {
-    const code = req.query.code;
-    if (!code) return res.status(400).send("Missing OAuth code.");
-
-    const clientId = process.env.GMAIL_CLIENT_ID;
-    const clientSecret = process.env.GMAIL_CLIENT_SECRET;
-    const redirectUri = process.env.GMAIL_REDIRECT_URI ||
-      `${req.protocol}://${req.get("host")}/admin/gmail-callback`;
-
-    // Exchange code for tokens
-    const tokenResp = await axios.post(
-      "https://oauth2.googleapis.com/token",
-      new URLSearchParams({
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
-        grant_type: "authorization_code",
-      }),
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-    );
-
-    const { access_token, refresh_token } = tokenResp.data;
-    if (!refresh_token) {
-      return res.status(400).send("No refresh_token returned. Try revoking access at https://myaccount.google.com/permissions and reconnect.");
-    }
-
-    // Get email address associated with the token
-    const profileResp = await axios.get(
-      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-      { headers: { Authorization: `Bearer ${access_token}` } }
-    );
-    const email = profileResp.data.emailAddress;
-
-    // Store in DB
     const paralegal = require("./email-paralegal");
-    const account = await paralegal.addAccount(email, refresh_token);
+    const accounts = await paralegal.listAccounts();
+
+    const accountsHtml = accounts.length ? accounts.map(a => `
+      <div style="background:#f5f5f5; padding:12px; margin:8px 0; border-left: 4px solid ${a.active ? "#4CAF50" : "#999"};">
+        <strong>${a.email}</strong> <span style="color:#666;">(${a.imap_host}:${a.imap_port})</span>
+        <br><small>Last scan: ${a.last_scan_at ? new Date(a.last_scan_at).toLocaleString() : "never"}</small>
+        ${a.last_error ? `<br><small style="color:red;">Error: ${a.last_error}</small>` : ""}
+      </div>
+    `).join("") : "<p><em>No accounts linked yet.</em></p>";
 
     res.send(`
-      <html><body style="font-family: sans-serif; padding: 40px; max-width: 600px;">
-        <h1 style="color: #B79C62;">✅ Connected</h1>
-        <p>Gmail account <strong>${email}</strong> is now linked to Zara.</p>
-        <p>She'll scan for unreplied emails every 30 minutes and send you a digest at 7 AM and 8 PM Pacific via WhatsApp.</p>
-        <p>Account ID: ${account.id}</p>
-        <p><a href="/admin/gmail-connect">Link another account</a></p>
+      <html><head><title>Zara Email Setup</title>
+      <style>
+        body { font-family: sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; }
+        h1 { color: #0C1C36; }
+        h2 { color: #B79C62; margin-top: 30px; }
+        input, select, button { padding: 8px; margin: 4px 0; font-size: 14px; }
+        input[type="text"], input[type="password"], input[type="email"] { width: 100%; box-sizing: border-box; }
+        button { background: #B79C62; color: white; border: none; padding: 10px 20px; cursor: pointer; }
+        button:hover { background: #8f7a4c; }
+        .preset { display: inline-block; margin: 3px; padding: 4px 10px; background: #eee; cursor: pointer; border-radius: 3px; font-size: 12px; }
+        .preset:hover { background: #ddd; }
+        .warn { background: #fff3cd; padding: 12px; border-left: 4px solid #ffc107; margin: 20px 0; }
+      </style>
+      </head><body>
+        <h1>📬 Zara Email Setup</h1>
+        <p>Configure IMAP credentials for accounts you want Zara to monitor.</p>
+
+        <h2>Linked Accounts</h2>
+        ${accountsHtml}
+
+        <h2>Add / Update Account</h2>
+        <div class="warn">
+          <strong>⚠️ App passwords:</strong> For Gmail, Hotmail, and Google Workspace accounts with 2FA, you likely need an <em>app-specific password</em> (not your login password). 
+          <br>• Gmail: <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a>
+          <br>• Hotmail/Outlook: <a href="https://account.microsoft.com/security" target="_blank">account.microsoft.com/security</a> → App passwords
+        </div>
+
+        <form method="POST" action="/admin/email-setup">
+          <label>Email address:<br>
+          <input type="email" name="email" required placeholder="jj@tezlawfirm.com"></label><br>
+
+          <label>Display name (optional):<br>
+          <input type="text" name="display_name" placeholder="Tez Law primary"></label><br>
+
+          <label>IMAP host:<br>
+          <input type="text" name="imap_host" required placeholder="imap.secureserver.net" id="imap_host"></label>
+          <div>
+            <small>Quick fill:</small>
+            <span class="preset" onclick="fillPreset('imap.secureserver.net',993)">GoDaddy Workspace</span>
+            <span class="preset" onclick="fillPreset('outlook.office365.com',993)">GoDaddy 365 / Hotmail / Outlook</span>
+            <span class="preset" onclick="fillPreset('imap.gmail.com',993)">Gmail</span>
+            <span class="preset" onclick="fillPreset('imap.mail.yahoo.com',993)">Yahoo</span>
+            <span class="preset" onclick="fillPreset('imap.zoho.com',993)">Zoho</span>
+          </div>
+
+          <label>IMAP port:<br>
+          <input type="number" name="imap_port" value="993" id="imap_port" required></label><br>
+
+          <label>Username (usually same as email):<br>
+          <input type="text" name="imap_user" required placeholder="jj@tezlawfirm.com"></label><br>
+
+          <label>Password (or app-specific password):<br>
+          <input type="password" name="password" required></label><br>
+
+          <label>
+            <input type="checkbox" name="use_tls" value="1" checked>
+            Use TLS/SSL (recommended)
+          </label><br><br>
+
+          <button type="submit" name="action" value="test">Test connection</button>
+          <button type="submit" name="action" value="save">Test + Save</button>
+        </form>
+
+        <h2>Remove Account</h2>
+        <form method="POST" action="/admin/email-setup">
+          <label>Email to remove:<br>
+          <input type="email" name="email" required></label>
+          <button type="submit" name="action" value="remove" style="background:#c00;">Remove</button>
+        </form>
+
+        <script>
+          function fillPreset(host, port) {
+            document.getElementById("imap_host").value = host;
+            document.getElementById("imap_port").value = port;
+          }
+        </script>
       </body></html>
     `);
   } catch (err) {
-    console.error("[/admin/gmail-callback] error:", err.response?.data || err.message);
-    res.status(500).send(`OAuth error: ${err.message}<br><br>Details: ${JSON.stringify(err.response?.data || {})}`);
+    res.status(500).send(`Error: ${err.message}`);
+  }
+});
+
+app.post("/admin/email-setup", async (req, res) => {
+  try {
+    const paralegal = require("./email-paralegal");
+    const { email, imap_host, imap_port, imap_user, password, use_tls, display_name, action } = req.body;
+
+    if (action === "remove") {
+      const removed = await paralegal.removeAccount(email);
+      return res.send(`
+        <html><body style="font-family:sans-serif; padding:40px;">
+          ${removed ? `<h1 style="color:#c00;">🗑️ Removed</h1><p>Account <strong>${email}</strong> has been removed.</p>` : `<h1>Not found</h1><p>${email} was not in the account list.</p>`}
+          <p><a href="/admin/email-setup">← Back to setup</a></p>
+        </body></html>
+      `);
+    }
+
+    // Test the connection first
+    const testResult = await paralegal.testAccount({
+      imap_host, imap_port: parseInt(imap_port) || 993, imap_user, password,
+      use_tls: use_tls === "1" || use_tls === "on",
+    });
+
+    if (!testResult.ok) {
+      return res.send(`
+        <html><body style="font-family:sans-serif; padding:40px; max-width:600px;">
+          <h1 style="color:#c00;">❌ Connection failed</h1>
+          <p><strong>Host:</strong> ${imap_host}:${imap_port}</p>
+          <p><strong>User:</strong> ${imap_user}</p>
+          <p><strong>Error:</strong> <code>${testResult.error}</code></p>
+          <h3>Common fixes:</h3>
+          <ul>
+            <li>Verify the password is correct — try app-specific password if 2FA is enabled</li>
+            <li>Check IMAP is enabled in your email provider settings</li>
+            <li>Confirm the host and port match your provider's docs</li>
+            <li>Some providers block IMAP for OAuth-only accounts (e.g., Microsoft may require Modern Auth)</li>
+          </ul>
+          <p><a href="/admin/email-setup">← Try again</a></p>
+        </body></html>
+      `);
+    }
+
+    if (action === "test") {
+      return res.send(`
+        <html><body style="font-family:sans-serif; padding:40px;">
+          <h1 style="color:#4CAF50;">✅ Connection works!</h1>
+          <p>Successfully connected to <strong>${imap_host}:${imap_port}</strong> as <strong>${imap_user}</strong>.</p>
+          <p>INBOX contains ${testResult.messageCount} messages.</p>
+          <p>Click "Test + Save" if you're ready to store this account.</p>
+          <p><a href="/admin/email-setup">← Back to setup</a></p>
+        </body></html>
+      `);
+    }
+
+    // action === "save"
+    const account = await paralegal.addAccount({
+      email, imap_host, imap_port: parseInt(imap_port) || 993, imap_user, password,
+      use_tls: use_tls === "1" || use_tls === "on",
+      display_name,
+    });
+
+    res.send(`
+      <html><body style="font-family:sans-serif; padding:40px;">
+        <h1 style="color:#4CAF50;">✅ Saved!</h1>
+        <p>Account <strong>${account.email}</strong> is now linked to Zara (id: ${account.id}).</p>
+        <p>${testResult.messageCount} messages in INBOX. Zara will scan every 30 min.</p>
+        <p><a href="/admin/email-setup">← Add another account</a></p>
+      </body></html>
+    `);
+  } catch (err) {
+    console.error("[/admin/email-setup POST] error:", err.message);
+    res.status(500).send(`<html><body><h1>Error</h1><p>${err.message}</p><p><a href="/admin/email-setup">← Back</a></p></body></html>`);
   }
 });
 
