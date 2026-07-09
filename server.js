@@ -1860,6 +1860,103 @@ app.get("/admin/init-drafts", async (req, res) => {
   }
 });
 
+// ── Gmail OAuth For Email Paralegal ───────────────────────
+//
+// Step 1: JJ visits /admin/gmail-connect from a browser signed into
+//         the Gmail account he wants to link. Redirects to Google.
+// Step 2: Google prompts consent, redirects back to /admin/gmail-callback.
+// Step 3: We exchange the code for a refresh_token, store it in DB.
+//
+// Env vars required:
+//   GMAIL_CLIENT_ID
+//   GMAIL_CLIENT_SECRET
+//   GMAIL_REDIRECT_URI  (should be: https://tezlaw-bot.onrender.com/admin/gmail-callback)
+//
+app.get("/admin/gmail-connect", (req, res) => {
+  const clientId = process.env.GMAIL_CLIENT_ID;
+  const redirectUri = process.env.GMAIL_REDIRECT_URI ||
+    `${req.protocol}://${req.get("host")}/admin/gmail-callback`;
+  if (!clientId) return res.status(500).send("GMAIL_CLIENT_ID not set in env vars.");
+
+  const scope = "https://www.googleapis.com/auth/gmail.readonly";
+  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authUrl.searchParams.set("client_id", clientId);
+  authUrl.searchParams.set("redirect_uri", redirectUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", scope);
+  authUrl.searchParams.set("access_type", "offline");
+  authUrl.searchParams.set("prompt", "consent");  // force refresh_token every time
+
+  res.redirect(authUrl.toString());
+});
+
+app.get("/admin/gmail-callback", async (req, res) => {
+  try {
+    const code = req.query.code;
+    if (!code) return res.status(400).send("Missing OAuth code.");
+
+    const clientId = process.env.GMAIL_CLIENT_ID;
+    const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+    const redirectUri = process.env.GMAIL_REDIRECT_URI ||
+      `${req.protocol}://${req.get("host")}/admin/gmail-callback`;
+
+    // Exchange code for tokens
+    const tokenResp = await axios.post(
+      "https://oauth2.googleapis.com/token",
+      new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+    );
+
+    const { access_token, refresh_token } = tokenResp.data;
+    if (!refresh_token) {
+      return res.status(400).send("No refresh_token returned. Try revoking access at https://myaccount.google.com/permissions and reconnect.");
+    }
+
+    // Get email address associated with the token
+    const profileResp = await axios.get(
+      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+      { headers: { Authorization: `Bearer ${access_token}` } }
+    );
+    const email = profileResp.data.emailAddress;
+
+    // Store in DB
+    const paralegal = require("./email-paralegal");
+    const account = await paralegal.addAccount(email, refresh_token);
+
+    res.send(`
+      <html><body style="font-family: sans-serif; padding: 40px; max-width: 600px;">
+        <h1 style="color: #B79C62;">✅ Connected</h1>
+        <p>Gmail account <strong>${email}</strong> is now linked to Zara.</p>
+        <p>She'll scan for unreplied emails every 30 minutes and send you a digest at 7 AM and 8 PM Pacific via WhatsApp.</p>
+        <p>Account ID: ${account.id}</p>
+        <p><a href="/admin/gmail-connect">Link another account</a></p>
+      </body></html>
+    `);
+  } catch (err) {
+    console.error("[/admin/gmail-callback] error:", err.response?.data || err.message);
+    res.status(500).send(`OAuth error: ${err.message}<br><br>Details: ${JSON.stringify(err.response?.data || {})}`);
+  }
+});
+
+// Trigger digest manually (for testing)
+app.get("/admin/email-digest/:when", async (req, res) => {
+  try {
+    const digest = require("./email-digest");
+    const when = req.params.when || "test";
+    const dryRun = req.query.dry === "1";
+    const result = await digest.runDigest(when, { dryRun });
+    res.json({ ok: true, ...result, dryRun });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Voice call routes ─────────────────────────────────────
 app.post("/voice/incoming",          (req, res) => {
   const savedPrompt = app.locals.SYSTEM_PROMPT || null;
@@ -1894,6 +1991,17 @@ app.listen(PORT, async () => {
     console.log("✅ Case files table ready");
   } catch (e) {
     console.error("⚠️  Case files table init failed:", e.message);
+  }
+
+  // Initialize email paralegal tables + start scheduler
+  try {
+    const paralegal = require("./email-paralegal");
+    const digest = require("./email-digest");
+    await paralegal.initEmailTables();
+    console.log("✅ Email paralegal tables ready");
+    digest.startEmailScheduler();
+  } catch (e) {
+    console.error("⚠️  Email paralegal init failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)

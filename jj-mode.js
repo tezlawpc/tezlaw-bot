@@ -170,6 +170,15 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  `/case delete <name>` — asks for confirmation",
       "  `/case new <name>` — explicit create (errors if exists)",
       "",
+      "*📬 Email Paralegal*",
+      "  `/unreplied` — refresh digest of unreplied emails now",
+      "  `/replied <id>` — mark thread as handled",
+      "  `/snooze <id> <days>` — mute a thread for N days",
+      "  `/ignore <id>` — stop tracking this thread",
+      "  `/email accounts` — list linked Gmail accounts",
+      "  `/email scan` — force a scan",
+      "  Auto-digest fires 7 AM + 8 PM Pacific via WhatsApp.",
+      "",
       "*📰 Legal Digest*",
       "  `/pending` — see auto-detected cache updates awaiting approval",
       "  `/approve <id>` — approve pending update",
@@ -358,6 +367,103 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     } catch (err) {
       console.error("[JJ-Mode] # hashtag handler error:", err.message, err.stack);
       return { handled: true, message: `❌ Case shortcut error: ${err.message}` };
+    }
+  }
+
+  // ── /unreplied | /replied | /snooze | /ignore — Email Paralegal ─
+  //
+  // Twice-daily WhatsApp digest of unreplied emails, plus on-demand
+  // commands to review and manage the tracked threads.
+  //
+  //   /unreplied              — get digest now (fresh scan + list)
+  //   /replied <id>           — mark thread as handled
+  //   /snooze <id> <days>     — mute a thread for N days
+  //   /ignore <id>            — stop tracking this specific thread
+  //   /email accounts         — list linked Gmail accounts
+  //   /email scan             — force a scan now (no digest send)
+  //
+  const emailCmdFirstLine = lower.split("\n", 1)[0].trim();
+  const unrepliedMatch = emailCmdFirstLine.match(/^\/unreplied\s*$/);
+  const repliedMatch = emailCmdFirstLine.match(/^\/replied\s+(\d+)\s*$/);
+  const snoozeMatch = emailCmdFirstLine.match(/^\/snooze\s+(\d+)\s+(\d+)\s*(?:days?)?\s*$/);
+  const ignoreMatch = emailCmdFirstLine.match(/^\/ignore\s+(\d+)\s*$/);
+  const emailSubMatch = emailCmdFirstLine.match(/^\/email\s+(accounts|scan|list)\s*$/);
+
+  if (unrepliedMatch) {
+    try {
+      const digest = require("./email-digest");
+      const paralegal = require("./email-paralegal");
+      await paralegal.scanAllAccounts();
+      const threads = await paralegal.getPendingThreads();
+      const chunks = digest.buildDigestMessage(threads, "on-demand");
+      return { handled: true, message: chunks.join("\n\n") };
+    } catch (err) {
+      console.error("[JJ-Mode] /unreplied error:", err.message);
+      return { handled: true, message: `❌ /unreplied error: ${err.message}` };
+    }
+  }
+
+  if (repliedMatch) {
+    try {
+      const paralegal = require("./email-paralegal");
+      const trackerId = parseInt(repliedMatch[1]);
+      const result = await paralegal.markReplied(trackerId);
+      if (!result) return { handled: true, message: `❌ Thread id ${trackerId} not found.` };
+      return { handled: true, message: `✅ Marked as replied: "${result.subject}" (${result.account_email})` };
+    } catch (err) {
+      return { handled: true, message: `❌ /replied error: ${err.message}` };
+    }
+  }
+
+  if (snoozeMatch) {
+    try {
+      const paralegal = require("./email-paralegal");
+      const trackerId = parseInt(snoozeMatch[1]);
+      const days = parseInt(snoozeMatch[2]);
+      const result = await paralegal.snoozeThread(trackerId, days);
+      if (!result) return { handled: true, message: `❌ Thread id ${trackerId} not found.` };
+      return { handled: true, message: `😴 Snoozed for ${days} day(s): "${result.subject}"` };
+    } catch (err) {
+      return { handled: true, message: `❌ /snooze error: ${err.message}` };
+    }
+  }
+
+  if (ignoreMatch) {
+    try {
+      const paralegal = require("./email-paralegal");
+      const trackerId = parseInt(ignoreMatch[1]);
+      const result = await paralegal.ignoreThread(trackerId);
+      if (!result) return { handled: true, message: `❌ Thread id ${trackerId} not found.` };
+      return { handled: true, message: `🔇 Ignored: "${result.subject}"\n\nWon't appear in future digests unless the thread has new activity from someone else.` };
+    } catch (err) {
+      return { handled: true, message: `❌ /ignore error: ${err.message}` };
+    }
+  }
+
+  if (emailSubMatch) {
+    try {
+      const paralegal = require("./email-paralegal");
+      const sub = emailSubMatch[1];
+      if (sub === "accounts" || sub === "list") {
+        const accts = await paralegal.listAccounts();
+        if (!accts.length) return { handled: true, message: "📭 No Gmail accounts linked yet.\n\nTo connect: visit `/admin/gmail-connect` from a browser signed into the Gmail account you want to link." };
+        const lines = accts.map(a => {
+          const lastScan = a.last_scan_at ? new Date(a.last_scan_at).toLocaleString() : "never";
+          const status = a.active ? "✅ active" : "⏸ inactive";
+          return `  ${status} — ${a.email}  (last scan: ${lastScan})`;
+        });
+        return { handled: true, message: `📧 *Linked Gmail accounts (${accts.length}):*\n\n${lines.join("\n")}` };
+      }
+      if (sub === "scan") {
+        const stats = await paralegal.scanAllAccounts();
+        const lines = stats.map(s => {
+          if (s.error) return `  ❌ ${s.email}: ${s.error}`;
+          return `  ✅ ${s.email}: ${s.tracked} tracked, ${s.autoSkipped} auto-skipped`;
+        });
+        return { handled: true, message: `🔍 *Scan complete:*\n\n${lines.join("\n")}` };
+      }
+    } catch (err) {
+      return { handled: true, message: `❌ /email error: ${err.message}` };
     }
   }
 
