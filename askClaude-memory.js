@@ -153,7 +153,24 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       return jj.message;
     }
 
-    // 2. Check if intake flow should run (before Claude)
+    // 2a. NEW structured intake agent (runs before Claude, before old intake)
+    // Handles multi-turn intake for new leads with practice area classification,
+    // urgency triage, and HOT/WARM/COLD lead scoring.
+    if (!isImage && !isPdf && !isDocx) {
+      try {
+        const intakeAgent = require("./intake-agent");
+        const result = await intakeAgent.processIntakeMessage(platform, platformId, userMessage, {});
+        if (result.handled) {
+          await db.saveMessage(platform, platformId, "user", userMessage);
+          await db.saveMessage(platform, platformId, "assistant", result.message);
+          return result.message;
+        }
+      } catch (e) {
+        console.log("[askClaude] intake-agent error (falling through):", e.message);
+      }
+    }
+
+    // 2b. Legacy intake flow (fallback if new agent doesn't handle)
     if (!isImage && !isPdf) {
       const intake = await checkIntake(platform, platformId, userMessage);
       if (intake.triggered) {
