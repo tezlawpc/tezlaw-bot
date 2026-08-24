@@ -2103,6 +2103,25 @@ app.listen(PORT, async () => {
     console.error("⚠️  Email paralegal init failed:", e.message);
   }
 
+  // Initialize structured intake agent
+  try {
+    const intakeAgent = require("./intake-agent");
+    await intakeAgent.initIntakeAgentTables();
+    console.log("✅ Intake agent tables ready");
+  } catch (e) {
+    console.error("⚠️  Intake agent init failed:", e.message);
+  }
+
+  // Initialize USPTO watch tables (trademark monitoring)
+  try {
+    const usptoWatch = require("./uspto-watch");
+    await usptoWatch.initUsptoWatchTables();
+    console.log("✅ USPTO watch tables ready");
+    usptoWatch.startUsptoScheduler();
+  } catch (e) {
+    console.error("⚠️  USPTO watch init failed:", e.message);
+  }
+
   // Load saved system prompt from DB (if admin has edited it)
   initPromptTable().then(() => getSavedPrompt()).then(saved => {
     if (saved) {
