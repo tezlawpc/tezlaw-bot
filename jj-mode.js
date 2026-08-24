@@ -170,6 +170,21 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  `/case delete <name>` — asks for confirmation",
       "  `/case new <name>` — explicit create (errors if exists)",
       "",
+      "*📥 Intake Agent (auto-runs for new leads)*",
+      "  Zara asks new inquirers structured questions across all channels.",
+      "  Alerts you via WhatsApp + email with HOT/WARM/COLD tag.",
+      "  `/intake list` — see recent intake records",
+      "  `/intake show <id>` — details of one intake",
+      "  `/intake stats` — 30-day rollup",
+      "",
+      "*🔎 USPTO Trademark Watch*",
+      "  `/uspto watch <term>` — monitor USPTO for new filings",
+      "     Example: `/uspto watch Tez Law for our firm`",
+      "  `/uspto list` — see active watches",
+      "  `/uspto remove <id>` — stop a watch",
+      "  `/uspto matches [days]` — recent matches (default 30 days)",
+      "  `/uspto check` — force check now (usually runs daily 6:30 AM PT)",
+      "",
       "*📬 Email Paralegal*",
       "  `/unreplied` — refresh digest of unreplied emails now",
       "  `/replied <id>` — mark thread as handled",
@@ -367,6 +382,136 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     } catch (err) {
       console.error("[JJ-Mode] # hashtag handler error:", err.message, err.stack);
       return { handled: true, message: `❌ Case shortcut error: ${err.message}` };
+    }
+  }
+
+  // ── /uspto watch|list|remove|matches|check — Trademark monitoring ─
+  //
+  //   /uspto watch <term>      — start monitoring for new USPTO filings matching this term
+  //   /uspto list              — list active watches
+  //   /uspto remove <id>       — stop watching (id from list)
+  //   /uspto matches [days]    — show recent matches (default 30 days)
+  //   /uspto check             — force a check now (usually runs daily 6:30 AM PT)
+  //
+  const usptoFirstLine = lower.split("\n", 1)[0].trim();
+  const usptoMatch = usptoFirstLine.match(/^\/uspto\s+(watch|list|remove|del|rm|matches|check)(?:\s+(.+))?\s*$/);
+  if (usptoMatch) {
+    try {
+      const uspto = require("./uspto-watch");
+      const action = usptoMatch[1];
+      const arg = (usptoMatch[2] || "").trim();
+
+      if (action === "list") {
+        const watches = await uspto.listWatches();
+        if (!watches.length) {
+          return { handled: true, message: "🔎 No USPTO watches active.\n\nAdd one with:\n`/uspto watch <term>`\n\nExample: `/uspto watch Tez Law`" };
+        }
+        const lines = watches.map(w => {
+          const lastCheck = w.last_checked_at
+            ? new Date(w.last_checked_at).toLocaleDateString()
+            : "never";
+          const clientBit = w.client_name ? ` (${w.client_name})` : "";
+          return `#${w.id} — "${w.search_term}"${clientBit}\n   ${w.match_count} matches • last check: ${lastCheck}`;
+        });
+        return { handled: true, message: `🔎 *${watches.length} USPTO watch(es):*\n\n${lines.join("\n\n")}\n\n_Auto-checks daily at 6:30 AM PT._` };
+      }
+
+      if (action === "watch") {
+        if (!arg) return { handled: true, message: "Usage: `/uspto watch <term>`\n\nExample: `/uspto watch Tez Law`" };
+        // Parse optional client name from "term for client"
+        const forMatch = arg.match(/^(.+?)\s+for\s+(.+)$/i);
+        const term = forMatch ? forMatch[1].trim() : arg;
+        const clientName = forMatch ? forMatch[2].trim() : null;
+        const r = await uspto.addWatch(term, { clientName });
+        return { handled: true, message: `✅ Watching USPTO for "${r.search_term}" (id #${r.id})${clientName ? ` for ${clientName}` : ""}.\n\nZara will check daily at 6:30 AM PT and alert you via WhatsApp on new matches. Run \`/uspto check\` to force a check now.` };
+      }
+
+      if (action === "remove" || action === "del" || action === "rm") {
+        if (!arg) return { handled: true, message: "Usage: `/uspto remove <id>` (get id from `/uspto list`)" };
+        const removed = await uspto.removeWatch(arg);
+        if (!removed) return { handled: true, message: `❌ Watch #${arg} not found.` };
+        return { handled: true, message: `🗑️ Removed USPTO watch: "${removed.search_term}"` };
+      }
+
+      if (action === "matches") {
+        const days = arg ? parseInt(arg) : 30;
+        const matches = await uspto.getRecentMatches(days);
+        if (!matches.length) return { handled: true, message: `🔎 No USPTO matches in the last ${days} days.` };
+        const lines = matches.slice(0, 20).map(m => {
+          const filed = m.filing_date ? new Date(m.filing_date).toLocaleDateString() : "unknown";
+          return `📄 *${m.mark_text || "(unnamed)"}* (${m.serial_number})\n   Owner: ${m.owner_name || "unknown"} • Filed: ${filed}\n   Watch: "${m.search_term}"`;
+        });
+        const more = matches.length > 20 ? `\n\n_...${matches.length - 20} more not shown_` : "";
+        return { handled: true, message: `🔎 *${matches.length} match(es) in last ${days} days:*\n\n${lines.join("\n\n")}${more}` };
+      }
+
+      if (action === "check") {
+        const stats = await uspto.checkAllWatches();
+        return { handled: true, message: `✅ USPTO check complete:\n\n  • ${stats.total} watches checked\n  • ${stats.newMatches} new matches\n  • ${stats.errors} errors\n\n${stats.newMatches > 0 ? "New matches sent via WhatsApp." : "No new filings."}` };
+      }
+    } catch (err) {
+      console.error("[JJ-Mode] /uspto error:", err.message);
+      return { handled: true, message: `❌ USPTO command error: ${err.message}` };
+    }
+  }
+
+  // ── /intake list|show|stats — View intake records ────────
+  //
+  //   /intake list                   — recent 20 intake records
+  //   /intake show <id>              — details of one intake
+  //   /intake stats                  — 30-day rollup by classification
+  //
+  const intakeCmdMatch = usptoFirstLine.match(/^\/intake\s+(list|show|stats)(?:\s+(.+))?\s*$/);
+  if (intakeCmdMatch) {
+    try {
+      const intakeAgent = require("./intake-agent");
+      const action = intakeCmdMatch[1];
+      const arg = (intakeCmdMatch[2] || "").trim();
+
+      if (action === "list") {
+        const rows = await intakeAgent.listRecentIntakes(20);
+        if (!rows.length) return { handled: true, message: "📥 No intake records yet." };
+        const lines = rows.map(r => {
+          const emoji = r.classification === "hot" ? "🔴" : r.classification === "warm" ? "🟡" : "🟢";
+          const when = new Date(r.created_at).toLocaleDateString();
+          return `${emoji} #${r.id} ${r.client_name || "(no name)"} — ${r.practice_area || "?"} • ${when}`;
+        });
+        return { handled: true, message: `📥 *Recent intakes:*\n\n${lines.join("\n")}\n\nDetail: \`/intake show <id>\``};
+      }
+
+      if (action === "show") {
+        if (!arg) return { handled: true, message: "Usage: `/intake show <id>`" };
+        const r = await intakeAgent.getIntake(parseInt(arg));
+        if (!r) return { handled: true, message: `❌ Intake #${arg} not found.` };
+        const emoji = r.classification === "hot" ? "🔴" : r.classification === "warm" ? "🟡" : "🟢";
+        const lines = [
+          `${emoji} *Intake #${r.id} — ${r.classification.toUpperCase()}*`,
+          "",
+          `Name: ${r.client_name || "(none)"}`,
+          `Phone: ${r.client_phone || "(none)"}`,
+          `Email: ${r.client_email || "(none)"}`,
+          `Language: ${r.language}`,
+          `Practice: ${r.practice_area}`,
+          `Urgency: ${r.urgency}`,
+          `Callback pref: ${r.preferred_callback || "(none)"}`,
+          `Platform: ${r.platform}`,
+          `Created: ${new Date(r.created_at).toLocaleString()}`,
+          "",
+          `*Description:*`,
+          (r.case_description || "(none)").substring(0, 800),
+        ];
+        return { handled: true, message: lines.join("\n") };
+      }
+
+      if (action === "stats") {
+        const rows = await intakeAgent.getIntakeStats(30);
+        if (!rows.length) return { handled: true, message: "📊 No intake stats in the last 30 days." };
+        const lines = rows.map(row => `  ${row.classification} • ${row.practice_area || "?"} — ${row.n}`);
+        return { handled: true, message: `📊 *Intake stats (last 30 days):*\n\n${lines.join("\n")}` };
+      }
+    } catch (err) {
+      console.error("[JJ-Mode] /intake error:", err.message);
+      return { handled: true, message: `❌ /intake error: ${err.message}` };
     }
   }
 
