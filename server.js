@@ -2167,6 +2167,20 @@ app.post("/admin/hearing/notes/:id/send-paralegal", async (req, res) => {
   }
 });
 
+app.delete("/admin/hearing/notes/:id", async (req, res) => {
+  try {
+    const hn = require("./hearing-notes");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+    const result = await hn.deleteNote(id);
+    console.log(`[hearing-notes] Deleted note #${id} (${result.client_name})`);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[delete-hearing-note]:", err.message);
+    res.status(err.message.includes("not found") ? 404 : 500).json({ ok: false, error: err.message });
+  }
+});
+
 // Document upload + extract — accepts PDF, JPG, PNG, WebP.
 // Uses Claude vision to OCR + extract structured client/case data.
 const docUpload = multer({
