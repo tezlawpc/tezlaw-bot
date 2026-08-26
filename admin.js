@@ -987,7 +987,13 @@ function dashboardHtml() {
 
     /* Sidebar */
     .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 220px;
-               background: #0C1C36; padding: 0; z-index: 100; }
+               background: #0C1C36; padding: 0; z-index: 100;
+               overflow-y: auto; overflow-x: hidden; }
+    /* Custom scrollbar for the sidebar - subtle gold accent */
+    .sidebar::-webkit-scrollbar { width: 6px; }
+    .sidebar::-webkit-scrollbar-track { background: transparent; }
+    .sidebar::-webkit-scrollbar-thumb { background: rgba(183,156,98,.3); border-radius: 3px; }
+    .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(183,156,98,.6); }
     .sidebar-logo { padding: 24px 20px; border-bottom: 1px solid rgba(183,156,98,.3); }
     .sidebar-logo h2 { color: #B79C62; font-size: 18px; }
     .sidebar-logo p { color: rgba(183,156,98,.6); font-size: 11px; margin-top: 2px; }
@@ -1123,6 +1129,15 @@ function dashboardHtml() {
   </div>
   <a href="/admin/matters/" class="nav-item" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); text-decoration:none; border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">⚖️</span><span>→ Matter Manager</span>
+  </a>
+  <a href="/admin/hearing/notes" class="nav-item" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); text-decoration:none; border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">📝</span><span>→ Hearing Notes</span>
+  </a>
+  <a href="/admin/hearing/notes/history" class="nav-item" style="text-decoration:none; border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+    <span class="icon">📚</span><span>Hearing History</span>
+  </a>
+  <a href="/admin/email-setup" class="nav-item" style="text-decoration:none; border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+    <span class="icon">📬</span><span>Email Setup</span>
   </a>
   <div class="nav-item active" onclick="showPage('dashboard')" id="nav-dashboard">
     <span class="icon">📊</span><span>Dashboard</span>
