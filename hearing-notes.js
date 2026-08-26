@@ -485,7 +485,56 @@ async function listNotes(limit = 50) {
      ORDER BY created_at DESC LIMIT $1`,
     [limit]
   );
-  return r.rows;
+  const rows = r.rows;
+
+  // Compute sequence number for each row: which # is this among the same
+  // client's same-type hearings (e.g. "master #2", "bond #3"). Identity:
+  // A-Number if present, else lowercased client name.
+  const groups = {};
+  for (const row of rows) {
+    const key = ((row.a_number || row.client_name || "") + "|" + (row.hearing_type || "master"))
+                  .toLowerCase().replace(/[-\s]/g, "");
+    (groups[key] = groups[key] || []).push(row);
+  }
+  for (const key of Object.keys(groups)) {
+    // Sort by hearing_date ASC (or created_at as fallback), assign 1,2,3...
+    const list = groups[key];
+    list.sort((a, b) => {
+      const ad = a.hearing_date ? new Date(a.hearing_date).getTime() : new Date(a.created_at).getTime();
+      const bd = b.hearing_date ? new Date(b.hearing_date).getTime() : new Date(b.created_at).getTime();
+      return ad - bd;
+    });
+    for (let i = 0; i < list.length; i++) {
+      list[i].sequence = i + 1;
+      list[i].sequence_total = list.length;
+    }
+  }
+  return rows;
+}
+
+// Get sequence info for a specific hearing note (used on detail page)
+async function getHearingSequenceInfo(note) {
+  if (!note) return null;
+  const identity = (note.a_number || note.client_name || "").toLowerCase().replace(/[-\s]/g, "");
+  const type = note.hearing_type || "master";
+
+  // Find all hearings of the same type for the same client identity
+  const r = await db.query(
+    `SELECT id, hearing_date, created_at, a_number, client_name FROM hearing_notes
+     WHERE hearing_type = $1
+     ORDER BY COALESCE(hearing_date, created_at) ASC`,
+    [type]
+  );
+  const matches = r.rows.filter(row => {
+    const rowIdentity = (row.a_number || row.client_name || "").toLowerCase().replace(/[-\s]/g, "");
+    return rowIdentity === identity;
+  });
+  const idx = matches.findIndex(row => row.id === note.id);
+  return {
+    sequence: idx >= 0 ? idx + 1 : null,
+    total: matches.length,
+    all_ids: matches.map(m => m.id),
+  };
 }
 
 async function getNote(id) {
@@ -502,6 +551,36 @@ async function deleteNote(id) {
   );
   if (!r.rows.length) throw new Error(`Note ${id} not found`);
   return { id: r.rows[0].id, client_name: r.rows[0].client_name };
+}
+
+// Find the most recent hearing note matching a client (by A# preferred, name fallback)
+// Used to pre-fill client/court info when creating an individual hearing note.
+async function getMostRecentForClient({ clientName, aNumber }) {
+  await initHearingNotesTables();
+  const key = aNumber ? String(aNumber).toLowerCase().replace(/[-\s]/g, "") : null;
+  const nameKey = clientName ? String(clientName).toLowerCase().trim() : null;
+
+  // Try A-Number match first
+  if (key) {
+    const r = await db.query(
+      `SELECT * FROM hearing_notes
+       WHERE LOWER(REGEXP_REPLACE(COALESCE(a_number, ''), '[- ]', '', 'g')) = $1
+       ORDER BY COALESCE(hearing_date, created_at) DESC LIMIT 1`,
+      [key]
+    );
+    if (r.rows[0]) return r.rows[0];
+  }
+  // Fallback: client name match
+  if (nameKey) {
+    const r = await db.query(
+      `SELECT * FROM hearing_notes
+       WHERE LOWER(TRIM(client_name)) = $1
+       ORDER BY COALESCE(hearing_date, created_at) DESC LIMIT 1`,
+      [nameKey]
+    );
+    if (r.rows[0]) return r.rows[0];
+  }
+  return null;
 }
 
 // ── Telegram Send ────────────────────────────────────────
@@ -601,6 +680,8 @@ async function sendToParalegal(id) {
 function renderAdminChrome({ title, body, activeItem = null }) {
   const notesActive = activeItem === "notes" ? "active" : "";
   const historyActive = activeItem === "history" ? "active" : "";
+  const indivActive = activeItem === "individual" ? "active" : "";
+  const indivHistActive = activeItem === "individual-history" ? "active" : "";
 
   return `<!DOCTYPE html>
 <html>
@@ -698,10 +779,16 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     <span class="icon">⚖️</span><span>→ Matter Manager</span>
   </a>
   <a href="/admin/hearing/notes" class="nav-item ${notesActive}" style="background:rgba(183,156,98,.08); ${notesActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
-    <span class="icon">📝</span><span>→ Hearing Notes</span>
+    <span class="icon">📝</span><span>→ Master Hearing Notes</span>
   </a>
   <a href="/admin/hearing/notes/history" class="nav-item ${historyActive}" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
-    <span class="icon">📚</span><span>Hearing History</span>
+    <span class="icon">📚</span><span>Master History</span>
+  </a>
+  <a href="/admin/hearing/individual" class="nav-item ${indivActive}" style="background:rgba(183,156,98,.08); ${indivActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">⚖️</span><span>→ Individual Hearing Notes</span>
+  </a>
+  <a href="/admin/hearing/individual/history" class="nav-item ${indivHistActive}" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+    <span class="icon">📖</span><span>Individual History</span>
   </a>
   <a href="/admin/email-setup" class="nav-item" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">📬</span><span>Email Setup</span>
@@ -1279,7 +1366,7 @@ function renderHistoryPage(notes) {
       <td>#${n.id}</td>
       <td>${escapeHtml(n.client_name)}</td>
       <td>${escapeHtml(n.a_number || "")}</td>
-      <td>${escapeHtml(n.hearing_type || "-")}</td>
+      <td>${escapeHtml(n.hearing_type || "-")}${n.sequence_total && n.sequence_total > 1 ? ` <span style="background:#B79C62; color:white; padding:1px 6px; border-radius:8px; font-size:11px;">#${n.sequence}/${n.sequence_total}</span>` : ""}</td>
       <td>${n.hearing_date ? new Date(n.hearing_date).toLocaleDateString() : "-"}</td>
       <td>${n.next_hearing_date ? new Date(n.next_hearing_date).toLocaleDateString() : "-"}</td>
       <td>${escapeHtml(n.next_hearing_type || "-")}</td>
@@ -1591,12 +1678,15 @@ module.exports = {
   listNotes,
   getNote,
   deleteNote,
+  getMostRecentForClient,
+  getHearingSequenceInfo,
   sendToParalegal,
   generateParalegalSummary,
   generateClientSummary,
   extractDocumentFields,
   extractI589FieldsFromPdf,
   renderNoteForm,
+  renderAdminChrome,
   renderHistoryPage,
   renderDetailPage,
   parseFormSubmission,
