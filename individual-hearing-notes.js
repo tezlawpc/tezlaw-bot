@@ -146,13 +146,14 @@ Your job: extract as much structured content as possible. Return ONLY valid JSON
   "case_summary": "Brief 1-2 sentence description of the case (from any narrative context in the doc)",
   "witnesses": [
     {
-      "name": "Witness name (or 'Applicant' if not named)",
-      "role": "e.g. Applicant, Spouse, Expert, Country Conditions Expert"
+      "name": "Witness name (or empty if not named)",
+      "role": "Respondent | Spouse | Additional witness"
     }
   ],
   "examinations": [
     {
-      "witness": "Witness name",
+      "witness_role": "Respondent | Spouse | Additional witness",
+      "witness_name": "Witness name if given, else empty string",
       "examination_type": "direct/cross/redirect (best guess)",
       "qa_rows": [
         {
@@ -171,6 +172,7 @@ Rules:
 - Extract questions in ORDER as they appear.
 - If a question has a paired anticipated answer in the doc, put it in expected_answer. Otherwise leave empty.
 - judge_notes stays empty — the attorney fills that in DURING the hearing.
+- witness_role must be one of exactly: "Respondent" (the applicant themselves), "Spouse" (respondent's spouse), or "Additional witness" (experts, country conditions witnesses, family members other than spouse, etc.). Default to "Respondent" if unclear.
 - If it's unclear whether something is direct vs cross, guess based on tone (softball → direct, adversarial → cross).
 - If the doc has only closing argument, still return the JSON structure with empty examinations array.
 - If the doc has only exam Q's, return with empty closing_argument string.
@@ -218,15 +220,22 @@ Rules:
 
   // Normalize structure - ensure arrays exist
   extracted.witnesses = extracted.witnesses || [];
-  extracted.examinations = (extracted.examinations || []).map(ex => ({
-    witness: ex.witness || "Applicant",
-    examination_type: ex.examination_type || "direct",
-    qa_rows: (ex.qa_rows || []).map(qa => ({
-      question: qa.question || "",
-      expected_answer: qa.expected_answer || "",
-      judge_notes: qa.judge_notes || "",
-    })),
-  }));
+  extracted.examinations = (extracted.examinations || []).map(ex => {
+    // Support both new schema (witness_role + witness_name) and legacy (witness)
+    const witness_role = ex.witness_role || "Respondent";
+    const witness_name = ex.witness_name || ex.witness || "";
+    return {
+      witness_role,
+      witness_name,
+      witness: witness_name ? `${witness_role} (${witness_name})` : witness_role,
+      examination_type: ex.examination_type || "direct",
+      qa_rows: (ex.qa_rows || []).map(qa => ({
+        question: qa.question || "",
+        expected_answer: qa.expected_answer || "",
+        judge_notes: qa.judge_notes || "",
+      })),
+    };
+  });
   extracted.closing_argument = extracted.closing_argument || "";
   extracted.case_summary = extracted.case_summary || "";
   return extracted;
@@ -352,22 +361,14 @@ function buildStructuredForAI(data) {
     for (const e of exhibits) {
       const parts = [`#${e.number || "?"}`, e.description || "(no description)"];
       const flags = [];
-      if (e.offered_by) flags.push(`offered by ${e.offered_by}`);
-      if (e.marked)     flags.push(`marked: ${e.marked}`);
-      if (e.admitted)   flags.push(`admitted: ${e.admitted}`);
+      if (e.marked)     flags.push("marked");
+      if (e.admitted)   flags.push("admitted");
       if (e.objection)  flags.push(`objection: ${e.objection}`);
-      if (e.bates)      flags.push(`bates: ${e.bates}`);
       lines.push(`  - ${parts.join(": ")}${flags.length ? " [" + flags.join("; ") + "]" : ""}`);
     }
     lines.push("");
   } else {
     lines.push("EXHIBITS: (none)");
-    lines.push("");
-  }
-
-  if (data.evidence_objections) {
-    lines.push("OBJECTIONS ON EVIDENCE:");
-    lines.push(data.evidence_objections);
     lines.push("");
   }
 
@@ -382,7 +383,14 @@ function buildStructuredForAI(data) {
   if (exams.length) {
     lines.push(`WITNESS EXAMINATIONS (${exams.length}):`);
     for (const ex of exams) {
-      lines.push(`\n${ex.witness || "(unnamed witness)"} — ${ex.examination_type || "examination"}`);
+      const role = ex.witness_role || "";
+      const name = ex.witness_name || "";
+      let witnessDisplay;
+      if (role && name) witnessDisplay = `${role}: ${name}`;
+      else if (name) witnessDisplay = name;
+      else if (role) witnessDisplay = role;
+      else witnessDisplay = ex.witness || "(unnamed witness)";
+      lines.push(`\n${witnessDisplay} — ${ex.examination_type || "examination"}`);
       const rows = (ex.qa_rows || []).filter(r => r.question || r.expected_answer || r.judge_notes);
       if (rows.length) {
         for (const r of rows) {
@@ -606,10 +614,44 @@ async function deleteIndividualNote(id) {
   return { id: r.rows[0].id, client_name: r.rows[0].client_name };
 }
 
+// Find all individual hearing notes for the same client (by A# preferred, name fallback).
+// Returns array ordered by hearing_date ASC (or created_at). Used to render
+// continuation tabs (1st Merits, 2nd Merits, 3rd Merits).
+async function getIndividualNotesForClient({ clientName, aNumber }) {
+  await initTables();
+  const key = aNumber ? String(aNumber).toLowerCase().replace(/[-\s]/g, "") : null;
+  const nameKey = clientName ? String(clientName).toLowerCase().trim() : null;
+  if (!key && !nameKey) return [];
+
+  const r = await db.query(
+    `SELECT id, client_name, a_number, hearing_date, judge_name, disposition, created_at
+     FROM individual_hearing_notes`
+  );
+  const matches = r.rows.filter(row => {
+    if (key) {
+      const rowKey = String(row.a_number || "").toLowerCase().replace(/[-\s]/g, "");
+      if (rowKey && rowKey === key) return true;
+    }
+    if (nameKey) {
+      const rowName = String(row.client_name || "").toLowerCase().trim();
+      if (rowName === nameKey) return true;
+    }
+    return false;
+  });
+  matches.sort((a, b) => {
+    const ad = a.hearing_date ? new Date(a.hearing_date).getTime() : new Date(a.created_at).getTime();
+    const bd = b.hearing_date ? new Date(b.hearing_date).getTime() : new Date(b.created_at).getTime();
+    return ad - bd;
+  });
+  return matches;
+}
+
 // ── Form parsing ─────────────────────────────────────────
 
 function parseFormSubmission(body) {
   // Exhibits: submitted as indexed fields exhibit_number_0, exhibit_description_0, etc.
+  // Marked and Admitted are now checkboxes — value is "yes" if checked, "" otherwise.
+  // (Offered by and Bates fields removed from form; still stored empty for schema stability.)
   const exhibits = [];
   const exhibitKeys = Object.keys(body).filter(k => /^exhibit_number_\d+$/.test(k));
   const exhibitIndices = exhibitKeys.map(k => parseInt(k.split("_").pop(), 10)).sort((a, b) => a - b);
@@ -618,8 +660,8 @@ function parseFormSubmission(body) {
       number:      (body[`exhibit_number_${i}`] || "").trim(),
       description: (body[`exhibit_description_${i}`] || "").trim(),
       offered_by:  (body[`exhibit_offered_by_${i}`] || "").trim(),
-      marked:      (body[`exhibit_marked_${i}`] || "").trim(),
-      admitted:    (body[`exhibit_admitted_${i}`] || "").trim(),
+      marked:      body[`exhibit_marked_${i}`] ? "yes" : "",
+      admitted:    body[`exhibit_admitted_${i}`] ? "yes" : "",
       objection:   (body[`exhibit_objection_${i}`] || "").trim(),
       bates:       (body[`exhibit_bates_${i}`] || "").trim(),
     };
@@ -627,11 +669,17 @@ function parseFormSubmission(body) {
   }
 
   // Examinations: nested — for each examination (e_0, e_1...), rows (r_0, r_1...)
+  // Witness has separate role (dropdown) and name (text) fields; combined into
+  // a display string in `witness` for backward compat with existing renderers.
   const examinations = [];
-  const examKeys = Object.keys(body).filter(k => /^exam_witness_\d+$/.test(k));
-  const examIndices = examKeys.map(k => parseInt(k.split("_").pop(), 10)).sort((a, b) => a - b);
+  const examKeys = Object.keys(body).filter(k => /^exam_witness_role_\d+$/.test(k) || /^exam_witness_\d+$/.test(k));
+  const examIndices = [...new Set(examKeys.map(k => parseInt(k.split("_").pop(), 10)))].sort((a, b) => a - b);
   for (const ei of examIndices) {
-    const witness = (body[`exam_witness_${ei}`] || "").trim();
+    const witnessRole = (body[`exam_witness_role_${ei}`] || "").trim();
+    const witnessName = (body[`exam_witness_name_${ei}`] || body[`exam_witness_${ei}`] || "").trim();
+    const witnessDisplay = witnessName
+      ? (witnessRole ? `${witnessRole} (${witnessName})` : witnessName)
+      : (witnessRole || "");
     const exType  = (body[`exam_type_${ei}`] || "").trim();
     const qa_rows = [];
     const rowKeys = Object.keys(body).filter(k => new RegExp(`^exam_${ei}_q_\\d+$`).test(k));
@@ -642,8 +690,14 @@ function parseFormSubmission(body) {
       const jn = (body[`exam_${ei}_jn_${ri}`] || "").trim();
       if (q || a || jn) qa_rows.push({ question: q, expected_answer: a, judge_notes: jn });
     }
-    if (witness || exType || qa_rows.length) {
-      examinations.push({ witness, examination_type: exType, qa_rows });
+    if (witnessDisplay || exType || qa_rows.length) {
+      examinations.push({
+        witness: witnessDisplay,
+        witness_role: witnessRole,
+        witness_name: witnessName,
+        examination_type: exType,
+        qa_rows,
+      });
     }
   }
 
@@ -673,16 +727,56 @@ function parseFormSubmission(body) {
 
 // ── HTML Form ────────────────────────────────────────────
 
-function renderForm({ noteId = null, prev = {}, error = null, saved = false } = {}) {
+function renderForm({ noteId = null, prev = {}, error = null, saved = false, siblings = [] } = {}) {
   const isEdit = !!noteId;
 
   const langOptions = [
-    { v: "en", l: "English" }, { v: "zh", l: "中文" }, { v: "es", l: "Español" },
-    { v: "hi", l: "हिन्दी" }, { v: "pa", l: "ਪੰਜਾਬੀ" },
+    { v: "en", l: "English" },
+    { v: "zh", l: "中文 (Chinese)" },
+    { v: "es", l: "Español (Spanish)" },
+    { v: "hi", l: "हिन्दी (Hindi)" },
+    { v: "pa", l: "ਪੰਜਾਬੀ (Punjabi)" },
   ].map(o => `<option value="${o.v}" ${prev.client_language === o.v ? "selected" : ""}>${o.l}</option>`).join("");
 
   const exhibits = prev.exhibits || [];
   const examinations = prev.examinations || [];
+
+  // Continuation tabs — show only if this client has multiple individual hearings.
+  // Each tab is a link to that hearing's edit page. "+ Add continuation" creates
+  // a new note pre-filled with this hearing's client info.
+  let tabsSection = "";
+  if (siblings && siblings.length > 0) {
+    const ordinal = (n) => {
+      const s = ["th", "st", "nd", "rd"];
+      const v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    };
+    const tabLinks = siblings.map((s, i) => {
+      const label = `${ordinal(i + 1)} Merits`;
+      const dateStr = s.hearing_date ? new Date(s.hearing_date).toLocaleDateString() : "(no date)";
+      const isCurrent = s.id === noteId;
+      const style = isCurrent
+        ? "background:#B79C62; color:white; padding:8px 16px; border-radius:6px 6px 0 0; text-decoration:none; font-weight:600; border-bottom:3px solid #0C1C36;"
+        : "background:#eee; color:#333; padding:8px 16px; border-radius:6px 6px 0 0; text-decoration:none;";
+      return `<a href="/admin/hearing/individual/${s.id}" style="${style}">${label} <span style="font-size:11px; opacity:.85;">${dateStr}</span></a>`;
+    }).join("");
+    // + Add continuation button — copies client info from current note
+    const addLink = isEdit
+      ? `<a href="/admin/hearing/individual?copy_from=${noteId}" style="background:#fdf7f0; color:#B79C62; padding:8px 16px; border-radius:6px 6px 0 0; text-decoration:none; border:1px dashed #B79C62;">+ Add continuation</a>`
+      : "";
+    tabsSection = `
+      <div style="margin:15px 0 -1px 0; display:flex; gap:4px; flex-wrap:wrap; align-items:end; border-bottom:1px solid #ddd; padding-bottom:0;">
+        ${tabLinks}
+        ${addLink}
+      </div>`;
+  } else if (isEdit) {
+    // Show "+ Add continuation" even with no siblings yet (this note is the only one)
+    tabsSection = `
+      <div style="margin:15px 0 -1px 0; display:flex; gap:4px; flex-wrap:wrap; align-items:end; border-bottom:1px solid #ddd;">
+        <span style="background:#B79C62; color:white; padding:8px 16px; border-radius:6px 6px 0 0; font-weight:600; border-bottom:3px solid #0C1C36;">1st Merits <span style="font-size:11px; opacity:.85;">${prev.hearing_date ? new Date(prev.hearing_date).toLocaleDateString() : "(no date)"}</span></span>
+        <a href="/admin/hearing/individual?copy_from=${noteId}" style="background:#fdf7f0; color:#B79C62; padding:8px 16px; border-radius:6px 6px 0 0; text-decoration:none; border:1px dashed #B79C62;">+ Add continuation</a>
+      </div>`;
+  }
 
   const errorSection = error ? `
     <div style="background:#ffebee; padding:15px; border-left:4px solid #c00; margin:15px 0; border-radius:4px;">
@@ -697,8 +791,10 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false } = 
   const body = `
     <div class="page-header">
       <h1>⚖️ Individual Hearing ${isEdit ? "— Editing #" + noteId : "— New"}</h1>
-      <a href="/admin/hearing/individual/history" class="back-link">← History</a>
+      <a href="/admin/hearing/history" class="back-link">← All Hearings</a>
     </div>
+
+    ${tabsSection}
 
     <p style="margin-bottom:15px; color:#555;">Prep tool for individual/merits hearings. Fill this in before the hearing; all fields remain editable during and after. Upload the prep outline (PDF or text) and Excel exhibit list to auto-populate.</p>
 
@@ -798,18 +894,16 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false } = 
       <!-- Section 3: Exhibit list -->
       <fieldset>
         <legend>Exhibit List</legend>
-        <div class="hint">Upload an Excel/CSV above to auto-populate, or add rows manually.</div>
+        <div class="hint">Upload an Excel/CSV above to auto-populate, or add rows manually. Check "Marked" if formally identified in the record; "Admitted" if received into evidence.</div>
         <div style="overflow-x:auto;">
         <table id="exhibits-table" style="width:100%; margin:8px 0; font-size:13px;">
           <thead>
             <tr>
               <th style="width:60px; text-align:left;">#</th>
               <th style="text-align:left;">Description</th>
-              <th style="width:100px; text-align:left;">Offered by</th>
-              <th style="width:80px; text-align:left;">Marked</th>
-              <th style="width:80px; text-align:left;">Admitted</th>
+              <th style="width:70px; text-align:center;">Marked</th>
+              <th style="width:80px; text-align:center;">Admitted</th>
               <th style="text-align:left;">Objection / Notes</th>
-              <th style="width:80px; text-align:left;">Bates</th>
               <th style="width:30px;"></th>
             </tr>
           </thead>
@@ -819,13 +913,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false } = 
         <button type="button" onclick="addExhibitRow()" style="background:#eee; padding:6px 12px; border:none; cursor:pointer; border-radius:4px; font-size:13px;">+ Add exhibit row</button>
       </fieldset>
 
-      <!-- Section 4: Objections -->
-      <fieldset>
-        <legend>Objections On Evidence Submitted</legend>
-        <textarea name="evidence_objections" rows="4" placeholder="Notes about objections raised by either side on documentary or testimonial evidence.">${escapeHtml(prev.evidence_objections || "")}</textarea>
-      </fieldset>
-
-      <!-- Section 5: Pre-examination notes -->
+      <!-- Section 4: Pre-examination notes (was Section 5) -->
       <fieldset>
         <legend>Notes Before Examinations</legend>
         <textarea name="pre_examination_notes" rows="4" placeholder="Opening statement notes, procedural matters, preliminary issues, judge's opening remarks, etc.">${escapeHtml(prev.pre_examination_notes || "")}</textarea>
@@ -910,15 +998,15 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false } = 
       function addExhibitRow(data) {
         data = data || {};
         const idx = exhibitCounter++;
+        const isMarked = !!(data.marked && String(data.marked).trim());
+        const isAdmitted = !!(data.admitted && String(data.admitted).trim());
         const tr = document.createElement("tr");
         tr.innerHTML =
           '<td><input type="text" name="exhibit_number_' + idx + '" value="' + escapeHTML(data.number || "") + '" style="width:100%;"></td>' +
           '<td><input type="text" name="exhibit_description_' + idx + '" value="' + escapeHTML(data.description || "") + '" style="width:100%;"></td>' +
-          '<td><input type="text" name="exhibit_offered_by_' + idx + '" value="' + escapeHTML(data.offered_by || "") + '" style="width:100%;"></td>' +
-          '<td><input type="text" name="exhibit_marked_' + idx + '" value="' + escapeHTML(data.marked || "") + '" style="width:100%;"></td>' +
-          '<td><input type="text" name="exhibit_admitted_' + idx + '" value="' + escapeHTML(data.admitted || "") + '" style="width:100%;"></td>' +
+          '<td style="text-align:center;"><input type="checkbox" name="exhibit_marked_' + idx + '" value="yes"' + (isMarked ? " checked" : "") + ' style="transform:scale(1.3);"></td>' +
+          '<td style="text-align:center;"><input type="checkbox" name="exhibit_admitted_' + idx + '" value="yes"' + (isAdmitted ? " checked" : "") + ' style="transform:scale(1.3);"></td>' +
           '<td><input type="text" name="exhibit_objection_' + idx + '" value="' + escapeHTML(data.objection || "") + '" style="width:100%;"></td>' +
-          '<td><input type="text" name="exhibit_bates_' + idx + '" value="' + escapeHTML(data.bates || "") + '" style="width:100%;"></td>' +
           '<td><button type="button" onclick="this.closest(\\'tr\\').remove()" style="background:#eee; border:none; padding:4px 8px; cursor:pointer; border-radius:3px;">×</button></td>';
         document.getElementById("exhibits-tbody").appendChild(tr);
       }
@@ -931,13 +1019,29 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false } = 
       function addExamination(data) {
         data = data || {};
         const idx = examCounter++;
+        // Prefer new schema (witness_role + witness_name); fall back to legacy witness string
+        let role = data.witness_role || "";
+        let name = data.witness_name || "";
+        if (!role && !name && data.witness) {
+          // Legacy record: try to split "Role (Name)" pattern, else treat as name
+          const m = String(data.witness).match(/^(Respondent|Spouse|Additional witness)\\s*\\(([^)]+)\\)\\s*$/i);
+          if (m) { role = m[1]; name = m[2]; }
+          else { role = "Respondent"; name = data.witness; }
+        }
+        if (!role) role = "Respondent";
+
         const wrap = document.createElement("div");
         wrap.dataset.examIdx = idx;
         wrap.style.cssText = "border:1px solid #ddd; padding:12px; margin:12px 0; border-radius:4px; background:#fafafa;";
         wrap.innerHTML =
-          '<div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">' +
+          '<div style="display:flex; gap:8px; margin-bottom:8px; align-items:center; flex-wrap:wrap;">' +
             '<label style="font-weight:600; flex:0 0 auto;">Witness:</label>' +
-            '<input type="text" name="exam_witness_' + idx + '" value="' + escapeHTML(data.witness || "Applicant") + '" style="flex:1; padding:6px;">' +
+            '<select name="exam_witness_role_' + idx + '" style="padding:6px; min-width:180px;">' +
+              witnessRoleOpt("Respondent", role) +
+              witnessRoleOpt("Spouse", role) +
+              witnessRoleOpt("Additional witness", role) +
+            '</select>' +
+            '<input type="text" name="exam_witness_name_' + idx + '" value="' + escapeHTML(name) + '" placeholder="Name (optional)" style="flex:1; min-width:180px; padding:6px;">' +
             '<label style="font-weight:600; flex:0 0 auto;">Type:</label>' +
             '<select name="exam_type_' + idx + '" style="padding:6px;">' +
               opt("direct", "Direct examination", data.examination_type) +
@@ -963,6 +1067,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false } = 
         (data.qa_rows || []).forEach(row => addQARow(idx, row));
         if (!data.qa_rows || !data.qa_rows.length) addQARow(idx);
       }
+      function witnessRoleOpt(v, current) { return '<option value="' + v + '"' + (current === v ? " selected" : "") + '>' + v + '</option>'; }
       function addQARow(examIdx, row) {
         row = row || {};
         const tbody = document.querySelector('tbody[data-exam-rows="' + examIdx + '"]');
@@ -987,7 +1092,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false } = 
       INITIAL_EXHIBITS.forEach(e => addExhibitRow(e));
       if (!INITIAL_EXHIBITS.length) addExhibitRow();
       INITIAL_EXAMS.forEach(e => addExamination(e));
-      if (!INITIAL_EXAMS.length) addExamination({ witness: "Applicant", examination_type: "direct" });
+      if (!INITIAL_EXAMS.length) addExamination({ witness_role: "Respondent", witness_name: "", examination_type: "direct" });
 
       // ── Load from prior master hearing ──────────────────
       async function loadFromPriorHearing() {
@@ -1339,6 +1444,7 @@ module.exports = {
   listIndividualNotes,
   getIndividualNote,
   deleteIndividualNote,
+  getIndividualNotesForClient,
   parseFormSubmission,
   generateParalegalSummary,
   generateClientSummary,
