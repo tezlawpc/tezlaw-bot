@@ -175,7 +175,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  Zara generates a paralegal summary + client summary in client's language.",
       "  `/notes list` — recent hearing notes",
       "  `/notes show <id>` — view one hearing's paralegal summary",
-      "  `/notes send <id>` — send paralegal summary to Jue via Telegram",
+      "  `/notes send <id>` — send paralegal summary to team Telegram group",
       "  `/notes delete <id>` — permanently delete a hearing note",
       "",
       "*📥 Intake Agent (auto-runs for new leads)*",
@@ -527,7 +527,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
   //
   //   /notes list                 — recent hearing notes
   //   /notes show <id>            — details of one hearing note
-  //   /notes send <id>            — send paralegal summary to Jue via Telegram
+  //   /notes send <id>            — send paralegal summary to team Telegram group
   //
   const notesFirstLine = lower.split("\n", 1)[0].trim();
   const notesMatch = notesFirstLine.match(/^\/notes\s+(list|show|send|delete)(?:\s+(.+))?\s*$/);
@@ -546,7 +546,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
           const sent = r.sent_to_paralegal_at ? "✅ sent" : "not sent";
           return `#${r.id} · ${r.client_name} · ${hearing} · ${next} · ${sent}`;
         });
-        return { handled: true, message: `📝 *Recent hearing notes:*\n\n${lines.join("\n")}\n\nDetail: \`/notes show <id>\`\nSend to Jue: \`/notes send <id>\`` };
+        return { handled: true, message: `📝 *Recent hearing notes:*\n\n${lines.join("\n")}\n\nDetail: \`/notes show <id>\`\nSend to team group: \`/notes send <id>\`` };
       }
 
       if (action === "show") {
@@ -562,7 +562,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
         if (!arg) return { handled: true, message: "Usage: `/notes send <id>`" };
         try {
           const result = await hn.sendToParalegal(parseInt(arg));
-          return { handled: true, message: `✅ Sent to Jue via Telegram (${result.chunks} message${result.chunks > 1 ? "s" : ""}).` };
+          return { handled: true, message: `✅ Sent to team Telegram group (${result.chunks} message${result.chunks > 1 ? "s" : ""}).` };
         } catch (e) {
           return { handled: true, message: `❌ Send failed: ${e.message}` };
         }
