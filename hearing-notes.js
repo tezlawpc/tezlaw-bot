@@ -86,62 +86,84 @@ async function initHearingNotesTables() {
   `);
 }
 
-// ── I-589 PDF Extraction (OCR via Claude) ────────────────
+// ── Generic Document Extraction (OCR via Claude) ─────────
 //
-// Accepts a PDF buffer (fillable or scanned) and extracts client info
-// relevant to hearing notes. Uses Claude Sonnet for better OCR accuracy
-// on scanned documents.
+// Accepts a file buffer + mime type. Handles PDFs and images
+// (JPG/PNG/WebP). Claude identifies what kind of document it is
+// and extracts any client/case fields it can find, PLUS narrative
+// content usable in the free-form notes section.
 
-async function extractI589FieldsFromPdf(pdfBuffer) {
-  const base64Pdf = pdfBuffer.toString("base64");
+async function extractDocumentFields(fileBuffer, mimeType, originalName = "") {
+  const base64 = fileBuffer.toString("base64");
 
-  const prompt = `You are extracting data from a USCIS Form I-589 (Application for Asylum and for Withholding of Removal).
+  const isPdf = mimeType && mimeType.includes("pdf");
+  const isImage = mimeType && mimeType.startsWith("image/");
+  if (!isPdf && !isImage) {
+    throw new Error(`Unsupported file type: ${mimeType}. Upload PDF, JPG, PNG, or WebP.`);
+  }
 
-The PDF may be a fillable form OR a scanned/printed copy. Extract the following fields as accurately as possible. If a field is illegible or not present, use null.
+  const prompt = `You are extracting client/case information from a document related to an immigration case. The document could be any of these types:
+- USCIS Form I-589 (Application for Asylum)
+- Notice to Appear (NTA / Form I-862)
+- EOIR hearing notice / court notice
+- USCIS receipt notice or approval notice
+- Client meeting notes (handwritten or typed)
+- Client intake form
+- Court orders / minute orders
+- Any other immigration-related document
 
-Extract these fields and return ONLY valid JSON with this exact structure (no other text):
+First identify what type of document this is. Then extract as many of the following fields as possible. Use null for fields not present or illegible. Do NOT invent data.
+
+Return ONLY valid JSON with this structure (no preamble, no code fences):
 
 {
-  "client_name": "Full legal name (Last, First Middle format if possible)",
-  "a_number": "A-Number if visible (format: A123-456-789)",
-  "date_of_birth": "Date of birth (YYYY-MM-DD format)",
-  "country_of_citizenship": "Country of citizenship/nationality",
-  "country_of_birth": "Country of birth",
-  "native_language": "Native/primary language (e.g. Mandarin, Spanish, Punjabi)",
-  "us_address": "Client's US mailing address (street, city, state, zip)",
-  "asylum_basis": ["Array of persecution grounds checked (any of: race, religion, nationality, political_opinion, particular_social_group, torture)"],
-  "spouse_name": "Spouse's name if listed",
-  "children_count": "Number of children listed on the form (integer or null)",
-  "date_of_entry": "Date of last entry to US (YYYY-MM-DD)",
-  "manner_of_entry": "Manner of last entry (e.g. visa waiver, EWI, B1/B2, etc)"
+  "document_type": "Best label for what this document is (e.g. 'I-589', 'NTA', 'EOIR Hearing Notice', 'Meeting Notes')",
+  "client_name": "Full legal name in 'Last, First Middle' format if possible",
+  "a_number": "A-Number with format A123-456-789 if visible",
+  "date_of_birth": "YYYY-MM-DD",
+  "country_of_citizenship": "Country name",
+  "country_of_birth": "Country name",
+  "native_language": "Language name (e.g. 'Mandarin', 'Spanish', 'Punjabi')",
+  "us_address": "Full US mailing address if listed",
+  "client_phone": "Phone number if listed",
+  "client_email": "Email address if listed",
+  "judge_name": "Immigration Judge name if mentioned",
+  "dhs_attorney": "DHS/ICE trial attorney name if mentioned",
+  "hearing_date": "YYYY-MM-DD of hearing referenced in this document",
+  "hearing_time": "HH:MM in 24h format",
+  "hearing_type": "master/individual/status/bond/other",
+  "case_type": "Type of case (e.g. 'Asylum (I-589)', 'Cancellation of Removal (non-LPR)')",
+  "charges": "Charges of removability from NTA if present (e.g. 'INA 237(a)(1)(B)')",
+  "allegations": "Numbered allegations from NTA if present (as string)",
+  "applications_mentioned": ["Array of relief applications mentioned"],
+  "asylum_basis": ["Array of persecution grounds from I-589: race/religion/nationality/political_opinion/particular_social_group/torture"],
+  "date_of_entry": "YYYY-MM-DD of last US entry if mentioned",
+  "manner_of_entry": "How client entered US (e.g. 'B1/B2 visa', 'EWI', 'visa waiver')",
+  "spouse_name": "Spouse name if listed",
+  "children_count": 0,
+  "narrative_notes": "Any narrative content useful for hearing notes: what the document actually says, procedural history, meeting summary, judge's comments, DHS positions, deadlines mentioned, etc. Keep to 1-3 short paragraphs. Preserve specific dates and numbers exactly."
 }
 
-Important rules:
+Rules:
 - Return ONLY the JSON object. No preamble, no explanation, no code fences.
-- Use null (not empty string) for any field you cannot read.
-- For dates, use YYYY-MM-DD format. If only month/year visible, use YYYY-MM-01. If unclear, use null.
-- For the A-Number, include the "A" prefix and dashes if that's how it appears.
-- Do NOT invent data. If unsure, use null.`;
+- Use null (not empty string) for any field you cannot read confidently.
+- For dates, YYYY-MM-DD format. If only month/year visible, use YYYY-MM-01. If unsure, null.
+- For handwritten sections that are illegible, use null rather than guessing.
+- If this is meeting notes or free-form text, extract as much as possible AND put the meaningful content into narrative_notes.`;
+
+  const contentBlock = isPdf
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
+    : { type: "image",    source: { type: "base64", media_type: mimeType,           data: base64 } };
 
   const resp = await axios.post(
     "https://api.anthropic.com/v1/messages",
     {
       model: "claude-sonnet-4-6",
-      max_tokens: 2000,
+      max_tokens: 2500,
       messages: [
         {
           role: "user",
-          content: [
-            {
-              type: "document",
-              source: {
-                type: "base64",
-                media_type: "application/pdf",
-                data: base64Pdf,
-              },
-            },
-            { type: "text", text: prompt },
-          ],
+          content: [contentBlock, { type: "text", text: prompt }],
         },
       ],
     },
@@ -151,48 +173,66 @@ Important rules:
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
-      timeout: 120000, // 2 min — OCR of 15-page PDF takes time
+      timeout: 120000, // 2 min — OCR of large scanned PDF takes time
     }
   );
 
   const text = resp.data.content?.[0]?.text?.trim() || "{}";
-  // Strip potential code fences
   const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
   let extracted;
   try {
     extracted = JSON.parse(cleaned);
   } catch (e) {
-    throw new Error(`Claude returned unparseable JSON: ${cleaned.substring(0, 200)}`);
+    throw new Error(`Claude returned unparseable JSON: ${cleaned.substring(0, 300)}`);
   }
 
-  // Map extracted native language to our language code
   const langCode = mapLanguageNameToCode(extracted.native_language);
 
-  return {
-    raw: extracted,
-    // Fields that map directly to the hearing notes form:
-    form_prefill: {
-      client_name: extracted.client_name || null,
-      a_number: extracted.a_number || null,
-      client_language: langCode,
-      case_type: "Asylum (I-589)",
-      // These aren't on the form yet but we return them anyway for
-      // downstream use (e.g. saving to case file):
-      _extra: {
-        date_of_birth: extracted.date_of_birth,
-        country_of_citizenship: extracted.country_of_citizenship,
-        country_of_birth: extracted.country_of_birth,
-        native_language: extracted.native_language,
-        us_address: extracted.us_address,
-        asylum_basis: extracted.asylum_basis,
-        spouse_name: extracted.spouse_name,
-        children_count: extracted.children_count,
-        date_of_entry: extracted.date_of_entry,
-        manner_of_entry: extracted.manner_of_entry,
-      },
+  // Map to form fields (only fields that map directly to the hearing notes form)
+  const form_prefill = {
+    document_type: extracted.document_type,
+    client_name: extracted.client_name || null,
+    a_number: extracted.a_number || null,
+    client_language: langCode,
+    client_phone: extracted.client_phone || null,
+    client_email: extracted.client_email || null,
+    judge_name: extracted.judge_name || null,
+    dhs_attorney: extracted.dhs_attorney || null,
+    case_type: extracted.case_type || null,
+    hearing_type: extracted.hearing_type || null,
+    hearing_datetime: mergeDateTime(extracted.hearing_date, extracted.hearing_time),
+    narrative_notes: extracted.narrative_notes || null,
+    // Reference-only extras shown to user, not filled into form:
+    _extra: {
+      date_of_birth: extracted.date_of_birth,
+      country_of_citizenship: extracted.country_of_citizenship,
+      country_of_birth: extracted.country_of_birth,
+      native_language: extracted.native_language,
+      us_address: extracted.us_address,
+      charges: extracted.charges,
+      allegations: extracted.allegations,
+      applications_mentioned: extracted.applications_mentioned,
+      asylum_basis: extracted.asylum_basis,
+      date_of_entry: extracted.date_of_entry,
+      manner_of_entry: extracted.manner_of_entry,
+      spouse_name: extracted.spouse_name,
+      children_count: extracted.children_count,
     },
   };
+
+  return { raw: extracted, form_prefill };
+}
+
+function mergeDateTime(dateStr, timeStr) {
+  if (!dateStr) return null;
+  const time = timeStr && /^\d{1,2}:\d{2}/.test(timeStr) ? timeStr : "09:00";
+  return `${dateStr}T${time.length === 4 ? "0" + time : time}`;
+}
+
+// Backward compatibility alias
+async function extractI589FieldsFromPdf(pdfBuffer) {
+  return extractDocumentFields(pdfBuffer, "application/pdf", "i589.pdf");
 }
 
 function mapLanguageNameToCode(name) {
@@ -435,7 +475,8 @@ async function saveNote(data, { generateSummaries = true } = {}) {
 async function listNotes(limit = 50) {
   await initHearingNotesTables();
   const r = await db.query(
-    `SELECT id, client_name, a_number, hearing_date, next_hearing_date, next_hearing_type,
+    `SELECT id, client_name, a_number, hearing_date, hearing_type,
+       next_hearing_date, next_hearing_type,
        client_language, sent_to_paralegal_at, sent_to_client_at, created_at
      FROM hearing_notes
      ORDER BY created_at DESC LIMIT $1`,
@@ -751,19 +792,24 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
   </div>
   <p style="margin-bottom:15px; color:#555;">Take notes during the hearing. Zara will clean them up and generate a paralegal summary + client-friendly summary in the client's language.</p>
 
-  <div style="background:#fdf7f0; border:1px dashed #B79C62; padding:15px; border-radius:6px; margin-bottom:20px;">
-    <div style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">
-      <div style="flex:1; min-width:200px;">
-        <strong>📄 Upload Client's I-589 (optional)</strong><br>
-        <span style="font-size:12px; color:#666;">Zara will OCR the PDF and auto-fill client info. Works with scanned or fillable PDFs. Takes ~30–60 seconds.</span>
-      </div>
-      <div>
-        <input type="file" id="i589-upload" accept=".pdf,application/pdf" style="display:none;" onchange="uploadI589(this.files[0])">
-        <button type="button" onclick="document.getElementById('i589-upload').click()" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; font-size:14px;">Choose I-589 PDF</button>
-      </div>
+  <div id="upload-area"
+       ondragover="handleDragOver(event)"
+       ondragleave="handleDragLeave(event)"
+       ondrop="handleDrop(event)"
+       style="background:#fdf7f0; border:2px dashed #B79C62; padding:25px; border-radius:8px; margin-bottom:20px; text-align:center; transition:all .2s;">
+    <div style="font-size:14px; margin-bottom:12px;">
+      <strong style="font-size:16px;">📄 Drop a document here</strong> — or —
+      <button type="button" onclick="document.getElementById('doc-upload').click()" style="background:#B79C62; color:white; padding:8px 18px; border:none; border-radius:4px; cursor:pointer; font-size:14px; margin-left:8px;">Choose file</button>
+      <input type="file" id="doc-upload" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/*" style="display:none;" onchange="uploadDocument(this.files[0])">
     </div>
-    <div id="i589-status" style="margin-top:10px; font-size:13px;"></div>
-    <div id="i589-extracted" style="margin-top:10px;"></div>
+    <div style="font-size:12px; color:#666; margin-bottom:4px;">
+      Works with I-589, NTA, court notices, meeting notes, hearing orders, receipts, or any immigration document.
+    </div>
+    <div style="font-size:12px; color:#666;">
+      Accepts PDF, JPG, PNG, WebP · Max 32 MB · OCR takes ~30–60 seconds
+    </div>
+    <div id="doc-status" style="margin-top:12px; font-size:13px;"></div>
+    <div id="doc-extracted" style="margin-top:10px;"></div>
   </div>
 
   ${errorSection}
@@ -1019,26 +1065,52 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
       }
     }
 
-    // ── I-589 Upload + Auto-Fill ──────────────────────────
-    async function uploadI589(file) {
+    // ── Document Upload + Auto-Fill ──────────────────────
+    // Handles drag-drop AND file picker.
+    // Extracts fields from I-589, NTA, notes, court orders, etc.
+
+    function handleDragOver(e) {
+      e.preventDefault(); e.stopPropagation();
+      document.getElementById("upload-area").style.background = "#faedd5";
+      document.getElementById("upload-area").style.borderColor = "#8f7a4c";
+    }
+    function handleDragLeave(e) {
+      e.preventDefault(); e.stopPropagation();
+      document.getElementById("upload-area").style.background = "#fdf7f0";
+      document.getElementById("upload-area").style.borderColor = "#B79C62";
+    }
+    function handleDrop(e) {
+      e.preventDefault(); e.stopPropagation();
+      document.getElementById("upload-area").style.background = "#fdf7f0";
+      document.getElementById("upload-area").style.borderColor = "#B79C62";
+      const files = e.dataTransfer.files;
+      if (files.length > 0) uploadDocument(files[0]);
+    }
+
+    async function uploadDocument(file) {
       if (!file) return;
-      const statusEl = document.getElementById("i589-status");
-      const extractedEl = document.getElementById("i589-extracted");
+      const statusEl = document.getElementById("doc-status");
+      const extractedEl = document.getElementById("doc-extracted");
       extractedEl.innerHTML = "";
 
-      // File size check (32 MB is API limit)
       if (file.size > 32 * 1024 * 1024) {
         statusEl.innerHTML = '<span style="color:#c00;">❌ File too large (max 32 MB). Try a smaller/lower-quality scan.</span>';
         return;
       }
 
-      statusEl.innerHTML = '<span style="color:#666;">⏳ Uploading and OCRing... this can take 30–60 seconds for a full I-589.</span>';
+      const acceptable = /\\.(pdf|jpg|jpeg|png|webp)$/i.test(file.name) || file.type.includes("pdf") || file.type.startsWith("image/");
+      if (!acceptable) {
+        statusEl.innerHTML = '<span style="color:#c00;">❌ Unsupported file type. Use PDF, JPG, PNG, or WebP.</span>';
+        return;
+      }
+
+      statusEl.innerHTML = '<span style="color:#666;">⏳ Uploading and OCRing ' + file.name + ' — 30–60 seconds for a large scan...</span>';
 
       const formData = new FormData();
-      formData.append("i589", file);
+      formData.append("document", file);
 
       try {
-        const resp = await fetch("/admin/hearing/notes/extract-i589", {
+        const resp = await fetch("/admin/hearing/notes/extract-document", {
           method: "POST",
           body: formData,
         });
@@ -1049,42 +1121,86 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
           return;
         }
 
-        // Fill form fields with extracted values
         const filled = [];
         const prefill = data.form_prefill || {};
+        const docType = prefill.document_type || "document";
 
         function fillIfEmpty(fieldName, value) {
           if (!value) return false;
           const el = document.querySelector('[name="' + fieldName + '"]');
           if (!el) return false;
-          // Don't overwrite user-entered values
           if (el.value && el.value.trim()) return false;
           el.value = value;
-          el.style.backgroundColor = "#fffde7"; // subtle highlight
+          el.style.backgroundColor = "#fffde7";
           filled.push(fieldName);
           return true;
         }
 
         fillIfEmpty("client_name", prefill.client_name);
         fillIfEmpty("a_number", prefill.a_number);
+        fillIfEmpty("client_email", prefill.client_email);
+        fillIfEmpty("client_phone", prefill.client_phone);
         fillIfEmpty("case_type", prefill.case_type);
+        fillIfEmpty("judge_name", prefill.judge_name);
+        fillIfEmpty("dhs_attorney", prefill.dhs_attorney);
 
-        // Set language dropdown
+        // Language dropdown
         if (prefill.client_language) {
           const langEl = document.querySelector('[name="client_language"]');
-          if (langEl && langEl.value === "en") { // only if still default
+          if (langEl && langEl.value === "en") {
             langEl.value = prefill.client_language;
             langEl.style.backgroundColor = "#fffde7";
             filled.push("client_language");
           }
         }
 
-        // Auto-check I-589 Asylum in applications
-        const asylumCheckbox = Array.from(document.querySelectorAll('input[type="checkbox"]'))
-          .find(cb => cb.value && cb.value.startsWith("I-589 Asylum"));
-        if (asylumCheckbox && !asylumCheckbox.checked) {
-          asylumCheckbox.checked = true;
-          filled.push("I-589 Asylum (application)");
+        // Hearing type
+        if (prefill.hearing_type) {
+          const htEl = document.querySelector('[name="hearing_type"]');
+          if (htEl) {
+            const match = Array.from(htEl.options).find(o => o.value.toLowerCase().includes(prefill.hearing_type.toLowerCase()));
+            if (match) {
+              htEl.value = match.value;
+              htEl.style.backgroundColor = "#fffde7";
+              filled.push("hearing_type");
+            }
+          }
+        }
+
+        // Hearing date/time
+        if (prefill.hearing_datetime) {
+          const dtEl = document.querySelector('[name="hearing_date"]');
+          if (dtEl && !dtEl.value) {
+            // Chop off timezone/seconds to match datetime-local format
+            const val = prefill.hearing_datetime.substring(0, 16);
+            dtEl.value = val;
+            dtEl.style.backgroundColor = "#fffde7";
+            filled.push("hearing_date");
+          }
+        }
+
+        // Narrative notes → append to raw_notes
+        if (prefill.narrative_notes) {
+          const notesEl = document.getElementById("raw_notes");
+          if (notesEl) {
+            const stamp = "--- From " + docType + " (" + file.name + ") ---";
+            const addition = stamp + "\\n" + prefill.narrative_notes;
+            notesEl.value = notesEl.value.trim()
+              ? notesEl.value + "\\n\\n" + addition
+              : addition;
+            notesEl.style.backgroundColor = "#fffde7";
+            filled.push("raw_notes");
+          }
+        }
+
+        // Auto-check I-589 Asylum if doc is an I-589
+        if (docType && /i-?589|asylum/i.test(docType)) {
+          const asylumCheckbox = Array.from(document.querySelectorAll('input[type="checkbox"]'))
+            .find(cb => cb.value && cb.value.startsWith("I-589 Asylum"));
+          if (asylumCheckbox && !asylumCheckbox.checked) {
+            asylumCheckbox.checked = true;
+            filled.push("I-589 Asylum (application)");
+          }
         }
 
         // Show extracted info summary
@@ -1093,20 +1209,25 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
         if (extra.date_of_birth) extraLines.push("DOB: " + extra.date_of_birth);
         if (extra.country_of_citizenship) extraLines.push("Country: " + extra.country_of_citizenship);
         if (extra.us_address) extraLines.push("US Address: " + extra.us_address);
+        if (extra.charges) extraLines.push("Charges: " + extra.charges);
+        if (extra.allegations) extraLines.push("Allegations: " + extra.allegations);
         if (extra.asylum_basis && extra.asylum_basis.length) extraLines.push("Asylum basis: " + extra.asylum_basis.join(", "));
+        if (extra.applications_mentioned && extra.applications_mentioned.length) extraLines.push("Applications mentioned: " + extra.applications_mentioned.join(", "));
         if (extra.date_of_entry) extraLines.push("Entered US: " + extra.date_of_entry + (extra.manner_of_entry ? " (" + extra.manner_of_entry + ")" : ""));
         if (extra.spouse_name) extraLines.push("Spouse: " + extra.spouse_name);
         if (extra.children_count) extraLines.push("Children: " + extra.children_count);
 
+        const detectedLine = '<div style="font-size:12px; color:#666; margin-bottom:6px;">Detected: <strong>' + (docType || "unknown document") + '</strong></div>';
+
         if (filled.length === 0) {
-          statusEl.innerHTML = '<span style="color:#ff9800;">⚠️ Extracted but no new fields filled (form may already have values). See below for extracted data.</span>';
+          statusEl.innerHTML = detectedLine + '<span style="color:#ff9800;">⚠️ No new fields filled. Form may already have values, or nothing extractable from this doc.</span>';
         } else {
-          statusEl.innerHTML = '<span style="color:#4CAF50;">✅ Extracted and filled: ' + filled.join(", ") + '. Please verify highlighted fields.</span>';
+          statusEl.innerHTML = detectedLine + '<span style="color:#4CAF50;">✅ Filled: ' + filled.join(", ") + '. Please verify highlighted fields.</span>';
         }
 
         if (extraLines.length) {
-          extractedEl.innerHTML = '<div style="background:white; padding:10px; border-radius:4px; margin-top:8px; font-size:13px; color:#333; border:1px solid #eee;">' +
-            '<strong>Additional data from I-589 (reference only):</strong><br>' +
+          extractedEl.innerHTML = '<div style="background:white; padding:10px; border-radius:4px; margin-top:8px; font-size:13px; color:#333; border:1px solid #eee; text-align:left;">' +
+            '<strong>Additional data extracted (for reference):</strong><br>' +
             extraLines.map(l => "• " + l).join("<br>") +
             '</div>';
         }
@@ -1115,17 +1236,28 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
         statusEl.innerHTML = '<span style="color:#c00;">❌ Upload error: ' + e.message + '</span>';
       }
     }
+
+    // Backward-compat alias in case old code paths still call it
+    async function uploadI589(file) { return uploadDocument(file); }
   </script>`;
 
   return renderAdminChrome({ title: "Hearing Notes", body, activeItem: "notes" });
 }
 
 function renderHistoryPage(notes) {
-  const rows = notes.length ? notes.map(n => `
-    <tr>
+  const rows = notes.length ? notes.map(n => {
+    const sentClass = n.sent_to_paralegal_at ? "sent" : "unsent";
+    return `
+    <tr class="hearing-row"
+        data-name="${escapeAttr((n.client_name || "").toLowerCase())}"
+        data-anumber="${escapeAttr((n.a_number || "").toLowerCase().replace(/[-\s]/g, ""))}"
+        data-htype="${escapeAttr(n.hearing_type || "")}"
+        data-sent="${sentClass}"
+        data-lang="${escapeAttr(n.client_language || "")}">
       <td>#${n.id}</td>
       <td>${escapeHtml(n.client_name)}</td>
       <td>${escapeHtml(n.a_number || "")}</td>
+      <td>${escapeHtml(n.hearing_type || "-")}</td>
       <td>${n.hearing_date ? new Date(n.hearing_date).toLocaleDateString() : "-"}</td>
       <td>${n.next_hearing_date ? new Date(n.next_hearing_date).toLocaleDateString() : "-"}</td>
       <td>${escapeHtml(n.next_hearing_type || "-")}</td>
@@ -1133,23 +1265,110 @@ function renderHistoryPage(notes) {
       <td>${n.sent_to_paralegal_at ? "✅" : "—"}</td>
       <td>${new Date(n.created_at).toLocaleDateString()}</td>
       <td><a href="/admin/hearing/notes/${n.id}" style="color:#B79C62;">view</a></td>
-    </tr>`).join("") : `<tr><td colspan="10" style="text-align:center; color:#888;">No hearing notes yet.</td></tr>`;
+    </tr>`;
+  }).join("") : `<tr id="no-data-row"><td colspan="11" style="text-align:center; color:#888;">No hearing notes yet.</td></tr>`;
 
   const body = `
     <div class="page-header">
       <h1>📚 Hearing Notes History</h1>
       <a href="/admin/hearing/notes" class="back-link">← Back to note-taking</a>
     </div>
+
+    <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #eee;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+        <div style="flex:1; min-width:260px;">
+          <input type="text" id="search-input" placeholder="🔍 Search by client name or A-Number..."
+                 onkeyup="filterRows()"
+                 style="width:100%; padding:9px 12px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+        </div>
+        <div>
+          <select id="filter-htype" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+            <option value="">All hearing types</option>
+            <option value="master">Master</option>
+            <option value="individual/merits">Individual/Merits</option>
+            <option value="status">Status</option>
+            <option value="bond">Bond</option>
+            <option value="custody redetermination">Custody Redetermination</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div>
+          <select id="filter-sent" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+            <option value="">All</option>
+            <option value="sent">Sent to Jue ✅</option>
+            <option value="unsent">Not sent</option>
+          </select>
+        </div>
+        <div>
+          <select id="filter-lang" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+            <option value="">All languages</option>
+            <option value="en">English</option>
+            <option value="zh">Chinese</option>
+            <option value="es">Spanish</option>
+            <option value="hi">Hindi</option>
+            <option value="pa">Punjabi</option>
+          </select>
+        </div>
+        <div>
+          <button type="button" onclick="clearFilters()"
+                  style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">
+            Clear
+          </button>
+        </div>
+      </div>
+      <div id="row-count" style="margin-top:10px; font-size:13px; color:#666;">
+        Showing ${notes.length} note${notes.length === 1 ? "" : "s"}
+      </div>
+    </div>
+
     <table>
       <thead>
         <tr>
-          <th>ID</th><th>Client</th><th>A#</th><th>Hearing</th>
+          <th>ID</th><th>Client</th><th>A#</th><th>Type</th><th>Hearing</th>
           <th>Next</th><th>Next Type</th><th>Lang</th>
-          <th>Sent Jue</th><th>Created</th><th></th>
+          <th>Sent</th><th>Created</th><th></th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+      <tbody id="rows-body">${rows}</tbody>
+    </table>
+
+    <script>
+      const TOTAL = ${notes.length};
+      function filterRows() {
+        const search = document.getElementById("search-input").value.toLowerCase().replace(/[-\\s]/g, "");
+        const htype = document.getElementById("filter-htype").value;
+        const sent = document.getElementById("filter-sent").value;
+        const lang = document.getElementById("filter-lang").value;
+        let visible = 0;
+        document.querySelectorAll(".hearing-row").forEach(row => {
+          const name = row.dataset.name || "";
+          const anumber = row.dataset.anumber || "";
+          const rowHtype = row.dataset.htype || "";
+          const rowSent = row.dataset.sent || "";
+          const rowLang = row.dataset.lang || "";
+          const matchesSearch = !search || name.includes(search) || anumber.includes(search);
+          const matchesHtype = !htype || rowHtype === htype;
+          const matchesSent = !sent || rowSent === sent;
+          const matchesLang = !lang || rowLang === lang;
+          const show = matchesSearch && matchesHtype && matchesSent && matchesLang;
+          row.style.display = show ? "" : "none";
+          if (show) visible++;
+        });
+        const count = document.getElementById("row-count");
+        if (visible === TOTAL) {
+          count.textContent = "Showing " + TOTAL + " note" + (TOTAL === 1 ? "" : "s");
+        } else {
+          count.textContent = "Showing " + visible + " of " + TOTAL + " notes";
+        }
+      }
+      function clearFilters() {
+        document.getElementById("search-input").value = "";
+        document.getElementById("filter-htype").value = "";
+        document.getElementById("filter-sent").value = "";
+        document.getElementById("filter-lang").value = "";
+        filterRows();
+      }
+    </script>`;
 
   return renderAdminChrome({ title: "Hearing History", body, activeItem: "history" });
 }
@@ -1190,7 +1409,11 @@ function renderDetailPage(note) {
     </div>
 
     <h2 style="color:#B79C62; margin-top:30px;">Paralegal Summary</h2>
-    <button type="button" onclick="copyEl('paralegal-detail')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-bottom:8px;">📋 Copy</button>
+    <div style="margin-bottom:8px;">
+      <button type="button" onclick="copyEl('paralegal-detail')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy</button>
+      <button type="button" onclick="sendParalegalDetail(${note.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 ${note.sent_to_paralegal_at ? "Re-send" : "Send"} to Jue via Telegram</button>
+      <span id="send-detail-status" style="margin-left:12px; font-weight:bold;"></span>
+    </div>
     <pre id="paralegal-detail" style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.paralegal_summary || "(none)")}</pre>
 
     <h2 style="color:#B79C62; margin-top:30px;">Client Summary (${note.client_language})</h2>
@@ -1204,6 +1427,25 @@ function renderDetailPage(note) {
       function copyEl(id) {
         navigator.clipboard.writeText(document.getElementById(id).textContent);
         alert("Copied!");
+      }
+      async function sendParalegalDetail(id) {
+        const status = document.getElementById("send-detail-status");
+        status.textContent = "Sending...";
+        status.style.color = "#666";
+        try {
+          const resp = await fetch("/admin/hearing/notes/" + id + "/send-paralegal", { method: "POST" });
+          const data = await resp.json();
+          if (data.ok) {
+            status.textContent = "✅ Sent to Jue via Telegram";
+            status.style.color = "#4CAF50";
+          } else {
+            status.textContent = "❌ " + (data.error || "Send failed");
+            status.style.color = "#c00";
+          }
+        } catch (e) {
+          status.textContent = "❌ " + e.message;
+          status.style.color = "#c00";
+        }
       }
     </script>`;
 
@@ -1286,6 +1528,7 @@ module.exports = {
   sendToParalegal,
   generateParalegalSummary,
   generateClientSummary,
+  extractDocumentFields,
   extractI589FieldsFromPdf,
   renderNoteForm,
   renderHistoryPage,
