@@ -1201,6 +1201,22 @@ app.post("/telegram", async (req, res) => {
   const firstName = msg.from?.first_name || "there";
 
   try {
+    // ── /chatid — utility command for setting up group chats ──
+    // Works in DMs, groups, and channels. Returns the current chat's ID
+    // so JJ can set env vars like HEARING_NOTES_TELEGRAM_GROUP_ID.
+    const textForCmd = (msg.text || msg.caption || "").trim();
+    if (/^\/chatid(@\w+)?\s*$/i.test(textForCmd)) {
+      const chatType = msg.chat.type || "unknown"; // 'private', 'group', 'supergroup', 'channel'
+      const chatTitle = msg.chat.title || "(no title)";
+      const info =
+        `📍 *Chat ID Info*\n\n` +
+        `Chat ID: \`${chatId}\`\n` +
+        `Type: ${chatType}\n` +
+        (chatType !== "private" ? `Title: ${chatTitle}\n` : `From: ${firstName}\n`) +
+        `\n_Copy the Chat ID above to use in env vars like_ \`HEARING_NOTES_TELEGRAM_GROUP_ID\`.`;
+      await tgSend(chatId, info);
+      return;
+    }
     if (msg.photo) {
       await axios.post(`${TELEGRAM_API}/sendChatAction`, { chat_id: chatId, action: "typing" });
       const best = msg.photo[msg.photo.length-1];
