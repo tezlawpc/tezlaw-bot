@@ -228,24 +228,34 @@ Rules:
 
   const resp = await axios.post(
     "https://api.anthropic.com/v1/messages",
-    { model: EXTRACT_MODEL, max_tokens: 4000, messages },
+    // 16000 tokens ≈ 12000 words — enough for a comprehensive merits hearing prep doc
+    // (multiple witnesses, extensive Q&A, full closing argument). 4000 was truncating.
+    { model: EXTRACT_MODEL, max_tokens: 16000, messages },
     {
       headers: {
         "x-api-key": process.env.ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
-      timeout: 120000,
+      timeout: 180000,
     }
   );
 
   const text = resp.data.content?.[0]?.text?.trim() || "{}";
   const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const stopReason = resp.data.stop_reason;
   let extracted;
   try {
     extracted = JSON.parse(cleaned);
   } catch (e) {
-    throw new Error(`Claude returned unparseable JSON: ${cleaned.substring(0, 300)}`);
+    const truncatedNote = stopReason === "max_tokens"
+      ? " (Claude's response was TRUNCATED — hit token limit. Try splitting the doc into a witness-testimony half and a closing-argument half, then upload separately.)"
+      : "";
+    throw new Error(
+      `Extracted text from your document, but Claude's structured response wasn't valid JSON` +
+      `${truncatedNote}. Response length: ${cleaned.length} chars. Stop reason: ${stopReason || "unknown"}. ` +
+      `You can still see the raw extracted text at the bottom of the form and paste sections manually.`
+    );
   }
 
   // Normalize structure - ensure arrays exist
@@ -1220,6 +1230,17 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
             return;
           }
           if (!data.ok) { status.innerHTML = '<span style="color:#c00;">❌ ' + escapeHTML(data.error || "Extraction failed") + '</span>'; return; }
+          // If server returned a warning, show it — the file was read but AI extraction had issues
+          if (data.warning) {
+            status.innerHTML =
+              '<span style="color:#ff9800;">⚠️ File extracted but AI structuring had issues. ' +
+              'Raw text saved — you can copy sections into the form manually. ' +
+              'Details: ' + escapeHTML(data.warning) + '</span>';
+            // Still save the raw so it's available on the hidden field
+            const raw = data.raw_text || "";
+            if (raw) document.getElementById("hearing_summary_raw").value = raw;
+            return;
+          }
           // Populate examinations from extracted structure
           if (data.extracted.examinations && data.extracted.examinations.length) {
             if (confirm("Extracted " + data.extracted.examinations.length + " examination section(s). Replace current examinations?")) {
