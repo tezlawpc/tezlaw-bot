@@ -51,6 +51,8 @@ async function initTables() {
       court_location        TEXT,
       court_address         TEXT,
       dhs_attorney          TEXT,
+      attorney_appearance   TEXT,
+      respondent_appearance TEXT,
       exhibits              JSONB DEFAULT '[]'::jsonb,
       evidence_objections   TEXT,
       pre_examination_notes TEXT,
@@ -58,6 +60,8 @@ async function initTables() {
       closing_argument      TEXT,
       disposition           TEXT,
       disposition_notes     TEXT,
+      next_hearing_date     TIMESTAMPTZ,
+      next_hearing_type     TEXT,
       next_action_deadline  DATE,
       hearing_summary_raw   TEXT,
       paralegal_summary     TEXT,
@@ -67,6 +71,17 @@ async function initTables() {
       updated_at            TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // Migrations for existing installations (safe no-op if columns exist)
+  const alters = [
+    "ADD COLUMN IF NOT EXISTS attorney_appearance TEXT",
+    "ADD COLUMN IF NOT EXISTS respondent_appearance TEXT",
+    "ADD COLUMN IF NOT EXISTS next_hearing_date TIMESTAMPTZ",
+    "ADD COLUMN IF NOT EXISTS next_hearing_type TEXT",
+  ];
+  for (const alter of alters) {
+    try { await db.query(`ALTER TABLE individual_hearing_notes ${alter}`); }
+    catch (e) { /* column may already exist on older PG or race — ignore */ }
+  }
   await db.query(`
     CREATE INDEX IF NOT EXISTS idx_individual_hearing_notes_created
       ON individual_hearing_notes (created_at DESC)
@@ -119,9 +134,11 @@ function parseExhibitExcel(buffer, filename = "exhibits.xlsx") {
   const headers = rows[headerIdx].map(h => String(h == null ? "" : h).trim().toLowerCase());
   const dataRows = rows.slice(headerIdx + 1).filter(r => r.some(c => String(c == null ? "" : c).trim()));
 
-  // Try to map common column names to standard fields
+  // Try to map common column names to standard fields.
+  // Number column: also matches "EOR", "EOR submission", "part", "index",
+  // "annex", "attachment" — common headers on immigration exhibit lists.
   const colIdx = {
-    number:      findCol(headers, ["exhibit", "exh", "no.", "no", "#", "number", "tab"]),
+    number:      findCol(headers, ["exhibit", "exh", "eor", "no.", "no", "#", "number", "tab", "part", "index", "annex", "attachment", "submission"]),
     description: findCol(headers, ["description", "desc", "document", "title", "name"]),
     offered_by:  findCol(headers, ["offered by", "party", "proponent", "offered", "by"]),
     marked:      findCol(headers, ["marked", "identified", "id'd"]),
@@ -178,12 +195,16 @@ Your job: extract as much structured content as possible. Return ONLY valid JSON
   "client_info": {
     "client_name": "Full name of the respondent/applicant if named in doc, else empty string. Prefer 'Last, First' format if that's how it appears.",
     "a_number": "A-Number if given (with or without dashes), else empty string",
+    "client_email": "Client email address if listed anywhere in the doc, else empty string",
+    "client_phone": "Client phone number if listed anywhere in the doc, else empty string",
     "hearing_date": "Hearing date and time in ISO format YYYY-MM-DDTHH:MM if found (guess time if not stated). Empty string if not in doc.",
     "judge_name": "Immigration judge name if given, else empty string. Include honorific if present (e.g. 'Hon. Kevin Riley').",
     "court_location": "Court short name if given (e.g. 'Los Angeles Immigration Court'), else empty string",
-    "court_address": "Full court address if given, else empty string",
+    "court_address": "Full street address of the court if given ANYWHERE in the doc (may appear in caption, header, notice attachments, or after judge/court name), else empty string. Include street, city, state, ZIP.",
     "dhs_attorney": "DHS trial attorney name if given, else empty string",
-    "case_type": "Type of case if identifiable — e.g. 'Asylum (I-589)', 'Withholding of Removal', 'CAT protection', 'Cancellation of Removal'. Empty string if unclear."
+    "case_type": "Type of case if identifiable — e.g. 'Asylum (I-589)', 'Withholding of Removal', 'CAT protection', 'Cancellation of Removal'. Empty string if unclear.",
+    "attorney_appearance": "How the attorney is appearing: 'In person', 'WebEx', 'Telephone', or empty if not stated",
+    "respondent_appearance": "How the respondent is appearing: 'In person', 'WebEx', 'Telephone', or empty if not stated"
   },
   "case_summary": "Brief 1-2 sentence description of the case (from any narrative context in the doc)",
   "witnesses": [
@@ -197,11 +218,16 @@ Your job: extract as much structured content as possible. Return ONLY valid JSON
       "witness_role": "Respondent | Spouse | Additional witness",
       "witness_name": "Witness name if given, else empty string",
       "examination_type": "direct/cross/redirect (best guess)",
-      "qa_rows": [
+      "sections": [
         {
-          "question": "The question the attorney will ask (verbatim or best paraphrase)",
-          "expected_answer": "Expected/prepared answer if noted, else empty string",
-          "judge_notes": ""
+          "title": "Section title (e.g. 'Background', 'Life in China', 'Persecution events', 'Fear of return', 'Country conditions'). Identify natural thematic sections from the doc's structure — headings, spacing, topic shifts.",
+          "qa_rows": [
+            {
+              "question": "The question the attorney will ask (verbatim or best paraphrase)",
+              "expected_answer": "Expected/prepared answer if noted, else empty string",
+              "judge_notes": ""
+            }
+          ]
         }
       ]
     }
@@ -213,6 +239,7 @@ Rules:
 - Return ONLY the JSON object.
 - Look CAREFULLY at the first page/section of the doc for the case caption — that's where client name, A-Number, judge, hearing date are usually listed. Do not skip this.
 - Extract questions in ORDER as they appear.
+- Break each witness's examination into THEMATIC SECTIONS based on the doc's structure. Common sections for direct exam: Background, Life in home country, Persecution events, Coming to the US, Fear of return, Country conditions. Look for headers, bold text, or topic shifts in the doc. If the doc has no obvious sections, use one section titled "Testimony" with all rows.
 - If a question has a paired anticipated answer in the doc, put it in expected_answer. Otherwise leave empty.
 - judge_notes stays empty — the attorney fills that in DURING the hearing.
 - witness_role must be one of exactly: "Respondent" (the applicant themselves), "Spouse" (respondent's spouse), or "Additional witness" (experts, country conditions witnesses, family members other than spouse, etc.). Default to "Respondent" if unclear.
@@ -291,30 +318,58 @@ Rules:
   // Normalize structure - ensure arrays exist
   extracted.client_info = extracted.client_info || {};
   extracted.client_info = {
-    client_name:    extracted.client_info.client_name    || "",
-    a_number:       extracted.client_info.a_number       || "",
-    hearing_date:   extracted.client_info.hearing_date   || "",
-    judge_name:     extracted.client_info.judge_name     || "",
-    court_location: extracted.client_info.court_location || "",
-    court_address:  extracted.client_info.court_address  || "",
-    dhs_attorney:   extracted.client_info.dhs_attorney   || "",
-    case_type:      extracted.client_info.case_type      || "",
+    client_name:           extracted.client_info.client_name           || "",
+    a_number:              extracted.client_info.a_number              || "",
+    client_email:          extracted.client_info.client_email          || "",
+    client_phone:          extracted.client_info.client_phone          || "",
+    hearing_date:          extracted.client_info.hearing_date          || "",
+    judge_name:            extracted.client_info.judge_name            || "",
+    court_location:        extracted.client_info.court_location        || "",
+    court_address:         extracted.client_info.court_address         || "",
+    dhs_attorney:          extracted.client_info.dhs_attorney          || "",
+    case_type:             extracted.client_info.case_type             || "",
+    attorney_appearance:   extracted.client_info.attorney_appearance   || "",
+    respondent_appearance: extracted.client_info.respondent_appearance || "",
   };
   extracted.witnesses = extracted.witnesses || [];
   extracted.examinations = (extracted.examinations || []).map(ex => {
     // Support both new schema (witness_role + witness_name) and legacy (witness)
     const witness_role = ex.witness_role || "Respondent";
     const witness_name = ex.witness_name || ex.witness || "";
+
+    // Normalize sections: prefer new `sections` schema, fall back to old `qa_rows`.
+    // Old records with flat qa_rows are wrapped in a single unnamed section.
+    let sections;
+    if (Array.isArray(ex.sections) && ex.sections.length) {
+      sections = ex.sections.map(s => ({
+        title: s.title || "Testimony",
+        qa_rows: (s.qa_rows || []).map(qa => ({
+          question: qa.question || "",
+          expected_answer: qa.expected_answer || "",
+          judge_notes: qa.judge_notes || "",
+        })),
+      }));
+    } else if (Array.isArray(ex.qa_rows) && ex.qa_rows.length) {
+      sections = [{
+        title: "Testimony",
+        qa_rows: ex.qa_rows.map(qa => ({
+          question: qa.question || "",
+          expected_answer: qa.expected_answer || "",
+          judge_notes: qa.judge_notes || "",
+        })),
+      }];
+    } else {
+      sections = [{ title: "Testimony", qa_rows: [] }];
+    }
+
     return {
       witness_role,
       witness_name,
       witness: witness_name ? `${witness_role} (${witness_name})` : witness_role,
       examination_type: ex.examination_type || "direct",
-      qa_rows: (ex.qa_rows || []).map(qa => ({
-        question: qa.question || "",
-        expected_answer: qa.expected_answer || "",
-        judge_notes: qa.judge_notes || "",
-      })),
+      sections,
+      // Keep qa_rows flat too for backward compat with downstream code
+      qa_rows: sections.flatMap(s => s.qa_rows),
     };
   });
   extracted.closing_argument = extracted.closing_argument || "";
@@ -618,7 +673,10 @@ async function saveIndividualNote(data, id = null) {
          dhs_attorney=$11, exhibits=$12::jsonb, evidence_objections=$13, pre_examination_notes=$14,
          examinations=$15::jsonb, closing_argument=$16,
          disposition=$17, disposition_notes=$18, next_action_deadline=$19,
-         hearing_summary_raw=$20, updated_at=NOW()
+         hearing_summary_raw=$20,
+         attorney_appearance=$22, respondent_appearance=$23,
+         next_hearing_date=$24, next_hearing_type=$25,
+         updated_at=NOW()
        WHERE id=$21 RETURNING id`,
       [
         data.client_name, data.a_number || null, data.client_language || "en",
@@ -634,6 +692,8 @@ async function saveIndividualNote(data, id = null) {
         data.next_action_deadline || null,
         data.hearing_summary_raw || null,
         id,
+        data.attorney_appearance || null, data.respondent_appearance || null,
+        data.next_hearing_date || null, data.next_hearing_type || null,
       ]
     );
     if (!r.rows[0]) throw new Error(`Individual hearing note ${id} not found`);
@@ -645,9 +705,12 @@ async function saveIndividualNote(data, id = null) {
        case_type, hearing_date, judge_name, court_location, court_address,
        dhs_attorney, exhibits, evidence_objections, pre_examination_notes,
        examinations, closing_argument, disposition, disposition_notes,
-       next_action_deadline, hearing_summary_raw)
+       next_action_deadline, hearing_summary_raw,
+       attorney_appearance, respondent_appearance,
+       next_hearing_date, next_hearing_type)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-             $11,$12::jsonb,$13,$14,$15::jsonb,$16,$17,$18,$19,$20)
+             $11,$12::jsonb,$13,$14,$15::jsonb,$16,$17,$18,$19,$20,
+             $21,$22,$23,$24)
      RETURNING id`,
     [
       data.client_name, data.a_number || null, data.client_language || "en",
@@ -662,6 +725,8 @@ async function saveIndividualNote(data, id = null) {
       data.disposition || null, data.disposition_notes || null,
       data.next_action_deadline || null,
       data.hearing_summary_raw || null,
+      data.attorney_appearance || null, data.respondent_appearance || null,
+      data.next_hearing_date || null, data.next_hearing_type || null,
     ]
   );
   return { id: r.rows[0].id, updated: false };
@@ -754,9 +819,11 @@ function parseFormSubmission(body) {
     if (row.number || row.description) exhibits.push(row);
   }
 
-  // Examinations: nested — for each examination (e_0, e_1...), rows (r_0, r_1...)
-  // Witness has separate role (dropdown) and name (text) fields; combined into
-  // a display string in `witness` for backward compat with existing renderers.
+  // Examinations: nested — for each examination (exam_witness_role_N),
+  // sections (exam_N_section_S_title), rows (exam_N_section_S_q_R).
+  // Witness has separate role (dropdown) and name (text) fields; combined
+  // into a display string in `witness` for backward compat with existing
+  // renderers.
   const examinations = [];
   const examKeys = Object.keys(body).filter(k => /^exam_witness_role_\d+$/.test(k) || /^exam_witness_\d+$/.test(k));
   const examIndices = [...new Set(examKeys.map(k => parseInt(k.split("_").pop(), 10)))].sort((a, b) => a - b);
@@ -767,22 +834,52 @@ function parseFormSubmission(body) {
       ? (witnessRole ? `${witnessRole} (${witnessName})` : witnessName)
       : (witnessRole || "");
     const exType  = (body[`exam_type_${ei}`] || "").trim();
-    const qa_rows = [];
-    const rowKeys = Object.keys(body).filter(k => new RegExp(`^exam_${ei}_q_\\d+$`).test(k));
-    const rowIndices = rowKeys.map(k => parseInt(k.split("_").pop(), 10)).sort((a, b) => a - b);
-    for (const ri of rowIndices) {
-      const q = (body[`exam_${ei}_q_${ri}`] || "").trim();
-      const a = (body[`exam_${ei}_a_${ri}`] || "").trim();
-      const jn = (body[`exam_${ei}_jn_${ri}`] || "").trim();
-      if (q || a || jn) qa_rows.push({ question: q, expected_answer: a, judge_notes: jn });
+
+    // Discover sections for this examination
+    const sectionTitleKeys = Object.keys(body).filter(k => new RegExp(`^exam_${ei}_section_\\d+_title$`).test(k));
+    const sectionIndices = sectionTitleKeys.map(k => parseInt(k.match(/_section_(\d+)_/)[1], 10)).sort((a, b) => a - b);
+
+    const sections = [];
+    if (sectionIndices.length) {
+      // New sections-based form
+      for (const si of sectionIndices) {
+        const title = (body[`exam_${ei}_section_${si}_title`] || "").trim();
+        const qa_rows = [];
+        const rowKeys = Object.keys(body).filter(k => new RegExp(`^exam_${ei}_section_${si}_q_\\d+$`).test(k));
+        const rowIndices = rowKeys.map(k => parseInt(k.split("_").pop(), 10)).sort((a, b) => a - b);
+        for (const ri of rowIndices) {
+          const q = (body[`exam_${ei}_section_${si}_q_${ri}`] || "").trim();
+          const a = (body[`exam_${ei}_section_${si}_a_${ri}`] || "").trim();
+          const jn = (body[`exam_${ei}_section_${si}_jn_${ri}`] || "").trim();
+          if (q || a || jn) qa_rows.push({ question: q, expected_answer: a, judge_notes: jn });
+        }
+        if (title || qa_rows.length) sections.push({ title: title || "Testimony", qa_rows });
+      }
+    } else {
+      // Backward compat: old flat form
+      const qa_rows = [];
+      const rowKeys = Object.keys(body).filter(k => new RegExp(`^exam_${ei}_q_\\d+$`).test(k));
+      const rowIndices = rowKeys.map(k => parseInt(k.split("_").pop(), 10)).sort((a, b) => a - b);
+      for (const ri of rowIndices) {
+        const q = (body[`exam_${ei}_q_${ri}`] || "").trim();
+        const a = (body[`exam_${ei}_a_${ri}`] || "").trim();
+        const jn = (body[`exam_${ei}_jn_${ri}`] || "").trim();
+        if (q || a || jn) qa_rows.push({ question: q, expected_answer: a, judge_notes: jn });
+      }
+      if (qa_rows.length) sections.push({ title: "Testimony", qa_rows });
     }
-    if (witnessDisplay || exType || qa_rows.length) {
+
+    // Also compute flat qa_rows for downstream code that expects it
+    const flatQaRows = sections.flatMap(s => s.qa_rows);
+
+    if (witnessDisplay || exType || sections.length) {
       examinations.push({
         witness: witnessDisplay,
         witness_role: witnessRole,
         witness_name: witnessName,
         examination_type: exType,
-        qa_rows,
+        sections,
+        qa_rows: flatQaRows,
       });
     }
   }
@@ -799,6 +896,8 @@ function parseFormSubmission(body) {
     court_location: (body.court_location || "").trim() || null,
     court_address: (body.court_address || "").trim() || null,
     dhs_attorney: (body.dhs_attorney || "").trim() || null,
+    attorney_appearance: (body.attorney_appearance || "").trim() || null,
+    respondent_appearance: (body.respondent_appearance || "").trim() || null,
     exhibits,
     evidence_objections: (body.evidence_objections || "").trim() || null,
     pre_examination_notes: (body.pre_examination_notes || "").trim() || null,
@@ -806,6 +905,8 @@ function parseFormSubmission(body) {
     closing_argument: (body.closing_argument || "").trim() || null,
     disposition: (body.disposition || "").trim() || null,
     disposition_notes: (body.disposition_notes || "").trim() || null,
+    next_hearing_date: body.next_hearing_date || null,
+    next_hearing_type: (body.next_hearing_type || "").trim() || null,
     next_action_deadline: body.next_action_deadline || null,
     hearing_summary_raw: (body.hearing_summary_raw || "").trim() || null,
   };
@@ -882,7 +983,9 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
 
     ${tabsSection}
 
-    <p style="margin-bottom:15px; color:#555;">Prep tool for individual/merits hearings. Fill this in before the hearing; all fields remain editable during and after. Upload the prep outline (PDF or text) and Excel exhibit list to auto-populate.</p>
+    ${isEdit ? `<div id="autosave-status" style="font-size:12px; color:#888; margin:5px 0 10px 0; text-align:right;">Auto-save ready</div>` : ""}
+
+    <p style="margin-bottom:15px; color:#555;">Prep tool for individual/merits hearings. Fill this in before the hearing; all fields remain editable during and after. Upload the prep outline (PDF or text) and Excel exhibit list to auto-populate.${isEdit ? ` <em style="color:#B79C62;">Auto-saves every 5 seconds when you make changes.</em>` : ""}</p>
 
     <!-- Upload areas -->
     <div style="display:flex; gap:15px; margin-bottom:20px; flex-wrap:wrap;">
@@ -975,6 +1078,26 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         </div>
         <label>Court address</label>
         <textarea name="court_address" rows="2">${escapeHtml(prev.court_address || "")}</textarea>
+        <div class="row">
+          <div>
+            <label>Attorney appearance</label>
+            <select name="attorney_appearance">
+              <option value="" ${!prev.attorney_appearance ? "selected" : ""}>—</option>
+              <option value="In person" ${prev.attorney_appearance === "In person" ? "selected" : ""}>In person</option>
+              <option value="WebEx" ${prev.attorney_appearance === "WebEx" ? "selected" : ""}>WebEx</option>
+              <option value="Telephone" ${prev.attorney_appearance === "Telephone" ? "selected" : ""}>Telephone</option>
+            </select>
+          </div>
+          <div>
+            <label>Respondent appearance</label>
+            <select name="respondent_appearance">
+              <option value="" ${!prev.respondent_appearance ? "selected" : ""}>—</option>
+              <option value="In person" ${prev.respondent_appearance === "In person" ? "selected" : ""}>In person</option>
+              <option value="WebEx" ${prev.respondent_appearance === "WebEx" ? "selected" : ""}>WebEx</option>
+              <option value="Telephone" ${prev.respondent_appearance === "Telephone" ? "selected" : ""}>Telephone</option>
+            </select>
+          </div>
+        </div>
       </fieldset>
 
       <!-- Section 3: Exhibit list -->
@@ -1024,9 +1147,26 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       <fieldset>
         <legend>Post-Hearing (Optional)</legend>
         <label>Disposition</label>
-        <input type="text" name="disposition" value="${escapeAttr(prev.disposition)}" placeholder="e.g. Relief granted, Decision reserved, Removal ordered">
+        <input type="text" name="disposition" value="${escapeAttr(prev.disposition)}" placeholder="e.g. Relief granted, Decision reserved, Removal ordered, Continued">
         <label>Disposition notes</label>
         <textarea name="disposition_notes" rows="2">${escapeHtml(prev.disposition_notes || "")}</textarea>
+        <div class="row">
+          <div>
+            <label>Next hearing date/time</label>
+            <input type="datetime-local" name="next_hearing_date" step="1800" value="${escapeAttr(prev.next_hearing_date ? isoToLocal(prev.next_hearing_date) : "")}">
+          </div>
+          <div>
+            <label>Next hearing type</label>
+            <select name="next_hearing_type">
+              <option value="" ${!prev.next_hearing_type ? "selected" : ""}>—</option>
+              <option value="master" ${prev.next_hearing_type === "master" ? "selected" : ""}>Master</option>
+              <option value="individual" ${prev.next_hearing_type === "individual" ? "selected" : ""}>Individual/Merits (continued)</option>
+              <option value="bond" ${prev.next_hearing_type === "bond" ? "selected" : ""}>Bond</option>
+              <option value="status" ${prev.next_hearing_type === "status" ? "selected" : ""}>Status</option>
+              <option value="other" ${prev.next_hearing_type === "other" ? "selected" : ""}>Other</option>
+            </select>
+          </div>
+        </div>
         <label>Next action deadline</label>
         <input type="date" name="next_action_deadline" value="${escapeAttr(prev.next_action_deadline ? String(prev.next_action_deadline).substring(0, 10) : "")}">
       </fieldset>
@@ -1104,16 +1244,14 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         document.getElementById("exhibits-tbody").innerHTML = "";
       }
 
-      // ── Examinations ────────────────────────────────────
+      // ── Examinations (with sections) ────────────────────
       let examCounter = 0;
       function addExamination(data) {
         data = data || {};
         const idx = examCounter++;
-        // Prefer new schema (witness_role + witness_name); fall back to legacy witness string
         let role = data.witness_role || "";
         let name = data.witness_name || "";
         if (!role && !name && data.witness) {
-          // Legacy record: try to split "Role (Name)" pattern, else treat as name
           const m = String(data.witness).match(/^(Respondent|Spouse|Additional witness)\\s*\\(([^)]+)\\)\\s*$/i);
           if (m) { role = m[1]; name = m[2]; }
           else { role = "Respondent"; name = data.witness; }
@@ -1143,6 +1281,35 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
             '</select>' +
             '<button type="button" onclick="this.closest(\\'div[data-exam-idx]\\').remove()" style="background:#c00; color:white; border:none; padding:6px 10px; cursor:pointer; border-radius:3px;">Remove witness</button>' +
           '</div>' +
+          '<div data-sections-container="' + idx + '"></div>' +
+          '<button type="button" onclick="addSection(' + idx + ')" style="background:#0C1C36; color:white; padding:6px 12px; border:none; cursor:pointer; border-radius:3px; font-size:13px; margin-top:8px;">+ Add section</button>';
+        document.getElementById("exams-container").appendChild(wrap);
+
+        // Normalize sections (support old qa_rows and new sections)
+        let sections = data.sections;
+        if (!sections || !sections.length) {
+          if (data.qa_rows && data.qa_rows.length) sections = [{ title: "Testimony", qa_rows: data.qa_rows }];
+          else sections = [{ title: "Testimony", qa_rows: [] }];
+        }
+        sections.forEach(s => addSection(idx, s));
+      }
+      let sectionCounters = {};
+      function addSection(examIdx, sectionData) {
+        sectionData = sectionData || { title: "", qa_rows: [] };
+        if (!(examIdx in sectionCounters)) sectionCounters[examIdx] = 0;
+        const sIdx = sectionCounters[examIdx]++;
+        const container = document.querySelector('div[data-sections-container="' + examIdx + '"]');
+        if (!container) return;
+
+        const secDiv = document.createElement("div");
+        secDiv.dataset.sectionIdx = sIdx;
+        secDiv.style.cssText = "border:1px solid #ccc; border-left:3px solid #B79C62; padding:10px; margin:10px 0; background:white; border-radius:3px;";
+        secDiv.innerHTML =
+          '<div style="display:flex; gap:8px; margin-bottom:6px; align-items:center;">' +
+            '<label style="font-weight:600; font-size:13px; color:#B79C62; flex:0 0 auto;">Section:</label>' +
+            '<input type="text" name="exam_' + examIdx + '_section_' + sIdx + '_title" value="' + escapeHTML(sectionData.title || "") + '" placeholder="e.g. Background, Persecution, Fear of return" style="flex:1; padding:5px; font-weight:600;">' +
+            '<button type="button" onclick="this.closest(\\'div[data-section-idx]\\').remove()" style="background:#eee; color:#c00; border:none; padding:4px 10px; cursor:pointer; border-radius:3px; font-size:12px;">Remove section</button>' +
+          '</div>' +
           '<table style="width:100%; font-size:13px;">' +
             '<thead><tr>' +
               '<th style="width:35%; text-align:left; padding:4px;">Question</th>' +
@@ -1150,32 +1317,35 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
               '<th style="width:25%; text-align:left; padding:4px;">Judge Q / Notes</th>' +
               '<th style="width:30px;"></th>' +
             '</tr></thead>' +
-            '<tbody data-exam-rows="' + idx + '"></tbody>' +
+            '<tbody data-section-rows="' + examIdx + '_' + sIdx + '"></tbody>' +
           '</table>' +
-          '<button type="button" onclick="addQARow(' + idx + ')" style="background:#eee; padding:5px 10px; border:none; cursor:pointer; border-radius:3px; font-size:12px; margin-top:6px;">+ Add Q&amp;A row</button>';
-        document.getElementById("exams-container").appendChild(wrap);
-        (data.qa_rows || []).forEach(row => addQARow(idx, row));
-        if (!data.qa_rows || !data.qa_rows.length) addQARow(idx);
+          '<button type="button" onclick="addQARow(' + examIdx + ', ' + sIdx + ')" style="background:#eee; padding:4px 10px; border:none; cursor:pointer; border-radius:3px; font-size:12px; margin-top:4px;">+ Add Q&amp;A row</button>';
+        container.appendChild(secDiv);
+
+        const rows = sectionData.qa_rows || [];
+        rows.forEach(r => addQARow(examIdx, sIdx, r));
+        if (!rows.length) addQARow(examIdx, sIdx);
       }
-      function witnessRoleOpt(v, current) { return '<option value="' + v + '"' + (current === v ? " selected" : "") + '>' + v + '</option>'; }
-      function addQARow(examIdx, row) {
+      function addQARow(examIdx, sectionIdx, row) {
         row = row || {};
-        const tbody = document.querySelector('tbody[data-exam-rows="' + examIdx + '"]');
+        const tbody = document.querySelector('tbody[data-section-rows="' + examIdx + '_' + sectionIdx + '"]');
         if (!tbody) return;
         const rowIdx = tbody.querySelectorAll("tr").length;
         const tr = document.createElement("tr");
         tr.innerHTML =
-          '<td style="vertical-align:top; padding:4px;"><textarea name="exam_' + examIdx + '_q_' + rowIdx + '" rows="2" style="width:100%; font-family:inherit; font-size:13px;">' + escapeHTML(row.question || "") + '</textarea></td>' +
-          '<td style="vertical-align:top; padding:4px;"><textarea name="exam_' + examIdx + '_a_' + rowIdx + '" rows="2" style="width:100%; font-family:inherit; font-size:13px;">' + escapeHTML(row.expected_answer || "") + '</textarea></td>' +
-          '<td style="vertical-align:top; padding:4px;"><textarea name="exam_' + examIdx + '_jn_' + rowIdx + '" rows="2" style="width:100%; font-family:inherit; font-size:13px;">' + escapeHTML(row.judge_notes || "") + '</textarea></td>' +
+          '<td style="vertical-align:top; padding:4px;"><textarea name="exam_' + examIdx + '_section_' + sectionIdx + '_q_' + rowIdx + '" rows="2" style="width:100%; font-family:inherit; font-size:13px;">' + escapeHTML(row.question || "") + '</textarea></td>' +
+          '<td style="vertical-align:top; padding:4px;"><textarea name="exam_' + examIdx + '_section_' + sectionIdx + '_a_' + rowIdx + '" rows="2" style="width:100%; font-family:inherit; font-size:13px;">' + escapeHTML(row.expected_answer || "") + '</textarea></td>' +
+          '<td style="vertical-align:top; padding:4px;"><textarea name="exam_' + examIdx + '_section_' + sectionIdx + '_jn_' + rowIdx + '" rows="2" style="width:100%; font-family:inherit; font-size:13px;">' + escapeHTML(row.judge_notes || "") + '</textarea></td>' +
           '<td style="vertical-align:top; padding:4px;"><button type="button" onclick="this.closest(\\'tr\\').remove()" style="background:#eee; border:none; padding:2px 6px; cursor:pointer; border-radius:3px;">×</button></td>';
         tbody.appendChild(tr);
       }
       function clearExaminations() {
         document.getElementById("exams-container").innerHTML = "";
         examCounter = 0;
+        sectionCounters = {};
       }
       function opt(v, l, current) { return '<option value="' + v + '"' + (current === v ? " selected" : "") + '>' + l + '</option>'; }
+      function witnessRoleOpt(v, current) { return '<option value="' + v + '"' + (current === v ? " selected" : "") + '>' + v + '</option>'; }
       function escapeHTML(s) { return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 
       // Initialize with existing data
@@ -1287,14 +1457,18 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           const ci = data.extracted.client_info || {};
           let filledInfo = 0;
           const infoMap = {
-            client_name:    ci.client_name,
-            a_number:       ci.a_number,
-            case_type:      ci.case_type,
-            hearing_date:   ci.hearing_date,
-            judge_name:     ci.judge_name,
-            court_location: ci.court_location,
-            court_address:  ci.court_address,
-            dhs_attorney:   ci.dhs_attorney,
+            client_name:           ci.client_name,
+            a_number:              ci.a_number,
+            client_email:          ci.client_email,
+            client_phone:          ci.client_phone,
+            case_type:             ci.case_type,
+            hearing_date:          ci.hearing_date,
+            judge_name:            ci.judge_name,
+            court_location:        ci.court_location,
+            court_address:         ci.court_address,
+            dhs_attorney:          ci.dhs_attorney,
+            attorney_appearance:   ci.attorney_appearance,
+            respondent_appearance: ci.respondent_appearance,
           };
           for (const [fieldName, val] of Object.entries(infoMap)) {
             if (!val) continue;
@@ -1450,6 +1624,82 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         status.style.marginLeft = "8px";
         el.parentElement.appendChild(status);
         setTimeout(() => status.remove(), 2000);
+      }
+
+      // ── Auto-save (edit mode only) ──────────────────────
+      const AUTOSAVE_NOTE_ID = ${noteId ? noteId : "null"};
+      let formDirty = false;
+      let lastSaveAt = Date.now();
+      let autosaveInFlight = false;
+
+      if (AUTOSAVE_NOTE_ID) {
+        const form = document.getElementById("ih-form");
+        const status = document.getElementById("autosave-status");
+
+        // Any input change marks the form as dirty
+        const markDirty = () => { formDirty = true; };
+        form.addEventListener("input", markDirty);
+        form.addEventListener("change", markDirty);
+
+        // Every 5s: if dirty, save
+        setInterval(async () => {
+          if (!formDirty || autosaveInFlight) return;
+          autosaveInFlight = true;
+          formDirty = false;
+          const startedAt = Date.now();
+          status.textContent = "Auto-saving...";
+          status.style.color = "#666";
+          try {
+            const fd = new FormData(form);
+            const resp = await fetch("/admin/hearing/individual/" + AUTOSAVE_NOTE_ID + "/autosave", {
+              method: "POST",
+              body: new URLSearchParams(fd),  // uses urlencoded; matches body parser
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            });
+            const data = await resp.json();
+            if (data.ok) {
+              lastSaveAt = Date.now();
+              status.textContent = "✓ Auto-saved just now";
+              status.style.color = "#4CAF50";
+            } else if (data.skip) {
+              // Missing required field — silent skip, retry next cycle
+              formDirty = true;
+              status.textContent = "⚠️ " + data.error;
+              status.style.color = "#ff9800";
+            } else {
+              formDirty = true;  // save failed, retry
+              status.textContent = "❌ Auto-save failed: " + (data.error || "unknown");
+              status.style.color = "#c00";
+            }
+          } catch (e) {
+            formDirty = true;
+            status.textContent = "❌ Auto-save error: " + e.message;
+            status.style.color = "#c00";
+          } finally {
+            autosaveInFlight = false;
+          }
+        }, 5000);
+
+        // Update relative timestamp every second
+        setInterval(() => {
+          if (formDirty || autosaveInFlight) return;
+          const secs = Math.floor((Date.now() - lastSaveAt) / 1000);
+          if (secs < 5) return;  // let the "just now" message stay
+          const label = secs < 60 ? secs + "s ago"
+                      : secs < 3600 ? Math.floor(secs / 60) + "m ago"
+                      : Math.floor(secs / 3600) + "h ago";
+          status.textContent = "✓ Auto-saved " + label;
+          status.style.color = "#888";
+        }, 1000);
+
+        // Warn on navigation away with unsaved changes
+        window.addEventListener("beforeunload", (e) => {
+          if (formDirty || autosaveInFlight) {
+            e.preventDefault();
+            e.returnValue = "You have unsaved changes. Leave anyway?";
+            return e.returnValue;
+          }
+        });
       }
     </script>`;
 
