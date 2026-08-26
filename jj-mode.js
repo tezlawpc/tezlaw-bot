@@ -176,6 +176,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  `/notes list` — recent hearing notes",
       "  `/notes show <id>` — view one hearing's paralegal summary",
       "  `/notes send <id>` — send paralegal summary to Jue via Telegram",
+      "  `/notes delete <id>` — permanently delete a hearing note",
       "",
       "*📥 Intake Agent (auto-runs for new leads)*",
       "  Zara asks new inquirers structured questions across all channels.",
@@ -529,7 +530,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
   //   /notes send <id>            — send paralegal summary to Jue via Telegram
   //
   const notesFirstLine = lower.split("\n", 1)[0].trim();
-  const notesMatch = notesFirstLine.match(/^\/notes\s+(list|show|send)(?:\s+(.+))?\s*$/);
+  const notesMatch = notesFirstLine.match(/^\/notes\s+(list|show|send|delete)(?:\s+(.+))?\s*$/);
   if (notesMatch) {
     try {
       const hn = require("./hearing-notes");
@@ -564,6 +565,16 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
           return { handled: true, message: `✅ Sent to Jue via Telegram (${result.chunks} message${result.chunks > 1 ? "s" : ""}).` };
         } catch (e) {
           return { handled: true, message: `❌ Send failed: ${e.message}` };
+        }
+      }
+
+      if (action === "delete") {
+        if (!arg) return { handled: true, message: "Usage: `/notes delete <id>`" };
+        try {
+          const result = await hn.deleteNote(parseInt(arg));
+          return { handled: true, message: `🗑️ Deleted hearing note #${result.id} (${result.client_name}).` };
+        } catch (e) {
+          return { handled: true, message: `❌ Delete failed: ${e.message}` };
         }
       }
     } catch (err) {
