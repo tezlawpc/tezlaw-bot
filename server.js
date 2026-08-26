@@ -2167,29 +2167,48 @@ app.post("/admin/hearing/notes/:id/send-paralegal", async (req, res) => {
   }
 });
 
-// I-589 upload + extract — uses multer memory storage, hands PDF to Claude for OCR
-const i589Upload = multer({
+// Document upload + extract — accepts PDF, JPG, PNG, WebP.
+// Uses Claude vision to OCR + extract structured client/case data.
+const docUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 32 * 1024 * 1024 }, // 32 MB (Anthropic PDF limit)
+  limits: { fileSize: 32 * 1024 * 1024 }, // 32 MB (Anthropic limit)
 });
-app.post("/admin/hearing/notes/extract-i589", i589Upload.single("i589"), async (req, res) => {
+
+async function handleExtract(req, res) {
   try {
     if (!req.file) {
-      return res.status(400).json({ ok: false, error: "No file uploaded (expected field name 'i589')" });
+      return res.status(400).json({ ok: false, error: "No file uploaded" });
     }
-    if (!req.file.mimetype || (!req.file.mimetype.includes("pdf") && !req.file.originalname.toLowerCase().endsWith(".pdf"))) {
-      return res.status(400).json({ ok: false, error: "File must be a PDF" });
+    const name = req.file.originalname || "upload";
+    const mime = req.file.mimetype || "";
+    const isPdf   = mime.includes("pdf")    || /\.pdf$/i.test(name);
+    const isImage = mime.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(name);
+    if (!isPdf && !isImage) {
+      return res.status(400).json({ ok: false, error: "Unsupported file type. Use PDF, JPG, PNG, or WebP." });
     }
-    console.log(`[i589-extract] Processing ${req.file.originalname} (${req.file.size} bytes)`);
+    // Normalize mime type when browser sent something generic
+    let effectiveMime = mime;
+    if (!effectiveMime || effectiveMime === "application/octet-stream") {
+      if (isPdf) effectiveMime = "application/pdf";
+      else if (/\.jpe?g$/i.test(name)) effectiveMime = "image/jpeg";
+      else if (/\.png$/i.test(name))   effectiveMime = "image/png";
+      else if (/\.webp$/i.test(name))  effectiveMime = "image/webp";
+    }
+    console.log(`[extract-document] Processing ${name} (${req.file.size} bytes, ${effectiveMime})`);
     const hn = require("./hearing-notes");
-    const extracted = await hn.extractI589FieldsFromPdf(req.file.buffer);
+    const extracted = await hn.extractDocumentFields(req.file.buffer, effectiveMime, name);
     res.json({ ok: true, ...extracted });
   } catch (err) {
-    console.error("[i589-extract]:", err.message);
+    console.error("[extract-document]:", err.message);
     const msg = err.response?.data?.error?.message || err.message;
     res.status(500).json({ ok: false, error: msg });
   }
-});
+}
+
+app.post("/admin/hearing/notes/extract-document", docUpload.single("document"), handleExtract);
+
+// Backward-compat: old /extract-i589 endpoint still works
+app.post("/admin/hearing/notes/extract-i589", docUpload.single("i589"), handleExtract);
 
 // ── Voice call routes ─────────────────────────────────────
 app.post("/voice/incoming",          (req, res) => {
