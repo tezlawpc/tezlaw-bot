@@ -2056,6 +2056,86 @@ app.get("/admin/email-digest/:when", async (req, res) => {
   }
 });
 
+// ── Master Calendar Hearing Form ─────────────────────────
+//
+// Admin form for generating client-facing emails about upcoming
+// master calendar hearings. Copy-paste flow — no SMTP send.
+//
+// Routes:
+//   GET  /admin/hearing/master           → form
+//   POST /admin/hearing/master           → preview or preview+save
+//   GET  /admin/hearing/master/history   → list of past hearings
+//   GET  /admin/hearing/master/:id       → detail view of one hearing
+//
+app.get("/admin/hearing/master", async (req, res) => {
+  try {
+    const hearingForms = require("./hearing-forms");
+    await hearingForms.initHearingTables();
+    res.send(hearingForms.renderAdminForm({}));
+  } catch (err) {
+    console.error("[/admin/hearing/master GET] error:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/hearing/master", async (req, res) => {
+  try {
+    const hearingForms = require("./hearing-forms");
+    const action = req.body.action;
+    const parsed = hearingForms.parseFormSubmission(req.body);
+
+    // Validate required fields
+    if (!parsed.client_name || !parsed.a_number || !parsed.hearing_datetime) {
+      return res.send(hearingForms.renderAdminForm({
+        error: "Missing required fields: client name, A-Number, and hearing date/time are required.",
+        previousInputs: parsed,
+      }));
+    }
+
+    if (action === "save") {
+      const result = await hearingForms.saveHearing(parsed);
+      return res.send(hearingForms.renderAdminForm({
+        generated: { subject: result.subject, body: result.body },
+        saved: true,
+        previousInputs: parsed,
+      }));
+    }
+
+    // Default: preview only
+    const generated = hearingForms.generateEmail(parsed);
+    return res.send(hearingForms.renderAdminForm({
+      generated,
+      saved: false,
+      previousInputs: parsed,
+    }));
+  } catch (err) {
+    console.error("[/admin/hearing/master POST] error:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><p><a href="/admin/hearing/master">Back</a></p>`);
+  }
+});
+
+app.get("/admin/hearing/master/history", async (req, res) => {
+  try {
+    const hearingForms = require("./hearing-forms");
+    const hearings = await hearingForms.listHearings(50);
+    res.send(hearingForms.renderHistoryPage(hearings));
+  } catch (err) {
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.get("/admin/hearing/master/:id", async (req, res) => {
+  try {
+    const hearingForms = require("./hearing-forms");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).send("Invalid id");
+    const hearing = await hearingForms.getHearing(id);
+    res.send(hearingForms.renderDetailPage(hearing));
+  } catch (err) {
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
 // ── Voice call routes ─────────────────────────────────────
 app.post("/voice/incoming",          (req, res) => {
   const savedPrompt = app.locals.SYSTEM_PROMPT || null;
@@ -2120,6 +2200,15 @@ app.listen(PORT, async () => {
     usptoWatch.startUsptoScheduler();
   } catch (e) {
     console.error("⚠️  USPTO watch init failed:", e.message);
+  }
+
+  // Initialize master hearing tables (hearing-forms admin panel)
+  try {
+    const hearingForms = require("./hearing-forms");
+    await hearingForms.initHearingTables();
+    console.log("✅ Hearing forms tables ready");
+  } catch (e) {
+    console.error("⚠️  Hearing forms init failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)
