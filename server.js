@@ -2639,16 +2639,52 @@ app.post("/admin/hearing/individual/extract-summary", docUpload.single("summary"
     const ih = require("./individual-hearing-notes");
     const name = req.file.originalname || "summary";
     const mime = req.file.mimetype || "";
-    const isPdf = mime.includes("pdf") || /\.pdf$/i.test(name);
+    const isPdf  = mime.includes("pdf") || /\.pdf$/i.test(name);
     const isText = mime.startsWith("text/") || /\.(txt|md)$/i.test(name);
+    const isDocx =
+      mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      /\.docx$/i.test(name);
+    const isDoc  = /\.doc$/i.test(name) && !isDocx;
+
     let extracted, rawText = null;
     if (isPdf) {
-      extracted = await ih.extractHearingSummary({ pdfBuffer: req.file.buffer, mimeType: "application/pdf", filename: name });
+      extracted = await ih.extractHearingSummary({
+        pdfBuffer: req.file.buffer,
+        mimeType: "application/pdf",
+        filename: name,
+      });
+    } else if (isDocx) {
+      // Word .docx — extract plain text with mammoth, then run through Claude
+      const mammoth = require("mammoth");
+      try {
+        const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+        rawText = (result.value || "").trim();
+        if (!rawText) {
+          return res.status(400).json({
+            ok: false,
+            error: "Word document appears to be empty or contains only images.",
+          });
+        }
+        extracted = await ih.extractHearingSummary({ textContent: rawText, filename: name });
+      } catch (e) {
+        return res.status(400).json({
+          ok: false,
+          error: `Could not read Word document: ${e.message}. Try saving as PDF instead.`,
+        });
+      }
     } else if (isText) {
       rawText = req.file.buffer.toString("utf8");
       extracted = await ih.extractHearingSummary({ textContent: rawText, filename: name });
+    } else if (isDoc) {
+      return res.status(400).json({
+        ok: false,
+        error: "Old-format .doc files aren't supported — please save as .docx or PDF and re-upload.",
+      });
     } else {
-      return res.status(400).json({ ok: false, error: "File must be PDF or text (.txt/.md)" });
+      return res.status(400).json({
+        ok: false,
+        error: "File must be PDF, Word (.docx), or text (.txt/.md).",
+      });
     }
     res.json({ ok: true, extracted, raw_text: rawText });
   } catch (err) {
