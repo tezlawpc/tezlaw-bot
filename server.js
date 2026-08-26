@@ -2197,6 +2197,163 @@ app.delete("/admin/hearing/notes/:id", async (req, res) => {
   }
 });
 
+// ── Individual Hearing Notes ──────────────────────────────
+//
+// Full prep tool for individual/merits hearings. Supports Excel exhibit
+// upload, PDF/text hearing summary upload with Claude extraction, and
+// pre-fill from prior master hearing.
+//
+app.get("/admin/hearing/individual", async (req, res) => {
+  try {
+    const ih = require("./individual-hearing-notes");
+    await ih.initTables();
+    res.send(ih.renderForm({}));
+  } catch (err) {
+    console.error("[/admin/hearing/individual GET]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/hearing/individual", async (req, res) => {
+  try {
+    const ih = require("./individual-hearing-notes");
+    const parsed = ih.parseFormSubmission(req.body);
+    if (!parsed.client_name) {
+      return res.send(ih.renderForm({ error: "Client name is required.", prev: parsed }));
+    }
+    const saved = await ih.saveIndividualNote(parsed);
+    res.redirect(`/admin/hearing/individual/${saved.id}?saved=1`);
+  } catch (err) {
+    console.error("[/admin/hearing/individual POST]:", err.message, err.stack);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><p><a href="/admin/hearing/individual">Back</a></p>`);
+  }
+});
+
+app.get("/admin/hearing/individual/history", async (req, res) => {
+  try {
+    const ih = require("./individual-hearing-notes");
+    const notes = await ih.listIndividualNotes(50);
+    res.send(ih.renderHistoryPage(notes));
+  } catch (err) {
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// GET /admin/hearing/individual/prior-lookup?name=...&a=...
+app.get("/admin/hearing/individual/prior-lookup", async (req, res) => {
+  try {
+    const hn = require("./hearing-notes");
+    const note = await hn.getMostRecentForClient({
+      clientName: req.query.name || "",
+      aNumber: req.query.a || "",
+    });
+    if (!note) return res.json({ ok: true, note: null });
+    // Return only the fields we need on the form
+    res.json({
+      ok: true,
+      note: {
+        id: note.id,
+        client_name: note.client_name,
+        a_number: note.a_number,
+        client_email: note.client_email,
+        client_phone: note.client_phone,
+        client_language: note.client_language,
+        case_type: note.case_type,
+        judge_name: note.judge_name,
+        dhs_attorney: note.dhs_attorney,
+        created_at: note.created_at,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/hearing/individual/:id", async (req, res) => {
+  try {
+    const ih = require("./individual-hearing-notes");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).send("Invalid id");
+    const note = await ih.getIndividualNote(id);
+    if (!note) return res.status(404).send("Not found");
+    res.send(ih.renderForm({ noteId: id, prev: note, saved: req.query.saved === "1" }));
+  } catch (err) {
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/hearing/individual/:id", async (req, res) => {
+  try {
+    const ih = require("./individual-hearing-notes");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).send("Invalid id");
+    const parsed = ih.parseFormSubmission(req.body);
+    if (!parsed.client_name) {
+      return res.send(ih.renderForm({ noteId: id, error: "Client name is required.", prev: parsed }));
+    }
+    await ih.saveIndividualNote(parsed, id);
+    res.redirect(`/admin/hearing/individual/${id}?saved=1`);
+  } catch (err) {
+    console.error("[/admin/hearing/individual/:id POST]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.delete("/admin/hearing/individual/:id", async (req, res) => {
+  try {
+    const ih = require("./individual-hearing-notes");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+    const result = await ih.deleteIndividualNote(id);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(err.message.includes("not found") ? 404 : 500).json({ ok: false, error: err.message });
+  }
+});
+
+// Extract hearing summary from PDF or text file
+app.post("/admin/hearing/individual/extract-summary", docUpload.single("summary"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "No file uploaded" });
+    const ih = require("./individual-hearing-notes");
+    const name = req.file.originalname || "summary";
+    const mime = req.file.mimetype || "";
+    const isPdf = mime.includes("pdf") || /\.pdf$/i.test(name);
+    const isText = mime.startsWith("text/") || /\.(txt|md)$/i.test(name);
+    let extracted, rawText = null;
+    if (isPdf) {
+      extracted = await ih.extractHearingSummary({ pdfBuffer: req.file.buffer, mimeType: "application/pdf", filename: name });
+    } else if (isText) {
+      rawText = req.file.buffer.toString("utf8");
+      extracted = await ih.extractHearingSummary({ textContent: rawText, filename: name });
+    } else {
+      return res.status(400).json({ ok: false, error: "File must be PDF or text (.txt/.md)" });
+    }
+    res.json({ ok: true, extracted, raw_text: rawText });
+  } catch (err) {
+    console.error("[extract-summary]:", err.message);
+    const msg = err.response?.data?.error?.message || err.message;
+    res.status(500).json({ ok: false, error: msg });
+  }
+});
+
+// Parse Excel/CSV exhibit list
+app.post("/admin/hearing/individual/extract-exhibits", docUpload.single("exhibits"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "No file uploaded" });
+    const ih = require("./individual-hearing-notes");
+    const name = req.file.originalname || "exhibits.xlsx";
+    if (!/\.(xlsx|xls|csv)$/i.test(name)) {
+      return res.status(400).json({ ok: false, error: "File must be .xlsx, .xls, or .csv" });
+    }
+    const result = ih.parseExhibitExcel(req.file.buffer, name);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[extract-exhibits]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Document upload + extract — accepts PDF, JPG, PNG, WebP.
 // Uses Claude vision to OCR + extract structured client/case data.
 const docUpload = multer({
@@ -2313,6 +2470,15 @@ app.listen(PORT, async () => {
     console.log("✅ Hearing notes tables ready");
   } catch (e) {
     console.error("⚠️  Hearing notes init failed:", e.message);
+  }
+
+  // Initialize individual hearing notes tables (merits hearing prep tool)
+  try {
+    const ih = require("./individual-hearing-notes");
+    await ih.initTables();
+    console.log("✅ Individual hearing tables ready");
+  } catch (e) {
+    console.error("⚠️  Individual hearing init failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)
