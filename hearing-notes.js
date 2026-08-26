@@ -35,11 +35,18 @@ async function initHearingNotesTables() {
       hearing_date          TIMESTAMPTZ,
       hearing_type          TEXT DEFAULT 'master',
       case_type             TEXT,
+      dhs_attorney          TEXT,
+      client_attendance     TEXT,
+      attorney_appearance   TEXT,
       pleadings_admitted    TEXT,
       pleadings_denied      TEXT,
       pleadings_contested   TEXT,
       removability_conceded BOOLEAN,
       applications          JSONB DEFAULT '[]'::jsonb,
+      disposition           TEXT,
+      disposition_notes     TEXT,
+      bond_outcome          TEXT,
+      bond_amount           INTEGER,
       next_hearing_date     TIMESTAMPTZ,
       next_hearing_type     TEXT,
       interpreter_used      BOOLEAN,
@@ -53,6 +60,20 @@ async function initHearingNotesTables() {
       created_at            TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // Migrations for tables that predate the new columns
+  for (const col of [
+    ["dhs_attorney", "TEXT"],
+    ["client_attendance", "TEXT"],
+    ["attorney_appearance", "TEXT"],
+    ["disposition", "TEXT"],
+    ["disposition_notes", "TEXT"],
+    ["bond_outcome", "TEXT"],
+    ["bond_amount", "INTEGER"],
+  ]) {
+    try {
+      await db.query(`ALTER TABLE hearing_notes ADD COLUMN IF NOT EXISTS ${col[0]} ${col[1]}`);
+    } catch (e) { /* older Postgres may not support IF NOT EXISTS on ADD COLUMN */ }
+  }
   await db.query(`
     CREATE INDEX IF NOT EXISTS idx_hearing_notes_created
       ON hearing_notes (created_at DESC)
@@ -178,10 +199,14 @@ function buildStructuredNotes(data) {
   const lines = [
     `Client: ${data.client_name || "(not provided)"}`,
     `A-Number: ${data.a_number || "(not provided)"}`,
+    `Client contact: ${[data.client_email, data.client_phone].filter(Boolean).join(" / ") || "(not provided)"}`,
     `Judge: ${data.judge_name || "(not provided)"}`,
+    `DHS Trial Attorney: ${data.dhs_attorney || "(not noted)"}`,
     `Hearing date: ${data.hearing_date ? new Date(data.hearing_date).toLocaleString() : "(not provided)"}`,
     `Hearing type: ${data.hearing_type || "master"}`,
     `Case type: ${data.case_type || "(not specified)"}`,
+    `Client attendance: ${data.client_attendance || "(not noted)"}`,
+    `Attorney appearance: ${data.attorney_appearance || "(not noted)"}`,
     "",
     "PLEADINGS TAKEN:",
     `  Admitted allegations: ${data.pleadings_admitted || "(none noted)"}`,
@@ -191,14 +216,31 @@ function buildStructuredNotes(data) {
     "",
     `APPLICATIONS REQUESTED: ${(data.applications && data.applications.length) ? data.applications.join(", ") : "(none noted)"}`,
     "",
+    "DISPOSITION (outcome of today's hearing):",
+    `  ${data.disposition || "(not noted)"}`,
+    data.disposition_notes ? `  Details: ${data.disposition_notes}` : "",
+    "",
+  ];
+
+  // Bond section only if noted
+  if (data.bond_outcome && data.bond_outcome !== "not_applicable" && data.bond_outcome !== "") {
+    lines.push("BOND:");
+    lines.push(`  Outcome: ${data.bond_outcome}`);
+    if (data.bond_outcome === "granted" && data.bond_amount) {
+      lines.push(`  Amount: $${Number(data.bond_amount).toLocaleString()}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(
     "NEXT HEARING:",
     `  Type: ${data.next_hearing_type || "(not scheduled)"}`,
     `  Date/time: ${data.next_hearing_date ? new Date(data.next_hearing_date).toLocaleString() : "(not scheduled)"}`,
     "",
     `INTERPRETER: ${data.interpreter_used ? `Yes (${data.interpreter_language || "language not noted"})` : "No"}`,
     "",
-    "DEADLINES SET:",
-  ];
+    "DEADLINES SET:"
+  );
   if (data.deadlines && data.deadlines.length) {
     for (const d of data.deadlines) {
       lines.push(`  • ${d.date || "(date TBD)"}: ${d.description || "(no description)"}`);
@@ -206,7 +248,7 @@ function buildStructuredNotes(data) {
   } else {
     lines.push("  (none noted)");
   }
-  return lines.join("\n");
+  return lines.filter(l => l !== "").join("\n").replace(/\n\n+/g, "\n\n");
 }
 
 // ── Storage ──────────────────────────────────────────────
@@ -231,22 +273,29 @@ async function saveNote(data, { generateSummaries = true } = {}) {
     `INSERT INTO hearing_notes
       (client_name, a_number, client_language, client_email, client_phone,
        judge_name, hearing_date, hearing_type, case_type,
+       dhs_attorney, client_attendance, attorney_appearance,
        pleadings_admitted, pleadings_denied, pleadings_contested, removability_conceded,
-       applications, next_hearing_date, next_hearing_type,
+       applications, disposition, disposition_notes, bond_outcome, bond_amount,
+       next_hearing_date, next_hearing_type,
        interpreter_used, interpreter_language, deadlines,
        raw_notes, paralegal_summary, client_summary)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
-             $10, $11, $12, $13, $14::jsonb, $15, $16, $17, $18, $19::jsonb,
-             $20, $21, $22)
+             $10, $11, $12,
+             $13, $14, $15, $16, $17::jsonb, $18, $19, $20, $21,
+             $22, $23, $24, $25, $26::jsonb,
+             $27, $28, $29)
      RETURNING id`,
     [
       data.client_name, data.a_number || null, data.client_language || "en",
       data.client_email || null, data.client_phone || null,
       data.judge_name || null, data.hearing_date || null,
       data.hearing_type || "master", data.case_type || null,
+      data.dhs_attorney || null, data.client_attendance || null, data.attorney_appearance || null,
       data.pleadings_admitted || null, data.pleadings_denied || null,
       data.pleadings_contested || null, !!data.removability_conceded,
       JSON.stringify(data.applications || []),
+      data.disposition || null, data.disposition_notes || null,
+      data.bond_outcome || null, data.bond_amount || null,
       data.next_hearing_date || null, data.next_hearing_type || null,
       !!data.interpreter_used, data.interpreter_language || null,
       JSON.stringify(data.deadlines || []),
@@ -544,6 +593,16 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
       </div>
       <div class="row">
         <div>
+          <label>Client email</label>
+          <input type="text" name="client_email" value="${escapeAttr(prev.client_email)}" placeholder="client@example.com">
+        </div>
+        <div>
+          <label>Client phone</label>
+          <input type="text" name="client_phone" value="${escapeAttr(prev.client_phone)}" placeholder="e.g. 626-555-0123">
+        </div>
+      </div>
+      <div class="row">
+        <div>
           <label>Client's language (for client summary)</label>
           <select name="client_language">${langOptions}</select>
         </div>
@@ -558,12 +617,42 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
           <input type="text" name="judge_name" value="${escapeAttr(prev.judge_name)}" placeholder="e.g. Hon. Kevin Riley">
         </div>
         <div>
+          <label>DHS Trial Attorney</label>
+          <input type="text" name="dhs_attorney" value="${escapeAttr(prev.dhs_attorney)}" placeholder="e.g. AUSA J. Smith">
+        </div>
+      </div>
+      <div class="row">
+        <div>
           <label>Hearing date/time</label>
           <input type="datetime-local" name="hearing_date" step="1800" value="${escapeAttr(prev.hearing_date)}">
         </div>
+        <div>
+          <label>Case type</label>
+          <input type="text" name="case_type" value="${escapeAttr(prev.case_type)}" placeholder="e.g. Asylum (I-589), Cancellation of Removal">
+        </div>
       </div>
-      <label>Case type</label>
-      <input type="text" name="case_type" value="${escapeAttr(prev.case_type)}" placeholder="e.g. Asylum (I-589), Cancellation of Removal">
+      <div class="row">
+        <div>
+          <label>Client attendance</label>
+          <select name="client_attendance">
+            <option value="">-- select --</option>
+            <option value="in_person" ${prev.client_attendance === "in_person" ? "selected" : ""}>In person</option>
+            <option value="webex" ${prev.client_attendance === "webex" ? "selected" : ""}>WebEx / video</option>
+            <option value="phone" ${prev.client_attendance === "phone" ? "selected" : ""}>Telephonic</option>
+            <option value="absent" ${prev.client_attendance === "absent" ? "selected" : ""}>ABSENT ⚠️</option>
+          </select>
+        </div>
+        <div>
+          <label>Attorney appearance</label>
+          <select name="attorney_appearance">
+            <option value="">-- select --</option>
+            <option value="in_person" ${prev.attorney_appearance === "in_person" ? "selected" : ""}>In person</option>
+            <option value="webex" ${prev.attorney_appearance === "webex" ? "selected" : ""}>WebEx / video</option>
+            <option value="telephonic" ${prev.attorney_appearance === "telephonic" ? "selected" : ""}>Telephonic</option>
+            <option value="covering" ${prev.attorney_appearance === "covering" ? "selected" : ""}>Covering counsel</option>
+          </select>
+        </div>
+      </div>
     </fieldset>
 
     <fieldset>
@@ -591,6 +680,51 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
     <fieldset>
       <legend>Applications Requested</legend>
       <div style="display:flex; flex-wrap:wrap;">${applicationCheckboxes}</div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Disposition (Outcome Of Today's Hearing)</legend>
+      <label>Disposition</label>
+      <select name="disposition">
+        <option value="">-- select --</option>
+        <option value="pleadings_taken_continued_individual" ${prev.disposition === "pleadings_taken_continued_individual" ? "selected" : ""}>Pleadings taken, continued to individual/merits</option>
+        <option value="continued_status" ${prev.disposition === "continued_status" ? "selected" : ""}>Continued for status</option>
+        <option value="continued_master" ${prev.disposition === "continued_master" ? "selected" : ""}>Continued to next master calendar</option>
+        <option value="admin_closure" ${prev.disposition === "admin_closure" ? "selected" : ""}>Administrative closure granted</option>
+        <option value="termination" ${prev.disposition === "termination" ? "selected" : ""}>Case terminated</option>
+        <option value="vd_granted" ${prev.disposition === "vd_granted" ? "selected" : ""}>Voluntary departure granted</option>
+        <option value="removal_ordered" ${prev.disposition === "removal_ordered" ? "selected" : ""}>Removal order entered</option>
+        <option value="relief_granted" ${prev.disposition === "relief_granted" ? "selected" : ""}>Relief granted (asylum/cancellation/etc.)</option>
+        <option value="relief_denied" ${prev.disposition === "relief_denied" ? "selected" : ""}>Relief denied</option>
+        <option value="motion_granted" ${prev.disposition === "motion_granted" ? "selected" : ""}>Motion granted</option>
+        <option value="motion_denied" ${prev.disposition === "motion_denied" ? "selected" : ""}>Motion denied</option>
+        <option value="decision_reserved" ${prev.disposition === "decision_reserved" ? "selected" : ""}>Decision reserved</option>
+        <option value="in_absentia_ordered" ${prev.disposition === "in_absentia_ordered" ? "selected" : ""}>In absentia removal order entered ⚠️</option>
+        <option value="other" ${prev.disposition === "other" ? "selected" : ""}>Other (specify in notes)</option>
+      </select>
+      <label>Disposition details</label>
+      <textarea name="disposition_notes" rows="2" placeholder="e.g. VD granted, 60 days, $500 bond required. Or: Continued to Sep 15 for individual hearing on asylum.">${escapeHtml(prev.disposition_notes || "")}</textarea>
+    </fieldset>
+
+    <fieldset>
+      <legend>Bond (If Applicable)</legend>
+      <div class="hint">Only fill this in for bond hearings or when bond is at issue.</div>
+      <div class="row">
+        <div>
+          <label>Bond outcome</label>
+          <select name="bond_outcome">
+            <option value="">-- N/A --</option>
+            <option value="granted" ${prev.bond_outcome === "granted" ? "selected" : ""}>Granted</option>
+            <option value="denied" ${prev.bond_outcome === "denied" ? "selected" : ""}>Denied</option>
+            <option value="continued" ${prev.bond_outcome === "continued" ? "selected" : ""}>Continued</option>
+            <option value="withdrawn" ${prev.bond_outcome === "withdrawn" ? "selected" : ""}>Withdrawn</option>
+          </select>
+        </div>
+        <div>
+          <label>Bond amount (if granted)</label>
+          <input type="text" name="bond_amount" value="${escapeAttr(prev.bond_amount)}" placeholder="e.g. 5000">
+        </div>
+      </div>
     </fieldset>
 
     <fieldset>
@@ -751,8 +885,14 @@ function renderDetailPage(note) {
     <div style="background: white; padding: 20px; border-radius: 4px; margin: 15px 0; border-left: 4px solid #B79C62;">
       <div style="margin:4px 0;"><strong>Client:</strong> ${escapeHtml(note.client_name)}</div>
       <div style="margin:4px 0;"><strong>A-Number:</strong> ${escapeHtml(note.a_number || "-")}</div>
+      <div style="margin:4px 0;"><strong>Client contact:</strong> ${escapeHtml([note.client_email, note.client_phone].filter(Boolean).join(" / ") || "-")}</div>
       <div style="margin:4px 0;"><strong>Hearing:</strong> ${note.hearing_date ? new Date(note.hearing_date).toLocaleString() : "-"} (${escapeHtml(note.hearing_type || "master")})</div>
       <div style="margin:4px 0;"><strong>Judge:</strong> ${escapeHtml(note.judge_name || "-")}</div>
+      <div style="margin:4px 0;"><strong>DHS Trial Attorney:</strong> ${escapeHtml(note.dhs_attorney || "-")}</div>
+      <div style="margin:4px 0;"><strong>Client attendance:</strong> ${escapeHtml(note.client_attendance || "-")}</div>
+      <div style="margin:4px 0;"><strong>Attorney appearance:</strong> ${escapeHtml(note.attorney_appearance || "-")}</div>
+      <div style="margin:4px 0;"><strong>Disposition:</strong> ${escapeHtml(note.disposition || "-")}${note.disposition_notes ? " — " + escapeHtml(note.disposition_notes) : ""}</div>
+      ${note.bond_outcome ? `<div style="margin:4px 0;"><strong>Bond:</strong> ${escapeHtml(note.bond_outcome)}${note.bond_amount ? ` — $${Number(note.bond_amount).toLocaleString()}` : ""}</div>` : ""}
       <div style="margin:4px 0;"><strong>Next hearing:</strong> ${note.next_hearing_date ? new Date(note.next_hearing_date).toLocaleString() : "not scheduled"} (${escapeHtml(note.next_hearing_type || "-")})</div>
       <div style="margin:4px 0;"><strong>Client language:</strong> ${note.client_language}</div>
       <div style="margin:4px 0;"><strong>Sent to Jue:</strong> ${note.sent_to_paralegal_at ? new Date(note.sent_to_paralegal_at).toLocaleString() : "not sent"}</div>
@@ -814,11 +954,18 @@ function parseFormSubmission(body) {
     hearing_date: body.hearing_date || null,
     hearing_type: body.hearing_type || "master",
     case_type: (body.case_type || "").trim(),
+    dhs_attorney: (body.dhs_attorney || "").trim() || null,
+    client_attendance: body.client_attendance || null,
+    attorney_appearance: body.attorney_appearance || null,
     pleadings_admitted: (body.pleadings_admitted || "").trim(),
     pleadings_denied: (body.pleadings_denied || "").trim(),
     pleadings_contested: (body.pleadings_contested || "").trim(),
     removability_conceded: !!body.removability_conceded,
     applications,
+    disposition: body.disposition || null,
+    disposition_notes: (body.disposition_notes || "").trim() || null,
+    bond_outcome: body.bond_outcome || null,
+    bond_amount: body.bond_amount ? parseInt(body.bond_amount.toString().replace(/[,$\s]/g, ""), 10) || null : null,
     next_hearing_date: body.next_hearing_date || null,
     next_hearing_type: body.next_hearing_type || null,
     interpreter_used: !!body.interpreter_used,
