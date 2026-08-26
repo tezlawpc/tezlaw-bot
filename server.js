@@ -2548,6 +2548,86 @@ app.get("/admin/hearing/individual/prior-lookup", async (req, res) => {
   }
 });
 
+// Extract hearing summary from PDF, Word (.docx), or text file.
+// Registered BEFORE the /:id route so Express matches this specific path first.
+app.post("/admin/hearing/individual/extract-summary", docUpload.single("summary"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "No file uploaded" });
+    const ih = require("./individual-hearing-notes");
+    const name = req.file.originalname || "summary";
+    const mime = req.file.mimetype || "";
+    const isPdf  = mime.includes("pdf") || /\.pdf$/i.test(name);
+    const isText = mime.startsWith("text/") || /\.(txt|md)$/i.test(name);
+    const isDocx =
+      mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      /\.docx$/i.test(name);
+    const isDoc  = /\.doc$/i.test(name) && !isDocx;
+
+    let extracted, rawText = null;
+    if (isPdf) {
+      extracted = await ih.extractHearingSummary({
+        pdfBuffer: req.file.buffer,
+        mimeType: "application/pdf",
+        filename: name,
+      });
+    } else if (isDocx) {
+      // Word .docx — extract plain text with mammoth, then run through Claude
+      const mammoth = require("mammoth");
+      try {
+        const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+        rawText = (result.value || "").trim();
+        if (!rawText) {
+          return res.status(400).json({
+            ok: false,
+            error: "Word document appears to be empty or contains only images.",
+          });
+        }
+        extracted = await ih.extractHearingSummary({ textContent: rawText, filename: name });
+      } catch (e) {
+        return res.status(400).json({
+          ok: false,
+          error: `Could not read Word document: ${e.message}. Try saving as PDF instead.`,
+        });
+      }
+    } else if (isText) {
+      rawText = req.file.buffer.toString("utf8");
+      extracted = await ih.extractHearingSummary({ textContent: rawText, filename: name });
+    } else if (isDoc) {
+      return res.status(400).json({
+        ok: false,
+        error: "Old-format .doc files aren't supported — please save as .docx or PDF and re-upload.",
+      });
+    } else {
+      return res.status(400).json({
+        ok: false,
+        error: "File must be PDF, Word (.docx), or text (.txt/.md).",
+      });
+    }
+    res.json({ ok: true, extracted, raw_text: rawText });
+  } catch (err) {
+    console.error("[extract-summary]:", err.message);
+    const msg = err.response?.data?.error?.message || err.message;
+    res.status(500).json({ ok: false, error: msg });
+  }
+});
+
+// Parse Excel/CSV exhibit list. Registered BEFORE the /:id route.
+app.post("/admin/hearing/individual/extract-exhibits", docUpload.single("exhibits"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "No file uploaded" });
+    const ih = require("./individual-hearing-notes");
+    const name = req.file.originalname || "exhibits.xlsx";
+    if (!/\.(xlsx|xls|csv)$/i.test(name)) {
+      return res.status(400).json({ ok: false, error: "File must be .xlsx, .xls, or .csv" });
+    }
+    const result = ih.parseExhibitExcel(req.file.buffer, name);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[extract-exhibits]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/admin/hearing/individual/:id", async (req, res) => {
   try {
     const ih = require("./individual-hearing-notes");
@@ -2633,83 +2713,8 @@ app.post("/admin/hearing/individual/:id/send-paralegal", async (req, res) => {
 });
 
 // Extract hearing summary from PDF or text file
-app.post("/admin/hearing/individual/extract-summary", docUpload.single("summary"), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ ok: false, error: "No file uploaded" });
-    const ih = require("./individual-hearing-notes");
-    const name = req.file.originalname || "summary";
-    const mime = req.file.mimetype || "";
-    const isPdf  = mime.includes("pdf") || /\.pdf$/i.test(name);
-    const isText = mime.startsWith("text/") || /\.(txt|md)$/i.test(name);
-    const isDocx =
-      mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      /\.docx$/i.test(name);
-    const isDoc  = /\.doc$/i.test(name) && !isDocx;
-
-    let extracted, rawText = null;
-    if (isPdf) {
-      extracted = await ih.extractHearingSummary({
-        pdfBuffer: req.file.buffer,
-        mimeType: "application/pdf",
-        filename: name,
-      });
-    } else if (isDocx) {
-      // Word .docx — extract plain text with mammoth, then run through Claude
-      const mammoth = require("mammoth");
-      try {
-        const result = await mammoth.extractRawText({ buffer: req.file.buffer });
-        rawText = (result.value || "").trim();
-        if (!rawText) {
-          return res.status(400).json({
-            ok: false,
-            error: "Word document appears to be empty or contains only images.",
-          });
-        }
-        extracted = await ih.extractHearingSummary({ textContent: rawText, filename: name });
-      } catch (e) {
-        return res.status(400).json({
-          ok: false,
-          error: `Could not read Word document: ${e.message}. Try saving as PDF instead.`,
-        });
-      }
-    } else if (isText) {
-      rawText = req.file.buffer.toString("utf8");
-      extracted = await ih.extractHearingSummary({ textContent: rawText, filename: name });
-    } else if (isDoc) {
-      return res.status(400).json({
-        ok: false,
-        error: "Old-format .doc files aren't supported — please save as .docx or PDF and re-upload.",
-      });
-    } else {
-      return res.status(400).json({
-        ok: false,
-        error: "File must be PDF, Word (.docx), or text (.txt/.md).",
-      });
-    }
-    res.json({ ok: true, extracted, raw_text: rawText });
-  } catch (err) {
-    console.error("[extract-summary]:", err.message);
-    const msg = err.response?.data?.error?.message || err.message;
-    res.status(500).json({ ok: false, error: msg });
-  }
-});
-
-// Parse Excel/CSV exhibit list
-app.post("/admin/hearing/individual/extract-exhibits", docUpload.single("exhibits"), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ ok: false, error: "No file uploaded" });
-    const ih = require("./individual-hearing-notes");
-    const name = req.file.originalname || "exhibits.xlsx";
-    if (!/\.(xlsx|xls|csv)$/i.test(name)) {
-      return res.status(400).json({ ok: false, error: "File must be .xlsx, .xls, or .csv" });
-    }
-    const result = ih.parseExhibitExcel(req.file.buffer, name);
-    res.json({ ok: true, ...result });
-  } catch (err) {
-    console.error("[extract-exhibits]:", err.message);
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+// Extract routes moved to earlier in the file — see /admin/hearing/individual/extract-summary
+// and /admin/hearing/individual/extract-exhibits above the /:id route.
 
 // Document upload + extract — accepts PDF, JPG, PNG, WebP.
 // Uses Claude vision to OCR + extract structured client/case data.
