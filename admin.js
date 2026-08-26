@@ -1131,10 +1131,16 @@ function dashboardHtml() {
     <span class="icon">⚖️</span><span>→ Matter Manager</span>
   </a>
   <a href="/admin/hearing/notes" class="nav-item" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); text-decoration:none; border-bottom:1px solid rgba(183,156,98,.2);">
-    <span class="icon">📝</span><span>→ Hearing Notes</span>
+    <span class="icon">📝</span><span>→ Master Hearing</span>
   </a>
   <a href="/admin/hearing/notes/history" class="nav-item" style="text-decoration:none; border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
-    <span class="icon">📚</span><span>Hearing History</span>
+    <span class="icon">📚</span><span>Master History</span>
+  </a>
+  <a href="/admin/hearing/individual" class="nav-item" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); text-decoration:none; border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">⚖️</span><span>→ Individual Hearing</span>
+  </a>
+  <a href="/admin/hearing/individual/history" class="nav-item" style="text-decoration:none; border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+    <span class="icon">📖</span><span>Individual History</span>
   </a>
   <a href="/admin/email-setup" class="nav-item" style="text-decoration:none; border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">📬</span><span>Email Setup</span>
