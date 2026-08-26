@@ -2058,81 +2058,112 @@ app.get("/admin/email-digest/:when", async (req, res) => {
 
 // ── Master Calendar Hearing Form ─────────────────────────
 //
-// Admin form for generating client-facing emails about upcoming
-// master calendar hearings. Copy-paste flow — no SMTP send.
+// REDIRECT: The original pre-hearing email form has been replaced
+// by the hearing NOTES tool at /admin/hearing/notes.
+//
+app.get("/admin/hearing/master", (req, res) => res.redirect("/admin/hearing/notes"));
+app.post("/admin/hearing/master", (req, res) => res.redirect("/admin/hearing/notes"));
+app.get("/admin/hearing/master/history", (req, res) => res.redirect("/admin/hearing/notes/history"));
+app.get("/admin/hearing/master/:id", (req, res) => res.redirect(`/admin/hearing/notes/${req.params.id}`));
+
+// ── Hearing Notes ─────────────────────────────────────────
+//
+// Structured note-taking during hearings + AI-generated summaries
+// for paralegal (English, detailed) and client (their language, plain).
 //
 // Routes:
-//   GET  /admin/hearing/master           → form
-//   POST /admin/hearing/master           → preview or preview+save
-//   GET  /admin/hearing/master/history   → list of past hearings
-//   GET  /admin/hearing/master/:id       → detail view of one hearing
+//   GET  /admin/hearing/notes                    → note-taking form
+//   POST /admin/hearing/notes                    → generate + preview/save
+//   GET  /admin/hearing/notes/history            → past notes
+//   GET  /admin/hearing/notes/:id                → one hearing detail
+//   POST /admin/hearing/notes/:id/send-paralegal → send to Jue via Telegram
 //
-app.get("/admin/hearing/master", async (req, res) => {
+app.get("/admin/hearing/notes", async (req, res) => {
   try {
-    const hearingForms = require("./hearing-forms");
-    await hearingForms.initHearingTables();
-    res.send(hearingForms.renderAdminForm({}));
+    const hn = require("./hearing-notes");
+    await hn.initHearingNotesTables();
+    res.send(hn.renderNoteForm({}));
   } catch (err) {
-    console.error("[/admin/hearing/master GET] error:", err.message);
+    console.error("[/admin/hearing/notes GET]:", err.message);
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
   }
 });
 
-app.post("/admin/hearing/master", async (req, res) => {
+app.post("/admin/hearing/notes", async (req, res) => {
   try {
-    const hearingForms = require("./hearing-forms");
+    const hn = require("./hearing-notes");
     const action = req.body.action;
-    const parsed = hearingForms.parseFormSubmission(req.body);
+    const parsed = hn.parseFormSubmission(req.body);
 
-    // Validate required fields
-    if (!parsed.client_name || !parsed.a_number || !parsed.hearing_datetime) {
-      return res.send(hearingForms.renderAdminForm({
-        error: "Missing required fields: client name, A-Number, and hearing date/time are required.",
-        previousInputs: parsed,
+    if (!parsed.client_name) {
+      return res.send(hn.renderNoteForm({
+        error: "Client name is required.",
+        prev: parsed,
       }));
     }
 
     if (action === "save") {
-      const result = await hearingForms.saveHearing(parsed);
-      return res.send(hearingForms.renderAdminForm({
-        generated: { subject: result.subject, body: result.body },
+      const saved = await hn.saveNote(parsed, { generateSummaries: true });
+      return res.send(hn.renderNoteForm({
+        generated: {
+          id: saved.id,
+          paralegal_summary: saved.paralegal_summary,
+          client_summary: saved.client_summary,
+        },
         saved: true,
-        previousInputs: parsed,
+        prev: parsed,
       }));
     }
 
-    // Default: preview only
-    const generated = hearingForms.generateEmail(parsed);
-    return res.send(hearingForms.renderAdminForm({
-      generated,
+    // Preview only — generate summaries but don't save to DB
+    const hnMod = require("./hearing-notes");
+    const [paralegal_summary, client_summary] = await Promise.all([
+      hnMod.generateParalegalSummary(parsed),
+      hnMod.generateClientSummary(parsed),
+    ]);
+    return res.send(hn.renderNoteForm({
+      generated: { paralegal_summary, client_summary },
       saved: false,
-      previousInputs: parsed,
+      prev: parsed,
     }));
   } catch (err) {
-    console.error("[/admin/hearing/master POST] error:", err.message);
-    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><p><a href="/admin/hearing/master">Back</a></p>`);
+    console.error("[/admin/hearing/notes POST]:", err.message, err.stack);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><p><a href="/admin/hearing/notes">Back</a></p>`);
   }
 });
 
-app.get("/admin/hearing/master/history", async (req, res) => {
+app.get("/admin/hearing/notes/history", async (req, res) => {
   try {
-    const hearingForms = require("./hearing-forms");
-    const hearings = await hearingForms.listHearings(50);
-    res.send(hearingForms.renderHistoryPage(hearings));
+    const hn = require("./hearing-notes");
+    const notes = await hn.listNotes(50);
+    res.send(hn.renderHistoryPage(notes));
   } catch (err) {
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
   }
 });
 
-app.get("/admin/hearing/master/:id", async (req, res) => {
+app.get("/admin/hearing/notes/:id", async (req, res) => {
   try {
-    const hearingForms = require("./hearing-forms");
+    const hn = require("./hearing-notes");
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).send("Invalid id");
-    const hearing = await hearingForms.getHearing(id);
-    res.send(hearingForms.renderDetailPage(hearing));
+    const note = await hn.getNote(id);
+    res.send(hn.renderDetailPage(note));
   } catch (err) {
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/hearing/notes/:id/send-paralegal", async (req, res) => {
+  try {
+    const hn = require("./hearing-notes");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+    const result = await hn.sendToParalegal(id);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[send-paralegal]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -2202,13 +2233,13 @@ app.listen(PORT, async () => {
     console.error("⚠️  USPTO watch init failed:", e.message);
   }
 
-  // Initialize master hearing tables (hearing-forms admin panel)
+  // Initialize hearing notes tables (courtroom note-taking tool)
   try {
-    const hearingForms = require("./hearing-forms");
-    await hearingForms.initHearingTables();
-    console.log("✅ Hearing forms tables ready");
+    const hn = require("./hearing-notes");
+    await hn.initHearingNotesTables();
+    console.log("✅ Hearing notes tables ready");
   } catch (e) {
-    console.error("⚠️  Hearing forms init failed:", e.message);
+    console.error("⚠️  Hearing notes init failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)
