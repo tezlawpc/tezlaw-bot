@@ -491,6 +491,16 @@ async function getNote(id) {
   return r.rows[0];
 }
 
+async function deleteNote(id) {
+  await initHearingNotesTables();
+  const r = await db.query(
+    `DELETE FROM hearing_notes WHERE id = $1 RETURNING id, client_name`,
+    [id]
+  );
+  if (!r.rows.length) throw new Error(`Note ${id} not found`);
+  return { id: r.rows[0].id, client_name: r.rows[0].client_name };
+}
+
 // ── Telegram Send ────────────────────────────────────────
 
 async function sendToParalegal(id) {
@@ -1264,7 +1274,11 @@ function renderHistoryPage(notes) {
       <td>${n.client_language}</td>
       <td>${n.sent_to_paralegal_at ? "✅" : "—"}</td>
       <td>${new Date(n.created_at).toLocaleDateString()}</td>
-      <td><a href="/admin/hearing/notes/${n.id}" style="color:#B79C62;">view</a></td>
+      <td>
+        <a href="/admin/hearing/notes/${n.id}" style="color:#B79C62;">view</a>
+        &nbsp;·&nbsp;
+        <a href="#" onclick="deleteRow(${n.id}, ${JSON.stringify(n.client_name).replace(/"/g, "&quot;")}); return false;" style="color:#c00; font-size:12px;">🗑️</a>
+      </td>
     </tr>`;
   }).join("") : `<tr id="no-data-row"><td colspan="11" style="text-align:center; color:#888;">No hearing notes yet.</td></tr>`;
 
@@ -1368,6 +1382,29 @@ function renderHistoryPage(notes) {
         document.getElementById("filter-lang").value = "";
         filterRows();
       }
+      async function deleteRow(id, clientName) {
+        if (!confirm("Delete hearing note #" + id + " for " + clientName + "?\\n\\nThis cannot be undone.")) return;
+        try {
+          const resp = await fetch("/admin/hearing/notes/" + id, { method: "DELETE" });
+          const data = await resp.json();
+          if (data.ok) {
+            // Remove the row from the table without a full page reload
+            const row = document.querySelector('tr.hearing-row[data-name][data-anumber]');
+            const rows = document.querySelectorAll('.hearing-row');
+            for (const r of rows) {
+              if (r.querySelector('a[href*="/' + id + '"]')) {
+                r.remove();
+                break;
+              }
+            }
+            filterRows();
+          } else {
+            alert("❌ Delete failed: " + (data.error || "unknown error"));
+          }
+        } catch (e) {
+          alert("❌ Delete error: " + e.message);
+        }
+      }
     </script>`;
 
   return renderAdminChrome({ title: "Hearing History", body, activeItem: "history" });
@@ -1386,6 +1423,8 @@ function renderDetailPage(note) {
         <a href="/admin/hearing/notes/history" class="back-link">← History</a>
         &nbsp; · &nbsp;
         <a href="/admin/hearing/notes" class="back-link">New note</a>
+        &nbsp; · &nbsp;
+        <a href="#" onclick="deleteNote(${note.id}, ${JSON.stringify(note.client_name).replace(/"/g, "&quot;")}); return false;" style="color:#c00; font-size:13px;">🗑️ Delete</a>
       </div>
     </div>
 
@@ -1427,6 +1466,20 @@ function renderDetailPage(note) {
       function copyEl(id) {
         navigator.clipboard.writeText(document.getElementById(id).textContent);
         alert("Copied!");
+      }
+      async function deleteNote(id, clientName) {
+        if (!confirm("Delete hearing note #" + id + " for " + clientName + "?\\n\\nThis cannot be undone.")) return;
+        try {
+          const resp = await fetch("/admin/hearing/notes/" + id, { method: "DELETE" });
+          const data = await resp.json();
+          if (data.ok) {
+            window.location.href = "/admin/hearing/notes/history";
+          } else {
+            alert("❌ Delete failed: " + (data.error || "unknown error"));
+          }
+        } catch (e) {
+          alert("❌ Delete error: " + e.message);
+        }
       }
       async function sendParalegalDetail(id) {
         const status = document.getElementById("send-detail-status");
@@ -1525,6 +1578,7 @@ module.exports = {
   saveNote,
   listNotes,
   getNote,
+  deleteNote,
   sendToParalegal,
   generateParalegalSummary,
   generateClientSummary,
