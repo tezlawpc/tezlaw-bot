@@ -170,6 +170,13 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  `/case delete <name>` — asks for confirmation",
       "  `/case new <name>` — explicit create (errors if exists)",
       "",
+      "*📝 Hearing Notes* (courtroom note-taking + AI summaries)",
+      "  Take notes at hearings via: https://tezlaw-bot.onrender.com/admin/hearing/notes",
+      "  Zara generates a paralegal summary + client summary in client's language.",
+      "  `/notes list` — recent hearing notes",
+      "  `/notes show <id>` — view one hearing's paralegal summary",
+      "  `/notes send <id>` — send paralegal summary to Jue via Telegram",
+      "",
       "*📥 Intake Agent (auto-runs for new leads)*",
       "  Zara asks new inquirers structured questions across all channels.",
       "  Alerts you via WhatsApp + email with HOT/WARM/COLD tag.",
@@ -512,6 +519,56 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     } catch (err) {
       console.error("[JJ-Mode] /intake error:", err.message);
       return { handled: true, message: `❌ /intake error: ${err.message}` };
+    }
+  }
+
+  // ── /notes list|show|send — Hearing Notes ────────────────
+  //
+  //   /notes list                 — recent hearing notes
+  //   /notes show <id>            — details of one hearing note
+  //   /notes send <id>            — send paralegal summary to Jue via Telegram
+  //
+  const notesFirstLine = lower.split("\n", 1)[0].trim();
+  const notesMatch = notesFirstLine.match(/^\/notes\s+(list|show|send)(?:\s+(.+))?\s*$/);
+  if (notesMatch) {
+    try {
+      const hn = require("./hearing-notes");
+      const action = notesMatch[1];
+      const arg = (notesMatch[2] || "").trim();
+
+      if (action === "list") {
+        const rows = await hn.listNotes(20);
+        if (!rows.length) return { handled: true, message: "📝 No hearing notes yet.\n\nCreate one at: https://tezlaw-bot.onrender.com/admin/hearing/notes" };
+        const lines = rows.map(r => {
+          const hearing = r.hearing_date ? new Date(r.hearing_date).toLocaleDateString() : "?";
+          const next = r.next_hearing_date ? `next: ${new Date(r.next_hearing_date).toLocaleDateString()}` : "no next hearing";
+          const sent = r.sent_to_paralegal_at ? "✅ sent" : "not sent";
+          return `#${r.id} · ${r.client_name} · ${hearing} · ${next} · ${sent}`;
+        });
+        return { handled: true, message: `📝 *Recent hearing notes:*\n\n${lines.join("\n")}\n\nDetail: \`/notes show <id>\`\nSend to Jue: \`/notes send <id>\`` };
+      }
+
+      if (action === "show") {
+        if (!arg) return { handled: true, message: "Usage: `/notes show <id>`" };
+        const note = await hn.getNote(parseInt(arg));
+        if (!note) return { handled: true, message: `❌ Note #${arg} not found.` };
+        const summary = note.paralegal_summary || "(no summary generated)";
+        const truncated = summary.length > 3000 ? summary.substring(0, 3000) + "\n...(truncated - view full at /admin/hearing/notes/" + note.id + ")" : summary;
+        return { handled: true, message: `📝 *Note #${note.id} — ${note.client_name}*\nA#: ${note.a_number || "none"}\n\n${truncated}` };
+      }
+
+      if (action === "send") {
+        if (!arg) return { handled: true, message: "Usage: `/notes send <id>`" };
+        try {
+          const result = await hn.sendToParalegal(parseInt(arg));
+          return { handled: true, message: `✅ Sent to Jue via Telegram (${result.chunks} message${result.chunks > 1 ? "s" : ""}).` };
+        } catch (e) {
+          return { handled: true, message: `❌ Send failed: ${e.message}` };
+        }
+      }
+    } catch (err) {
+      console.error("[JJ-Mode] /notes error:", err.message);
+      return { handled: true, message: `❌ /notes error: ${err.message}` };
     }
   }
 
