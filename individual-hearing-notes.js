@@ -163,6 +163,7 @@ function findCol(headers, keywords) {
 // examination Q&A pairs, witness list, and closing argument.
 async function extractHearingSummary({ pdfBuffer, textContent, mimeType, filename = "summary" }) {
   const prompt = `You are analyzing an immigration attorney's hearing summary / prep outline for an individual (merits) hearing. The document may contain:
+- Case caption (client name, A-Number, court, judge, hearing date at the top)
 - Notes about the case background
 - Direct examination questions for the applicant/witnesses
 - Anticipated cross-examination
@@ -174,6 +175,16 @@ async function extractHearingSummary({ pdfBuffer, textContent, mimeType, filenam
 Your job: extract as much structured content as possible. Return ONLY valid JSON (no preamble, no code fences) with this structure:
 
 {
+  "client_info": {
+    "client_name": "Full name of the respondent/applicant if named in doc, else empty string. Prefer 'Last, First' format if that's how it appears.",
+    "a_number": "A-Number if given (with or without dashes), else empty string",
+    "hearing_date": "Hearing date and time in ISO format YYYY-MM-DDTHH:MM if found (guess time if not stated). Empty string if not in doc.",
+    "judge_name": "Immigration judge name if given, else empty string. Include honorific if present (e.g. 'Hon. Kevin Riley').",
+    "court_location": "Court short name if given (e.g. 'Los Angeles Immigration Court'), else empty string",
+    "court_address": "Full court address if given, else empty string",
+    "dhs_attorney": "DHS trial attorney name if given, else empty string",
+    "case_type": "Type of case if identifiable — e.g. 'Asylum (I-589)', 'Withholding of Removal', 'CAT protection', 'Cancellation of Removal'. Empty string if unclear."
+  },
   "case_summary": "Brief 1-2 sentence description of the case (from any narrative context in the doc)",
   "witnesses": [
     {
@@ -200,6 +211,7 @@ Your job: extract as much structured content as possible. Return ONLY valid JSON
 
 Rules:
 - Return ONLY the JSON object.
+- Look CAREFULLY at the first page/section of the doc for the case caption — that's where client name, A-Number, judge, hearing date are usually listed. Do not skip this.
 - Extract questions in ORDER as they appear.
 - If a question has a paired anticipated answer in the doc, put it in expected_answer. Otherwise leave empty.
 - judge_notes stays empty — the attorney fills that in DURING the hearing.
@@ -207,7 +219,7 @@ Rules:
 - If it's unclear whether something is direct vs cross, guess based on tone (softball → direct, adversarial → cross).
 - If the doc has only closing argument, still return the JSON structure with empty examinations array.
 - If the doc has only exam Q's, return with empty closing_argument string.
-- Do not invent content. Empty structures are fine.`;
+- Do not invent content. Empty strings and empty structures are fine.`;
 
   const isTextMode = !pdfBuffer && !!textContent;
   const messages = [];
@@ -277,6 +289,17 @@ Rules:
   }
 
   // Normalize structure - ensure arrays exist
+  extracted.client_info = extracted.client_info || {};
+  extracted.client_info = {
+    client_name:    extracted.client_info.client_name    || "",
+    a_number:       extracted.client_info.a_number       || "",
+    hearing_date:   extracted.client_info.hearing_date   || "",
+    judge_name:     extracted.client_info.judge_name     || "",
+    court_location: extracted.client_info.court_location || "",
+    court_address:  extracted.client_info.court_address  || "",
+    dhs_attorney:   extracted.client_info.dhs_attorney   || "",
+    case_type:      extracted.client_info.case_type      || "",
+  };
   extracted.witnesses = extracted.witnesses || [];
   extracted.examinations = (extracted.examinations || []).map(ex => {
     // Support both new schema (witness_role + witness_name) and legacy (witness)
@@ -1259,6 +1282,29 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
             if (raw) document.getElementById("hearing_summary_raw").value = raw;
             return;
           }
+          // Populate client / case / judge fields from extracted client_info
+          // (only fills empty fields, doesn't overwrite what's already there)
+          const ci = data.extracted.client_info || {};
+          let filledInfo = 0;
+          const infoMap = {
+            client_name:    ci.client_name,
+            a_number:       ci.a_number,
+            case_type:      ci.case_type,
+            hearing_date:   ci.hearing_date,
+            judge_name:     ci.judge_name,
+            court_location: ci.court_location,
+            court_address:  ci.court_address,
+            dhs_attorney:   ci.dhs_attorney,
+          };
+          for (const [fieldName, val] of Object.entries(infoMap)) {
+            if (!val) continue;
+            const el = document.querySelector('[name="' + fieldName + '"]');
+            if (el && !el.value.trim()) {
+              el.value = val;
+              el.style.backgroundColor = "#fffde7";  // highlight auto-filled
+              filledInfo++;
+            }
+          }
           // Populate examinations from extracted structure
           if (data.extracted.examinations && data.extracted.examinations.length) {
             if (confirm("Extracted " + data.extracted.examinations.length + " examination section(s). Replace current examinations?")) {
@@ -1279,7 +1325,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           // Save raw for reference
           const raw = data.raw_text || "";
           if (raw) document.getElementById("hearing_summary_raw").value = raw;
-          status.innerHTML = '<span style="color:#4CAF50;">✅ Extracted ' + (data.extracted.examinations || []).length + ' exam section(s), ' + (data.extracted.closing_argument ? "closing argument, " : "") + '' + (data.extracted.witnesses || []).length + ' witness(es).</span>';
+          status.innerHTML = '<span style="color:#4CAF50;">✅ Extracted ' + (data.extracted.examinations || []).length + ' exam section(s), ' + (data.extracted.closing_argument ? "closing argument, " : "") + '' + (data.extracted.witnesses || []).length + ' witness(es)' + (filledInfo ? ", " + filledInfo + " client/court field(s) auto-filled" : "") + '.</span>';
         } catch (e) {
           console.error("[uploadSummary] fetch/network error:", e);
           status.innerHTML = '<span style="color:#c00;">❌ ' + escapeHTML(e.message || String(e) || "Upload failed") + ' — check browser console for details</span>';
