@@ -44,6 +44,8 @@ async function initHearingNotesTables() {
       pleadings_method      TEXT,
       removability_conceded BOOLEAN,
       applications          JSONB DEFAULT '[]'::jsonb,
+      asylum_fee_needed     BOOLEAN,
+      biometrics_needed     BOOLEAN,
       disposition           TEXT,
       disposition_notes     TEXT,
       bond_outcome          TEXT,
@@ -71,6 +73,8 @@ async function initHearingNotesTables() {
     ["bond_outcome", "TEXT"],
     ["bond_amount", "INTEGER"],
     ["pleadings_method", "TEXT"],
+    ["asylum_fee_needed", "BOOLEAN"],
+    ["biometrics_needed", "BOOLEAN"],
   ]) {
     try {
       await db.query(`ALTER TABLE hearing_notes ADD COLUMN IF NOT EXISTS ${col[0]} ${col[1]}`);
@@ -335,6 +339,8 @@ function buildStructuredNotes(data) {
     `  Removability conceded: ${data.removability_conceded ? "Yes" : "No"}`,
     "",
     `APPLICATIONS REQUESTED: ${(data.applications && data.applications.length) ? data.applications.join(", ") : "(none noted)"}`,
+    data.asylum_fee_needed ? "ASYLUM FEE: Required (client must pay filing fee)" : "",
+    data.biometrics_needed ? "BIOMETRICS: Required (client must attend biometrics appointment when scheduled by USCIS)" : "",
     "",
     "DISPOSITION (outcome of today's hearing):",
     `  ${data.disposition || "(not noted)"}`,
@@ -356,8 +362,6 @@ function buildStructuredNotes(data) {
     "NEXT HEARING:",
     `  Type: ${data.next_hearing_type || "(not scheduled)"}`,
     `  Date/time: ${data.next_hearing_date ? new Date(data.next_hearing_date).toLocaleString() : "(not scheduled)"}`,
-    "",
-    `INTERPRETER: ${data.interpreter_used ? `Yes (${data.interpreter_language || "language not noted"})` : "No"}`,
     "",
     "DEADLINES SET:"
   );
@@ -395,14 +399,16 @@ async function saveNote(data, { generateSummaries = true } = {}) {
        judge_name, hearing_date, hearing_type, case_type,
        dhs_attorney, client_attendance, attorney_appearance,
        pleadings_admitted, pleadings_denied, pleadings_contested, pleadings_method, removability_conceded,
-       applications, disposition, disposition_notes, bond_outcome, bond_amount,
-       next_hearing_date, next_hearing_type,
-       interpreter_used, interpreter_language, deadlines,
+       applications, asylum_fee_needed, biometrics_needed,
+       disposition, disposition_notes, bond_outcome, bond_amount,
+       next_hearing_date, next_hearing_type, deadlines,
        raw_notes, paralegal_summary, client_summary)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
              $10, $11, $12,
-             $13, $14, $15, $16, $17, $18::jsonb, $19, $20, $21, $22,
-             $23, $24, $25, $26, $27::jsonb,
+             $13, $14, $15, $16, $17,
+             $18::jsonb, $19, $20,
+             $21, $22, $23, $24,
+             $25, $26, $27::jsonb,
              $28, $29, $30)
      RETURNING id`,
     [
@@ -415,10 +421,10 @@ async function saveNote(data, { generateSummaries = true } = {}) {
       data.pleadings_contested || null, data.pleadings_method || null,
       !!data.removability_conceded,
       JSON.stringify(data.applications || []),
+      !!data.asylum_fee_needed, !!data.biometrics_needed,
       data.disposition || null, data.disposition_notes || null,
       data.bond_outcome || null, data.bond_amount || null,
       data.next_hearing_date || null, data.next_hearing_type || null,
-      !!data.interpreter_used, data.interpreter_language || null,
       JSON.stringify(data.deadlines || []),
       data.raw_notes || null, paralegal_summary, client_summary,
     ]
@@ -865,6 +871,16 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
     <fieldset>
       <legend>Applications Requested</legend>
       <div style="display:flex; flex-wrap:wrap;">${applicationCheckboxes}</div>
+      <div style="margin-top:14px; padding-top:10px; border-top:1px solid #eee;">
+        <label style="display:inline-flex; align-items:center; font-weight:normal; margin-right:20px;">
+          <input type="checkbox" name="asylum_fee_needed" value="1" ${prev.asylum_fee_needed ? "checked" : ""}>
+          Asylum fee needed ($100 as of 2025)
+        </label>
+        <label style="display:inline-flex; align-items:center; font-weight:normal;">
+          <input type="checkbox" name="biometrics_needed" value="1" ${prev.biometrics_needed ? "checked" : ""}>
+          Biometrics needed
+        </label>
+      </div>
     </fieldset>
 
     <fieldset>
@@ -924,16 +940,6 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
           <input type="text" name="bond_amount" value="${escapeAttr(prev.bond_amount)}" placeholder="e.g. 5000">
         </div>
       </div>
-    </fieldset>
-
-    <fieldset>
-      <legend>Interpreter</legend>
-      <label style="display:inline-flex; align-items:center; font-weight:normal;">
-        <input type="checkbox" name="interpreter_used" value="1" ${prev.interpreter_used ? "checked" : ""}>
-        Interpreter used
-      </label>
-      <label>Interpreter language (if used)</label>
-      <input type="text" name="interpreter_language" value="${escapeAttr(prev.interpreter_language)}" placeholder="e.g. Mandarin, Spanish, Punjabi">
     </fieldset>
 
     <fieldset>
@@ -1174,6 +1180,8 @@ function renderDetailPage(note) {
       <div style="margin:4px 0;"><strong>Client attendance:</strong> ${escapeHtml(note.client_attendance || "-")}</div>
       <div style="margin:4px 0;"><strong>Attorney appearance:</strong> ${escapeHtml(note.attorney_appearance || "-")}</div>
       <div style="margin:4px 0;"><strong>Disposition:</strong> ${escapeHtml(note.disposition || "-")}${note.disposition_notes ? " — " + escapeHtml(note.disposition_notes) : ""}</div>
+      ${note.asylum_fee_needed ? '<div style="margin:4px 0;"><strong>Asylum fee:</strong> Required</div>' : ""}
+      ${note.biometrics_needed ? '<div style="margin:4px 0;"><strong>Biometrics:</strong> Required</div>' : ""}
       ${note.bond_outcome ? `<div style="margin:4px 0;"><strong>Bond:</strong> ${escapeHtml(note.bond_outcome)}${note.bond_amount ? ` — $${Number(note.bond_amount).toLocaleString()}` : ""}</div>` : ""}
       <div style="margin:4px 0;"><strong>Next hearing:</strong> ${note.next_hearing_date ? new Date(note.next_hearing_date).toLocaleString() : "not scheduled"} (${escapeHtml(note.next_hearing_type || "-")})</div>
       <div style="margin:4px 0;"><strong>Client language:</strong> ${note.client_language}</div>
@@ -1245,14 +1253,14 @@ function parseFormSubmission(body) {
     pleadings_method: body.pleadings_method || null,
     removability_conceded: !!body.removability_conceded,
     applications,
+    asylum_fee_needed: !!body.asylum_fee_needed,
+    biometrics_needed: !!body.biometrics_needed,
     disposition: body.disposition || null,
     disposition_notes: (body.disposition_notes || "").trim() || null,
     bond_outcome: body.bond_outcome || null,
     bond_amount: body.bond_amount ? parseInt(body.bond_amount.toString().replace(/[,$\s]/g, ""), 10) || null : null,
     next_hearing_date: body.next_hearing_date || null,
     next_hearing_type: body.next_hearing_type || null,
-    interpreter_used: !!body.interpreter_used,
-    interpreter_language: (body.interpreter_language || "").trim(),
     deadlines,
     raw_notes: (body.raw_notes || "").trim(),
   };
