@@ -475,6 +475,60 @@ async function saveNote(data, { generateSummaries = true } = {}) {
   return { id: r.rows[0].id, paralegal_summary, client_summary };
 }
 
+// Update an existing hearing note (does not regenerate summaries by default —
+// call generateAndSaveSummariesForMaster separately if you want fresh ones).
+async function updateNote(id, data) {
+  await initHearingNotesTables();
+  const r = await db.query(
+    `UPDATE hearing_notes SET
+       client_name=$1, a_number=$2, client_language=$3, client_email=$4, client_phone=$5,
+       judge_name=$6, hearing_date=$7, hearing_type=$8, case_type=$9,
+       dhs_attorney=$10, client_attendance=$11, attorney_appearance=$12,
+       pleadings_admitted=$13, pleadings_denied=$14, pleadings_contested=$15,
+       pleadings_method=$16, removability_conceded=$17,
+       applications=$18::jsonb, asylum_fee_needed=$19, biometrics_needed=$20,
+       disposition=$21, disposition_notes=$22, bond_outcome=$23, bond_amount=$24,
+       next_hearing_date=$25, next_hearing_type=$26, deadlines=$27::jsonb,
+       raw_notes=$28
+     WHERE id=$29 RETURNING id`,
+    [
+      data.client_name, data.a_number || null, data.client_language || "en",
+      data.client_email || null, data.client_phone || null,
+      data.judge_name || null, data.hearing_date || null,
+      data.hearing_type || "master", data.case_type || null,
+      data.dhs_attorney || null, data.client_attendance || null, data.attorney_appearance || null,
+      data.pleadings_admitted || null, data.pleadings_denied || null,
+      data.pleadings_contested || null, data.pleadings_method || null,
+      !!data.removability_conceded,
+      JSON.stringify(data.applications || []),
+      !!data.asylum_fee_needed, !!data.biometrics_needed,
+      data.disposition || null, data.disposition_notes || null,
+      data.bond_outcome || null, data.bond_amount || null,
+      data.next_hearing_date || null, data.next_hearing_type || null,
+      JSON.stringify(data.deadlines || []),
+      data.raw_notes || null,
+      id,
+    ]
+  );
+  if (!r.rows[0]) throw new Error(`Note ${id} not found`);
+  return { id: r.rows[0].id, updated: true };
+}
+
+// Regenerate paralegal + client summaries for a saved master hearing.
+async function generateAndSaveSummariesForMaster(id) {
+  const note = await getNote(id);
+  if (!note) throw new Error(`Note ${id} not found`);
+  const [p, c] = await Promise.all([
+    generateParalegalSummary(note),
+    generateClientSummary(note),
+  ]);
+  await db.query(
+    `UPDATE hearing_notes SET paralegal_summary=$1, client_summary=$2 WHERE id=$3`,
+    [p, c, id]
+  );
+  return { paralegal_summary: p, client_summary: c };
+}
+
 async function listNotes(limit = 50) {
   await initHearingNotesTables();
   const r = await db.query(
@@ -781,14 +835,11 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   <a href="/admin/hearing/notes" class="nav-item ${notesActive}" style="background:rgba(183,156,98,.08); ${notesActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">📝</span><span>→ Master Hearing Notes</span>
   </a>
-  <a href="/admin/hearing/notes/history" class="nav-item ${historyActive}" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
-    <span class="icon">📚</span><span>Master History</span>
-  </a>
   <a href="/admin/hearing/individual" class="nav-item ${indivActive}" style="background:rgba(183,156,98,.08); ${indivActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">⚖️</span><span>→ Individual Hearing Notes</span>
   </a>
-  <a href="/admin/hearing/individual/history" class="nav-item ${indivHistActive}" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
-    <span class="icon">📖</span><span>Individual History</span>
+  <a href="/admin/hearing/history" class="nav-item ${historyActive}" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+    <span class="icon">📚</span><span>All Hearing History</span>
   </a>
   <a href="/admin/email-setup" class="nav-item" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">📬</span><span>Email Setup</span>
@@ -840,7 +891,16 @@ const APPLICATION_OPTIONS = [
   "Other",
 ];
 
-function renderNoteForm({ generated = null, saved = false, sent = null, error = null, prev = {} } = {}) {
+function renderNoteForm({ noteId = null, generated = null, saved = false, sent = null, error = null, prev = {} } = {}) {
+  const isEdit = !!noteId;
+  // When editing, auto-show saved summaries (like individual hearing form does)
+  if (isEdit && !generated && (prev.paralegal_summary || prev.client_summary)) {
+    generated = {
+      id: noteId,
+      paralegal_summary: prev.paralegal_summary || "",
+      client_summary: prev.client_summary || "",
+    };
+  }
   const langOptions = [
     { v: "en", l: "English" },
     { v: "zh", l: "中文 (Chinese)" },
@@ -897,7 +957,7 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
 
   const body = `
   <div class="page-header">
-    <h1>📝 Hearing Notes</h1>
+    <h1>📝 Hearing Notes${isEdit ? ` — Editing #${noteId}` : ""}</h1>
   </div>
   <p style="margin-bottom:15px; color:#555;">Take notes during the hearing. Zara will clean them up and generate a paralegal summary + client-friendly summary in the client's language.</p>
 
@@ -924,7 +984,7 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
   ${errorSection}
   ${previewSection}
 
-  <form method="POST" action="/admin/hearing/notes" id="hearing-form">
+  <form method="POST" action="/admin/hearing/notes${isEdit ? "/" + noteId : ""}" id="hearing-form">
     <fieldset>
       <legend>Client & Hearing</legend>
       <div class="row">
@@ -1111,14 +1171,21 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
     </fieldset>
 
     <div class="button-row">
-      <button type="submit" name="action" value="preview">✨ Generate Summaries (Preview)</button>
-      <button type="submit" name="action" value="save">💾 Generate + Save</button>
-      <button type="reset" class="secondary">Clear form</button>
+      ${isEdit ? `
+        <button type="submit" name="action" value="update" style="background:#B79C62; color:white;">💾 Update</button>
+        <button type="submit" name="action" value="update_and_regenerate" style="background:#0C1C36; color:white;">💾 Update + Regenerate Summaries</button>
+        <a href="/admin/hearing/notes" style="background:#eee; color:#333; padding:12px 24px; border-radius:4px; text-decoration:none; font-size:15px;">+ New note</a>
+        <button type="button" onclick="deleteThisNote(${noteId}, ${JSON.stringify(prev.client_name || "").replace(/"/g, "&quot;")})" style="background:#c00; color:white; padding:12px 20px; border:none; border-radius:4px; cursor:pointer; font-size:14px; margin-left:auto;">🗑️ Delete note</button>
+      ` : `
+        <button type="submit" name="action" value="preview">✨ Generate Summaries (Preview)</button>
+        <button type="submit" name="action" value="save">💾 Generate + Save</button>
+        <button type="reset" class="secondary">Clear form</button>
+      `}
     </div>
   </form>
 
   <p style="margin-top:30px; color:#888; font-size:13px;">
-    <a href="/admin/hearing/notes/history" class="back-link">View past hearing notes →</a>
+    <a href="/admin/hearing/history" class="back-link">View all hearing notes →</a>
   </p>
 
   <script>
@@ -1171,6 +1238,21 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
       } catch (e) {
         status.textContent = "❌ " + e.message;
         status.style.color = "#c00";
+      }
+    }
+
+    async function deleteThisNote(id, clientName) {
+      if (!confirm("Delete hearing note #" + id + " for " + clientName + "?\\n\\nThis cannot be undone.")) return;
+      try {
+        const resp = await fetch("/admin/hearing/notes/" + id, { method: "DELETE" });
+        const data = await resp.json();
+        if (data.ok) {
+          window.location.href = "/admin/hearing/history";
+        } else {
+          alert("❌ Delete failed: " + (data.error || "unknown error"));
+        }
+      } catch (e) {
+        alert("❌ Delete error: " + e.message);
       }
     }
 
@@ -1675,6 +1757,8 @@ function escapeAttr(s) { return escapeHtml(s); }
 module.exports = {
   initHearingNotesTables,
   saveNote,
+  updateNote,
+  generateAndSaveSummariesForMaster,
   listNotes,
   getNote,
   deleteNote,
