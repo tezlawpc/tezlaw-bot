@@ -232,6 +232,291 @@ Rules:
   return extracted;
 }
 
+// ── AI Summary Generation ────────────────────────────────
+
+async function generateParalegalSummary(data) {
+  const structured = buildStructuredForAI(data);
+
+  const prompt = `You are cleaning up individual (merits) hearing notes for the legal team at Tez Law, P.C.
+
+The attorney (JJ Zhang) prepared and used these notes for an individual/merits hearing. Your job is to produce a clean, professional summary the team can use to update the case file and take follow-up action.
+
+Rules:
+- Complete and detailed — include ALL material information
+- Structured with clear headings for each section
+- Professional attorney-to-team tone (efficient, factual)
+- Preserve ALL specific dates, exhibit numbers, deadlines, and witness names exactly
+- Summarize witness testimony as narrative (don't dump every Q&A row) — capture the substance of what was covered
+- Do NOT invent or embellish — only use what's in the notes
+- Use bullet points where appropriate for scannability
+- End with an "Action Items" section listing follow-up tasks
+
+Structured hearing data:
+${structured}
+
+Produce the paralegal summary now. Start directly with the summary — no preamble.`;
+
+  try {
+    const resp = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      { model: ANTHROPIC_MODEL, max_tokens: 3000, messages: [{ role: "user", content: prompt }] },
+      {
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        timeout: 60000,
+      }
+    );
+    return resp.data.content?.[0]?.text?.trim() || "(summary generation failed)";
+  } catch (e) {
+    console.error("[individual-hearing] Paralegal summary error:", e.message);
+    return `AI cleanup unavailable. Structured notes:\n\n${structured}`;
+  }
+}
+
+async function generateClientSummary(data) {
+  const lang = data.client_language || "en";
+  const langNames = {
+    en: "English",
+    zh: "Simplified Chinese (中文)",
+    es: "Spanish (Español)",
+    hi: "Hindi (हिन्दी)",
+    pa: "Punjabi (ਪੰਜਾਬੀ)",
+  };
+  const languageName = langNames[lang] || "English";
+  const structured = buildStructuredForAI(data);
+
+  const prompt = `You are writing a client-friendly summary of an immigration individual (merits) hearing in ${languageName}.
+
+The client attended their individual hearing today with attorney JJ Zhang of Tez Law, P.C. Your job is to write a warm but professional summary explaining what happened and what comes next.
+
+Rules:
+- Write ENTIRELY in ${languageName}
+- Plain language — no legalese, no Latin phrases, no complex procedural terminology
+- Warm and reassuring tone but professional
+- Focus on: what happened at the hearing, what the client said/showed, what the judge decided (if anything), and what happens next
+- Do NOT walk through every question and answer — summarize testimony as narrative
+- Include specific dates and deadlines with clear context
+- Do NOT invent information — only what's in the notes
+- End with attorney contact info: "If you have questions, please contact us at 626-678-8677 or jj@tezlawfirm.com" (translated)
+- Address the client directly ("You" / "您" / "Usted" / "आप" / "ਤੁਸੀਂ")
+- Sign off with "Sincerely, Attorney JJ Zhang, Tez Law, P.C." (translated)
+
+Client name: ${data.client_name}
+
+Hearing details (in English — you translate the meaningful parts):
+${structured}
+
+Produce the client summary in ${languageName} now. Start directly with the greeting.`;
+
+  try {
+    const resp = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      { model: ANTHROPIC_MODEL, max_tokens: 3000, messages: [{ role: "user", content: prompt }] },
+      {
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        timeout: 60000,
+      }
+    );
+    return resp.data.content?.[0]?.text?.trim() || "(summary generation failed)";
+  } catch (e) {
+    console.error("[individual-hearing] Client summary error:", e.message);
+    return "(AI summary unavailable — please write manually)";
+  }
+}
+
+function buildStructuredForAI(data) {
+  const lines = [
+    `Client: ${data.client_name || "(not provided)"}`,
+    `A-Number: ${data.a_number || "(not provided)"}`,
+    `Client language: ${data.client_language || "en"}`,
+    `Case type: ${data.case_type || "(not specified)"}`,
+    `Hearing date: ${data.hearing_date ? new Date(data.hearing_date).toLocaleString() : "(not provided)"}`,
+    `Judge: ${data.judge_name || "(not noted)"}`,
+    `Court: ${data.court_location || "(not noted)"}`,
+    `Court address: ${data.court_address || "(not noted)"}`,
+    `DHS Trial Attorney: ${data.dhs_attorney || "(not noted)"}`,
+    "",
+  ];
+
+  // Exhibits
+  const exhibits = data.exhibits || [];
+  if (exhibits.length) {
+    lines.push(`EXHIBITS (${exhibits.length} total):`);
+    for (const e of exhibits) {
+      const parts = [`#${e.number || "?"}`, e.description || "(no description)"];
+      const flags = [];
+      if (e.offered_by) flags.push(`offered by ${e.offered_by}`);
+      if (e.marked)     flags.push(`marked: ${e.marked}`);
+      if (e.admitted)   flags.push(`admitted: ${e.admitted}`);
+      if (e.objection)  flags.push(`objection: ${e.objection}`);
+      if (e.bates)      flags.push(`bates: ${e.bates}`);
+      lines.push(`  - ${parts.join(": ")}${flags.length ? " [" + flags.join("; ") + "]" : ""}`);
+    }
+    lines.push("");
+  } else {
+    lines.push("EXHIBITS: (none)");
+    lines.push("");
+  }
+
+  if (data.evidence_objections) {
+    lines.push("OBJECTIONS ON EVIDENCE:");
+    lines.push(data.evidence_objections);
+    lines.push("");
+  }
+
+  if (data.pre_examination_notes) {
+    lines.push("PRE-EXAMINATION NOTES:");
+    lines.push(data.pre_examination_notes);
+    lines.push("");
+  }
+
+  // Examinations
+  const exams = data.examinations || [];
+  if (exams.length) {
+    lines.push(`WITNESS EXAMINATIONS (${exams.length}):`);
+    for (const ex of exams) {
+      lines.push(`\n${ex.witness || "(unnamed witness)"} — ${ex.examination_type || "examination"}`);
+      const rows = (ex.qa_rows || []).filter(r => r.question || r.expected_answer || r.judge_notes);
+      if (rows.length) {
+        for (const r of rows) {
+          if (r.question) lines.push(`  Q: ${r.question}`);
+          if (r.expected_answer) lines.push(`  A: ${r.expected_answer}`);
+          if (r.judge_notes) lines.push(`  [Judge/Notes]: ${r.judge_notes}`);
+          lines.push("");
+        }
+      } else {
+        lines.push("  (no Q&A recorded)");
+      }
+    }
+  } else {
+    lines.push("WITNESS EXAMINATIONS: (none recorded)");
+  }
+  lines.push("");
+
+  if (data.closing_argument) {
+    lines.push("CLOSING ORAL ARGUMENT:");
+    lines.push(data.closing_argument);
+    lines.push("");
+  }
+
+  if (data.disposition) {
+    lines.push("DISPOSITION:");
+    lines.push(`  ${data.disposition}`);
+    if (data.disposition_notes) lines.push(`  Notes: ${data.disposition_notes}`);
+    lines.push("");
+  }
+
+  if (data.next_action_deadline) {
+    lines.push(`NEXT ACTION DEADLINE: ${data.next_action_deadline}`);
+  }
+
+  return lines.join("\n");
+}
+
+// ── Save summaries separately ─────────────────────────────
+
+async function saveSummaries(id, paralegal_summary, client_summary) {
+  await initTables();
+  await db.query(
+    `UPDATE individual_hearing_notes
+     SET paralegal_summary = $1, client_summary = $2, updated_at = NOW()
+     WHERE id = $3`,
+    [paralegal_summary, client_summary, id]
+  );
+}
+
+// Generate both summaries for a saved note
+async function generateAndSaveSummaries(id) {
+  const note = await getIndividualNote(id);
+  if (!note) throw new Error(`Note ${id} not found`);
+  const [p, c] = await Promise.all([
+    generateParalegalSummary(note),
+    generateClientSummary(note),
+  ]);
+  await saveSummaries(id, p, c);
+  return { paralegal_summary: p, client_summary: c };
+}
+
+// ── Send To Team Group ────────────────────────────────────
+
+async function sendToTeamGroup(id) {
+  const note = await getIndividualNote(id);
+  if (!note) throw new Error(`Note ${id} not found`);
+  if (!note.paralegal_summary) throw new Error("No paralegal summary generated yet. Click Generate Summaries first.");
+
+  const rawRecipient =
+    process.env.HEARING_NOTES_TELEGRAM_GROUP_ID ||
+    process.env.HEARING_NOTES_TELEGRAM_ID ||
+    process.env.RECIPIENT_JUE_TELEGRAM_ID ||
+    process.env.RECIPIENT_JUE_TELEGRAM;
+  const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+
+  if (!rawRecipient || !telegramToken) {
+    throw new Error("Telegram not configured. Set HEARING_NOTES_TELEGRAM_GROUP_ID env var.");
+  }
+
+  let chatId = null;
+  const trimmed = String(rawRecipient).trim();
+  if (/^-?\d+$/.test(trimmed)) {
+    chatId = trimmed;
+  } else {
+    const withAt = trimmed.startsWith("@") ? trimmed : "@" + trimmed;
+    try {
+      const resp = await axios.get(
+        `https://api.telegram.org/bot${telegramToken}/getChat`,
+        { params: { chat_id: withAt }, timeout: 10000 }
+      );
+      if (resp.data && resp.data.ok && resp.data.result?.id) chatId = String(resp.data.result.id);
+    } catch (e) {
+      const detail = e.response?.data?.description || e.message;
+      throw new Error(`Could not resolve Telegram target ${withAt}: ${detail}`);
+    }
+    if (!chatId) throw new Error(`Could not resolve Telegram target ${withAt}`);
+  }
+
+  const header = `⚖️ *Individual Hearing Notes — ${note.client_name}*\nA#: ${note.a_number || "(none)"}\nHearing: ${note.hearing_date ? new Date(note.hearing_date).toLocaleDateString() : "(not set)"}\nJudge: ${note.judge_name || "(not noted)"}\n\n`;
+  const message = header + note.paralegal_summary;
+
+  const chunks = [];
+  const MAX = 4000;
+  let remaining = message;
+  while (remaining.length > MAX) {
+    let cut = remaining.lastIndexOf("\n\n", MAX);
+    if (cut < 1000) cut = remaining.lastIndexOf("\n", MAX);
+    if (cut < 1000) cut = MAX;
+    chunks.push(remaining.substring(0, cut));
+    remaining = remaining.substring(cut).trim();
+  }
+  if (remaining) chunks.push(remaining);
+
+  for (const chunk of chunks) {
+    try {
+      await axios.post(
+        `https://api.telegram.org/bot${telegramToken}/sendMessage`,
+        { chat_id: chatId, text: chunk, parse_mode: "Markdown" },
+        { timeout: 15000 }
+      );
+    } catch (e) {
+      const detail = e.response?.data?.description || e.message;
+      const hint = detail.includes("chat not found") ? " (Make sure @TEZJJBot is in the group.)" : "";
+      throw new Error(`Telegram send failed: ${detail}.${hint}`);
+    }
+  }
+
+  await db.query(
+    `UPDATE individual_hearing_notes SET sent_to_paralegal_at = NOW() WHERE id = $1`,
+    [id]
+  );
+  return { sent: true, chunks: chunks.length };
+}
+
 // ── Storage ──────────────────────────────────────────────
 
 async function saveIndividualNote(data, id = null) {
@@ -572,11 +857,41 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false } = 
         <input type="date" name="next_action_deadline" value="${escapeAttr(prev.next_action_deadline ? String(prev.next_action_deadline).substring(0, 10) : "")}">
       </fieldset>
 
-      <div style="margin-top:20px; display:flex; gap:10px;">
+      <div style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
         <button type="submit" style="background:#B79C62; color:white; padding:12px 28px; border:none; border-radius:4px; cursor:pointer; font-size:15px;">💾 ${isEdit ? "Update" : "Save"}</button>
         ${isEdit ? `<a href="/admin/hearing/individual" style="background:#eee; color:#333; padding:12px 28px; border-radius:4px; text-decoration:none; font-size:15px;">+ New</a>` : ""}
+        ${isEdit ? `
+          <button type="button" onclick="generateSummaries(${noteId})" style="background:#0C1C36; color:white; padding:12px 20px; border:none; border-radius:4px; cursor:pointer; font-size:14px;">✨ Generate Summaries</button>
+          <span id="gen-status" style="font-size:13px;"></span>
+          <button type="button" onclick="deleteThisNote(${noteId}, ${JSON.stringify(prev.client_name || "").replace(/"/g, "&quot;")})" style="background:#c00; color:white; padding:12px 20px; border:none; border-radius:4px; cursor:pointer; font-size:14px; margin-left:auto;">🗑️ Delete note</button>
+        ` : ""}
       </div>
     </form>
+
+    ${isEdit && (prev.paralegal_summary || prev.client_summary) ? `
+    <div id="summaries-section" style="margin-top:30px;">
+      <h2 style="color:#B79C62; border-bottom:2px solid #B79C62; padding-bottom:6px;">Generated Summaries</h2>
+
+      <div style="background:#f5f9ff; padding:20px; margin:15px 0; border-left:4px solid #0C1C36; border-radius:4px;">
+        <h3 style="margin-top:0;">📋 Paralegal Summary (English, detailed)</h3>
+        <pre id="paralegal-content" style="white-space:pre-wrap; font-family:inherit; margin:0; background:white; padding:15px; border-radius:4px;">${escapeHtml(prev.paralegal_summary || "(not generated)")}</pre>
+        <div style="margin-top:12px;">
+          <button type="button" onclick="copyEl('paralegal-content')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Paralegal Summary</button>
+          <button type="button" onclick="sendToTeam(${noteId})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 ${prev.sent_to_paralegal_at ? "Re-send" : "Send"} to team group</button>
+          <span id="send-status" style="margin-left:12px; font-weight:bold;"></span>
+        </div>
+      </div>
+
+      <div style="background:#fdf7f0; padding:20px; margin:15px 0; border-left:4px solid #B79C62; border-radius:4px;">
+        <h3 style="margin-top:0;">👤 Client Summary (in client's language)</h3>
+        <pre id="client-content" style="white-space:pre-wrap; font-family:inherit; margin:0; background:white; padding:15px; border-radius:4px;">${escapeHtml(prev.client_summary || "(not generated)")}</pre>
+        <div style="margin-top:12px;">
+          <button type="button" onclick="copyEl('client-content')" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Client Summary</button>
+          <span style="margin-left:12px; color:#666; font-size:13px;">Paste into WhatsApp, email, iMessage, etc.</span>
+        </div>
+      </div>
+    </div>
+    ` : ""}
 
     <script>
       const INITIAL_EXHIBITS = ${JSON.stringify(exhibits)};
@@ -784,6 +1099,73 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false } = 
           status.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
         }
       }
+
+      // ── Generate summaries ──────────────────────────────
+      async function generateSummaries(id) {
+        const status = document.getElementById("gen-status");
+        status.innerHTML = '<span style="color:#666;">⏳ Generating summaries... 15-30s</span>';
+        try {
+          const resp = await fetch("/admin/hearing/individual/" + id + "/generate-summaries", { method: "POST" });
+          const data = await resp.json();
+          if (data.ok) {
+            status.innerHTML = '<span style="color:#4CAF50;">✅ Summaries generated. Reloading...</span>';
+            setTimeout(() => window.location.reload(), 800);
+          } else {
+            status.innerHTML = '<span style="color:#c00;">❌ ' + (data.error || "Generation failed") + '</span>';
+          }
+        } catch (e) {
+          status.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
+        }
+      }
+
+      // ── Send to team group ──────────────────────────────
+      async function sendToTeam(id) {
+        const status = document.getElementById("send-status");
+        status.textContent = "Sending...";
+        status.style.color = "#666";
+        try {
+          const resp = await fetch("/admin/hearing/individual/" + id + "/send-paralegal", { method: "POST" });
+          const data = await resp.json();
+          if (data.ok) {
+            status.textContent = "✅ Sent to team group";
+            status.style.color = "#4CAF50";
+          } else {
+            status.textContent = "❌ " + (data.error || "Send failed");
+            status.style.color = "#c00";
+          }
+        } catch (e) {
+          status.textContent = "❌ " + e.message;
+          status.style.color = "#c00";
+        }
+      }
+
+      // ── Delete note ─────────────────────────────────────
+      async function deleteThisNote(id, clientName) {
+        if (!confirm("Delete individual hearing note #" + id + " for " + clientName + "?\\n\\nThis cannot be undone.")) return;
+        try {
+          const resp = await fetch("/admin/hearing/individual/" + id, { method: "DELETE" });
+          const data = await resp.json();
+          if (data.ok) {
+            window.location.href = "/admin/hearing/individual/history";
+          } else {
+            alert("❌ Delete failed: " + (data.error || "unknown error"));
+          }
+        } catch (e) {
+          alert("❌ Delete error: " + e.message);
+        }
+      }
+
+      // ── Copy helper ─────────────────────────────────────
+      function copyEl(id) {
+        const el = document.getElementById(id);
+        navigator.clipboard.writeText(el.textContent);
+        const status = document.createElement("span");
+        status.textContent = " ✅ Copied";
+        status.style.color = "#4CAF50";
+        status.style.marginLeft = "8px";
+        el.parentElement.appendChild(status);
+        setTimeout(() => status.remove(), 2000);
+      }
     </script>`;
 
   return hearingNotes.renderAdminChrome({
@@ -806,8 +1188,15 @@ function isoToLocal(iso) {
 // ── History page ─────────────────────────────────────────
 
 function renderHistoryPage(notes) {
-  const rows = notes.length ? notes.map(n => `
-    <tr>
+  const rows = notes.length ? notes.map(n => {
+    const sentClass = n.sent_to_paralegal_at ? "sent" : "unsent";
+    return `
+    <tr class="ih-row"
+        data-name="${escapeAttr((n.client_name || "").toLowerCase())}"
+        data-anumber="${escapeAttr((n.a_number || "").toLowerCase().replace(/[-\s]/g, ""))}"
+        data-judge="${escapeAttr((n.judge_name || "").toLowerCase())}"
+        data-sent="${sentClass}"
+        data-lang="${escapeAttr(n.client_language || "")}">
       <td>#${n.id}</td>
       <td>${escapeHtml(n.client_name)}</td>
       <td>${escapeHtml(n.a_number || "")}</td>
@@ -821,13 +1210,51 @@ function renderHistoryPage(notes) {
         &nbsp;·&nbsp;
         <a href="#" onclick="delRow(${n.id}, ${JSON.stringify(n.client_name).replace(/"/g, '&quot;')}); return false;" style="color:#c00; font-size:12px;">🗑️</a>
       </td>
-    </tr>`).join("") : `<tr><td colspan="9" style="text-align:center; color:#888;">No individual hearing notes yet.</td></tr>`;
+    </tr>`;
+  }).join("") : `<tr id="no-data-row"><td colspan="9" style="text-align:center; color:#888;">No individual hearing notes yet.</td></tr>`;
 
   const body = `
     <div class="page-header">
       <h1>📖 Individual Hearing History</h1>
       <a href="/admin/hearing/individual" class="back-link">← Back to prep tool</a>
     </div>
+
+    <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #eee;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+        <div style="flex:1; min-width:260px;">
+          <input type="text" id="search-input" placeholder="🔍 Search by client name or A-Number..."
+                 onkeyup="filterRows()"
+                 style="width:100%; padding:9px 12px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+        </div>
+        <div>
+          <select id="filter-sent" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+            <option value="">All</option>
+            <option value="sent">Sent to team ✅</option>
+            <option value="unsent">Not sent</option>
+          </select>
+        </div>
+        <div>
+          <select id="filter-lang" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+            <option value="">All languages</option>
+            <option value="en">English</option>
+            <option value="zh">Chinese</option>
+            <option value="es">Spanish</option>
+            <option value="hi">Hindi</option>
+            <option value="pa">Punjabi</option>
+          </select>
+        </div>
+        <div>
+          <button type="button" onclick="clearFilters()"
+                  style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">
+            Clear
+          </button>
+        </div>
+      </div>
+      <div id="row-count" style="margin-top:10px; font-size:13px; color:#666;">
+        Showing ${notes.length} note${notes.length === 1 ? "" : "s"}
+      </div>
+    </div>
+
     <table>
       <thead>
         <tr>
@@ -835,16 +1262,53 @@ function renderHistoryPage(notes) {
           <th>Judge</th><th>Lang</th><th>Sent</th><th>Created</th><th></th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody id="rows-body">${rows}</tbody>
     </table>
+
     <script>
+      const TOTAL = ${notes.length};
+      function filterRows() {
+        const search = document.getElementById("search-input").value.toLowerCase().replace(/[-\\s]/g, "");
+        const sent = document.getElementById("filter-sent").value;
+        const lang = document.getElementById("filter-lang").value;
+        let visible = 0;
+        document.querySelectorAll(".ih-row").forEach(row => {
+          const name = row.dataset.name || "";
+          const anumber = row.dataset.anumber || "";
+          const judge = row.dataset.judge || "";
+          const rowSent = row.dataset.sent || "";
+          const rowLang = row.dataset.lang || "";
+          const matchesSearch = !search || name.includes(search) || anumber.includes(search) || judge.includes(search);
+          const matchesSent = !sent || rowSent === sent;
+          const matchesLang = !lang || rowLang === lang;
+          const show = matchesSearch && matchesSent && matchesLang;
+          row.style.display = show ? "" : "none";
+          if (show) visible++;
+        });
+        const count = document.getElementById("row-count");
+        if (visible === TOTAL) count.textContent = "Showing " + TOTAL + " note" + (TOTAL === 1 ? "" : "s");
+        else count.textContent = "Showing " + visible + " of " + TOTAL + " notes";
+      }
+      function clearFilters() {
+        document.getElementById("search-input").value = "";
+        document.getElementById("filter-sent").value = "";
+        document.getElementById("filter-lang").value = "";
+        filterRows();
+      }
       async function delRow(id, name) {
         if (!confirm("Delete individual hearing note #" + id + " for " + name + "?")) return;
         try {
           const resp = await fetch("/admin/hearing/individual/" + id, { method: "DELETE" });
           const data = await resp.json();
-          if (data.ok) window.location.reload();
-          else alert("❌ " + (data.error || "delete failed"));
+          if (data.ok) {
+            const rows = document.querySelectorAll('.ih-row');
+            for (const r of rows) {
+              if (r.querySelector('a[href*="/' + id + '"]')) { r.remove(); break; }
+            }
+            filterRows();
+          } else {
+            alert("❌ " + (data.error || "delete failed"));
+          }
         } catch (e) { alert("❌ " + e.message); }
       }
     </script>`;
@@ -876,6 +1340,10 @@ module.exports = {
   getIndividualNote,
   deleteIndividualNote,
   parseFormSubmission,
+  generateParalegalSummary,
+  generateClientSummary,
+  generateAndSaveSummaries,
+  sendToTeamGroup,
   renderForm,
   renderHistoryPage,
 };
