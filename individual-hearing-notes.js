@@ -31,7 +31,8 @@ const XLSX = require("xlsx");
 const hearingNotes = require("./hearing-notes");
 
 const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
-const EXTRACT_MODEL   = "claude-sonnet-4-6";
+const EXTRACT_MODEL   = "claude-sonnet-4-6";  // used for PDF extraction (needs vision reasoning)
+const TEXT_EXTRACT_MODEL = "claude-haiku-4-5-20251001";  // 5-10x faster for text-only extraction from Word/txt
 
 // ── Schema ───────────────────────────────────────────────
 
@@ -208,6 +209,7 @@ Rules:
 - If the doc has only exam Q's, return with empty closing_argument string.
 - Do not invent content. Empty structures are fine.`;
 
+  const isTextMode = !pdfBuffer && !!textContent;
   const messages = [];
   if (pdfBuffer && mimeType && mimeType.includes("pdf")) {
     messages.push({
@@ -218,28 +220,44 @@ Rules:
       ],
     });
   } else if (textContent) {
+    // Clean up mammoth-extracted text: collapse whitespace, remove tab/space
+    // sequences that add noise without meaning. Preserves paragraph breaks.
+    const cleanedText = String(textContent)
+      .replace(/[ \t]+/g, " ")            // collapse runs of tabs/spaces
+      .replace(/\n{3,}/g, "\n\n")         // collapse 3+ newlines to 2
+      .replace(/^\s+|\s+$/gm, "")         // trim each line
+      .trim();
     messages.push({
       role: "user",
-      content: `${prompt}\n\n=== HEARING SUMMARY DOCUMENT ===\n\n${textContent}`,
+      content: `${prompt}\n\n=== HEARING SUMMARY DOCUMENT ===\n\n${cleanedText}`,
     });
   } else {
     throw new Error("Provide either pdfBuffer (with mimeType) or textContent.");
   }
 
+  // Model selection: PDF uses Sonnet (needs vision reasoning). Plain text uses
+  // Haiku 4.5 which is 5-10x faster and plenty capable for structured extraction
+  // from already-plain text. This was blowing the 3-min timeout with Sonnet.
+  const modelForCall = isTextMode ? TEXT_EXTRACT_MODEL : EXTRACT_MODEL;
+  const startedAt = Date.now();
+
   const resp = await axios.post(
     "https://api.anthropic.com/v1/messages",
     // 16000 tokens ≈ 12000 words — enough for a comprehensive merits hearing prep doc
     // (multiple witnesses, extensive Q&A, full closing argument). 4000 was truncating.
-    { model: EXTRACT_MODEL, max_tokens: 16000, messages },
+    { model: modelForCall, max_tokens: 16000, messages },
     {
       headers: {
         "x-api-key": process.env.ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
-      timeout: 180000,
+      // 5-minute timeout as safety net; Haiku typically finishes in 20-40 seconds.
+      timeout: 300000,
     }
   );
+  const elapsedMs = Date.now() - startedAt;
+  console.log(`[extract-summary] ${modelForCall} completed in ${elapsedMs}ms (${(elapsedMs / 1000).toFixed(1)}s)`);
 
   const text = resp.data.content?.[0]?.text?.trim() || "{}";
   const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
