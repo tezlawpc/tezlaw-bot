@@ -2311,6 +2311,34 @@ app.delete("/admin/hearing/individual/:id", async (req, res) => {
   }
 });
 
+// Generate AI paralegal + client summaries for a saved individual hearing
+app.post("/admin/hearing/individual/:id/generate-summaries", async (req, res) => {
+  try {
+    const ih = require("./individual-hearing-notes");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+    const result = await ih.generateAndSaveSummaries(id);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[individual generate-summaries]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Send paralegal summary of an individual hearing to team Telegram group
+app.post("/admin/hearing/individual/:id/send-paralegal", async (req, res) => {
+  try {
+    const ih = require("./individual-hearing-notes");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+    const result = await ih.sendToTeamGroup(id);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[individual send-paralegal]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Extract hearing summary from PDF or text file
 app.post("/admin/hearing/individual/extract-summary", docUpload.single("summary"), async (req, res) => {
   try {
