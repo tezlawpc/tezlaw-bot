@@ -8,9 +8,12 @@
 //    2. Client summary — in client's language, plain language
 //
 //  Delivery:
-//    - Paralegal: Telegram to Jue (via RECIPIENT_JUE_TELEGRAM_ID)
+//    - Team group: Telegram group chat via HEARING_NOTES_TELEGRAM_GROUP_ID
+//      (add @TEZJJBot to the group, use /chatid in the group to get the ID)
 //    - Client: copy-to-clipboard (paste into WhatsApp, email, etc.)
 //    - Both: copy buttons available always
+//
+//  Backward-compat: still honors RECIPIENT_JUE_TELEGRAM_ID as fallback.
 //
 //  No SMTP send yet (waiting on GoDaddy resolution).
 // ============================================================
@@ -253,7 +256,7 @@ async function generateParalegalSummary(data) {
 
   const prompt = `You are cleaning up immigration court hearing notes for a paralegal at Tez Law, P.C.
 
-The attorney (JJ Zhang) took these notes during the hearing. Your job is to produce a clean, professional summary the paralegal (Jue Wang) can use to update the case file.
+The attorney (JJ Zhang) took these notes during the hearing. Your job is to produce a clean, professional summary the team (paralegals, associates) can use to update the case file and take follow-up action.
 
 Rules:
 - Complete and detailed — include ALL information provided
@@ -263,7 +266,7 @@ Rules:
 - Do NOT invent or embellish — only use what's in the notes
 - Do NOT add "Please note" or "Kindly" language — direct and efficient
 - Use bullet points where appropriate for scannability
-- End with an "Action Items" section listing what the paralegal needs to do
+- End with an "Action Items" section listing what the team needs to do
 
 Structured hearing data:
 ${structured}
@@ -508,21 +511,26 @@ async function sendToParalegal(id) {
   if (!note) throw new Error(`Note ${id} not found`);
   if (!note.paralegal_summary) throw new Error("No paralegal summary generated");
 
-  const rawRecipient = process.env.RECIPIENT_JUE_TELEGRAM_ID || process.env.RECIPIENT_JUE_TELEGRAM;
+  // Prefer group chat, fall back to individual recipient for backward compat
+  const rawRecipient =
+    process.env.HEARING_NOTES_TELEGRAM_GROUP_ID ||
+    process.env.HEARING_NOTES_TELEGRAM_ID ||
+    process.env.RECIPIENT_JUE_TELEGRAM_ID ||
+    process.env.RECIPIENT_JUE_TELEGRAM;
   const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 
   if (!rawRecipient || !telegramToken) {
-    throw new Error("Telegram not configured. Set RECIPIENT_JUE_TELEGRAM_ID env var (either Jue's numeric user ID from @userinfobot, OR her @username — she must have started your bot first).");
+    throw new Error("Telegram not configured. Set HEARING_NOTES_TELEGRAM_GROUP_ID env var to the group's chat ID (send /chatid in the group to get it — group IDs start with -100).");
   }
 
-  // Resolve the recipient to a chat_id. If already numeric, use as-is.
-  // If it starts with @ or is a string username, try to resolve via getChat.
+  // Resolve to a chat_id. Numeric (positive or negative) is used as-is.
+  // Group chat IDs are negative (e.g. -1001234567890).
   let chatId = null;
   const trimmed = String(rawRecipient).trim();
   if (/^-?\d+$/.test(trimmed)) {
     chatId = trimmed;
   } else {
-    // Username path — needs @ prefix for getChat
+    // Legacy path: try @username resolution
     const withAt = trimmed.startsWith("@") ? trimmed : "@" + trimmed;
     try {
       const resp = await axios.get(
@@ -534,17 +542,16 @@ async function sendToParalegal(id) {
       }
     } catch (e) {
       const detail = e.response?.data?.description || e.message;
-      throw new Error(`Could not resolve Telegram user ${withAt}: ${detail}. She may need to message your bot first (@TEZJJBot), OR give me her numeric user ID from @userinfobot.`);
+      throw new Error(`Could not resolve Telegram target ${withAt}: ${detail}. For groups, send /chatid in the group to @TEZJJBot and use the returned numeric ID.`);
     }
     if (!chatId) {
-      throw new Error(`Could not resolve Telegram user ${withAt}. She may need to message your bot first.`);
+      throw new Error(`Could not resolve Telegram target ${withAt}.`);
     }
   }
 
   const header = `📋 *Hearing Notes — ${note.client_name}*\nA#: ${note.a_number || "(none)"}\nDate: ${note.hearing_date ? new Date(note.hearing_date).toLocaleDateString() : "(not set)"}\n\n`;
   const message = header + note.paralegal_summary;
 
-  // Telegram has a 4096 char limit per message
   const chunks = [];
   const MAX = 4000;
   let remaining = message;
@@ -570,7 +577,12 @@ async function sendToParalegal(id) {
       );
     } catch (e) {
       const detail = e.response?.data?.description || e.message;
-      throw new Error(`Telegram send failed: ${detail}. Recipient may need to message @TEZJJBot first to enable delivery.`);
+      const hint = detail.includes("chat not found")
+        ? " (Make sure @TEZJJBot is a member of the group.)"
+        : detail.includes("bot was blocked")
+        ? " (The user has blocked the bot.)"
+        : "";
+      throw new Error(`Telegram send failed: ${detail}.${hint}`);
     }
   }
 
@@ -777,7 +789,7 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
       <div style="margin-top:12px;">
         <button type="button" onclick="copyContent('paralegal-content')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Paralegal Summary</button>
         ${generated.id ? `
-        <button type="button" onclick="sendParalegal(${generated.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 Send to Jue via Telegram</button>
+        <button type="button" onclick="sendParalegal(${generated.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 Send to team group</button>
         <span id="send-status" style="margin-left:12px; font-weight:bold;"></span>
         ` : ""}
       </div>
@@ -793,7 +805,7 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
     </div>
 
     ${saved ? '<p style="color:#4CAF50; font-weight:bold;">✅ Saved to database.</p>' : ""}
-    ${sent ? `<p style="color:#4CAF50; font-weight:bold;">📤 Sent to Jue via Telegram (${sent.chunks} message${sent.chunks > 1 ? "s" : ""}).</p>` : ""}
+    ${sent ? `<p style="color:#4CAF50; font-weight:bold;">📤 Sent to team group (${sent.chunks} message${sent.chunks > 1 ? "s" : ""}).</p>` : ""}
   ` : "";
 
   const body = `
@@ -1063,7 +1075,7 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
         const resp = await fetch("/admin/hearing/notes/" + id + "/send-paralegal", { method: "POST" });
         const data = await resp.json();
         if (data.ok) {
-          status.textContent = "✅ Sent to Jue via Telegram";
+          status.textContent = "✅ Sent to team group";
           status.style.color = "#4CAF50";
         } else {
           status.textContent = "❌ " + (data.error || "Send failed");
@@ -1309,7 +1321,7 @@ function renderHistoryPage(notes) {
         <div>
           <select id="filter-sent" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
             <option value="">All</option>
-            <option value="sent">Sent to Jue ✅</option>
+            <option value="sent">Sent to team ✅</option>
             <option value="unsent">Not sent</option>
           </select>
         </div>
@@ -1443,14 +1455,14 @@ function renderDetailPage(note) {
       ${note.bond_outcome ? `<div style="margin:4px 0;"><strong>Bond:</strong> ${escapeHtml(note.bond_outcome)}${note.bond_amount ? ` — $${Number(note.bond_amount).toLocaleString()}` : ""}</div>` : ""}
       <div style="margin:4px 0;"><strong>Next hearing:</strong> ${note.next_hearing_date ? new Date(note.next_hearing_date).toLocaleString() : "not scheduled"} (${escapeHtml(note.next_hearing_type || "-")})</div>
       <div style="margin:4px 0;"><strong>Client language:</strong> ${note.client_language}</div>
-      <div style="margin:4px 0;"><strong>Sent to Jue:</strong> ${note.sent_to_paralegal_at ? new Date(note.sent_to_paralegal_at).toLocaleString() : "not sent"}</div>
+      <div style="margin:4px 0;"><strong>Sent to team:</strong> ${note.sent_to_paralegal_at ? new Date(note.sent_to_paralegal_at).toLocaleString() : "not sent"}</div>
       <div style="margin:4px 0;"><strong>Created:</strong> ${new Date(note.created_at).toLocaleString()}</div>
     </div>
 
     <h2 style="color:#B79C62; margin-top:30px;">Paralegal Summary</h2>
     <div style="margin-bottom:8px;">
       <button type="button" onclick="copyEl('paralegal-detail')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy</button>
-      <button type="button" onclick="sendParalegalDetail(${note.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 ${note.sent_to_paralegal_at ? "Re-send" : "Send"} to Jue via Telegram</button>
+      <button type="button" onclick="sendParalegalDetail(${note.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 ${note.sent_to_paralegal_at ? "Re-send" : "Send"} to team group</button>
       <span id="send-detail-status" style="margin-left:12px; font-weight:bold;"></span>
     </div>
     <pre id="paralegal-detail" style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.paralegal_summary || "(none)")}</pre>
@@ -1489,7 +1501,7 @@ function renderDetailPage(note) {
           const resp = await fetch("/admin/hearing/notes/" + id + "/send-paralegal", { method: "POST" });
           const data = await resp.json();
           if (data.ok) {
-            status.textContent = "✅ Sent to Jue via Telegram";
+            status.textContent = "✅ Sent to team group";
             status.style.color = "#4CAF50";
           } else {
             status.textContent = "❌ " + (data.error || "Send failed");
