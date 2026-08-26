@@ -2167,6 +2167,30 @@ app.post("/admin/hearing/notes/:id/send-paralegal", async (req, res) => {
   }
 });
 
+// I-589 upload + extract — uses multer memory storage, hands PDF to Claude for OCR
+const i589Upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 32 * 1024 * 1024 }, // 32 MB (Anthropic PDF limit)
+});
+app.post("/admin/hearing/notes/extract-i589", i589Upload.single("i589"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ ok: false, error: "No file uploaded (expected field name 'i589')" });
+    }
+    if (!req.file.mimetype || (!req.file.mimetype.includes("pdf") && !req.file.originalname.toLowerCase().endsWith(".pdf"))) {
+      return res.status(400).json({ ok: false, error: "File must be a PDF" });
+    }
+    console.log(`[i589-extract] Processing ${req.file.originalname} (${req.file.size} bytes)`);
+    const hn = require("./hearing-notes");
+    const extracted = await hn.extractI589FieldsFromPdf(req.file.buffer);
+    res.json({ ok: true, ...extracted });
+  } catch (err) {
+    console.error("[i589-extract]:", err.message);
+    const msg = err.response?.data?.error?.message || err.message;
+    res.status(500).json({ ok: false, error: msg });
+  }
+});
+
 // ── Voice call routes ─────────────────────────────────────
 app.post("/voice/incoming",          (req, res) => {
   const savedPrompt = app.locals.SYSTEM_PROMPT || null;
