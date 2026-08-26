@@ -2582,11 +2582,22 @@ app.post("/admin/hearing/individual/extract-summary", docUpload.single("summary"
             error: "Word document appears to be empty or contains only images.",
           });
         }
-        extracted = await ih.extractHearingSummary({ textContent: rawText, filename: name });
       } catch (e) {
         return res.status(400).json({
           ok: false,
           error: `Could not read Word document: ${e.message}. Try saving as PDF instead.`,
+        });
+      }
+      // Try the AI extraction — but if it fails, still return the raw text
+      // so the attorney can save it to the note and manually work from it.
+      try {
+        extracted = await ih.extractHearingSummary({ textContent: rawText, filename: name });
+      } catch (e) {
+        return res.status(200).json({
+          ok: true,
+          extracted: { witnesses: [], examinations: [], closing_argument: "", case_summary: "" },
+          raw_text: rawText,
+          warning: e.message,
         });
       }
     } else if (isText) {
