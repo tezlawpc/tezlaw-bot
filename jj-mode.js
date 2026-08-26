@@ -178,6 +178,14 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  `/notes send <id>` — send paralegal summary to team Telegram group",
       "  `/notes delete <id>` — permanently delete a hearing note",
       "",
+      "*⚖️ Individual Hearing Notes* (merits hearing prep + notes)",
+      "  Prep + note tool at: https://tezlaw-bot.onrender.com/admin/hearing/individual",
+      "  `/indiv list` — recent individual hearing notes",
+      "  `/indiv show <id>` — view paralegal summary",
+      "  `/indiv send <id>` — send to team Telegram group",
+      "  `/indiv generate <id>` — regenerate AI summaries",
+      "  `/indiv delete <id>` — permanently delete",
+      "",
       "*📥 Intake Agent (auto-runs for new leads)*",
       "  Zara asks new inquirers structured questions across all channels.",
       "  Alerts you via WhatsApp + email with HOT/WARM/COLD tag.",
@@ -580,6 +588,77 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     } catch (err) {
       console.error("[JJ-Mode] /notes error:", err.message);
       return { handled: true, message: `❌ /notes error: ${err.message}` };
+    }
+  }
+
+  // ── /indiv list|show|send|delete|generate — Individual Hearing Notes ─
+  //
+  //   /indiv list                — recent individual hearing notes
+  //   /indiv show <id>           — view one individual note's paralegal summary
+  //   /indiv send <id>           — send paralegal summary to team Telegram group
+  //   /indiv delete <id>         — delete an individual note
+  //   /indiv generate <id>       — regenerate AI summaries for a note
+  //
+  const indivFirstLine = lower.split("\n", 1)[0].trim();
+  const indivMatch = indivFirstLine.match(/^\/indiv(?:idual)?\s+(list|show|send|delete|generate)(?:\s+(.+))?\s*$/);
+  if (indivMatch) {
+    try {
+      const ih = require("./individual-hearing-notes");
+      const action = indivMatch[1];
+      const arg = (indivMatch[2] || "").trim();
+
+      if (action === "list") {
+        const rows = await ih.listIndividualNotes(20);
+        if (!rows.length) return { handled: true, message: "⚖️ No individual hearing notes yet.\n\nCreate one at: https://tezlaw-bot.onrender.com/admin/hearing/individual" };
+        const lines = rows.map(r => {
+          const hearing = r.hearing_date ? new Date(r.hearing_date).toLocaleDateString() : "?";
+          const sent = r.sent_to_paralegal_at ? "✅ sent" : "not sent";
+          return `#${r.id} · ${r.client_name} · ${hearing} · Judge ${r.judge_name || "?"} · ${sent}`;
+        });
+        return { handled: true, message: `⚖️ *Recent individual hearing notes:*\n\n${lines.join("\n")}\n\nDetail: \`/indiv show <id>\`\nSend to team: \`/indiv send <id>\`` };
+      }
+
+      if (action === "show") {
+        if (!arg) return { handled: true, message: "Usage: `/indiv show <id>`" };
+        const note = await ih.getIndividualNote(parseInt(arg));
+        if (!note) return { handled: true, message: `❌ Individual note #${arg} not found.` };
+        const summary = note.paralegal_summary || "(no summary generated — use `/indiv generate " + note.id + "`)";
+        const truncated = summary.length > 3000 ? summary.substring(0, 3000) + "\n...(truncated - view full at /admin/hearing/individual/" + note.id + ")" : summary;
+        return { handled: true, message: `⚖️ *Individual Hearing #${note.id} — ${note.client_name}*\nA#: ${note.a_number || "none"}\nJudge: ${note.judge_name || "?"}\n\n${truncated}` };
+      }
+
+      if (action === "send") {
+        if (!arg) return { handled: true, message: "Usage: `/indiv send <id>`" };
+        try {
+          const result = await ih.sendToTeamGroup(parseInt(arg));
+          return { handled: true, message: `✅ Sent individual hearing #${arg} to team Telegram group (${result.chunks} message${result.chunks > 1 ? "s" : ""}).` };
+        } catch (e) {
+          return { handled: true, message: `❌ Send failed: ${e.message}` };
+        }
+      }
+
+      if (action === "delete") {
+        if (!arg) return { handled: true, message: "Usage: `/indiv delete <id>`" };
+        try {
+          const result = await ih.deleteIndividualNote(parseInt(arg));
+          return { handled: true, message: `🗑️ Deleted individual hearing note #${result.id} (${result.client_name}).` };
+        } catch (e) {
+          return { handled: true, message: `❌ Delete failed: ${e.message}` };
+        }
+      }
+
+      if (action === "generate") {
+        if (!arg) return { handled: true, message: "Usage: `/indiv generate <id>`" };
+        try {
+          await ih.generateAndSaveSummaries(parseInt(arg));
+          return { handled: true, message: `✨ Generated summaries for individual hearing #${arg}. View: https://tezlaw-bot.onrender.com/admin/hearing/individual/${arg}` };
+        } catch (e) {
+          return { handled: true, message: `❌ Generate failed: ${e.message}` };
+        }
+      }
+    } catch (err) {
+      console.error("[JJ-Mode] /indiv error:", err.message);
+      return { handled: true, message: `❌ /indiv error: ${err.message}` };
     }
   }
 
