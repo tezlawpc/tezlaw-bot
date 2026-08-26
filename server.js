@@ -2156,15 +2156,7 @@ app.post("/admin/hearing/notes", async (req, res) => {
   }
 });
 
-app.get("/admin/hearing/notes/history", async (req, res) => {
-  try {
-    const hn = require("./hearing-notes");
-    const notes = await hn.listNotes(50);
-    res.send(hn.renderHistoryPage(notes));
-  } catch (err) {
-    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
-  }
-});
+app.get("/admin/hearing/notes/history", (req, res) => res.redirect("/admin/hearing/history"));
 
 app.get("/admin/hearing/notes/:id", async (req, res) => {
   try {
@@ -2172,8 +2164,38 @@ app.get("/admin/hearing/notes/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).send("Invalid id");
     const note = await hn.getNote(id);
-    res.send(hn.renderDetailPage(note));
+    if (!note) return res.status(404).send(`<h1>Not found</h1><p><a href="/admin/hearing/history">← Back to history</a></p>`);
+    res.send(hn.renderNoteForm({
+      noteId: id,
+      prev: note,
+      saved: req.query.saved === "1",
+    }));
   } catch (err) {
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// Update an existing master hearing note
+app.post("/admin/hearing/notes/:id", async (req, res) => {
+  try {
+    const hn = require("./hearing-notes");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).send("Invalid id");
+    const parsed = hn.parseFormSubmission(req.body);
+    if (!parsed.client_name) {
+      return res.send(hn.renderNoteForm({
+        noteId: id,
+        error: "Client name is required.",
+        prev: { ...parsed, id },
+      }));
+    }
+    await hn.updateNote(id, parsed);
+    if (req.body.action === "update_and_regenerate") {
+      await hn.generateAndSaveSummariesForMaster(id);
+    }
+    res.redirect(`/admin/hearing/notes/${id}?saved=1`);
+  } catch (err) {
+    console.error("[/admin/hearing/notes/:id POST]:", err.message);
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
   }
 });
@@ -2237,15 +2259,243 @@ app.post("/admin/hearing/individual", async (req, res) => {
   }
 });
 
-app.get("/admin/hearing/individual/history", async (req, res) => {
+app.get("/admin/hearing/individual/history", (req, res) => res.redirect("/admin/hearing/history"));
+
+// ── Unified Hearing History ──────────────────────────────
+// Combines master + individual hearing notes into one searchable/filterable
+// list. Every row has an "edit" link that goes to the appropriate editor.
+app.get("/admin/hearing/history", async (req, res) => {
   try {
+    const hn = require("./hearing-notes");
     const ih = require("./individual-hearing-notes");
-    const notes = await ih.listIndividualNotes(50);
-    res.send(ih.renderHistoryPage(notes));
+    const [masterRows, individualRows] = await Promise.all([
+      hn.listNotes(200),
+      ih.listIndividualNotes(200),
+    ]);
+
+    // Normalize rows into a unified shape
+    const normalized = [];
+    for (const m of masterRows) {
+      normalized.push({
+        kind: "master",
+        id: m.id,
+        edit_url: `/admin/hearing/notes/${m.id}`,
+        type_label: m.hearing_type || "master",
+        sequence: m.sequence,
+        sequence_total: m.sequence_total,
+        client_name: m.client_name,
+        a_number: m.a_number,
+        client_language: m.client_language,
+        hearing_date: m.hearing_date,
+        judge_name: null,
+        sent_to_paralegal_at: m.sent_to_paralegal_at,
+        created_at: m.created_at,
+      });
+    }
+    for (const i of individualRows) {
+      normalized.push({
+        kind: "individual",
+        id: i.id,
+        edit_url: `/admin/hearing/individual/${i.id}`,
+        type_label: "individual",
+        sequence: null,
+        sequence_total: null,
+        client_name: i.client_name,
+        a_number: i.a_number,
+        client_language: i.client_language,
+        hearing_date: i.hearing_date,
+        judge_name: i.judge_name,
+        sent_to_paralegal_at: i.sent_to_paralegal_at,
+        created_at: i.created_at,
+      });
+    }
+    // Sort by created_at desc
+    normalized.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    res.send(renderUnifiedHistory(normalized));
   } catch (err) {
+    console.error("[/admin/hearing/history]:", err.message);
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
   }
 });
+
+function renderUnifiedHistory(rows) {
+  const hn = require("./hearing-notes");
+
+  const html = require("./hearing-notes"); // reuse escapes if exported? not exported — inline them here
+  const esc = (s) => s == null ? "" : String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+
+  const tbody = rows.length ? rows.map(r => {
+    const seqBadge = r.sequence_total && r.sequence_total > 1
+      ? ` <span style="background:#B79C62; color:white; padding:1px 6px; border-radius:8px; font-size:11px;">#${r.sequence}/${r.sequence_total}</span>`
+      : "";
+    const kindBadge = r.kind === "individual"
+      ? `<span style="background:#0C1C36; color:#B79C62; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">INDIV</span>`
+      : `<span style="background:#B79C62; color:white; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">MASTER</span>`;
+    const deleteUrl = r.kind === "master" ? `/admin/hearing/notes/${r.id}` : `/admin/hearing/individual/${r.id}`;
+    return `
+    <tr class="h-row"
+        data-kind="${r.kind}"
+        data-type="${esc((r.type_label || "").toLowerCase())}"
+        data-name="${esc((r.client_name || "").toLowerCase())}"
+        data-anumber="${esc((r.a_number || "").toLowerCase().replace(/[-\s]/g, ""))}"
+        data-judge="${esc((r.judge_name || "").toLowerCase())}"
+        data-sent="${r.sent_to_paralegal_at ? "sent" : "unsent"}"
+        data-lang="${esc(r.client_language || "")}">
+      <td>${kindBadge} #${r.id}</td>
+      <td>${esc(r.type_label || "-")}${seqBadge}</td>
+      <td>${esc(r.client_name)}</td>
+      <td>${esc(r.a_number || "")}</td>
+      <td>${r.hearing_date ? new Date(r.hearing_date).toLocaleDateString() : "-"}</td>
+      <td>${esc(r.judge_name || "-")}</td>
+      <td>${r.client_language}</td>
+      <td>${r.sent_to_paralegal_at ? "✅" : "—"}</td>
+      <td>${new Date(r.created_at).toLocaleDateString()}</td>
+      <td>
+        <a href="${r.edit_url}" style="color:#B79C62;">edit</a>
+        &nbsp;·&nbsp;
+        <a href="#" onclick="delRow('${r.kind}', ${r.id}, ${JSON.stringify(r.client_name).replace(/"/g, '&quot;')}); return false;" style="color:#c00; font-size:12px;">🗑️</a>
+      </td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="10" style="text-align:center; color:#888;">No hearing notes yet.</td></tr>`;
+
+  const body = `
+    <div class="page-header">
+      <h1>📚 All Hearing Notes</h1>
+      <div>
+        <a href="/admin/hearing/notes" class="back-link">+ New master hearing</a>
+        &nbsp;·&nbsp;
+        <a href="/admin/hearing/individual" class="back-link">+ New individual hearing</a>
+      </div>
+    </div>
+
+    <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #eee;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+        <div style="flex:1; min-width:260px;">
+          <input type="text" id="search-input" placeholder="🔍 Search by client name, A-Number, or judge..."
+                 onkeyup="filterRows()"
+                 style="width:100%; padding:9px 12px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+        </div>
+        <div>
+          <select id="filter-kind" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+            <option value="">All hearings</option>
+            <option value="master">Master hearings only</option>
+            <option value="individual">Individual hearings only</option>
+          </select>
+        </div>
+        <div>
+          <select id="filter-type" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+            <option value="">All types</option>
+            <option value="master">Master</option>
+            <option value="individual">Individual</option>
+            <option value="individual/merits">Individual/Merits</option>
+            <option value="status">Status</option>
+            <option value="bond">Bond</option>
+            <option value="custody redetermination">Custody Redetermination</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div>
+          <select id="filter-sent" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+            <option value="">All</option>
+            <option value="sent">Sent ✅</option>
+            <option value="unsent">Not sent</option>
+          </select>
+        </div>
+        <div>
+          <select id="filter-lang" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+            <option value="">All languages</option>
+            <option value="en">English</option>
+            <option value="zh">Chinese</option>
+            <option value="es">Spanish</option>
+            <option value="hi">Hindi</option>
+            <option value="pa">Punjabi</option>
+          </select>
+        </div>
+        <div>
+          <button type="button" onclick="clearFilters()"
+                  style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">
+            Clear
+          </button>
+        </div>
+      </div>
+      <div id="row-count" style="margin-top:10px; font-size:13px; color:#666;">
+        Showing ${rows.length} note${rows.length === 1 ? "" : "s"}
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Type</th><th>Client</th><th>A#</th><th>Hearing</th>
+          <th>Judge</th><th>Lang</th><th>Sent</th><th>Created</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="rows-body">${tbody}</tbody>
+    </table>
+
+    <script>
+      const TOTAL = ${rows.length};
+      function filterRows() {
+        const search = document.getElementById("search-input").value.toLowerCase().replace(/[-\\s]/g, "");
+        const kind = document.getElementById("filter-kind").value;
+        const type = document.getElementById("filter-type").value;
+        const sent = document.getElementById("filter-sent").value;
+        const lang = document.getElementById("filter-lang").value;
+        let visible = 0;
+        document.querySelectorAll(".h-row").forEach(row => {
+          const name = row.dataset.name || "";
+          const anumber = row.dataset.anumber || "";
+          const judge = row.dataset.judge || "";
+          const matchesSearch = !search || name.includes(search) || anumber.includes(search) || judge.includes(search);
+          const matchesKind = !kind || row.dataset.kind === kind;
+          const matchesType = !type || row.dataset.type === type;
+          const matchesSent = !sent || row.dataset.sent === sent;
+          const matchesLang = !lang || row.dataset.lang === lang;
+          const show = matchesSearch && matchesKind && matchesType && matchesSent && matchesLang;
+          row.style.display = show ? "" : "none";
+          if (show) visible++;
+        });
+        const count = document.getElementById("row-count");
+        if (visible === TOTAL) count.textContent = "Showing " + TOTAL + " note" + (TOTAL === 1 ? "" : "s");
+        else count.textContent = "Showing " + visible + " of " + TOTAL + " notes";
+      }
+      function clearFilters() {
+        document.getElementById("search-input").value = "";
+        document.getElementById("filter-kind").value = "";
+        document.getElementById("filter-type").value = "";
+        document.getElementById("filter-sent").value = "";
+        document.getElementById("filter-lang").value = "";
+        filterRows();
+      }
+      async function delRow(kind, id, name) {
+        if (!confirm("Delete " + kind + " hearing note #" + id + " for " + name + "?")) return;
+        const url = kind === "master" ? "/admin/hearing/notes/" + id : "/admin/hearing/individual/" + id;
+        try {
+          const resp = await fetch(url, { method: "DELETE" });
+          const data = await resp.json();
+          if (data.ok) {
+            const rows = document.querySelectorAll(".h-row");
+            for (const r of rows) {
+              if (r.querySelector('a[href="' + (kind === "master" ? "/admin/hearing/notes/" + id : "/admin/hearing/individual/" + id) + '"]')) {
+                r.remove();
+                break;
+              }
+            }
+            filterRows();
+          } else {
+            alert("❌ " + (data.error || "delete failed"));
+          }
+        } catch (e) { alert("❌ " + e.message); }
+      }
+    </script>`;
+
+  return hn.renderAdminChrome({
+    title: "All Hearing Notes",
+    body,
+    activeItem: "history",
+  });
+}
 
 // GET /admin/hearing/individual/prior-lookup?name=...&a=...
 app.get("/admin/hearing/individual/prior-lookup", async (req, res) => {
