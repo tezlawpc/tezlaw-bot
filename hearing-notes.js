@@ -80,6 +80,126 @@ async function initHearingNotesTables() {
   `);
 }
 
+// ── I-589 PDF Extraction (OCR via Claude) ────────────────
+//
+// Accepts a PDF buffer (fillable or scanned) and extracts client info
+// relevant to hearing notes. Uses Claude Sonnet for better OCR accuracy
+// on scanned documents.
+
+async function extractI589FieldsFromPdf(pdfBuffer) {
+  const base64Pdf = pdfBuffer.toString("base64");
+
+  const prompt = `You are extracting data from a USCIS Form I-589 (Application for Asylum and for Withholding of Removal).
+
+The PDF may be a fillable form OR a scanned/printed copy. Extract the following fields as accurately as possible. If a field is illegible or not present, use null.
+
+Extract these fields and return ONLY valid JSON with this exact structure (no other text):
+
+{
+  "client_name": "Full legal name (Last, First Middle format if possible)",
+  "a_number": "A-Number if visible (format: A123-456-789)",
+  "date_of_birth": "Date of birth (YYYY-MM-DD format)",
+  "country_of_citizenship": "Country of citizenship/nationality",
+  "country_of_birth": "Country of birth",
+  "native_language": "Native/primary language (e.g. Mandarin, Spanish, Punjabi)",
+  "us_address": "Client's US mailing address (street, city, state, zip)",
+  "asylum_basis": ["Array of persecution grounds checked (any of: race, religion, nationality, political_opinion, particular_social_group, torture)"],
+  "spouse_name": "Spouse's name if listed",
+  "children_count": "Number of children listed on the form (integer or null)",
+  "date_of_entry": "Date of last entry to US (YYYY-MM-DD)",
+  "manner_of_entry": "Manner of last entry (e.g. visa waiver, EWI, B1/B2, etc)"
+}
+
+Important rules:
+- Return ONLY the JSON object. No preamble, no explanation, no code fences.
+- Use null (not empty string) for any field you cannot read.
+- For dates, use YYYY-MM-DD format. If only month/year visible, use YYYY-MM-01. If unclear, use null.
+- For the A-Number, include the "A" prefix and dashes if that's how it appears.
+- Do NOT invent data. If unsure, use null.`;
+
+  const resp = await axios.post(
+    "https://api.anthropic.com/v1/messages",
+    {
+      model: "claude-sonnet-4-6",
+      max_tokens: 2000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: base64Pdf,
+              },
+            },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    },
+    {
+      headers: {
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      timeout: 120000, // 2 min — OCR of 15-page PDF takes time
+    }
+  );
+
+  const text = resp.data.content?.[0]?.text?.trim() || "{}";
+  // Strip potential code fences
+  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+  let extracted;
+  try {
+    extracted = JSON.parse(cleaned);
+  } catch (e) {
+    throw new Error(`Claude returned unparseable JSON: ${cleaned.substring(0, 200)}`);
+  }
+
+  // Map extracted native language to our language code
+  const langCode = mapLanguageNameToCode(extracted.native_language);
+
+  return {
+    raw: extracted,
+    // Fields that map directly to the hearing notes form:
+    form_prefill: {
+      client_name: extracted.client_name || null,
+      a_number: extracted.a_number || null,
+      client_language: langCode,
+      case_type: "Asylum (I-589)",
+      // These aren't on the form yet but we return them anyway for
+      // downstream use (e.g. saving to case file):
+      _extra: {
+        date_of_birth: extracted.date_of_birth,
+        country_of_citizenship: extracted.country_of_citizenship,
+        country_of_birth: extracted.country_of_birth,
+        native_language: extracted.native_language,
+        us_address: extracted.us_address,
+        asylum_basis: extracted.asylum_basis,
+        spouse_name: extracted.spouse_name,
+        children_count: extracted.children_count,
+        date_of_entry: extracted.date_of_entry,
+        manner_of_entry: extracted.manner_of_entry,
+      },
+    },
+  };
+}
+
+function mapLanguageNameToCode(name) {
+  if (!name) return null;
+  const lower = String(name).toLowerCase();
+  if (/mandarin|cantonese|chinese|mandarín|中文/i.test(lower)) return "zh";
+  if (/spanish|español|espanol|castellano/i.test(lower)) return "es";
+  if (/hindi|हिन्दी/i.test(lower)) return "hi";
+  if (/punjabi|panjabi|ਪੰਜਾਬੀ/i.test(lower)) return "pa";
+  if (/english|inglés|anglais/i.test(lower)) return "en";
+  return null; // unknown language, let user pick
+}
+
 // ── AI Summary Generation ────────────────────────────────
 
 async function generateParalegalSummary(data) {
@@ -573,12 +693,27 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
   <div class="page-header">
     <h1>📝 Hearing Notes</h1>
   </div>
-  <p style="margin-bottom:20px; color:#555;">Take notes during the hearing. Zara will clean them up and generate a paralegal summary + client-friendly summary in the client's language.</p>
+  <p style="margin-bottom:15px; color:#555;">Take notes during the hearing. Zara will clean them up and generate a paralegal summary + client-friendly summary in the client's language.</p>
+
+  <div style="background:#fdf7f0; border:1px dashed #B79C62; padding:15px; border-radius:6px; margin-bottom:20px;">
+    <div style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">
+      <div style="flex:1; min-width:200px;">
+        <strong>📄 Upload Client's I-589 (optional)</strong><br>
+        <span style="font-size:12px; color:#666;">Zara will OCR the PDF and auto-fill client info. Works with scanned or fillable PDFs. Takes ~30–60 seconds.</span>
+      </div>
+      <div>
+        <input type="file" id="i589-upload" accept=".pdf,application/pdf" style="display:none;" onchange="uploadI589(this.files[0])">
+        <button type="button" onclick="document.getElementById('i589-upload').click()" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; font-size:14px;">Choose I-589 PDF</button>
+      </div>
+    </div>
+    <div id="i589-status" style="margin-top:10px; font-size:13px;"></div>
+    <div id="i589-extracted" style="margin-top:10px;"></div>
+  </div>
 
   ${errorSection}
   ${previewSection}
 
-  <form method="POST" action="/admin/hearing/notes">
+  <form method="POST" action="/admin/hearing/notes" id="hearing-form">
     <fieldset>
       <legend>Client & Hearing</legend>
       <div class="row">
@@ -827,6 +962,103 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
         status.style.color = "#c00";
       }
     }
+
+    // ── I-589 Upload + Auto-Fill ──────────────────────────
+    async function uploadI589(file) {
+      if (!file) return;
+      const statusEl = document.getElementById("i589-status");
+      const extractedEl = document.getElementById("i589-extracted");
+      extractedEl.innerHTML = "";
+
+      // File size check (32 MB is API limit)
+      if (file.size > 32 * 1024 * 1024) {
+        statusEl.innerHTML = '<span style="color:#c00;">❌ File too large (max 32 MB). Try a smaller/lower-quality scan.</span>';
+        return;
+      }
+
+      statusEl.innerHTML = '<span style="color:#666;">⏳ Uploading and OCRing... this can take 30–60 seconds for a full I-589.</span>';
+
+      const formData = new FormData();
+      formData.append("i589", file);
+
+      try {
+        const resp = await fetch("/admin/hearing/notes/extract-i589", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await resp.json();
+
+        if (!resp.ok || !data.ok) {
+          statusEl.innerHTML = '<span style="color:#c00;">❌ ' + (data.error || "Extraction failed") + '</span>';
+          return;
+        }
+
+        // Fill form fields with extracted values
+        const filled = [];
+        const prefill = data.form_prefill || {};
+
+        function fillIfEmpty(fieldName, value) {
+          if (!value) return false;
+          const el = document.querySelector('[name="' + fieldName + '"]');
+          if (!el) return false;
+          // Don't overwrite user-entered values
+          if (el.value && el.value.trim()) return false;
+          el.value = value;
+          el.style.backgroundColor = "#fffde7"; // subtle highlight
+          filled.push(fieldName);
+          return true;
+        }
+
+        fillIfEmpty("client_name", prefill.client_name);
+        fillIfEmpty("a_number", prefill.a_number);
+        fillIfEmpty("case_type", prefill.case_type);
+
+        // Set language dropdown
+        if (prefill.client_language) {
+          const langEl = document.querySelector('[name="client_language"]');
+          if (langEl && langEl.value === "en") { // only if still default
+            langEl.value = prefill.client_language;
+            langEl.style.backgroundColor = "#fffde7";
+            filled.push("client_language");
+          }
+        }
+
+        // Auto-check I-589 Asylum in applications
+        const asylumCheckbox = Array.from(document.querySelectorAll('input[type="checkbox"]'))
+          .find(cb => cb.value && cb.value.startsWith("I-589 Asylum"));
+        if (asylumCheckbox && !asylumCheckbox.checked) {
+          asylumCheckbox.checked = true;
+          filled.push("I-589 Asylum (application)");
+        }
+
+        // Show extracted info summary
+        const extra = prefill._extra || {};
+        const extraLines = [];
+        if (extra.date_of_birth) extraLines.push("DOB: " + extra.date_of_birth);
+        if (extra.country_of_citizenship) extraLines.push("Country: " + extra.country_of_citizenship);
+        if (extra.us_address) extraLines.push("US Address: " + extra.us_address);
+        if (extra.asylum_basis && extra.asylum_basis.length) extraLines.push("Asylum basis: " + extra.asylum_basis.join(", "));
+        if (extra.date_of_entry) extraLines.push("Entered US: " + extra.date_of_entry + (extra.manner_of_entry ? " (" + extra.manner_of_entry + ")" : ""));
+        if (extra.spouse_name) extraLines.push("Spouse: " + extra.spouse_name);
+        if (extra.children_count) extraLines.push("Children: " + extra.children_count);
+
+        if (filled.length === 0) {
+          statusEl.innerHTML = '<span style="color:#ff9800;">⚠️ Extracted but no new fields filled (form may already have values). See below for extracted data.</span>';
+        } else {
+          statusEl.innerHTML = '<span style="color:#4CAF50;">✅ Extracted and filled: ' + filled.join(", ") + '. Please verify highlighted fields.</span>';
+        }
+
+        if (extraLines.length) {
+          extractedEl.innerHTML = '<div style="background:white; padding:10px; border-radius:4px; margin-top:8px; font-size:13px; color:#333; border:1px solid #eee;">' +
+            '<strong>Additional data from I-589 (reference only):</strong><br>' +
+            extraLines.map(l => "• " + l).join("<br>") +
+            '</div>';
+        }
+
+      } catch (e) {
+        statusEl.innerHTML = '<span style="color:#c00;">❌ Upload error: ' + e.message + '</span>';
+      }
+    }
   </script>`;
 
   return renderAdminChrome({ title: "Hearing Notes", body, activeItem: "notes" });
@@ -995,6 +1227,7 @@ module.exports = {
   sendToParalegal,
   generateParalegalSummary,
   generateClientSummary,
+  extractI589FieldsFromPdf,
   renderNoteForm,
   renderHistoryPage,
   renderDetailPage,
