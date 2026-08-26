@@ -324,6 +324,131 @@ async function sendToParalegal(id) {
   return { sent: true, chunks: chunks.length };
 }
 
+// ── Admin Panel Chrome (Sidebar + Layout) ────────────────
+// Matches admin.js styling so hearing notes pages feel integrated.
+// activeItem: which nav item to highlight — "notes" | "history" | null
+
+function renderAdminChrome({ title, body, activeItem = null }) {
+  const notesActive = activeItem === "notes" ? "active" : "";
+  const historyActive = activeItem === "history" ? "active" : "";
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(title)} — Zara Admin</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #f0ede6; color: #0C1C36; }
+
+  /* Sidebar (mirrors admin.js) */
+  .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 220px;
+             background: #0C1C36; padding: 0; z-index: 100;
+             overflow-y: auto; overflow-x: hidden; }
+  .sidebar::-webkit-scrollbar { width: 6px; }
+  .sidebar::-webkit-scrollbar-track { background: transparent; }
+  .sidebar::-webkit-scrollbar-thumb { background: rgba(183,156,98,.3); border-radius: 3px; }
+  .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(183,156,98,.6); }
+  .sidebar-logo { padding: 24px 20px; border-bottom: 1px solid rgba(183,156,98,.3); }
+  .sidebar-logo h2 { color: #B79C62; font-size: 18px; }
+  .sidebar-logo p { color: rgba(183,156,98,.6); font-size: 11px; margin-top: 2px; }
+  .nav-item { display: block; padding: 14px 20px; color: rgba(255,255,255,.7);
+              cursor: pointer; border-left: 3px solid transparent; transition: all .2s;
+              font-size: 14px; text-decoration: none; }
+  .nav-item:hover, .nav-item.active { color: #B79C62; background: rgba(183,156,98,.1);
+                                       border-left-color: #B79C62; }
+  .nav-item .icon { margin-right: 10px; }
+
+  /* Main */
+  .main { margin-left: 220px; padding: 28px; min-height: 100vh; }
+  .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .page-header h1 { color: #0C1C36; font-size: 24px; }
+  .back-link { color: #B79C62; text-decoration: none; font-size: 13px; }
+  .back-link:hover { text-decoration: underline; }
+
+  /* Mobile responsive */
+  @media (max-width: 768px) {
+    .sidebar { width: 56px; padding: 0; }
+    .sidebar-logo { padding: 14px 8px; text-align: center; border-bottom: 1px solid rgba(183,156,98,.3); }
+    .sidebar-logo img { width: 36px !important; margin: 0 auto 4px !important; }
+    .sidebar-logo h2 { font-size: 11px; letter-spacing: .04em; }
+    .sidebar-logo p { display: none; }
+    .nav-item { padding: 12px 0; text-align: center; font-size: 16px; }
+    .nav-item span:not(.icon) { display: none; }
+    .nav-item .icon { margin-right: 0; font-size: 18px; }
+    .main { margin-left: 56px; padding: 16px 12px; }
+    .page-header { flex-wrap: wrap; gap: 10px; }
+    .page-header h1 { font-size: 18px; }
+  }
+
+  /* Hearing form specific */
+  label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 14px; }
+  input[type="text"], input[type="datetime-local"], input[type="date"], select, textarea {
+    width: 100%; padding: 8px; margin: 3px 0; box-sizing: border-box;
+    border: 1px solid #ccc; border-radius: 4px; font-size: 14px; font-family: inherit;
+  }
+  textarea { min-height: 60px; }
+  input[type="checkbox"] { margin-right: 6px; transform: scale(1.15); }
+  .row { display: flex; gap: 12px; margin: 6px 0; }
+  .row > div { flex: 1; }
+  fieldset { border: 1px solid #ddd; padding: 15px; margin: 15px 0; border-radius: 4px; background: white; }
+  legend { font-weight: 600; color: #0C1C36; padding: 0 8px; }
+  .button-row { margin-top: 25px; display: flex; gap: 10px; flex-wrap: wrap; }
+  button {
+    padding: 12px 24px; font-size: 15px; border-radius: 4px; cursor: pointer;
+    border: none; font-family: inherit;
+  }
+  button[type="submit"] { background: #B79C62; color: white; }
+  button[type="submit"]:hover { background: #8f7a4c; }
+  button.secondary { background: #eee; color: #333; }
+  #raw_notes { min-height: 200px; font-family: monospace; font-size: 14px; }
+  .deadlines-container { margin: 8px 0; }
+  .deadline-row { display: flex; gap: 8px; margin: 6px 0; }
+  .deadline-row input[type="date"] { flex: 0 0 160px; }
+  .deadline-row input[type="text"] { flex: 1; }
+  .deadline-row button { flex: 0 0 auto; padding: 4px 10px; background: #eee; border: none; cursor: pointer; border-radius: 4px; }
+  .add-deadline { background: #eee; padding: 6px 12px; border: none; cursor: pointer; border-radius: 4px; font-size: 13px; }
+  .hint { color: #666; font-size: 12px; font-style: italic; margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px; background: white; }
+  th, td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #f5f5f5; color: #0C1C36; }
+  tr:hover { background: #fafafa; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-logo">
+    <img src="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png" alt="TEZ Law" style="width:60px;height:auto;display:block;margin-bottom:8px">
+    <h2>Zara</h2>
+    <p>Admin Panel</p>
+  </div>
+  <a href="/admin/matters/" class="nav-item" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">⚖️</span><span>→ Matter Manager</span>
+  </a>
+  <a href="/admin/hearing/notes" class="nav-item ${notesActive}" style="background:rgba(183,156,98,.08); ${notesActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">📝</span><span>→ Hearing Notes</span>
+  </a>
+  <a href="/admin/hearing/notes/history" class="nav-item ${historyActive}" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+    <span class="icon">📚</span><span>Hearing History</span>
+  </a>
+  <a href="/admin/email-setup" class="nav-item" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+    <span class="icon">📬</span><span>Email Setup</span>
+  </a>
+  <a href="/admin/" class="nav-item">
+    <span class="icon">📊</span><span>Dashboard</span>
+  </a>
+</div>
+
+<div class="main">
+  ${body}
+</div>
+
+</body>
+</html>`;
+}
+
 // ── HTML: Note-Taking Form ───────────────────────────────
 
 const APPLICATION_OPTIONS = [
@@ -395,48 +520,11 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
     ${sent ? `<p style="color:#4CAF50; font-weight:bold;">📤 Sent to Jue via Telegram (${sent.chunks} message${sent.chunks > 1 ? "s" : ""}).</p>` : ""}
   ` : "";
 
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Hearing Notes — Tez Law Zara</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 900px; margin: 20px auto; padding: 20px; color: #333; }
-    h1 { color: #0C1C36; border-bottom: 3px solid #B79C62; padding-bottom: 10px; }
-    h2 { color: #B79C62; }
-    label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 14px; }
-    input[type="text"], input[type="datetime-local"], input[type="date"], select, textarea {
-      width: 100%; padding: 8px; margin: 3px 0; box-sizing: border-box;
-      border: 1px solid #ccc; border-radius: 4px; font-size: 14px; font-family: inherit;
-    }
-    textarea { min-height: 60px; }
-    input[type="checkbox"] { margin-right: 6px; transform: scale(1.15); }
-    .row { display: flex; gap: 12px; margin: 6px 0; }
-    .row > div { flex: 1; }
-    fieldset { border: 1px solid #ddd; padding: 15px; margin: 15px 0; border-radius: 4px; }
-    legend { font-weight: 600; color: #0C1C36; padding: 0 8px; }
-    .button-row { margin-top: 25px; display: flex; gap: 10px; flex-wrap: wrap; }
-    button {
-      padding: 12px 24px; font-size: 15px; border-radius: 4px; cursor: pointer;
-      border: none; font-family: inherit;
-    }
-    button[type="submit"] { background: #B79C62; color: white; }
-    button[type="submit"]:hover { background: #8f7a4c; }
-    button.secondary { background: #eee; color: #333; }
-    #raw_notes { min-height: 200px; font-family: monospace; font-size: 14px; }
-    .deadlines-container { margin: 8px 0; }
-    .deadline-row { display: flex; gap: 8px; margin: 6px 0; }
-    .deadline-row input[type="date"] { flex: 0 0 160px; }
-    .deadline-row input[type="text"] { flex: 1; }
-    .deadline-row button { flex: 0 0 auto; padding: 4px 10px; background: #eee; border: none; cursor: pointer; border-radius: 4px; }
-    .add-deadline { background: #eee; padding: 6px 12px; border: none; cursor: pointer; border-radius: 4px; font-size: 13px; }
-    .hint { color: #666; font-size: 12px; font-style: italic; margin: 2px 0; }
-  </style>
-</head>
-<body>
-  <h1>📝 Hearing Notes</h1>
-  <p>Take notes during the hearing. Zara will clean them up and generate a paralegal summary + client-friendly summary in the client's language.</p>
+  const body = `
+  <div class="page-header">
+    <h1>📝 Hearing Notes</h1>
+  </div>
+  <p style="margin-bottom:20px; color:#555;">Take notes during the hearing. Zara will clean them up and generate a paralegal summary + client-friendly summary in the client's language.</p>
 
   ${errorSection}
   ${previewSection}
@@ -550,7 +638,7 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
   </form>
 
   <p style="margin-top:30px; color:#888; font-size:13px;">
-    <a href="/admin/hearing/notes/history">View past hearing notes →</a>
+    <a href="/admin/hearing/notes/history" class="back-link">View past hearing notes →</a>
   </p>
 
   <script>
@@ -568,7 +656,6 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
       deadlineIndex++;
     }
 
-    // Load previous deadlines if any
     const prevDeadlines = ${JSON.stringify(prev.deadlines || [])};
     if (prevDeadlines.length === 0) {
       addDeadlineRow();
@@ -606,9 +693,9 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
         status.style.color = "#c00";
       }
     }
-  </script>
-</body>
-</html>`;
+  </script>`;
+
+  return renderAdminChrome({ title: "Hearing Notes", body, activeItem: "notes" });
 }
 
 function renderHistoryPage(notes) {
@@ -623,94 +710,74 @@ function renderHistoryPage(notes) {
       <td>${n.client_language}</td>
       <td>${n.sent_to_paralegal_at ? "✅" : "—"}</td>
       <td>${new Date(n.created_at).toLocaleDateString()}</td>
-      <td><a href="/admin/hearing/notes/${n.id}">view</a></td>
+      <td><a href="/admin/hearing/notes/${n.id}" style="color:#B79C62;">view</a></td>
     </tr>`).join("") : `<tr><td colspan="10" style="text-align:center; color:#888;">No hearing notes yet.</td></tr>`;
 
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Hearing Notes History — Tez Law Zara</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 1200px; margin: 30px auto; padding: 20px; }
-    h1 { color: #0C1C36; border-bottom: 3px solid #B79C62; padding-bottom: 10px; }
-    table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px; }
-    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; }
-    th { background: #f5f5f5; color: #0C1C36; }
-    tr:hover { background: #fafafa; }
-    a.button { display: inline-block; padding: 10px 20px; background: #B79C62; color: white; text-decoration: none; border-radius: 4px; }
-  </style>
-</head>
-<body>
-  <h1>📝 Hearing Notes History</h1>
-  <p><a href="/admin/hearing/notes" class="button">← Back to note-taking</a></p>
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th><th>Client</th><th>A#</th><th>Hearing</th>
-        <th>Next</th><th>Next Type</th><th>Client Lang</th>
-        <th>Sent Jue</th><th>Created</th><th></th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
-</body>
-</html>`;
+  const body = `
+    <div class="page-header">
+      <h1>📚 Hearing Notes History</h1>
+      <a href="/admin/hearing/notes" class="back-link">← Back to note-taking</a>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Client</th><th>A#</th><th>Hearing</th>
+          <th>Next</th><th>Next Type</th><th>Lang</th>
+          <th>Sent Jue</th><th>Created</th><th></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  return renderAdminChrome({ title: "Hearing History", body, activeItem: "history" });
 }
 
 function renderDetailPage(note) {
-  if (!note) return `<html><body><h1>Not found</h1><p><a href="/admin/hearing/notes/history">← Back</a></p></body></html>`;
+  if (!note) {
+    const body = `<div class="page-header"><h1>Not found</h1></div><p><a href="/admin/hearing/notes/history" class="back-link">← Back to history</a></p>`;
+    return renderAdminChrome({ title: "Not Found", body });
+  }
 
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Hearing #${note.id} — Tez Law Zara</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 900px; margin: 30px auto; padding: 20px; }
-    h1 { color: #0C1C36; border-bottom: 3px solid #B79C62; padding-bottom: 10px; }
-    h2 { color: #B79C62; margin-top: 30px; }
-    .meta { background: #f5f5f5; padding: 15px; border-radius: 4px; margin: 15px 0; }
-    .meta div { margin: 4px 0; }
-    pre { background: white; padding: 15px; border: 1px solid #ddd; border-radius: 4px;
-          white-space: pre-wrap; font-family: inherit; }
-    button { background: #0C1C36; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 8px; }
-  </style>
-</head>
-<body>
-  <h1>Hearing #${note.id} — ${escapeHtml(note.client_name)}</h1>
-  <p><a href="/admin/hearing/notes/history">← History</a> · <a href="/admin/hearing/notes">New note</a></p>
+  const body = `
+    <div class="page-header">
+      <h1>Hearing #${note.id} — ${escapeHtml(note.client_name)}</h1>
+      <div>
+        <a href="/admin/hearing/notes/history" class="back-link">← History</a>
+        &nbsp; · &nbsp;
+        <a href="/admin/hearing/notes" class="back-link">New note</a>
+      </div>
+    </div>
 
-  <div class="meta">
-    <div><strong>Client:</strong> ${escapeHtml(note.client_name)}</div>
-    <div><strong>A-Number:</strong> ${escapeHtml(note.a_number || "-")}</div>
-    <div><strong>Hearing:</strong> ${note.hearing_date ? new Date(note.hearing_date).toLocaleString() : "-"} (${escapeHtml(note.hearing_type || "master")})</div>
-    <div><strong>Judge:</strong> ${escapeHtml(note.judge_name || "-")}</div>
-    <div><strong>Next hearing:</strong> ${note.next_hearing_date ? new Date(note.next_hearing_date).toLocaleString() : "not scheduled"} (${escapeHtml(note.next_hearing_type || "-")})</div>
-    <div><strong>Client language:</strong> ${note.client_language}</div>
-    <div><strong>Sent to Jue:</strong> ${note.sent_to_paralegal_at ? new Date(note.sent_to_paralegal_at).toLocaleString() : "not sent"}</div>
-    <div><strong>Created:</strong> ${new Date(note.created_at).toLocaleString()}</div>
-  </div>
+    <div style="background: white; padding: 20px; border-radius: 4px; margin: 15px 0; border-left: 4px solid #B79C62;">
+      <div style="margin:4px 0;"><strong>Client:</strong> ${escapeHtml(note.client_name)}</div>
+      <div style="margin:4px 0;"><strong>A-Number:</strong> ${escapeHtml(note.a_number || "-")}</div>
+      <div style="margin:4px 0;"><strong>Hearing:</strong> ${note.hearing_date ? new Date(note.hearing_date).toLocaleString() : "-"} (${escapeHtml(note.hearing_type || "master")})</div>
+      <div style="margin:4px 0;"><strong>Judge:</strong> ${escapeHtml(note.judge_name || "-")}</div>
+      <div style="margin:4px 0;"><strong>Next hearing:</strong> ${note.next_hearing_date ? new Date(note.next_hearing_date).toLocaleString() : "not scheduled"} (${escapeHtml(note.next_hearing_type || "-")})</div>
+      <div style="margin:4px 0;"><strong>Client language:</strong> ${note.client_language}</div>
+      <div style="margin:4px 0;"><strong>Sent to Jue:</strong> ${note.sent_to_paralegal_at ? new Date(note.sent_to_paralegal_at).toLocaleString() : "not sent"}</div>
+      <div style="margin:4px 0;"><strong>Created:</strong> ${new Date(note.created_at).toLocaleString()}</div>
+    </div>
 
-  <h2>Paralegal Summary</h2>
-  <button type="button" onclick="copyEl('paralegal-detail')">📋 Copy</button>
-  <pre id="paralegal-detail">${escapeHtml(note.paralegal_summary || "(none)")}</pre>
+    <h2 style="color:#B79C62; margin-top:30px;">Paralegal Summary</h2>
+    <button type="button" onclick="copyEl('paralegal-detail')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-bottom:8px;">📋 Copy</button>
+    <pre id="paralegal-detail" style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.paralegal_summary || "(none)")}</pre>
 
-  <h2>Client Summary (${note.client_language})</h2>
-  <button type="button" onclick="copyEl('client-detail')">📋 Copy</button>
-  <pre id="client-detail">${escapeHtml(note.client_summary || "(none)")}</pre>
+    <h2 style="color:#B79C62; margin-top:30px;">Client Summary (${note.client_language})</h2>
+    <button type="button" onclick="copyEl('client-detail')" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-bottom:8px;">📋 Copy</button>
+    <pre id="client-detail" style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.client_summary || "(none)")}</pre>
 
-  <h2>Original Raw Notes</h2>
-  <pre>${escapeHtml(note.raw_notes || "(none)")}</pre>
+    <h2 style="color:#B79C62; margin-top:30px;">Original Raw Notes</h2>
+    <pre style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.raw_notes || "(none)")}</pre>
 
-  <script>
-    function copyEl(id) {
-      navigator.clipboard.writeText(document.getElementById(id).textContent);
-      alert("Copied!");
-    }
-  </script>
-</body>
-</html>`;
+    <script>
+      function copyEl(id) {
+        navigator.clipboard.writeText(document.getElementById(id).textContent);
+        alert("Copied!");
+      }
+    </script>`;
+
+  return renderAdminChrome({ title: `Hearing #${note.id}`, body });
 }
 
 // ── Form Parsing ─────────────────────────────────────────
