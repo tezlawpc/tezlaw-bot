@@ -68,7 +68,11 @@ async function extractPdfText(buffer, filename) {
 // Research module is loaded inside admin.js so it inherits admin auth.
 
 const app = express();
-app.use(express.json()); app.use(express.urlencoded({ extended: true }));
+// Body parser limits raised from 100kb default to 25mb so hearing note forms
+// with extensive Q&A rows, closing arguments, and multiple witnesses don't
+// hit "payload too large" errors. Individual merits prep can easily reach 1-3mb.
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb", parameterLimit: 50000 }));
 app.use(express.text({ type: "text/xml" }));
 app.use(cookieParser());
 
@@ -2680,6 +2684,26 @@ app.post("/admin/hearing/individual/:id", async (req, res) => {
   } catch (err) {
     console.error("[/admin/hearing/individual/:id POST]:", err.message);
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// Autosave endpoint — same save logic, returns JSON instead of redirect.
+// Called by the client every 5 seconds when form is dirty.
+app.post("/admin/hearing/individual/:id/autosave", async (req, res) => {
+  try {
+    const ih = require("./individual-hearing-notes");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+    const parsed = ih.parseFormSubmission(req.body);
+    // For autosave, tolerate missing client_name (user might be mid-typing)
+    if (!parsed.client_name) {
+      return res.json({ ok: false, error: "Client name required for save", skip: true });
+    }
+    await ih.saveIndividualNote(parsed, id);
+    res.json({ ok: true, id, saved_at: new Date().toISOString() });
+  } catch (err) {
+    console.error("[individual autosave]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
