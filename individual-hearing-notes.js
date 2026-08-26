@@ -77,12 +77,36 @@ async function initTables() {
 // Accept an .xlsx or .csv buffer, return an array of exhibit objects.
 // Uses first sheet, first row as headers.
 function parseExhibitExcel(buffer, filename = "exhibits.xlsx") {
-  const workbook = XLSX.read(buffer, { type: "buffer" });
+  if (!buffer || !buffer.length) {
+    throw new Error(`File is empty or unreadable (0 bytes).`);
+  }
+
+  let workbook;
+  try {
+    // dateNF prevents SheetJS from choking on unusual date formats in cells
+    workbook = XLSX.read(buffer, { type: "buffer", cellDates: false, cellText: false });
+  } catch (e) {
+    throw new Error(
+      `Could not parse "${filename}" as Excel/CSV: ${e.message}. ` +
+      `The file may be corrupted, password-protected, or in an unsupported format (e.g. Numbers, old .xls). ` +
+      `Try re-saving as .xlsx or .csv from Excel and re-uploading.`
+    );
+  }
+
   const firstSheetName = workbook.SheetNames[0];
   if (!firstSheetName) throw new Error("No sheets found in file.");
   const sheet = workbook.Sheets[firstSheetName];
-  // header:1 returns array of arrays
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+  let rows;
+  try {
+    // header:1 returns array of arrays; raw:true skips number/date formatting
+    rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true, blankrows: false });
+  } catch (e) {
+    throw new Error(
+      `Could not read cells from sheet "${firstSheetName}": ${e.message}. ` +
+      `Try selecting/copying the exhibit list to a new blank Excel and uploading that.`
+    );
+  }
   if (!rows.length) return { exhibits: [], sheet_name: firstSheetName, raw_rows: [] };
 
   // Detect header row: use the first row that has more than 1 non-empty cell
@@ -91,8 +115,8 @@ function parseExhibitExcel(buffer, filename = "exhibits.xlsx") {
     const nonEmpty = rows[i].filter(c => String(c).trim()).length;
     if (nonEmpty >= 2) { headerIdx = i; break; }
   }
-  const headers = rows[headerIdx].map(h => String(h).trim().toLowerCase());
-  const dataRows = rows.slice(headerIdx + 1).filter(r => r.some(c => String(c).trim()));
+  const headers = rows[headerIdx].map(h => String(h == null ? "" : h).trim().toLowerCase());
+  const dataRows = rows.slice(headerIdx + 1).filter(r => r.some(c => String(c == null ? "" : c).trim()));
 
   // Try to map common column names to standard fields
   const colIdx = {
@@ -105,17 +129,23 @@ function parseExhibitExcel(buffer, filename = "exhibits.xlsx") {
     bates:       findCol(headers, ["bates", "bates #", "pages"]),
   };
 
+  const safeCell = (val) => {
+    if (val == null) return "";
+    if (val instanceof Date) return val.toLocaleDateString();
+    return String(val).trim();
+  };
+
   const exhibits = dataRows.map((r, i) => ({
-    number:      colIdx.number      >= 0 ? String(r[colIdx.number] || "").trim() : String(i + 1),
-    description: colIdx.description >= 0 ? String(r[colIdx.description] || "").trim() : (r.filter(c => String(c).trim()).join(" ").trim() || ""),
-    offered_by:  colIdx.offered_by  >= 0 ? String(r[colIdx.offered_by] || "").trim() : "",
-    marked:      colIdx.marked      >= 0 ? String(r[colIdx.marked] || "").trim() : "",
-    admitted:    colIdx.admitted    >= 0 ? String(r[colIdx.admitted] || "").trim() : "",
-    objection:   colIdx.objection   >= 0 ? String(r[colIdx.objection] || "").trim() : "",
-    bates:       colIdx.bates       >= 0 ? String(r[colIdx.bates] || "").trim() : "",
+    number:      colIdx.number      >= 0 ? safeCell(r[colIdx.number])      : String(i + 1),
+    description: colIdx.description >= 0 ? safeCell(r[colIdx.description]) : (r.filter(c => String(c == null ? "" : c).trim()).map(safeCell).join(" ").trim() || ""),
+    offered_by:  colIdx.offered_by  >= 0 ? safeCell(r[colIdx.offered_by])  : "",
+    marked:      colIdx.marked      >= 0 ? safeCell(r[colIdx.marked])      : "",
+    admitted:    colIdx.admitted    >= 0 ? safeCell(r[colIdx.admitted])    : "",
+    objection:   colIdx.objection   >= 0 ? safeCell(r[colIdx.objection])   : "",
+    bates:       colIdx.bates       >= 0 ? safeCell(r[colIdx.bates])       : "",
   })).filter(e => e.description || e.number);
 
-  return { exhibits, sheet_name: firstSheetName, raw_rows: rows };
+  return { exhibits, sheet_name: firstSheetName, raw_rows: rows.slice(0, 5) };
 }
 
 function findCol(headers, keywords) {
@@ -1148,13 +1178,39 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       async function uploadSummary(file) {
         if (!file) return;
         const status = document.getElementById("summary-status");
-        status.innerHTML = '<span style="color:#666;">⏳ Uploading and extracting from ' + file.name + '... 30-60 seconds</span>';
-        const fd = new FormData();
-        fd.append("summary", file);
+        status.innerHTML = '<span style="color:#666;">⏳ Uploading and extracting from ' + escapeHTML(file.name) + '... 30-60 seconds</span>';
+        console.log("[uploadSummary] file:", file.name, "type:", file.type, "size:", file.size);
+
+        let fd;
+        try {
+          fd = new FormData();
+          const originalName = file.name || "summary";
+          const safeName = originalName.replace(/[^\\w.\\-]/g, "_");
+          if (safeName !== originalName) {
+            console.log("[uploadSummary] renaming for upload:", originalName, "→", safeName);
+            const renamed = new File([file], safeName, { type: file.type || "application/octet-stream" });
+            fd.append("summary", renamed);
+          } else {
+            fd.append("summary", file);
+          }
+        } catch (prepErr) {
+          console.error("[uploadSummary] file prep failed:", prepErr);
+          status.innerHTML = '<span style="color:#c00;">❌ Cannot read file: ' + escapeHTML(prepErr.message || String(prepErr)) + '</span>';
+          return;
+        }
+
         try {
           const resp = await fetch("/admin/hearing/individual/extract-summary", { method: "POST", body: fd });
-          const data = await resp.json();
-          if (!data.ok) { status.innerHTML = '<span style="color:#c00;">❌ ' + (data.error || "Extraction failed") + '</span>'; return; }
+          let data;
+          try {
+            data = await resp.json();
+          } catch (jsonErr) {
+            const text = await resp.text().catch(() => "(no response body)");
+            console.error("[uploadSummary] server returned non-JSON:", resp.status, text.substring(0, 500));
+            status.innerHTML = '<span style="color:#c00;">❌ Server error ' + resp.status + ' — check console for details</span>';
+            return;
+          }
+          if (!data.ok) { status.innerHTML = '<span style="color:#c00;">❌ ' + escapeHTML(data.error || "Extraction failed") + '</span>'; return; }
           // Populate examinations from extracted structure
           if (data.extracted.examinations && data.extracted.examinations.length) {
             if (confirm("Extracted " + data.extracted.examinations.length + " examination section(s). Replace current examinations?")) {
@@ -1177,7 +1233,8 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           if (raw) document.getElementById("hearing_summary_raw").value = raw;
           status.innerHTML = '<span style="color:#4CAF50;">✅ Extracted ' + (data.extracted.examinations || []).length + ' exam section(s), ' + (data.extracted.closing_argument ? "closing argument, " : "") + '' + (data.extracted.witnesses || []).length + ' witness(es).</span>';
         } catch (e) {
-          status.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
+          console.error("[uploadSummary] fetch/network error:", e);
+          status.innerHTML = '<span style="color:#c00;">❌ ' + escapeHTML(e.message || String(e) || "Upload failed") + ' — check browser console for details</span>';
         }
       }
 
@@ -1185,14 +1242,42 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       async function uploadExhibits(file) {
         if (!file) return;
         const status = document.getElementById("exhibits-status");
-        status.innerHTML = '<span style="color:#666;">⏳ Parsing ' + file.name + '...</span>';
-        const fd = new FormData();
-        fd.append("exhibits", file);
+        status.innerHTML = '<span style="color:#666;">⏳ Parsing ' + escapeHTML(file.name) + '... (' + Math.round(file.size / 1024) + ' KB)</span>';
+        console.log("[uploadExhibits] file:", file.name, "type:", file.type, "size:", file.size);
+
+        // Some browsers reject FormData when filenames contain unusual characters.
+        // Sanitize to ASCII-safe name; keeps extension intact.
+        let fd;
+        try {
+          fd = new FormData();
+          const originalName = file.name || "exhibits.xlsx";
+          const safeName = originalName.replace(/[^\\w.\\-]/g, "_");
+          if (safeName !== originalName) {
+            console.log("[uploadExhibits] renaming for upload:", originalName, "→", safeName);
+            const renamed = new File([file], safeName, { type: file.type || "application/octet-stream" });
+            fd.append("exhibits", renamed);
+          } else {
+            fd.append("exhibits", file);
+          }
+        } catch (prepErr) {
+          console.error("[uploadExhibits] file prep failed:", prepErr);
+          status.innerHTML = '<span style="color:#c00;">❌ Cannot read file: ' + escapeHTML(prepErr.message || String(prepErr)) + '</span>';
+          return;
+        }
+
         try {
           const resp = await fetch("/admin/hearing/individual/extract-exhibits", { method: "POST", body: fd });
-          const data = await resp.json();
-          if (!data.ok) { status.innerHTML = '<span style="color:#c00;">❌ ' + (data.error || "Parse failed") + '</span>'; return; }
-          if (!data.exhibits.length) { status.innerHTML = '<span style="color:#ff9800;">⚠️ No exhibits detected in file.</span>'; return; }
+          let data;
+          try {
+            data = await resp.json();
+          } catch (jsonErr) {
+            const text = await resp.text().catch(() => "(no response body)");
+            console.error("[uploadExhibits] server returned non-JSON:", resp.status, text.substring(0, 500));
+            status.innerHTML = '<span style="color:#c00;">❌ Server error ' + resp.status + ' — check console for details</span>';
+            return;
+          }
+          if (!data.ok) { status.innerHTML = '<span style="color:#c00;">❌ ' + escapeHTML(data.error || "Parse failed") + '</span>'; return; }
+          if (!data.exhibits.length) { status.innerHTML = '<span style="color:#ff9800;">⚠️ No exhibits detected in file. Check that headers are in row 1.</span>'; return; }
           if (confirm("Parsed " + data.exhibits.length + " exhibit rows from sheet \\"" + (data.sheet_name || "?") + "\\". Replace current exhibits?")) {
             clearExhibits();
             data.exhibits.forEach(e => addExhibitRow(e));
@@ -1201,7 +1286,8 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           }
           status.innerHTML = '<span style="color:#4CAF50;">✅ Loaded ' + data.exhibits.length + ' exhibit rows.</span>';
         } catch (e) {
-          status.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
+          console.error("[uploadExhibits] fetch/network error:", e);
+          status.innerHTML = '<span style="color:#c00;">❌ ' + escapeHTML(e.message || String(e) || "Upload failed") + ' — check browser console for details</span>';
         }
       }
 
