@@ -45,6 +45,14 @@ const sendgridUpload = multer({
   limits: { fileSize: 25 * 1024 * 1024, files: 20 }
 });
 
+// General document upload — used by /extract-document, /extract-i589,
+// /extract-summary, /extract-exhibits. 32MB matches Anthropic PDF upload limit.
+// Declared here (not later) so route definitions can reference it in order.
+const docUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 32 * 1024 * 1024 },
+});
+
 // Extract text from a PDF buffer. Returns "" on error (so a corrupted PDF
 // doesn't tank the whole ingest — we keep the email body for parsing).
 async function extractPdfText(buffer, filename) {
@@ -2384,10 +2392,7 @@ app.post("/admin/hearing/individual/extract-exhibits", docUpload.single("exhibit
 
 // Document upload + extract — accepts PDF, JPG, PNG, WebP.
 // Uses Claude vision to OCR + extract structured client/case data.
-const docUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 32 * 1024 * 1024 }, // 32 MB (Anthropic limit)
-});
+// (docUpload is declared near the top of this file — see near sendgridUpload.)
 
 async function handleExtract(req, res) {
   try {
