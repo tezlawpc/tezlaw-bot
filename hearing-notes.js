@@ -559,7 +559,7 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
         </div>
         <div>
           <label>Hearing date/time</label>
-          <input type="datetime-local" name="hearing_date" value="${escapeAttr(prev.hearing_date)}">
+          <input type="datetime-local" name="hearing_date" step="1800" value="${escapeAttr(prev.hearing_date)}">
         </div>
       </div>
       <label>Case type</label>
@@ -602,7 +602,7 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
         </div>
         <div>
           <label>Date/time</label>
-          <input type="datetime-local" name="next_hearing_date" value="${escapeAttr(prev.next_hearing_date)}">
+          <input type="datetime-local" name="next_hearing_date" step="1800" value="${escapeAttr(prev.next_hearing_date)}">
         </div>
       </div>
     </fieldset>
