@@ -391,7 +391,7 @@ function buildStructuredForAI(data) {
     for (const e of exhibits) {
       const parts = [`#${e.number || "?"}`, e.description || "(no description)"];
       const flags = [];
-      if (e.marked)     flags.push("marked");
+      if (e.marked)     flags.push(`marked as #${e.marked}`);
       if (e.admitted)   flags.push("admitted");
       if (e.objection)  flags.push(`objection: ${e.objection}`);
       lines.push(`  - ${parts.join(": ")}${flags.length ? " [" + flags.join("; ") + "]" : ""}`);
@@ -686,11 +686,16 @@ function parseFormSubmission(body) {
   const exhibitKeys = Object.keys(body).filter(k => /^exhibit_number_\d+$/.test(k));
   const exhibitIndices = exhibitKeys.map(k => parseInt(k.split("_").pop(), 10)).sort((a, b) => a - b);
   for (const i of exhibitIndices) {
+    // Marked is now a number (1-99), stored as its string form; empty = not marked yet.
+    const markedRaw = String(body[`exhibit_marked_${i}`] || "").trim();
+    const markedNum = markedRaw && !isNaN(Number(markedRaw))
+      ? String(Math.max(1, Math.min(99, parseInt(markedRaw, 10))))
+      : "";
     const row = {
       number:      (body[`exhibit_number_${i}`] || "").trim(),
       description: (body[`exhibit_description_${i}`] || "").trim(),
       offered_by:  (body[`exhibit_offered_by_${i}`] || "").trim(),
-      marked:      body[`exhibit_marked_${i}`] ? "yes" : "",
+      marked:      markedNum,
       admitted:    body[`exhibit_admitted_${i}`] ? "yes" : "",
       objection:   (body[`exhibit_objection_${i}`] || "").trim(),
       bates:       (body[`exhibit_bates_${i}`] || "").trim(),
@@ -924,14 +929,14 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       <!-- Section 3: Exhibit list -->
       <fieldset>
         <legend>Exhibit List</legend>
-        <div class="hint">Upload an Excel/CSV above to auto-populate, or add rows manually. Check "Marked" if formally identified in the record; "Admitted" if received into evidence.</div>
+        <div class="hint">Upload an Excel/CSV above to auto-populate, or add rows manually. "Marked" is the exhibit's number (1-99) once formally identified in the record; check "Admitted" if received into evidence.</div>
         <div style="overflow-x:auto;">
         <table id="exhibits-table" style="width:100%; margin:8px 0; font-size:13px;">
           <thead>
             <tr>
               <th style="width:60px; text-align:left;">#</th>
               <th style="text-align:left;">Description</th>
-              <th style="width:70px; text-align:center;">Marked</th>
+              <th style="width:80px; text-align:center;">Marked</th>
               <th style="width:80px; text-align:center;">Admitted</th>
               <th style="text-align:left;">Objection / Notes</th>
               <th style="width:30px;"></th>
@@ -1028,13 +1033,17 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       function addExhibitRow(data) {
         data = data || {};
         const idx = exhibitCounter++;
-        const isMarked = !!(data.marked && String(data.marked).trim());
+        // Marked is now a number (1-99). If old data has "yes"/"X", show blank
+        // so the browser's number input doesn't complain. Any actual number preserves.
+        const markedNum = (data.marked != null && !isNaN(Number(data.marked)) && String(data.marked).trim() !== "")
+          ? String(parseInt(data.marked, 10))
+          : "";
         const isAdmitted = !!(data.admitted && String(data.admitted).trim());
         const tr = document.createElement("tr");
         tr.innerHTML =
           '<td><input type="text" name="exhibit_number_' + idx + '" value="' + escapeHTML(data.number || "") + '" style="width:100%;"></td>' +
           '<td><input type="text" name="exhibit_description_' + idx + '" value="' + escapeHTML(data.description || "") + '" style="width:100%;"></td>' +
-          '<td style="text-align:center;"><input type="checkbox" name="exhibit_marked_' + idx + '" value="yes"' + (isMarked ? " checked" : "") + ' style="transform:scale(1.3);"></td>' +
+          '<td style="text-align:center;"><input type="number" name="exhibit_marked_' + idx + '" min="1" max="99" value="' + escapeHTML(markedNum) + '" placeholder="—" style="width:60px; text-align:center; padding:4px;"></td>' +
           '<td style="text-align:center;"><input type="checkbox" name="exhibit_admitted_' + idx + '" value="yes"' + (isAdmitted ? " checked" : "") + ' style="transform:scale(1.3);"></td>' +
           '<td><input type="text" name="exhibit_objection_' + idx + '" value="' + escapeHTML(data.objection || "") + '" style="width:100%;"></td>' +
           '<td><button type="button" onclick="this.closest(\\'tr\\').remove()" style="background:#eee; border:none; padding:4px 8px; cursor:pointer; border-radius:3px;">×</button></td>';
