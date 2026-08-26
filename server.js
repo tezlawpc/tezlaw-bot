@@ -2237,7 +2237,28 @@ app.get("/admin/hearing/individual", async (req, res) => {
   try {
     const ih = require("./individual-hearing-notes");
     await ih.initTables();
-    res.send(ih.renderForm({}));
+    // ?copy_from=<id> — pre-fill client info from an existing hearing to create
+    // a continuation. We copy client/court/judge info but NOT exhibits, exams,
+    // or closing (those are specific to each hearing session).
+    let prev = {};
+    if (req.query.copy_from) {
+      const src = await ih.getIndividualNote(parseInt(req.query.copy_from));
+      if (src) {
+        prev = {
+          client_name: src.client_name,
+          a_number: src.a_number,
+          client_language: src.client_language,
+          client_email: src.client_email,
+          client_phone: src.client_phone,
+          case_type: src.case_type,
+          judge_name: src.judge_name,
+          court_location: src.court_location,
+          court_address: src.court_address,
+          dhs_attorney: src.dhs_attorney,
+        };
+      }
+    }
+    res.send(ih.renderForm({ prev }));
   } catch (err) {
     console.error("[/admin/hearing/individual GET]:", err.message);
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
@@ -2534,7 +2555,17 @@ app.get("/admin/hearing/individual/:id", async (req, res) => {
     if (!id) return res.status(400).send("Invalid id");
     const note = await ih.getIndividualNote(id);
     if (!note) return res.status(404).send("Not found");
-    res.send(ih.renderForm({ noteId: id, prev: note, saved: req.query.saved === "1" }));
+    // Find sibling individual hearings for the same client (for continuation tabs)
+    const siblings = await ih.getIndividualNotesForClient({
+      clientName: note.client_name,
+      aNumber: note.a_number,
+    });
+    res.send(ih.renderForm({
+      noteId: id,
+      prev: note,
+      siblings,
+      saved: req.query.saved === "1",
+    }));
   } catch (err) {
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
   }
@@ -2547,7 +2578,11 @@ app.post("/admin/hearing/individual/:id", async (req, res) => {
     if (!id) return res.status(400).send("Invalid id");
     const parsed = ih.parseFormSubmission(req.body);
     if (!parsed.client_name) {
-      return res.send(ih.renderForm({ noteId: id, error: "Client name is required.", prev: parsed }));
+      const siblings = await ih.getIndividualNotesForClient({
+        clientName: parsed.client_name,
+        aNumber: parsed.a_number,
+      });
+      return res.send(ih.renderForm({ noteId: id, error: "Client name is required.", prev: parsed, siblings }));
     }
     await ih.saveIndividualNote(parsed, id);
     res.redirect(`/admin/hearing/individual/${id}?saved=1`);
