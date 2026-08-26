@@ -803,8 +803,8 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       <div id="summary-drop" ondragover="dragOver(event, 'summary-drop')" ondragleave="dragLeave(event, 'summary-drop')" ondrop="dropSummary(event)"
            style="flex:1; min-width:300px; background:#fdf7f0; border:2px dashed #B79C62; padding:20px; border-radius:8px; text-align:center;">
         <strong>📄 Hearing Summary / Prep Outline</strong>
-        <div style="font-size:12px; color:#666; margin:6px 0;">Drop PDF or text file — Claude extracts Q&amp;A + closing</div>
-        <input type="file" id="summary-file" accept=".pdf,.txt,.md" style="display:none;" onchange="uploadSummary(this.files[0])">
+        <div style="font-size:12px; color:#666; margin:6px 0;">Drop PDF, Word (.docx), or text file — Claude extracts Q&amp;A + closing</div>
+        <input type="file" id="summary-file" accept=".pdf,.docx,.txt,.md" style="display:none;" onchange="uploadSummary(this.files[0])">
         <button type="button" onclick="document.getElementById('summary-file').click()" style="background:#B79C62; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Choose file</button>
         <div id="summary-status" style="margin-top:8px; font-size:13px;"></div>
       </div>
