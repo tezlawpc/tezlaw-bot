@@ -41,6 +41,7 @@ async function initHearingNotesTables() {
       pleadings_admitted    TEXT,
       pleadings_denied      TEXT,
       pleadings_contested   TEXT,
+      pleadings_method      TEXT,
       removability_conceded BOOLEAN,
       applications          JSONB DEFAULT '[]'::jsonb,
       disposition           TEXT,
@@ -69,6 +70,7 @@ async function initHearingNotesTables() {
     ["disposition_notes", "TEXT"],
     ["bond_outcome", "TEXT"],
     ["bond_amount", "INTEGER"],
+    ["pleadings_method", "TEXT"],
   ]) {
     try {
       await db.query(`ALTER TABLE hearing_notes ADD COLUMN IF NOT EXISTS ${col[0]} ${col[1]}`);
@@ -329,9 +331,7 @@ function buildStructuredNotes(data) {
     `Attorney appearance: ${data.attorney_appearance || "(not noted)"}`,
     "",
     "PLEADINGS TAKEN:",
-    `  Admitted allegations: ${data.pleadings_admitted || "(none noted)"}`,
-    `  Denied allegations: ${data.pleadings_denied || "(none noted)"}`,
-    `  Contested allegations: ${data.pleadings_contested || "(none noted)"}`,
+    `  Method: ${data.pleadings_method || "(not noted)"}`,
     `  Removability conceded: ${data.removability_conceded ? "Yes" : "No"}`,
     "",
     `APPLICATIONS REQUESTED: ${(data.applications && data.applications.length) ? data.applications.join(", ") : "(none noted)"}`,
@@ -394,16 +394,16 @@ async function saveNote(data, { generateSummaries = true } = {}) {
       (client_name, a_number, client_language, client_email, client_phone,
        judge_name, hearing_date, hearing_type, case_type,
        dhs_attorney, client_attendance, attorney_appearance,
-       pleadings_admitted, pleadings_denied, pleadings_contested, removability_conceded,
+       pleadings_admitted, pleadings_denied, pleadings_contested, pleadings_method, removability_conceded,
        applications, disposition, disposition_notes, bond_outcome, bond_amount,
        next_hearing_date, next_hearing_type,
        interpreter_used, interpreter_language, deadlines,
        raw_notes, paralegal_summary, client_summary)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
              $10, $11, $12,
-             $13, $14, $15, $16, $17::jsonb, $18, $19, $20, $21,
-             $22, $23, $24, $25, $26::jsonb,
-             $27, $28, $29)
+             $13, $14, $15, $16, $17, $18::jsonb, $19, $20, $21, $22,
+             $23, $24, $25, $26, $27::jsonb,
+             $28, $29, $30)
      RETURNING id`,
     [
       data.client_name, data.a_number || null, data.client_language || "en",
@@ -412,7 +412,8 @@ async function saveNote(data, { generateSummaries = true } = {}) {
       data.hearing_type || "master", data.case_type || null,
       data.dhs_attorney || null, data.client_attendance || null, data.attorney_appearance || null,
       data.pleadings_admitted || null, data.pleadings_denied || null,
-      data.pleadings_contested || null, !!data.removability_conceded,
+      data.pleadings_contested || null, data.pleadings_method || null,
+      !!data.removability_conceded,
       JSON.stringify(data.applications || []),
       data.disposition || null, data.disposition_notes || null,
       data.bond_outcome || null, data.bond_amount || null,
@@ -450,11 +451,37 @@ async function sendToParalegal(id) {
   if (!note) throw new Error(`Note ${id} not found`);
   if (!note.paralegal_summary) throw new Error("No paralegal summary generated");
 
-  const telegramId = process.env.RECIPIENT_JUE_TELEGRAM_ID;
+  const rawRecipient = process.env.RECIPIENT_JUE_TELEGRAM_ID || process.env.RECIPIENT_JUE_TELEGRAM;
   const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 
-  if (!telegramId || !telegramToken) {
-    throw new Error("Telegram not configured. Set RECIPIENT_JUE_TELEGRAM_ID env var (Jue's Telegram numeric user ID).");
+  if (!rawRecipient || !telegramToken) {
+    throw new Error("Telegram not configured. Set RECIPIENT_JUE_TELEGRAM_ID env var (either Jue's numeric user ID from @userinfobot, OR her @username — she must have started your bot first).");
+  }
+
+  // Resolve the recipient to a chat_id. If already numeric, use as-is.
+  // If it starts with @ or is a string username, try to resolve via getChat.
+  let chatId = null;
+  const trimmed = String(rawRecipient).trim();
+  if (/^-?\d+$/.test(trimmed)) {
+    chatId = trimmed;
+  } else {
+    // Username path — needs @ prefix for getChat
+    const withAt = trimmed.startsWith("@") ? trimmed : "@" + trimmed;
+    try {
+      const resp = await axios.get(
+        `https://api.telegram.org/bot${telegramToken}/getChat`,
+        { params: { chat_id: withAt }, timeout: 10000 }
+      );
+      if (resp.data && resp.data.ok && resp.data.result?.id) {
+        chatId = String(resp.data.result.id);
+      }
+    } catch (e) {
+      const detail = e.response?.data?.description || e.message;
+      throw new Error(`Could not resolve Telegram user ${withAt}: ${detail}. She may need to message your bot first (@TEZJJBot), OR give me her numeric user ID from @userinfobot.`);
+    }
+    if (!chatId) {
+      throw new Error(`Could not resolve Telegram user ${withAt}. She may need to message your bot first.`);
+    }
   }
 
   const header = `📋 *Hearing Notes — ${note.client_name}*\nA#: ${note.a_number || "(none)"}\nDate: ${note.hearing_date ? new Date(note.hearing_date).toLocaleDateString() : "(not set)"}\n\n`;
@@ -474,15 +501,20 @@ async function sendToParalegal(id) {
   if (remaining) chunks.push(remaining);
 
   for (const chunk of chunks) {
-    await axios.post(
-      `https://api.telegram.org/bot${telegramToken}/sendMessage`,
-      {
-        chat_id: telegramId,
-        text: chunk,
-        parse_mode: "Markdown",
-      },
-      { timeout: 15000 }
-    );
+    try {
+      await axios.post(
+        `https://api.telegram.org/bot${telegramToken}/sendMessage`,
+        {
+          chat_id: chatId,
+          text: chunk,
+          parse_mode: "Markdown",
+        },
+        { timeout: 15000 }
+      );
+    } catch (e) {
+      const detail = e.response?.data?.description || e.message;
+      throw new Error(`Telegram send failed: ${detail}. Recipient may need to message @TEZJJBot first to enable delivery.`);
+    }
   }
 
   await db.query(
@@ -490,7 +522,7 @@ async function sendToParalegal(id) {
     [id]
   );
 
-  return { sent: true, chunks: chunks.length };
+  return { sent: true, chunks: chunks.length, resolved_chat_id: chatId };
 }
 
 // ── Admin Panel Chrome (Sidebar + Layout) ────────────────
@@ -626,11 +658,29 @@ const APPLICATION_OPTIONS = [
   "CAT (Convention Against Torture)",
   "Cancellation of Removal (LPR)",
   "Cancellation of Removal (non-LPR)",
-  "Adjustment of Status",
+  "Adjustment of Status (I-485)",
+  "I-130 Petition for Alien Relative",
+  "I-751 Removal of Conditions",
+  "I-360 Special Immigrant / VAWA",
+  "I-601 Waiver (inadmissibility)",
+  "I-601A Provisional Waiver",
+  "I-212 Consent to Reapply",
+  "212(c) Relief",
+  "212(h) Waiver",
+  "237(a)(1)(H) Waiver (fraud)",
+  "N-400 Naturalization",
+  "TPS (Temporary Protected Status)",
+  "NACARA",
+  "SIJ (Special Immigrant Juvenile)",
+  "U Visa (I-918)",
+  "T Visa (I-914)",
   "Voluntary Departure",
   "Prosecutorial Discretion",
   "Termination",
   "Administrative Closure",
+  "Motion to Reopen",
+  "Motion to Reconsider",
+  "Motion to Change Venue",
   "Other",
 ];
 
@@ -774,6 +824,7 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
             <option value="in_person" ${prev.client_attendance === "in_person" ? "selected" : ""}>In person</option>
             <option value="webex" ${prev.client_attendance === "webex" ? "selected" : ""}>WebEx / video</option>
             <option value="phone" ${prev.client_attendance === "phone" ? "selected" : ""}>Telephonic</option>
+            <option value="waived" ${prev.client_attendance === "waived" ? "selected" : ""}>Waived</option>
             <option value="absent" ${prev.client_attendance === "absent" ? "selected" : ""}>ABSENT ⚠️</option>
           </select>
         </div>
@@ -794,22 +845,21 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
       <legend>Pleadings Taken</legend>
       <div class="row">
         <div>
-          <label>Allegations admitted</label>
-          <input type="text" name="pleadings_admitted" value="${escapeAttr(prev.pleadings_admitted)}" placeholder="e.g. 1, 2, 3">
+          <label>How were pleadings taken?</label>
+          <select name="pleadings_method">
+            <option value="">-- N/A --</option>
+            <option value="oral" ${prev.pleadings_method === "oral" ? "selected" : ""}>Oral (on the record)</option>
+            <option value="written" ${prev.pleadings_method === "written" ? "selected" : ""}>Written (submitted)</option>
+            <option value="oral_and_written" ${prev.pleadings_method === "oral_and_written" ? "selected" : ""}>Both oral and written</option>
+          </select>
         </div>
         <div>
-          <label>Allegations denied</label>
-          <input type="text" name="pleadings_denied" value="${escapeAttr(prev.pleadings_denied)}" placeholder="e.g. 4, 5">
-        </div>
-        <div>
-          <label>Allegations contested</label>
-          <input type="text" name="pleadings_contested" value="${escapeAttr(prev.pleadings_contested)}" placeholder="e.g. 6">
+          <label style="display:inline-flex; align-items:center; font-weight:normal; margin-top:24px;">
+            <input type="checkbox" name="removability_conceded" value="1" ${prev.removability_conceded ? "checked" : ""}>
+            Removability conceded
+          </label>
         </div>
       </div>
-      <label style="display:inline-flex; align-items:center; font-weight:normal; margin-top:8px;">
-        <input type="checkbox" name="removability_conceded" value="1" ${prev.removability_conceded ? "checked" : ""}>
-        Removability conceded
-      </label>
     </fieldset>
 
     <fieldset>
@@ -842,6 +892,20 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
     </fieldset>
 
     <fieldset>
+      <legend>Next Hearing</legend>
+      <div class="row">
+        <div>
+          <label>Type</label>
+          <select name="next_hearing_type">${nextHearingTypeOptions}</select>
+        </div>
+        <div>
+          <label>Date/time</label>
+          <input type="datetime-local" name="next_hearing_date" step="1800" value="${escapeAttr(prev.next_hearing_date)}">
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
       <legend>Bond (If Applicable)</legend>
       <div class="hint">Only fill this in for bond hearings or when bond is at issue.</div>
       <div class="row">
@@ -858,20 +922,6 @@ function renderNoteForm({ generated = null, saved = false, sent = null, error = 
         <div>
           <label>Bond amount (if granted)</label>
           <input type="text" name="bond_amount" value="${escapeAttr(prev.bond_amount)}" placeholder="e.g. 5000">
-        </div>
-      </div>
-    </fieldset>
-
-    <fieldset>
-      <legend>Next Hearing</legend>
-      <div class="row">
-        <div>
-          <label>Type</label>
-          <select name="next_hearing_type">${nextHearingTypeOptions}</select>
-        </div>
-        <div>
-          <label>Date/time</label>
-          <input type="datetime-local" name="next_hearing_date" step="1800" value="${escapeAttr(prev.next_hearing_date)}">
         </div>
       </div>
     </fieldset>
@@ -1192,6 +1242,7 @@ function parseFormSubmission(body) {
     pleadings_admitted: (body.pleadings_admitted || "").trim(),
     pleadings_denied: (body.pleadings_denied || "").trim(),
     pleadings_contested: (body.pleadings_contested || "").trim(),
+    pleadings_method: body.pleadings_method || null,
     removability_conceded: !!body.removability_conceded,
     applications,
     disposition: body.disposition || null,
