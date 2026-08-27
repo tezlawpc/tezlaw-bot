@@ -99,12 +99,17 @@ async function initHearingNotesTables() {
 // content usable in the free-form notes section.
 
 async function extractDocumentFields(fileBuffer, mimeType, originalName = "") {
+  // Normalize HEIC (iPhone photos) — treat as jpeg for Anthropic vision API
+  let normalizedMime = mimeType;
+  if (mimeType === "image/heic" || mimeType === "image/heif" || /\.(heic|heif)$/i.test(originalName)) {
+    normalizedMime = "image/jpeg";  // Anthropic accepts jpeg/png/gif/webp
+  }
   const base64 = fileBuffer.toString("base64");
 
-  const isPdf = mimeType && mimeType.includes("pdf");
-  const isImage = mimeType && mimeType.startsWith("image/");
+  const isPdf = normalizedMime && normalizedMime.includes("pdf");
+  const isImage = normalizedMime && normalizedMime.startsWith("image/");
   if (!isPdf && !isImage) {
-    throw new Error(`Unsupported file type: ${mimeType}. Upload PDF, JPG, PNG, or WebP.`);
+    throw new Error(`Unsupported file type: ${mimeType}. Upload PDF, JPG, PNG, WebP, or HEIC.`);
   }
 
   const prompt = `You are extracting client/case information from a document related to an immigration case. The document could be any of these types:
@@ -113,16 +118,19 @@ async function extractDocumentFields(fileBuffer, mimeType, originalName = "") {
 - EOIR hearing notice / court notice
 - USCIS receipt notice or approval notice
 - Client meeting notes (handwritten or typed)
+- **Handwritten hearing notes** by covering counsel or another attorney at a hearing they attended on our behalf
 - Client intake form
 - Court orders / minute orders
 - Any other immigration-related document
 
-First identify what type of document this is. Then extract as many of the following fields as possible. Use null for fields not present or illegible. Do NOT invent data.
+First identify what type of document this is. If it's handwritten attorney notes from a hearing, extract EVERYTHING you can read about what happened: judge's decisions, deadlines, next hearing date, pleadings, applications discussed, DHS positions, motions ruled on, testimony highlights, and any specific dates/deadlines.
+
+Then extract as many of the following fields as possible. Use null for fields not present or illegible. Do NOT invent data.
 
 Return ONLY valid JSON with this structure (no preamble, no code fences):
 
 {
-  "document_type": "Best label for what this document is (e.g. 'I-589', 'NTA', 'EOIR Hearing Notice', 'Meeting Notes')",
+  "document_type": "Best label for what this document is (e.g. 'I-589', 'NTA', 'EOIR Hearing Notice', 'Attorney Hearing Notes')",
   "client_name": "Full legal name in 'Last, First Middle' format if possible",
   "a_number": "A-Number with format A123-456-789 if visible",
   "date_of_birth": "YYYY-MM-DD",
@@ -134,10 +142,13 @@ Return ONLY valid JSON with this structure (no preamble, no code fences):
   "client_email": "Email address if listed",
   "judge_name": "Immigration Judge name if mentioned",
   "dhs_attorney": "DHS/ICE trial attorney name if mentioned",
-  "hearing_date": "YYYY-MM-DD of hearing referenced in this document",
+  "hearing_date": "YYYY-MM-DD of hearing referenced in this document (if attorney notes describe hearing that happened, use that date; if it's a notice for future hearing, use that)",
   "hearing_time": "HH:MM in 24h format",
   "hearing_type": "master/individual/status/bond/other",
   "case_type": "Type of case (e.g. 'Asylum (I-589)', 'Cancellation of Removal (non-LPR)')",
+  "next_hearing_date": "YYYY-MM-DD of the NEXT hearing if mentioned (different from hearing_date above)",
+  "next_hearing_time": "HH:MM 24h",
+  "next_hearing_type": "master/individual/status/bond/other",
   "charges": "Charges of removability from NTA if present (e.g. 'INA 237(a)(1)(B)')",
   "allegations": "Numbered allegations from NTA if present (as string)",
   "applications_mentioned": ["Array of relief applications mentioned"],
@@ -146,19 +157,19 @@ Return ONLY valid JSON with this structure (no preamble, no code fences):
   "manner_of_entry": "How client entered US (e.g. 'B1/B2 visa', 'EWI', 'visa waiver')",
   "spouse_name": "Spouse name if listed",
   "children_count": 0,
-  "narrative_notes": "Any narrative content useful for hearing notes: what the document actually says, procedural history, meeting summary, judge's comments, DHS positions, deadlines mentioned, etc. Keep to 1-3 short paragraphs. Preserve specific dates and numbers exactly."
+  "narrative_notes": "Any narrative content useful for hearing notes: what the document actually says, procedural history, meeting summary, judge's comments, DHS positions, deadlines mentioned, testimony highlights from covering counsel's handwritten notes, etc. Keep to 2-4 paragraphs. Preserve specific dates and numbers exactly. If handwritten, transcribe as much as legible."
 }
 
 Rules:
 - Return ONLY the JSON object. No preamble, no explanation, no code fences.
 - Use null (not empty string) for any field you cannot read confidently.
 - For dates, YYYY-MM-DD format. If only month/year visible, use YYYY-MM-01. If unsure, null.
-- For handwritten sections that are illegible, use null rather than guessing.
-- If this is meeting notes or free-form text, extract as much as possible AND put the meaningful content into narrative_notes.`;
+- For handwritten sections that are illegible, use null rather than guessing. Better to leave a field null than guess wrong.
+- If this is meeting notes or handwritten hearing notes, extract as much as possible AND put the meaningful content into narrative_notes.`;
 
   const contentBlock = isPdf
     ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
-    : { type: "image",    source: { type: "base64", media_type: mimeType,           data: base64 } };
+    : { type: "image",    source: { type: "base64", media_type: normalizedMime,    data: base64 } };
 
   const resp = await axios.post(
     "https://api.anthropic.com/v1/messages",
@@ -202,11 +213,14 @@ Rules:
     client_language: langCode,
     client_phone: extracted.client_phone || null,
     client_email: extracted.client_email || null,
+    client_address: extracted.us_address || null,
     judge_name: extracted.judge_name || null,
     dhs_attorney: extracted.dhs_attorney || null,
     case_type: extracted.case_type || null,
     hearing_type: extracted.hearing_type || null,
     hearing_datetime: mergeDateTime(extracted.hearing_date, extracted.hearing_time),
+    next_hearing_date: mergeDateTime(extracted.next_hearing_date, extracted.next_hearing_time),
+    next_hearing_type: extracted.next_hearing_type || null,
     narrative_notes: extracted.narrative_notes || null,
     // Reference-only extras shown to user, not filled into form:
     _extra: {
@@ -981,13 +995,13 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     <div style="font-size:14px; margin-bottom:12px;">
       <strong style="font-size:16px;">📄 Drop a document here</strong> — or —
       <button type="button" onclick="document.getElementById('doc-upload').click()" style="background:#B79C62; color:white; padding:8px 18px; border:none; border-radius:4px; cursor:pointer; font-size:14px; margin-left:8px;">Choose file</button>
-      <input type="file" id="doc-upload" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/*" style="display:none;" onchange="uploadDocument(this.files[0])">
+      <input type="file" id="doc-upload" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*" style="display:none;" onchange="uploadDocument(this.files[0])">
     </div>
     <div style="font-size:12px; color:#666; margin-bottom:4px;">
-      Works with I-589, NTA, court notices, meeting notes, hearing orders, receipts, or any immigration document.
+      Works with I-589, NTA, court notices, meeting notes, hearing orders, receipts, or <strong>handwritten hearing notes</strong> from covering counsel.
     </div>
     <div style="font-size:12px; color:#666;">
-      Accepts PDF, JPG, PNG, WebP · Max 32 MB · OCR takes ~30–60 seconds
+      Accepts PDF, JPG, PNG, WebP, HEIC · Max 32 MB · OCR takes ~30–60 seconds
     </div>
     <div id="doc-status" style="margin-top:12px; font-size:13px;"></div>
     <div id="doc-extracted" style="margin-top:10px;"></div>
@@ -1345,9 +1359,12 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         fillIfEmpty("a_number", prefill.a_number);
         fillIfEmpty("client_email", prefill.client_email);
         fillIfEmpty("client_phone", prefill.client_phone);
+        fillIfEmpty("client_address", prefill.client_address);
         fillIfEmpty("case_type", prefill.case_type);
         fillIfEmpty("judge_name", prefill.judge_name);
         fillIfEmpty("dhs_attorney", prefill.dhs_attorney);
+        fillIfEmpty("next_hearing_date", prefill.next_hearing_date);
+        fillIfEmpty("next_hearing_type", prefill.next_hearing_type);
 
         // Language dropdown
         if (prefill.client_language) {
