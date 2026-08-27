@@ -2162,6 +2162,13 @@ app.post("/admin/hearing/notes", async (req, res) => {
 
 app.get("/admin/hearing/notes/history", (req, res) => res.redirect("/admin/hearing/history"));
 
+// IMPORTANT: extract-document and extract-i589 must be registered BEFORE the
+// parametrized /:id route below. Otherwise Express matches "extract-document"
+// against ":id", parseInt() returns NaN, and the request fails with
+// "Invalid id" before ever reaching handleExtract.
+app.post("/admin/hearing/notes/extract-document", docUpload.single("document"), handleExtract);
+app.post("/admin/hearing/notes/extract-i589", docUpload.single("i589"), handleExtract);
+
 app.get("/admin/hearing/notes/:id", async (req, res) => {
   try {
     const hn = require("./hearing-notes");
@@ -3605,10 +3612,9 @@ async function handleExtract(req, res) {
   }
 }
 
-app.post("/admin/hearing/notes/extract-document", docUpload.single("document"), handleExtract);
-
-// Backward-compat: old /extract-i589 endpoint still works
-app.post("/admin/hearing/notes/extract-i589", docUpload.single("i589"), handleExtract);
+// Note: /admin/hearing/notes/extract-document and /extract-i589 are registered
+// EARLIER in the file, ABOVE the parametrized /:id route (see near line 2165)
+// so Express can match them before falling through to the /:id catchall.
 
 // ── Voice call routes ─────────────────────────────────────
 app.post("/voice/incoming",          (req, res) => {
