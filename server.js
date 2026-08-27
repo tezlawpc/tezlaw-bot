@@ -161,6 +161,22 @@ app.post("/admin/backups/restore", auth.requireRole("admin"), async (req, res) =
   }
 });
 
+// Version check endpoint — hit this to verify which build of the code is
+// actually running on Render. Helps diagnose "changes didn't deploy" issues.
+app.get("/version", (req, res) => {
+  res.json({
+    version: "v3-tooluse-2026-08-28",
+    features: {
+      auto_match_tool_use: true,
+      hearing_note_dedup: true,
+      revision_history: true,
+      backup_system: true,
+      bulk_upload: true,
+    },
+    server_time: new Date().toISOString(),
+  });
+});
+
 // ── Triage Dashboard ─────────────────────────────────────
 app.get("/admin/dashboard", async (req, res) => {
   try {
@@ -3891,6 +3907,7 @@ Do not repeat the same file for multiple exhibits unless it truly represents mul
     // Use Anthropic's tool use to force a structured JSON response.
     // Tool use guarantees Claude returns data matching our schema — no more
     // "invalid JSON" errors from preambles, code fences, or trailing text.
+    console.log(`[auto-match v3-tooluse] Sending ${exhibits.length} exhibits + ${allFiles.length} files to Claude`);
     const anthResp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
@@ -3951,21 +3968,26 @@ Do not repeat the same file for multiple exhibits unless it truly represents mul
     const toolUseBlock = contentBlocks.find(b => b.type === "tool_use" && b.name === "report_matches");
     if (toolUseBlock && Array.isArray(toolUseBlock.input?.matches)) {
       claudeMatches = toolUseBlock.input.matches;
+      console.log(`[auto-match v3-tooluse] ✓ Tool call returned ${claudeMatches.length} matches`);
     } else {
       // Fallback: try to extract JSON from any text blocks. Some edge cases
       // (rate limits, model refusals, older model versions without tool support)
       // return a text block instead of a tool use call.
       const textBlock = contentBlocks.find(b => b.type === "text")?.text || "";
+      console.warn(`[auto-match v3-tooluse] ⚠️  No tool_use block. Content types: ${contentBlocks.map(b => b.type).join(",")}. Falling back to text parse.`);
       claudeMatches = extractJsonArrayFromText(textBlock);
       if (!claudeMatches) {
-        console.error("[auto-match] Claude did not call the tool AND text was unparseable. Response:",
-          JSON.stringify(anthResp.data.content).substring(0, 800));
+        console.error("[auto-match v3-tooluse] Claude did not call the tool AND text was unparseable. Response:",
+          JSON.stringify(anthResp.data.content).substring(0, 1000));
         return res.status(500).json({
           ok: false,
-          error: "Claude didn't return matches in a usable format. Try again in a moment or match manually.",
+          error: "Claude didn't return matches in a usable format (v3-tooluse). Try again in a moment or match manually.",
           debug_snippet: textBlock.substring(0, 200),
+          content_types: contentBlocks.map(b => b.type),
+          stop_reason: anthResp.data.stop_reason,
         });
       }
+      console.log(`[auto-match v3-tooluse] Fallback parsed ${claudeMatches.length} matches from text`);
     }
 
     // Map Claude's response back to exhibit indices with actual file paths
