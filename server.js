@@ -3460,6 +3460,93 @@ app.post("/admin/hearing/individual/extract-exhibits", docUpload.single("exhibit
   }
 });
 
+// Browse a client's Dropbox folder from within the individual hearing form —
+// used by the "Browse Dropbox → add as exhibits" modal picker.
+// Query params: client_name, a_number (either or both), optional subfolder path.
+// Returns folder + breadcrumb + subfolders + files as JSON.
+app.get("/admin/hearing/individual/dropbox/files", async (req, res) => {
+  try {
+    const dbx = require("./dropbox-integration");
+    const clientName = (req.query.client_name || "").trim();
+    const aNumber = (req.query.a_number || "").trim();
+    const requestedSubfolder = (req.query.subfolder || "").trim();
+
+    if (!clientName && !aNumber) {
+      return res.status(400).json({ ok: false, error: "Client name or A-Number required" });
+    }
+
+    // Build a client key using the same logic as the client-profiles aggregator
+    const clientKey = dbx.makeClientKey({ clientName, aNumber });
+    if (!clientKey) {
+      return res.status(400).json({ ok: false, error: "Could not derive client key" });
+    }
+
+    // Resolve (or reuse cached) root folder for this client
+    const rootFolder = await dbx.resolveClientFolder({
+      clientKey, clientName, aNumber,
+    });
+    if (!rootFolder) {
+      return res.status(404).json({
+        ok: false,
+        error: `No Dropbox folder found for ${clientName || aNumber}. Link one via the client profile first.`,
+      });
+    }
+
+    // Determine which folder to list: requested subfolder must be under rootFolder
+    let currentPath = rootFolder;
+    if (requestedSubfolder) {
+      if (!requestedSubfolder.startsWith(rootFolder)) {
+        return res.status(400).json({ ok: false, error: "Subfolder must be inside the client folder" });
+      }
+      currentPath = requestedSubfolder;
+    }
+
+    const entries = await dbx.listFolder(currentPath);
+    if (!entries) return res.status(404).json({ ok: false, error: `Folder not found: ${currentPath}` });
+
+    const subfolders = entries
+      .filter(e => e[".tag"] === "folder")
+      .map(e => ({ name: e.name, path: e.path_display }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const files = entries
+      .filter(e => e[".tag"] === "file")
+      .map(e => ({
+        name: e.name,
+        path: e.path_display,
+        size: e.size,
+        server_modified: e.server_modified,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    // Breadcrumb from root down to currentPath
+    const breadcrumb = [];
+    if (rootFolder) {
+      const rootName = rootFolder.split("/").pop() || rootFolder;
+      breadcrumb.push({ name: rootName, path: null });   // null path = go to root
+      if (currentPath !== rootFolder) {
+        const rel = currentPath.substring(rootFolder.length).split("/").filter(Boolean);
+        let acc = rootFolder;
+        for (const seg of rel) {
+          acc += "/" + seg;
+          breadcrumb.push({ name: seg, path: acc });
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      folder: rootFolder,
+      current_path: currentPath,
+      breadcrumb,
+      subfolders,
+      files,
+    });
+  } catch (err) {
+    console.error("[individual dropbox browse]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/admin/hearing/individual/:id", async (req, res) => {
   try {
     const ih = require("./individual-hearing-notes");
