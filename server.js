@@ -3560,24 +3560,33 @@ async function handleExtract(req, res) {
     const name = req.file.originalname || "upload";
     const mime = req.file.mimetype || "";
     const isPdf   = mime.includes("pdf")    || /\.pdf$/i.test(name);
-    const isImage = mime.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(name);
+    // Accept HEIC/HEIF (iPhone photos) — they'll be normalized to image/jpeg below.
+    const isImage = mime.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif)$/i.test(name);
     if (!isPdf && !isImage) {
-      return res.status(400).json({ ok: false, error: "Unsupported file type. Use PDF, JPG, PNG, or WebP." });
+      return res.status(400).json({ ok: false, error: "Unsupported file type. Use PDF, JPG, PNG, WebP, or HEIC." });
     }
-    // Normalize mime type when browser sent something generic
+    // Normalize MIME type. Browsers/iOS often send empty or generic MIME for
+    // heic files, and Anthropic vision API doesn't accept image/heic — so
+    // we relabel as image/jpeg. The raw bytes go through unchanged; Claude
+    // decodes based on file magic bytes.
     let effectiveMime = mime;
     if (!effectiveMime || effectiveMime === "application/octet-stream") {
       if (isPdf) effectiveMime = "application/pdf";
-      else if (/\.jpe?g$/i.test(name)) effectiveMime = "image/jpeg";
-      else if (/\.png$/i.test(name))   effectiveMime = "image/png";
-      else if (/\.webp$/i.test(name))  effectiveMime = "image/webp";
+      else if (/\.jpe?g$/i.test(name))            effectiveMime = "image/jpeg";
+      else if (/\.png$/i.test(name))              effectiveMime = "image/png";
+      else if (/\.webp$/i.test(name))             effectiveMime = "image/webp";
+      else if (/\.(heic|heif)$/i.test(name))      effectiveMime = "image/jpeg";  // Anthropic doesn't accept heic
     }
-    console.log(`[extract-document] Processing ${name} (${req.file.size} bytes, ${effectiveMime})`);
+    // Also handle when browser DID send image/heic explicitly
+    if (effectiveMime === "image/heic" || effectiveMime === "image/heif") {
+      effectiveMime = "image/jpeg";
+    }
+    console.log(`[extract-document] Processing ${name} (${req.file.size} bytes, mime=${mime}, effectiveMime=${effectiveMime})`);
     const hn = require("./hearing-notes");
     const extracted = await hn.extractDocumentFields(req.file.buffer, effectiveMime, name);
     res.json({ ok: true, ...extracted });
   } catch (err) {
-    console.error("[extract-document]:", err.message);
+    console.error("[extract-document]:", err.message, err.response?.data || "");
     const msg = err.response?.data?.error?.message || err.message;
     res.status(500).json({ ok: false, error: msg });
   }
