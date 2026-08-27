@@ -2301,6 +2301,83 @@ app.get("/admin/clients", async (req, res) => {
   }
 });
 
+// ── Hearing Notices (scan Dropbox + client notification) ─
+// Scans a client's Dropbox folder for hearing notices via Claude Sonnet vision,
+// extracts date/time/court/judge, stores them, and offers one-click notification.
+
+app.post("/admin/clients/:key/hearing-notices/scan", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const dbx = require("./dropbox-integration");
+    const hn = require("./hearing-notices");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    const folder = await dbx.resolveClientFolder({
+      clientKey: client.key, clientName: client.client_name, aNumber: client.a_number,
+    });
+    if (!folder) return res.status(400).json({ ok: false, error: "Dropbox folder not linked for this client" });
+    const result = await hn.scanClientFolder({
+      clientKey: client.key,
+      clientName: client.client_name,
+      aNumber: client.a_number,
+      dropboxFolderPath: folder,
+      limit: parseInt(req.query.limit || "20"),
+    });
+    res.json({ ok: true, folder, ...result });
+  } catch (err) {
+    console.error("[hearing notices scan]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/clients/:key/hearing-notices", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const hn = require("./hearing-notices");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    const notices = await hn.listClientNotices(client.key);
+    // Build contact links for each notice
+    const enriched = notices.map(n => ({
+      ...n,
+      contact_links: hn.buildContactLinks({
+        notice: n,
+        clientEmail: client.client_email,
+        clientPhone: client.client_phone,
+        clientLang: client.client_language,
+      }),
+    }));
+    res.json({ ok: true, notices: enriched });
+  } catch (err) {
+    console.error("[hearing notices list]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/clients/:key/hearing-notices/:id/notified", async (req, res) => {
+  try {
+    const hn = require("./hearing-notices");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+    await hn.markNotified(id, (req.body.channel || "").trim() || "unknown");
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/clients/:key/hearing-notices/:id/dismiss", async (req, res) => {
+  try {
+    const hn = require("./hearing-notices");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+    await hn.dismissNotice(id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Dropbox Integration ───────────────────────────────────
 // OAuth setup flow, config, and per-client file operations.
 // See dropbox-integration.js for details.
@@ -3611,6 +3688,15 @@ app.listen(PORT, async () => {
     console.log("✅ Dropbox settings table ready");
   } catch (e) {
     console.error("⚠️  Dropbox init failed:", e.message);
+  }
+
+  // Initialize hearing notices table
+  try {
+    const hn = require("./hearing-notices");
+    await hn.initTable();
+    console.log("✅ Hearing notices table ready");
+  } catch (e) {
+    console.error("⚠️  Hearing notices init failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)
