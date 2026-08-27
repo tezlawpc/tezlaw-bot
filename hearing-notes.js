@@ -1242,6 +1242,8 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
 
   <p style="margin-top:30px; color:#888; font-size:13px;">
     <a href="/admin/hearing/history" class="back-link">View all hearing notes →</a>
+    &nbsp;·&nbsp;
+    <a href="/admin/hearing/notes/bulk-upload" class="back-link" style="color:#0061FF;">📚 Bulk upload multiple documents →</a>
   </p>
 
   <script>
@@ -1867,7 +1869,304 @@ function escapeAttr(s) { return escapeHtml(s); }
 
 // ── Exports ──────────────────────────────────────────────
 
-module.exports = {
+// ── Bulk upload page ─────────────────────────────────────
+// Multi-file upload → Claude extraction in parallel → review grid →
+// bulk-create draft hearing notes with one click.
+function renderBulkUploadPage() {
+  const body = `
+<div class="page-header">
+  <h1>📚 Bulk Upload Master Hearing Notes</h1>
+  <div style="font-size:13px; color:#666;">
+    Drop or select multiple photos/PDFs from a day of court. Zara extracts fields for each in parallel, then you review + create the drafts.
+  </div>
+</div>
+
+<div id="bulk-upload-area"
+     ondragover="handleBulkDrag(event, true)"
+     ondragleave="handleBulkDrag(event, false)"
+     ondrop="handleBulkDrop(event)"
+     style="border:3px dashed #B79C62; padding:32px 20px; text-align:center; border-radius:8px; background:#fdf7f0; cursor:pointer; margin-bottom:20px;"
+     onclick="document.getElementById('bulk-file-input').click()">
+  <div style="font-size:40px; margin-bottom:8px;">📚</div>
+  <strong style="font-size:16px;">Drop multiple documents here — or click to select</strong>
+  <div style="font-size:12px; color:#666; margin-top:6px;">
+    PDF, JPG, PNG, WebP, or HEIC. Up to 20 files at a time. Each processes in parallel (~30–60 sec each).
+  </div>
+  <input type="file" id="bulk-file-input" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*" style="display:none;" onchange="handleBulkFiles(this.files)">
+</div>
+
+<div id="bulk-progress-bar" style="display:none; background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <strong id="bulk-progress-label" style="color:#0C1C36;">Processing…</strong>
+    <span id="bulk-progress-count" style="font-size:13px; color:#666;">0 of 0</span>
+  </div>
+  <div style="background:#eee; height:8px; border-radius:4px; overflow:hidden;">
+    <div id="bulk-progress-fill" style="background:linear-gradient(to right, #B79C62, #d4b979); height:100%; width:0%; transition:width 0.3s;"></div>
+  </div>
+</div>
+
+<div id="bulk-cards-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:15px;"></div>
+
+<div id="bulk-actions-bar" style="display:none; position:sticky; bottom:0; background:white; padding:15px 20px; border-radius:6px; border:1px solid #eee; margin-top:20px; box-shadow:0 -4px 12px rgba(0,0,0,.05); display:none;">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <div>
+      <span id="bulk-ready-count" style="font-size:13px; color:#666;">0 ready</span>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button type="button" onclick="discardAllPending()" style="background:#eee; color:#333; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Discard all pending</button>
+      <button type="button" onclick="createAllAsDrafts()" id="bulk-create-all-btn" style="background:#0C1C36; color:white; padding:9px 16px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">Create all as drafts</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const CONCURRENCY = 3;   // max simultaneous Claude extractions
+const cards = new Map();   // cardId → { file, status, extraction, noteId }
+let queue = [];
+let inFlight = 0;
+
+function handleBulkDrag(e, on) {
+  e.preventDefault(); e.stopPropagation();
+  const el = document.getElementById("bulk-upload-area");
+  el.style.background = on ? "#faedd5" : "#fdf7f0";
+  el.style.borderColor = on ? "#8f7a4c" : "#B79C62";
+}
+function handleBulkDrop(e) {
+  handleBulkDrag(e, false);
+  handleBulkFiles(e.dataTransfer.files);
+}
+
+function handleBulkFiles(files) {
+  const arr = Array.from(files || []);
+  if (!arr.length) return;
+  const remaining = Math.min(arr.length, 20);
+  if (arr.length > 20) alert("Max 20 files at a time. Only the first 20 will be processed.");
+
+  document.getElementById("bulk-progress-bar").style.display = "block";
+  document.getElementById("bulk-actions-bar").style.display = "block";
+
+  for (let i = 0; i < remaining; i++) {
+    const file = arr[i];
+    const cardId = "card-" + Date.now() + "-" + i + "-" + Math.random().toString(36).substr(2, 5);
+    cards.set(cardId, { file, status: "queued", extraction: null, noteId: null });
+    renderCard(cardId);
+    queue.push(cardId);
+  }
+  updateProgress();
+  processQueue();
+}
+
+async function processQueue() {
+  while (queue.length && inFlight < CONCURRENCY) {
+    const cardId = queue.shift();
+    inFlight++;
+    processCard(cardId).finally(() => {
+      inFlight--;
+      processQueue();
+      updateProgress();
+    });
+  }
+}
+
+async function processCard(cardId) {
+  const c = cards.get(cardId);
+  if (!c) return;
+
+  c.status = "uploading";
+  renderCard(cardId);
+
+  // Rename file to sanitize (Safari/iOS quirks)
+  let safeFile = c.file;
+  try {
+    const safeName = (c.file.name || "upload").replace(/[^\\w.\\-]/g, "_") || "upload";
+    if (typeof File === "function") {
+      safeFile = new File([c.file], safeName, { type: c.file.type || "application/octet-stream" });
+    }
+  } catch (e) { /* use original */ }
+
+  const formData = new FormData();
+  formData.append("document", safeFile, safeFile.name);
+
+  try {
+    c.status = "extracting";
+    renderCard(cardId);
+    const resp = await fetch("/admin/hearing/notes/extract-document", {
+      method: "POST",
+      body: formData,
+    });
+    const text = await resp.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch (e) { throw new Error("Server returned non-JSON: " + text.substring(0, 100)); }
+    if (!resp.ok || !data.ok) throw new Error(data.error || "Extraction failed (HTTP " + resp.status + ")");
+    c.extraction = data.form_prefill || {};
+    c.raw = data.raw_extraction || null;
+    c.status = "ready";
+  } catch (e) {
+    c.status = "error";
+    c.error = e.message;
+  }
+  renderCard(cardId);
+}
+
+function renderCard(cardId) {
+  const c = cards.get(cardId);
+  if (!c) return;
+  const grid = document.getElementById("bulk-cards-grid");
+  let card = document.getElementById(cardId);
+  if (!card) {
+    card = document.createElement("div");
+    card.id = cardId;
+    card.style.cssText = "background:white; border-radius:6px; padding:15px; border:1px solid #eee; box-shadow:0 1px 3px rgba(0,0,0,.04);";
+    grid.appendChild(card);
+  }
+
+  const statusMap = {
+    queued:     { emoji: "⏳", text: "Queued",           color: "#888" },
+    uploading:  { emoji: "📤", text: "Uploading…",       color: "#0061FF" },
+    extracting: { emoji: "🤖", text: "Claude extracting…",color: "#B79C62" },
+    ready:      { emoji: "✓",  text: "Ready to create",  color: "#2e7d32" },
+    creating:   { emoji: "💾", text: "Creating draft…",  color: "#B79C62" },
+    created:    { emoji: "✅", text: "Draft created",    color: "#2e7d32" },
+    error:      { emoji: "❌", text: "Error",            color: "#c00" },
+    discarded:  { emoji: "🗑️", text: "Discarded",        color: "#888" },
+  };
+  const s = statusMap[c.status] || statusMap.queued;
+
+  const filename = c.file?.name || "upload";
+  const shortName = filename.length > 32 ? filename.substring(0, 29) + "…" : filename;
+
+  let content = '';
+  content += '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">';
+  content +=   '<div style="font-size:12px; color:#666; font-family:monospace; overflow:hidden; text-overflow:ellipsis;" title="' + escapeHTMLLocal2(filename) + '">📄 ' + escapeHTMLLocal2(shortName) + '</div>';
+  content +=   '<span style="background:' + s.color + '; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">' + s.emoji + ' ' + s.text + '</span>';
+  content += '</div>';
+
+  if (c.status === "error") {
+    content += '<div style="background:#fee; color:#900; padding:8px; border-radius:3px; font-size:12px; margin-bottom:8px;">' + escapeHTMLLocal2(c.error) + '</div>';
+    content += '<button type="button" onclick="retryCard(\\'' + cardId + '\\')" style="background:#eee; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Retry</button>';
+    content += '<button type="button" onclick="discardCard(\\'' + cardId + '\\')" style="background:#eee; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; font-size:11px;">Discard</button>';
+  } else if (c.status === "ready") {
+    const e = c.extraction || {};
+    content += '<div style="font-size:13px; line-height:1.5;">';
+    content += e.client_name ? '<div><strong>Client:</strong> ' + escapeHTMLLocal2(e.client_name) + '</div>' : '<div style="color:#c00;">⚠️ No client name extracted</div>';
+    if (e.a_number) content += '<div><strong>A#:</strong> ' + escapeHTMLLocal2(e.a_number) + '</div>';
+    if (e.hearing_datetime) content += '<div><strong>Hearing:</strong> ' + escapeHTMLLocal2(new Date(e.hearing_datetime).toLocaleString()) + '</div>';
+    if (e.judge_name) content += '<div><strong>Judge:</strong> ' + escapeHTMLLocal2(e.judge_name) + '</div>';
+    if (e.case_type) content += '<div style="font-size:12px; color:#666;"><strong>Type:</strong> ' + escapeHTMLLocal2(e.case_type) + '</div>';
+    if (e.hearing_type) content += '<div style="font-size:12px; color:#666;"><strong>Master/Individual:</strong> ' + escapeHTMLLocal2(e.hearing_type) + '</div>';
+    if (e.narrative_notes) {
+      const short = e.narrative_notes.length > 120 ? e.narrative_notes.substring(0, 120) + "…" : e.narrative_notes;
+      content += '<div style="font-size:11px; color:#888; margin-top:4px; font-style:italic;">' + escapeHTMLLocal2(short) + '</div>';
+    }
+    content += '</div>';
+    content += '<div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">';
+    content +=   '<button type="button" onclick="createDraft(\\'' + cardId + '\\')" style="background:#0C1C36; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:11px; font-weight:600;">💾 Create draft</button>';
+    content +=   '<button type="button" onclick="discardCard(\\'' + cardId + '\\')" style="background:#eee; color:#666; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:11px;">Discard</button>';
+    content += '</div>';
+  } else if (c.status === "created") {
+    content += '<div style="background:#e8f5e9; color:#2e7d32; padding:8px; border-radius:3px; font-size:12px;">';
+    content +=   '<strong>Draft created!</strong> ' + (c.extraction?.client_name ? escapeHTMLLocal2(c.extraction.client_name) : "");
+    content += '</div>';
+    content += '<a href="/admin/hearing/notes/' + c.noteId + '" target="_blank" style="display:inline-block; margin-top:8px; background:#0C1C36; color:white; padding:6px 12px; text-decoration:none; border-radius:3px; font-size:11px; font-weight:600;">Open to edit →</a>';
+  } else if (c.status === "discarded") {
+    content += '<div style="color:#888; font-size:12px; font-style:italic;">Discarded</div>';
+  } else {
+    // uploading / extracting / queued
+    content += '<div style="text-align:center; padding:20px 0; color:#888;">';
+    content += '<div style="font-size:24px;">' + s.emoji + '</div>';
+    content += '<div style="font-size:12px; margin-top:6px;">' + s.text + '</div>';
+    content += '</div>';
+  }
+  card.innerHTML = content;
+}
+
+function escapeHTMLLocal2(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function updateProgress() {
+  const total = cards.size;
+  const done = Array.from(cards.values()).filter(c => c.status === "ready" || c.status === "error" || c.status === "created" || c.status === "discarded").length;
+  const readyCount = Array.from(cards.values()).filter(c => c.status === "ready").length;
+  const errorCount = Array.from(cards.values()).filter(c => c.status === "error").length;
+  const createdCount = Array.from(cards.values()).filter(c => c.status === "created").length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+  document.getElementById("bulk-progress-fill").style.width = pct + "%";
+  document.getElementById("bulk-progress-count").textContent = done + " of " + total + (errorCount ? "  (" + errorCount + " errors)" : "");
+  document.getElementById("bulk-progress-label").textContent = done < total ? "Processing…" : "All processed";
+  document.getElementById("bulk-ready-count").textContent = readyCount + " ready · " + createdCount + " created";
+  document.getElementById("bulk-create-all-btn").disabled = readyCount === 0;
+  document.getElementById("bulk-create-all-btn").style.opacity = readyCount === 0 ? "0.5" : "1";
+}
+
+async function createDraft(cardId) {
+  const c = cards.get(cardId);
+  if (!c || c.status !== "ready" || !c.extraction) return;
+  c.status = "creating";
+  renderCard(cardId);
+  try {
+    const resp = await fetch("/admin/hearing/notes/create-from-extraction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ extraction: c.extraction, raw: c.raw }),
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || "Failed to create draft");
+    c.noteId = data.note_id;
+    c.status = "created";
+  } catch (e) {
+    c.status = "error";
+    c.error = e.message;
+  }
+  renderCard(cardId);
+  updateProgress();
+}
+
+async function createAllAsDrafts() {
+  const readyCards = Array.from(cards.entries()).filter(([, c]) => c.status === "ready");
+  if (!readyCards.length) return;
+  if (!confirm("Create " + readyCards.length + " draft hearing note" + (readyCards.length === 1 ? "" : "s") + "?")) return;
+  // Fire off in parallel, small concurrency
+  const chunks = [];
+  for (let i = 0; i < readyCards.length; i += 3) chunks.push(readyCards.slice(i, i + 3));
+  for (const chunk of chunks) {
+    await Promise.all(chunk.map(([cardId]) => createDraft(cardId)));
+  }
+  updateProgress();
+}
+
+function retryCard(cardId) {
+  const c = cards.get(cardId);
+  if (!c) return;
+  c.status = "queued";
+  c.error = null;
+  renderCard(cardId);
+  queue.push(cardId);
+  processQueue();
+  updateProgress();
+}
+
+function discardCard(cardId) {
+  const c = cards.get(cardId);
+  if (!c) return;
+  c.status = "discarded";
+  renderCard(cardId);
+  updateProgress();
+}
+
+function discardAllPending() {
+  if (!confirm("Discard all extractions that haven't been saved as drafts?")) return;
+  cards.forEach((c, cardId) => {
+    if (c.status === "ready" || c.status === "error") discardCard(cardId);
+  });
+}
+</script>`;
+
+  return renderAdminChrome({ title: "Bulk Upload Hearing Notes", body, activeItem: "notes" });
+}
+
+
   initHearingNotesTables,
   saveNote,
   updateNote,
@@ -1886,6 +2185,7 @@ module.exports = {
   renderAdminChrome,
   renderHistoryPage,
   renderDetailPage,
+  renderBulkUploadPage,
   parseFormSubmission,
   APPLICATION_OPTIONS,
 };
