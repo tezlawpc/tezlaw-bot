@@ -391,31 +391,37 @@ Rules:
 // ── AI Summary Generation ────────────────────────────────
 
 async function generateParalegalSummary(data) {
-  const structured = buildStructuredForAI(data);
+  const structured = buildStructuredForAISummary(data);
 
-  const prompt = `You are cleaning up individual (merits) hearing notes for the legal team at Tez Law, P.C.
+  const prompt = `You are producing a SHORT, scannable individual hearing recap for the Tez Law team.
 
-The attorney (JJ Zhang) prepared and used these notes for an individual/merits hearing. Your job is to produce a clean, professional summary the team can use to update the case file and take follow-up action.
+Keep it MINIMAL. This is a case-file update — the paralegal already has access to the full note with all witness testimony and closing argument, so DO NOT reproduce those. Just the essentials.
 
-Rules:
-- Complete and detailed — include ALL material information
-- Structured with clear headings for each section
-- Professional attorney-to-team tone (efficient, factual)
-- Preserve ALL specific dates, exhibit numbers, deadlines, and witness names exactly
-- Summarize witness testimony as narrative (don't dump every Q&A row) — capture the substance of what was covered
-- Do NOT invent or embellish — only use what's in the notes
-- Use bullet points where appropriate for scannability
-- End with an "Action Items" section listing follow-up tasks
+Include ONLY these sections (skip any that have no info):
 
-Structured hearing data:
+1. **Case info** — one line each: client name, A#, case type, hearing date, judge, court, appearance method
+2. **Exhibits** — brief count + note any that were NOT admitted (specify which and why)
+3. **Pre-hearing notes** (if any — quote briefly)
+4. **Disposition** + disposition notes
+5. **Next hearing** (date + type) if scheduled
+6. **Action items** — short bullet list of follow-up tasks
+
+RULES:
+- Total length: aim for under 300 words. Punchy, scannable, no filler.
+- No witness testimony summaries. No closing argument content. Those are in the full note.
+- Use clean structure with short bold section headers.
+- Preserve specific dates, exhibit numbers, and deadlines exactly.
+- Do NOT invent info. If a section has no data, skip it entirely.
+
+Hearing data:
 ${structured}
 
-Produce the paralegal summary now. Start directly with the summary — no preamble.`;
+Produce the recap now. Start directly — no preamble.`;
 
   try {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
-      { model: ANTHROPIC_MODEL, max_tokens: 3000, messages: [{ role: "user", content: prompt }] },
+      { model: ANTHROPIC_MODEL, max_tokens: 1200, messages: [{ role: "user", content: prompt }] },
       {
         headers: {
           "x-api-key": process.env.ANTHROPIC_API_KEY,
@@ -442,35 +448,42 @@ async function generateClientSummary(data) {
     pa: "Punjabi (ਪੰਜਾਬੀ)",
   };
   const languageName = langNames[lang] || "English";
-  const structured = buildStructuredForAI(data);
+  const structured = buildStructuredForAISummary(data);
 
-  const prompt = `You are writing a client-friendly summary of an immigration individual (merits) hearing in ${languageName}.
+  const prompt = `You are writing a SHORT client-facing note about an immigration individual (merits) hearing, in ${languageName}.
 
-The client attended their individual hearing today with attorney JJ Zhang of Tez Law, P.C. Your job is to write a warm but professional summary explaining what happened and what comes next.
+Keep it BRIEF and reassuring. This isn't a detailed hearing recap — just enough for the client to know what happened and what to do next.
 
-Rules:
+Structure (skip any sections with no info):
+
+1. Brief greeting acknowledging the hearing took place (date, judge)
+2. Basic info: what type of hearing it was, exhibits filed (count only)
+3. What happened at the hearing (1-2 short sentences — did they testify? Was there a decision?)
+4. What comes next: any next hearing date/type, any deadlines
+5. Contact info + sign-off
+
+RULES:
 - Write ENTIRELY in ${languageName}
-- Plain language — no legalese, no Latin phrases, no complex procedural terminology
-- Warm and reassuring tone but professional
-- Focus on: what happened at the hearing, what the client said/showed, what the judge decided (if anything), and what happens next
-- Do NOT walk through every question and answer — summarize testimony as narrative
-- Include specific dates and deadlines with clear context
-- Do NOT invent information — only what's in the notes
-- End with attorney contact info: "If you have questions, please contact us at 626-678-8677 or jj@tezlawfirm.com" (translated)
+- Plain, warm language — no legalese
+- Total length: aim for under 200 words. Short is better than long.
+- Do NOT walk through witness testimony or closing argument details
+- Do NOT quote exhibits by title — just note the count
 - Address the client directly ("You" / "您" / "Usted" / "आप" / "ਤੁਸੀਂ")
-- Sign off with "Sincerely, Attorney JJ Zhang, Tez Law, P.C." (translated)
+- End with: "If you have any questions, please contact us at 626-678-8677 or jj@tezlawfirm.com" (translated)
+- Sign off: "Sincerely, Attorney JJ Zhang, Tez Law, P.C." (translated)
+- Do NOT invent information
 
 Client name: ${data.client_name}
 
-Hearing details (in English — you translate the meaningful parts):
+Hearing data (in English — translate meaningful parts to ${languageName}):
 ${structured}
 
-Produce the client summary in ${languageName} now. Start directly with the greeting.`;
+Produce the client note in ${languageName} now. Start directly with the greeting.`;
 
   try {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
-      { model: ANTHROPIC_MODEL, max_tokens: 3000, messages: [{ role: "user", content: prompt }] },
+      { model: ANTHROPIC_MODEL, max_tokens: 1200, messages: [{ role: "user", content: prompt }] },
       {
         headers: {
           "x-api-key": process.env.ANTHROPIC_API_KEY,
@@ -488,6 +501,17 @@ Produce the client summary in ${languageName} now. Start directly with the greet
 }
 
 function buildStructuredForAI(data) {
+  return buildStructuredInternal(data, { minimal: false });
+}
+
+// Minimal structured data — for summary generation. Excludes witness Q&A
+// and full closing argument. Only what's needed for a concise recap:
+// basic info + exhibits + pre/post-hearing notes + disposition.
+function buildStructuredForAISummary(data) {
+  return buildStructuredInternal(data, { minimal: true });
+}
+
+function buildStructuredInternal(data, { minimal }) {
   const lines = [
     `Client: ${data.client_name || "(not provided)"}`,
     `A-Number: ${data.a_number || "(not provided)"}`,
@@ -496,12 +520,18 @@ function buildStructuredForAI(data) {
     `Hearing date: ${data.hearing_date ? new Date(data.hearing_date).toLocaleString() : "(not provided)"}`,
     `Judge: ${data.judge_name || "(not noted)"}`,
     `Court: ${data.court_location || "(not noted)"}`,
-    `Court address: ${data.court_address || "(not noted)"}`,
-    `DHS Trial Attorney: ${data.dhs_attorney || "(not noted)"}`,
-    "",
   ];
+  if (!minimal) {
+    lines.push(`Court address: ${data.court_address || "(not noted)"}`);
+  }
+  lines.push(`DHS Trial Attorney: ${data.dhs_attorney || "(not noted)"}`);
+  if (data.attorney_appearance || data.respondent_appearance) {
+    lines.push(`Attorney appearance: ${data.attorney_appearance || "(not noted)"}`);
+    lines.push(`Respondent appearance: ${data.respondent_appearance || "(not noted)"}`);
+  }
+  lines.push("");
 
-  // Exhibits
+  // Exhibits (always included, both minimal and detailed)
   const exhibits = data.exhibits || [];
   if (exhibits.length) {
     lines.push(`EXHIBITS (${exhibits.length} total):`);
@@ -510,7 +540,6 @@ function buildStructuredForAI(data) {
       const flags = [];
       if (e.eoir_submission) flags.push(`EOIR: ${e.eoir_submission}`);
       if (e.marked)     flags.push(`marked as #${e.marked}`);
-      // Default = admitted; only note if explicitly not admitted
       if (e.not_admitted) flags.push("NOT ADMITTED");
       else flags.push("admitted");
       if (e.objection)  flags.push(`objection: ${e.objection}`);
@@ -523,45 +552,67 @@ function buildStructuredForAI(data) {
   }
 
   if (data.pre_examination_notes) {
-    lines.push("PRE-EXAMINATION NOTES:");
+    lines.push("PRE-HEARING NOTES:");
     lines.push(data.pre_examination_notes);
     lines.push("");
   }
 
-  // Examinations
-  const exams = data.examinations || [];
-  if (exams.length) {
-    lines.push(`WITNESS EXAMINATIONS (${exams.length}):`);
-    for (const ex of exams) {
-      const role = ex.witness_role || "";
-      const name = ex.witness_name || "";
-      let witnessDisplay;
-      if (role && name) witnessDisplay = `${role}: ${name}`;
-      else if (name) witnessDisplay = name;
-      else if (role) witnessDisplay = role;
-      else witnessDisplay = ex.witness || "(unnamed witness)";
-      lines.push(`\n${witnessDisplay} — ${ex.examination_type || "examination"}`);
-      const rows = (ex.qa_rows || []).filter(r => r.question || r.expected_answer || r.judge_notes);
-      if (rows.length) {
-        for (const r of rows) {
-          if (r.question) lines.push(`  Q: ${r.question}`);
-          if (r.expected_answer) lines.push(`  A: ${r.expected_answer}`);
-          if (r.judge_notes) lines.push(`  [Judge/Notes]: ${r.judge_notes}`);
-          lines.push("");
-        }
-      } else {
-        lines.push("  (no Q&A recorded)");
+  // In minimal mode, skip the detailed examinations Q&A and full closing argument.
+  // Just note that they occurred so the summary can reference them.
+  if (minimal) {
+    const exams = data.examinations || [];
+    if (exams.length) {
+      lines.push("WITNESSES EXAMINED:");
+      for (const ex of exams) {
+        const role = ex.witness_role || "Respondent";
+        const name = ex.witness_name || "";
+        const witnessDisplay = name ? `${role} (${name})` : role;
+        const rowCount = (ex.sections || []).reduce((sum, s) => sum + (s.qa_rows || []).length, 0)
+          || (ex.qa_rows || []).length;
+        lines.push(`  - ${witnessDisplay} — ${ex.examination_type || "examination"} (${rowCount} Q&A rows)`);
       }
+      lines.push("");
+    }
+    if (data.closing_argument) {
+      lines.push("CLOSING ARGUMENT: (delivered — see individual hearing note for full text)");
+      lines.push("");
     }
   } else {
-    lines.push("WITNESS EXAMINATIONS: (none recorded)");
-  }
-  lines.push("");
-
-  if (data.closing_argument) {
-    lines.push("CLOSING ORAL ARGUMENT:");
-    lines.push(data.closing_argument);
+    // Full detail mode — used for direct display, not summary generation
+    const exams = data.examinations || [];
+    if (exams.length) {
+      lines.push(`WITNESS EXAMINATIONS (${exams.length}):`);
+      for (const ex of exams) {
+        const role = ex.witness_role || "";
+        const name = ex.witness_name || "";
+        let witnessDisplay;
+        if (role && name) witnessDisplay = `${role}: ${name}`;
+        else if (name) witnessDisplay = name;
+        else if (role) witnessDisplay = role;
+        else witnessDisplay = ex.witness || "(unnamed witness)";
+        lines.push(`\n${witnessDisplay} — ${ex.examination_type || "examination"}`);
+        const rows = (ex.qa_rows || []).filter(r => r.question || r.expected_answer || r.judge_notes);
+        if (rows.length) {
+          for (const r of rows) {
+            if (r.question) lines.push(`  Q: ${r.question}`);
+            if (r.expected_answer) lines.push(`  A: ${r.expected_answer}`);
+            if (r.judge_notes) lines.push(`  [Judge/Notes]: ${r.judge_notes}`);
+            lines.push("");
+          }
+        } else {
+          lines.push("  (no Q&A recorded)");
+        }
+      }
+    } else {
+      lines.push("WITNESS EXAMINATIONS: (none recorded)");
+    }
     lines.push("");
+
+    if (data.closing_argument) {
+      lines.push("CLOSING ORAL ARGUMENT:");
+      lines.push(data.closing_argument);
+      lines.push("");
+    }
   }
 
   if (data.disposition) {
@@ -571,6 +622,9 @@ function buildStructuredForAI(data) {
     lines.push("");
   }
 
+  if (data.next_hearing_date || data.next_hearing_type) {
+    lines.push(`NEXT HEARING: ${data.next_hearing_type || "(type not noted)"} on ${data.next_hearing_date ? new Date(data.next_hearing_date).toLocaleString() : "(date not set)"}`);
+  }
   if (data.next_action_deadline) {
     lines.push(`NEXT ACTION DEADLINE: ${data.next_action_deadline}`);
   }
