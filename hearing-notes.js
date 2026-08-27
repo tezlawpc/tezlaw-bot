@@ -34,6 +34,7 @@ async function initHearingNotesTables() {
       client_language       TEXT DEFAULT 'en',
       client_email          TEXT,
       client_phone          TEXT,
+      client_address        TEXT,
       judge_name            TEXT,
       hearing_date          TIMESTAMPTZ,
       hearing_type          TEXT DEFAULT 'master',
@@ -78,6 +79,7 @@ async function initHearingNotesTables() {
     ["pleadings_method", "TEXT"],
     ["asylum_fee_needed", "BOOLEAN"],
     ["biometrics_needed", "BOOLEAN"],
+    ["client_address", "TEXT"],
   ]) {
     try {
       await db.query(`ALTER TABLE hearing_notes ADD COLUMN IF NOT EXISTS ${col[0]} ${col[1]}`);
@@ -445,14 +447,14 @@ async function saveNote(data, { generateSummaries = true } = {}) {
        applications, asylum_fee_needed, biometrics_needed,
        disposition, disposition_notes, bond_outcome, bond_amount,
        next_hearing_date, next_hearing_type, deadlines,
-       raw_notes, paralegal_summary, client_summary)
+       raw_notes, paralegal_summary, client_summary, client_address)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
              $10, $11, $12,
              $13, $14, $15, $16, $17,
              $18::jsonb, $19, $20,
              $21, $22, $23, $24,
              $25, $26, $27::jsonb,
-             $28, $29, $30)
+             $28, $29, $30, $31)
      RETURNING id`,
     [
       data.client_name, data.a_number || null, data.client_language || "en",
@@ -470,6 +472,7 @@ async function saveNote(data, { generateSummaries = true } = {}) {
       data.next_hearing_date || null, data.next_hearing_type || null,
       JSON.stringify(data.deadlines || []),
       data.raw_notes || null, paralegal_summary, client_summary,
+      data.client_address || null,
     ]
   );
   return { id: r.rows[0].id, paralegal_summary, client_summary };
@@ -489,7 +492,7 @@ async function updateNote(id, data) {
        applications=$18::jsonb, asylum_fee_needed=$19, biometrics_needed=$20,
        disposition=$21, disposition_notes=$22, bond_outcome=$23, bond_amount=$24,
        next_hearing_date=$25, next_hearing_type=$26, deadlines=$27::jsonb,
-       raw_notes=$28
+       raw_notes=$28, client_address=$30
      WHERE id=$29 RETURNING id`,
     [
       data.client_name, data.a_number || null, data.client_language || "en",
@@ -508,6 +511,7 @@ async function updateNote(id, data) {
       JSON.stringify(data.deadlines || []),
       data.raw_notes || null,
       id,
+      data.client_address || null,
     ]
   );
   if (!r.rows[0]) throw new Error(`Note ${id} not found`);
@@ -1011,6 +1015,8 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
           <input type="text" name="client_phone" value="${escapeAttr(prev.client_phone)}" placeholder="e.g. 626-555-0123">
         </div>
       </div>
+      <label>Client mailing address</label>
+      <textarea name="client_address" rows="2" placeholder="Street, City, State, ZIP">${escapeHtml(prev.client_address || "")}</textarea>
       <div class="row">
         <div>
           <label>Client's language (for client summary)</label>
@@ -1720,6 +1726,7 @@ function parseFormSubmission(body) {
     client_language: body.client_language || "en",
     client_email: (body.client_email || "").trim() || null,
     client_phone: (body.client_phone || "").trim() || null,
+    client_address: (body.client_address || "").trim() || null,
     judge_name: (body.judge_name || "").trim(),
     hearing_date: body.hearing_date || null,
     hearing_type: body.hearing_type || "master",
