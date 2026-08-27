@@ -473,8 +473,8 @@ RULES:
 - Do NOT walk through witness testimony or closing argument details
 - Do NOT quote exhibits by title — just note the count
 - Address the client directly ("You" / "您" / "Usted" / "आप" / "ਤੁਸੀਂ")
-- End with: "If you have any questions, please contact us at 626-678-8677 or jj@tezlawfirm.com" (translated)
-- Sign off: "Sincerely, Attorney JJ Zhang, Tez Law, P.C." (translated)
+- End with: "If you have any questions, please contact us at 626-678-8677 or info@tezlawfirm.com" (translated)
+- Sign off with "Sincerely, TEZ LAW FIRM" (translate "Sincerely" but keep TEZ LAW FIRM as the firm name; for Chinese use "TEZ律师事务所"). Do NOT use any personal attorney name.
 - Do NOT invent information
 
 Client name: ${data.client_name}
