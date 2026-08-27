@@ -2550,6 +2550,27 @@ app.get("/admin/dropbox/browse", async (req, res) => {
   }
 });
 
+// Dumps the raw response from Dropbox's get_current_account so we can see
+// exactly what fields (including root_info) it returned.
+app.get("/admin/dropbox/raw-account", async (req, res) => {
+  try {
+    const dbx = require("./dropbox-integration");
+    const token = await dbx.getAccessToken();
+    const resp = await axios.post(
+      "https://api.dropboxapi.com/2/users/get_current_account",
+      null,
+      { headers: { "Authorization": `Bearer ${token}` }, timeout: 15000 }
+    );
+    res.type("text/plain").send(JSON.stringify(resp.data, null, 2));
+  } catch (err) {
+    const detail = err.response?.data || err.message;
+    res.status(500).type("text/plain").send(
+      "Error: " + err.message + "\n\nResponse status: " + (err.response?.status || "n/a") +
+      "\nResponse body: " + JSON.stringify(detail, null, 2)
+    );
+  }
+});
+
 // Diagnostic: shows lengths of Dropbox env vars (safe, doesn't reveal values)
 app.get("/admin/dropbox/diag", async (req, res) => {
   const key = process.env.DROPBOX_APP_KEY || "";
