@@ -192,6 +192,10 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  `/client <name or A#>` — look up a specific client",
       "  `/docs <name or A#>` — list a client's documents on file",
       "",
+      "*📦 Dropbox Integration*",
+      "  Setup: https://tezlaw-bot.onrender.com/admin/dropbox/setup",
+      "  `/dropbox` — check connection status",
+      "",
       "*📥 Intake Agent (auto-runs for new leads)*",
       "  Zara asks new inquirers structured questions across all channels.",
       "  Alerts you via WhatsApp + email with HOT/WARM/COLD tag.",
@@ -794,6 +798,37 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     } catch (err) {
       console.error("[JJ-Mode] /docs error:", err.message);
       return { handled: true, message: `❌ /docs error: ${err.message}` };
+    }
+  }
+
+  // ── /dropbox — Dropbox connection status ──────────────────
+  const dropboxFirstLine = lower.split("\n", 1)[0].trim();
+  if (dropboxFirstLine === "/dropbox" || dropboxFirstLine === "/dbx") {
+    try {
+      const dbx = require("./dropbox-integration");
+      if (!dbx.isConfigured()) {
+        return { handled: true, message: "📦 *Dropbox: not configured*\n\nSet these env vars in Render:\n• `DROPBOX_APP_KEY`\n• `DROPBOX_APP_SECRET`\n• `DROPBOX_BRANCH_ROOTS`\n\nThen visit: https://tezlaw-bot.onrender.com/admin/dropbox/setup" };
+      }
+      const settings = await dbx.getSettings();
+      const branches = dbx.getBranchRoots();
+      if (!settings.refresh_token) {
+        return { handled: true, message: "📦 *Dropbox: configured but not authorized*\n\nVisit: https://tezlaw-bot.onrender.com/admin/dropbox/setup to authorize." };
+      }
+      // Test the connection
+      let testResult = "";
+      try {
+        await dbx.getAccessToken();
+        testResult = "✅ Connection working";
+      } catch (e) {
+        testResult = `❌ Token refresh failed: ${e.message}`;
+      }
+      return {
+        handled: true,
+        message: `📦 *Dropbox Status*\n\nAccount: *${settings.authorized_account_name || "-"}*\nEmail: ${settings.authorized_email || "-"}\nAuthorized: ${settings.last_authorized_at ? new Date(settings.last_authorized_at).toLocaleString() : "-"}\nBranch folders: ${branches.length ? branches.map(b => `\`${b}\``).join(", ") : "_(none configured)_"}\n\n${testResult}\n\nSetup: https://tezlaw-bot.onrender.com/admin/dropbox/setup`,
+      };
+    } catch (err) {
+      console.error("[JJ-Mode] /dropbox error:", err.message);
+      return { handled: true, message: `❌ /dropbox error: ${err.message}` };
     }
   }
 
