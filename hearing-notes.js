@@ -871,10 +871,16 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   <a href="/admin/email-setup" class="nav-item" data-perm="email.setup" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">📬</span><span>Email Setup</span>
   </a>
+  <a href="/admin/reminders" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+    <span class="icon">📣</span><span>Hearing Reminders</span>
+  </a>
+  <a href="/admin/audit-log" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+    <span class="icon">📜</span><span>Audit Log</span>
+  </a>
   <a href="/admin/users" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">👤</span><span>Admin Users</span>
   </a>
-  <a href="/admin/" class="nav-item">
+  <a href="/admin/dashboard" class="nav-item" data-active-item="dashboard">
     <span class="icon">📊</span><span>Dashboard</span>
   </a>
 </div>
