@@ -895,8 +895,10 @@ function parseFormSubmission(body) {
       admitted:         body[`exhibit_admitted_${i}`] ? "yes" : "",
       objection:        (body[`exhibit_objection_${i}`] || "").trim(),
       bates:            (body[`exhibit_bates_${i}`] || "").trim(),
+      // Dropbox file path linked to this exhibit (assists file matching, no upload)
+      dropbox_file_path: (body[`exhibit_dropbox_file_path_${i}`] || "").trim(),
     };
-    if (row.number || row.description || row.eoir_submission) exhibits.push(row);
+    if (row.number || row.description || row.eoir_submission || row.dropbox_file_path) exhibits.push(row);
   }
 
   // Examinations: nested — for each examination (exam_witness_role_N),
@@ -1197,15 +1199,17 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
               <th style="width:70px; text-align:center;">Marked</th>
               <th style="width:90px; text-align:center;">Not admitted</th>
               <th style="text-align:left;">Objection / Notes</th>
+              <th style="width:70px; text-align:center;" title="Attach a file from client's Dropbox">📎</th>
               <th style="width:30px;"></th>
             </tr>
           </thead>
           <tbody id="exhibits-tbody"></tbody>
         </table>
         </div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
           <button type="button" onclick="addExhibitRow()" style="background:#eee; padding:6px 12px; border:none; cursor:pointer; border-radius:4px; font-size:13px;">+ Add exhibit row</button>
-          <button type="button" onclick="openDropboxExhibitPicker()" style="background:#0061FF; color:white; padding:6px 12px; border:none; cursor:pointer; border-radius:4px; font-size:13px;">📦 Browse Dropbox → add as exhibits</button>
+          <button type="button" onclick="autoMatchDropboxExhibits()" id="dbx-automatch-btn" style="background:#0061FF; color:white; padding:6px 12px; border:none; cursor:pointer; border-radius:4px; font-size:13px;">🎯 Auto-match to Dropbox files</button>
+          <span style="font-size:12px; color:#666;">Uploads via Excel; use the 📎 icon on each row or Auto-match to link Dropbox files.</span>
         </div>
       </fieldset>
 
@@ -1213,25 +1217,19 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       <div id="dbx-exhibit-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
         <div style="background:white; border-radius:8px; width:min(720px, 92vw); max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
           <div style="padding:15px 20px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:space-between;">
-            <h3 style="margin:0; color:#0C1C36;">📦 Browse Dropbox</h3>
+            <h3 id="dbx-exhibit-modal-title" style="margin:0; color:#0C1C36; font-size:16px;">📎 Link to Exhibit</h3>
             <button type="button" onclick="closeDropboxExhibitPicker()" style="background:none; border:none; font-size:24px; color:#666; cursor:pointer; padding:0 4px;">×</button>
           </div>
           <div id="dbx-exhibit-breadcrumb" style="padding:10px 20px; font-size:13px; color:#666; background:#f9f9f9; border-bottom:1px solid #eee;"></div>
           <div style="padding:10px 20px;">
             <input type="text" id="dbx-exhibit-filter" placeholder="🔍 Filter files by name..." oninput="filterDbxExhibitFiles()" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
           </div>
-          <div id="dbx-exhibit-body" style="flex:1; overflow-y:auto; padding:0 20px 15px 20px;">
+          <div id="dbx-exhibit-body" style="flex:1; overflow-y:auto; padding:0 20px 15px 20px; min-height:200px;">
             <div style="text-align:center; color:#666; padding:40px 0;">Loading…</div>
           </div>
-          <div style="padding:15px 20px; border-top:1px solid #eee; display:flex; justify-content:space-between; align-items:center; gap:10px; background:#f9f9f9;">
-            <div style="display:flex; gap:8px; align-items:center;">
-              <button type="button" onclick="toggleSelectAllDbxExhibits()" id="dbx-exhibit-select-all" style="background:#eee; color:#333; padding:6px 12px; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Select all files here</button>
-              <span id="dbx-exhibit-selected-count" style="font-size:12px; color:#666;">0 selected</span>
-            </div>
-            <div style="display:flex; gap:8px;">
-              <button type="button" onclick="closeDropboxExhibitPicker()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Cancel</button>
-              <button type="button" onclick="addSelectedAsExhibits()" id="dbx-exhibit-add-btn" style="background:#0061FF; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Add as exhibits</button>
-            </div>
+          <div style="padding:12px 20px; border-top:1px solid #eee; display:flex; justify-content:space-between; align-items:center; gap:10px; background:#f9f9f9;">
+            <span style="font-size:12px; color:#666;">💡 Click any file to link it to the exhibit above</span>
+            <button type="button" onclick="closeDropboxExhibitPicker()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Cancel</button>
           </div>
         </div>
       </div>
@@ -1346,7 +1344,9 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         // Not admitted (inverted). Only checked if explicitly flagged as not admitted.
         // Older records with admitted: "yes" translate to not_admitted: false (they WERE admitted).
         const isNotAdmitted = !!(data.not_admitted && String(data.not_admitted).trim());
+        const linkedPath = data.dropbox_file_path || "";
         const tr = document.createElement("tr");
+        tr.dataset.exhibitIdx = idx;
         tr.innerHTML =
           '<td><input type="text" name="exhibit_number_' + idx + '" value="' + escapeHTML(data.number || "") + '" style="width:100%;"></td>' +
           '<td><input type="text" name="exhibit_eoir_submission_' + idx + '" value="' + escapeHTML(data.eoir_submission || "") + '" style="width:100%;" placeholder="EOIR ref"></td>' +
@@ -1354,32 +1354,94 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           '<td style="text-align:center;"><input type="number" name="exhibit_marked_' + idx + '" min="1" max="99" value="' + escapeHTML(markedNum) + '" placeholder="—" style="width:60px; text-align:center; padding:4px;"></td>' +
           '<td style="text-align:center;"><input type="checkbox" name="exhibit_not_admitted_' + idx + '" value="yes"' + (isNotAdmitted ? " checked" : "") + ' style="transform:scale(1.3);"></td>' +
           '<td><input type="text" name="exhibit_objection_' + idx + '" value="' + escapeHTML(data.objection || "") + '" style="width:100%;"></td>' +
+          '<td style="text-align:center;">' + renderExhibitLinkCell(idx, linkedPath) + '</td>' +
           '<td><button type="button" onclick="this.closest(\\'tr\\').remove()" style="background:#eee; border:none; padding:4px 8px; cursor:pointer; border-radius:3px;">×</button></td>';
         document.getElementById("exhibits-tbody").appendChild(tr);
+      }
+
+      // Render the paperclip cell for an exhibit row. Shows either:
+      // - "Link" button (unlinked)
+      // - Small chip with filename + link icon (linked, click to open, right-click to unlink)
+      function renderExhibitLinkCell(idx, linkedPath) {
+        const hiddenInput = '<input type="hidden" name="exhibit_dropbox_file_path_' + idx + '" value="' + escapeHTML(linkedPath) + '">';
+        if (linkedPath) {
+          const filename = linkedPath.split("/").pop() || linkedPath;
+          const shortName = filename.length > 22 ? filename.substring(0, 19) + "…" : filename;
+          return hiddenInput +
+            '<div style="display:flex; align-items:center; gap:2px; justify-content:center;">' +
+              '<button type="button" onclick="openExhibitLinkedFile(' + idx + ')" title="' + escapeHTML(filename) + '" style="background:#e8f5e9; color:#2e7d32; border:1px solid #2e7d32; padding:2px 6px; font-size:11px; border-radius:3px; cursor:pointer; max-width:130px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">📎 ' + escapeHTML(shortName) + '</button>' +
+              '<button type="button" onclick="unlinkExhibitDropbox(' + idx + ')" title="Unlink" style="background:none; color:#c00; border:none; padding:2px 4px; font-size:12px; cursor:pointer;">×</button>' +
+            '</div>';
+        }
+        return hiddenInput +
+          '<button type="button" onclick="openLinkExhibitToDropbox(' + idx + ')" style="background:#eee; border:none; padding:4px 10px; font-size:11px; border-radius:3px; cursor:pointer;">📎 Link</button>';
+      }
+
+      // Open the linked Dropbox file in a new tab
+      async function openExhibitLinkedFile(idx) {
+        const hidden = document.querySelector('[name="exhibit_dropbox_file_path_' + idx + '"]');
+        const path = hidden?.value;
+        if (!path) return;
+        try {
+          const resp = await fetch("/admin/dropbox/temp-link?path=" + encodeURIComponent(path));
+          const data = await resp.json();
+          if (data.ok && data.link) {
+            window.open(data.link, "_blank");
+          } else {
+            alert("Could not open file: " + (data.error || "unknown"));
+          }
+        } catch (e) {
+          alert("Error opening file: " + e.message);
+        }
+      }
+
+      function unlinkExhibitDropbox(idx) {
+        const row = document.querySelector('tr[data-exhibit-idx="' + idx + '"]');
+        if (!row) return;
+        const cell = row.querySelector('td:nth-last-child(2)');   // paperclip cell (before delete)
+        cell.innerHTML = renderExhibitLinkCell(idx, "");
+      }
+
+      function setExhibitLinkedPath(idx, path) {
+        const row = document.querySelector('tr[data-exhibit-idx="' + idx + '"]');
+        if (!row) return;
+        const cell = row.querySelector('td:nth-last-child(2)');
+        cell.innerHTML = renderExhibitLinkCell(idx, path);
       }
       function clearExhibits() {
         document.getElementById("exhibits-tbody").innerHTML = "";
       }
 
       // ── Dropbox Exhibit Picker ─────────────────────────
-      let dbxExhibitCurrentPath = null;   // current browsing path
-      let dbxExhibitRootPath = null;      // client's Dropbox root
-      let dbxExhibitFiles = [];           // files in current view
-      let dbxExhibitSubfolders = [];      // subfolders in current view
+      // The modal is now used to LINK a Dropbox file to a specific
+      // exhibit row (not to create new rows).
+      let dbxExhibitCurrentPath = null;
+      let dbxExhibitRootPath = null;
+      let dbxExhibitFiles = [];
+      let dbxExhibitSubfolders = [];
+      let dbxLinkTargetIdx = null;   // which exhibit row is being linked
 
-      async function openDropboxExhibitPicker() {
+      async function openLinkExhibitToDropbox(exhibitIdx) {
         const clientName = (document.querySelector('[name="client_name"]')?.value || "").trim();
         const aNumber    = (document.querySelector('[name="a_number"]')?.value    || "").trim();
         if (!clientName && !aNumber) {
-          alert("Enter the client name (or A-Number) at the top of the form first — Zara needs it to find their Dropbox folder.");
+          alert("Enter the client name (or A-Number) at the top of the form first.");
           return;
         }
+        dbxLinkTargetIdx = exhibitIdx;
+        // Update modal title to show which exhibit we're linking
+        const descEl = document.querySelector('[name="exhibit_description_' + exhibitIdx + '"]');
+        const numEl = document.querySelector('[name="exhibit_number_' + exhibitIdx + '"]');
+        const label = "Exhibit #" + (numEl?.value || "?") + (descEl?.value ? " — " + descEl.value : "");
+        document.getElementById("dbx-exhibit-modal-title").textContent = "📎 Link to " + label;
         document.getElementById("dbx-exhibit-modal").style.display = "flex";
         document.getElementById("dbx-exhibit-filter").value = "";
-        await loadDbxExhibitFolder(null);   // null = root of client's folder
+        await loadDbxExhibitFolder(null);
       }
+
       function closeDropboxExhibitPicker() {
         document.getElementById("dbx-exhibit-modal").style.display = "none";
+        dbxLinkTargetIdx = null;
       }
 
       async function loadDbxExhibitFolder(subpath) {
@@ -1419,11 +1481,9 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         }).join(' <span style="color:#999;">/</span> ');
         crumb.innerHTML = '📁 ' + crumbParts;
 
-        // File list
         const body = document.getElementById("dbx-exhibit-body");
         let html = "";
 
-        // Subfolders (navigation only, not selectable)
         if (dbxExhibitSubfolders.length) {
           html += '<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin:8px 0 4px 0;">Subfolders</div>';
           html += dbxExhibitSubfolders.map(f =>
@@ -1434,21 +1494,19 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           ).join("");
         }
 
-        // Files (selectable)
         if (dbxExhibitFiles.length) {
-          html += '<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin:12px 0 4px 0;">Files (click to select)</div>';
+          html += '<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin:12px 0 4px 0;">Files — click to link</div>';
           html += '<div id="dbx-exhibit-file-list">';
           html += dbxExhibitFiles.map((f, idx) => {
             const iconMap = {".pdf":"📄",".jpg":"🖼️",".jpeg":"🖼️",".png":"🖼️",".doc":"📝",".docx":"📝",".xls":"📊",".xlsx":"📊"};
             const ext = (f.name.match(/\\.[^.]+$/)||[""])[0].toLowerCase();
             const icon = iconMap[ext] || "📎";
             const sizeStr = f.size < 1024 ? f.size + " B" : f.size < 1048576 ? (f.size/1024).toFixed(1)+" KB" : (f.size/1048576).toFixed(1)+" MB";
-            return '<label class="dbx-exhibit-file-row" data-idx="' + idx + '" data-name="' + escapeAttr(f.name.toLowerCase()) + '" style="display:flex; align-items:center; gap:8px; padding:8px; border-radius:4px; cursor:pointer; margin-bottom:2px;">' +
-              '<input type="checkbox" class="dbx-exhibit-check" data-idx="' + idx + '" onchange="updateDbxExhibitSelectedCount()" style="transform:scale(1.2); margin:0;">' +
+            return '<div class="dbx-exhibit-file-row" data-idx="' + idx + '" data-name="' + escapeAttr(f.name.toLowerCase()) + '" onclick="linkDbxFileToExhibit(' + idx + ')" style="display:flex; align-items:center; gap:8px; padding:10px; border-radius:4px; cursor:pointer; margin-bottom:2px; border:1px solid transparent;">' +
               '<span style="font-size:16px;">' + icon + '</span>' +
               '<span style="flex:1; font-size:13px;">' + escapeHTML(f.name) + '</span>' +
               '<span style="font-size:11px; color:#888;">' + sizeStr + '</span>' +
-            '</label>';
+            '</div>';
           }).join("");
           html += '</div>';
         } else if (!dbxExhibitSubfolders.length) {
@@ -1456,11 +1514,9 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         }
 
         body.innerHTML = html;
-        updateDbxExhibitSelectedCount();
 
-        // Hover style for file rows
         document.querySelectorAll(".dbx-exhibit-file-row").forEach(r => {
-          r.addEventListener("mouseover", () => r.style.background = "#f0f8ff");
+          r.addEventListener("mouseover", () => r.style.background = "#e8f5e9");
           r.addEventListener("mouseout", () => r.style.background = "");
         });
       }
@@ -1473,72 +1529,116 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         });
       }
 
-      function toggleSelectAllDbxExhibits() {
-        // Select/deselect only currently visible (after filter) checkboxes
-        const visible = Array.from(document.querySelectorAll(".dbx-exhibit-file-row"))
-          .filter(r => r.style.display !== "none");
-        const allChecked = visible.every(r => r.querySelector(".dbx-exhibit-check").checked);
-        visible.forEach(r => { r.querySelector(".dbx-exhibit-check").checked = !allChecked; });
-        updateDbxExhibitSelectedCount();
-      }
-
-      function updateDbxExhibitSelectedCount() {
-        const count = document.querySelectorAll(".dbx-exhibit-check:checked").length;
-        document.getElementById("dbx-exhibit-selected-count").textContent = count + " selected";
-        document.getElementById("dbx-exhibit-add-btn").textContent = count ? "Add " + count + " as exhibit" + (count === 1 ? "" : "s") : "Add as exhibits";
-      }
-
-      // Clean filename into a decent exhibit description.
-      // "Kong_passport_scan.pdf" → "Kong passport scan"
-      // "I797-receipt-notice.PDF" → "I797 receipt notice"
-      // "IMG_20250312.jpg" → "IMG 20250312"
-      function filenameToDescription(name) {
-        return String(name || "")
-          .replace(/\\.[^.]+$/, "")           // strip extension
-          .replace(/[_\\-]+/g, " ")            // underscores/hyphens → spaces
-          .replace(/\\s+/g, " ")               // collapse whitespace
-          .trim();
-      }
-
-      // If the file lives in a subfolder like "EOR-1" or "EOIR Submission 2",
-      // grab that as the EOIR submission tag automatically.
-      function eoirFromPath(filePath) {
-        // filePath like "/USCIS/.../KONG, XIANGMIN/EOR-1/passport.pdf"
-        const parts = String(filePath || "").split("/").filter(Boolean);
-        // Look at each ancestor folder name for "EOR" or "EOIR"
-        for (let i = parts.length - 2; i >= 0; i--) {
-          const name = parts[i];
-          if (/^EO?IR?[\\s\\-_]/i.test(name) || /^EOR[\\s\\-_]?\\d/i.test(name)) return name;
+      // Click handler on a file row — links to the current target exhibit
+      function linkDbxFileToExhibit(fileIdx) {
+        if (dbxLinkTargetIdx == null) {
+          alert("No exhibit selected to link to.");
+          return;
         }
-        return "";
-      }
-
-      function addSelectedAsExhibits() {
-        const checked = Array.from(document.querySelectorAll(".dbx-exhibit-check:checked"));
-        if (!checked.length) { alert("Select at least one file first."); return; }
-
-        // Determine starting exhibit number (next available)
-        const existingNumbers = Array.from(document.querySelectorAll('[name^="exhibit_number_"]'))
-          .map(el => parseInt(el.value, 10))
-          .filter(n => !isNaN(n));
-        let nextNumber = existingNumbers.length ? Math.max(...existingNumbers) + 1 : 1;
-
-        for (const cb of checked) {
-          const file = dbxExhibitFiles[parseInt(cb.dataset.idx)];
-          if (!file) continue;
-          addExhibitRow({
-            number: String(nextNumber++),
-            eoir_submission: eoirFromPath(file.path),
-            description: filenameToDescription(file.name),
-            marked: "",
-            not_admitted: "",
-            objection: "",
-          });
-        }
+        const file = dbxExhibitFiles[fileIdx];
+        if (!file) return;
+        setExhibitLinkedPath(dbxLinkTargetIdx, file.path);
         closeDropboxExhibitPicker();
-        // Scroll to the exhibits section so attorney sees what was added
-        document.getElementById("exhibits-tbody").scrollIntoView({ behavior: "smooth", block: "center" });
       }
+
+      // ── Auto-match all unlinked exhibits to Dropbox files ──
+      // Uses token-overlap between exhibit description and filename.
+      async function autoMatchDropboxExhibits() {
+        const clientName = (document.querySelector('[name="client_name"]')?.value || "").trim();
+        const aNumber    = (document.querySelector('[name="a_number"]')?.value    || "").trim();
+        if (!clientName && !aNumber) {
+          alert("Enter the client name (or A-Number) at the top of the form first.");
+          return;
+        }
+        const btn = document.getElementById("dbx-automatch-btn");
+        const origText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "⏳ Loading Dropbox files…";
+        try {
+          // Recursively gather ALL files under the client's Dropbox root
+          const allFiles = await fetchAllClientDropboxFiles(clientName, aNumber);
+          btn.textContent = "⏳ Matching…";
+
+          // Gather unlinked exhibit rows
+          const rows = Array.from(document.querySelectorAll('#exhibits-tbody tr'));
+          let matched = 0, skipped = 0;
+          for (const row of rows) {
+            const idx = row.dataset.exhibitIdx;
+            const currentLink = document.querySelector('[name="exhibit_dropbox_file_path_' + idx + '"]')?.value;
+            if (currentLink) { skipped++; continue; }  // already linked
+            const desc = document.querySelector('[name="exhibit_description_' + idx + '"]')?.value || "";
+            const eoir = document.querySelector('[name="exhibit_eoir_submission_' + idx + '"]')?.value || "";
+            const best = findBestMatch(desc, eoir, allFiles);
+            if (best) {
+              setExhibitLinkedPath(idx, best.path);
+              matched++;
+            }
+          }
+          alert("Auto-match complete!\\n\\n✓ Linked: " + matched + " exhibit(s)\\n⊙ Already linked (skipped): " + skipped + "\\n⚠️ No match found: " + (rows.length - matched - skipped) + "\\n\\nReview and adjust as needed. Remember to Save when done.");
+        } catch (e) {
+          alert("Auto-match failed: " + e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = origText;
+        }
+      }
+
+      // Recursively fetch all files under the client's Dropbox folder (max 2 levels deep)
+      async function fetchAllClientDropboxFiles(clientName, aNumber, subfolder) {
+        const url = "/admin/hearing/individual/dropbox/files"
+          + "?client_name=" + encodeURIComponent(clientName)
+          + "&a_number=" + encodeURIComponent(aNumber)
+          + (subfolder ? "&subfolder=" + encodeURIComponent(subfolder) : "");
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || "Failed to load");
+        let files = (data.files || []).map(f => ({ ...f, parent: data.current_path }));
+        // Recurse into subfolders (one level down from client root)
+        if (!subfolder && data.subfolders?.length) {
+          for (const sub of data.subfolders) {
+            try {
+              const subUrl = "/admin/hearing/individual/dropbox/files"
+                + "?client_name=" + encodeURIComponent(clientName)
+                + "&a_number=" + encodeURIComponent(aNumber)
+                + "&subfolder=" + encodeURIComponent(sub.path);
+              const subResp = await fetch(subUrl);
+              const subData = await subResp.json();
+              if (subData.ok) {
+                files = files.concat((subData.files || []).map(f => ({ ...f, parent: subData.current_path, parentName: sub.name })));
+              }
+            } catch (e) { /* skip failed subfolder */ }
+          }
+        }
+        return files;
+      }
+
+      // Find best-matching Dropbox file for an exhibit description
+      // Uses simple token overlap scoring — no external ML.
+      function findBestMatch(description, eoir, files) {
+        const norm = (s) => String(s || "").toLowerCase().replace(/\\.[^.]+$/, "").replace(/[^a-z0-9]+/g, " ").trim();
+        const descTokens = norm(description).split(/\\s+/).filter(t => t.length >= 3);
+        const eoirLower = String(eoir || "").toLowerCase();
+        if (!descTokens.length) return null;
+        let best = null;
+        let bestScore = 0;
+        for (const file of files) {
+          const fnameTokens = norm(file.name).split(/\\s+/).filter(Boolean);
+          let score = 0;
+          for (const t of descTokens) {
+            if (fnameTokens.some(ft => ft === t || ft.includes(t) || t.includes(ft))) score += 2;
+          }
+          // Bonus if file is in a folder matching the EOIR submission
+          if (eoirLower && String(file.parentName || "").toLowerCase().includes(eoirLower)) score += 3;
+          if (eoirLower && String(file.parent || "").toLowerCase().includes(eoirLower)) score += 2;
+          // Require at least 2 points to consider a match (avoids false positives)
+          if (score >= 2 && score > bestScore) {
+            bestScore = score;
+            best = file;
+          }
+        }
+        return best;
+      }
+
 
       // ── Examinations (with sections) ────────────────────
       let examCounter = 0;
