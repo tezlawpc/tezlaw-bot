@@ -1542,7 +1542,8 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       }
 
       // ── Auto-match all unlinked exhibits to Dropbox files ──
-      // Uses token-overlap between exhibit description and filename.
+      // Uses Claude on the server to intelligently match descriptions to filenames.
+      // Shows a review dialog before applying so JJ can approve/reject each match.
       async function autoMatchDropboxExhibits() {
         const clientName = (document.querySelector('[name="client_name"]')?.value || "").trim();
         const aNumber    = (document.querySelector('[name="a_number"]')?.value    || "").trim();
@@ -1550,93 +1551,178 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           alert("Enter the client name (or A-Number) at the top of the form first.");
           return;
         }
+
+        // Gather unlinked exhibits
+        const rows = Array.from(document.querySelectorAll('#exhibits-tbody tr'));
+        const unlinked = [];
+        for (const row of rows) {
+          const idx = row.dataset.exhibitIdx;
+          const currentLink = document.querySelector('[name="exhibit_dropbox_file_path_' + idx + '"]')?.value;
+          if (currentLink) continue;   // skip already-linked
+          const desc = document.querySelector('[name="exhibit_description_' + idx + '"]')?.value || "";
+          const eoir = document.querySelector('[name="exhibit_eoir_submission_' + idx + '"]')?.value || "";
+          const num = document.querySelector('[name="exhibit_number_' + idx + '"]')?.value || "";
+          if (!desc.trim()) continue;   // skip empty
+          unlinked.push({ idx, description: desc, eoir_submission: eoir, exhibit_number: num });
+        }
+
+        if (!unlinked.length) {
+          alert("Nothing to auto-match. All exhibit rows are either linked or have empty descriptions.");
+          return;
+        }
+
         const btn = document.getElementById("dbx-automatch-btn");
         const origText = btn.textContent;
         btn.disabled = true;
-        btn.textContent = "⏳ Loading Dropbox files…";
-        try {
-          // Recursively gather ALL files under the client's Dropbox root
-          const allFiles = await fetchAllClientDropboxFiles(clientName, aNumber);
-          btn.textContent = "⏳ Matching…";
+        btn.textContent = "🤖 Asking Claude to match…";
 
-          // Gather unlinked exhibit rows
-          const rows = Array.from(document.querySelectorAll('#exhibits-tbody tr'));
-          let matched = 0, skipped = 0;
-          for (const row of rows) {
-            const idx = row.dataset.exhibitIdx;
-            const currentLink = document.querySelector('[name="exhibit_dropbox_file_path_' + idx + '"]')?.value;
-            if (currentLink) { skipped++; continue; }  // already linked
-            const desc = document.querySelector('[name="exhibit_description_' + idx + '"]')?.value || "";
-            const eoir = document.querySelector('[name="exhibit_eoir_submission_' + idx + '"]')?.value || "";
-            const best = findBestMatch(desc, eoir, allFiles);
-            if (best) {
-              setExhibitLinkedPath(idx, best.path);
-              matched++;
-            }
+        try {
+          const resp = await fetch("/admin/hearing/individual/dropbox/auto-match", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              client_name: clientName,
+              a_number: aNumber,
+              exhibits: unlinked,
+            }),
+          });
+          const data = await resp.json();
+          if (!data.ok) {
+            alert("Auto-match failed: " + (data.error || "unknown error"));
+            return;
           }
-          alert("Auto-match complete!\\n\\n✓ Linked: " + matched + " exhibit(s)\\n⊙ Already linked (skipped): " + skipped + "\\n⚠️ No match found: " + (rows.length - matched - skipped) + "\\n\\nReview and adjust as needed. Remember to Save when done.");
+          if (!data.matches || !data.matches.length) {
+            alert(data.warning || "No files found in Dropbox folder.");
+            return;
+          }
+          showMatchReviewDialog(data.matches, data.total_files, data.folder);
         } catch (e) {
-          alert("Auto-match failed: " + e.message);
+          alert("Auto-match error: " + e.message);
         } finally {
           btn.disabled = false;
           btn.textContent = origText;
         }
       }
 
-      // Recursively fetch all files under the client's Dropbox folder (max 2 levels deep)
-      async function fetchAllClientDropboxFiles(clientName, aNumber, subfolder) {
-        const url = "/admin/hearing/individual/dropbox/files"
-          + "?client_name=" + encodeURIComponent(clientName)
-          + "&a_number=" + encodeURIComponent(aNumber)
-          + (subfolder ? "&subfolder=" + encodeURIComponent(subfolder) : "");
-        const resp = await fetch(url);
-        const data = await resp.json();
-        if (!data.ok) throw new Error(data.error || "Failed to load");
-        let files = (data.files || []).map(f => ({ ...f, parent: data.current_path }));
-        // Recurse into subfolders (one level down from client root)
-        if (!subfolder && data.subfolders?.length) {
-          for (const sub of data.subfolders) {
-            try {
-              const subUrl = "/admin/hearing/individual/dropbox/files"
-                + "?client_name=" + encodeURIComponent(clientName)
-                + "&a_number=" + encodeURIComponent(aNumber)
-                + "&subfolder=" + encodeURIComponent(sub.path);
-              const subResp = await fetch(subUrl);
-              const subData = await subResp.json();
-              if (subData.ok) {
-                files = files.concat((subData.files || []).map(f => ({ ...f, parent: subData.current_path, parentName: sub.name })));
-              }
-            } catch (e) { /* skip failed subfolder */ }
-          }
-        }
-        return files;
+      // Show a modal with all Claude's proposed matches. User can approve
+      // all, approve high-confidence only, or approve individually.
+      function showMatchReviewDialog(matches, totalFiles, folder) {
+        // Categorize
+        const high = matches.filter(m => m.confidence === "high");
+        const medium = matches.filter(m => m.confidence === "medium");
+        const low = matches.filter(m => m.confidence === "low");
+        const none = matches.filter(m => m.confidence === "none");
+
+        const confBadge = (conf) => {
+          const colors = { high: "#2e7d32", medium: "#e65100", low: "#c62828", none: "#888" };
+          const labels = { high: "high", medium: "medium", low: "low", none: "no match" };
+          return '<span style="background:' + colors[conf] + '; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">' + labels[conf] + '</span>';
+        };
+
+        const rowHTML = matches.map((m, i) => {
+          const shortPath = m.dropbox_file_path ? m.dropbox_file_path.split("/").slice(-2).join("/") : "";
+          const filenamePart = m.matched_filename
+            ? '<div style="font-size:13px; color:#0C1C36;">📎 <strong>' + escapeHTML(m.matched_filename) + '</strong></div>' +
+              '<div style="font-size:10px; color:#888; font-family:monospace;">' + escapeHTML(shortPath) + '</div>'
+            : '<div style="font-size:13px; color:#c00; font-style:italic;">No match found</div>';
+          const disabledAttr = m.confidence === "none" ? "disabled" : "";
+          const checkedAttr = (m.confidence === "high" || m.confidence === "medium") ? "checked" : "";
+          return '<tr>' +
+            '<td style="padding:8px; vertical-align:top;">' +
+              '<input type="checkbox" class="match-check" data-i="' + i + '" ' + checkedAttr + ' ' + disabledAttr + ' style="transform:scale(1.3);">' +
+            '</td>' +
+            '<td style="padding:8px;">' +
+              '<div style="font-size:13px; color:#0C1C36; font-weight:600;">' + escapeHTML(m.description || "(no description)") + '</div>' +
+            '</td>' +
+            '<td style="padding:8px;">' + confBadge(m.confidence) + '</td>' +
+            '<td style="padding:8px;">' + filenamePart + '</td>' +
+            '<td style="padding:8px; font-size:11px; color:#666; font-style:italic; max-width:200px;">' + escapeHTML(m.reason || "") + '</td>' +
+          '</tr>';
+        }).join("");
+
+        const modal = document.createElement("div");
+        modal.id = "match-review-modal";
+        modal.style.cssText = "position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center; padding:20px;";
+        modal.innerHTML =
+          '<div style="background:white; border-radius:8px; width:min(900px, 100%); max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
+            '<div style="padding:16px 20px; border-bottom:1px solid #eee;">' +
+              '<div style="display:flex; justify-content:space-between; align-items:center;">' +
+                '<h3 style="margin:0; color:#0C1C36; font-size:16px;">🤖 Review Auto-Match Suggestions</h3>' +
+                '<button type="button" onclick="closeMatchReview()" style="background:none; border:none; font-size:24px; color:#666; cursor:pointer;">×</button>' +
+              '</div>' +
+              '<div style="font-size:12px; color:#666; margin-top:4px;">' +
+                'Scanned <strong>' + totalFiles + '</strong> files in <code style="font-size:11px;">' + escapeHTML(folder) + '</code>. ' +
+                '<span style="color:#2e7d32;">' + high.length + ' high</span> · ' +
+                '<span style="color:#e65100;">' + medium.length + ' medium</span> · ' +
+                '<span style="color:#c62828;">' + low.length + ' low</span> · ' +
+                '<span style="color:#888;">' + none.length + ' no match</span>' +
+              '</div>' +
+            '</div>' +
+            '<div style="padding:10px 20px; background:#f9f9f9; border-bottom:1px solid #eee; display:flex; gap:8px; flex-wrap:wrap;">' +
+              '<button type="button" onclick="selectMatchesByConfidence([\\'high\\'])" style="background:#e8f5e9; color:#2e7d32; border:1px solid #2e7d32; padding:5px 10px; border-radius:3px; cursor:pointer; font-size:12px;">Only high confidence</button>' +
+              '<button type="button" onclick="selectMatchesByConfidence([\\'high\\', \\'medium\\'])" style="background:#fff3e0; color:#e65100; border:1px solid #e65100; padding:5px 10px; border-radius:3px; cursor:pointer; font-size:12px;">High + medium (default)</button>' +
+              '<button type="button" onclick="selectMatchesByConfidence([\\'high\\', \\'medium\\', \\'low\\'])" style="background:#f5f5f5; color:#333; border:1px solid #999; padding:5px 10px; border-radius:3px; cursor:pointer; font-size:12px;">All including low</button>' +
+              '<button type="button" onclick="selectMatchesByConfidence([])" style="background:white; color:#333; border:1px solid #ccc; padding:5px 10px; border-radius:3px; cursor:pointer; font-size:12px;">None</button>' +
+            '</div>' +
+            '<div style="overflow-y:auto; flex:1; padding:0;">' +
+              '<table style="width:100%; border-collapse:collapse; font-size:13px;">' +
+                '<thead style="background:#f5f5f5; position:sticky; top:0;">' +
+                  '<tr>' +
+                    '<th style="padding:8px; width:40px; text-align:center;">Apply</th>' +
+                    '<th style="padding:8px; text-align:left;">Exhibit</th>' +
+                    '<th style="padding:8px; width:80px;">Confidence</th>' +
+                    '<th style="padding:8px; text-align:left;">Matched File</th>' +
+                    '<th style="padding:8px; text-align:left;">Claude\\'s reason</th>' +
+                  '</tr>' +
+                '</thead>' +
+                '<tbody>' + rowHTML + '</tbody>' +
+              '</table>' +
+            '</div>' +
+            '<div style="padding:12px 20px; border-top:1px solid #eee; display:flex; justify-content:space-between; align-items:center; gap:10px; background:#f9f9f9;">' +
+              '<span style="font-size:12px; color:#666;">💡 Uncheck any match you don\\'t want to apply</span>' +
+              '<div style="display:flex; gap:8px;">' +
+                '<button type="button" onclick="closeMatchReview()" style="background:#eee; color:#333; padding:9px 16px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Cancel</button>' +
+                '<button type="button" onclick="applyMatches()" style="background:#0061FF; color:white; padding:9px 16px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">Apply selected matches</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        modal._matches = matches;
+        document.body.appendChild(modal);
       }
 
-      // Find best-matching Dropbox file for an exhibit description
-      // Uses simple token overlap scoring — no external ML.
-      function findBestMatch(description, eoir, files) {
-        const norm = (s) => String(s || "").toLowerCase().replace(/\\.[^.]+$/, "").replace(/[^a-z0-9]+/g, " ").trim();
-        const descTokens = norm(description).split(/\\s+/).filter(t => t.length >= 3);
-        const eoirLower = String(eoir || "").toLowerCase();
-        if (!descTokens.length) return null;
-        let best = null;
-        let bestScore = 0;
-        for (const file of files) {
-          const fnameTokens = norm(file.name).split(/\\s+/).filter(Boolean);
-          let score = 0;
-          for (const t of descTokens) {
-            if (fnameTokens.some(ft => ft === t || ft.includes(t) || t.includes(ft))) score += 2;
+      function selectMatchesByConfidence(allowedLevels) {
+        const modal = document.getElementById("match-review-modal");
+        const matches = modal._matches;
+        document.querySelectorAll(".match-check").forEach(cb => {
+          const m = matches[parseInt(cb.dataset.i)];
+          if (cb.disabled) return;   // no-match rows can't be selected
+          cb.checked = allowedLevels.includes(m.confidence);
+        });
+      }
+
+      function closeMatchReview() {
+        const modal = document.getElementById("match-review-modal");
+        if (modal) modal.remove();
+      }
+
+      function applyMatches() {
+        const modal = document.getElementById("match-review-modal");
+        const matches = modal._matches;
+        let applied = 0;
+        document.querySelectorAll(".match-check:checked").forEach(cb => {
+          const m = matches[parseInt(cb.dataset.i)];
+          if (m && m.dropbox_file_path) {
+            setExhibitLinkedPath(m.idx, m.dropbox_file_path);
+            applied++;
           }
-          // Bonus if file is in a folder matching the EOIR submission
-          if (eoirLower && String(file.parentName || "").toLowerCase().includes(eoirLower)) score += 3;
-          if (eoirLower && String(file.parent || "").toLowerCase().includes(eoirLower)) score += 2;
-          // Require at least 2 points to consider a match (avoids false positives)
-          if (score >= 2 && score > bestScore) {
-            bestScore = score;
-            best = file;
-          }
-        }
-        return best;
+        });
+        closeMatchReview();
+        // Brief toast in the corner
+        const toast = document.createElement("div");
+        toast.style.cssText = "position:fixed; top:20px; right:20px; background:#2e7d32; color:white; padding:12px 20px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.2); z-index:10001; font-size:14px;";
+        toast.textContent = "✓ Applied " + applied + " match" + (applied === 1 ? "" : "es") + ". Remember to save the form.";
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 4000);
       }
 
 
