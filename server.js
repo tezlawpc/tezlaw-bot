@@ -77,10 +77,16 @@ app.use(express.text({ type: "text/xml" }));
 app.use(cookieParser());
 
 // ── Authentication ─────────────────────────────────────────
-// Mount BEFORE any /admin/* handlers so login/logout/setup work,
-// and the requireAdminAuth middleware protects everything else.
+// CRITICAL ORDER:
+//   1. requireAdminAuth middleware FIRST — sets req.user on every /admin/*
+//      request before any route handler runs.
+//   2. Role-based middleware SECOND — checks req.user for specific paths.
+//   3. auth.mount() LAST — registers login/logout/setup/users routes that
+//      depend on req.user being set (via requireRole checks inside).
+//
+// If you register routes BEFORE requireAdminAuth, req.user is undefined when
+// the route handler runs and every request fails with 401.
 const auth = require("./auth");
-auth.mount(app);
 app.use("/admin", auth.requireAdminAuth);
 
 // ── Role-based access control ─────────────────────────────
@@ -102,6 +108,9 @@ app.use("/admin/hearing", (req, res, next) => {
   // WRITE operations require admin or attorney
   return auth.requireRole("admin", "attorney")(req, res, next);
 });
+
+// Now mount the login/logout/setup/users routes AFTER all middleware.
+auth.mount(app);
 
 // ── Admin panel ───────────────────────────────────────────
 // Matter manager mounted BEFORE adminRouter so /admin/matters/* takes
