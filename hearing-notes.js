@@ -870,12 +870,30 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   <a href="/admin/email-setup" class="nav-item" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">📬</span><span>Email Setup</span>
   </a>
+  <a href="/admin/users" class="nav-item" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+    <span class="icon">👤</span><span>Admin Users</span>
+  </a>
   <a href="/admin/" class="nav-item">
     <span class="icon">📊</span><span>Dashboard</span>
   </a>
 </div>
 
 <div class="main">
+  <div id="auth-user-chip" style="position:fixed; top:12px; right:20px; font-size:12px; color:#555; background:white; padding:6px 12px; border-radius:20px; box-shadow:0 1px 4px rgba(0,0,0,.08); z-index:100; display:flex; align-items:center; gap:8px;">
+    <span id="auth-user-name" style="color:#0C1C36; font-weight:600;">…</span>
+    <form method="POST" action="/admin/logout" style="display:inline; margin:0;">
+      <button type="submit" style="background:none; border:none; color:#c00; font-size:11px; cursor:pointer; padding:0; text-decoration:underline;">Logout</button>
+    </form>
+  </div>
+  <script>
+    fetch("/admin/whoami").then(r => r.json()).then(d => {
+      if (d.authenticated) {
+        document.getElementById("auth-user-name").textContent = (d.name || d.username) + " (" + d.role + ")";
+      } else {
+        document.getElementById("auth-user-chip").style.display = "none";
+      }
+    }).catch(() => document.getElementById("auth-user-chip").style.display = "none");
+  </script>
   ${body}
 </div>
 
