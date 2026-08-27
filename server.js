@@ -2551,20 +2551,50 @@ app.get("/admin/dropbox/browse", async (req, res) => {
 });
 
 // Diagnostic: shows lengths of Dropbox env vars (safe, doesn't reveal values)
-app.get("/admin/dropbox/diag", (req, res) => {
+app.get("/admin/dropbox/diag", async (req, res) => {
   const key = process.env.DROPBOX_APP_KEY || "";
   const secret = process.env.DROPBOX_APP_SECRET || "";
   const branches = process.env.DROPBOX_BRANCH_ROOTS || "";
+  let dbxStatus = "not loaded";
+  let namespaceInfo = "unknown";
+  try {
+    const dbx = require("./dropbox-integration");
+    const settings = await dbx.getSettings();
+    dbxStatus = settings.refresh_token ? "authorized" : "not authorized";
+    namespaceInfo = settings.root_namespace_id
+      ? `saved: ${settings.root_namespace_id}`
+      : "NOT SAVED — needs re-authorization";
+
+    // Try to fetch namespace live if missing
+    if (!settings.root_namespace_id && settings.refresh_token && req.query.fix === "1") {
+      try {
+        const header = await dbx.getPathRootHeader();
+        namespaceInfo = header ? `just fetched: ${header}` : "fetch attempted but no namespace returned";
+      } catch (e) {
+        namespaceInfo += ` (fetch failed: ${e.message})`;
+      }
+    }
+  } catch (e) {
+    dbxStatus = "error: " + e.message;
+  }
   res.type("text/plain").send(
     `Dropbox env diagnostic:
 DROPBOX_APP_KEY:       length=${key.length}, first_char="${key[0] || ""}", last_char="${key[key.length-1] || ""}", has_spaces=${/\s/.test(key)}, has_quotes=${/["']/.test(key)}
 DROPBOX_APP_SECRET:    length=${secret.length}, first_char="${secret[0] || ""}", last_char="${secret[secret.length-1] || ""}", has_spaces=${/\s/.test(secret)}, has_quotes=${/["']/.test(secret)}
 DROPBOX_BRANCH_ROOTS:  "${branches}"
 
+Auth status:           ${dbxStatus}
+Team namespace ID:     ${namespaceInfo}
+
 Expected:
 DROPBOX_APP_KEY:       15 chars, alphanumeric only, no spaces/quotes
 DROPBOX_APP_SECRET:    15 chars, alphanumeric only, no spaces/quotes
-DROPBOX_BRANCH_ROOTS:  comma-separated folder names (e.g. "ASYLUM_EOIR" or "ASYLUM_EOIR,Broker A")
+DROPBOX_BRANCH_ROOTS:  comma-separated folder names, e.g. "/USCIS/ASYLUM_EOIR"
+Team namespace ID:     Should be saved if you re-authorized after Aug 27 build.
+
+TIP: If team namespace ID shows "NOT SAVED", visit /admin/dropbox/diag?fix=1 to
+     force-fetch it right now without re-authorizing. If that still fails,
+     click "Re-authorize" on /admin/dropbox/setup.
 `
   );
 });
