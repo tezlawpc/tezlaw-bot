@@ -2307,6 +2307,25 @@ app.get("/admin/clients", async (req, res) => {
 
 const DROPBOX_CALLBACK_URL = (process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com") + "/admin/dropbox/callback";
 
+// Diagnostic: shows lengths of Dropbox env vars (safe, doesn't reveal values)
+app.get("/admin/dropbox/diag", (req, res) => {
+  const key = process.env.DROPBOX_APP_KEY || "";
+  const secret = process.env.DROPBOX_APP_SECRET || "";
+  const branches = process.env.DROPBOX_BRANCH_ROOTS || "";
+  res.type("text/plain").send(
+    `Dropbox env diagnostic:
+DROPBOX_APP_KEY:       length=${key.length}, first_char="${key[0] || ""}", last_char="${key[key.length-1] || ""}", has_spaces=${/\s/.test(key)}, has_quotes=${/["']/.test(key)}
+DROPBOX_APP_SECRET:    length=${secret.length}, first_char="${secret[0] || ""}", last_char="${secret[secret.length-1] || ""}", has_spaces=${/\s/.test(secret)}, has_quotes=${/["']/.test(secret)}
+DROPBOX_BRANCH_ROOTS:  "${branches}"
+
+Expected:
+DROPBOX_APP_KEY:       15 chars, alphanumeric only, no spaces/quotes
+DROPBOX_APP_SECRET:    15 chars, alphanumeric only, no spaces/quotes
+DROPBOX_BRANCH_ROOTS:  comma-separated folder names (e.g. "ASYLUM_EOIR" or "ASYLUM_EOIR,Broker A")
+`
+  );
+});
+
 app.get("/admin/dropbox/setup", async (req, res) => {
   try {
     const dbx = require("./dropbox-integration");
