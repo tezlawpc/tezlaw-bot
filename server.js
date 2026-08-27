@@ -2556,15 +2556,19 @@ app.get("/admin/dropbox/raw-account", async (req, res) => {
   try {
     const dbx = require("./dropbox-integration");
     const token = await dbx.getAccessToken();
+    // NOTE: use string "null" as body (not the null value) — Dropbox requires
+    // Content-Type: application/json but axios strips that header when data is null.
+    // Passing "null" as a string forces axios to send the header we set.
     const resp = await axios.post(
       "https://api.dropboxapi.com/2/users/get_current_account",
-      null,
+      "null",
       {
         headers: {
           "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",   // Dropbox strictly requires this even with empty body
+          "Content-Type": "application/json",
         },
         timeout: 15000,
+        transformRequest: [(data) => data],  // prevent axios from re-serializing
       }
     );
     res.type("text/plain").send(JSON.stringify(resp.data, null, 2));
@@ -2725,13 +2729,14 @@ app.get("/admin/dropbox/callback", async (req, res) => {
     try {
       const acct = await axios.post(
         "https://api.dropboxapi.com/2/users/get_current_account",
-        null,
+        "null",
         {
           headers: {
             "Authorization": `Bearer ${tokens.access_token}`,
             "Content-Type": "application/json",
           },
           timeout: 10000,
+          transformRequest: [(data) => data],
         }
       );
       accountName = acct.data.name?.display_name || null;
