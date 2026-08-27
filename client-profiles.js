@@ -458,10 +458,29 @@ function renderClientDetail(client, { documents = [] } = {}) {
             return;
           }
           if (!data.resolved || !data.folder) {
-            status.innerHTML = '<span style="color:#ff9800;">⚠️ No matching Dropbox folder found for this client.</span><br>' +
-              '<span style="font-size:12px; color:#666;">Zara searched configured branches for a folder named like "' +
-              dbxEscape(${JSON.stringify(client.client_name || "")}) + '".</span><br><br>' +
-              '<button type="button" onclick="dbxChangeFolder()" style="background:#0061FF; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Set folder manually</button>';
+            let suggHtml = '';
+            const suggestions = data.suggestions || [];
+            if (suggestions.length) {
+              suggHtml = '<div style="margin-top:15px; text-align:left; max-width:520px; margin-left:auto; margin-right:auto;">' +
+                '<div style="font-weight:600; margin-bottom:8px; color:#0C1C36;">💡 Did you mean one of these?</div>' +
+                suggestions.map(function(s) {
+                  const reason = s.reason ? '<span style="color:#888; font-size:11px; margin-left:6px;">(' + dbxEscape(s.reason) + ')</span>' : '';
+                  const escapedPath = JSON.stringify(s.path).replace(/"/g,"&quot;");
+                  return '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:#f8f8f8; border-radius:4px; margin-bottom:4px;">' +
+                    '<div style="font-family:monospace; font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + dbxEscape(s.path) + reason + '</div>' +
+                    '<button type="button" onclick="dbxUseSuggestion(' + escapedPath + '); return false;" style="background:#0061FF; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:12px; margin-left:8px; flex-shrink:0;">Use this</button>' +
+                    '</div>';
+                }).join('') +
+                '<div style="margin-top:10px; text-align:center;"><button type="button" onclick="dbxChangeFolder()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Or enter folder path manually</button></div>' +
+                '</div>';
+            } else {
+              suggHtml = '<div style="margin-top:15px;"><button type="button" onclick="dbxChangeFolder()" style="background:#0061FF; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Set folder manually</button></div>';
+            }
+            status.innerHTML = '<span style="color:#ff9800;">⚠️ No exact match found for this client in configured branches.</span><br>' +
+              '<span style="font-size:12px; color:#666;">Searched for "' +
+              dbxEscape(${JSON.stringify(client.client_name || "")}) + '"' +
+              (${JSON.stringify(client.a_number || "")} ? ' / A#' + dbxEscape(${JSON.stringify(client.a_number || "")}) : "") +
+              '</span>' + suggHtml;
             countEl.textContent = "";
             uploadBtn.style.display = "none";
             return;
@@ -574,7 +593,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
       }
       async function dbxChangeFolder() {
         const currentPath = document.getElementById("dbx-folder-info").textContent.trim().replace(/^📁\\s*/, "").replace(/\\s*\\(cached\\)$/, "");
-        const newPath = prompt("Enter the full Dropbox folder path for this client:\\n\\nExample: /Law ICAN Immigration/Kong, Xiangmin\\n\\nLeave blank to clear and re-auto-detect on next load.", currentPath || "");
+        const newPath = prompt("Enter the full Dropbox folder path for this client:\\n\\nExample: /ASYLUM_EOIR/Kong Xiangmin\\n\\nLeave blank to clear and re-auto-detect on next load.", currentPath || "");
         if (newPath === null) return;
         try {
           const resp = await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/dropbox/mapping", {
@@ -585,6 +604,20 @@ function renderClientDetail(client, { documents = [] } = {}) {
           const data = await resp.json();
           if (data.ok) dbxRefresh(true);
           else alert("❌ " + (data.error || "Failed"));
+        } catch (e) { alert("❌ " + e.message); }
+      }
+
+      // Save a suggested folder as this client's Dropbox mapping (one-click "Use this")
+      async function dbxUseSuggestion(path) {
+        try {
+          const resp = await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/dropbox/mapping", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "path=" + encodeURIComponent(path),
+          });
+          const data = await resp.json();
+          if (data.ok) dbxRefresh(true);
+          else alert("❌ " + (data.error || "Failed to set folder"));
         } catch (e) { alert("❌ " + e.message); }
       }
 
