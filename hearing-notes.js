@@ -2167,6 +2167,7 @@ function discardAllPending() {
 }
 
 
+module.exports = {
   initHearingNotesTables,
   saveNote,
   updateNote,
