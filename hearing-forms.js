@@ -154,7 +154,7 @@ USCIS may require you to complete biometrics (fingerprints and photograph) in
 connection with your case. If USCIS has sent you a biometrics appointment
 notice, YOU MUST ATTEND that appointment. Failure to attend biometrics can
 result in your case being denied. Please forward any USCIS biometrics
-appointment notice to Attorney JJ Zhang immediately upon receipt.` : "";
+appointment notice to TEZ LAW FIRM immediately upon receipt.` : "";
 
   const notesBlock = specialNotes ? `
 
@@ -185,8 +185,8 @@ Please dress professionally. Business attire is expected. Do not wear
 sunglasses, hats, or clothing with images or slogans.
 
 ATTORNEY REPRESENTATION
-Attorney JJ Zhang of Tez Law, P.C. will represent you at this hearing. Please
-plan to meet Attorney Zhang inside the courthouse waiting area at the arrival
+An attorney from TEZ LAW FIRM will represent you at this hearing. Please
+plan to meet your attorney inside the courthouse waiting area at the arrival
 time listed above.${biometricsBlock}${notesBlock}
 
 IF YOU CANNOT ATTEND
@@ -197,18 +197,17 @@ the Immigration Judge ordering you removed from the United States.
 QUESTIONS
 If you have any questions before the hearing, please contact us:
 Phone: 626-678-8677
-Email: jj@tezlawfirm.com
+Email: info@tezlawfirm.com
 
 We look forward to seeing you at your hearing.
 
 Sincerely,
 
-JJ Zhang
-Managing Attorney
-Tez Law, P.C.
+TEZ LAW FIRM
+West Covina, California
 California Bar #326666
 626-678-8677
-jj@tezlawfirm.com
+info@tezlawfirm.com
 www.tezlawfirm.com`;
 
   return { subject, body };
@@ -235,7 +234,7 @@ function renderChinese(data) {
 USCIS 可能要求您完成生物特征采集(指纹和照片)。如果 USCIS 向您发送
 生物特征采集预约通知,您必须按时前往。未能出席生物特征采集可能导致
 您的案件被拒绝。请在收到 USCIS 生物特征采集通知后立即转发给
-章律师。` : "";
+TEZ律师事务所。` : "";
 
   const notesBlock = specialNotes ? `
 
@@ -264,8 +263,8 @@ ${bringList}
 请穿正式服装(商务着装)。请勿戴太阳镜、帽子,或穿有图案或口号的衣服。
 
 律师代理
-Tez Law, P.C. 的章律师(JJ Zhang)将代表您出席此次听证。请按上述到达
-时间在法院候审区与章律师会面。${biometricsBlock}${notesBlock}
+TEZ律师事务所的律师将代表您出席此次听证。请按上述到达
+时间在法院候审区与您的律师会面。${biometricsBlock}${notesBlock}
 
 如无法出席
 如因紧急原因无法出席,请立即联系我们的办公室。无正当法律理由缺席
@@ -274,18 +273,18 @@ Tez Law, P.C. 的章律师(JJ Zhang)将代表您出席此次听证。请按上�
 有疑问请联系
 如在听证前有任何疑问,请联系我们:
 电话: 626-678-8677
-邮箱: jj@tezlawfirm.com
+邮箱: info@tezlawfirm.com
 
 期待在您的听证时与您相见。
 
 此致
 
-章律师 (JJ Zhang)
-主管律师
+TEZ律师事务所
+加州西科维纳市
 Tez Law, P.C.
 加州律师执照 #326666
 626-678-8677
-jj@tezlawfirm.com
+info@tezlawfirm.com
 www.tezlawfirm.com`;
 
   return { subject, body };
@@ -312,7 +311,7 @@ BIOMÉTRICOS REQUERIDOS
 USCIS puede requerir que complete los biométricos (huellas digitales y
 fotografía) para su caso. Si USCIS le ha enviado una cita para biométricos,
 DEBE ASISTIR. No asistir puede resultar en la denegación de su caso.
-Por favor reenvíe cualquier aviso de cita de biométricos al abogado JJ Zhang
+Por favor reenvíe cualquier aviso de cita de biométricos a TEZ LAW FIRM
 inmediatamente al recibirlo.` : "";
 
   const notesBlock = specialNotes ? `
@@ -346,7 +345,7 @@ Por favor vista profesionalmente. Se espera vestimenta de negocios. No use
 lentes de sol, sombreros ni ropa con imágenes o eslóganes.
 
 REPRESENTACIÓN LEGAL
-El abogado JJ Zhang de Tez Law, P.C. le representará en esta audiencia.
+Un abogado de TEZ LAW FIRM le representará en esta audiencia.
 Por favor planee reunirse con el abogado Zhang en el área de espera dentro
 del tribunal a la hora de llegada indicada arriba.${biometricsBlock}${notesBlock}
 
@@ -359,18 +358,17 @@ de los Estados Unidos.
 PREGUNTAS
 Si tiene preguntas antes de la audiencia, contáctenos:
 Teléfono: 626-678-8677
-Correo: jj@tezlawfirm.com
+Correo: info@tezlawfirm.com
 
 Esperamos verle en su audiencia.
 
 Atentamente,
 
-JJ Zhang
-Abogado Administrador
-Tez Law, P.C.
+TEZ LAW FIRM
+West Covina, California
 Barra de California #326666
 626-678-8677
-jj@tezlawfirm.com
+info@tezlawfirm.com
 www.tezlawfirm.com`;
 
   return { subject, body };
@@ -398,7 +396,7 @@ function renderHindi(data) {
 USCIS आपके केस के लिए बायोमेट्रिक्स (फिंगरप्रिंट और फोटो) की आवश्यकता कर सकता है।
 यदि USCIS ने आपको बायोमेट्रिक्स अपॉइंटमेंट नोटिस भेजा है, तो आपको उपस्थित होना
 अनिवार्य है। बायोमेट्रिक्स में उपस्थित न होने से आपका केस खारिज हो सकता है।
-कृपया USCIS बायोमेट्रिक्स नोटिस मिलते ही तुरंत अटॉर्नी JJ Zhang को अग्रेषित करें।` : "";
+कृपया USCIS बायोमेट्रिक्स नोटिस मिलते ही तुरंत TEZ LAW FIRM को अग्रेषित करें।` : "";
 
   const notesBlock = specialNotes ? `
 
@@ -430,7 +428,7 @@ ${bringList}
 या नारे वाले कपड़े न पहनें।
 
 अटॉर्नी प्रतिनिधित्व
-Tez Law, P.C. के अटॉर्नी JJ Zhang इस सुनवाई में आपका प्रतिनिधित्व करेंगे।
+TEZ LAW FIRM का एक अटॉर्नी इस सुनवाई में आपका प्रतिनिधित्व करेगा।
 कृपया ऊपर दिए गए आगमन समय पर कोर्टहाउस के प्रतीक्षा क्षेत्र में अटॉर्नी Zhang
 से मिलने की योजना बनाएँ।${biometricsBlock}${notesBlock}
 
@@ -442,18 +440,17 @@ Tez Law, P.C. के अटॉर्नी JJ Zhang इस सुनवाई �
 प्रश्न
 सुनवाई से पहले कोई प्रश्न होने पर, कृपया संपर्क करें:
 फ़ोन: 626-678-8677
-ईमेल: jj@tezlawfirm.com
+ईमेल: info@tezlawfirm.com
 
 हम आपकी सुनवाई में आपसे मिलने की प्रतीक्षा करेंगे।
 
 सादर,
 
-JJ Zhang
-प्रबंध अटॉर्नी
-Tez Law, P.C.
+TEZ LAW FIRM
+वेस्ट कोविना, कैलिफ़ोर्निया
 California Bar #326666
 626-678-8677
-jj@tezlawfirm.com
+info@tezlawfirm.com
 www.tezlawfirm.com`;
 
   return { subject, body };
@@ -481,7 +478,7 @@ function renderPunjabi(data) {
 USCIS ਤੁਹਾਡੇ ਕੇਸ ਲਈ ਬਾਇਓਮੈਟ੍ਰਿਕਸ (ਫਿੰਗਰਪ੍ਰਿੰਟ ਅਤੇ ਫੋਟੋ) ਦੀ ਮੰਗ ਕਰ ਸਕਦਾ ਹੈ।
 ਜੇ USCIS ਨੇ ਤੁਹਾਨੂੰ ਬਾਇਓਮੈਟ੍ਰਿਕਸ ਅਪਾਇੰਟਮੈਂਟ ਦਾ ਨੋਟਿਸ ਭੇਜਿਆ ਹੈ, ਤਾਂ ਤੁਹਾਨੂੰ
 ਹਾਜ਼ਰ ਹੋਣਾ ਜ਼ਰੂਰੀ ਹੈ। ਹਾਜ਼ਰ ਨਾ ਹੋਣ ਨਾਲ ਤੁਹਾਡਾ ਕੇਸ ਰੱਦ ਹੋ ਸਕਦਾ ਹੈ। ਕਿਰਪਾ ਕਰਕੇ
-USCIS ਬਾਇਓਮੈਟ੍ਰਿਕਸ ਨੋਟਿਸ ਮਿਲਦੇ ਹੀ ਤੁਰੰਤ ਵਕੀਲ JJ Zhang ਨੂੰ ਭੇਜੋ।` : "";
+USCIS ਬਾਇਓਮੈਟ੍ਰਿਕਸ ਨੋਟਿਸ ਮਿਲਦੇ ਹੀ ਤੁਰੰਤ TEZ LAW FIRM ਨੂੰ ਭੇਜੋ।` : "";
 
   const notesBlock = specialNotes ? `
 
@@ -513,7 +510,7 @@ ${bringList}
 ਕਿਸੇ ਵੀ ਤਸਵੀਰ ਜਾਂ ਨਾਅਰੇ ਵਾਲੇ ਕੱਪੜੇ ਨਾ ਪਹਿਨੋ।
 
 ਵਕੀਲ ਦੀ ਪ੍ਰਤੀਨਿਧਤਾ
-Tez Law, P.C. ਦੇ ਵਕੀਲ JJ Zhang ਇਸ ਸੁਣਵਾਈ ਵਿੱਚ ਤੁਹਾਡੀ ਪ੍ਰਤੀਨਿਧਤਾ ਕਰਨਗੇ।
+TEZ LAW FIRM ਦਾ ਇੱਕ ਵਕੀਲ ਇਸ ਸੁਣਵਾਈ ਵਿੱਚ ਤੁਹਾਡੀ ਪ੍ਰਤੀਨਿਧਤਾ ਕਰੇਗਾ।
 ਕਿਰਪਾ ਕਰਕੇ ਉੱਪਰ ਦਿੱਤੇ ਗਏ ਆਉਣ ਦੇ ਸਮੇਂ ਤੇ ਕੋਰਟਹਾਊਸ ਦੇ ਉਡੀਕ ਖੇਤਰ ਵਿੱਚ
 ਵਕੀਲ Zhang ਨੂੰ ਮਿਲਣ ਦੀ ਯੋਜਨਾ ਬਣਾਓ।${biometricsBlock}${notesBlock}
 
@@ -526,18 +523,17 @@ Tez Law, P.C. ਦੇ ਵਕੀਲ JJ Zhang ਇਸ ਸੁਣਵਾਈ ਵਿੱ�
 ਸਵਾਲ
 ਸੁਣਵਾਈ ਤੋਂ ਪਹਿਲਾਂ ਕੋਈ ਸਵਾਲ ਹੋਵੇ ਤਾਂ ਕਿਰਪਾ ਕਰਕੇ ਸੰਪਰਕ ਕਰੋ:
 ਫ਼ੋਨ: 626-678-8677
-ਈਮੇਲ: jj@tezlawfirm.com
+ਈਮੇਲ: info@tezlawfirm.com
 
 ਅਸੀਂ ਤੁਹਾਡੀ ਸੁਣਵਾਈ ਵਿੱਚ ਤੁਹਾਨੂੰ ਮਿਲਣ ਦੀ ਉਡੀਕ ਕਰਦੇ ਹਾਂ।
 
 ਸਤਿਕਾਰ ਨਾਲ,
 
-JJ Zhang
-ਪ੍ਰਬੰਧਕ ਵਕੀਲ
-Tez Law, P.C.
+TEZ LAW FIRM
+ਵੈਸਟ ਕੋਵੀਨਾ, ਕੈਲੀਫੋਰਨੀਆ
 California Bar #326666
 626-678-8677
-jj@tezlawfirm.com
+info@tezlawfirm.com
 www.tezlawfirm.com`;
 
   return { subject, body };
