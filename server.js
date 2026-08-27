@@ -2663,8 +2663,8 @@ app.get("/admin/dropbox/callback", async (req, res) => {
     if (!code) return res.status(400).send(`<h1>Missing authorization code</h1><p>${req.query.error_description || ""}</p>`);
     const tokens = await dbx.exchangeCodeForToken(code, DROPBOX_CALLBACK_URL);
 
-    // Fetch account info for display
-    let accountName = null, accountEmail = null, accountId = tokens.account_id || null;
+    // Fetch account info for display + team namespace ID for team folder access
+    let accountName = null, accountEmail = null, accountId = tokens.account_id || null, rootNamespaceId = null;
     try {
       const acct = await axios.post(
         "https://api.dropboxapi.com/2/users/get_current_account",
@@ -2674,6 +2674,7 @@ app.get("/admin/dropbox/callback", async (req, res) => {
       accountName = acct.data.name?.display_name || null;
       accountEmail = acct.data.email || null;
       accountId = acct.data.account_id || accountId;
+      rootNamespaceId = acct.data.root_info?.root_namespace_id || null;
     } catch (e) {
       console.warn("[dropbox callback] could not fetch account info:", e.message);
     }
@@ -2683,7 +2684,10 @@ app.get("/admin/dropbox/callback", async (req, res) => {
       account_id: accountId,
       account_name: accountName,
       email: accountEmail,
+      root_namespace_id: rootNamespaceId,
     });
+    // Force cache reset so next API call uses new tokens + namespace
+    if (dbx.resetTokenCache) dbx.resetTokenCache();
 
     res.redirect("/admin/dropbox/setup?connected=1");
   } catch (err) {
