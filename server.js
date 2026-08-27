@@ -2462,9 +2462,42 @@ app.get("/admin/clients/:key/dropbox/files", async (req, res) => {
       aNumber: client.a_number,
       useCache: req.query.fresh !== "1",
     });
+
+    // If no folder was auto-resolved, include suggestions so the UI can offer "did you mean" picks
+    if (!result.resolved) {
+      try {
+        const suggestions = await dbx.suggestClientFolders({
+          clientName: client.client_name,
+          aNumber: client.a_number,
+          limit: 8,
+        });
+        return res.json({ ok: true, ...result, suggestions });
+      } catch (e) {
+        return res.json({ ok: true, ...result, suggestions: [], suggestions_error: e.message });
+      }
+    }
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error("[dropbox files list]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Get folder suggestions for a client without altering current mapping
+app.get("/admin/clients/:key/dropbox/suggest", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const dbx = require("./dropbox-integration");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    const suggestions = await dbx.suggestClientFolders({
+      clientName: client.client_name,
+      aNumber: client.a_number,
+      limit: 20,
+    });
+    res.json({ ok: true, suggestions });
+  } catch (err) {
+    console.error("[dropbox suggest]:", err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
