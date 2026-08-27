@@ -2559,7 +2559,13 @@ app.get("/admin/dropbox/raw-account", async (req, res) => {
     const resp = await axios.post(
       "https://api.dropboxapi.com/2/users/get_current_account",
       null,
-      { headers: { "Authorization": `Bearer ${token}` }, timeout: 15000 }
+      {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",   // Dropbox strictly requires this even with empty body
+        },
+        timeout: 15000,
+      }
     );
     res.type("text/plain").send(JSON.stringify(resp.data, null, 2));
   } catch (err) {
@@ -2720,7 +2726,13 @@ app.get("/admin/dropbox/callback", async (req, res) => {
       const acct = await axios.post(
         "https://api.dropboxapi.com/2/users/get_current_account",
         null,
-        { headers: { "Authorization": `Bearer ${tokens.access_token}` }, timeout: 10000 }
+        {
+          headers: {
+            "Authorization": `Bearer ${tokens.access_token}`,
+            "Content-Type": "application/json",
+          },
+          timeout: 10000,
+        }
       );
       accountName = acct.data.name?.display_name || null;
       accountEmail = acct.data.email || null;
