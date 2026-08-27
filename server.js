@@ -2286,6 +2286,31 @@ app.post("/admin/hearing/individual", async (req, res) => {
 
 app.get("/admin/hearing/individual/history", (req, res) => res.redirect("/admin/hearing/history"));
 
+// ── Client Profiles ───────────────────────────────────────
+// Aggregated view of every client across master and individual hearing
+// notes. Grouped by A-Number (preferred) or client name.
+app.get("/admin/clients", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const clients = await cp.aggregateClients();
+    res.send(cp.renderClientList(clients));
+  } catch (err) {
+    console.error("[/admin/clients]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.get("/admin/clients/:key", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const client = await cp.getClientByKey(req.params.key);
+    res.send(cp.renderClientDetail(client));
+  } catch (err) {
+    console.error("[/admin/clients/:key]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
 // ── Unified Hearing History ──────────────────────────────
 // Combines master + individual hearing notes into one searchable/filterable
 // list. Every row has an "edit" link that goes to the appropriate editor.
