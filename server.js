@@ -2301,6 +2301,19 @@ app.get("/admin/clients", async (req, res) => {
   }
 });
 
+// Bulk import all client folders from configured Dropbox branches
+app.post("/admin/clients/bulk-import-dropbox", async (req, res) => {
+  try {
+    const dbx = require("./dropbox-integration");
+    const dryRun = req.query.dry === "1";
+    const result = await dbx.bulkImportFromDropbox({ dryRun });
+    res.json({ ok: true, dry_run: dryRun, ...result });
+  } catch (err) {
+    console.error("[bulk import]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Hearing Notices (scan Dropbox + client notification) ─
 // Scans a client's Dropbox folder for hearing notices via Claude Sonnet vision,
 // extracts date/time/court/judge, stores them, and offers one-click notification.
