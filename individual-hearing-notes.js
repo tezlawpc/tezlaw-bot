@@ -135,17 +135,26 @@ function parseExhibitExcel(buffer, filename = "exhibits.xlsx") {
   const dataRows = rows.slice(headerIdx + 1).filter(r => r.some(c => String(c == null ? "" : c).trim()));
 
   // Try to map common column names to standard fields.
-  // Number column: also matches "EOR", "EOR submission", "part", "index",
-  // "annex", "attachment" — common headers on immigration exhibit lists.
+  // - "number" is the list/row number (list #)
+  // - "eoir_submission" is the EOIR filing reference (e.g. "EOR-1", "5/12/25 filing")
+  //   Usually Column B on Tez Law's exhibit sheets, but we match by header first.
   const colIdx = {
-    number:      findCol(headers, ["exhibit", "exh", "eor", "no.", "no", "#", "number", "tab", "part", "index", "annex", "attachment", "submission"]),
-    description: findCol(headers, ["description", "desc", "document", "title", "name"]),
-    offered_by:  findCol(headers, ["offered by", "party", "proponent", "offered", "by"]),
-    marked:      findCol(headers, ["marked", "identified", "id'd"]),
-    admitted:    findCol(headers, ["admitted", "received", "admit"]),
-    objection:   findCol(headers, ["objection", "objections", "notes", "note"]),
-    bates:       findCol(headers, ["bates", "bates #", "pages"]),
+    number:           findCol(headers, ["#", "no.", "no ", "list", "item", "number", "tab"]),
+    eoir_submission:  findCol(headers, ["eoir", "eoir submission", "eor submission", "submission", "filing", "eor"]),
+    description:      findCol(headers, ["description", "desc", "document", "title", "name"]),
+    offered_by:       findCol(headers, ["offered by", "party", "proponent", "offered", "by"]),
+    marked:           findCol(headers, ["marked", "identified", "id'd"]),
+    admitted:         findCol(headers, ["admitted", "received", "admit"]),
+    objection:        findCol(headers, ["objection", "objections", "notes", "note"]),
+    bates:            findCol(headers, ["bates", "bates #", "pages"]),
   };
+
+  // Fallback: if EOIR wasn't matched by header but a column B exists, use it
+  if (colIdx.eoir_submission < 0 && headers.length >= 2 && headers[1]) {
+    // Only use column B if header wasn't already claimed as something else
+    const claimed = new Set(Object.values(colIdx).filter(v => v >= 0));
+    if (!claimed.has(1)) colIdx.eoir_submission = 1;
+  }
 
   const safeCell = (val) => {
     if (val == null) return "";
@@ -154,14 +163,16 @@ function parseExhibitExcel(buffer, filename = "exhibits.xlsx") {
   };
 
   const exhibits = dataRows.map((r, i) => ({
-    number:      colIdx.number      >= 0 ? safeCell(r[colIdx.number])      : String(i + 1),
-    description: colIdx.description >= 0 ? safeCell(r[colIdx.description]) : (r.filter(c => String(c == null ? "" : c).trim()).map(safeCell).join(" ").trim() || ""),
-    offered_by:  colIdx.offered_by  >= 0 ? safeCell(r[colIdx.offered_by])  : "",
-    marked:      colIdx.marked      >= 0 ? safeCell(r[colIdx.marked])      : "",
-    admitted:    colIdx.admitted    >= 0 ? safeCell(r[colIdx.admitted])    : "",
-    objection:   colIdx.objection   >= 0 ? safeCell(r[colIdx.objection])   : "",
-    bates:       colIdx.bates       >= 0 ? safeCell(r[colIdx.bates])       : "",
-  })).filter(e => e.description || e.number);
+    number:           colIdx.number           >= 0 ? safeCell(r[colIdx.number])           : String(i + 1),
+    eoir_submission:  colIdx.eoir_submission  >= 0 ? safeCell(r[colIdx.eoir_submission])  : "",
+    description:      colIdx.description      >= 0 ? safeCell(r[colIdx.description])      : (r.filter(c => String(c == null ? "" : c).trim()).map(safeCell).join(" ").trim() || ""),
+    offered_by:       colIdx.offered_by       >= 0 ? safeCell(r[colIdx.offered_by])       : "",
+    marked:           colIdx.marked           >= 0 ? safeCell(r[colIdx.marked])           : "",
+    admitted:         colIdx.admitted         >= 0 ? safeCell(r[colIdx.admitted])         : "",
+    not_admitted:     "",  // new checkbox — inverted semantics; user checks only when NOT admitted
+    objection:        colIdx.objection        >= 0 ? safeCell(r[colIdx.objection])        : "",
+    bates:            colIdx.bates            >= 0 ? safeCell(r[colIdx.bates])            : "",
+  })).filter(e => e.description || e.number || e.eoir_submission);
 
   return { exhibits, sheet_name: firstSheetName, raw_rows: rows.slice(0, 5) };
 }
@@ -497,8 +508,11 @@ function buildStructuredForAI(data) {
     for (const e of exhibits) {
       const parts = [`#${e.number || "?"}`, e.description || "(no description)"];
       const flags = [];
+      if (e.eoir_submission) flags.push(`EOIR: ${e.eoir_submission}`);
       if (e.marked)     flags.push(`marked as #${e.marked}`);
-      if (e.admitted)   flags.push("admitted");
+      // Default = admitted; only note if explicitly not admitted
+      if (e.not_admitted) flags.push("NOT ADMITTED");
+      else flags.push("admitted");
       if (e.objection)  flags.push(`objection: ${e.objection}`);
       lines.push(`  - ${parts.join(": ")}${flags.length ? " [" + flags.join("; ") + "]" : ""}`);
     }
@@ -808,15 +822,20 @@ function parseFormSubmission(body) {
       ? String(Math.max(1, Math.min(99, parseInt(markedRaw, 10))))
       : "";
     const row = {
-      number:      (body[`exhibit_number_${i}`] || "").trim(),
-      description: (body[`exhibit_description_${i}`] || "").trim(),
-      offered_by:  (body[`exhibit_offered_by_${i}`] || "").trim(),
-      marked:      markedNum,
-      admitted:    body[`exhibit_admitted_${i}`] ? "yes" : "",
-      objection:   (body[`exhibit_objection_${i}`] || "").trim(),
-      bates:       (body[`exhibit_bates_${i}`] || "").trim(),
+      number:           (body[`exhibit_number_${i}`] || "").trim(),
+      eoir_submission:  (body[`exhibit_eoir_submission_${i}`] || "").trim(),
+      description:      (body[`exhibit_description_${i}`] || "").trim(),
+      offered_by:       (body[`exhibit_offered_by_${i}`] || "").trim(),
+      marked:           markedNum,
+      // "Not admitted" checkbox — checked means exhibit was refused.
+      // Default is admitted (empty not_admitted) since most get admitted.
+      not_admitted:     body[`exhibit_not_admitted_${i}`] ? "yes" : "",
+      // Legacy admitted field: retain for backward compat but not surfaced in new UI.
+      admitted:         body[`exhibit_admitted_${i}`] ? "yes" : "",
+      objection:        (body[`exhibit_objection_${i}`] || "").trim(),
+      bates:            (body[`exhibit_bates_${i}`] || "").trim(),
     };
-    if (row.number || row.description) exhibits.push(row);
+    if (row.number || row.description || row.eoir_submission) exhibits.push(row);
   }
 
   // Examinations: nested — for each examination (exam_witness_role_N),
@@ -1103,15 +1122,16 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       <!-- Section 3: Exhibit list -->
       <fieldset>
         <legend>Exhibit List</legend>
-        <div class="hint">Upload an Excel/CSV above to auto-populate, or add rows manually. "Marked" is the exhibit's number (1-99) once formally identified in the record; check "Admitted" if received into evidence.</div>
+        <div class="hint">Upload an Excel/CSV above to auto-populate, or add rows manually. "Marked" is the exhibit's number (1-99) once formally identified in the record. Check "Not admitted" only when the exhibit was refused — everything else is assumed admitted.</div>
         <div style="overflow-x:auto;">
         <table id="exhibits-table" style="width:100%; margin:8px 0; font-size:13px;">
           <thead>
             <tr>
-              <th style="width:60px; text-align:left;">#</th>
+              <th style="width:50px; text-align:left;">#</th>
+              <th style="width:120px; text-align:left;">EOIR Submission</th>
               <th style="text-align:left;">Description</th>
-              <th style="width:80px; text-align:center;">Marked</th>
-              <th style="width:80px; text-align:center;">Admitted</th>
+              <th style="width:70px; text-align:center;">Marked</th>
+              <th style="width:90px; text-align:center;">Not admitted</th>
               <th style="text-align:left;">Objection / Notes</th>
               <th style="width:30px;"></th>
             </tr>
@@ -1229,13 +1249,16 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         const markedNum = (data.marked != null && !isNaN(Number(data.marked)) && String(data.marked).trim() !== "")
           ? String(parseInt(data.marked, 10))
           : "";
-        const isAdmitted = !!(data.admitted && String(data.admitted).trim());
+        // Not admitted (inverted). Only checked if explicitly flagged as not admitted.
+        // Older records with admitted: "yes" translate to not_admitted: false (they WERE admitted).
+        const isNotAdmitted = !!(data.not_admitted && String(data.not_admitted).trim());
         const tr = document.createElement("tr");
         tr.innerHTML =
           '<td><input type="text" name="exhibit_number_' + idx + '" value="' + escapeHTML(data.number || "") + '" style="width:100%;"></td>' +
+          '<td><input type="text" name="exhibit_eoir_submission_' + idx + '" value="' + escapeHTML(data.eoir_submission || "") + '" style="width:100%;" placeholder="EOIR ref"></td>' +
           '<td><input type="text" name="exhibit_description_' + idx + '" value="' + escapeHTML(data.description || "") + '" style="width:100%;"></td>' +
           '<td style="text-align:center;"><input type="number" name="exhibit_marked_' + idx + '" min="1" max="99" value="' + escapeHTML(markedNum) + '" placeholder="—" style="width:60px; text-align:center; padding:4px;"></td>' +
-          '<td style="text-align:center;"><input type="checkbox" name="exhibit_admitted_' + idx + '" value="yes"' + (isAdmitted ? " checked" : "") + ' style="transform:scale(1.3);"></td>' +
+          '<td style="text-align:center;"><input type="checkbox" name="exhibit_not_admitted_' + idx + '" value="yes"' + (isNotAdmitted ? " checked" : "") + ' style="transform:scale(1.3);"></td>' +
           '<td><input type="text" name="exhibit_objection_' + idx + '" value="' + escapeHTML(data.objection || "") + '" style="width:100%;"></td>' +
           '<td><button type="button" onclick="this.closest(\\'tr\\').remove()" style="background:#eee; border:none; padding:4px 8px; cursor:pointer; border-radius:3px;">×</button></td>';
         document.getElementById("exhibits-tbody").appendChild(tr);
