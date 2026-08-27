@@ -741,6 +741,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   const indivActive = activeItem === "individual" ? "active" : "";
   const indivHistActive = activeItem === "individual-history" ? "active" : "";
   const clientsActive = activeItem === "clients" ? "active" : "";
+  const dropboxActive = activeItem === "dropbox" ? "active" : "";
 
   return `<!DOCTYPE html>
 <html>
@@ -839,6 +840,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   </a>
   <a href="/admin/clients" class="nav-item ${clientsActive}" style="background:rgba(183,156,98,.08); ${clientsActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">👥</span><span>→ Client Profiles</span>
+  </a>
+  <a href="/admin/dropbox/setup" class="nav-item ${dropboxActive}" style="background:rgba(0,97,255,.06); ${dropboxActive ? "" : "border-left-color:rgba(0,97,255,.4);"} border-bottom:1px solid rgba(0,97,255,.2);">
+    <span class="icon">📦</span><span>→ Dropbox</span>
   </a>
   <a href="/admin/hearing/notes" class="nav-item ${notesActive}" style="background:rgba(183,156,98,.08); ${notesActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">📝</span><span>→ Master Hearing Notes</span>
