@@ -165,7 +165,13 @@ async function getPathRootHeader() {
       const acct = await axios.post(
         "https://api.dropboxapi.com/2/users/get_current_account",
         null,
-        { headers: { "Authorization": `Bearer ${token}` }, timeout: 15000 }
+        {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",   // Dropbox requires this even for no-body POST
+          },
+          timeout: 15000,
+        }
       );
       rootId = acct.data.root_info?.root_namespace_id;
       if (rootId) {
