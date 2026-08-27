@@ -33,14 +33,16 @@ async function aggregateClients() {
   const [masterRes, indivRes] = await Promise.all([
     db.query(`
       SELECT id, client_name, a_number, client_language, client_email, client_phone,
-             case_type, hearing_type, hearing_date, next_hearing_date, next_hearing_type,
+             client_address, case_type, hearing_type, hearing_date,
+             next_hearing_date, next_hearing_type,
              judge_name, disposition, sent_to_paralegal_at, created_at
       FROM hearing_notes
       ORDER BY COALESCE(hearing_date, created_at) DESC
     `),
     db.query(`
       SELECT id, client_name, a_number, client_language, client_email, client_phone,
-             case_type, hearing_date, next_hearing_date, next_hearing_type,
+             client_address, case_type, hearing_date,
+             next_hearing_date, next_hearing_type,
              judge_name, court_location, disposition, sent_to_paralegal_at, created_at
       FROM individual_hearing_notes
       ORDER BY COALESCE(hearing_date, created_at) DESC
@@ -59,6 +61,7 @@ async function aggregateClients() {
         a_number: row.a_number,
         client_email: row.client_email,
         client_phone: row.client_phone,
+        client_address: row.client_address,
         client_language: row.client_language,
         case_types: new Set(),
         judges: new Set(),
@@ -72,6 +75,7 @@ async function aggregateClients() {
     // Fill in missing contact info from most recent record (rows come newest-first)
     if (!c.client_email && row.client_email) c.client_email = row.client_email;
     if (!c.client_phone && row.client_phone) c.client_phone = row.client_phone;
+    if (!c.client_address && row.client_address) c.client_address = row.client_address;
     if (!c.client_language && row.client_language) c.client_language = row.client_language;
     if (row.case_type) c.case_types.add(row.case_type);
     if (row.judge_name) c.judges.add(row.judge_name);
@@ -344,6 +348,7 @@ function renderClientDetail(client) {
             <div><strong>A-Number:</strong> ${escapeHtml(client.a_number || "-")}</div>
             <div><strong>Email:</strong> ${email ? `<a href="mailto:${escapeAttr(email)}">${escapeHtml(email)}</a>` : "-"}</div>
             <div><strong>Phone:</strong> ${phone ? escapeHtml(phone) : "-"}</div>
+            <div><strong>Address:</strong> ${client.client_address ? escapeHtml(client.client_address).replace(/\n/g, "<br>") : "-"}</div>
             <div><strong>Language:</strong> ${languageLabel(client.client_language)}</div>
           </div>
         </div>
