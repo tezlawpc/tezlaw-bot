@@ -849,28 +849,28 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     <h2>Zara</h2>
     <p>Admin Panel</p>
   </div>
-  <a href="/admin/matters/" class="nav-item" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); border-bottom:1px solid rgba(183,156,98,.2);">
+  <a href="/admin/matters/" class="nav-item" data-perm="matters.access" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">⚖️</span><span>→ Matter Manager</span>
   </a>
-  <a href="/admin/clients" class="nav-item ${clientsActive}" style="background:rgba(183,156,98,.08); ${clientsActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
+  <a href="/admin/clients" class="nav-item ${clientsActive}" data-perm="clients.read" style="background:rgba(183,156,98,.08); ${clientsActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">👥</span><span>→ Client Profiles</span>
   </a>
-  <a href="/admin/dropbox/setup" class="nav-item ${dropboxActive}" style="background:rgba(0,97,255,.06); ${dropboxActive ? "" : "border-left-color:rgba(0,97,255,.4);"} border-bottom:1px solid rgba(0,97,255,.2);">
+  <a href="/admin/dropbox/setup" class="nav-item ${dropboxActive}" data-perm="dropbox.setup" style="background:rgba(0,97,255,.06); ${dropboxActive ? "" : "border-left-color:rgba(0,97,255,.4);"} border-bottom:1px solid rgba(0,97,255,.2);">
     <span class="icon">📦</span><span>→ Dropbox</span>
   </a>
-  <a href="/admin/hearing/notes" class="nav-item ${notesActive}" style="background:rgba(183,156,98,.08); ${notesActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
+  <a href="/admin/hearing/notes" class="nav-item ${notesActive}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${notesActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">📝</span><span>→ Master Hearing Notes</span>
   </a>
-  <a href="/admin/hearing/individual" class="nav-item ${indivActive}" style="background:rgba(183,156,98,.08); ${indivActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
+  <a href="/admin/hearing/individual" class="nav-item ${indivActive}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${indivActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">⚖️</span><span>→ Individual Hearing Notes</span>
   </a>
-  <a href="/admin/hearing/history" class="nav-item ${historyActive}" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+  <a href="/admin/hearing/history" class="nav-item ${historyActive}" data-perm="hearings.read" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">📚</span><span>All Hearing History</span>
   </a>
-  <a href="/admin/email-setup" class="nav-item" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+  <a href="/admin/email-setup" class="nav-item" data-perm="email.setup" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">📬</span><span>Email Setup</span>
   </a>
-  <a href="/admin/users" class="nav-item" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
+  <a href="/admin/users" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">👤</span><span>Admin Users</span>
   </a>
   <a href="/admin/" class="nav-item">
@@ -881,17 +881,26 @@ function renderAdminChrome({ title, body, activeItem = null }) {
 <div class="main">
   <div id="auth-user-chip" style="position:fixed; top:12px; right:20px; font-size:12px; color:#555; background:white; padding:6px 12px; border-radius:20px; box-shadow:0 1px 4px rgba(0,0,0,.08); z-index:100; display:flex; align-items:center; gap:8px;">
     <span id="auth-user-name" style="color:#0C1C36; font-weight:600;">…</span>
+    <span id="auth-user-role" style="background:#666; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;"></span>
     <form method="POST" action="/admin/logout" style="display:inline; margin:0;">
       <button type="submit" style="background:none; border:none; color:#c00; font-size:11px; cursor:pointer; padding:0; text-decoration:underline;">Logout</button>
     </form>
   </div>
   <script>
     fetch("/admin/whoami").then(r => r.json()).then(d => {
-      if (d.authenticated) {
-        document.getElementById("auth-user-name").textContent = (d.name || d.username) + " (" + d.role + ")";
-      } else {
+      if (!d.authenticated) {
         document.getElementById("auth-user-chip").style.display = "none";
+        return;
       }
+      document.getElementById("auth-user-name").textContent = d.name || d.username;
+      const roleEl = document.getElementById("auth-user-role");
+      roleEl.textContent = d.role_label || d.role;
+      roleEl.style.background = d.role_color || "#666";
+      // Hide sidebar items the user's role can't access
+      document.querySelectorAll("[data-perm]").forEach(el => {
+        const p = el.dataset.perm;
+        if (!(d.permissions && d.permissions[p])) el.style.display = "none";
+      });
     }).catch(() => document.getElementById("auth-user-chip").style.display = "none");
   </script>
   ${body}
