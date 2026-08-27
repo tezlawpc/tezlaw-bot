@@ -162,19 +162,22 @@ async function getPathRootHeader() {
     // Fetch current account and store root namespace ID
     try {
       const token = await getAccessToken();
-      const acct = await axios.post(
-        "https://api.dropboxapi.com/2/users/get_current_account",
-        "null",
-        {
-          headers: {
-            "Authorization": `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          timeout: 15000,
-          transformRequest: [(data) => data],
-        }
-      );
-      rootId = acct.data.root_info?.root_namespace_id;
+      // Use native fetch — axios overrides Content-Type on empty-body POSTs.
+      const resp = await fetch("https://api.dropboxapi.com/2/users/get_current_account", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: "null",
+      });
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "");
+        console.warn(`[dropbox] account fetch HTTP ${resp.status}: ${errText}`);
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      rootId = data.root_info?.root_namespace_id;
       if (rootId) {
         await db.query(`UPDATE dropbox_settings SET root_namespace_id = $1 WHERE id = 1`, [rootId]);
       }
