@@ -112,6 +112,55 @@ app.use("/admin/hearing", (req, res, next) => {
 // Now mount the login/logout/setup/users routes AFTER all middleware.
 auth.mount(app);
 
+// ── Backups (admin only) ─────────────────────────────────
+app.get("/admin/backups", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const backups = require("./backup-system");
+    const list = await backups.listBackups();
+    const lastBackup = list[0] || null;
+    res.send(backups.renderBackupsPage({ backups: list, lastBackup, stats: {} }));
+  } catch (err) {
+    console.error("[backups]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/backups/run-now", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const backups = require("./backup-system");
+    const result = await backups.runBackup({ manual: true });
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error("[backup run]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/backups/preview", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const backups = require("./backup-system");
+    const path = req.query.path;
+    if (!path) return res.status(400).json({ ok: false, error: "Missing path" });
+    const preview = await backups.previewRestore(path);
+    res.json({ ok: true, preview });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/backups/restore", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const backups = require("./backup-system");
+    const path = req.body.path;
+    if (!path) return res.status(400).json({ ok: false, error: "Missing path" });
+    const result = await backups.restoreFromBackup(path);
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error("[backup restore]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Triage Dashboard ─────────────────────────────────────
 app.get("/admin/dashboard", async (req, res) => {
   try {
@@ -4292,6 +4341,15 @@ app.listen(PORT, async () => {
     console.log("✅ Hearing reminders scheduled");
   } catch (e) {
     console.error("⚠️  Reminders init failed:", e.message);
+  }
+
+  // Initialize backup system + start cron
+  try {
+    const backups = require("./backup-system");
+    backups.startCron();
+    console.log("✅ Backup cron scheduled (3 AM Pacific daily)");
+  } catch (e) {
+    console.error("⚠️  Backup init failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)
