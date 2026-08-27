@@ -382,9 +382,12 @@ async function changePassword(userId, newPassword) {
 // first admin account.
 async function requireAdminAuth(req, res, next) {
   try {
-    // Whitelist — auth-adjacent endpoints must be reachable without auth
+    // Whitelist — auth-adjacent endpoints must be reachable without auth.
+    // /whoami is included because it's called by client-side JS to check
+    // auth status; it returns { authenticated: false } when not logged in
+    // instead of redirecting to login (which would break the JSON API).
     const path = req.path;
-    const WHITELIST = new Set(["/login", "/logout", "/setup", "/whoami-early"]);
+    const WHITELIST = new Set(["/login", "/logout", "/setup", "/whoami", "/whoami-early"]);
     if (WHITELIST.has(path)) return next();
 
     // Bootstrap: if no admin users exist, force setup
