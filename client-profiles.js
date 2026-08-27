@@ -368,6 +368,16 @@ function renderClientDetail(client, { documents = [] } = {}) {
 
     ${upcomingSection}
 
+    <!-- Detected hearing notices from Dropbox scan -->
+    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;" id="hearing-notices-section">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+        <h3 style="margin:0; color:#0C1C36;">🗓️ Hearing Notices <span id="hn-count" style="color:#888; font-weight:normal; font-size:14px;"></span></h3>
+        <button type="button" onclick="scanForNotices()" id="hn-scan-btn" style="background:#0C1C36; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🔍 Scan Dropbox for notices</button>
+      </div>
+      <div id="hn-status" style="font-size:13px; color:#666; margin-bottom:10px;">Click "Scan Dropbox" to detect hearing notices in this client's folder.</div>
+      <div id="hn-list"></div>
+    </div>
+
     ${require("./client-documents").renderDocumentsSection({ clientKey: client.key, documents, aNumber: client.a_number })}
 
     <!-- Dropbox Documents section (lazy-loaded via JS) -->
@@ -624,6 +634,104 @@ function renderClientDetail(client, { documents = [] } = {}) {
 
       // Load on page ready
       dbxRefresh(false);
+
+      // ── Hearing Notices ────────────────────────────────
+      async function loadHearingNotices() {
+        try {
+          const resp = await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/hearing-notices");
+          const data = await resp.json();
+          if (!data.ok) return;
+          renderNotices(data.notices || []);
+        } catch (e) { /* silent */ }
+      }
+      function renderNotices(notices) {
+        const list = document.getElementById("hn-list");
+        const count = document.getElementById("hn-count");
+        const status = document.getElementById("hn-status");
+        count.textContent = notices.length ? "(" + notices.length + ")" : "";
+        if (!notices.length) {
+          list.innerHTML = "";
+          return;
+        }
+        status.style.display = "none";
+        list.innerHTML = notices.map(n => {
+          const dt = n.hearing_date ? new Date(n.hearing_date) : null;
+          const dateStr = dt && !isNaN(dt) ? dt.toLocaleString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "(date not confirmed)";
+          const noticeTypeBadge = n.notice_type
+            ? '<span style="background:#fdf7f0; color:#B79C62; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">' + dbxEscape(n.notice_type) + '</span>'
+            : "";
+          const confidenceBadge = n.confidence === "low"
+            ? '<span style="background:#fff3e0; color:#e65100; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">low confidence — verify</span>'
+            : "";
+          const notifiedBadge = n.notified_at
+            ? '<span style="background:#e8f5e9; color:#2e7d32; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">✓ notified ' + new Date(n.notified_at).toLocaleDateString() + '</span>'
+            : "";
+          const links = n.contact_links || {};
+          const btn = (href, channel, label, color) => href
+            ? '<a href="' + href + '" target="_blank" rel="noopener" onclick="markNotified(' + n.id + ', \\'' + channel + '\\')" style="background:' + color + '; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px; margin-right:4px;">' + label + '</a>'
+            : '<span style="background:#eee; color:#999; padding:6px 12px; border-radius:4px; font-size:12px; margin-right:4px;">' + label + ' (no contact)</span>';
+          return '<div style="border-left:4px solid #B79C62; background:#fdf7f0; padding:12px; border-radius:4px; margin-bottom:8px;">' +
+            '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">' +
+              '<div style="flex:1; min-width:250px;">' +
+                '<div style="font-size:15px; font-weight:600; color:#0C1C36;">' + dbxEscape(dateStr) + '</div>' +
+                '<div style="margin-top:4px; font-size:13px; color:#333;">' + noticeTypeBadge + confidenceBadge + notifiedBadge + '</div>' +
+                (n.court_name ? '<div style="font-size:12px; color:#666; margin-top:4px;">📍 ' + dbxEscape(n.court_name) + '</div>' : "") +
+                (n.court_address ? '<div style="font-size:12px; color:#666;">📌 ' + dbxEscape(n.court_address) + '</div>' : "") +
+                (n.judge_name ? '<div style="font-size:12px; color:#666;">⚖️ ' + dbxEscape(n.judge_name) + '</div>' : "") +
+              '</div>' +
+              '<div style="display:flex; gap:4px; flex-wrap:wrap;">' +
+                btn(links.email,     "email",    "✉️ Email",      "#0C1C36") +
+                btn(links.whatsapp,  "whatsapp", "💬 WhatsApp",    "#25D366") +
+                btn(links.sms,       "sms",      "📱 SMS",         "#0061FF") +
+                '<button type="button" onclick="dismissNotice(' + n.id + ')" title="Dismiss (hide this notice)" style="background:#eee; color:#666; padding:6px 10px; border:none; border-radius:4px; cursor:pointer; font-size:12px;">✕</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        }).join("");
+      }
+      async function scanForNotices() {
+        const btn = document.getElementById("hn-scan-btn");
+        const status = document.getElementById("hn-status");
+        btn.disabled = true;
+        btn.textContent = "⏳ Scanning...";
+        status.style.display = "";
+        status.textContent = "Scanning Dropbox files for hearing notices (this can take 30-90 seconds)...";
+        try {
+          const resp = await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/hearing-notices/scan", { method: "POST" });
+          const data = await resp.json();
+          if (data.ok) {
+            const foundCount = (data.notices || []).length;
+            status.textContent = "✅ Scanned " + (data.scanned || 0) + " new file(s), skipped " + (data.skipped || 0) + " already-scanned, found " + foundCount + " new notice(s)";
+            await loadHearingNotices();
+          } else {
+            status.innerHTML = '<span style="color:#c00;">❌ ' + dbxEscape(data.error || "Scan failed") + '</span>';
+          }
+        } catch (e) {
+          status.innerHTML = '<span style="color:#c00;">❌ ' + dbxEscape(e.message) + '</span>';
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "🔍 Scan Dropbox for notices";
+        }
+      }
+      async function markNotified(id, channel) {
+        try {
+          await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/hearing-notices/" + id + "/notified", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "channel=" + encodeURIComponent(channel),
+          });
+          // Refresh notices to show notified badge (small delay so link opens first)
+          setTimeout(loadHearingNotices, 500);
+        } catch (e) { /* silent */ }
+      }
+      async function dismissNotice(id) {
+        if (!confirm("Dismiss this notice? (You can re-scan later to bring it back.)")) return;
+        try {
+          await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/hearing-notices/" + id + "/dismiss", { method: "POST" });
+          loadHearingNotices();
+        } catch (e) { /* silent */ }
+      }
+      loadHearingNotices();
     </script>
 
     <!-- Hearings history -->
