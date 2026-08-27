@@ -293,15 +293,15 @@ const MESSAGES = {
 ${n.court_name ? `📍 Court: ${n.court_name}\n` : ""}${n.court_address ? `📌 Address: ${n.court_address}\n` : ""}${n.judge_name ? `⚖️ Judge: ${n.judge_name}\n` : ""}
 Please arrive 30 minutes early with your government-issued ID. If you cannot attend, call us IMMEDIATELY at 626-678-8677.
 
-— Attorney JJ Zhang, Tez Law P.C.`,
+— TEZ LAW FIRM`,
 
-  zh: (n) => `您好，我是TEZ律师事务所。这是关于您即将到来的${prettyTypeZh(n.hearing_type)}庭审的提醒：
+  zh: (n) => `您好，这里是TEZ律师事务所。这是关于您即将到来的${prettyTypeZh(n.hearing_type)}庭审的提醒：
 
 📅 日期：${formatDate(n.hearing_date, "zh")}
 ${n.court_name ? `📍 法院：${n.court_name}\n` : ""}${n.court_address ? `📌 地址：${n.court_address}\n` : ""}${n.judge_name ? `⚖️ 法官：${n.judge_name}\n` : ""}
 请提前30分钟到达并携带政府颁发的身份证件。如无法出席，请立即致电626-678-8677。
 
-— JJ Zhang 律师, TEZ律师事务所`,
+— TEZ律师事务所`,
 
   es: (n) => `Hola, le habla el bufete Tez Law. Le recordamos su próxima audiencia de ${prettyTypeEs(n.hearing_type)}:
 
@@ -309,7 +309,7 @@ ${n.court_name ? `📍 法院：${n.court_name}\n` : ""}${n.court_address ? `�
 ${n.court_name ? `📍 Corte: ${n.court_name}\n` : ""}${n.court_address ? `📌 Dirección: ${n.court_address}\n` : ""}${n.judge_name ? `⚖️ Juez: ${n.judge_name}\n` : ""}
 Por favor llegue 30 minutos antes con su identificación oficial. Si no puede asistir, llámenos INMEDIATAMENTE al 626-678-8677.
 
-— Abogado JJ Zhang, Tez Law P.C.`,
+— TEZ LAW FIRM`,
 };
 
 function prettyType(t) {
