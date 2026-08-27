@@ -112,6 +112,148 @@ app.use("/admin/hearing", (req, res, next) => {
 // Now mount the login/logout/setup/users routes AFTER all middleware.
 auth.mount(app);
 
+// ── Triage Dashboard ─────────────────────────────────────
+app.get("/admin/dashboard", async (req, res) => {
+  try {
+    const dashboard = require("./dashboard");
+    const [upcoming, unnotified, recent, reminderStats, clientStats] = await Promise.all([
+      dashboard.getUpcomingHearings(14),
+      dashboard.getUnnotifiedNotices(),
+      dashboard.getRecentHearings(10),
+      dashboard.getReminderStats(),
+      dashboard.getClientStats(),
+    ]);
+    res.send(dashboard.renderDashboard({ upcoming, unnotified, recent, reminderStats, clientStats }));
+  } catch (err) {
+    console.error("[dashboard]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// ── Audit Log Viewer (admin only) ────────────────────────
+app.get("/admin/audit-log", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const audit = require("./audit-log");
+    const filters = {
+      userId: req.query.user_id ? parseInt(req.query.user_id) : null,
+      action: req.query.action || null,
+    };
+    const entries = await audit.listRecent({ userId: filters.userId, action: filters.action, limit: 200 });
+    const users = await audit.listDistinctUsers();
+    res.send(audit.renderAuditLogPage({
+      entries,
+      filters,
+      users,
+      actions: Object.values(audit.ACTIONS),
+    }));
+  } catch (err) {
+    console.error("[audit log]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// ── Manual reminder trigger (admin only) — for testing ───
+app.post("/admin/reminders/run-now", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const reminders = require("./hearing-reminders");
+    const result = await reminders.runDailyReminders();
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Reminder viewer page (admin only)
+app.get("/admin/reminders", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const reminders = require("./hearing-reminders");
+    const [recent, stats] = await Promise.all([
+      reminders.getRecentReminders(100),
+      reminders.getStats(),
+    ]);
+    const hearingNotes = require("./hearing-notes");
+    const rows = recent.map(r => {
+      const dt = new Date(r.sent_at).toLocaleString();
+      const hearingDt = r.hearing_date ? new Date(r.hearing_date).toLocaleString() : "";
+      const statusBadge = r.success
+        ? '<span style="background:#2e7d32; color:white; padding:2px 8px; border-radius:10px; font-size:10px;">✓ sent</span>'
+        : r.channel === "skipped"
+        ? '<span style="background:#888; color:white; padding:2px 8px; border-radius:10px; font-size:10px;">⊙ skipped</span>'
+        : '<span style="background:#c00; color:white; padding:2px 8px; border-radius:10px; font-size:10px;">✕ failed</span>';
+      return `<tr>
+        <td style="font-size:11px; color:#666;">${dt}</td>
+        <td>${r.client_name || ""}</td>
+        <td>${hearingDt}</td>
+        <td>${r.days_out}d</td>
+        <td>${r.channel || ""}</td>
+        <td>${statusBadge}</td>
+        <td style="font-size:11px; color:#c00;">${r.error_message || ""}</td>
+      </tr>`;
+    }).join("");
+    const body = `
+      <div class="page-header"><h1>📣 Hearing Reminders</h1><div style="font-size:13px; color:#666;">Automated reminders sent to clients before hearings. Runs daily at 7 AM Pacific.</div></div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:15px;">
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">Sent (all-time)</div>
+          <div style="font-size:22px; font-weight:600; color:#0C1C36;">${stats.sent}</div>
+        </div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">Last 7 days</div>
+          <div style="font-size:22px; font-weight:600; color:#0C1C36;">${stats.last_7_days}</div>
+        </div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">WhatsApp</div>
+          <div style="font-size:22px; font-weight:600; color:#25D366;">${stats.whatsapp_sent}</div>
+        </div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">SMS</div>
+          <div style="font-size:22px; font-weight:600; color:#0061FF;">${stats.sms_sent}</div>
+        </div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">Skipped (no phone)</div>
+          <div style="font-size:22px; font-weight:600; color:#888;">${stats.skipped}</div>
+        </div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">Failed</div>
+          <div style="font-size:22px; font-weight:600; color:${stats.failed ? "#c00" : "#0C1C36"};">${stats.failed}</div>
+        </div>
+      </div>
+      <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee;">
+        <strong>Manual trigger:</strong>
+        <button type="button" onclick="runNow()" style="background:#0C1C36; color:white; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; margin-left:10px;">🚀 Run reminders now</button>
+        <span style="font-size:12px; color:#666; margin-left:10px;">Sends any pending 7-day or 1-day reminders immediately.</span>
+        <div id="run-status" style="margin-top:10px; font-size:13px;"></div>
+      </div>
+      <table style="background:white; width:100%; font-size:13px;">
+        <thead>
+          <tr><th>Sent at</th><th>Client</th><th>Hearing</th><th>Window</th><th>Channel</th><th>Status</th><th>Error</th></tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:#888; padding:20px;">No reminders sent yet.</td></tr>'}</tbody>
+      </table>
+      <script>
+        async function runNow() {
+          const s = document.getElementById("run-status");
+          s.textContent = "⏳ Running…";
+          try {
+            const r = await fetch("/admin/reminders/run-now", { method: "POST" });
+            const d = await r.json();
+            if (d.ok) {
+              s.innerHTML = '<span style="color:#2e7d32;">✓ Done — 7d: ' + d.result.sevenDay.sent + ' sent, 1d: ' + d.result.oneDay.sent + ' sent</span>';
+              setTimeout(() => location.reload(), 2000);
+            } else {
+              s.innerHTML = '<span style="color:#c00;">❌ ' + d.error + '</span>';
+            }
+          } catch (e) {
+            s.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
+          }
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "Hearing Reminders", body, activeItem: null }));
+  } catch (err) {
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
 // ── Admin panel ───────────────────────────────────────────
 // Matter manager mounted BEFORE adminRouter so /admin/matters/* takes
 // precedence; otherwise Express would route those requests into the
@@ -4131,6 +4273,25 @@ app.listen(PORT, async () => {
     }
   } catch (e) {
     console.error("⚠️  Auth init failed:", e.message);
+  }
+
+  // Initialize audit log
+  try {
+    const audit = require("./audit-log");
+    await audit.initTable();
+    console.log("✅ Audit log table ready");
+  } catch (e) {
+    console.error("⚠️  Audit log init failed:", e.message);
+  }
+
+  // Initialize hearing reminders + start cron
+  try {
+    const reminders = require("./hearing-reminders");
+    await reminders.initTable();
+    reminders.startCron();
+    console.log("✅ Hearing reminders scheduled");
+  } catch (e) {
+    console.error("⚠️  Reminders init failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)
