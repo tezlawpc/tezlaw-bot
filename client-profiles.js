@@ -378,6 +378,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
           <button type="button" onclick="dbxToggleUpload()" id="dbx-upload-btn" style="background:#0061FF; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; display:none;">+ Upload to Dropbox</button>
           <button type="button" onclick="dbxChangeFolder()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">📁 Change folder</button>
           <button type="button" onclick="dbxRefresh(true)" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🔄 Refresh</button>
+          <a href="/admin/clients/${client.key}/dropbox/debug" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; text-decoration:none;">🔍 Debug</a>
         </div>
       </div>
       <div id="dbx-folder-info" style="font-size:12px; color:#666; margin-bottom:10px;"></div>
