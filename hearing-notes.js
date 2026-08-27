@@ -850,14 +850,13 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     <h2>Zara</h2>
     <p>Admin Panel</p>
   </div>
-  <a href="/admin/matters/" class="nav-item" data-perm="matters.access" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); border-bottom:1px solid rgba(183,156,98,.2);">
-    <span class="icon">⚖️</span><span>→ Matter Manager</span>
+
+  <!-- Primary work items — visible to everyone with role -->
+  <a href="/admin/dashboard" class="nav-item" data-perm="hearings.read" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">📊</span><span>→ Dashboard</span>
   </a>
   <a href="/admin/clients" class="nav-item ${clientsActive}" data-perm="clients.read" style="background:rgba(183,156,98,.08); ${clientsActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">👥</span><span>→ Client Profiles</span>
-  </a>
-  <a href="/admin/dropbox/setup" class="nav-item ${dropboxActive}" data-perm="dropbox.setup" style="background:rgba(0,97,255,.06); ${dropboxActive ? "" : "border-left-color:rgba(0,97,255,.4);"} border-bottom:1px solid rgba(0,97,255,.2);">
-    <span class="icon">📦</span><span>→ Dropbox</span>
   </a>
   <a href="/admin/hearing/notes" class="nav-item ${notesActive}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${notesActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">📝</span><span>→ Master Hearing Notes</span>
@@ -868,23 +867,28 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   <a href="/admin/hearing/history" class="nav-item ${historyActive}" data-perm="hearings.read" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">📚</span><span>All Hearing History</span>
   </a>
-  <a href="/admin/email-setup" class="nav-item" data-perm="email.setup" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
-    <span class="icon">📬</span><span>Email Setup</span>
+
+  <!-- Admin-only items — hidden for attorney/paralegal/viewer -->
+  <a href="/admin/matters/" class="nav-item" data-perm="matters.access" style="background:rgba(12,28,54,.06); border-left-color:rgba(12,28,54,.4); border-bottom:1px solid rgba(12,28,54,.15); font-size:13px;">
+    <span class="icon">⚖️</span><span>Matter Manager <span style="font-size:9px; opacity:.6;">(admin)</span></span>
   </a>
-  <a href="/admin/reminders" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
-    <span class="icon">📣</span><span>Hearing Reminders</span>
+  <a href="/admin/dropbox/setup" class="nav-item ${dropboxActive}" data-perm="dropbox.setup" style="background:rgba(0,97,255,.06); ${dropboxActive ? "" : "border-left-color:rgba(0,97,255,.4);"} border-bottom:1px solid rgba(0,97,255,.15); font-size:13px;">
+    <span class="icon">📦</span><span>Dropbox Setup <span style="font-size:9px; opacity:.6;">(admin)</span></span>
   </a>
-  <a href="/admin/backups" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
-    <span class="icon">📦</span><span>Backups</span>
+  <a href="/admin/email-setup" class="nav-item" data-perm="email.setup" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:13px; opacity:.85;">
+    <span class="icon">📬</span><span>Email Setup <span style="font-size:9px; opacity:.6;">(admin)</span></span>
   </a>
-  <a href="/admin/audit-log" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
-    <span class="icon">📜</span><span>Audit Log</span>
+  <a href="/admin/reminders" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:13px; opacity:.85;">
+    <span class="icon">📣</span><span>Hearing Reminders <span style="font-size:9px; opacity:.6;">(admin)</span></span>
   </a>
-  <a href="/admin/users" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
-    <span class="icon">👤</span><span>Admin Users</span>
+  <a href="/admin/backups" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:13px; opacity:.85;">
+    <span class="icon">💾</span><span>Backups <span style="font-size:9px; opacity:.6;">(admin)</span></span>
   </a>
-  <a href="/admin/dashboard" class="nav-item" data-active-item="dashboard">
-    <span class="icon">📊</span><span>Dashboard</span>
+  <a href="/admin/audit-log" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:13px; opacity:.85;">
+    <span class="icon">📜</span><span>Audit Log <span style="font-size:9px; opacity:.6;">(admin)</span></span>
+  </a>
+  <a href="/admin/users" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:13px; opacity:.85;">
+    <span class="icon">👤</span><span>Admin Users <span style="font-size:9px; opacity:.6;">(admin)</span></span>
   </a>
 </div>
 
