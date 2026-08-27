@@ -2301,6 +2301,259 @@ app.get("/admin/clients", async (req, res) => {
   }
 });
 
+// ── Dropbox Integration ───────────────────────────────────
+// OAuth setup flow, config, and per-client file operations.
+// See dropbox-integration.js for details.
+
+const DROPBOX_CALLBACK_URL = (process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com") + "/admin/dropbox/callback";
+
+app.get("/admin/dropbox/setup", async (req, res) => {
+  try {
+    const dbx = require("./dropbox-integration");
+    const configured = dbx.isConfigured();
+    const settings = configured ? await dbx.getSettings() : {};
+    const branches = dbx.getBranchRoots();
+    const hn = require("./hearing-notes");
+    const authorized = !!(settings && settings.refresh_token);
+
+    let statusHtml = "";
+    if (!configured) {
+      statusHtml = `
+        <div style="background:#fef2f2; border-left:4px solid #c00; padding:15px; border-radius:4px;">
+          <strong>⚠️ Not configured</strong>
+          <p style="margin:8px 0 0 0;">Set these env vars in Render, then reload:</p>
+          <ul style="margin:8px 0;">
+            <li><code>DROPBOX_APP_KEY</code></li>
+            <li><code>DROPBOX_APP_SECRET</code></li>
+            <li><code>DROPBOX_BRANCH_ROOTS</code> (comma-separated folder names, e.g. <code>Law ICAN Immigration,Some Broker</code>)</li>
+          </ul>
+        </div>`;
+    } else if (!authorized) {
+      statusHtml = `
+        <div style="background:#fff8e1; border-left:4px solid #ff9800; padding:15px; border-radius:4px;">
+          <strong>Configured, but not yet authorized.</strong>
+          <p style="margin:8px 0;">Click below to grant Zara access to your Dropbox.</p>
+          <a href="${dbx.authorizeUrl(DROPBOX_CALLBACK_URL)}" style="background:#0061FF; color:white; padding:10px 20px; border-radius:4px; text-decoration:none; display:inline-block; font-weight:600;">
+            📦 Authorize Dropbox
+          </a>
+        </div>`;
+    } else {
+      statusHtml = `
+        <div style="background:#e8f5e9; border-left:4px solid #4CAF50; padding:15px; border-radius:4px;">
+          <strong>✅ Connected</strong>
+          <div style="margin-top:8px; line-height:1.7;">
+            Account: <strong>${settings.authorized_account_name || "-"}</strong> (${settings.authorized_email || ""})<br>
+            Authorized: ${settings.last_authorized_at ? new Date(settings.last_authorized_at).toLocaleString() : "-"}<br>
+            Last used: ${settings.last_used_at ? new Date(settings.last_used_at).toLocaleString() : "never"}
+          </div>
+          <div style="margin-top:12px;">
+            <a href="${dbx.authorizeUrl(DROPBOX_CALLBACK_URL)}" style="background:#eee; color:#333; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">Re-authorize</a>
+          </div>
+        </div>`;
+    }
+
+    const branchList = branches.length
+      ? branches.map(b => `<li><code>${b}</code></li>`).join("")
+      : `<li style="color:#888;">None configured yet.</li>`;
+
+    const body = `
+      <div class="page-header">
+        <h1>📦 Dropbox Integration</h1>
+        <a href="/admin/clients" class="back-link">← Clients</a>
+      </div>
+
+      ${statusHtml}
+
+      <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-top:15px;">
+        <h3 style="margin-top:0;">📁 Configured Branch Folders</h3>
+        <p style="color:#666; font-size:13px;">Zara looks for each client's folder inside these top-level branches (in order). Change the <code>DROPBOX_BRANCH_ROOTS</code> env var in Render to update.</p>
+        <ul>${branchList}</ul>
+      </div>
+
+      <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-top:15px;">
+        <h3 style="margin-top:0;">How It Works</h3>
+        <ol style="line-height:1.9;">
+          <li>Client profiles auto-detect the matching Dropbox folder by searching branches for a folder named <code>Last, First</code>.</li>
+          <li>Once found, the folder path is cached in Zara's database — subsequent loads are instant.</li>
+          <li>Files uploaded via the profile go directly to the Dropbox folder.</li>
+          <li>Deletes from Zara also delete from Dropbox (with confirmation).</li>
+          <li>Downloads use temporary Dropbox links (served directly by Dropbox, not proxied through Zara).</li>
+        </ol>
+      </div>
+
+      <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-top:15px;">
+        <h3 style="margin-top:0;">Callback URL</h3>
+        <p style="color:#666; font-size:13px;">Add this exact URL to your Dropbox app's "Redirect URIs" in the OAuth 2 settings:</p>
+        <code style="display:block; background:#f5f5f5; padding:10px; border-radius:4px; word-break:break-all;">${DROPBOX_CALLBACK_URL}</code>
+      </div>`;
+
+    res.send(hn.renderAdminChrome({ title: "Dropbox Setup", body, activeItem: "dropbox" }));
+  } catch (err) {
+    console.error("[dropbox setup]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.get("/admin/dropbox/callback", async (req, res) => {
+  try {
+    const dbx = require("./dropbox-integration");
+    const code = req.query.code;
+    if (!code) return res.status(400).send(`<h1>Missing authorization code</h1><p>${req.query.error_description || ""}</p>`);
+    const tokens = await dbx.exchangeCodeForToken(code, DROPBOX_CALLBACK_URL);
+
+    // Fetch account info for display
+    let accountName = null, accountEmail = null, accountId = tokens.account_id || null;
+    try {
+      const acct = await axios.post(
+        "https://api.dropboxapi.com/2/users/get_current_account",
+        null,
+        { headers: { "Authorization": `Bearer ${tokens.access_token}` }, timeout: 10000 }
+      );
+      accountName = acct.data.name?.display_name || null;
+      accountEmail = acct.data.email || null;
+      accountId = acct.data.account_id || accountId;
+    } catch (e) {
+      console.warn("[dropbox callback] could not fetch account info:", e.message);
+    }
+
+    await dbx.saveRefreshToken({
+      refresh_token: tokens.refresh_token,
+      account_id: accountId,
+      account_name: accountName,
+      email: accountEmail,
+    });
+
+    res.redirect("/admin/dropbox/setup?connected=1");
+  } catch (err) {
+    console.error("[dropbox callback]:", err.message);
+    res.status(500).send(`<h1>Authorization failed</h1><p>${err.message}</p><p><a href="/admin/dropbox/setup">Try again</a></p>`);
+  }
+});
+
+// List Dropbox files for a client (JSON)
+app.get("/admin/clients/:key/dropbox/files", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const dbx = require("./dropbox-integration");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    const result = await dbx.listClientFiles({
+      clientKey: client.key,
+      clientName: client.client_name,
+      aNumber: client.a_number,
+      useCache: req.query.fresh !== "1",
+    });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[dropbox files list]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Upload a file to the client's Dropbox folder
+app.post("/admin/clients/:key/dropbox/upload", docUpload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "No file uploaded" });
+    const cp = require("./client-profiles");
+    const dbx = require("./dropbox-integration");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+
+    let folder = await dbx.resolveClientFolder({
+      clientKey: client.key,
+      clientName: client.client_name,
+      aNumber: client.a_number,
+    });
+    if (!folder) {
+      return res.status(400).json({
+        ok: false,
+        error: "Client's Dropbox folder not found. Use the 'Change folder' option on the profile to set it manually.",
+      });
+    }
+
+    const originalName = (req.body.original_filename || req.file.originalname || "file").trim();
+    const uploadPath = `${folder}/${originalName}`;
+    const result = await dbx.uploadFile({
+      path: uploadPath,
+      buffer: req.file.buffer,
+      autorename: true,
+    });
+    dbx.clearListCache(folder);
+    res.json({ ok: true, path: result.path_display, name: result.name, size: result.size });
+  } catch (err) {
+    console.error("[dropbox upload]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Download a file from Dropbox (redirects to temporary link)
+app.get("/admin/clients/:key/dropbox/download", async (req, res) => {
+  try {
+    const dbx = require("./dropbox-integration");
+    const filePath = req.query.path;
+    if (!filePath) return res.status(400).send("Missing path");
+    const link = await dbx.getTemporaryLink(filePath);
+    res.redirect(link);
+  } catch (err) {
+    console.error("[dropbox download]:", err.message);
+    res.status(500).send(`Error: ${err.message}`);
+  }
+});
+
+// Delete a file from Dropbox
+app.post("/admin/clients/:key/dropbox/delete", async (req, res) => {
+  try {
+    const dbx = require("./dropbox-integration");
+    const cp = require("./client-profiles");
+    const filePath = req.body.path;
+    if (!filePath) return res.status(400).json({ ok: false, error: "Missing path" });
+    await dbx.deleteFile(filePath);
+    // Clear cache for that folder
+    const client = await cp.getClientByKey(req.params.key);
+    if (client) {
+      const folder = await dbx.resolveClientFolder({
+        clientKey: client.key, clientName: client.client_name, aNumber: client.a_number,
+      });
+      if (folder) dbx.clearListCache(folder);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[dropbox delete]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Set / override / clear the Dropbox folder mapping for a client
+app.post("/admin/clients/:key/dropbox/mapping", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const dbx = require("./dropbox-integration");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    const path = (req.body.path || "").trim();
+    if (path === "") {
+      await dbx.clearClientFolderMapping(client.key);
+      return res.json({ ok: true, cleared: true });
+    }
+    // Verify folder exists
+    const meta = await dbx.getMetadata(path);
+    if (!meta || meta[".tag"] !== "folder") {
+      return res.status(400).json({ ok: false, error: `Not a Dropbox folder: ${path}` });
+    }
+    await dbx.setClientFolderMapping({
+      clientKey: client.key,
+      aNumber: client.a_number,
+      clientName: client.client_name,
+      dropboxPath: path,
+    });
+    dbx.clearListCache(path);
+    res.json({ ok: true, path });
+  } catch (err) {
+    console.error("[dropbox mapping]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/admin/clients/:key", async (req, res) => {
   try {
     const cp = require("./client-profiles");
@@ -2975,6 +3228,15 @@ app.listen(PORT, async () => {
     console.log("✅ Client documents table ready");
   } catch (e) {
     console.error("⚠️  Client documents init failed:", e.message);
+  }
+
+  // Initialize Dropbox settings + mapping tables
+  try {
+    const dbx = require("./dropbox-integration");
+    await dbx.initTable();
+    console.log("✅ Dropbox settings table ready");
+  } catch (e) {
+    console.error("⚠️  Dropbox init failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)
