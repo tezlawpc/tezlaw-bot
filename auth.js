@@ -642,6 +642,7 @@ function mount(app) {
           <td>
             ${req.user && req.user.uid !== u.id
               ? `<button type="button" onclick="editUser(${u.id}, '${escapeHtml(u.username)}', '${escapeHtml(u.role)}')" style="background:#eee; color:#333; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Edit role</button>
+                 <button type="button" onclick="resetUserPassword(${u.id}, '${escapeHtml(u.username)}')" style="background:#B79C62; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Reset password</button>
                  <form method="POST" action="/admin/users/${u.id}/delete" style="display:inline;" onsubmit="return confirm('Delete user ${escapeHtml(u.username)}? This cannot be undone.');"><button type="submit" style="background:#c00; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Delete</button></form>`
               : `<span style="color:#888; font-size:11px;">(you)</span>`}
           </td>
@@ -768,6 +769,33 @@ function mount(app) {
               else alert("Error: " + (d.error || "unknown"));
             });
           }
+          async function resetUserPassword(id, username) {
+            if (!confirm("Reset password for " + username + "?\\n\\nA new temporary password will be generated. You'll need to share it with the user via a secure channel (WhatsApp, phone, in-person). Their existing password will stop working immediately.")) return;
+            try {
+              const resp = await fetch("/admin/users/" + id + "/reset-password", { method: "POST" });
+              const data = await resp.json();
+              if (!data.ok) { alert("Error: " + (data.error || "unknown")); return; }
+              // Show the temp password in a modal so admin can copy it
+              const modal = document.createElement("div");
+              modal.style.cssText = "position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:10000; display:flex; align-items:center; justify-content:center;";
+              modal.innerHTML =
+                '<div style="background:white; padding:30px; border-radius:8px; max-width:480px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
+                  '<h2 style="margin:0 0 12px 0; color:#0C1C36;">🔑 Password reset</h2>' +
+                  '<p style="color:#666; font-size:13px;">Share this temporary password with <strong>' + data.full_name + '</strong> (' + data.username + ') via a secure channel. It will only be shown once.</p>' +
+                  '<div style="background:#fdf7f0; padding:15px; border-radius:6px; text-align:center; margin:15px 0; border:2px solid #B79C62;">' +
+                    '<code style="font-size:22px; font-weight:600; color:#0C1C36; letter-spacing:2px; font-family:monospace;">' + data.temporary_password + '</code>' +
+                  '</div>' +
+                  '<div style="display:flex; gap:8px; justify-content:flex-end;">' +
+                    '<button onclick="navigator.clipboard.writeText(\\'' + data.temporary_password + '\\'); this.textContent=\\'Copied\\';" style="background:#eee; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">📋 Copy</button>' +
+                    '<button onclick="this.closest(\\'div\\').parentElement.parentElement.remove()" style="background:#0C1C36; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">Done</button>' +
+                  '</div>' +
+                  '<div style="font-size:11px; color:#888; margin-top:12px;">The user should log in and immediately change their password via the "Change your password" box.</div>' +
+                '</div>';
+              document.body.appendChild(modal);
+            } catch (e) {
+              alert("Error: " + e.message);
+            }
+          }
         </script>
       `;
       res.send(hearingNotes.renderAdminChrome({ title: "Admin Users", body, activeItem: "users" }));
@@ -828,6 +856,32 @@ function mount(app) {
       res.redirect("/admin/login");
     } catch (err) {
       res.status(400).send(`<h1>Error</h1><p>${escapeHtml(err.message)}</p><p><a href="/admin/users">← Back</a></p>`);
+    }
+  });
+
+  // Admin-initiated password reset: generates a random temporary password
+  // and shows it to the admin ONCE. Admin shares it with the user via secure
+  // channel (in-person, phone, WhatsApp). User must change it after login.
+  app.post("/admin/users/:id/reset-password", requireRole("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const user = await db.query(`SELECT username, full_name FROM admin_users WHERE id = $1`, [id]);
+      if (!user.rows[0]) return res.status(404).json({ ok: false, error: "User not found" });
+      // Generate a strong random password (12 chars, mixed case + digits)
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+      let tempPassword = "";
+      for (let i = 0; i < 12; i++) tempPassword += chars[Math.floor(Math.random() * chars.length)];
+      await changePassword(id, tempPassword);
+      res.json({
+        ok: true,
+        username: user.rows[0].username,
+        full_name: user.rows[0].full_name,
+        temporary_password: tempPassword,
+        message: "Password reset. Share the temporary password with the user via a secure channel. They should change it after login via the 'Change your password' box.",
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
     }
   });
 }
