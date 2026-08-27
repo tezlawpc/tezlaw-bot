@@ -2307,6 +2307,116 @@ app.get("/admin/clients", async (req, res) => {
 
 const DROPBOX_CALLBACK_URL = (process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com") + "/admin/dropbox/callback";
 
+// Diagnostic: browse Dropbox to see what Zara can actually reach
+app.get("/admin/dropbox/browse", async (req, res) => {
+  try {
+    const dbx = require("./dropbox-integration");
+    const hn = require("./hearing-notes");
+    const path = req.query.path || "";  // "" = root
+
+    let entries = null;
+    let error = null;
+    try {
+      entries = await dbx.listFolder(path);
+    } catch (e) {
+      error = e.message;
+    }
+
+    const branches = dbx.getBranchRoots();
+    const parent = path ? path.substring(0, path.lastIndexOf("/")) : null;
+
+    // Try each configured branch and report what happened
+    const branchReports = [];
+    if (!path) {
+      for (const b of branches) {
+        const bpath = b.startsWith("/") ? b : "/" + b;
+        try {
+          const meta = await dbx.getMetadata(bpath);
+          if (!meta) {
+            branchReports.push({ path: bpath, status: "❌ not_found", detail: "This folder does not exist in your Dropbox at this exact path." });
+          } else if (meta[".tag"] !== "folder") {
+            branchReports.push({ path: bpath, status: "⚠️ not_a_folder", detail: `Path exists but is a ${meta[".tag"]}, not a folder.` });
+          } else {
+            const contents = await dbx.listFolder(bpath);
+            branchReports.push({
+              path: bpath,
+              status: "✅ found",
+              detail: `${(contents || []).filter(e => e[".tag"] === "folder").length} subfolders, ${(contents || []).filter(e => e[".tag"] === "file").length} files at top level`,
+            });
+          }
+        } catch (e) {
+          branchReports.push({ path: bpath, status: "❌ error", detail: e.message });
+        }
+      }
+    }
+
+    const escapeHtml = s => String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+    let entriesHtml = "";
+    if (error) {
+      entriesHtml = `<div style="background:#fef2f2; border-left:4px solid #c00; padding:15px; border-radius:4px;"><strong>Error listing this path:</strong><br><code>${escapeHtml(error)}</code></div>`;
+    } else if (!entries || !entries.length) {
+      entriesHtml = `<div style="color:#888; padding:20px; text-align:center;">(empty folder)</div>`;
+    } else {
+      const folders = entries.filter(e => e[".tag"] === "folder");
+      const files = entries.filter(e => e[".tag"] === "file");
+      entriesHtml = `
+        <table style="width:100%; font-size:13px;">
+          <thead><tr style="border-bottom:1px solid #eee;"><th style="text-align:left; width:30px;"></th><th style="text-align:left;">Name</th><th style="text-align:left;">Path</th></tr></thead>
+          <tbody>
+            ${folders.map(f => `
+              <tr>
+                <td>📁</td>
+                <td><a href="/admin/dropbox/browse?path=${encodeURIComponent(f.path_display)}" style="color:#0061FF; font-weight:600; text-decoration:none;">${escapeHtml(f.name)}</a></td>
+                <td style="font-family:monospace; font-size:11px; color:#666;">${escapeHtml(f.path_display)}</td>
+              </tr>`).join("")}
+            ${files.map(f => `
+              <tr>
+                <td>📄</td>
+                <td>${escapeHtml(f.name)}</td>
+                <td style="font-family:monospace; font-size:11px; color:#666;">${escapeHtml(f.path_display)}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+        <div style="font-size:12px; color:#666; margin-top:8px;">${folders.length} folder(s), ${files.length} file(s)</div>`;
+    }
+
+    const branchReportsHtml = branchReports.length ? `
+      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #eee; margin-bottom:15px;">
+        <h3 style="margin:0 0 10px 0;">Configured branch check</h3>
+        ${branchReports.map(b => `
+          <div style="padding:8px; margin-bottom:6px; background:#f8f8f8; border-radius:4px;">
+            <div><code style="font-weight:600;">${escapeHtml(b.path)}</code> — ${b.status}</div>
+            <div style="font-size:12px; color:#666; margin-top:4px;">${escapeHtml(b.detail)}</div>
+          </div>`).join("")}
+      </div>` : "";
+
+    const breadcrumb = path
+      ? `<div style="margin-bottom:10px;"><a href="/admin/dropbox/browse" style="color:#0061FF;">📦 Root</a> ${path.split("/").filter(Boolean).map((seg, i, arr) => {
+          const fullPath = "/" + arr.slice(0, i + 1).join("/");
+          return `/ <a href="/admin/dropbox/browse?path=${encodeURIComponent(fullPath)}" style="color:#0061FF;">${escapeHtml(seg)}</a>`;
+        }).join(" ")}</div>`
+      : `<div style="margin-bottom:10px;"><strong>📦 Dropbox Root</strong></div>`;
+
+    const body = `
+      <div class="page-header">
+        <h1>📦 Dropbox Browser</h1>
+        <a href="/admin/dropbox/setup" class="back-link">← Setup</a>
+      </div>
+      <p style="color:#666;">This shows what Zara can actually see in your Dropbox. Use it to verify branch folder names and paths.</p>
+      ${branchReportsHtml}
+      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #eee;">
+        ${breadcrumb}
+        ${entriesHtml}
+      </div>`;
+
+    res.send(hn.renderAdminChrome({ title: "Dropbox Browser", body, activeItem: "dropbox" }));
+  } catch (err) {
+    console.error("[dropbox browse]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
 // Diagnostic: shows lengths of Dropbox env vars (safe, doesn't reveal values)
 app.get("/admin/dropbox/diag", (req, res) => {
   const key = process.env.DROPBOX_APP_KEY || "";
