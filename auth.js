@@ -26,6 +26,147 @@ const COOKIE_NAME = "tezauth";
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;              // 24h default
 const SESSION_TTL_LONG_MS = 30 * 24 * 60 * 60 * 1000;   // 30d "remember me"
 
+// ── Roles ────────────────────────────────────────────────
+// Kept intentionally simple: four roles, each with a fixed feature set.
+// Add more granular permissions later if a role split is needed.
+//
+//   admin      = JJ. Everything, including user + system management.
+//   attorney   = Licensed attorneys. Hearing notes, clients, Dropbox, notices.
+//                No user management, no OAuth setup, no email setup.
+//   paralegal  = Case managers / paralegals. Clients, Dropbox files, hearing
+//                notices, view hearing notes. Cannot create/edit hearing notes.
+//   viewer     = Read-only across the platform.
+
+const ROLES = {
+  admin: {
+    label: "Administrator",
+    description: "Full access to everything, including user + system settings",
+    color: "#0C1C36",
+  },
+  attorney: {
+    label: "Attorney",
+    description: "Hearing notes (create/edit), clients, Dropbox, hearing notices",
+    color: "#B79C62",
+  },
+  paralegal: {
+    label: "Paralegal / Case Manager",
+    description: "Clients, Dropbox, hearing notices. View hearing notes only.",
+    color: "#0061FF",
+  },
+  viewer: {
+    label: "Viewer (Read-Only)",
+    description: "View-only access to clients, hearings, and Dropbox files",
+    color: "#666",
+  },
+};
+
+// Which roles are allowed to reach each feature area.
+// Used both by the requireRole middleware and by the client-side
+// sidebar filter (via /admin/whoami's `permissions` payload).
+const PERMISSIONS = {
+  // System admin — only JJ
+  "users.manage":         ["admin"],
+  "dropbox.setup":        ["admin"],
+  "email.setup":          ["admin"],
+  "system.settings":      ["admin"],
+
+  // Hearing notes — attorneys write, paralegals + viewers can read
+  "hearings.write":       ["admin", "attorney"],
+  "hearings.read":        ["admin", "attorney", "paralegal", "viewer"],
+
+  // Client-facing tools — all roles, viewers read only
+  "clients.write":        ["admin", "attorney", "paralegal"],
+  "clients.read":         ["admin", "attorney", "paralegal", "viewer"],
+
+  // Dropbox files — download for all authed, upload/delete for staff
+  "dropbox.files.write":  ["admin", "attorney", "paralegal"],
+  "dropbox.files.read":   ["admin", "attorney", "paralegal", "viewer"],
+
+  // Hearing notices — everyone can view + send
+  "notices.send":         ["admin", "attorney", "paralegal"],
+  "notices.read":         ["admin", "attorney", "paralegal", "viewer"],
+
+  // Matter manager — all authed
+  "matters.access":       ["admin", "attorney", "paralegal", "viewer"],
+};
+
+function hasPermission(user, permKey) {
+  if (!user || !user.r) return false;
+  const roles = PERMISSIONS[permKey] || [];
+  return roles.includes(user.r);
+}
+
+// Middleware factory: requires the user to have a specific permission.
+// Use like:  app.post("/admin/users/new", requirePermission("users.manage"), handler)
+function requirePermission(permKey) {
+  return (req, res, next) => {
+    if (!req.user) {
+      if (req.method === "GET") {
+        return res.redirect(`/admin/login?next=${encodeURIComponent(req.originalUrl)}`);
+      }
+      return res.status(401).json({ ok: false, error: "Not authenticated" });
+    }
+    if (!hasPermission(req.user, permKey)) {
+      const roleLabel = ROLES[req.user.r]?.label || req.user.r;
+      if (req.method === "GET") {
+        return res.status(403).send(renderDeniedPage({
+          userRole: roleLabel,
+          permission: permKey,
+        }));
+      }
+      return res.status(403).json({
+        ok: false,
+        error: `Access denied. Your role (${roleLabel}) doesn't have "${permKey}" permission.`,
+      });
+    }
+    next();
+  };
+}
+
+// Middleware: requires the user to have ONE of the listed roles.
+// Simpler than requirePermission when you're just gating by role.
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user) {
+      if (req.method === "GET") {
+        return res.redirect(`/admin/login?next=${encodeURIComponent(req.originalUrl)}`);
+      }
+      return res.status(401).json({ ok: false, error: "Not authenticated" });
+    }
+    if (!allowedRoles.includes(req.user.r)) {
+      const roleLabel = ROLES[req.user.r]?.label || req.user.r;
+      if (req.method === "GET") {
+        return res.status(403).send(renderDeniedPage({
+          userRole: roleLabel,
+          requiredRoles: allowedRoles.map(r => ROLES[r]?.label || r).join(" or "),
+        }));
+      }
+      return res.status(403).json({
+        ok: false,
+        error: `Access denied. This action requires ${allowedRoles.join(" or ")} role.`,
+      });
+    }
+    next();
+  };
+}
+
+function renderDeniedPage({ userRole, permission, requiredRoles }) {
+  const needs = requiredRoles ? `role: ${requiredRoles}` : `permission: ${permission}`;
+  return `<!doctype html><html><head><meta charset="utf-8">
+<title>Access Denied</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f7f7f7;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.card{background:white;padding:40px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.08);max-width:480px;text-align:center}
+h1{color:#c00;margin:0 0 12px 0}p{color:#555;line-height:1.5}
+a{background:#0C1C36;color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin-top:16px}</style></head>
+<body><div class="card">
+<div style="font-size:48px; margin-bottom:12px;">🔒</div>
+<h1>Access Denied</h1>
+<p>Your role (<strong>${escapeHtml(userRole)}</strong>) doesn't have access to this feature.</p>
+<p style="font-size:12px; color:#888;">Required ${escapeHtml(needs)}</p>
+<a href="/admin/">← Back to Dashboard</a>
+</div></body></html>`;
+}
+
 let _sessionSecret = null;
 
 // ── Schema ───────────────────────────────────────────────
@@ -461,65 +602,184 @@ function mount(app) {
     const cookies = parseCookies(req);
     const payload = await verifyToken(cookies[COOKIE_NAME]);
     if (!payload || !payload.uid) return res.json({ ok: false, authenticated: false });
-    res.json({ ok: true, authenticated: true, username: payload.u, name: payload.n, role: payload.r });
+    // Compute which permissions this user has (used by client-side to hide nav items)
+    const perms = {};
+    for (const p of Object.keys(PERMISSIONS)) {
+      if ((PERMISSIONS[p] || []).includes(payload.r)) perms[p] = true;
+    }
+    res.json({
+      ok: true,
+      authenticated: true,
+      username: payload.u,
+      name: payload.n,
+      role: payload.r,
+      role_label: ROLES[payload.r]?.label || payload.r,
+      role_color: ROLES[payload.r]?.color || "#666",
+      permissions: perms,
+    });
   });
 
-  // User management page (JJ only)
-  app.get("/admin/users", async (req, res) => {
+  // User management page — admin only
+  app.get("/admin/users", requireRole("admin"), async (req, res) => {
     try {
       const users = await listUsers();
-      const rows = users.map(u => `
+      const existingUsernames = new Set(users.map(u => u.username));
+
+      const rows = users.map(u => {
+        const roleInfo = ROLES[u.role] || { label: u.role, color: "#666" };
+        return `
         <tr>
-          <td>${escapeHtml(u.username)}</td>
+          <td><strong>${escapeHtml(u.username)}</strong></td>
           <td>${escapeHtml(u.full_name || "")}</td>
-          <td>${escapeHtml(u.role)}</td>
-          <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "never"}</td>
+          <td>
+            <span style="background:${roleInfo.color}; color:white; padding:3px 8px; border-radius:10px; font-size:11px; font-weight:600;">${escapeHtml(roleInfo.label)}</span>
+          </td>
+          <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '<span style="color:#c00; font-style:italic;">never</span>'}</td>
           <td>${new Date(u.created_at).toLocaleDateString()}</td>
           <td>
             ${req.user && req.user.uid !== u.id
-              ? `<form method="POST" action="/admin/users/${u.id}/delete" style="display:inline;" onsubmit="return confirm('Delete user ${escapeHtml(u.username)}?');"><button type="submit" style="background:#c00; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Delete</button></form>`
+              ? `<button type="button" onclick="editUser(${u.id}, '${escapeHtml(u.username)}', '${escapeHtml(u.role)}')" style="background:#eee; color:#333; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Edit role</button>
+                 <form method="POST" action="/admin/users/${u.id}/delete" style="display:inline;" onsubmit="return confirm('Delete user ${escapeHtml(u.username)}? This cannot be undone.');"><button type="submit" style="background:#c00; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Delete</button></form>`
               : `<span style="color:#888; font-size:11px;">(you)</span>`}
           </td>
-        </tr>
-      `).join("");
+        </tr>`;
+      }).join("");
+
+      // Known Tez Law staff members — quick-add buttons pre-fill the form
+      const KNOWN_STAFF = [
+        { username: "chandler",    full_name: "Chandler Jin",   role: "attorney",  note: "Associate Attorney (NY Bar)" },
+        { username: "jue",         full_name: "Jue Wang",       role: "paralegal", note: "Case Manager / Paralegal" },
+        { username: "michael",     full_name: "Michael Liu",    role: "paralegal", note: "Immigration Court Specialist" },
+        { username: "linmei",      full_name: "Lin Mei",        role: "paralegal", note: "Personal Injury" },
+      ];
+      const missingStaff = KNOWN_STAFF.filter(s => !existingUsernames.has(s.username));
+      const quickAddHTML = missingStaff.length ? `
+        <div style="background:#fdf7f0; padding:15px 20px; border-radius:6px; margin-bottom:15px; border-left:4px solid #B79C62;">
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:8px;">
+            <div>
+              <strong style="color:#0C1C36;">⚡ Quick-add Tez Law staff</strong>
+              <div style="font-size:12px; color:#666; margin-top:3px;">Click a name to pre-fill the form below. Set a strong temporary password and share with the person.</div>
+            </div>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px;">
+            ${missingStaff.map(s => `
+              <button type="button" onclick="quickAddStaff(${JSON.stringify(s).replace(/"/g, "&quot;")})" style="background:white; border:1px solid #B79C62; color:#0C1C36; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:12px;">
+                <strong>${escapeHtml(s.full_name)}</strong>
+                <span style="color:#666; font-size:11px; margin-left:6px;">${escapeHtml(s.note)}</span>
+              </button>
+            `).join("")}
+          </div>
+        </div>
+      ` : "";
+
+      // Role legend — helps JJ pick the right one
+      const roleLegend = `
+        <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee;">
+          <strong style="color:#0C1C36;">📋 Role permissions</strong>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px; margin-top:10px;">
+            ${Object.entries(ROLES).map(([key, r]) => `
+              <div style="border-left:3px solid ${r.color}; padding:8px 12px;">
+                <div style="font-weight:600; color:${r.color}; margin-bottom:3px; font-size:13px;">${escapeHtml(r.label)}</div>
+                <div style="font-size:11px; color:#666; line-height:1.4;">${escapeHtml(r.description)}</div>
+              </div>
+            `).join("")}
+          </div>
+        </div>`;
+
+      const roleOptionsHTML = Object.entries(ROLES).map(([key, r]) =>
+        `<option value="${key}">${escapeHtml(r.label)} — ${escapeHtml(r.description)}</option>`
+      ).join("");
+
       const hearingNotes = require("./hearing-notes");
       const body = `
         <div class="page-header"><h1>👤 Admin Users</h1></div>
-        <table>
+
+        ${quickAddHTML}
+        ${roleLegend}
+
+        <table style="background:white;">
           <thead>
             <tr><th>Username</th><th>Full name</th><th>Role</th><th>Last login</th><th>Created</th><th></th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
-        <div style="background:white; padding:20px; border-radius:4px; margin-top:20px; border:1px solid #eee;">
-          <h3 style="margin:0 0 12px 0;">Add new user</h3>
-          <form method="POST" action="/admin/users/new" style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr auto; gap:8px; align-items:end;">
-            <div><label style="font-size:12px; color:#666;">Full name</label><input type="text" name="full_name" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:3px;"></div>
-            <div><label style="font-size:12px; color:#666;">Username</label><input type="text" name="username" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:3px;"></div>
-            <div><label style="font-size:12px; color:#666;">Password (8+ chars)</label><input type="password" name="password" required minlength="8" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:3px;"></div>
-            <div><label style="font-size:12px; color:#666;">Role</label><select name="role" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:3px;"><option value="admin">admin</option><option value="staff">staff</option></select></div>
-            <button type="submit" style="background:#0C1C36; color:white; padding:9px 14px; border:none; border-radius:3px; cursor:pointer;">+ Add</button>
+
+        <div style="background:white; padding:20px; border-radius:6px; margin-top:20px; border:1px solid #eee;">
+          <h3 style="margin:0 0 12px 0; color:#0C1C36;">➕ Add a user</h3>
+          <form method="POST" action="/admin/users/new">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+              <div>
+                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Full name</label>
+                <input type="text" name="full_name" id="new_full_name" required style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+              </div>
+              <div>
+                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Username (letters/numbers/._-, 2–32 chars)</label>
+                <input type="text" name="username" id="new_username" required pattern="[a-z0-9_.\\-]{2,32}" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+              </div>
+              <div>
+                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Password (min 8 chars)</label>
+                <input type="password" name="password" required minlength="8" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+              </div>
+              <div>
+                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Role</label>
+                <select name="role" id="new_role" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">${roleOptionsHTML}</select>
+              </div>
+            </div>
+            <div style="margin-top:14px; text-align:right;">
+              <button type="submit" style="background:#0C1C36; color:white; padding:10px 18px; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Create user</button>
+            </div>
           </form>
         </div>
-        <div style="background:#fdf7f0; padding:15px; border-radius:4px; margin-top:20px; font-size:13px; color:#666; border-left:3px solid #B79C62;">
-          <strong>Change your password:</strong> <form method="POST" action="/admin/users/change-password" style="display:inline-flex; gap:6px; align-items:center; margin-left:8px;">
-            <input type="password" name="new_password" placeholder="new password" required minlength="8" style="padding:6px 10px; border:1px solid #ccc; border-radius:3px;">
+
+        <div style="background:#f9f9f9; padding:15px 20px; border-radius:6px; margin-top:20px; font-size:13px; color:#666; border-left:3px solid #B79C62;">
+          <strong>🔑 Change your password:</strong>
+          <form method="POST" action="/admin/users/change-password" style="display:inline-flex; gap:6px; align-items:center; margin-left:8px;">
+            <input type="password" name="new_password" placeholder="new password (min 8 chars)" required minlength="8" style="padding:6px 10px; border:1px solid #ccc; border-radius:3px; width:200px;">
             <button type="submit" style="background:#B79C62; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:12px;">Change</button>
           </form>
-        </div>`;
+          <div style="font-size:11px; margin-top:4px; color:#888;">You'll be signed out and asked to log in again after changing.</div>
+        </div>
+
+        <script>
+          function quickAddStaff(staff) {
+            document.getElementById("new_full_name").value = staff.full_name;
+            document.getElementById("new_username").value = staff.username;
+            document.getElementById("new_role").value = staff.role;
+            document.querySelector('input[name="password"]').focus();
+            // Scroll to the form
+            document.querySelector('input[name="password"]').scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+          function editUser(id, username, currentRole) {
+            const roleOptions = ${JSON.stringify(Object.entries(ROLES).map(([k,r]) => ({k, l: r.label})))};
+            let promptOptions = "Change role for " + username + "\\n\\nAvailable roles:\\n";
+            roleOptions.forEach((r, i) => { promptOptions += (i+1) + ". " + r.l + " (" + r.k + ")\\n"; });
+            const choice = prompt(promptOptions + "\\nEnter role key (e.g. attorney, paralegal, viewer, admin):", currentRole);
+            if (!choice || choice === currentRole) return;
+            if (!roleOptions.some(r => r.k === choice)) { alert("Invalid role: " + choice); return; }
+            fetch("/admin/users/" + id + "/role", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: "role=" + encodeURIComponent(choice),
+            }).then(r => r.json()).then(d => {
+              if (d.ok) location.reload();
+              else alert("Error: " + (d.error || "unknown"));
+            });
+          }
+        </script>
+      `;
       res.send(hearingNotes.renderAdminChrome({ title: "Admin Users", body, activeItem: "users" }));
     } catch (err) {
       res.status(500).send(`<h1>Error</h1><p>${escapeHtml(err.message)}</p>`);
     }
   });
 
-  app.post("/admin/users/new", async (req, res) => {
+  app.post("/admin/users/new", requireRole("admin"), async (req, res) => {
     try {
       await createUser({
         username: req.body.username,
         password: req.body.password,
         fullName: req.body.full_name,
-        role: req.body.role || "admin",
+        role: req.body.role || "paralegal",
       });
       res.redirect("/admin/users");
     } catch (err) {
@@ -527,11 +787,10 @@ function mount(app) {
     }
   });
 
-  app.post("/admin/users/:id/delete", async (req, res) => {
+  app.post("/admin/users/:id/delete", requireRole("admin"), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       if (!id) return res.status(400).send("Invalid id");
-      // Don't allow deleting yourself
       if (req.user && req.user.uid === id) {
         return res.status(400).send(`<h1>Cannot delete your own account</h1><p><a href="/admin/users">← Back</a></p>`);
       }
@@ -542,11 +801,26 @@ function mount(app) {
     }
   });
 
+  app.post("/admin/users/:id/role", requireRole("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const newRole = String(req.body.role || "").trim();
+      if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+      if (!ROLES[newRole]) return res.status(400).json({ ok: false, error: "Invalid role" });
+      if (req.user && req.user.uid === id && newRole !== "admin") {
+        return res.status(400).json({ ok: false, error: "You cannot demote yourself. Have another admin change your role." });
+      }
+      await db.query(`UPDATE admin_users SET role = $1 WHERE id = $2`, [newRole, id]);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   app.post("/admin/users/change-password", async (req, res) => {
     try {
       if (!req.user) return res.status(401).send("Not authenticated");
       await changePassword(req.user.uid, req.body.new_password);
-      // Sign out and require re-login with new password
       clearSessionCookie(res);
       res.redirect("/admin/login");
     } catch (err) {
@@ -564,6 +838,9 @@ function escapeHtml(s) {
 module.exports = {
   initTables,
   requireAdminAuth,
+  requireRole,
+  requirePermission,
+  hasPermission,
   mount,
   createUser,
   findUserByUsername,
@@ -571,5 +848,7 @@ module.exports = {
   hashPassword,
   verifyPasswordHash,
   parseCookies,
+  ROLES,
+  PERMISSIONS,
   COOKIE_NAME,
 };
