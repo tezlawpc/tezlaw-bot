@@ -539,4 +539,8 @@ module.exports = {
   clearListCache,
   toLastCommaFirst,
   normalizeName,
+  // Debug helpers
+  nameTokens,
+  aNumberDigits,
+  scoreFolderMatch,
 };
