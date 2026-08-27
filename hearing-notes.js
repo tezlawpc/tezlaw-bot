@@ -1317,9 +1317,9 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         return;
       }
 
-      const acceptable = /\\.(pdf|jpg|jpeg|png|webp)$/i.test(file.name) || file.type.includes("pdf") || file.type.startsWith("image/");
+      const acceptable = /\\.(pdf|jpg|jpeg|png|webp|heic|heif)$/i.test(file.name) || file.type.includes("pdf") || file.type.startsWith("image/") || file.type === "" || file.type === "application/octet-stream";
       if (!acceptable) {
-        statusEl.innerHTML = '<span style="color:#c00;">❌ Unsupported file type. Use PDF, JPG, PNG, or WebP.</span>';
+        statusEl.innerHTML = '<span style="color:#c00;">❌ Unsupported file type. Use PDF, JPG, PNG, WebP, or HEIC.</span>';
         return;
       }
 
