@@ -270,9 +270,9 @@ function mapLanguageNameToCode(name) {
 async function generateParalegalSummary(data) {
   const structured = buildStructuredNotes(data);
 
-  const prompt = `You are cleaning up immigration court hearing notes for a paralegal at Tez Law, P.C.
+  const prompt = `You are cleaning up immigration court hearing notes for a paralegal at Tez Law Firm.
 
-The attorney (JJ Zhang) took these notes during the hearing. Your job is to produce a clean, professional summary the team (paralegals, associates) can use to update the case file and take follow-up action.
+The attorney of record took these notes during the hearing. Your job is to produce a clean, professional summary the team (paralegals, associates) can use to update the case file and take follow-up action.
 
 Rules:
 - Complete and detailed — include ALL information provided
@@ -331,7 +331,7 @@ async function generateClientSummary(data) {
 
   const prompt = `You are writing a client-friendly hearing summary in ${languageName}.
 
-The client attended their immigration court hearing today with attorney JJ Zhang of Tez Law, P.C. Your job is to write a warm but professional summary explaining what happened and what they need to do next.
+The client attended their immigration court hearing today with their attorney from Tez Law Firm. Your job is to write a warm but professional summary explaining what happened and what they need to do next.
 
 Rules:
 - Write ENTIRELY in ${languageName}
@@ -340,10 +340,11 @@ Rules:
 - Focus on: what happened, what deadlines the client needs to remember, what they need to do next
 - Include specific dates and deadlines with clear context
 - Do NOT invent information — only what's in the notes
-- End with attorney contact info: "If you have questions, please contact us at 626-678-8677 or jj@tezlawfirm.com" (translate this line too)
+- End with firm contact info: "If you have questions, please contact us at 626-678-8677 or info@tezlawfirm.com" (translate this line too)
 - If interpreter was used, mention this positively
 - Address the client directly ("You" / "您" / "Usted" / "आप" / "ਤੁਸੀਂ")
-- Sign off with "Sincerely, Attorney JJ Zhang, Tez Law, P.C." (translate)
+- Sign off with "Sincerely, TEZ LAW FIRM" (translate the "Sincerely" part but keep TEZ LAW FIRM as the firm name; for Chinese use "TEZ律师事务所")
+- Do NOT use any personal attorney name (no "JJ Zhang", no "章律师", no "Attorney [Name]")
 
 Client's name: ${data.client_name}
 
