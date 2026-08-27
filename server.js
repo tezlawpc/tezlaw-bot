@@ -2308,6 +2308,139 @@ app.get("/admin/clients", async (req, res) => {
 const DROPBOX_CALLBACK_URL = (process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com") + "/admin/dropbox/callback";
 
 // Diagnostic: browse Dropbox to see what Zara can actually reach
+// Per-client Dropbox matching debug — shows tokens, branches scanned,
+// every candidate folder with its score, and where the current mapping came from.
+app.get("/admin/clients/:key/dropbox/debug", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const dbx = require("./dropbox-integration");
+    const hn = require("./hearing-notes");
+    const db = require("./db");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).send("Client not found");
+
+    const branches = dbx.getBranchRoots();
+    const tokens = dbx.nameTokens ? dbx.nameTokens(client.client_name) : [];
+    const aDigits = dbx.aNumberDigits ? dbx.aNumberDigits(client.a_number) : null;
+
+    // Existing mapping?
+    const mapRes = await db.query(
+      `SELECT * FROM client_dropbox_mapping WHERE client_key = $1`,
+      [client.key]
+    );
+    const existingMapping = mapRes.rows[0] || null;
+
+    // For each branch, list folders and score them
+    const branchDetails = [];
+    for (const b of branches) {
+      const bpath = b.startsWith("/") ? b : "/" + b;
+      const detail = { branch: bpath };
+      try {
+        const meta = await dbx.getMetadata(bpath);
+        if (!meta) { detail.error = "Branch folder does not exist"; branchDetails.push(detail); continue; }
+        if (meta[".tag"] !== "folder") { detail.error = `Path is a ${meta[".tag"]}, not a folder`; branchDetails.push(detail); continue; }
+        const entries = await dbx.listFolder(bpath);
+        if (!entries) { detail.error = "listFolder returned null"; branchDetails.push(detail); continue; }
+        const subfolders = entries.filter(e => e[".tag"] === "folder");
+        detail.subfolder_count = subfolders.length;
+        detail.file_count = entries.filter(e => e[".tag"] === "file").length;
+        // Score every subfolder
+        detail.scored = subfolders.map(f => {
+          const s = dbx.scoreFolderMatch ? dbx.scoreFolderMatch(f.name, tokens, aDigits) : { score: 0, reason: "scorer not exposed" };
+          return { name: f.name, path: f.path_display, score: s.score, reason: s.reason };
+        }).sort((a, b) => b.score - a.score);
+      } catch (e) {
+        detail.error = e.message;
+      }
+      branchDetails.push(detail);
+    }
+
+    const escapeHtml = s => String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    const scoreBadge = (n) => {
+      const color = n >= 70 ? "#4CAF50" : n >= 40 ? "#ff9800" : "#c00";
+      return `<span style="background:${color}; color:white; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">${n}</span>`;
+    };
+
+    const body = `
+      <div class="page-header">
+        <h1>🔍 Dropbox Debug: ${escapeHtml(client.client_name || client.key)}</h1>
+        <a href="/admin/clients/${client.key}" class="back-link">← Back to client</a>
+      </div>
+
+      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #eee; margin-bottom:15px;">
+        <h3 style="margin-top:0;">Client info Zara is matching on</h3>
+        <table style="font-size:13px;">
+          <tr><td style="padding:4px 15px 4px 0;"><strong>Name:</strong></td><td><code>${escapeHtml(client.client_name || "(none)")}</code></td></tr>
+          <tr><td style="padding:4px 15px 4px 0;"><strong>A-Number:</strong></td><td><code>${escapeHtml(client.a_number || "(none)")}</code></td></tr>
+          <tr><td style="padding:4px 15px 4px 0;"><strong>Client key:</strong></td><td><code>${escapeHtml(client.key)}</code></td></tr>
+          <tr><td style="padding:4px 15px 4px 0;"><strong>Name tokens (matcher uses these):</strong></td><td>${tokens.map(t => `<code style="background:#f0f0f0; padding:2px 6px; margin-right:4px;">${escapeHtml(t)}</code>`).join("") || "<em>none extracted</em>"}</td></tr>
+          <tr><td style="padding:4px 15px 4px 0;"><strong>A# digits (matcher uses):</strong></td><td>${aDigits ? `<code>${escapeHtml(aDigits)}</code>` : "<em>none</em>"}</td></tr>
+        </table>
+      </div>
+
+      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #eee; margin-bottom:15px;">
+        <h3 style="margin-top:0;">Current mapping in DB</h3>
+        ${existingMapping
+          ? `<div>Path: <code>${escapeHtml(existingMapping.dropbox_path)}</code></div>
+             <div style="font-size:12px; color:#666; margin-top:4px;">Resolved ${new Date(existingMapping.resolved_at).toLocaleString()} (${existingMapping.resolved_by})</div>
+             <form method="POST" action="/admin/clients/${client.key}/dropbox/mapping" style="margin-top:10px;">
+               <input type="hidden" name="path" value="">
+               <button type="submit" style="background:#c00; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">Clear this mapping & rescan</button>
+             </form>`
+          : `<em>No mapping yet — will auto-detect on next scan.</em>`}
+      </div>
+
+      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #eee;">
+        <h3 style="margin-top:0;">Configured branches (${branches.length})</h3>
+        ${branches.length === 0 ? `<div style="color:#c00;">⚠️ No branches configured. Set DROPBOX_BRANCH_ROOTS env var in Render.</div>` : ""}
+        ${branchDetails.map(bd => `
+          <div style="margin-bottom:20px; padding:12px; background:#f8f8f8; border-radius:4px;">
+            <div style="font-weight:600; margin-bottom:6px;"><code>${escapeHtml(bd.branch)}</code></div>
+            ${bd.error
+              ? `<div style="color:#c00;">❌ ${escapeHtml(bd.error)}</div>`
+              : `<div style="font-size:12px; color:#666; margin-bottom:8px;">${bd.subfolder_count} subfolders, ${bd.file_count} top-level files</div>
+                 ${bd.scored && bd.scored.length ? `
+                   <table style="width:100%; font-size:13px;">
+                     <thead><tr style="border-bottom:1px solid #ddd;"><th style="text-align:left; width:60px;">Score</th><th style="text-align:left;">Folder Name</th><th style="text-align:left;">Match reason</th><th></th></tr></thead>
+                     <tbody>
+                       ${bd.scored.slice(0, 30).map(s => `
+                         <tr>
+                           <td>${scoreBadge(s.score)}</td>
+                           <td><code>${escapeHtml(s.name)}</code></td>
+                           <td style="font-size:12px; color:#666;">${escapeHtml(s.reason || "—")}</td>
+                           <td>
+                             <form method="POST" action="/admin/clients/${client.key}/dropbox/mapping" style="margin:0; display:inline;">
+                               <input type="hidden" name="path" value="${escapeHtml(s.path)}">
+                               <button type="submit" style="background:#0061FF; color:white; border:none; padding:3px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Use this</button>
+                             </form>
+                           </td>
+                         </tr>`).join("")}
+                     </tbody>
+                   </table>
+                   ${bd.scored.length > 30 ? `<div style="font-size:12px; color:#888; margin-top:6px;">Showing top 30 of ${bd.scored.length} folders</div>` : ""}
+                 ` : `<em>No subfolders</em>`}`
+            }
+          </div>`).join("")}
+      </div>
+
+      <div style="background:#fdf7f0; padding:15px; border-radius:4px; border-left:4px solid #B79C62; margin-top:15px;">
+        <h3 style="margin-top:0;">How to fix</h3>
+        <ul style="line-height:1.8;">
+          <li>Score ≥70 = auto-selected. Below that = shown as suggestion only.</li>
+          <li>If the RIGHT folder scored low, the matcher needs tuning — send me the folder name and the client name.</li>
+          <li>If the branch shows an error, fix the DROPBOX_BRANCH_ROOTS env var.</li>
+          <li>If the right folder isn't in the list at all, either it's in a different branch or nested deeper. Configure a more specific branch path.</li>
+          <li>To force a specific folder, click <strong>"Use this"</strong> next to it — this creates a manual mapping that persists.</li>
+        </ul>
+      </div>`;
+
+    res.send(hn.renderAdminChrome({ title: "Dropbox Debug", body, activeItem: "dropbox" }));
+  } catch (err) {
+    console.error("[dropbox debug]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><pre>${err.stack || ""}</pre>`);
+  }
+});
+
 app.get("/admin/dropbox/browse", async (req, res) => {
   try {
     const dbx = require("./dropbox-integration");
@@ -2691,15 +2824,21 @@ app.post("/admin/clients/:key/dropbox/mapping", async (req, res) => {
     const cp = require("./client-profiles");
     const dbx = require("./dropbox-integration");
     const client = await cp.getClientByKey(req.params.key);
-    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    if (!client) {
+      if (req.accepts("html")) return res.status(404).send("Client not found");
+      return res.status(404).json({ ok: false, error: "Client not found" });
+    }
     const path = (req.body.path || "").trim();
+    const isFormPost = !req.xhr && (req.get("content-type") || "").includes("form-urlencoded") && req.accepts("html");
+
     if (path === "") {
       await dbx.clearClientFolderMapping(client.key);
+      if (isFormPost) return res.redirect(`/admin/clients/${client.key}/dropbox/debug`);
       return res.json({ ok: true, cleared: true });
     }
-    // Verify folder exists
     const meta = await dbx.getMetadata(path);
     if (!meta || meta[".tag"] !== "folder") {
+      if (isFormPost) return res.status(400).send(`<h1>Not a Dropbox folder</h1><p><code>${path}</code></p><a href="/admin/clients/${client.key}/dropbox/debug">← Back</a>`);
       return res.status(400).json({ ok: false, error: `Not a Dropbox folder: ${path}` });
     }
     await dbx.setClientFolderMapping({
@@ -2709,9 +2848,11 @@ app.post("/admin/clients/:key/dropbox/mapping", async (req, res) => {
       dropboxPath: path,
     });
     dbx.clearListCache(path);
+    if (isFormPost) return res.redirect(`/admin/clients/${client.key}`);
     res.json({ ok: true, path });
   } catch (err) {
     console.error("[dropbox mapping]:", err.message);
+    if (req.accepts("html")) return res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
