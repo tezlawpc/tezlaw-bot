@@ -558,6 +558,152 @@ async function clearClientFolderMapping(clientKey) {
   await db.query(`DELETE FROM client_dropbox_mapping WHERE client_key = $1`, [clientKey]);
 }
 
+// ── Bulk import: discover all client folders under configured branches ────
+// Walks up to MAX_SCAN_DEPTH (2) deep, treats leaf folders (or folders
+// matching a "Last, First" pattern) as client folders, and upserts them into
+// client_dropbox_mapping so they appear in the client list.
+//
+// Returns { imported: [...], skipped: [...], errors: [...] }.
+
+// Parse a folder name into { client_name, a_number }.
+// Handles "KONG, XIANGMIN", "Kong Xiangmin", "KONG, XIANGMIN - A249-402-327",
+// "Kong Xiangmin (A249)", "A249-402-327 KONG XIANGMIN", etc.
+function parseClientFolderName(folderName) {
+  if (!folderName) return { client_name: null, a_number: null };
+  let s = folderName.trim();
+
+  // Extract A-Number in any position
+  // Match "A" + 8-9 digits with optional dashes/spaces, OR bare 9-digit number
+  const aRegex = /A\s*[-\s]?\d{3}[-\s]?\d{3}[-\s]?\d{2,4}/i;
+  const aMatch = s.match(aRegex);
+  let a_number = null;
+  if (aMatch) {
+    const digits = aMatch[0].replace(/[^\d]/g, "");
+    if (digits.length >= 8 && digits.length <= 9) {
+      // Format as A123-456-789
+      const padded = digits.padStart(9, "0");
+      a_number = `A${padded.slice(0, 3)}-${padded.slice(3, 6)}-${padded.slice(6, 9)}`;
+    }
+    s = s.replace(aMatch[0], "");
+  }
+
+  // Strip common separators like parens, extra dashes
+  s = s.replace(/[()]/g, " ")
+       .replace(/[-–—_]+/g, " ")
+       .replace(/\s+/g, " ")
+       .trim();
+
+  if (!s) return { client_name: null, a_number };
+
+  // Convert ALL CAPS to Title Case; preserve mixed/lower case as-is
+  const isAllCaps = s === s.toUpperCase() && /[A-Z]/.test(s);
+  let name;
+  if (isAllCaps) {
+    // Title case each word, preserve commas
+    name = s.toLowerCase().replace(/(^|[\s,])([a-z])/g, (m, sep, ch) => sep + ch.toUpperCase());
+  } else {
+    name = s;
+  }
+  return { client_name: name.trim(), a_number };
+}
+
+// Best-effort check: does this look like a person's name (client folder)
+// vs a branch/broker/organizational folder?
+function looksLikeClientFolder(folderName, parsed) {
+  if (!parsed.client_name) return false;
+  const name = parsed.client_name.trim();
+  // If A# present, definitely a client folder
+  if (parsed.a_number) return true;
+  // If has a comma AND two capitalized tokens → likely Last, First
+  if (name.includes(",")) return true;
+  // Common organizational keywords that suggest NOT a client folder
+  const ORG_HINTS = ["law", "office", "attorney", "broker", "team", "firm", "misc", "template", "archive", "old"];
+  const lower = name.toLowerCase();
+  if (ORG_HINTS.some(h => lower === h || lower.startsWith(h + " ") || lower.endsWith(" " + h))) return false;
+  // Otherwise: if name looks like 2-3 words, could be a client name
+  const wordCount = name.split(/\s+/).filter(Boolean).length;
+  return wordCount >= 2 && wordCount <= 4;
+}
+
+// Generate a stable client_key from name/A#
+function makeClientKey({ clientName, aNumber }) {
+  if (aNumber) return "a-" + String(aNumber).toLowerCase().replace(/[^\w]/g, "");
+  const n = String(clientName || "").toLowerCase().trim().replace(/[^\w]+/g, "-").replace(/^-|-$/g, "");
+  return n ? "n-" + n : null;
+}
+
+async function bulkImportFromDropbox({ dryRun = false } = {}) {
+  await initTable();
+  const branches = getBranchRoots();
+  if (!branches.length) throw new Error("No branches configured");
+
+  const imported = [];
+  const skipped = [];
+  const errors = [];
+  const seen = new Set();
+
+  async function scan(path, depth) {
+    if (depth > MAX_SCAN_DEPTH) return;
+    let entries;
+    try {
+      entries = await listFolder(path);
+    } catch (e) {
+      errors.push({ path, error: e.message });
+      return;
+    }
+    if (!entries) return;
+
+    for (const entry of entries) {
+      if (entry[".tag"] !== "folder") continue;
+      const parsed = parseClientFolderName(entry.name);
+      const looksClient = looksLikeClientFolder(entry.name, parsed);
+
+      if (looksClient) {
+        const key = makeClientKey({ clientName: parsed.client_name, aNumber: parsed.a_number });
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        const record = {
+          key,
+          client_name: parsed.client_name,
+          a_number: parsed.a_number,
+          dropbox_path: entry.path_display,
+          folder_name: entry.name,
+          parent_folder: path,
+        };
+        if (!dryRun) {
+          try {
+            await db.query(
+              `INSERT INTO client_dropbox_mapping (client_key, a_number, client_name, dropbox_path, resolved_by)
+               VALUES ($1, $2, $3, $4, 'bulk_import')
+               ON CONFLICT (client_key) DO UPDATE
+                 SET dropbox_path = EXCLUDED.dropbox_path,
+                     a_number = COALESCE(EXCLUDED.a_number, client_dropbox_mapping.a_number),
+                     client_name = COALESCE(EXCLUDED.client_name, client_dropbox_mapping.client_name),
+                     resolved_at = NOW()`,
+              [key, parsed.a_number || null, parsed.client_name, entry.path_display]
+            );
+          } catch (e) {
+            errors.push({ path: entry.path_display, error: e.message });
+            continue;
+          }
+        }
+        imported.push(record);
+      } else {
+        // Not a client folder — treat as organizational (broker/case type) and recurse
+        skipped.push({ path: entry.path_display, name: entry.name, reason: "organizational folder — recursing" });
+        if (depth < MAX_SCAN_DEPTH) await scan(entry.path_display, depth + 1);
+      }
+    }
+  }
+
+  for (const branch of branches) {
+    const branchPath = branch.startsWith("/") ? branch : "/" + branch;
+    await scan(branchPath, 1);
+  }
+
+  return { imported, skipped, errors, total_imported: imported.length };
+}
+
 // ── Higher-level: list a client's files ──────────────────
 
 const _listCache = new Map();
@@ -617,6 +763,10 @@ module.exports = {
   resolveClientFolder,
   setClientFolderMapping,
   clearClientFolderMapping,
+  bulkImportFromDropbox,
+  parseClientFolderName,
+  looksLikeClientFolder,
+  makeClientKey,
   listClientFiles,
   clearListCache,
   toLastCommaFirst,
