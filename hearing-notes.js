@@ -437,8 +437,75 @@ function buildStructuredNotes(data) {
 
 // ── Storage ──────────────────────────────────────────────
 
-async function saveNote(data, { generateSummaries = true } = {}) {
+// Look up an existing hearing note that matches on (client + hearing time + type).
+// Used to prevent creating a duplicate when the same hearing gets re-submitted
+// (page refresh, back button, second click, etc.).
+//
+// Match criteria (returns the first match):
+//   1. Same client_name (case-insensitive, trimmed) AND
+//   2. Same hearing_date within a 60-minute window OR both null AND
+//   3. Same hearing_type (or both null)
+//
+// Notes:
+//   - A_number is a strong secondary key. If two rows have the same A#,
+//     they're the same client.
+//   - The 60-minute window absorbs typos (10:00 AM vs 10:30 AM) which are
+//     almost always the same hearing being re-entered.
+async function findExistingNote(data) {
   await initHearingNotesTables();
+  const name = String(data.client_name || "").trim();
+  if (!name) return null;
+
+  // Prefer A-number match if provided (most reliable)
+  if (data.a_number) {
+    const byA = await db.query(
+      `SELECT id, client_name, hearing_date, hearing_type, sent_to_paralegal_at
+       FROM hearing_notes
+       WHERE a_number = $1
+         AND ($2::timestamptz IS NULL OR ABS(EXTRACT(EPOCH FROM (hearing_date - $2::timestamptz))) < 3600)
+       ORDER BY created_at DESC LIMIT 1`,
+      [data.a_number, data.hearing_date || null]
+    );
+    if (byA.rows[0]) return byA.rows[0];
+  }
+
+  // Fall back to case-insensitive name match + time window
+  const byName = await db.query(
+    `SELECT id, client_name, hearing_date, hearing_type, sent_to_paralegal_at
+     FROM hearing_notes
+     WHERE LOWER(TRIM(client_name)) = LOWER($1)
+       AND (
+         ($2::timestamptz IS NULL AND hearing_date IS NULL)
+         OR ABS(EXTRACT(EPOCH FROM (hearing_date - $2::timestamptz))) < 3600
+       )
+       AND (COALESCE(hearing_type, '') = COALESCE($3, ''))
+     ORDER BY created_at DESC LIMIT 1`,
+    [name, data.hearing_date || null, data.hearing_type || null]
+  );
+  return byName.rows[0] || null;
+}
+
+async function saveNote(data, { generateSummaries = true, allowDuplicate = false } = {}) {
+  await initHearingNotesTables();
+
+  // Duplicate detection — if a matching hearing already exists, update it
+  // instead of creating a new row. This prevents the "N duplicates for the
+  // same hearing" mess when a form gets re-submitted (back button, page
+  // reload, second click, etc.).
+  if (!allowDuplicate) {
+    const existing = await findExistingNote(data);
+    if (existing) {
+      console.log(`[hearing-notes] Duplicate detected for ${data.client_name} — updating #${existing.id} instead of creating new`);
+      await updateNote(existing.id, data);
+      let paralegal_summary = null, client_summary = null;
+      if (generateSummaries) {
+        const summaries = await generateAndSaveSummariesForMaster(existing.id);
+        paralegal_summary = summaries?.paralegal_summary || null;
+        client_summary = summaries?.client_summary || null;
+      }
+      return { id: existing.id, paralegal_summary, client_summary, was_duplicate: true };
+    }
+  }
 
   let paralegal_summary = null;
   let client_summary = null;
@@ -490,13 +557,91 @@ async function saveNote(data, { generateSummaries = true } = {}) {
       data.client_address || null,
     ]
   );
-  return { id: r.rows[0].id, paralegal_summary, client_summary };
+  const newId = r.rows[0].id;
+  // Log initial revision
+  await saveRevision(newId, "created", data, null);
+  return { id: newId, paralegal_summary, client_summary, was_duplicate: false };
+}
+
+// ── Revision History ─────────────────────────────────────
+// Every save/update to a hearing note appends to hearing_note_revisions.
+// Instead of creating a new hearing_notes row, we track what changed within
+// the single canonical row.
+
+async function initRevisionTable() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS hearing_note_revisions (
+      id             SERIAL PRIMARY KEY,
+      note_id        INTEGER NOT NULL REFERENCES hearing_notes(id) ON DELETE CASCADE,
+      revision_type  TEXT NOT NULL,     -- 'created', 'updated', 'sent_to_paralegal', 'summaries_regenerated'
+      changed_fields TEXT[],            -- list of field names that changed
+      snapshot       JSONB,             -- full snapshot at this revision
+      diff           JSONB,             -- {field: {old, new}}
+      user_id        INTEGER,
+      username       TEXT,
+      created_at     TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_hnr_note ON hearing_note_revisions (note_id, created_at DESC)`);
+}
+
+// Save a revision. Both `newData` and `oldData` are the plain form objects.
+async function saveRevision(noteId, revisionType, newData, oldData = null, { user = null } = {}) {
+  try {
+    await initRevisionTable();
+    const changedFields = [];
+    const diff = {};
+    if (oldData) {
+      for (const key of Object.keys(newData || {})) {
+        const oldV = oldData[key];
+        const newV = newData[key];
+        if (JSON.stringify(oldV) !== JSON.stringify(newV)) {
+          changedFields.push(key);
+          diff[key] = { old: oldV, new: newV };
+        }
+      }
+    }
+    await db.query(
+      `INSERT INTO hearing_note_revisions
+         (note_id, revision_type, changed_fields, snapshot, diff, user_id, username)
+       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)`,
+      [
+        noteId, revisionType,
+        changedFields.length ? changedFields : null,
+        newData ? JSON.stringify(newData) : null,
+        Object.keys(diff).length ? JSON.stringify(diff) : null,
+        user?.uid || null,
+        user?.u || null,
+      ]
+    );
+  } catch (e) {
+    console.warn("[hearing-notes] saveRevision failed:", e.message);
+  }
+}
+
+async function getRevisions(noteId) {
+  await initRevisionTable();
+  const r = await db.query(
+    `SELECT id, revision_type, changed_fields, diff, user_id, username, created_at
+     FROM hearing_note_revisions
+     WHERE note_id = $1
+     ORDER BY created_at DESC`,
+    [noteId]
+  );
+  return r.rows;
 }
 
 // Update an existing hearing note (does not regenerate summaries by default —
 // call generateAndSaveSummariesForMaster separately if you want fresh ones).
-async function updateNote(id, data) {
+async function updateNote(id, data, { user = null, skipRevision = false } = {}) {
   await initHearingNotesTables();
+
+  // Snapshot the OLD state so we can compute a diff for the revision log.
+  let oldNote = null;
+  if (!skipRevision) {
+    try { oldNote = await getNote(id); } catch (e) { /* silent */ }
+  }
+
   const r = await db.query(
     `UPDATE hearing_notes SET
        client_name=$1, a_number=$2, client_language=$3, client_email=$4, client_phone=$5,
@@ -530,6 +675,10 @@ async function updateNote(id, data) {
     ]
   );
   if (!r.rows[0]) throw new Error(`Note ${id} not found`);
+
+  if (!skipRevision) {
+    await saveRevision(id, "updated", data, oldNote, { user });
+  }
   return { id: r.rows[0].id, updated: true };
 }
 
@@ -742,6 +891,9 @@ async function sendToParalegal(id) {
     `UPDATE hearing_notes SET sent_to_paralegal_at = NOW() WHERE id = $1`,
     [id]
   );
+
+  // Record the send action as a revision (not a duplicate note)
+  await saveRevision(id, "sent_to_paralegal", null, null);
 
   return { sent: true, chunks: chunks.length, resolved_chat_id: chatId };
 }
@@ -958,7 +1110,7 @@ const APPLICATION_OPTIONS = [
   "Other",
 ];
 
-function renderNoteForm({ noteId = null, generated = null, saved = false, sent = null, error = null, prev = {} } = {}) {
+function renderNoteForm({ noteId = null, generated = null, saved = false, sent = null, error = null, prev = {}, merged = false, revisions = [] } = {}) {
   const isEdit = !!noteId;
   // When editing, auto-show saved summaries (like individual hearing form does)
   if (isEdit && !generated && (prev.paralegal_summary || prev.client_summary)) {
@@ -1019,7 +1171,40 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     </div>
 
     ${saved ? '<p style="color:#4CAF50; font-weight:bold;">✅ Saved to database.</p>' : ""}
+    ${merged ? '<div style="background:#fff8e1; border-left:4px solid #f9a825; padding:12px 16px; border-radius:4px; margin-bottom:10px; font-size:13px;"><strong>ℹ️ Merged with existing hearing note.</strong> Zara detected that a hearing note for this client at this time already existed (note #' + noteId + '). Instead of creating a duplicate, your changes were merged into the existing note. Scroll down to see revision history.</div>' : ""}
     ${sent ? `<p style="color:#4CAF50; font-weight:bold;">📤 Sent to team group (${sent.chunks} message${sent.chunks > 1 ? "s" : ""}).</p>` : ""}
+  ` : "";
+
+  // Revision history panel — only on edit mode
+  const revisionsHtml = isEdit && revisions && revisions.length ? `
+    <details style="margin:20px 0; background:white; border:1px solid #eee; border-radius:6px;" ${revisions.length > 1 ? "" : "open"}>
+      <summary style="cursor:pointer; padding:12px 16px; background:#f8f8f8; border-radius:6px 6px 0 0; font-weight:600; color:#0C1C36; display:flex; align-items:center; justify-content:space-between;">
+        <span>📜 Revision History (${revisions.length})</span>
+        <span style="font-size:11px; color:#888; font-weight:normal;">Click to ${revisions.length > 1 ? "expand" : "collapse"}</span>
+      </summary>
+      <div style="padding:0;">
+        ${revisions.map(r => {
+          const dt = new Date(r.created_at).toLocaleString();
+          const typeLabel = {
+            "created": "🆕 Created",
+            "updated": "✏️ Updated",
+            "sent_to_paralegal": "📤 Sent to team",
+            "summaries_regenerated": "🔄 Summaries regenerated",
+          }[r.revision_type] || r.revision_type;
+          const fields = r.changed_fields && r.changed_fields.length
+            ? `<div style="font-size:11px; color:#888; margin-top:4px;">Changed: ${r.changed_fields.map(f => `<code style="background:#eee; padding:1px 4px; border-radius:2px; font-size:10px;">${escapeHtml(f)}</code>`).join(" ")}</div>`
+            : "";
+          return `
+            <div style="padding:10px 16px; border-bottom:1px solid #f0f0f0; font-size:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span><strong>${typeLabel}</strong> ${r.username ? `by <span style="color:#0C1C36;">${escapeHtml(r.username)}</span>` : ""}</span>
+                <span style="color:#888;">${dt}</span>
+              </div>
+              ${fields}
+            </div>`;
+        }).join("")}
+      </div>
+    </details>
   ` : "";
 
   const body = `
@@ -1252,6 +1437,8 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       `}
     </div>
   </form>
+
+  ${revisionsHtml}
 
   <p style="margin-top:30px; color:#888; font-size:13px;">
     <a href="/admin/hearing/history" class="back-link">View all hearing notes →</a>
@@ -1594,6 +1781,8 @@ function renderHistoryPage(notes) {
     <div class="page-header">
       <h1>📚 Hearing Notes History</h1>
       <a href="/admin/hearing/notes" class="back-link">← Back to note-taking</a>
+      &nbsp;·&nbsp;
+      <a href="/admin/hearing/notes/duplicates" class="back-link" style="color:#c62828;">🧹 Find duplicates</a>
     </div>
 
     <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #eee;">
@@ -1882,7 +2071,153 @@ function escapeAttr(s) { return escapeHtml(s); }
 
 // ── Exports ──────────────────────────────────────────────
 
-// ── Bulk upload page ─────────────────────────────────────
+// ── Duplicate finder & merger ───────────────────────────
+// Finds hearing notes that appear to be duplicates (same client + same
+// hearing time) so JJ can consolidate them.
+
+async function findDuplicates() {
+  await initHearingNotesTables();
+  const r = await db.query(`
+    SELECT
+      LOWER(TRIM(client_name)) AS name_key,
+      COALESCE(a_number, '') AS a_key,
+      DATE_TRUNC('hour', hearing_date) AS hour_key,
+      COALESCE(hearing_type, '') AS type_key,
+      ARRAY_AGG(id ORDER BY created_at DESC) AS ids,
+      COUNT(*) AS n
+    FROM hearing_notes
+    WHERE client_name IS NOT NULL
+    GROUP BY name_key, a_key, hour_key, type_key
+    HAVING COUNT(*) > 1
+    ORDER BY n DESC, MAX(created_at) DESC
+    LIMIT 100
+  `);
+
+  const groups = [];
+  for (const row of r.rows) {
+    const notes = await db.query(
+      `SELECT id, client_name, a_number, hearing_date, hearing_type, created_at,
+              sent_to_paralegal_at, sent_to_client_at,
+              CASE WHEN raw_notes IS NOT NULL AND LENGTH(raw_notes) > 10 THEN 1 ELSE 0 END AS has_notes,
+              CASE WHEN paralegal_summary IS NOT NULL THEN 1 ELSE 0 END AS has_summary
+       FROM hearing_notes WHERE id = ANY($1) ORDER BY
+         (raw_notes IS NOT NULL AND LENGTH(raw_notes) > 10) DESC,   -- prefer ones with notes
+         (paralegal_summary IS NOT NULL) DESC,                       -- prefer ones with summary
+         (sent_to_paralegal_at IS NOT NULL) DESC,                    -- prefer ones already sent
+         created_at ASC                                              -- oldest first (usually canonical)`,
+      [row.ids]
+    );
+    groups.push({
+      key: `${row.name_key}|${row.hour_key}|${row.type_key}`,
+      count: row.n,
+      notes: notes.rows,
+      // Suggest keeping the FIRST one in the sorted result (best candidate)
+      keep_id: notes.rows[0].id,
+      delete_ids: notes.rows.slice(1).map(n => n.id),
+    });
+  }
+  return groups;
+}
+
+// Merge duplicates: delete the "extra" notes, keep the canonical one.
+// Also records a revision on the canonical note noting what was merged.
+async function mergeDuplicates(keepId, deleteIds) {
+  await initHearingNotesTables();
+  await initRevisionTable();
+  let deleted = 0;
+  for (const id of deleteIds) {
+    if (id === keepId) continue;
+    try {
+      // Migrate any revisions from the deleted note to the kept one
+      await db.query(
+        `UPDATE hearing_note_revisions SET note_id = $1 WHERE note_id = $2`,
+        [keepId, id]
+      );
+      await db.query(`DELETE FROM hearing_notes WHERE id = $1`, [id]);
+      deleted++;
+    } catch (e) {
+      console.warn(`[hearing-notes] Failed to delete duplicate #${id}:`, e.message);
+    }
+  }
+  await saveRevision(keepId, "updated", { merged_from: deleteIds }, null);
+  return { keep_id: keepId, deleted_count: deleted, deleted_ids: deleteIds };
+}
+
+function renderDuplicatesPage(groups) {
+  const dupCount = groups.reduce((sum, g) => sum + (g.count - 1), 0);
+  const groupCards = groups.length ? groups.map(g => {
+    const rows = g.notes.map((n, idx) => {
+      const isKept = idx === 0;
+      const dt = n.hearing_date ? new Date(n.hearing_date).toLocaleString() : "(no date)";
+      const created = new Date(n.created_at).toLocaleString();
+      return `
+        <tr style="${isKept ? 'background:#e8f5e9;' : ''}">
+          <td style="padding:6px 10px;">
+            ${isKept ? '<strong style="color:#2e7d32;">✓ KEEP</strong>' : '<span style="color:#c62828;">DELETE</span>'}
+          </td>
+          <td style="font-family:monospace; font-size:11px;">#${n.id}</td>
+          <td style="font-size:11px;">${escapeHtml(n.hearing_type || "—")}</td>
+          <td style="font-size:11px;">${dt}</td>
+          <td style="font-size:11px;">${created}</td>
+          <td style="text-align:center;">${n.has_notes ? '📝' : ''}</td>
+          <td style="text-align:center;">${n.has_summary ? '📄' : ''}</td>
+          <td style="text-align:center;">${n.sent_to_paralegal_at ? '📤' : ''}</td>
+        </tr>`;
+    }).join("");
+    return `
+      <div style="background:white; padding:16px; border-radius:6px; border:1px solid #eee; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <div>
+            <strong style="font-size:14px;">${escapeHtml(g.notes[0].client_name)}</strong>
+            <span style="color:#888; font-size:12px; margin-left:8px;">${g.count} copies</span>
+          </div>
+          <button onclick="mergeGroup('${g.keep_id}', [${g.delete_ids.join(",")}])" style="background:#c62828; color:white; padding:6px 12px; border:none; border-radius:4px; cursor:pointer; font-size:12px;">
+            Merge (keep #${g.keep_id}, delete ${g.delete_ids.length})
+          </button>
+        </div>
+        <table style="width:100%; font-size:12px;">
+          <thead style="background:#f8f8f8;">
+            <tr><th style="text-align:left; padding:4px 10px;">Action</th><th>ID</th><th>Type</th><th>Hearing Date</th><th>Created</th><th>📝</th><th>📄</th><th>📤</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }).join("") : `<div style="background:white; padding:30px; text-align:center; border-radius:6px; color:#2e7d32;"><h2>🎉 No duplicates found!</h2><p style="color:#666;">Your hearing notes database is clean.</p></div>`;
+
+  const body = `
+    <div class="page-header">
+      <h1>🧹 Duplicate Hearing Notes</h1>
+      <div style="font-size:13px; color:#666;">
+        Zara found <strong>${dupCount}</strong> duplicate hearing note(s) across <strong>${groups.length}</strong> group(s).
+        Each group shows notes that share the same client + hearing time + type.
+        The row highlighted green is the canonical one (has the most data — original + notes + summary + sent status).
+      </div>
+    </div>
+
+    <div style="background:#fff8e1; border-left:4px solid #f9a825; padding:12px 16px; border-radius:4px; margin-bottom:20px; font-size:13px;">
+      <strong>ℹ️ How merge works:</strong> Zara deletes the extra rows but keeps ALL their revision history attached to the surviving canonical note. The canonical row is the one with the most content (raw notes + summary + team-sent status).
+    </div>
+
+    ${groupCards}
+
+    <script>
+      async function mergeGroup(keepId, deleteIds) {
+        if (!confirm("Merge these duplicates?\\n\\nKeep note #" + keepId + ", delete " + deleteIds.length + " duplicate(s).\\n\\nThis cannot be undone (but they'll show in the next Dropbox backup).")) return;
+        try {
+          const r = await fetch("/admin/hearing/notes/merge-duplicates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ keep_id: keepId, delete_ids: deleteIds }),
+          });
+          const d = await r.json();
+          if (d.ok) location.reload();
+          else alert("Error: " + (d.error || "unknown"));
+        } catch (e) { alert("Error: " + e.message); }
+      }
+    </script>`;
+
+  return renderAdminChrome({ title: "Duplicate Hearing Notes", body, activeItem: null });
+}
 // Multi-file upload → Claude extraction in parallel → review grid →
 // bulk-create draft hearing notes with one click.
 function renderBulkUploadPage() {
@@ -2182,8 +2517,12 @@ function discardAllPending() {
 
 module.exports = {
   initHearingNotesTables,
+  initRevisionTable,
   saveNote,
   updateNote,
+  findExistingNote,
+  saveRevision,
+  getRevisions,
   generateAndSaveSummariesForMaster,
   listNotes,
   getNote,
@@ -2200,6 +2539,9 @@ module.exports = {
   renderHistoryPage,
   renderDetailPage,
   renderBulkUploadPage,
+  renderDuplicatesPage,
+  findDuplicates,
+  mergeDuplicates,
   parseFormSubmission,
   APPLICATION_OPTIONS,
 };
