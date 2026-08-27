@@ -1203,8 +1203,38 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           <tbody id="exhibits-tbody"></tbody>
         </table>
         </div>
-        <button type="button" onclick="addExhibitRow()" style="background:#eee; padding:6px 12px; border:none; cursor:pointer; border-radius:4px; font-size:13px;">+ Add exhibit row</button>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" onclick="addExhibitRow()" style="background:#eee; padding:6px 12px; border:none; cursor:pointer; border-radius:4px; font-size:13px;">+ Add exhibit row</button>
+          <button type="button" onclick="openDropboxExhibitPicker()" style="background:#0061FF; color:white; padding:6px 12px; border:none; cursor:pointer; border-radius:4px; font-size:13px;">📦 Browse Dropbox → add as exhibits</button>
+        </div>
       </fieldset>
+
+      <!-- Dropbox Exhibit Picker Modal -->
+      <div id="dbx-exhibit-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:white; border-radius:8px; width:min(720px, 92vw); max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+          <div style="padding:15px 20px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:space-between;">
+            <h3 style="margin:0; color:#0C1C36;">📦 Browse Dropbox</h3>
+            <button type="button" onclick="closeDropboxExhibitPicker()" style="background:none; border:none; font-size:24px; color:#666; cursor:pointer; padding:0 4px;">×</button>
+          </div>
+          <div id="dbx-exhibit-breadcrumb" style="padding:10px 20px; font-size:13px; color:#666; background:#f9f9f9; border-bottom:1px solid #eee;"></div>
+          <div style="padding:10px 20px;">
+            <input type="text" id="dbx-exhibit-filter" placeholder="🔍 Filter files by name..." oninput="filterDbxExhibitFiles()" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+          </div>
+          <div id="dbx-exhibit-body" style="flex:1; overflow-y:auto; padding:0 20px 15px 20px;">
+            <div style="text-align:center; color:#666; padding:40px 0;">Loading…</div>
+          </div>
+          <div style="padding:15px 20px; border-top:1px solid #eee; display:flex; justify-content:space-between; align-items:center; gap:10px; background:#f9f9f9;">
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button type="button" onclick="toggleSelectAllDbxExhibits()" id="dbx-exhibit-select-all" style="background:#eee; color:#333; padding:6px 12px; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Select all files here</button>
+              <span id="dbx-exhibit-selected-count" style="font-size:12px; color:#666;">0 selected</span>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button type="button" onclick="closeDropboxExhibitPicker()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Cancel</button>
+              <button type="button" onclick="addSelectedAsExhibits()" id="dbx-exhibit-add-btn" style="background:#0061FF; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Add as exhibits</button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- Section 4: Pre-examination notes (was Section 5) -->
       <fieldset>
@@ -1331,6 +1361,185 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         document.getElementById("exhibits-tbody").innerHTML = "";
       }
 
+      // ── Dropbox Exhibit Picker ─────────────────────────
+      let dbxExhibitCurrentPath = null;   // current browsing path
+      let dbxExhibitRootPath = null;      // client's Dropbox root
+      let dbxExhibitFiles = [];           // files in current view
+      let dbxExhibitSubfolders = [];      // subfolders in current view
+
+      async function openDropboxExhibitPicker() {
+        const clientName = (document.querySelector('[name="client_name"]')?.value || "").trim();
+        const aNumber    = (document.querySelector('[name="a_number"]')?.value    || "").trim();
+        if (!clientName && !aNumber) {
+          alert("Enter the client name (or A-Number) at the top of the form first — Zara needs it to find their Dropbox folder.");
+          return;
+        }
+        document.getElementById("dbx-exhibit-modal").style.display = "flex";
+        document.getElementById("dbx-exhibit-filter").value = "";
+        await loadDbxExhibitFolder(null);   // null = root of client's folder
+      }
+      function closeDropboxExhibitPicker() {
+        document.getElementById("dbx-exhibit-modal").style.display = "none";
+      }
+
+      async function loadDbxExhibitFolder(subpath) {
+        const clientName = (document.querySelector('[name="client_name"]')?.value || "").trim();
+        const aNumber    = (document.querySelector('[name="a_number"]')?.value    || "").trim();
+        const body = document.getElementById("dbx-exhibit-body");
+        body.innerHTML = '<div style="text-align:center; color:#666; padding:40px 0;">Loading…</div>';
+        const url = "/admin/hearing/individual/dropbox/files"
+          + "?client_name=" + encodeURIComponent(clientName)
+          + "&a_number=" + encodeURIComponent(aNumber)
+          + (subpath ? "&subfolder=" + encodeURIComponent(subpath) : "");
+        try {
+          const resp = await fetch(url);
+          const data = await resp.json();
+          if (!data.ok) {
+            body.innerHTML = '<div style="color:#c00; padding:40px 20px; text-align:center;">❌ ' + escapeHTML(data.error || "Failed to load") + '</div>';
+            document.getElementById("dbx-exhibit-breadcrumb").innerHTML = "";
+            return;
+          }
+          dbxExhibitCurrentPath = data.current_path;
+          dbxExhibitRootPath = data.folder;
+          dbxExhibitFiles = data.files || [];
+          dbxExhibitSubfolders = data.subfolders || [];
+          renderDbxExhibitBrowser(data);
+        } catch (e) {
+          body.innerHTML = '<div style="color:#c00; padding:40px 20px; text-align:center;">❌ ' + escapeHTML(e.message) + '</div>';
+        }
+      }
+
+      function renderDbxExhibitBrowser(data) {
+        // Breadcrumb
+        const crumb = document.getElementById("dbx-exhibit-breadcrumb");
+        const crumbParts = (data.breadcrumb || []).map((c, i, arr) => {
+          const isLast = i === arr.length - 1;
+          if (isLast) return '<strong>' + escapeHTML(c.name) + '</strong>';
+          return '<a href="#" onclick="loadDbxExhibitFolder(' + JSON.stringify(c.path).replace(/"/g,"&quot;") + '); return false;" style="color:#0061FF; text-decoration:none;">' + escapeHTML(c.name) + '</a>';
+        }).join(' <span style="color:#999;">/</span> ');
+        crumb.innerHTML = '📁 ' + crumbParts;
+
+        // File list
+        const body = document.getElementById("dbx-exhibit-body");
+        let html = "";
+
+        // Subfolders (navigation only, not selectable)
+        if (dbxExhibitSubfolders.length) {
+          html += '<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin:8px 0 4px 0;">Subfolders</div>';
+          html += dbxExhibitSubfolders.map(f =>
+            '<div style="padding:8px; border-radius:4px; cursor:pointer; display:flex; align-items:center; gap:8px;" onmouseover="this.style.background=\\'#f0f8ff\\'" onmouseout="this.style.background=\\'\\'" onclick="loadDbxExhibitFolder(' + JSON.stringify(f.path).replace(/"/g,"&quot;") + ')">' +
+              '<span style="font-size:16px;">📁</span>' +
+              '<span style="font-weight:600; color:#0C1C36;">' + escapeHTML(f.name) + '</span>' +
+            '</div>'
+          ).join("");
+        }
+
+        // Files (selectable)
+        if (dbxExhibitFiles.length) {
+          html += '<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin:12px 0 4px 0;">Files (click to select)</div>';
+          html += '<div id="dbx-exhibit-file-list">';
+          html += dbxExhibitFiles.map((f, idx) => {
+            const iconMap = {".pdf":"📄",".jpg":"🖼️",".jpeg":"🖼️",".png":"🖼️",".doc":"📝",".docx":"📝",".xls":"📊",".xlsx":"📊"};
+            const ext = (f.name.match(/\\.[^.]+$/)||[""])[0].toLowerCase();
+            const icon = iconMap[ext] || "📎";
+            const sizeStr = f.size < 1024 ? f.size + " B" : f.size < 1048576 ? (f.size/1024).toFixed(1)+" KB" : (f.size/1048576).toFixed(1)+" MB";
+            return '<label class="dbx-exhibit-file-row" data-idx="' + idx + '" data-name="' + escapeAttr(f.name.toLowerCase()) + '" style="display:flex; align-items:center; gap:8px; padding:8px; border-radius:4px; cursor:pointer; margin-bottom:2px;">' +
+              '<input type="checkbox" class="dbx-exhibit-check" data-idx="' + idx + '" onchange="updateDbxExhibitSelectedCount()" style="transform:scale(1.2); margin:0;">' +
+              '<span style="font-size:16px;">' + icon + '</span>' +
+              '<span style="flex:1; font-size:13px;">' + escapeHTML(f.name) + '</span>' +
+              '<span style="font-size:11px; color:#888;">' + sizeStr + '</span>' +
+            '</label>';
+          }).join("");
+          html += '</div>';
+        } else if (!dbxExhibitSubfolders.length) {
+          html += '<div style="text-align:center; color:#888; padding:40px 0;">This folder is empty.</div>';
+        }
+
+        body.innerHTML = html;
+        updateDbxExhibitSelectedCount();
+
+        // Hover style for file rows
+        document.querySelectorAll(".dbx-exhibit-file-row").forEach(r => {
+          r.addEventListener("mouseover", () => r.style.background = "#f0f8ff");
+          r.addEventListener("mouseout", () => r.style.background = "");
+        });
+      }
+
+      function filterDbxExhibitFiles() {
+        const q = document.getElementById("dbx-exhibit-filter").value.toLowerCase();
+        document.querySelectorAll(".dbx-exhibit-file-row").forEach(r => {
+          const name = r.dataset.name || "";
+          r.style.display = (!q || name.includes(q)) ? "flex" : "none";
+        });
+      }
+
+      function toggleSelectAllDbxExhibits() {
+        // Select/deselect only currently visible (after filter) checkboxes
+        const visible = Array.from(document.querySelectorAll(".dbx-exhibit-file-row"))
+          .filter(r => r.style.display !== "none");
+        const allChecked = visible.every(r => r.querySelector(".dbx-exhibit-check").checked);
+        visible.forEach(r => { r.querySelector(".dbx-exhibit-check").checked = !allChecked; });
+        updateDbxExhibitSelectedCount();
+      }
+
+      function updateDbxExhibitSelectedCount() {
+        const count = document.querySelectorAll(".dbx-exhibit-check:checked").length;
+        document.getElementById("dbx-exhibit-selected-count").textContent = count + " selected";
+        document.getElementById("dbx-exhibit-add-btn").textContent = count ? "Add " + count + " as exhibit" + (count === 1 ? "" : "s") : "Add as exhibits";
+      }
+
+      // Clean filename into a decent exhibit description.
+      // "Kong_passport_scan.pdf" → "Kong passport scan"
+      // "I797-receipt-notice.PDF" → "I797 receipt notice"
+      // "IMG_20250312.jpg" → "IMG 20250312"
+      function filenameToDescription(name) {
+        return String(name || "")
+          .replace(/\\.[^.]+$/, "")           // strip extension
+          .replace(/[_\\-]+/g, " ")            // underscores/hyphens → spaces
+          .replace(/\\s+/g, " ")               // collapse whitespace
+          .trim();
+      }
+
+      // If the file lives in a subfolder like "EOR-1" or "EOIR Submission 2",
+      // grab that as the EOIR submission tag automatically.
+      function eoirFromPath(filePath) {
+        // filePath like "/USCIS/.../KONG, XIANGMIN/EOR-1/passport.pdf"
+        const parts = String(filePath || "").split("/").filter(Boolean);
+        // Look at each ancestor folder name for "EOR" or "EOIR"
+        for (let i = parts.length - 2; i >= 0; i--) {
+          const name = parts[i];
+          if (/^EO?IR?[\\s\\-_]/i.test(name) || /^EOR[\\s\\-_]?\\d/i.test(name)) return name;
+        }
+        return "";
+      }
+
+      function addSelectedAsExhibits() {
+        const checked = Array.from(document.querySelectorAll(".dbx-exhibit-check:checked"));
+        if (!checked.length) { alert("Select at least one file first."); return; }
+
+        // Determine starting exhibit number (next available)
+        const existingNumbers = Array.from(document.querySelectorAll('[name^="exhibit_number_"]'))
+          .map(el => parseInt(el.value, 10))
+          .filter(n => !isNaN(n));
+        let nextNumber = existingNumbers.length ? Math.max(...existingNumbers) + 1 : 1;
+
+        for (const cb of checked) {
+          const file = dbxExhibitFiles[parseInt(cb.dataset.idx)];
+          if (!file) continue;
+          addExhibitRow({
+            number: String(nextNumber++),
+            eoir_submission: eoirFromPath(file.path),
+            description: filenameToDescription(file.name),
+            marked: "",
+            not_admitted: "",
+            objection: "",
+          });
+        }
+        closeDropboxExhibitPicker();
+        // Scroll to the exhibits section so attorney sees what was added
+        document.getElementById("exhibits-tbody").scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+
       // ── Examinations (with sections) ────────────────────
       let examCounter = 0;
       function addExamination(data) {
@@ -1434,6 +1643,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       function opt(v, l, current) { return '<option value="' + v + '"' + (current === v ? " selected" : "") + '>' + l + '</option>'; }
       function witnessRoleOpt(v, current) { return '<option value="' + v + '"' + (current === v ? " selected" : "") + '>' + v + '</option>'; }
       function escapeHTML(s) { return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+      function escapeAttr(s) { return escapeHTML(s); }
 
       // Initialize with existing data
       INITIAL_EXHIBITS.forEach(e => addExhibitRow(e));
