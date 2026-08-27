@@ -186,6 +186,11 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  `/indiv generate <id>` — regenerate AI summaries",
       "  `/indiv delete <id>` — permanently delete",
       "",
+      "*👥 Client Profiles* (aggregated view of every client)",
+      "  Client dashboard at: https://tezlaw-bot.onrender.com/admin/clients",
+      "  `/clients` — recent client list",
+      "  `/client <name or A#>` — look up a specific client",
+      "",
       "*📥 Intake Agent (auto-runs for new leads)*",
       "  Zara asks new inquirers structured questions across all channels.",
       "  Alerts you via WhatsApp + email with HOT/WARM/COLD tag.",
@@ -659,6 +664,80 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     } catch (err) {
       console.error("[JJ-Mode] /indiv error:", err.message);
       return { handled: true, message: `❌ /indiv error: ${err.message}` };
+    }
+  }
+
+  // ── /clients | /client — Client profile lookup ──────────────────
+  //
+  //   /clients                — recent 15 client profiles
+  //   /client <search>        — search for a client by name or A#
+  //
+  const clientsFirstLine = lower.split("\n", 1)[0].trim();
+  const clientsMatch = clientsFirstLine.match(/^\/clients?(?:\s+(.+))?\s*$/);
+  if (clientsMatch) {
+    try {
+      const cp = require("./client-profiles");
+      const query = (clientsMatch[1] || "").trim().toLowerCase();
+      const all = await cp.aggregateClients();
+
+      if (!query) {
+        if (!all.length) return { handled: true, message: "👥 No clients yet. Create a hearing note to populate.\n\nAll clients: https://tezlaw-bot.onrender.com/admin/clients" };
+        const top = all.slice(0, 15);
+        const lines = top.map((c, i) => {
+          const upNext = c.upcoming[0] ? ` · Next: ${c.upcoming[0].type} ${new Date(c.upcoming[0].date).toLocaleDateString()}` : "";
+          return `${i + 1}. *${c.client_name || "(unnamed)"}* ${c.a_number ? "· " + c.a_number : ""} · ${c.hearing_count} hearing${c.hearing_count === 1 ? "" : "s"}${upNext}`;
+        });
+        return {
+          handled: true,
+          message: `👥 *Recent clients* (${all.length} total):\n\n${lines.join("\n")}\n\n_Search: \`/client <name or A#>\`_\nAll clients: https://tezlaw-bot.onrender.com/admin/clients`,
+        };
+      }
+
+      // Search
+      const searchKey = query.replace(/[-\s]/g, "");
+      const matches = all.filter(c => {
+        const n = String(c.client_name || "").toLowerCase();
+        const a = String(c.a_number || "").toLowerCase().replace(/[-\s]/g, "");
+        const e = String(c.client_email || "").toLowerCase();
+        return n.includes(query) || a.includes(searchKey) || e.includes(query);
+      });
+
+      if (!matches.length) return { handled: true, message: `👥 No clients matching *"${query}"*.` };
+
+      if (matches.length === 1) {
+        const c = matches[0];
+        const lines = [
+          `👤 *${c.client_name || "(unnamed)"}*`,
+          c.a_number ? `A#: ${c.a_number}` : "",
+          c.client_email ? `Email: ${c.client_email}` : "",
+          c.client_phone ? `Phone: ${c.client_phone}` : "",
+          `Language: ${c.client_language || "?"}`,
+          `Case type(s): ${c.case_types.join(", ") || "(none noted)"}`,
+          `Total hearings: ${c.hearing_count}`,
+          c.most_recent_disposition ? `Most recent disposition: ${c.most_recent_disposition}` : "",
+        ].filter(Boolean);
+        if (c.upcoming.length) {
+          lines.push("");
+          lines.push("🗓️ *Upcoming:*");
+          c.upcoming.slice(0, 3).forEach(u => {
+            lines.push(`  • ${u.type} — ${new Date(u.date).toLocaleString()}`);
+          });
+        }
+        lines.push("");
+        lines.push(`Full profile: https://tezlaw-bot.onrender.com/admin/clients/${c.key}`);
+        return { handled: true, message: lines.join("\n") };
+      }
+
+      const lines = matches.slice(0, 10).map(c => {
+        return `• *${c.client_name || "(unnamed)"}*${c.a_number ? " · " + c.a_number : ""} · ${c.hearing_count} hearings`;
+      });
+      return {
+        handled: true,
+        message: `👥 Found *${matches.length}* clients matching *"${query}"*:\n\n${lines.join("\n")}${matches.length > 10 ? `\n\n_...and ${matches.length - 10} more._` : ""}\n\nRefine search: \`/client <more specific term>\``,
+      };
+    } catch (err) {
+      console.error("[JJ-Mode] /clients error:", err.message);
+      return { handled: true, message: `❌ /clients error: ${err.message}` };
     }
   }
 
