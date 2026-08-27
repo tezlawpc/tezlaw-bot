@@ -1312,31 +1312,78 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       const extractedEl = document.getElementById("doc-extracted");
       extractedEl.innerHTML = "";
 
+      console.log("[uploadDocument] File:", { name: file.name, size: file.size, type: file.type, lastModified: file.lastModified });
+
       if (file.size > 32 * 1024 * 1024) {
         statusEl.innerHTML = '<span style="color:#c00;">❌ File too large (max 32 MB). Try a smaller/lower-quality scan.</span>';
         return;
       }
 
-      const acceptable = /\\.(pdf|jpg|jpeg|png|webp|heic|heif)$/i.test(file.name) || file.type.includes("pdf") || file.type.startsWith("image/") || file.type === "" || file.type === "application/octet-stream";
-      if (!acceptable) {
-        statusEl.innerHTML = '<span style="color:#c00;">❌ Unsupported file type. Use PDF, JPG, PNG, WebP, or HEIC.</span>';
+      // Very permissive — allow anything that looks like PDF/image
+      const nameOk = /\\.(pdf|jpe?g|png|webp|heic|heif)$/i.test(file.name || "");
+      const typeOk = (file.type || "").includes("pdf") || (file.type || "").startsWith("image/");
+      if (!nameOk && !typeOk && file.type !== "" && file.type !== "application/octet-stream") {
+        console.warn("[uploadDocument] Rejected file:", { name: file.name, type: file.type });
+        statusEl.innerHTML = '<span style="color:#c00;">❌ Unsupported file type "' + (file.type || file.name) + '". Use PDF, JPG, PNG, WebP, or HEIC.</span>';
         return;
       }
 
-      statusEl.innerHTML = '<span style="color:#666;">⏳ Uploading and OCRing ' + file.name + ' — 30–60 seconds for a large scan...</span>';
+      statusEl.innerHTML = '<span style="color:#666;">⏳ Uploading and OCRing ' + escapeHTMLLocal(file.name) + ' — 30–60 seconds for a large scan...</span>';
 
-      const formData = new FormData();
-      formData.append("document", file);
-
+      // Rebuild the File with a sanitized name to avoid Safari FormData issues
+      // with special chars, emoji, or non-ASCII filenames.
+      let safeFile = file;
       try {
-        const resp = await fetch("/admin/hearing/notes/extract-document", {
+        const safeName = (file.name || "upload").replace(/[^\\w.\\-]/g, "_") || "upload";
+        if (safeName !== file.name && typeof File === "function") {
+          safeFile = new File([file], safeName, { type: file.type || "application/octet-stream" });
+          console.log("[uploadDocument] Renamed to:", safeName);
+        }
+      } catch (e) {
+        console.warn("[uploadDocument] Could not rename file, using original:", e.message);
+      }
+
+      let formData;
+      try {
+        formData = new FormData();
+        formData.append("document", safeFile, safeFile.name || "upload");
+      } catch (e) {
+        console.error("[uploadDocument] FormData construction failed:", e);
+        statusEl.innerHTML = '<span style="color:#c00;">❌ FormData error: ' + e.message + '</span>';
+        return;
+      }
+
+      let resp;
+      try {
+        resp = await fetch("/admin/hearing/notes/extract-document", {
           method: "POST",
           body: formData,
         });
-        const data = await resp.json();
+      } catch (e) {
+        console.error("[uploadDocument] fetch failed:", e);
+        statusEl.innerHTML = '<span style="color:#c00;">❌ Network error: ' + e.message + '. Check your connection or try a smaller file.</span>';
+        return;
+      }
 
+      let data;
+      try {
+        const text = await resp.text();
+        try {
+          data = JSON.parse(text);
+        } catch (parseErr) {
+          console.error("[uploadDocument] Non-JSON response:", { status: resp.status, body: text.substring(0, 500) });
+          statusEl.innerHTML = '<span style="color:#c00;">❌ Server returned non-JSON response (HTTP ' + resp.status + '). Body starts with: ' + escapeHTMLLocal(text.substring(0, 200)) + '</span>';
+          return;
+        }
+      } catch (e) {
+        console.error("[uploadDocument] Response read failed:", e);
+        statusEl.innerHTML = '<span style="color:#c00;">❌ Response error: ' + e.message + '</span>';
+        return;
+      }
+
+      try {
         if (!resp.ok || !data.ok) {
-          statusEl.innerHTML = '<span style="color:#c00;">❌ ' + (data.error || "Extraction failed") + '</span>';
+          statusEl.innerHTML = '<span style="color:#c00;">❌ ' + (data.error || "Extraction failed (HTTP " + resp.status + ")") + '</span>';
           return;
         }
 
@@ -1453,10 +1500,16 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
             extraLines.map(l => "• " + l).join("<br>") +
             '</div>';
         }
-
       } catch (e) {
-        statusEl.innerHTML = '<span style="color:#c00;">❌ Upload error: ' + e.message + '</span>';
+        // Anything unexpected during the "fill fields" phase
+        console.error("[uploadDocument] fill phase failed:", e);
+        statusEl.innerHTML = '<span style="color:#c00;">❌ Fill error: ' + e.message + '. Extraction may have succeeded — check server logs.</span>';
       }
+    }
+
+    // Local escaper for status messages (defined inside the form template)
+    function escapeHTMLLocal(s) {
+      return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
     // Backward-compat alias in case old code paths still call it
