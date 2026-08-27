@@ -3888,11 +3888,51 @@ Confidence levels:
 
 Do not repeat the same file for multiple exhibits unless it truly represents multiple exhibit numbers.`;
 
+    // Use Anthropic's tool use to force a structured JSON response.
+    // Tool use guarantees Claude returns data matching our schema — no more
+    // "invalid JSON" errors from preambles, code fences, or trailing text.
     const anthResp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
         model: "claude-sonnet-4-6",
         max_tokens: 4000,
+        tools: [{
+          name: "report_matches",
+          description: "Report the exhibit-to-file matches for the immigration hearing exhibit list.",
+          input_schema: {
+            type: "object",
+            properties: {
+              matches: {
+                type: "array",
+                description: "One entry per exhibit, in the order the exhibits were given.",
+                items: {
+                  type: "object",
+                  properties: {
+                    exhibit_num: {
+                      type: "integer",
+                      description: "1-based exhibit number from the input list",
+                    },
+                    file_num: {
+                      type: ["integer", "null"],
+                      description: "1-based file number from the file list, or null if no match",
+                    },
+                    confidence: {
+                      type: "string",
+                      enum: ["high", "medium", "low", "none"],
+                    },
+                    reason: {
+                      type: "string",
+                      description: "Brief reason for the match or non-match",
+                    },
+                  },
+                  required: ["exhibit_num", "confidence", "reason"],
+                },
+              },
+            },
+            required: ["matches"],
+          },
+        }],
+        tool_choice: { type: "tool", name: "report_matches" },
         messages: [{ role: "user", content: prompt }],
       },
       {
@@ -3905,18 +3945,27 @@ Do not repeat the same file for multiple exhibits unless it truly represents mul
       }
     );
 
-    const rawText = anthResp.data.content?.[0]?.text?.trim() || "[]";
-    const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-
-    let claudeMatches;
-    try {
-      claudeMatches = JSON.parse(cleaned);
-    } catch (e) {
-      console.error("[auto-match] Claude returned unparseable JSON:", cleaned.substring(0, 500));
-      return res.status(500).json({
-        ok: false,
-        error: "Claude returned invalid JSON. Try again or match manually.",
-      });
+    // Extract from tool_use block. This is the guaranteed-structured path.
+    let claudeMatches = null;
+    const contentBlocks = anthResp.data.content || [];
+    const toolUseBlock = contentBlocks.find(b => b.type === "tool_use" && b.name === "report_matches");
+    if (toolUseBlock && Array.isArray(toolUseBlock.input?.matches)) {
+      claudeMatches = toolUseBlock.input.matches;
+    } else {
+      // Fallback: try to extract JSON from any text blocks. Some edge cases
+      // (rate limits, model refusals, older model versions without tool support)
+      // return a text block instead of a tool use call.
+      const textBlock = contentBlocks.find(b => b.type === "text")?.text || "";
+      claudeMatches = extractJsonArrayFromText(textBlock);
+      if (!claudeMatches) {
+        console.error("[auto-match] Claude did not call the tool AND text was unparseable. Response:",
+          JSON.stringify(anthResp.data.content).substring(0, 800));
+        return res.status(500).json({
+          ok: false,
+          error: "Claude didn't return matches in a usable format. Try again in a moment or match manually.",
+          debug_snippet: textBlock.substring(0, 200),
+        });
+      }
     }
 
     // Map Claude's response back to exhibit indices with actual file paths
@@ -3965,6 +4014,50 @@ Do not repeat the same file for multiple exhibits unless it truly represents mul
     res.status(500).json({ ok: false, error: msg });
   }
 });
+
+// Robust JSON array extractor — handles preamble, trailing text, code fences.
+// Used as a fallback path when Claude returns a text block instead of a
+// tool_use block. Bracket-matching that respects strings/escapes.
+function extractJsonArrayFromText(text) {
+  if (!text || typeof text !== "string") return null;
+  const trimmed = text.trim();
+
+  // Try direct parse first (fast path)
+  try { const p = JSON.parse(trimmed); if (Array.isArray(p)) return p; } catch { /* continue */ }
+
+  // Strip markdown code fences (```json ... ``` or ``` ... ```)
+  let candidate = trimmed
+    .replace(/^```(?:json|javascript|js)?\s*\n?/im, "")
+    .replace(/\n?```\s*$/m, "")
+    .trim();
+  try { const p = JSON.parse(candidate); if (Array.isArray(p)) return p; } catch { /* continue */ }
+
+  // Find first '[' and its matching ']' by walking brackets while respecting
+  // strings and escape sequences. Handles preamble like "Here's the JSON:" or
+  // trailing explanation like "\nNote: ..." after the array.
+  const start = candidate.indexOf("[");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let end = -1;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < candidate.length; i++) {
+    const c = candidate[i];
+    if (escape) { escape = false; continue; }
+    if (c === "\\") { escape = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === "[") depth++;
+    else if (c === "]") { depth--; if (depth === 0) { end = i; break; } }
+  }
+  if (end === -1) return null;
+
+  try {
+    const p = JSON.parse(candidate.substring(start, end + 1));
+    return Array.isArray(p) ? p : null;
+  } catch { return null; }
+}
 
 // Recursively gather all files under a Dropbox folder, up to maxDepth deep.
 // Uses listFolder for each level (respects team namespace via dropbox-integration).
