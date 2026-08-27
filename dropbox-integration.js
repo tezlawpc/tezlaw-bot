@@ -33,11 +33,15 @@ async function initTable() {
       authorized_account_id TEXT,
       authorized_account_name TEXT,
       authorized_email      TEXT,
+      root_namespace_id     TEXT,
       last_authorized_at    TIMESTAMPTZ,
       last_used_at          TIMESTAMPTZ,
       CONSTRAINT single_row CHECK (id = 1)
     )
   `);
+  // Migration: add root_namespace_id if missing
+  try { await db.query(`ALTER TABLE dropbox_settings ADD COLUMN IF NOT EXISTS root_namespace_id TEXT`); }
+  catch (e) { /* older PG; ignore */ }
   await db.query(`
     CREATE TABLE IF NOT EXISTS client_dropbox_mapping (
       client_key    TEXT PRIMARY KEY,
@@ -60,7 +64,7 @@ async function getSettings() {
   return r.rows[0] || {};
 }
 
-async function saveRefreshToken({ refresh_token, account_id, account_name, email }) {
+async function saveRefreshToken({ refresh_token, account_id, account_name, email, root_namespace_id }) {
   await initTable();
   await db.query(
     `UPDATE dropbox_settings SET
@@ -68,9 +72,10 @@ async function saveRefreshToken({ refresh_token, account_id, account_name, email
        authorized_account_id = $2,
        authorized_account_name = $3,
        authorized_email = $4,
+       root_namespace_id = $5,
        last_authorized_at = NOW()
      WHERE id = 1`,
-    [refresh_token, account_id, account_name, email]
+    [refresh_token, account_id, account_name, email, root_namespace_id || null]
   );
 }
 
@@ -116,6 +121,8 @@ async function exchangeCodeForToken(code, callbackUrl) {
 
 let _accessToken = null;
 let _accessTokenExpiresAt = 0;
+let _pathRootHeader = null;      // cached path-root JSON string (team namespace)
+let _pathRootFetched = false;    // avoid re-fetching per call
 
 async function getAccessToken() {
   const now = Date.now();
@@ -144,19 +151,57 @@ async function getAccessToken() {
   return _accessToken;
 }
 
+// Fetch and cache the team-space root namespace ID so we can access
+// team folders (which live outside the user's personal namespace).
+async function getPathRootHeader() {
+  if (_pathRootFetched) return _pathRootHeader;
+  _pathRootFetched = true;
+  const settings = await getSettings();
+  let rootId = settings.root_namespace_id;
+  if (!rootId) {
+    // Fetch current account and store root namespace ID
+    try {
+      const token = await getAccessToken();
+      const acct = await axios.post(
+        "https://api.dropboxapi.com/2/users/get_current_account",
+        null,
+        { headers: { "Authorization": `Bearer ${token}` }, timeout: 15000 }
+      );
+      rootId = acct.data.root_info?.root_namespace_id;
+      if (rootId) {
+        await db.query(`UPDATE dropbox_settings SET root_namespace_id = $1 WHERE id = 1`, [rootId]);
+      }
+    } catch (e) {
+      console.warn("[dropbox] could not fetch root namespace:", e.message);
+    }
+  }
+  if (rootId) {
+    _pathRootHeader = JSON.stringify({ ".tag": "root", "root": String(rootId) });
+  }
+  return _pathRootHeader;
+}
+
+// Reset the cache — call after re-authorization since namespace may change
+function resetTokenCache() {
+  _accessToken = null;
+  _accessTokenExpiresAt = 0;
+  _pathRootHeader = null;
+  _pathRootFetched = false;
+}
+
 // Generic API call wrapper
 async function dropboxApi(endpoint, body, { method = "POST", contentType = "application/json" } = {}) {
   const token = await getAccessToken();
+  const pathRoot = await getPathRootHeader();
   const url = `https://api.dropboxapi.com/2/${endpoint}`;
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": contentType,
+  };
+  if (pathRoot) headers["Dropbox-API-Path-Root"] = pathRoot;
   try {
     const resp = await axios({
-      method,
-      url,
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": contentType,
-      },
-      data: body,
+      method, url, headers, data: body,
       timeout: 30000,
     });
     return resp.data;
@@ -198,22 +243,25 @@ async function listFolder(path) {
 async function uploadFile({ path, buffer, mode = "add", autorename = true }) {
   // Direct upload for files up to 150MB
   const token = await getAccessToken();
+  const pathRoot = await getPathRootHeader();
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/octet-stream",
+    "Dropbox-API-Arg": JSON.stringify({
+      path,
+      mode,
+      autorename,
+      mute: true,
+      strict_conflict: false,
+    }),
+  };
+  if (pathRoot) headers["Dropbox-API-Path-Root"] = pathRoot;
   try {
     const resp = await axios.post(
       "https://content.dropboxapi.com/2/files/upload",
       buffer,
       {
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/octet-stream",
-          "Dropbox-API-Arg": JSON.stringify({
-            path,
-            mode,
-            autorename,
-            mute: true,
-            strict_conflict: false,
-          }),
-        },
+        headers,
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
         timeout: 120000,
@@ -350,7 +398,9 @@ function toLastCommaFirst(name) {
 }
 
 // Try to find a client's Dropbox folder across configured branches.
+// Recurses up to MAX_SCAN_DEPTH into sub-branches (e.g. broker folders like "Law Patrick").
 // Returns {path, score, reason} for the best auto-match, or null if none scored high enough.
+const MAX_SCAN_DEPTH = 2;   // branch → sub-branch → client folder
 async function findClientFolder({ clientName, aNumber }) {
   const branches = getBranchRoots();
   if (!branches.length) return null;
@@ -361,69 +411,89 @@ async function findClientFolder({ clientName, aNumber }) {
 
   let best = null;
 
+  // Fast path: try exact direct hits first (only at level 1)
   for (const branch of branches) {
     const branchPath = branch.startsWith("/") ? branch : "/" + branch;
-
-    // Fast path: exact "Last, First" hit
-    const directPath = `${branchPath}/${targetLastFirst}`;
-    const meta = await getMetadata(directPath);
-    if (meta && meta[".tag"] === "folder") {
-      return { path: directPath, score: 100, reason: "exact Last, First match", branch: branchPath };
-    }
-
-    // Also try "First Last" direct
-    const firstLastPath = `${branchPath}/${clientName || ""}`.trim();
-    if (firstLastPath !== directPath) {
-      const meta2 = await getMetadata(firstLastPath);
-      if (meta2 && meta2[".tag"] === "folder") {
-        return { path: firstLastPath, score: 100, reason: "exact First Last match", branch: branchPath };
+    for (const candidateName of [targetLastFirst, targetLastFirst.toUpperCase(), clientName, (clientName || "").toUpperCase()]) {
+      if (!candidateName) continue;
+      const directPath = `${branchPath}/${candidateName}`;
+      const meta = await getMetadata(directPath);
+      if (meta && meta[".tag"] === "folder") {
+        return { path: directPath, score: 100, reason: `exact match: ${candidateName}`, branch: branchPath };
       }
     }
+  }
 
-    // Fuzzy: scan all subfolders and score each
-    const entries = await listFolder(branchPath);
-    if (!entries) continue;
+  // Recursive scan: walk each branch up to MAX_SCAN_DEPTH deep,
+  // scoring every folder as a potential client folder along the way.
+  async function scanFolder(path, depth) {
+    if (depth > MAX_SCAN_DEPTH) return;
+    const entries = await listFolder(path);
+    if (!entries) return;
     for (const entry of entries) {
       if (entry[".tag"] !== "folder") continue;
       const scored = scoreFolderMatch(entry.name, tokens, aDigits);
       if (scored.score > 0) {
-        const cand = { path: entry.path_display, score: scored.score, reason: scored.reason, branch: branchPath };
+        const cand = {
+          path: entry.path_display,
+          score: scored.score,
+          reason: `${scored.reason} @ depth ${depth}`,
+          branch: path,
+        };
         if (!best || cand.score > best.score) best = cand;
       }
+      // Recurse into this folder to check its children too.
+      // Skip recursion if we've already found a perfect match to save API calls.
+      if (depth < MAX_SCAN_DEPTH && (!best || best.score < 95)) {
+        await scanFolder(entry.path_display, depth + 1);
+      }
     }
+  }
+
+  for (const branch of branches) {
+    const branchPath = branch.startsWith("/") ? branch : "/" + branch;
+    await scanFolder(branchPath, 1);
+    if (best && best.score >= 95) break;  // stop at high-confidence match
   }
 
   // Only auto-select if we're confident
   return best && best.score >= 70 ? best : null;
 }
 
-// Return a ranked list of possible matches (including lower-scoring ones)
+// Return a ranked list of possible matches (recursive, including lower-scoring ones)
 // so the attorney can pick from a "did you mean" list.
-async function suggestClientFolders({ clientName, aNumber, minScore = 20, limit = 8 }) {
+async function suggestClientFolders({ clientName, aNumber, minScore = 20, limit = 12 }) {
   const branches = getBranchRoots();
   if (!branches.length) return [];
   const tokens = nameTokens(clientName);
   const aDigits = aNumberDigits(aNumber);
   const suggestions = [];
 
-  for (const branch of branches) {
-    const branchPath = branch.startsWith("/") ? branch : "/" + branch;
-    const entries = await listFolder(branchPath);
-    if (!entries) continue;
+  async function scanFolder(path, depth) {
+    if (depth > MAX_SCAN_DEPTH) return;
+    const entries = await listFolder(path);
+    if (!entries) return;
     for (const entry of entries) {
       if (entry[".tag"] !== "folder") continue;
-      // Give a small base score to every folder in the branch so we can
-      // still surface the full list if the attorney wants to browse.
       const scored = scoreFolderMatch(entry.name, tokens, aDigits);
-      const score = scored.score || 10;
-      suggestions.push({
-        path: entry.path_display,
-        name: entry.name,
-        branch: branchPath,
-        score,
-        reason: scored.reason || "in same branch",
-      });
+      const score = scored.score || (depth === MAX_SCAN_DEPTH ? 10 : 0);
+      if (score > 0) {
+        suggestions.push({
+          path: entry.path_display,
+          name: entry.name,
+          branch: path,
+          depth,
+          score,
+          reason: scored.reason || `in ${path}`,
+        });
+      }
+      if (depth < MAX_SCAN_DEPTH) await scanFolder(entry.path_display, depth + 1);
     }
+  }
+
+  for (const branch of branches) {
+    const branchPath = branch.startsWith("/") ? branch : "/" + branch;
+    await scanFolder(branchPath, 1);
   }
   return suggestions
     .filter(s => s.score >= minScore)
@@ -523,6 +593,8 @@ module.exports = {
   authorizeUrl,
   exchangeCodeForToken,
   getAccessToken,
+  getPathRootHeader,
+  resetTokenCache,
   dropboxApi,
   listFolder,
   uploadFile,
