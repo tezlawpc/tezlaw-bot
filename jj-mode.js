@@ -190,6 +190,7 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  Client dashboard at: https://tezlaw-bot.onrender.com/admin/clients",
       "  `/clients` — recent client list",
       "  `/client <name or A#>` — look up a specific client",
+      "  `/docs <name or A#>` — list a client's documents on file",
       "",
       "*📥 Intake Agent (auto-runs for new leads)*",
       "  Zara asks new inquirers structured questions across all channels.",
@@ -738,6 +739,61 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     } catch (err) {
       console.error("[JJ-Mode] /clients error:", err.message);
       return { handled: true, message: `❌ /clients error: ${err.message}` };
+    }
+  }
+
+  // ── /docs — Client document list ──────────────────
+  //
+  //   /docs <search>         — list documents for a client
+  //
+  const docsFirstLine = lower.split("\n", 1)[0].trim();
+  const docsMatch = docsFirstLine.match(/^\/docs?(?:\s+(.+))?\s*$/);
+  if (docsMatch) {
+    try {
+      const cp = require("./client-profiles");
+      const cd = require("./client-documents");
+      const query = (docsMatch[1] || "").trim().toLowerCase();
+      if (!query) {
+        const stats = await cd.getStorageStats();
+        const totalMB = (stats.total_bytes / 1024 / 1024).toFixed(1);
+        return { handled: true, message: `📁 *${stats.count}* documents on file (${totalMB} MB total)\n\nSearch a client's docs: \`/docs <name or A#>\`\nAll clients: https://tezlaw-bot.onrender.com/admin/clients` };
+      }
+
+      // Find matching client(s)
+      const all = await cp.aggregateClients();
+      const searchKey = query.replace(/[-\s]/g, "");
+      const matches = all.filter(c => {
+        const n = String(c.client_name || "").toLowerCase();
+        const a = String(c.a_number || "").toLowerCase().replace(/[-\s]/g, "");
+        return n.includes(query) || a.includes(searchKey);
+      });
+
+      if (!matches.length) return { handled: true, message: `📁 No clients matching *"${query}"*.` };
+      if (matches.length > 1) {
+        const lines = matches.slice(0, 8).map(c => `• ${c.client_name || "(unnamed)"}${c.a_number ? " · " + c.a_number : ""}`);
+        return { handled: true, message: `📁 Multiple clients match *"${query}"*:\n\n${lines.join("\n")}\n\nRefine search.` };
+      }
+
+      const c = matches[0];
+      const docs = await cd.listDocuments(c.key, c.a_number);
+      if (!docs.length) {
+        return { handled: true, message: `📁 *${c.client_name}* has no documents on file yet.\n\nUpload: https://tezlaw-bot.onrender.com/admin/clients/${c.key}` };
+      }
+      const totalBytes = docs.reduce((s, d) => s + (d.size_bytes || 0), 0);
+      const totalMB = (totalBytes / 1024 / 1024).toFixed(1);
+      const lines = docs.slice(0, 20).map(d => {
+        const cat = d.category ? ` · _${d.category}_` : "";
+        const sizeMB = (d.size_bytes / 1024 / 1024).toFixed(1);
+        return `• ${d.filename} (${sizeMB} MB)${cat}`;
+      });
+      const more = docs.length > 20 ? `\n\n_...and ${docs.length - 20} more._` : "";
+      return {
+        handled: true,
+        message: `📁 *${c.client_name}* — ${docs.length} document${docs.length === 1 ? "" : "s"} (${totalMB} MB):\n\n${lines.join("\n")}${more}\n\nFull profile: https://tezlaw-bot.onrender.com/admin/clients/${c.key}`,
+      };
+    } catch (err) {
+      console.error("[JJ-Mode] /docs error:", err.message);
+      return { handled: true, message: `❌ /docs error: ${err.message}` };
     }
   }
 
