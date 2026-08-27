@@ -370,6 +370,228 @@ function renderClientDetail(client, { documents = [] } = {}) {
 
     ${require("./client-documents").renderDocumentsSection({ clientKey: client.key, documents, aNumber: client.a_number })}
 
+    <!-- Dropbox Documents section (lazy-loaded via JS) -->
+    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;" id="dropbox-section">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+        <h3 style="margin:0; color:#0C1C36;">📦 Dropbox <span id="dbx-count" style="color:#888; font-weight:normal;"></span></h3>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" onclick="dbxToggleUpload()" id="dbx-upload-btn" style="background:#0061FF; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; display:none;">+ Upload to Dropbox</button>
+          <button type="button" onclick="dbxChangeFolder()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">📁 Change folder</button>
+          <button type="button" onclick="dbxRefresh(true)" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🔄 Refresh</button>
+        </div>
+      </div>
+      <div id="dbx-folder-info" style="font-size:12px; color:#666; margin-bottom:10px;"></div>
+
+      <!-- Upload form (hidden) -->
+      <div id="dbx-upload-form" style="display:none; background:#f5f9ff; padding:15px; border-radius:4px; margin-bottom:12px; border:1px dashed #0061FF;">
+        <div id="dbx-dropzone"
+             ondragover="dbxDragOver(event)" ondragleave="dbxDragLeave(event)" ondrop="dbxDropFile(event)"
+             onclick="document.getElementById('dbx-file-input').click()"
+             style="border:2px dashed #0061FF; padding:20px; border-radius:6px; text-align:center; background:white; margin-bottom:12px; cursor:pointer;">
+          <div style="font-size:36px; margin-bottom:8px;">📦</div>
+          <div><strong>Drop a file here or click to browse</strong></div>
+          <div style="font-size:12px; color:#666; margin-top:4px;">Uploads directly to this client's Dropbox folder. Max 25 MB.</div>
+          <input type="file" id="dbx-file-input" style="display:none;" onchange="dbxHandleFileSelected(this.files[0])">
+          <div id="dbx-selected" style="margin-top:8px; font-size:13px; color:#0C1C36;"></div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button type="button" onclick="dbxUpload()" id="dbx-upload-do-btn" style="background:#0061FF; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">📤 Upload to Dropbox</button>
+          <button type="button" onclick="dbxToggleUpload()" style="background:#eee; color:#333; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Cancel</button>
+          <span id="dbx-upload-status" style="font-size:13px;"></span>
+        </div>
+      </div>
+
+      <div id="dbx-status" style="padding:20px; text-align:center; color:#666;">Loading Dropbox files…</div>
+      <div id="dbx-files" style="display:none;">
+        <table style="width:100%; font-size:13px;">
+          <thead>
+            <tr style="border-bottom:1px solid #eee;">
+              <th></th>
+              <th style="text-align:left;">Filename</th>
+              <th style="text-align:left;">Size</th>
+              <th style="text-align:left;">Modified</th>
+              <th style="text-align:left;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="dbx-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      const DBX_CLIENT_KEY = ${JSON.stringify(client.key)};
+      let dbxSelectedFile = null;
+
+      function dbxIconFor(name) {
+        const n = (name || "").toLowerCase();
+        if (n.endsWith(".pdf")) return "📄";
+        if (/\\.(jpg|jpeg|png|gif|webp|heic)$/.test(n)) return "🖼️";
+        if (/\\.(docx?|txt|md|rtf)$/.test(n)) return "📝";
+        if (/\\.(xlsx?|csv)$/.test(n)) return "📊";
+        if (/\\.(mp4|mov|avi)$/.test(n)) return "🎬";
+        if (/\\.(mp3|wav|m4a)$/.test(n)) return "🎵";
+        if (/\\.(zip|rar|7z)$/.test(n)) return "🗜️";
+        return "📎";
+      }
+      function dbxFmtSize(n) {
+        if (n < 1024) return n + " B";
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+        return (n / 1024 / 1024).toFixed(1) + " MB";
+      }
+      function dbxEscape(s) { return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+      async function dbxRefresh(fresh) {
+        const status = document.getElementById("dbx-status");
+        const filesDiv = document.getElementById("dbx-files");
+        const countEl = document.getElementById("dbx-count");
+        const folderInfo = document.getElementById("dbx-folder-info");
+        const uploadBtn = document.getElementById("dbx-upload-btn");
+        status.style.display = "";
+        status.textContent = "Loading Dropbox files…";
+        filesDiv.style.display = "none";
+        try {
+          const resp = await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/dropbox/files" + (fresh ? "?fresh=1" : ""));
+          const data = await resp.json();
+          if (!data.ok) {
+            status.innerHTML = '<span style="color:#c00;">❌ ' + dbxEscape(data.error || "Failed to load") + '</span>' +
+              (data.error && data.error.includes("not authorized") ? '<br><br><a href="/admin/dropbox/setup" style="color:#0061FF;">→ Connect Dropbox first</a>' : "");
+            return;
+          }
+          if (!data.resolved || !data.folder) {
+            status.innerHTML = '<span style="color:#ff9800;">⚠️ No matching Dropbox folder found for this client.</span><br>' +
+              '<span style="font-size:12px; color:#666;">Zara searched configured branches for a folder named like "' +
+              dbxEscape(${JSON.stringify(client.client_name || "")}) + '".</span><br><br>' +
+              '<button type="button" onclick="dbxChangeFolder()" style="background:#0061FF; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Set folder manually</button>';
+            countEl.textContent = "";
+            uploadBtn.style.display = "none";
+            return;
+          }
+          folderInfo.innerHTML = '📁 <code>' + dbxEscape(data.folder) + '</code>' + (data.cached ? ' <span style="color:#888;">(cached)</span>' : '');
+          countEl.textContent = "(" + (data.files || []).length + ")";
+          uploadBtn.style.display = "";
+          if (data.folder_missing) {
+            status.innerHTML = '<span style="color:#ff9800;">⚠️ Folder path is stored but doesn\\'t exist in Dropbox: ' + dbxEscape(data.folder) + '</span>';
+            return;
+          }
+          const files = data.files || [];
+          if (!files.length) {
+            status.innerHTML = '<span style="color:#888;">Folder is empty. Upload to add files.</span>';
+            return;
+          }
+          // Render files
+          const tbody = document.getElementById("dbx-tbody");
+          tbody.innerHTML = files.map(f =>
+            '<tr>' +
+              '<td style="width:30px; text-align:center; font-size:18px;">' + dbxIconFor(f.name) + '</td>' +
+              '<td><a href="/admin/clients/' + encodeURIComponent(DBX_CLIENT_KEY) + '/dropbox/download?path=' + encodeURIComponent(f.path) + '" target="_blank" style="color:#0C1C36; text-decoration:none; font-weight:600;">' + dbxEscape(f.name) + '</a></td>' +
+              '<td style="font-size:12px; color:#666; white-space:nowrap;">' + dbxFmtSize(f.size) + '</td>' +
+              '<td style="font-size:12px; color:#666; white-space:nowrap;">' + (f.server_modified ? new Date(f.server_modified).toLocaleDateString() : "-") + '</td>' +
+              '<td style="white-space:nowrap;">' +
+                '<a href="/admin/clients/' + encodeURIComponent(DBX_CLIENT_KEY) + '/dropbox/download?path=' + encodeURIComponent(f.path) + '" target="_blank" style="color:#0061FF; font-size:13px;">📥</a>' +
+                ' &nbsp; ' +
+                '<a href="#" onclick="dbxDelete(' + JSON.stringify(f.path).replace(/"/g,"&quot;") + ', ' + JSON.stringify(f.name).replace(/"/g,"&quot;") + '); return false;" style="color:#c00; font-size:13px;">🗑️</a>' +
+              '</td>' +
+            '</tr>'
+          ).join("");
+          status.style.display = "none";
+          filesDiv.style.display = "";
+        } catch (e) {
+          status.innerHTML = '<span style="color:#c00;">❌ ' + dbxEscape(e.message) + '</span>';
+        }
+      }
+
+      function dbxToggleUpload() {
+        const f = document.getElementById("dbx-upload-form");
+        f.style.display = f.style.display === "none" ? "block" : "none";
+        if (f.style.display === "none") {
+          dbxSelectedFile = null;
+          document.getElementById("dbx-file-input").value = "";
+          document.getElementById("dbx-selected").textContent = "";
+          document.getElementById("dbx-upload-status").textContent = "";
+        }
+      }
+      function dbxHandleFileSelected(file) {
+        if (!file) return;
+        dbxSelectedFile = file;
+        const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+        document.getElementById("dbx-selected").textContent = "✓ " + file.name + " (" + sizeMB + " MB)";
+        if (file.size > 25 * 1024 * 1024) {
+          document.getElementById("dbx-selected").innerHTML += ' <span style="color:#c00;">— exceeds 25MB limit</span>';
+        }
+      }
+      function dbxDragOver(e) { e.preventDefault(); e.stopPropagation(); document.getElementById("dbx-dropzone").style.background = "#f0f8ff"; }
+      function dbxDragLeave(e) { e.preventDefault(); e.stopPropagation(); document.getElementById("dbx-dropzone").style.background = "white"; }
+      function dbxDropFile(e) {
+        e.preventDefault(); e.stopPropagation();
+        document.getElementById("dbx-dropzone").style.background = "white";
+        if (e.dataTransfer.files[0]) dbxHandleFileSelected(e.dataTransfer.files[0]);
+      }
+      async function dbxUpload() {
+        if (!dbxSelectedFile) { alert("Choose a file first"); return; }
+        if (dbxSelectedFile.size > 25 * 1024 * 1024) { alert("File exceeds 25MB limit"); return; }
+        const btn = document.getElementById("dbx-upload-do-btn");
+        const status = document.getElementById("dbx-upload-status");
+        btn.disabled = true;
+        status.textContent = "⏳ Uploading to Dropbox...";
+        status.style.color = "#666";
+        try {
+          const fd = new FormData();
+          const safeName = dbxSelectedFile.name.replace(/[^\\w.\\-]/g, "_");
+          const fileForUpload = safeName !== dbxSelectedFile.name
+            ? new File([dbxSelectedFile], safeName, { type: dbxSelectedFile.type })
+            : dbxSelectedFile;
+          fd.append("file", fileForUpload);
+          fd.append("original_filename", dbxSelectedFile.name);
+          const resp = await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/dropbox/upload", { method: "POST", body: fd });
+          const data = await resp.json();
+          if (data.ok) {
+            status.textContent = "✅ Uploaded";
+            status.style.color = "#4CAF50";
+            setTimeout(() => { dbxToggleUpload(); dbxRefresh(true); }, 700);
+          } else {
+            btn.disabled = false;
+            status.textContent = "❌ " + (data.error || "Upload failed");
+            status.style.color = "#c00";
+          }
+        } catch (e) {
+          btn.disabled = false;
+          status.textContent = "❌ " + e.message;
+          status.style.color = "#c00";
+        }
+      }
+      async function dbxDelete(path, name) {
+        if (!confirm("Delete " + name + " from Dropbox?\\n\\nThis DELETES the actual file in Dropbox. It cannot be undone.")) return;
+        try {
+          const resp = await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/dropbox/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "path=" + encodeURIComponent(path),
+          });
+          const data = await resp.json();
+          if (data.ok) dbxRefresh(true);
+          else alert("❌ " + (data.error || "Delete failed"));
+        } catch (e) { alert("❌ " + e.message); }
+      }
+      async function dbxChangeFolder() {
+        const currentPath = document.getElementById("dbx-folder-info").textContent.trim().replace(/^📁\\s*/, "").replace(/\\s*\\(cached\\)$/, "");
+        const newPath = prompt("Enter the full Dropbox folder path for this client:\\n\\nExample: /Law ICAN Immigration/Kong, Xiangmin\\n\\nLeave blank to clear and re-auto-detect on next load.", currentPath || "");
+        if (newPath === null) return;
+        try {
+          const resp = await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/dropbox/mapping", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "path=" + encodeURIComponent(newPath.trim()),
+          });
+          const data = await resp.json();
+          if (data.ok) dbxRefresh(true);
+          else alert("❌ " + (data.error || "Failed"));
+        } catch (e) { alert("❌ " + e.message); }
+      }
+
+      // Load on page ready
+      dbxRefresh(false);
+    </script>
+
     <!-- Hearings history -->
     <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
