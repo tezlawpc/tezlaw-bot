@@ -736,6 +736,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   const historyActive = activeItem === "history" ? "active" : "";
   const indivActive = activeItem === "individual" ? "active" : "";
   const indivHistActive = activeItem === "individual-history" ? "active" : "";
+  const clientsActive = activeItem === "clients" ? "active" : "";
 
   return `<!DOCTYPE html>
 <html>
@@ -831,6 +832,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   </div>
   <a href="/admin/matters/" class="nav-item" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">⚖️</span><span>→ Matter Manager</span>
+  </a>
+  <a href="/admin/clients" class="nav-item ${clientsActive}" style="background:rgba(183,156,98,.08); ${clientsActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">👥</span><span>→ Client Profiles</span>
   </a>
   <a href="/admin/hearing/notes" class="nav-item ${notesActive}" style="background:rgba(183,156,98,.08); ${notesActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">📝</span><span>→ Master Hearing Notes</span>
