@@ -2196,6 +2196,53 @@ app.get("/admin/hearing/notes/history", (req, res) => res.redirect("/admin/heari
 app.post("/admin/hearing/notes/extract-document", docUpload.single("document"), handleExtract);
 app.post("/admin/hearing/notes/extract-i589", docUpload.single("i589"), handleExtract);
 
+// Bulk upload — same route-order rule (must beat /:id)
+app.get("/admin/hearing/notes/bulk-upload", (req, res) => {
+  const hn = require("./hearing-notes");
+  res.send(hn.renderBulkUploadPage());
+});
+
+// Create a hearing note directly from an extraction result (JSON body).
+// Called by the bulk upload page to bulk-create draft hearing notes without
+// requiring the attorney to re-enter every field.
+app.post("/admin/hearing/notes/create-from-extraction", async (req, res) => {
+  try {
+    const hn = require("./hearing-notes");
+    const extraction = req.body.extraction || {};
+    if (!extraction.client_name) {
+      return res.status(400).json({ ok: false, error: "Client name is required — the extraction didn't identify one. Open manually to fill it in." });
+    }
+    // Build a note object matching what saveNote expects. Extraction fields
+    // map directly to hearing_notes columns; missing ones default to null.
+    const note = {
+      client_name:      extraction.client_name || "",
+      a_number:         extraction.a_number || null,
+      client_language:  extraction.client_language || "en",
+      client_email:     extraction.client_email || null,
+      client_phone:     extraction.client_phone || null,
+      client_address:   extraction.client_address || null,
+      hearing_datetime: extraction.hearing_datetime || null,
+      hearing_type:     extraction.hearing_type || null,
+      case_type:        extraction.case_type || null,
+      judge_name:       extraction.judge_name || null,
+      dhs_attorney:     extraction.dhs_attorney || null,
+      next_hearing_date: extraction.next_hearing_date || null,
+      next_hearing_type: extraction.next_hearing_type || null,
+      raw_notes:        extraction.narrative_notes || "",
+      deadlines:        [],
+      applications_filed: [],
+      applications_pending: [],
+    };
+    // Save as draft — do NOT auto-generate paralegal/client summaries yet
+    // (they're for finalized hearings; drafts still need attorney review).
+    const noteId = await hn.saveNote(note, { generateSummaries: false });
+    res.json({ ok: true, note_id: noteId });
+  } catch (err) {
+    console.error("[bulk-create-from-extraction]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/admin/hearing/notes/:id", async (req, res) => {
   try {
     const hn = require("./hearing-notes");
