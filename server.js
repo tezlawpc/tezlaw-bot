@@ -2304,11 +2304,77 @@ app.get("/admin/clients", async (req, res) => {
 app.get("/admin/clients/:key", async (req, res) => {
   try {
     const cp = require("./client-profiles");
+    const cd = require("./client-documents");
     const client = await cp.getClientByKey(req.params.key);
-    res.send(cp.renderClientDetail(client));
+    let documents = [];
+    if (client) {
+      documents = await cd.listDocuments(client.key, client.a_number);
+    }
+    res.send(cp.renderClientDetail(client, { documents }));
   } catch (err) {
     console.error("[/admin/clients/:key]:", err.message);
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// Upload a document to a client's file
+app.post("/admin/clients/:key/documents", docUpload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "No file uploaded" });
+    const cp = require("./client-profiles");
+    const cd = require("./client-documents");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    const originalName = (req.body.original_filename || req.file.originalname || "file").trim();
+    const result = await cd.uploadDocument({
+      clientKey: client.key,
+      clientName: client.client_name,
+      aNumber: client.a_number,
+      filename: originalName,
+      mimeType: req.file.mimetype,
+      buffer: req.file.buffer,
+      category: (req.body.category || "").trim() || null,
+      description: (req.body.description || "").trim() || null,
+    });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[client docs upload]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Download a client document
+app.get("/admin/clients/:key/documents/:id/download", async (req, res) => {
+  try {
+    const cd = require("./client-documents");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).send("Invalid id");
+    const doc = await cd.getDocument(id);
+    if (!doc) return res.status(404).send("Not found");
+    res.setHeader("Content-Type", doc.mime_type || "application/octet-stream");
+    // Content-Disposition — safely encode filename for headers with special chars
+    const safe = String(doc.filename).replace(/["\\\r\n]/g, "_");
+    const encoded = encodeURIComponent(doc.filename);
+    res.setHeader("Content-Disposition", `attachment; filename="${safe}"; filename*=UTF-8''${encoded}`);
+    res.setHeader("Content-Length", doc.file_data.length);
+    res.end(doc.file_data);
+  } catch (err) {
+    console.error("[client docs download]:", err.message);
+    res.status(500).send(`Error: ${err.message}`);
+  }
+});
+
+// Delete a client document
+app.delete("/admin/clients/:key/documents/:id", async (req, res) => {
+  try {
+    const cd = require("./client-documents");
+    const id = parseInt(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+    const result = await cd.deleteDocument(id);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[client docs delete]:", err.message);
+    res.status(err.message.includes("not found") ? 404 : 500).json({ ok: false, error: err.message });
   }
 });
 
@@ -2900,6 +2966,15 @@ app.listen(PORT, async () => {
     console.log("✅ Individual hearing tables ready");
   } catch (e) {
     console.error("⚠️  Individual hearing init failed:", e.message);
+  }
+
+  // Initialize client documents table
+  try {
+    const cd = require("./client-documents");
+    await cd.initTable();
+    console.log("✅ Client documents table ready");
+  } catch (e) {
+    console.error("⚠️  Client documents init failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)
