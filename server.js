@@ -307,8 +307,25 @@ app.get("/admin/reminders", auth.requireRole("admin"), async (req, res) => {
 // Matter manager mounted BEFORE adminRouter so /admin/matters/* takes
 // precedence; otherwise Express would route those requests into the
 // general admin router (which has no /matters/* routes and would 404).
-app.use("/admin/matters", matterManagerRouter);
-app.use("/admin", adminRouter);
+//
+// Both are restricted to admin role only — they contain JJ's operational
+// tooling (intake, leads, prompts, autoposter, analytics, drip campaigns,
+// SOL tracking, etc.) that attorneys and paralegals don't need for their
+// case work. Attorneys use hearing notes + client profiles + the triage
+// dashboard as their entry points; they don't need the ops panel.
+//
+// Non-admins hitting /admin/ (the old operational dashboard) are redirected
+// to /admin/dashboard (the triage view) instead of seeing an Access Denied
+// page, since /admin/ is the "root" that users might land on by default.
+app.get("/admin/", (req, res, next) => {
+  if (req.user && req.user.r !== "admin") {
+    return res.redirect("/admin/dashboard");
+  }
+  next();
+});
+
+app.use("/admin/matters", auth.requireRole("admin"), matterManagerRouter);
+app.use("/admin", auth.requireRole("admin"), adminRouter);
 app.get("/admin", (req, res) => res.redirect("/admin/"));
 
 // ──────────────────────────────────────────────────────────────
