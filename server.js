@@ -2556,28 +2556,29 @@ app.get("/admin/dropbox/raw-account", async (req, res) => {
   try {
     const dbx = require("./dropbox-integration");
     const token = await dbx.getAccessToken();
-    // NOTE: use string "null" as body (not the null value) — Dropbox requires
-    // Content-Type: application/json but axios strips that header when data is null.
-    // Passing "null" as a string forces axios to send the header we set.
-    const resp = await axios.post(
-      "https://api.dropboxapi.com/2/users/get_current_account",
-      "null",
-      {
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        timeout: 15000,
-        transformRequest: [(data) => data],  // prevent axios from re-serializing
-      }
-    );
-    res.type("text/plain").send(JSON.stringify(resp.data, null, 2));
+    // Native fetch — axios keeps overriding Content-Type on this specific endpoint.
+    const resp = await fetch("https://api.dropboxapi.com/2/users/get_current_account", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: "null",
+    });
+    const text = await resp.text();
+    if (!resp.ok) {
+      return res.status(500).type("text/plain").send(
+        "Error: HTTP " + resp.status + "\n\nResponse body: " + text
+      );
+    }
+    // Pretty-print JSON
+    try {
+      res.type("text/plain").send(JSON.stringify(JSON.parse(text), null, 2));
+    } catch {
+      res.type("text/plain").send(text);
+    }
   } catch (err) {
-    const detail = err.response?.data || err.message;
-    res.status(500).type("text/plain").send(
-      "Error: " + err.message + "\n\nResponse status: " + (err.response?.status || "n/a") +
-      "\nResponse body: " + JSON.stringify(detail, null, 2)
-    );
+    res.status(500).type("text/plain").send("Error: " + err.message + "\n" + (err.stack || ""));
   }
 });
 
@@ -2727,22 +2728,20 @@ app.get("/admin/dropbox/callback", async (req, res) => {
     // Fetch account info for display + team namespace ID for team folder access
     let accountName = null, accountEmail = null, accountId = tokens.account_id || null, rootNamespaceId = null;
     try {
-      const acct = await axios.post(
-        "https://api.dropboxapi.com/2/users/get_current_account",
-        "null",
-        {
-          headers: {
-            "Authorization": `Bearer ${tokens.access_token}`,
-            "Content-Type": "application/json",
-          },
-          timeout: 10000,
-          transformRequest: [(data) => data],
-        }
-      );
-      accountName = acct.data.name?.display_name || null;
-      accountEmail = acct.data.email || null;
-      accountId = acct.data.account_id || accountId;
-      rootNamespaceId = acct.data.root_info?.root_namespace_id || null;
+      const acctResp = await fetch("https://api.dropboxapi.com/2/users/get_current_account", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${tokens.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: "null",
+      });
+      if (!acctResp.ok) throw new Error(`HTTP ${acctResp.status}`);
+      const acctData = await acctResp.json();
+      accountName = acctData.name?.display_name || null;
+      accountEmail = acctData.email || null;
+      accountId = acctData.account_id || accountId;
+      rootNamespaceId = acctData.root_info?.root_namespace_id || null;
     } catch (e) {
       console.warn("[dropbox callback] could not fetch account info:", e.message);
     }
