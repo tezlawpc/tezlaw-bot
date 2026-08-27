@@ -263,6 +263,81 @@ function normalizeName(s) {
     .trim();
 }
 
+// Split a name into tokens (words) for order-independent matching.
+// "Kong, Xiangmin - A249" → ["kong", "xiangmin"]  (A# skipped, single letters skipped)
+function nameTokens(s) {
+  const raw = String(s || "")
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")   // punctuation → space
+    .split(/\s+/)
+    .filter(Boolean);
+  // Drop tokens that are:
+  //   - Single letter (initial)
+  //   - Look like A# (start with 'a' + digits, or all digits)
+  //   - Common case-type words that would false-match
+  const STOPWORDS = new Set([
+    "asylum", "removal", "cancellation", "adjustment", "eoir", "uscis",
+    "immigration", "immigrant", "petition", "case", "file", "client",
+    "and", "the", "of", "for", "with", "aka", "dba",
+    "i589", "i485", "i130", "i130i485",
+    "mr", "mrs", "ms", "dr", "hon",
+    "jr", "sr", "ii", "iii", "iv",
+  ]);
+  return raw.filter(t => {
+    if (t.length < 2) return false;                    // initials
+    if (/^a?\d+$/.test(t)) return false;               // A-numbers or digit blobs
+    if (STOPWORDS.has(t)) return false;
+    return true;
+  });
+}
+
+// Extract only the digits from an A-number for tolerant substring matching
+function aNumberDigits(a) {
+  if (!a) return null;
+  const digits = String(a).replace(/[^\d]/g, "");
+  return digits.length >= 6 ? digits : null;
+}
+
+// Score a folder against a client. Returns {score, reason}.
+// Score >= 70 is "good enough to auto-select". Below that = suggest only.
+function scoreFolderMatch(folderName, clientTokens, aDigits) {
+  const folderTokens = nameTokens(folderName);
+  if (!folderTokens.length && !aDigits) return { score: 0, reason: null };
+
+  // A# match wins if present in either — very high signal.
+  if (aDigits) {
+    const folderDigits = String(folderName).replace(/[^\d]/g, "");
+    if (folderDigits && (folderDigits.includes(aDigits) || aDigits.includes(folderDigits))) {
+      return { score: 100, reason: `A# match (${aDigits.slice(-4)})` };
+    }
+  }
+
+  if (!clientTokens.length) return { score: 0, reason: null };
+
+  // How many client name tokens appear in the folder tokens?
+  const folderSet = new Set(folderTokens);
+  const matched = clientTokens.filter(t => folderSet.has(t));
+
+  if (matched.length === clientTokens.length) {
+    // Every part of the client's name is in the folder.
+    // "Kong Xiangmin" matches "Kong, Xiangmin", "Xiangmin Kong", "Kong Xiangmin - Asylum".
+    return { score: 95, reason: "full name match" };
+  }
+  if (matched.length >= 2) {
+    // Two-word match — likely the same person even if other parts differ.
+    return { score: 80, reason: `${matched.length}/${clientTokens.length} name parts match` };
+  }
+  if (matched.length === 1 && clientTokens.length === 1) {
+    // Single-word client name matches single-word folder — modest signal.
+    return { score: 60, reason: "single-word name match" };
+  }
+  if (matched.length === 1 && folderTokens.length <= 3) {
+    // Partial match in a short folder name — worth suggesting.
+    return { score: 50, reason: `partial: "${matched[0]}" found` };
+  }
+  return { score: 0, reason: null };
+}
+
 // Guess "Last, First" format from a client name that might be "First Last" or "Last, First"
 function toLastCommaFirst(name) {
   if (!name) return "";
@@ -275,38 +350,85 @@ function toLastCommaFirst(name) {
 }
 
 // Try to find a client's Dropbox folder across configured branches.
-// Returns the full Dropbox path (e.g. "/Law ICAN Immigration/Kong, Xiangmin") or null.
+// Returns {path, score, reason} for the best auto-match, or null if none scored high enough.
 async function findClientFolder({ clientName, aNumber }) {
   const branches = getBranchRoots();
   if (!branches.length) return null;
 
+  const tokens = nameTokens(clientName);
+  const aDigits = aNumberDigits(aNumber);
   const targetLastFirst = toLastCommaFirst(clientName);
-  const targetNorm = normalizeName(targetLastFirst);
-  const targetANorm = aNumber ? String(aNumber).toLowerCase().replace(/[^\w]/g, "") : null;
+
+  let best = null;
 
   for (const branch of branches) {
     const branchPath = branch.startsWith("/") ? branch : "/" + branch;
 
-    // First try direct hit: /<branch>/Last, First
+    // Fast path: exact "Last, First" hit
     const directPath = `${branchPath}/${targetLastFirst}`;
     const meta = await getMetadata(directPath);
-    if (meta && meta[".tag"] === "folder") return directPath;
+    if (meta && meta[".tag"] === "folder") {
+      return { path: directPath, score: 100, reason: "exact Last, First match", branch: branchPath };
+    }
 
-    // Otherwise, list all subfolders of the branch and fuzzy-match
+    // Also try "First Last" direct
+    const firstLastPath = `${branchPath}/${clientName || ""}`.trim();
+    if (firstLastPath !== directPath) {
+      const meta2 = await getMetadata(firstLastPath);
+      if (meta2 && meta2[".tag"] === "folder") {
+        return { path: firstLastPath, score: 100, reason: "exact First Last match", branch: branchPath };
+      }
+    }
+
+    // Fuzzy: scan all subfolders and score each
     const entries = await listFolder(branchPath);
     if (!entries) continue;
-
     for (const entry of entries) {
       if (entry[".tag"] !== "folder") continue;
-      const folderName = entry.name;
-      const folderNorm = normalizeName(folderName);
-      // Match if folder name contains client's normalized name, or A# appears
-      if (folderNorm === targetNorm) return entry.path_display;
-      if (targetNorm && folderNorm.includes(targetNorm)) return entry.path_display;
-      if (targetANorm && folderNorm.replace(/[^\w]/g, "").includes(targetANorm)) return entry.path_display;
+      const scored = scoreFolderMatch(entry.name, tokens, aDigits);
+      if (scored.score > 0) {
+        const cand = { path: entry.path_display, score: scored.score, reason: scored.reason, branch: branchPath };
+        if (!best || cand.score > best.score) best = cand;
+      }
     }
   }
-  return null;
+
+  // Only auto-select if we're confident
+  return best && best.score >= 70 ? best : null;
+}
+
+// Return a ranked list of possible matches (including lower-scoring ones)
+// so the attorney can pick from a "did you mean" list.
+async function suggestClientFolders({ clientName, aNumber, minScore = 20, limit = 8 }) {
+  const branches = getBranchRoots();
+  if (!branches.length) return [];
+  const tokens = nameTokens(clientName);
+  const aDigits = aNumberDigits(aNumber);
+  const suggestions = [];
+
+  for (const branch of branches) {
+    const branchPath = branch.startsWith("/") ? branch : "/" + branch;
+    const entries = await listFolder(branchPath);
+    if (!entries) continue;
+    for (const entry of entries) {
+      if (entry[".tag"] !== "folder") continue;
+      // Give a small base score to every folder in the branch so we can
+      // still surface the full list if the attorney wants to browse.
+      const scored = scoreFolderMatch(entry.name, tokens, aDigits);
+      const score = scored.score || 10;
+      suggestions.push({
+        path: entry.path_display,
+        name: entry.name,
+        branch: branchPath,
+        score,
+        reason: scored.reason || "in same branch",
+      });
+    }
+  }
+  return suggestions
+    .filter(s => s.score >= minScore)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
 }
 
 // Get cached mapping OR resolve fresh (and cache it)
@@ -320,8 +442,8 @@ async function resolveClientFolder({ clientKey, clientName, aNumber, forceRescan
     if (cached.rows[0]) return cached.rows[0].dropbox_path;
   }
 
-  const path = await findClientFolder({ clientName, aNumber });
-  if (path) {
+  const match = await findClientFolder({ clientName, aNumber });
+  if (match && match.path) {
     await db.query(
       `INSERT INTO client_dropbox_mapping (client_key, a_number, client_name, dropbox_path, resolved_by)
        VALUES ($1, $2, $3, $4, 'auto')
@@ -330,9 +452,9 @@ async function resolveClientFolder({ clientKey, clientName, aNumber, forceRescan
              resolved_at = NOW(),
              a_number = EXCLUDED.a_number,
              client_name = EXCLUDED.client_name`,
-      [clientKey, aNumber || null, clientName || null, path]
+      [clientKey, aNumber || null, clientName || null, match.path]
     );
-    return path;
+    return match.path;
   }
   return null;
 }
@@ -409,6 +531,7 @@ module.exports = {
   createFolder,
   getMetadata,
   findClientFolder,
+  suggestClientFolders,
   resolveClientFolder,
   setClientFolderMapping,
   clearClientFolderMapping,
