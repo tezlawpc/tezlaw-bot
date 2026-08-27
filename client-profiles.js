@@ -273,7 +273,7 @@ function renderClientList(clients) {
   });
 }
 
-function renderClientDetail(client) {
+function renderClientDetail(client, { documents = [] } = {}) {
   if (!client) {
     const body = `
       <div class="page-header">
@@ -367,6 +367,8 @@ function renderClientDetail(client) {
     </div>
 
     ${upcomingSection}
+
+    ${require("./client-documents").renderDocumentsSection({ clientKey: client.key, documents, aNumber: client.a_number })}
 
     <!-- Hearings history -->
     <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
