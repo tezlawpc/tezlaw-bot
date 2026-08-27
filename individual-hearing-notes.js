@@ -45,6 +45,7 @@ async function initTables() {
       client_language       TEXT DEFAULT 'en',
       client_email          TEXT,
       client_phone          TEXT,
+      client_address        TEXT,
       case_type             TEXT,
       hearing_date          TIMESTAMPTZ,
       judge_name            TEXT,
@@ -77,6 +78,7 @@ async function initTables() {
     "ADD COLUMN IF NOT EXISTS respondent_appearance TEXT",
     "ADD COLUMN IF NOT EXISTS next_hearing_date TIMESTAMPTZ",
     "ADD COLUMN IF NOT EXISTS next_hearing_type TEXT",
+    "ADD COLUMN IF NOT EXISTS client_address TEXT",
   ];
   for (const alter of alters) {
     try { await db.query(`ALTER TABLE individual_hearing_notes ${alter}`); }
@@ -208,6 +210,7 @@ Your job: extract as much structured content as possible. Return ONLY valid JSON
     "a_number": "A-Number if given (with or without dashes), else empty string",
     "client_email": "Client email address if listed anywhere in the doc, else empty string",
     "client_phone": "Client phone number if listed anywhere in the doc, else empty string",
+    "client_address": "Client's mailing address if listed anywhere in the doc (may be in caption, contact block, or biographical info), else empty string. Include street, city, state, ZIP.",
     "hearing_date": "Hearing date and time in ISO format YYYY-MM-DDTHH:MM if found (guess time if not stated). Empty string if not in doc.",
     "judge_name": "Immigration judge name if given, else empty string. Include honorific if present (e.g. 'Hon. Kevin Riley').",
     "court_location": "Court short name if given (e.g. 'Los Angeles Immigration Court'), else empty string",
@@ -333,6 +336,7 @@ Rules:
     a_number:              extracted.client_info.a_number              || "",
     client_email:          extracted.client_info.client_email          || "",
     client_phone:          extracted.client_info.client_phone          || "",
+    client_address:        extracted.client_info.client_address        || "",
     hearing_date:          extracted.client_info.hearing_date          || "",
     judge_name:            extracted.client_info.judge_name            || "",
     court_location:        extracted.client_info.court_location        || "",
@@ -744,6 +748,7 @@ async function saveIndividualNote(data, id = null) {
          hearing_summary_raw=$20,
          attorney_appearance=$22, respondent_appearance=$23,
          next_hearing_date=$24, next_hearing_type=$25,
+         client_address=$26,
          updated_at=NOW()
        WHERE id=$21 RETURNING id`,
       [
@@ -762,6 +767,7 @@ async function saveIndividualNote(data, id = null) {
         id,
         data.attorney_appearance || null, data.respondent_appearance || null,
         data.next_hearing_date || null, data.next_hearing_type || null,
+        data.client_address || null,
       ]
     );
     if (!r.rows[0]) throw new Error(`Individual hearing note ${id} not found`);
@@ -775,10 +781,10 @@ async function saveIndividualNote(data, id = null) {
        examinations, closing_argument, disposition, disposition_notes,
        next_action_deadline, hearing_summary_raw,
        attorney_appearance, respondent_appearance,
-       next_hearing_date, next_hearing_type)
+       next_hearing_date, next_hearing_type, client_address)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
              $11,$12::jsonb,$13,$14,$15::jsonb,$16,$17,$18,$19,$20,
-             $21,$22,$23,$24)
+             $21,$22,$23,$24,$25)
      RETURNING id`,
     [
       data.client_name, data.a_number || null, data.client_language || "en",
@@ -795,6 +801,7 @@ async function saveIndividualNote(data, id = null) {
       data.hearing_summary_raw || null,
       data.attorney_appearance || null, data.respondent_appearance || null,
       data.next_hearing_date || null, data.next_hearing_type || null,
+      data.client_address || null,
     ]
   );
   return { id: r.rows[0].id, updated: false };
@@ -963,6 +970,7 @@ function parseFormSubmission(body) {
     client_language: body.client_language || "en",
     client_email: (body.client_email || "").trim() || null,
     client_phone: (body.client_phone || "").trim() || null,
+    client_address: (body.client_address || "").trim() || null,
     case_type: (body.case_type || "").trim() || null,
     hearing_date: body.hearing_date || null,
     judge_name: (body.judge_name || "").trim() || null,
@@ -1118,6 +1126,8 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
             <select name="client_language">${langOptions}</select>
           </div>
         </div>
+        <label>Client mailing address</label>
+        <textarea name="client_address" rows="2" placeholder="Street, City, State, ZIP">${escapeHtml(prev.client_address || "")}</textarea>
         <div class="row">
           <div>
             <label>Case type</label>
@@ -1538,6 +1548,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
             a_number:              ci.a_number,
             client_email:          ci.client_email,
             client_phone:          ci.client_phone,
+            client_address:        ci.client_address,
             case_type:             ci.case_type,
             hearing_date:          ci.hearing_date,
             judge_name:            ci.judge_name,
