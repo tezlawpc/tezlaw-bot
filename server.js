@@ -2950,6 +2950,20 @@ app.post("/admin/clients/:key/dropbox/upload", docUpload.single("file"), async (
 });
 
 // Download a file from Dropbox (redirects to temporary link)
+// Return a Dropbox temporary link as JSON (used by exhibit link opener)
+app.get("/admin/dropbox/temp-link", async (req, res) => {
+  try {
+    const dbx = require("./dropbox-integration");
+    const filePath = req.query.path;
+    if (!filePath) return res.status(400).json({ ok: false, error: "Missing path" });
+    const link = await dbx.getTemporaryLink(filePath);
+    res.json({ ok: true, link });
+  } catch (err) {
+    console.error("[dropbox temp-link]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/admin/clients/:key/dropbox/download", async (req, res) => {
   try {
     const dbx = require("./dropbox-integration");
