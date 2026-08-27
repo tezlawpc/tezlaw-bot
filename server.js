@@ -83,6 +83,26 @@ const auth = require("./auth");
 auth.mount(app);
 app.use("/admin", auth.requireAdminAuth);
 
+// ── Role-based access control ─────────────────────────────
+// Admin-only feature areas (JJ only): Dropbox OAuth setup, email
+// configuration, user management, system utilities. Regular hearing/client
+// work is open to attorneys + paralegals via the individual route mounts.
+app.use("/admin/dropbox/setup",     auth.requireRole("admin"));
+app.use("/admin/dropbox/callback",  auth.requireRole("admin"));
+app.use("/admin/dropbox/diag",      auth.requireRole("admin"));
+app.use("/admin/dropbox/raw-account", auth.requireRole("admin"));
+app.use("/admin/email-setup",       auth.requireRole("admin"));
+app.use("/admin/init-drafts",       auth.requireRole("admin"));
+app.use("/admin/inbound-log",       auth.requireRole("admin"));
+
+// Hearing note WRITE actions require admin or attorney role.
+// Attach a router-level middleware that only fires on write methods.
+app.use("/admin/hearing", (req, res, next) => {
+  if (req.method === "GET") return next();   // reads allowed for paralegals + viewers
+  // WRITE operations require admin or attorney
+  return auth.requireRole("admin", "attorney")(req, res, next);
+});
+
 // ── Admin panel ───────────────────────────────────────────
 // Matter manager mounted BEFORE adminRouter so /admin/matters/* takes
 // precedence; otherwise Express would route those requests into the
