@@ -2376,15 +2376,12 @@ app.post("/admin/hearing/notes", async (req, res) => {
 
     if (action === "save") {
       const saved = await hn.saveNote(parsed, { generateSummaries: true });
-      return res.send(hn.renderNoteForm({
-        generated: {
-          id: saved.id,
-          paralegal_summary: saved.paralegal_summary,
-          client_summary: saved.client_summary,
-        },
-        saved: true,
-        prev: parsed,
-      }));
+      // Redirect to the edit URL so:
+      //  - the form comes back in EDIT mode (subsequent saves UPDATE, not INSERT)
+      //  - browser refresh or back button won't create a duplicate row
+      //  - a dedup flag surfaces when we merged with an existing note instead of creating a new one
+      const flag = saved.was_duplicate ? "&merged=1" : "";
+      return res.redirect(`/admin/hearing/notes/${saved.id}?saved=1${flag}`);
     }
 
     // Preview only — generate summaries but don't save to DB
@@ -2417,6 +2414,30 @@ app.post("/admin/hearing/notes/extract-i589", docUpload.single("i589"), handleEx
 app.get("/admin/hearing/notes/bulk-upload", (req, res) => {
   const hn = require("./hearing-notes");
   res.send(hn.renderBulkUploadPage());
+});
+
+// Duplicate finder + merger
+app.get("/admin/hearing/notes/duplicates", async (req, res) => {
+  try {
+    const hn = require("./hearing-notes");
+    const groups = await hn.findDuplicates();
+    res.send(hn.renderDuplicatesPage(groups));
+  } catch (err) {
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/hearing/notes/merge-duplicates", async (req, res) => {
+  try {
+    const hn = require("./hearing-notes");
+    const keepId = parseInt(req.body.keep_id);
+    const deleteIds = (req.body.delete_ids || []).map(x => parseInt(x)).filter(Boolean);
+    if (!keepId || !deleteIds.length) return res.status(400).json({ ok: false, error: "Missing keep_id or delete_ids" });
+    const result = await hn.mergeDuplicates(keepId, deleteIds);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // Create a hearing note directly from an extraction result (JSON body).
@@ -2467,10 +2488,13 @@ app.get("/admin/hearing/notes/:id", async (req, res) => {
     if (!id) return res.status(400).send("Invalid id");
     const note = await hn.getNote(id);
     if (!note) return res.status(404).send(`<h1>Not found</h1><p><a href="/admin/hearing/history">← Back to history</a></p>`);
+    const revisions = await hn.getRevisions(id).catch(() => []);
     res.send(hn.renderNoteForm({
       noteId: id,
       prev: note,
       saved: req.query.saved === "1",
+      merged: req.query.merged === "1",
+      revisions,
     }));
   } catch (err) {
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
@@ -2491,7 +2515,7 @@ app.post("/admin/hearing/notes/:id", async (req, res) => {
         prev: { ...parsed, id },
       }));
     }
-    await hn.updateNote(id, parsed);
+    await hn.updateNote(id, parsed, { user: req.user });
     if (req.body.action === "update_and_regenerate") {
       await hn.generateAndSaveSummariesForMaster(id);
     }
@@ -4348,6 +4372,15 @@ app.listen(PORT, async () => {
     console.log("✅ Audit log table ready");
   } catch (e) {
     console.error("⚠️  Audit log init failed:", e.message);
+  }
+
+  // Initialize hearing note revision table
+  try {
+    const hn = require("./hearing-notes");
+    await hn.initRevisionTable();
+    console.log("✅ Hearing note revisions table ready");
+  } catch (e) {
+    console.error("⚠️  Revision table init failed:", e.message);
   }
 
   // Initialize hearing reminders + start cron
