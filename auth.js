@@ -70,6 +70,13 @@ const PERMISSIONS = {
   "email.setup":          ["admin"],
   "system.settings":      ["admin"],
 
+  // Matter Manager and its operational tooling (intake, leads, prompts,
+  // autoposter, analytics, drip campaigns, SOL tracking) — JJ only.
+  // Attorneys and paralegals do their case work through hearing notes +
+  // client profiles, not through JJ's operational panel.
+  "matters.access":       ["admin"],
+  "admin_panel.access":   ["admin"],
+
   // Hearing notes — attorneys write, paralegals + viewers can read
   "hearings.write":       ["admin", "attorney"],
   "hearings.read":        ["admin", "attorney", "paralegal", "viewer"],
@@ -85,9 +92,6 @@ const PERMISSIONS = {
   // Hearing notices — everyone can view + send
   "notices.send":         ["admin", "attorney", "paralegal"],
   "notices.read":         ["admin", "attorney", "paralegal", "viewer"],
-
-  // Matter manager — all authed
-  "matters.access":       ["admin", "attorney", "paralegal", "viewer"],
 };
 
 function hasPermission(user, permKey) {
