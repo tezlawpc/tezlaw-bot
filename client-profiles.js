@@ -110,6 +110,38 @@ async function aggregateClients() {
   for (const row of masterRes.rows) ingest(row, "master");
   for (const row of indivRes.rows) ingest(row, "individual");
 
+  // Also include clients that exist in client_dropbox_mapping but have no
+  // hearing notes yet — these were bulk-imported from Dropbox.
+  try {
+    const dbxRes = await db.query(`
+      SELECT client_key, client_name, a_number, dropbox_path, resolved_at
+      FROM client_dropbox_mapping
+      WHERE resolved_by = 'bulk_import'
+    `);
+    for (const row of dbxRes.rows) {
+      if (clients[row.client_key]) continue;  // already have from hearing notes
+      clients[row.client_key] = {
+        key: row.client_key,
+        client_name: row.client_name,
+        a_number: row.a_number,
+        client_email: null,
+        client_phone: null,
+        client_address: null,
+        client_language: null,
+        case_types: new Set(),
+        judges: new Set(),
+        hearings: [],
+        upcoming: [],
+        deadlines: [],
+        sent_count: 0,
+        dropbox_only: true,
+        dropbox_path: row.dropbox_path,
+      };
+    }
+  } catch (e) {
+    console.warn("[client-profiles] Dropbox-only client aggregation failed:", e.message);
+  }
+
   // Convert to array, materialize sets, compute summary metrics
   const results = Object.values(clients).map(c => {
     // Sort hearings by date desc for display
@@ -166,6 +198,9 @@ function renderClientList(clients) {
     const nextUp = c.upcoming[0]
       ? `<span style="background:#B79C62; color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Next: ${escapeHtml(c.upcoming[0].type)} ${new Date(c.upcoming[0].date).toLocaleDateString()}</span>`
       : "";
+    const sourceTag = c.dropbox_only
+      ? `<span style="background:#0061FF; color:white; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;" title="Imported from Dropbox — no hearings recorded yet">📦 Dropbox</span>`
+      : "";
     return `
     <tr class="c-row"
         data-name="${escapeAttr((c.client_name || "").toLowerCase())}"
@@ -173,8 +208,9 @@ function renderClientList(clients) {
         data-email="${escapeAttr((c.client_email || "").toLowerCase())}"
         data-lang="${escapeAttr(c.client_language || "")}"
         data-hasupcoming="${c.upcoming.length ? "yes" : "no"}"
-        data-casetypes="${escapeAttr(c.case_types.join(" | ").toLowerCase())}">
-      <td><a href="/admin/clients/${c.key}" style="color:#B79C62; font-weight:600;">${escapeHtml(c.client_name || "(unnamed)")}</a></td>
+        data-casetypes="${escapeAttr(c.case_types.join(" | ").toLowerCase())}"
+        data-source="${c.dropbox_only ? "dropbox" : "hearings"}">
+      <td><a href="/admin/clients/${c.key}" style="color:#B79C62; font-weight:600;">${escapeHtml(c.client_name || "(unnamed)")}</a>${sourceTag}</td>
       <td>${escapeHtml(c.a_number || "")}</td>
       <td>${escapeHtml(c.case_types.slice(0, 2).join(", ") || "-")}${c.case_types.length > 2 ? " +" + (c.case_types.length - 2) : ""}</td>
       <td>${c.hearing_count}</td>
@@ -183,14 +219,15 @@ function renderClientList(clients) {
       <td>${nextUp}</td>
       <td><a href="/admin/clients/${c.key}" style="color:#0C1C36;">view →</a></td>
     </tr>`;
-  }).join("") : `<tr><td colspan="8" style="text-align:center; color:#888;">No clients yet. Create a hearing note to populate this list.</td></tr>`;
+  }).join("") : `<tr><td colspan="8" style="text-align:center; color:#888;">No clients yet. Create a hearing note or bulk import from Dropbox to populate this list.</td></tr>`;
 
   const totalUpcoming = clients.filter(c => c.upcoming.length).length;
+  const totalDropboxOnly = clients.filter(c => c.dropbox_only).length;
 
   const body = `
     <div class="page-header">
       <h1>👥 Client Profiles</h1>
-      <div style="font-size:13px; color:#666;">${clients.length} clients · ${totalUpcoming} with upcoming hearings</div>
+      <div style="font-size:13px; color:#666;">${clients.length} clients · ${totalUpcoming} with upcoming hearings${totalDropboxOnly ? ` · ${totalDropboxOnly} from Dropbox` : ""}</div>
     </div>
 
     <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #eee;">
@@ -220,8 +257,13 @@ function renderClientList(clients) {
         <div>
           <button type="button" onclick="clearFilters()" style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Clear</button>
         </div>
+        <div style="border-left:1px solid #eee; padding-left:12px;">
+          <button type="button" onclick="bulkImportDropbox(true)" title="Preview what would be imported (no changes)" style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">👁 Preview import</button>
+          <button type="button" onclick="bulkImportDropbox(false)" title="Scan Dropbox and add all client folders as clients" style="padding:9px 14px; background:#0061FF; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">📥 Import from Dropbox</button>
+        </div>
       </div>
       <div id="row-count" style="margin-top:10px; font-size:13px; color:#666;">Showing ${clients.length} client${clients.length === 1 ? "" : "s"}</div>
+      <div id="import-status" style="margin-top:10px; font-size:13px;"></div>
     </div>
 
     <table>
@@ -263,6 +305,36 @@ function renderClientList(clients) {
         document.getElementById("filter-upcoming").value = "";
         document.getElementById("filter-lang").value = "";
         filterRows();
+      }
+      async function bulkImportDropbox(dryRun) {
+        const status = document.getElementById("import-status");
+        status.innerHTML = '<span style="color:#666;">⏳ Scanning Dropbox for client folders (this may take 20-90 seconds depending on folder count)…</span>';
+        try {
+          const url = "/admin/clients/bulk-import-dropbox" + (dryRun ? "?dry=1" : "");
+          const resp = await fetch(url, { method: "POST" });
+          const data = await resp.json();
+          if (!data.ok) {
+            status.innerHTML = '<span style="color:#c00;">❌ ' + (data.error || "Import failed") + '</span>';
+            return;
+          }
+          const label = dryRun ? "Would import" : "✅ Imported";
+          const foundList = (data.imported || []).slice(0, 20).map(c =>
+            '<li style="font-family:monospace; font-size:12px;">' +
+              (c.client_name || "(no name)") + (c.a_number ? " · " + c.a_number : "") +
+              '<span style="color:#888;"> — ' + c.dropbox_path + '</span>' +
+            '</li>'
+          ).join("");
+          const more = data.imported.length > 20 ? '<li style="color:#888;">…and ' + (data.imported.length - 20) + ' more</li>' : "";
+          status.innerHTML =
+            '<div style="background:#f0f8ff; padding:12px; border-radius:4px; border-left:3px solid #0061FF;">' +
+              '<strong>' + label + ' ' + data.imported.length + ' clients</strong>' +
+              (data.errors && data.errors.length ? '<div style="color:#c00; font-size:12px; margin-top:4px;">' + data.errors.length + ' errors — check console</div>' : "") +
+              '<ul style="margin:8px 0 0 0; padding-left:20px;">' + foundList + more + '</ul>' +
+              (!dryRun ? '<div style="margin-top:10px;"><a href="/admin/clients" style="background:#0061FF; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:13px;">🔄 Reload page to see them</a></div>' : '') +
+            '</div>';
+        } catch (e) {
+          status.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
+        }
       }
     </script>`;
 
