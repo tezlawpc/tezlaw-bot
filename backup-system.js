@@ -470,7 +470,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
       <thead>
         <tr><th>Filename</th><th>Uploaded</th><th>Size</th><th>Actions</th></tr>
       </thead>
-      <tbody>${rows || '<tr><td colspan="4" style="text-align:center; color:#888; padding:20px;">No backups yet. Click "Backup now" or wait for tomorrow\\'s 3 AM run.</td></tr>'}</tbody>
+      <tbody>${rows || '<tr><td colspan="4" style="text-align:center; color:#888; padding:20px;">No backups yet. Click "Backup now" or wait for the daily 3 AM run.</td></tr>'}</tbody>
     </table>
 
     <div id="preview-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10000; align-items:center; justify-content:center;">
