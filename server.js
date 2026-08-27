@@ -3501,6 +3501,215 @@ app.post("/admin/hearing/individual/extract-exhibits", docUpload.single("exhibit
   }
 });
 
+// Server-side auto-match: uses Claude Sonnet to intelligently match
+// exhibit descriptions to actual Dropbox filenames.
+// Much more accurate than token-overlap because Claude understands context
+// (e.g. "Passport" matches "SCAN_2024_01_15_travel_doc.pdf" when needed).
+//
+// Body: { client_name, a_number, exhibits: [{idx, description, eoir_submission}, ...] }
+// Returns: { matches: [{idx, dropbox_file_path, confidence, reason}, ...] }
+app.post("/admin/hearing/individual/dropbox/auto-match", async (req, res) => {
+  try {
+    const dbx = require("./dropbox-integration");
+    const clientName = String(req.body.client_name || "").trim();
+    const aNumber = String(req.body.a_number || "").trim();
+    const exhibits = Array.isArray(req.body.exhibits) ? req.body.exhibits : [];
+
+    if (!clientName && !aNumber) {
+      return res.status(400).json({ ok: false, error: "Client name or A-Number required" });
+    }
+    if (!exhibits.length) {
+      return res.status(400).json({ ok: false, error: "No exhibits provided" });
+    }
+
+    // Resolve client's Dropbox root folder
+    const clientKey = dbx.makeClientKey({ clientName, aNumber });
+    const rootFolder = await dbx.resolveClientFolder({
+      clientKey, clientName, aNumber,
+    });
+    if (!rootFolder) {
+      return res.status(404).json({
+        ok: false,
+        error: `No Dropbox folder found for ${clientName || aNumber}. Link one via the client profile first.`,
+      });
+    }
+
+    // Recursively fetch ALL files under client folder (up to 4 levels deep,
+    // covers structure like /CLIENT/EOR-1/subfolder/file.pdf)
+    console.log(`[auto-match] Scanning Dropbox folder: ${rootFolder}`);
+    const allFiles = await gatherAllFilesRecursive(dbx, rootFolder, 4);
+    console.log(`[auto-match] Found ${allFiles.length} files under ${rootFolder}`);
+
+    if (!allFiles.length) {
+      return res.json({
+        ok: true,
+        folder: rootFolder,
+        matches: [],
+        total_files: 0,
+        warning: "No files found in Dropbox folder. Verify the folder has documents.",
+      });
+    }
+
+    // Build the prompt for Claude
+    const filesList = allFiles.map((f, i) => {
+      const rel = f.path.startsWith(rootFolder) ? f.path.substring(rootFolder.length) : f.path;
+      return `${i + 1}. ${f.name}   [path: ${rel}]`;
+    }).join("\n");
+
+    const exhibitsList = exhibits.map((e, i) =>
+      `${i + 1}. ${e.description}${e.eoir_submission ? ` (EOIR: ${e.eoir_submission})` : ""}`
+    ).join("\n");
+
+    const prompt = `You are matching legal exhibit descriptions to Dropbox filenames for an immigration hearing.
+
+The exhibits (from an EOIR exhibit list) are:
+${exhibitsList}
+
+The available Dropbox files (in the client's folder) are:
+${filesList}
+
+Your task: For EACH exhibit, identify the SINGLE best matching file from the list above.
+
+Matching guidance:
+- "Passport" matches files with "passport", "travel doc", or "identity" in the name/path
+- "I-589" or "asylum application" matches "i589", "asylum", or "application" files
+- "NTA" or "Notice to Appear" matches "NTA", "notice to appear", "I-862" files
+- "Birth Certificate" matches "birth cert", "BC", "acta de nacimiento"
+- "Country Conditions" matches files with the country name + reports, or "HRW", "State Dept", "human rights"
+- "Medical Records" matches files with "medical", "hospital", "clinic", "psych", "MD"
+- "Declaration" matches files with "decl", "statement", "affidavit"
+- "Translation" matches files with "translation", "cert. translation", "trans"
+- If a file is in a subfolder matching the EOIR submission (e.g. "EOR-1"), that's a stronger signal
+- Files may have client's name prefixed (e.g. "Kong_passport.pdf") — the client's name is not part of the exhibit description
+- Files may be in Chinese, Spanish, or other languages — match by meaning if possible
+- If NO file reasonably matches an exhibit, return null for that exhibit's match
+
+Respond with ONLY a JSON array (no preamble, no code fences). Each entry represents one exhibit in the order given above:
+
+[
+  {"exhibit_num": 1, "file_num": 3, "confidence": "high", "reason": "Filename directly says 'passport'"},
+  {"exhibit_num": 2, "file_num": null, "confidence": "none", "reason": "No I-589 file found"},
+  {"exhibit_num": 3, "file_num": 7, "confidence": "medium", "reason": "File in EOR-1 folder matches submission ref"}
+]
+
+Confidence levels:
+- "high": obvious match, filename directly maps to description
+- "medium": likely match based on partial words, folder context, or inference
+- "low": possible but ambiguous — attorney should verify
+- "none": no reasonable match found
+
+Do not repeat the same file for multiple exhibits unless it truly represents multiple exhibit numbers.`;
+
+    const anthResp = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      {
+        model: "claude-sonnet-4-6",
+        max_tokens: 4000,
+        messages: [{ role: "user", content: prompt }],
+      },
+      {
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        timeout: 60000,
+      }
+    );
+
+    const rawText = anthResp.data.content?.[0]?.text?.trim() || "[]";
+    const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+    let claudeMatches;
+    try {
+      claudeMatches = JSON.parse(cleaned);
+    } catch (e) {
+      console.error("[auto-match] Claude returned unparseable JSON:", cleaned.substring(0, 500));
+      return res.status(500).json({
+        ok: false,
+        error: "Claude returned invalid JSON. Try again or match manually.",
+      });
+    }
+
+    // Map Claude's response back to exhibit indices with actual file paths
+    const matches = exhibits.map((exhibit, i) => {
+      const claudeMatch = claudeMatches.find(m => m.exhibit_num === i + 1);
+      if (!claudeMatch || claudeMatch.file_num == null) {
+        return {
+          idx: exhibit.idx,
+          description: exhibit.description,
+          dropbox_file_path: null,
+          matched_filename: null,
+          confidence: "none",
+          reason: claudeMatch?.reason || "No match returned",
+        };
+      }
+      const file = allFiles[claudeMatch.file_num - 1];
+      if (!file) {
+        return {
+          idx: exhibit.idx,
+          description: exhibit.description,
+          dropbox_file_path: null,
+          matched_filename: null,
+          confidence: "none",
+          reason: "Claude referenced a file that doesn't exist",
+        };
+      }
+      return {
+        idx: exhibit.idx,
+        description: exhibit.description,
+        dropbox_file_path: file.path,
+        matched_filename: file.name,
+        confidence: claudeMatch.confidence || "medium",
+        reason: claudeMatch.reason || "",
+      };
+    });
+
+    res.json({
+      ok: true,
+      folder: rootFolder,
+      total_files: allFiles.length,
+      matches,
+    });
+  } catch (err) {
+    console.error("[auto-match]:", err.message, err.response?.data || "");
+    const msg = err.response?.data?.error?.message || err.message;
+    res.status(500).json({ ok: false, error: msg });
+  }
+});
+
+// Recursively gather all files under a Dropbox folder, up to maxDepth deep.
+// Uses listFolder for each level (respects team namespace via dropbox-integration).
+async function gatherAllFilesRecursive(dbx, path, maxDepth) {
+  const collected = [];
+  async function walk(currentPath, depth) {
+    if (depth > maxDepth) return;
+    let entries;
+    try {
+      entries = await dbx.listFolder(currentPath);
+    } catch (e) {
+      console.warn(`[gather] listFolder(${currentPath}) failed:`, e.message);
+      return;
+    }
+    if (!entries) return;
+    for (const entry of entries) {
+      if (entry[".tag"] === "file") {
+        collected.push({
+          name: entry.name,
+          path: entry.path_display,
+          size: entry.size,
+          parent: currentPath,
+          parentName: currentPath.split("/").pop() || currentPath,
+        });
+      } else if (entry[".tag"] === "folder" && depth < maxDepth) {
+        await walk(entry.path_display, depth + 1);
+      }
+    }
+  }
+  await walk(path, 1);
+  return collected;
+}
+
 // Browse a client's Dropbox folder from within the individual hearing form —
 // used by the "Browse Dropbox → add as exhibits" modal picker.
 // Query params: client_name, a_number (either or both), optional subfolder path.
