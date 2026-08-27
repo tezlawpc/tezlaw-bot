@@ -1,0 +1,575 @@
+// ============================================================
+//  TEZ LAW P.C. — AUTHENTICATION
+//  ─────────────────────────────────────────────────────────
+//  Session-based auth for the /admin/* area.
+//
+//  Design notes:
+//  - Passwords hashed with scrypt (Node's built-in, no deps)
+//  - Sessions are signed HMAC tokens stored in an httpOnly cookie
+//  - Session secret self-generates and persists in DB (survives restarts)
+//  - No users → app enters "setup mode": first visit to any /admin/*
+//    redirects to /admin/setup so JJ can create the first admin user
+//  - After users exist, all /admin/* except /login /logout /setup requires
+//    a valid session cookie
+//  - No external session store needed (cookie carries the payload)
+//
+//  Bootstrap sequence on fresh Render deploy:
+//    1. First /admin/* request → redirected to /admin/setup
+//    2. JJ enters username + password → account created + logged in
+//    3. All future access requires login
+// ============================================================
+
+const crypto = require("crypto");
+const db = require("./db");
+
+const COOKIE_NAME = "tezauth";
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;              // 24h default
+const SESSION_TTL_LONG_MS = 30 * 24 * 60 * 60 * 1000;   // 30d "remember me"
+
+let _sessionSecret = null;
+
+// ── Schema ───────────────────────────────────────────────
+
+async function initTables() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id             SERIAL PRIMARY KEY,
+      username       TEXT UNIQUE NOT NULL,
+      password_hash  TEXT NOT NULL,
+      full_name      TEXT,
+      role           TEXT DEFAULT 'admin',
+      created_at     TIMESTAMPTZ DEFAULT NOW(),
+      last_login_at  TIMESTAMPTZ,
+      disabled       BOOLEAN DEFAULT FALSE
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS session_settings (
+      id      INT PRIMARY KEY DEFAULT 1,
+      secret  TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+}
+
+// ── Session secret (self-generating) ─────────────────────
+
+async function getSessionSecret() {
+  if (_sessionSecret) return _sessionSecret;
+  await initTables();
+  const r = await db.query(`SELECT secret FROM session_settings WHERE id = 1`);
+  if (r.rows[0]) {
+    _sessionSecret = r.rows[0].secret;
+    return _sessionSecret;
+  }
+  const newSecret = crypto.randomBytes(32).toString("hex");
+  await db.query(
+    `INSERT INTO session_settings (id, secret) VALUES (1, $1) ON CONFLICT (id) DO NOTHING`,
+    [newSecret]
+  );
+  // In case a race put a different value in — re-read
+  const again = await db.query(`SELECT secret FROM session_settings WHERE id = 1`);
+  _sessionSecret = again.rows[0].secret;
+  return _sessionSecret;
+}
+
+// ── Password hashing ─────────────────────────────────────
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPasswordHash(password, stored) {
+  try {
+    const [salt, hash] = String(stored).split(":");
+    if (!salt || !hash) return false;
+    const check = crypto.scryptSync(password, salt, 64).toString("hex");
+    const a = Buffer.from(check, "hex");
+    const b = Buffer.from(hash, "hex");
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+// ── Signed tokens ────────────────────────────────────────
+
+async function makeToken(payload) {
+  const secret = await getSessionSecret();
+  const data = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sig = crypto.createHmac("sha256", secret).update(data).digest("base64url");
+  return `${data}.${sig}`;
+}
+
+async function verifyToken(token) {
+  try {
+    if (!token || typeof token !== "string") return null;
+    const parts = token.split(".");
+    if (parts.length !== 2) return null;
+    const [data, sig] = parts;
+    const secret = await getSessionSecret();
+    const expectedSig = crypto.createHmac("sha256", secret).update(data).digest("base64url");
+    if (sig.length !== expectedSig.length) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) return null;
+    const payload = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
+    if (payload.exp && Date.now() > payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+// ── Cookie helpers ───────────────────────────────────────
+
+function parseCookies(req) {
+  const header = req.headers.cookie;
+  if (!header) return {};
+  const out = {};
+  header.split(";").forEach(pair => {
+    const idx = pair.indexOf("=");
+    if (idx < 0) return;
+    const k = pair.substring(0, idx).trim();
+    const v = pair.substring(idx + 1).trim();
+    try { out[k] = decodeURIComponent(v); } catch { out[k] = v; }
+  });
+  return out;
+}
+
+function setSessionCookie(res, token, ttlMs) {
+  const secure = process.env.NODE_ENV === "production" ||
+                 process.env.RENDER === "true" ||
+                 process.env.RENDER_EXTERNAL_URL;
+  const maxAge = Math.floor(ttlMs / 1000);
+  const parts = [
+    `${COOKIE_NAME}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${maxAge}`,
+  ];
+  if (secure) parts.push("Secure");
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function clearSessionCookie(res) {
+  const secure = process.env.NODE_ENV === "production" ||
+                 process.env.RENDER === "true" ||
+                 process.env.RENDER_EXTERNAL_URL;
+  const parts = [
+    `${COOKIE_NAME}=`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    "Max-Age=0",
+  ];
+  if (secure) parts.push("Secure");
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+// ── User CRUD ────────────────────────────────────────────
+
+async function countUsers() {
+  await initTables();
+  const r = await db.query(`SELECT COUNT(*)::int AS n FROM admin_users WHERE disabled = FALSE`);
+  return r.rows[0].n;
+}
+
+async function findUserByUsername(username) {
+  await initTables();
+  const r = await db.query(
+    `SELECT id, username, password_hash, full_name, role, disabled
+     FROM admin_users
+     WHERE LOWER(username) = LOWER($1) AND disabled = FALSE`,
+    [username.trim()]
+  );
+  return r.rows[0] || null;
+}
+
+async function createUser({ username, password, fullName, role = "admin" }) {
+  await initTables();
+  const clean = String(username || "").trim().toLowerCase();
+  if (!clean || !/^[a-z0-9_.-]{2,32}$/.test(clean)) {
+    throw new Error("Username must be 2–32 chars, letters/numbers/._- only");
+  }
+  if (!password || password.length < 8) {
+    throw new Error("Password must be at least 8 characters");
+  }
+  const hash = hashPassword(password);
+  const r = await db.query(
+    `INSERT INTO admin_users (username, password_hash, full_name, role)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, username, full_name, role`,
+    [clean, hash, fullName || null, role]
+  );
+  return r.rows[0];
+}
+
+async function updateLastLogin(userId) {
+  await db.query(`UPDATE admin_users SET last_login_at = NOW() WHERE id = $1`, [userId]);
+}
+
+async function listUsers() {
+  await initTables();
+  const r = await db.query(
+    `SELECT id, username, full_name, role, created_at, last_login_at, disabled
+     FROM admin_users
+     ORDER BY created_at ASC`
+  );
+  return r.rows;
+}
+
+async function deleteUser(id) {
+  await db.query(`DELETE FROM admin_users WHERE id = $1`, [id]);
+}
+
+async function changePassword(userId, newPassword) {
+  if (!newPassword || newPassword.length < 8) {
+    throw new Error("Password must be at least 8 characters");
+  }
+  const hash = hashPassword(newPassword);
+  await db.query(`UPDATE admin_users SET password_hash = $1 WHERE id = $2`, [hash, userId]);
+}
+
+// ── Middleware ───────────────────────────────────────────
+
+// Middleware for /admin/* — bypass for login/setup/logout,
+// enforce authentication for everything else. If no users exist yet,
+// redirect all /admin/* traffic to /admin/setup so JJ can create the
+// first admin account.
+async function requireAdminAuth(req, res, next) {
+  try {
+    // Whitelist — auth-adjacent endpoints must be reachable without auth
+    const path = req.path;
+    const WHITELIST = new Set(["/login", "/logout", "/setup", "/whoami-early"]);
+    if (WHITELIST.has(path)) return next();
+
+    // Bootstrap: if no admin users exist, force setup
+    const n = await countUsers();
+    if (n === 0) {
+      if (req.method === "GET") return res.redirect("/admin/setup");
+      return res.status(403).json({ ok: false, error: "Setup required. Visit /admin/setup." });
+    }
+
+    // Check session cookie
+    const cookies = parseCookies(req);
+    const token = cookies[COOKIE_NAME];
+    const payload = await verifyToken(token);
+    if (!payload || !payload.uid) {
+      if (req.method === "GET") {
+        const nextUrl = encodeURIComponent(req.originalUrl || req.url);
+        return res.redirect(`/admin/login?next=${nextUrl}`);
+      }
+      return res.status(401).json({ ok: false, error: "Not authenticated. Please log in." });
+    }
+    req.user = payload;
+    next();
+  } catch (err) {
+    console.error("[auth middleware]:", err.message);
+    res.status(500).send(`<h1>Auth error</h1><p>${err.message}</p>`);
+  }
+}
+
+// ── Login flow handlers ──────────────────────────────────
+
+function renderLoginPage({ error = null, nextUrl = "", username = "" } = {}) {
+  const nextField = nextUrl ? `<input type="hidden" name="next" value="${escapeHtml(nextUrl)}">` : "";
+  return `<!doctype html>
+<html><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — Tez Law Firm</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f7f7f7; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: white; padding: 40px 40px 30px 40px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: min(400px, 90vw); }
+    h1 { color: #0C1C36; margin: 0 0 6px 0; font-size: 24px; text-align: center; }
+    .brand { text-align: center; color: #B79C62; font-size: 12px; letter-spacing: 2px; margin-bottom: 24px; font-weight: 600; }
+    label { display: block; margin: 12px 0 4px 0; color: #333; font-size: 13px; font-weight: 600; }
+    input[type="text"], input[type="password"] { width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 15px; box-sizing: border-box; }
+    input:focus { outline: none; border-color: #B79C62; }
+    .row { display: flex; align-items: center; margin: 14px 0; font-size: 13px; color: #555; }
+    .row input { margin-right: 6px; }
+    button { width: 100%; padding: 12px; background: #0C1C36; color: white; border: none; border-radius: 4px; font-size: 15px; cursor: pointer; margin-top: 16px; font-weight: 600; }
+    button:hover { background: #1a3057; }
+    .err { background: #fee; color: #900; padding: 10px 12px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; border-left: 3px solid #c00; }
+    .foot { text-align: center; color: #999; font-size: 11px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">TEZ LAW P.C.</div>
+    <h1>Sign in</h1>
+    ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
+    <form method="POST" action="/admin/login">
+      ${nextField}
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" value="${escapeHtml(username)}" autofocus required autocomplete="username">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required autocomplete="current-password">
+      <div class="row">
+        <input type="checkbox" id="remember" name="remember" value="1">
+        <label for="remember" style="margin:0; font-weight:normal; cursor:pointer;">Remember me for 30 days</label>
+      </div>
+      <button type="submit">Sign in</button>
+    </form>
+    <div class="foot">Protect your rights — we handle the rest.</div>
+  </div>
+</body></html>`;
+}
+
+function renderSetupPage({ error = null, username = "", fullName = "" } = {}) {
+  return `<!doctype html>
+<html><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Setup — Tez Law Firm</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f7f7f7; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+    .card { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: min(500px, 90vw); }
+    h1 { color: #0C1C36; margin: 0 0 6px 0; font-size: 26px; }
+    .brand { color: #B79C62; font-size: 12px; letter-spacing: 2px; margin-bottom: 16px; font-weight: 600; }
+    .intro { background: #fdf7f0; border-left: 3px solid #B79C62; padding: 12px 14px; border-radius: 4px; margin: 16px 0 20px 0; font-size: 13px; color: #555; }
+    label { display: block; margin: 12px 0 4px 0; color: #333; font-size: 13px; font-weight: 600; }
+    input[type="text"], input[type="password"] { width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 15px; box-sizing: border-box; }
+    input:focus { outline: none; border-color: #B79C62; }
+    .hint { font-size: 11px; color: #888; margin-top: 3px; }
+    button { width: 100%; padding: 12px; background: #0C1C36; color: white; border: none; border-radius: 4px; font-size: 15px; cursor: pointer; margin-top: 20px; font-weight: 600; }
+    .err { background: #fee; color: #900; padding: 10px 12px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; border-left: 3px solid #c00; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">TEZ LAW P.C.</div>
+    <h1>Create the first admin account</h1>
+    <div class="intro">
+      Zara doesn't have any admin users yet. Create the first one below — this account will have full access.
+      You can add more users later via the Admin Users page.
+    </div>
+    ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
+    <form method="POST" action="/admin/setup">
+      <label for="fullName">Full name</label>
+      <input type="text" id="fullName" name="full_name" value="${escapeHtml(fullName)}" placeholder="e.g. JJ Zhang" required>
+
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" value="${escapeHtml(username)}" placeholder="e.g. jj" required autocomplete="username">
+      <div class="hint">2–32 characters. Letters, numbers, dot, dash, underscore only.</div>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required autocomplete="new-password">
+      <div class="hint">Minimum 8 characters. Use something strong.</div>
+
+      <label for="password2">Confirm password</label>
+      <input type="password" id="password2" name="password2" required autocomplete="new-password">
+
+      <button type="submit">Create admin account</button>
+    </form>
+  </div>
+</body></html>`;
+}
+
+// ── Route registration ───────────────────────────────────
+
+function mount(app) {
+  // Login page
+  app.get("/admin/login", async (req, res) => {
+    // If already logged in, bounce them home
+    const cookies = parseCookies(req);
+    const payload = await verifyToken(cookies[COOKIE_NAME]);
+    if (payload && payload.uid) return res.redirect(req.query.next || "/admin/hearing/notes");
+    // If no users exist, redirect to setup
+    const n = await countUsers();
+    if (n === 0) return res.redirect("/admin/setup");
+    res.send(renderLoginPage({ nextUrl: req.query.next || "" }));
+  });
+
+  app.post("/admin/login", async (req, res) => {
+    try {
+      const username = String(req.body.username || "").trim();
+      const password = String(req.body.password || "");
+      const remember = !!req.body.remember;
+      const nextUrl = String(req.body.next || "/admin/hearing/notes");
+      if (!username || !password) {
+        return res.send(renderLoginPage({ error: "Enter both username and password.", nextUrl, username }));
+      }
+      const user = await findUserByUsername(username);
+      if (!user || !verifyPasswordHash(password, user.password_hash)) {
+        return res.send(renderLoginPage({ error: "Wrong username or password.", nextUrl, username }));
+      }
+      const ttl = remember ? SESSION_TTL_LONG_MS : SESSION_TTL_MS;
+      const token = await makeToken({
+        uid: user.id,
+        u: user.username,
+        n: user.full_name,
+        r: user.role,
+        exp: Date.now() + ttl,
+      });
+      setSessionCookie(res, token, ttl);
+      await updateLastLogin(user.id);
+      const safeNext = (nextUrl.startsWith("/admin/") || nextUrl === "/admin") ? nextUrl : "/admin/hearing/notes";
+      res.redirect(safeNext);
+    } catch (err) {
+      console.error("[login]:", err.message);
+      res.status(500).send(renderLoginPage({ error: "Login error: " + err.message }));
+    }
+  });
+
+  app.post("/admin/logout", (req, res) => {
+    clearSessionCookie(res);
+    res.redirect("/admin/login");
+  });
+  app.get("/admin/logout", (req, res) => {
+    clearSessionCookie(res);
+    res.redirect("/admin/login");
+  });
+
+  // Setup — only accessible while no admin users exist
+  app.get("/admin/setup", async (req, res) => {
+    const n = await countUsers();
+    if (n > 0) return res.redirect("/admin/login");
+    res.send(renderSetupPage());
+  });
+
+  app.post("/admin/setup", async (req, res) => {
+    try {
+      const n = await countUsers();
+      if (n > 0) return res.redirect("/admin/login");
+      const username = String(req.body.username || "").trim();
+      const fullName = String(req.body.full_name || "").trim();
+      const password = String(req.body.password || "");
+      const password2 = String(req.body.password2 || "");
+      if (password !== password2) {
+        return res.send(renderSetupPage({ error: "Passwords don't match.", username, fullName }));
+      }
+      const user = await createUser({ username, password, fullName, role: "admin" });
+      const token = await makeToken({
+        uid: user.id, u: user.username, n: user.full_name, r: user.role,
+        exp: Date.now() + SESSION_TTL_MS,
+      });
+      setSessionCookie(res, token, SESSION_TTL_MS);
+      await updateLastLogin(user.id);
+      res.redirect("/admin/hearing/notes");
+    } catch (err) {
+      console.error("[setup]:", err.message);
+      res.send(renderSetupPage({ error: err.message, username: req.body.username, fullName: req.body.full_name }));
+    }
+  });
+
+  // Current user info (for chrome to show "Logged in as X | Logout")
+  app.get("/admin/whoami", async (req, res) => {
+    const cookies = parseCookies(req);
+    const payload = await verifyToken(cookies[COOKIE_NAME]);
+    if (!payload || !payload.uid) return res.json({ ok: false, authenticated: false });
+    res.json({ ok: true, authenticated: true, username: payload.u, name: payload.n, role: payload.r });
+  });
+
+  // User management page (JJ only)
+  app.get("/admin/users", async (req, res) => {
+    try {
+      const users = await listUsers();
+      const rows = users.map(u => `
+        <tr>
+          <td>${escapeHtml(u.username)}</td>
+          <td>${escapeHtml(u.full_name || "")}</td>
+          <td>${escapeHtml(u.role)}</td>
+          <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "never"}</td>
+          <td>${new Date(u.created_at).toLocaleDateString()}</td>
+          <td>
+            ${req.user && req.user.uid !== u.id
+              ? `<form method="POST" action="/admin/users/${u.id}/delete" style="display:inline;" onsubmit="return confirm('Delete user ${escapeHtml(u.username)}?');"><button type="submit" style="background:#c00; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Delete</button></form>`
+              : `<span style="color:#888; font-size:11px;">(you)</span>`}
+          </td>
+        </tr>
+      `).join("");
+      const hearingNotes = require("./hearing-notes");
+      const body = `
+        <div class="page-header"><h1>👤 Admin Users</h1></div>
+        <table>
+          <thead>
+            <tr><th>Username</th><th>Full name</th><th>Role</th><th>Last login</th><th>Created</th><th></th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="background:white; padding:20px; border-radius:4px; margin-top:20px; border:1px solid #eee;">
+          <h3 style="margin:0 0 12px 0;">Add new user</h3>
+          <form method="POST" action="/admin/users/new" style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr auto; gap:8px; align-items:end;">
+            <div><label style="font-size:12px; color:#666;">Full name</label><input type="text" name="full_name" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:3px;"></div>
+            <div><label style="font-size:12px; color:#666;">Username</label><input type="text" name="username" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:3px;"></div>
+            <div><label style="font-size:12px; color:#666;">Password (8+ chars)</label><input type="password" name="password" required minlength="8" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:3px;"></div>
+            <div><label style="font-size:12px; color:#666;">Role</label><select name="role" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:3px;"><option value="admin">admin</option><option value="staff">staff</option></select></div>
+            <button type="submit" style="background:#0C1C36; color:white; padding:9px 14px; border:none; border-radius:3px; cursor:pointer;">+ Add</button>
+          </form>
+        </div>
+        <div style="background:#fdf7f0; padding:15px; border-radius:4px; margin-top:20px; font-size:13px; color:#666; border-left:3px solid #B79C62;">
+          <strong>Change your password:</strong> <form method="POST" action="/admin/users/change-password" style="display:inline-flex; gap:6px; align-items:center; margin-left:8px;">
+            <input type="password" name="new_password" placeholder="new password" required minlength="8" style="padding:6px 10px; border:1px solid #ccc; border-radius:3px;">
+            <button type="submit" style="background:#B79C62; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:12px;">Change</button>
+          </form>
+        </div>`;
+      res.send(hearingNotes.renderAdminChrome({ title: "Admin Users", body, activeItem: "users" }));
+    } catch (err) {
+      res.status(500).send(`<h1>Error</h1><p>${escapeHtml(err.message)}</p>`);
+    }
+  });
+
+  app.post("/admin/users/new", async (req, res) => {
+    try {
+      await createUser({
+        username: req.body.username,
+        password: req.body.password,
+        fullName: req.body.full_name,
+        role: req.body.role || "admin",
+      });
+      res.redirect("/admin/users");
+    } catch (err) {
+      res.status(400).send(`<h1>Error</h1><p>${escapeHtml(err.message)}</p><p><a href="/admin/users">← Back</a></p>`);
+    }
+  });
+
+  app.post("/admin/users/:id/delete", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (!id) return res.status(400).send("Invalid id");
+      // Don't allow deleting yourself
+      if (req.user && req.user.uid === id) {
+        return res.status(400).send(`<h1>Cannot delete your own account</h1><p><a href="/admin/users">← Back</a></p>`);
+      }
+      await deleteUser(id);
+      res.redirect("/admin/users");
+    } catch (err) {
+      res.status(500).send(`<h1>Error</h1><p>${escapeHtml(err.message)}</p>`);
+    }
+  });
+
+  app.post("/admin/users/change-password", async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).send("Not authenticated");
+      await changePassword(req.user.uid, req.body.new_password);
+      // Sign out and require re-login with new password
+      clearSessionCookie(res);
+      res.redirect("/admin/login");
+    } catch (err) {
+      res.status(400).send(`<h1>Error</h1><p>${escapeHtml(err.message)}</p><p><a href="/admin/users">← Back</a></p>`);
+    }
+  });
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+module.exports = {
+  initTables,
+  requireAdminAuth,
+  mount,
+  createUser,
+  findUserByUsername,
+  countUsers,
+  hashPassword,
+  verifyPasswordHash,
+  parseCookies,
+  COOKIE_NAME,
+};
