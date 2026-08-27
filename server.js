@@ -76,6 +76,13 @@ app.use(express.urlencoded({ extended: true, limit: "25mb", parameterLimit: 5000
 app.use(express.text({ type: "text/xml" }));
 app.use(cookieParser());
 
+// ── Authentication ─────────────────────────────────────────
+// Mount BEFORE any /admin/* handlers so login/logout/setup work,
+// and the requireAdminAuth middleware protects everything else.
+const auth = require("./auth");
+auth.mount(app);
+app.use("/admin", auth.requireAdminAuth);
+
 // ── Admin panel ───────────────────────────────────────────
 // Matter manager mounted BEFORE adminRouter so /admin/matters/* takes
 // precedence; otherwise Express would route those requests into the
@@ -3826,6 +3833,19 @@ app.listen(PORT, async () => {
     console.log("✅ Hearing notices table ready");
   } catch (e) {
     console.error("⚠️  Hearing notices init failed:", e.message);
+  }
+
+  // Initialize auth tables
+  try {
+    await auth.initTables();
+    const userCount = await auth.countUsers();
+    if (userCount === 0) {
+      console.log("🔐 Auth: NO ADMIN USERS YET — visit /admin/setup to create the first account");
+    } else {
+      console.log(`🔐 Auth ready — ${userCount} admin user(s) registered`);
+    }
+  } catch (e) {
+    console.error("⚠️  Auth init failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)
