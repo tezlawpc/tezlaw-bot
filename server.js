@@ -776,6 +776,16 @@ app.post("/admin/deadlines/run-alerts", auth.requireRole("admin"), async (req, r
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// Backfill: create merits evidence deadlines for ALL individual hearings with
+// future dates. Also useful after upgrading to this feature.
+app.post("/admin/deadlines/backfill-merits", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    const results = await deadlines.backfillMeritsEvidenceDeadlines();
+    res.json({ ok: true, results });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // ── Court Motion Draft Generator ─────────────────────
 app.get("/admin/motions", async (req, res) => {
   try {
