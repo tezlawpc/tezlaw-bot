@@ -282,7 +282,7 @@ app.get("/admin/backups/diagnose", auth.requireRole("admin"), async (req, res) =
 // actually running on Render. Helps diagnose "changes didn't deploy" issues.
 app.get("/version", (req, res) => {
   res.json({
-    version: "v4-voice-audit-2026-08-28",
+    version: "v5-deadline-tracker-2026-08-28",
     features: {
       auto_match_tool_use: true,
       hearing_note_dedup: true,
@@ -312,6 +312,133 @@ app.get("/admin/dashboard", async (req, res) => {
     console.error("[dashboard]:", err.message);
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
   }
+});
+
+// ── Deadline Tracker ─────────────────────────────
+app.get("/admin/deadlines", async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    const hearingNotes = require("./hearing-notes");
+    const filters = {
+      client_name: req.query.client || undefined,
+      assigned_to: req.query.assigned || undefined,
+      source_type: req.query.source || undefined,
+      status: req.query.status || undefined,
+    };
+    const list = await deadlines.listDeadlines(filters);
+
+    // Get all users for the assign dropdown
+    let users = [];
+    try {
+      const result = await db.query(`SELECT id, name FROM users WHERE active = true ORDER BY name`);
+      users = result.rows;
+    } catch {
+      // fallback: users table may not exist or have different columns
+      try {
+        const result = await db.query(`SELECT id, name FROM users ORDER BY name LIMIT 20`);
+        users = result.rows;
+      } catch { users = []; }
+    }
+
+    const renderFn = deadlines.renderDeadlinesPage(req.user, filters);
+    const body = await renderFn(list, users);
+
+    res.send(hearingNotes.renderAdminChrome({ title: "Deadline Tracker", body, activeItem: "deadlines" }));
+  } catch (err) {
+    console.error("[deadlines page]:", err);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><pre>${err.stack || ""}</pre>`);
+  }
+});
+
+app.post("/admin/deadlines", express.json(), async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    const id = await deadlines.createManual({
+      client_name: req.body.client_name,
+      a_number: req.body.a_number,
+      due_date: req.body.due_date,
+      description: req.body.description,
+      priority: req.body.priority,
+      assigned_to: req.body.assigned_to ? parseInt(req.body.assigned_to, 10) : null,
+      notes: req.body.notes,
+    });
+    try {
+      const audit = require("./audit-log");
+      await audit.log({ user_id: req.user?.id, action: "deadline.create_manual", target_type: "deadline", target_id: id, changes: req.body });
+    } catch { /* silent */ }
+    res.json({ ok: true, id });
+  } catch (err) {
+    console.error("[deadline create]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/deadlines/:id/complete", async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    await deadlines.markComplete(parseInt(req.params.id, 10), req.user?.id);
+    try {
+      const audit = require("./audit-log");
+      await audit.log({ user_id: req.user?.id, action: "deadline.complete", target_type: "deadline", target_id: parseInt(req.params.id, 10) });
+    } catch { /* silent */ }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/deadlines/:id/reopen", async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    await deadlines.reopen(parseInt(req.params.id, 10));
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/deadlines/:id/snooze", express.json(), async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    const days = parseInt(req.body.days, 10) || 7;
+    await deadlines.snooze(parseInt(req.params.id, 10), days);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/deadlines/:id/edit", express.json(), async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    await deadlines.updateDeadline(parseInt(req.params.id, 10), req.body);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/deadlines/:id/delete", async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    await deadlines.remove(parseInt(req.params.id, 10));
+    try {
+      const audit = require("./audit-log");
+      await audit.log({ user_id: req.user?.id, action: "deadline.delete", target_type: "deadline", target_id: parseInt(req.params.id, 10) });
+    } catch { /* silent */ }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/deadlines/sync-all", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    const results = await deadlines.syncAll();
+    res.json({ ok: true, results });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Manual trigger for daily alerts (testing/debugging)
+app.post("/admin/deadlines/run-alerts", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    const results = await deadlines.runDailyAlerts();
+    res.json({ ok: true, results });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // ── Audit Log Viewer (admin only) ────────────────────────
@@ -4915,6 +5042,16 @@ app.listen(PORT, async () => {
     console.log("✅ Hearing reminders scheduled");
   } catch (e) {
     console.error("⚠️  Reminders init failed:", e.message);
+  }
+
+  // Initialize deadline tracker + start alert cron
+  try {
+    const deadlines = require("./deadline-tracker");
+    await deadlines.init();
+    deadlines.scheduleDailyAlerts();
+    console.log("✅ Deadline tracker + alert cron scheduled (7 AM Pacific)");
+  } catch (e) {
+    console.error("⚠️  Deadline tracker init failed:", e.message);
   }
 
   // Initialize backup system + start cron
