@@ -211,36 +211,88 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
   return deduped;
 }
 
-// De-duplicate events at the same time. If two sources have the same client
-// at the same time (e.g. hearing_note_upcoming AND hearing_notice), merge them
-// into one event that lists both source references.
+// De-duplicate events at the same time. Two hearings are considered the same if:
+//   (a) they're both hearing-type events (not deadlines)
+//   (b) same client — matched by A-number if both have one, else by name
+//   (c) same calendar day (dedup even when times differ slightly, since
+//       notes often have manually-entered times off by 15-60 min from
+//       the EOIR notice's official time)
+// The merged event prefers notice-sourced info (court_name/address usually
+// from EOIR paperwork) and the earliest known time.
 function dedupeEvents(events) {
-  const byKey = new Map();
-  for (const e of events) {
-    if (!e.event_date) continue;
-    const dt = new Date(e.event_date);
-    // Round to nearest hour for dedup
-    const hourKey = `${(e.client_name || "").toLowerCase().trim()}|${(e.a_number || "").toLowerCase().trim()}|${dt.toISOString().substring(0, 13)}`;
+  const HEARING_SOURCES = new Set([
+    "hearing_note_upcoming", "hearing_note_past",
+    "hearing_notice", "individual_hearing", "individual_upcoming",
+  ]);
 
-    if (!byKey.has(hourKey)) {
-      byKey.set(hourKey, { ...e, sources: [e.source], source_refs: [{ source: e.source, id: e.source_id }] });
+  // Split: hearings get deduped, deadlines pass through untouched
+  const hearings = events.filter(e => HEARING_SOURCES.has(e.source));
+  const deadlines = events.filter(e => !HEARING_SOURCES.has(e.source));
+
+  // Build dedup key: prefer A#, else name, plus calendar day
+  const norm = (s) => String(s || "").toLowerCase().trim().replace(/[-\s]/g, "");
+  const dayKey = (dt) => {
+    const d = new Date(dt);
+    // Use local calendar day to match how attorneys think about dates
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  const byKey = new Map();
+  for (const e of hearings) {
+    if (!e.event_date) continue;
+    const anum = norm(e.a_number);
+    const name = norm(e.client_name);
+    // Primary key: A# + day (if A# present). Fallback key: name + day.
+    // We store to BOTH so cross-source records (one has A#, other has only name)
+    // can merge as long as one identifier matches.
+    const primaryKey = anum ? `A:${anum}|${dayKey(e.event_date)}` : `N:${name}|${dayKey(e.event_date)}`;
+    const nameKey = name ? `N:${name}|${dayKey(e.event_date)}` : null;
+
+    // Try to find an existing bucket via A# or name key
+    let existing = byKey.get(primaryKey) || (nameKey && byKey.get(nameKey));
+
+    if (!existing) {
+      const bucket = {
+        ...e,
+        sources: [e.source],
+        source_refs: [{ source: e.source, id: e.source_id }],
+      };
+      byKey.set(primaryKey, bucket);
+      if (nameKey && nameKey !== primaryKey) byKey.set(nameKey, bucket);
     } else {
-      const existing = byKey.get(hourKey);
       existing.sources.push(e.source);
       existing.source_refs.push({ source: e.source, id: e.source_id });
-      // Fill in blanks from this event
+      // Fill blanks — prefer richer values
       if (!existing.court_name && e.court_name) existing.court_name = e.court_name;
       if (!existing.court_address && e.court_address) existing.court_address = e.court_address;
       if (!existing.judge_name && e.judge_name) existing.judge_name = e.judge_name;
       if (!existing.description && e.description) existing.description = e.description;
-      // Prefer non-deadline events as primary source
-      if (existing.source === "deadline" && e.source !== "deadline") {
+      if (!existing.a_number && e.a_number) existing.a_number = e.a_number;
+      if (!existing.client_name && e.client_name) existing.client_name = e.client_name;
+      // Prefer EOIR notice as primary source (has official court info from paperwork)
+      // Priority: hearing_notice > hearing_note > individual_hearing
+      const sourcePriority = { hearing_notice: 3, hearing_note_upcoming: 2, hearing_note_past: 2, individual_hearing: 1, individual_upcoming: 1 };
+      if ((sourcePriority[e.source] || 0) > (sourcePriority[existing.source] || 0)) {
         existing.source = e.source;
-        existing.event_subtype = e.event_subtype;
+        existing.event_subtype = e.event_subtype || existing.event_subtype;
       }
+      // Use the earliest time known (many notes have placeholder times like 9:00; keep whichever is earlier if same day)
+      const existingDt = new Date(existing.event_date);
+      const eDt = new Date(e.event_date);
+      // Prefer the time from the EOIR notice source (most reliable)
+      if (e.source === "hearing_notice" && existing.source !== "hearing_notice") {
+        existing.event_date = e.event_date;
+      } else if (eDt < existingDt) {
+        existing.event_date = e.event_date;
+      }
+      // Register the alternate key too, in case a third record needs to merge
+      if (nameKey && !byKey.has(nameKey)) byKey.set(nameKey, existing);
     }
   }
-  return Array.from(byKey.values());
+
+  // Extract unique values (multiple keys may point to same bucket)
+  const uniqueBuckets = new Set(byKey.values());
+  return [...uniqueBuckets, ...deadlines];
 }
 
 // Compute stats for the header cards
@@ -249,10 +301,12 @@ function computeStats(events) {
   const dayMs = 86400000;
   const weekEnd = new Date(now.getTime() + 7 * dayMs);
   const monthEnd = new Date(now.getTime() + 30 * dayMs);
+  const sixtyEnd = new Date(now.getTime() + 60 * dayMs);
   const stats = {
     total: events.length,
     upcoming_week: 0,
     upcoming_month: 0,
+    upcoming_60: 0,
     past_due_deadlines: 0,
     pending_deadlines: 0,
     hearings_today: 0,
@@ -266,6 +320,7 @@ function computeStats(events) {
     } else {
       if (dt >= now && dt <= weekEnd) stats.upcoming_week++;
       if (dt >= now && dt <= monthEnd) stats.upcoming_month++;
+      if (dt >= now && dt <= sixtyEnd) stats.upcoming_60++;
       // Today
       const isToday = dt.toDateString() === now.toDateString();
       if (isToday) stats.hearings_today++;
@@ -324,6 +379,10 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
     <div style="background:white; padding:14px; border-radius:8px; border:1px solid #e0e0e0; border-left:4px solid ${EVENT_COLORS.hearing};">
       <div style="font-size:11px; color:#666;">NEXT 30 DAYS</div>
       <div style="font-size:24px; font-weight:700; color:${brand.navy}; margin-top:4px;">${stats.upcoming_month}</div>
+    </div>
+    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #e0e0e0; border-left:4px solid ${EVENT_COLORS.hearing};">
+      <div style="font-size:11px; color:#666;">NEXT 60 DAYS</div>
+      <div style="font-size:24px; font-weight:700; color:${brand.navy}; margin-top:4px;">${stats.upcoming_60}</div>
     </div>
     <div style="background:white; padding:14px; border-radius:8px; border:1px solid #e0e0e0; border-left:4px solid ${EVENT_COLORS.deadline};">
       <div style="font-size:11px; color:#666;">PENDING DEADLINES</div>
