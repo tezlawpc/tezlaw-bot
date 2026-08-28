@@ -3311,8 +3311,8 @@ app.post("/admin/hearing/notes/create-from-extraction", async (req, res) => {
     };
     // Save as draft — do NOT auto-generate paralegal/client summaries yet
     // (they're for finalized hearings; drafts still need attorney review).
-    const noteId = await hn.saveNote(note, { generateSummaries: false });
-    res.json({ ok: true, note_id: noteId });
+    const saveResult = await hn.saveNote(note, { generateSummaries: false });
+    res.json({ ok: true, note_id: saveResult.id, was_duplicate: saveResult.was_duplicate });
   } catch (err) {
     console.error("[bulk-create-from-extraction]:", err.message);
     res.status(500).json({ ok: false, error: err.message });
