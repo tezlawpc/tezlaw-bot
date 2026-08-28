@@ -1013,6 +1013,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   <a href="/admin/hearing/notes" class="nav-item ${notesActive}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${notesActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">📝</span><span>→ Master Hearing Notes</span>
   </a>
+  <a href="/admin/hearing/notes/dictate" class="nav-item" data-perm="hearings.write" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:12px; opacity:.85; padding-left:36px;">
+    <span class="icon">🎙️</span><span>Voice Dictate</span>
+  </a>
   <a href="/admin/hearing/individual" class="nav-item ${indivActive}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${indivActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">⚖️</span><span>→ Individual Hearing Notes</span>
   </a>
@@ -1212,6 +1215,26 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     <h1>📝 Hearing Notes${isEdit ? ` — Editing #${noteId}` : ""}</h1>
   </div>
   <p style="margin-bottom:15px; color:#555;">Take notes during the hearing. Zara will clean them up and generate a paralegal summary + client-friendly summary in the client's language.</p>
+
+  ${!isEdit ? `
+  <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:20px;">
+    <a href="/admin/hearing/notes/dictate" style="text-decoration:none; background:linear-gradient(135deg, #B79C62, #d4b979); color:white; padding:16px 20px; border-radius:8px; text-align:center; font-weight:600; box-shadow:0 2px 8px rgba(183,156,98,0.2);">
+      <div style="font-size:28px; margin-bottom:4px;">🎙️</div>
+      <div style="font-size:14px;">Voice Dictate</div>
+      <div style="font-size:11px; opacity:.9; margin-top:2px;">Just left court</div>
+    </a>
+    <a href="/admin/hearing/notes/bulk-upload" style="text-decoration:none; background:linear-gradient(135deg, #0061FF, #4a8fff); color:white; padding:16px 20px; border-radius:8px; text-align:center; font-weight:600; box-shadow:0 2px 8px rgba(0,97,255,0.2);">
+      <div style="font-size:28px; margin-bottom:4px;">📚</div>
+      <div style="font-size:14px;">Bulk Upload</div>
+      <div style="font-size:11px; opacity:.9; margin-top:2px;">Multiple docs</div>
+    </a>
+    <a href="#type-manually" onclick="document.getElementById('doc-upload').click(); return false;" style="text-decoration:none; background:linear-gradient(135deg, #0C1C36, #1a2f4f); color:white; padding:16px 20px; border-radius:8px; text-align:center; font-weight:600; box-shadow:0 2px 8px rgba(12,28,54,0.2);">
+      <div style="font-size:28px; margin-bottom:4px;">📄</div>
+      <div style="font-size:14px;">Upload Document</div>
+      <div style="font-size:11px; opacity:.9; margin-top:2px;">PDF, image, notes</div>
+    </a>
+  </div>
+  ` : ""}
 
   <div id="upload-area"
        ondragover="handleDragOver(event)"
