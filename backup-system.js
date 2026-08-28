@@ -54,24 +54,48 @@ async function createSnapshot(onProgress) {
   `);
   const tables = tablesResult.rows.map(r => r.tablename);
 
+  // Pre-fetch table sizes so we can warn on / skip pathologically huge tables
+  const sizesRes = await db.query(`
+    SELECT relname AS table_name, pg_total_relation_size(relid) AS total_size_bytes
+    FROM pg_stat_user_tables
+  `);
+  const sizeMap = new Map(sizesRes.rows.map(r => [r.table_name, parseInt(r.total_size_bytes, 10)]));
+
   const snapshot = {
     version: "2.0",
     created_at: new Date().toISOString(),
     tables: {},
     counts: {},
     skipped_bytea_columns: {},
+    skipped_oversized_tables: {},
     table_timings_sec: {},
+    errors: {},
   };
+
+  // Skip tables larger than 100 MB — they're likely full of binary content
+  // and will OOM the backup. Metadata still preserved (row count + size).
+  const MAX_TABLE_BYTES = 100 * 1024 * 1024;
+  const PER_TABLE_TIMEOUT_MS = 60 * 1000;  // 1 min per table max
 
   for (let i = 0; i < tables.length; i++) {
     const tbl = tables[i];
     const tblStart = Date.now();
+    const tblSize = sizeMap.get(tbl) || 0;
+
     try {
-      // Detect column types — skip BYTEA columns (binary file content) because
-      // they inflate the JSON snapshot dramatically (client_documents holds
-      // actual PDF/image bytes). We keep row count + metadata; the actual file
-      // bytes live in the DB itself and can be re-uploaded via the client
-      // documents hub if a restore is ever needed.
+      // Progress: about to process this table
+      if (typeof onProgress === "function") {
+        onProgress({
+          phase: "querying",
+          current_table: tbl,
+          tables_done: i,
+          tables_total: tables.length,
+          table_size_bytes: tblSize,
+          rows_so_far: Object.values(snapshot.counts).reduce((sum, v) => typeof v === "number" ? sum + v : sum, 0),
+        });
+      }
+
+      // Detect BYTEA columns
       const colsRes = await db.query(`
         SELECT column_name, data_type
         FROM information_schema.columns
@@ -82,17 +106,32 @@ async function createSnapshot(onProgress) {
       const byteaCols = colsRes.rows.filter(c => c.data_type === 'bytea').map(c => c.column_name);
       const otherCols = colsRes.rows.filter(c => c.data_type !== 'bytea').map(c => c.column_name);
 
+      // Skip oversized tables (likely BYTEA-dominated even after skipping BYTEA)
+      if (tblSize > MAX_TABLE_BYTES) {
+        console.warn(`[backup] SKIPPING oversized table ${tbl} (${(tblSize / 1024 / 1024).toFixed(1)} MB)`);
+        const rowCountRes = await Promise.race([
+          db.query(`SELECT COUNT(*) FROM "${tbl.replace(/"/g, '""')}"`),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("COUNT timeout")), 10000)),
+        ]).catch(e => ({ rows: [{ count: "unknown" }] }));
+        snapshot.skipped_oversized_tables[tbl] = {
+          size_bytes: tblSize,
+          size_pretty: (tblSize / 1024 / 1024).toFixed(1) + " MB",
+          row_estimate: rowCountRes.rows[0].count,
+          reason: `Exceeds ${MAX_TABLE_BYTES / 1024 / 1024} MB skip threshold`,
+        };
+        snapshot.counts[tbl] = `SKIPPED (${(tblSize / 1024 / 1024).toFixed(1)} MB — too large)`;
+        continue;
+      }
+
       let selectSql;
       if (byteaCols.length > 0 && otherCols.length > 0) {
         const scalarList = otherCols.map(c => `"${c.replace(/"/g, '""')}"`).join(", ");
-        // Include placeholder + size for each BYTEA so the restore layer knows content existed
         const sizeExprs = byteaCols.map(c =>
           `octet_length("${c.replace(/"/g, '""')}") AS "${c.replace(/"/g, '""')}_size_bytes"`
         ).join(", ");
         selectSql = `SELECT ${scalarList}, ${sizeExprs} FROM "${tbl.replace(/"/g, '""')}"`;
         snapshot.skipped_bytea_columns[tbl] = byteaCols;
       } else if (otherCols.length === 0) {
-        // Table has ONLY BYTEA columns (unusual) — skip entirely
         snapshot.tables[tbl] = [];
         snapshot.counts[tbl] = "SKIPPED (all BYTEA)";
         continue;
@@ -100,27 +139,23 @@ async function createSnapshot(onProgress) {
         selectSql = `SELECT * FROM "${tbl.replace(/"/g, '""')}"`;
       }
 
-      const dataRes = await db.query(selectSql);
+      // Wrap query in a timeout so one bad table can't hang the whole backup
+      const dataRes = await Promise.race([
+        db.query(selectSql),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`Table query timeout after ${PER_TABLE_TIMEOUT_MS / 1000}s`)), PER_TABLE_TIMEOUT_MS)),
+      ]);
+
       snapshot.tables[tbl] = dataRes.rows;
       snapshot.counts[tbl] = dataRes.rows.length;
       const elapsed = ((Date.now() - tblStart) / 1000).toFixed(1);
       snapshot.table_timings_sec[tbl] = parseFloat(elapsed);
-      const skipMsg = byteaCols.length ? ` (skipped BYTEA cols: ${byteaCols.join(", ")})` : "";
+      const skipMsg = byteaCols.length ? ` (skipped BYTEA: ${byteaCols.join(", ")})` : "";
       console.log(`[backup] ${tbl}: ${dataRes.rows.length} rows${skipMsg} in ${elapsed}s`);
-
-      // Progress callback for status endpoint
-      if (typeof onProgress === "function") {
-        onProgress({
-          phase: "querying",
-          current_table: tbl,
-          tables_done: i + 1,
-          tables_total: tables.length,
-          rows_so_far: Object.values(snapshot.counts).reduce((sum, v) => typeof v === "number" ? sum + v : sum, 0),
-        });
-      }
     } catch (e) {
       console.warn(`[backup] Failed to snapshot table ${tbl}:`, e.message);
+      snapshot.errors[tbl] = e.message;
       snapshot.counts[tbl] = "ERROR: " + e.message;
+      // CONTINUE — don't let one bad table kill the backup
     }
   }
   return snapshot;
@@ -352,6 +387,8 @@ async function runBackup({ manual = false, onProgress = null } = {}) {
     old_backups_deleted: deletedOld,
     duration_seconds: durationSec,
     skipped_bytea_columns: snapshot.skipped_bytea_columns || {},
+    skipped_oversized_tables: snapshot.skipped_oversized_tables || {},
+    errors: snapshot.errors || {},
     slowest_tables: Object.entries(snapshot.table_timings_sec || {})
       .sort(([, a], [, b]) => b - a).slice(0, 5)
       .map(([tbl, sec]) => ({ table: tbl, seconds: sec })),
