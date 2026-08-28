@@ -2588,6 +2588,39 @@ const audioUpload = multer({
   limits: { fileSize: 30 * 1024 * 1024 },
 });
 
+// Extract-only endpoint — transcribes + extracts fields but does NOT create
+// a note. Used by the embedded dictation modal in the hearing note form to
+// populate fields inline. Returns JSON with the extracted data so client-side
+// JS can merge into the current form.
+app.post("/admin/hearing/notes/dictate/extract-only", audioUpload.single("audio"), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ ok: false, error: "No audio file uploaded" });
+    }
+    const voice = require("./voice-dictation");
+    const filename = req.file.originalname || "dictation.webm";
+    console.log(`[dictate-extract-only] Received ${req.file.buffer.length} bytes`);
+    const transcript = await voice.transcribeAudio(req.file.buffer, filename);
+    console.log(`[dictate-extract-only] Transcript: ${transcript.length} chars`);
+    if (!transcript || transcript.trim().length < 5) {
+      return res.status(400).json({
+        ok: false,
+        error: "Transcript was empty or too short. Recording may have been silent.",
+      });
+    }
+    const hint = {
+      client_name: String(req.body.client_name || "").trim() || null,
+      a_number: String(req.body.a_number || "").trim() || null,
+      hearing_type: String(req.body.hearing_type || "").trim() || null,
+    };
+    const extracted = await voice.extractFieldsFromTranscript(transcript, hint);
+    res.json({ ok: true, transcript, extracted });
+  } catch (err) {
+    console.error("[dictate-extract-only]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.post("/admin/hearing/notes/dictate/process", audioUpload.single("audio"), async (req, res) => {
   try {
     if (!req.file || !req.file.buffer) {
