@@ -125,15 +125,44 @@ app.get("/admin/backups", auth.requireRole("admin"), async (req, res) => {
   }
 });
 
+// In-memory backup status tracking so the browser can poll while a backup
+// runs in the background. Solves Render's request-timeout issue: previously
+// the browser held the connection for 30-60 sec while backups ran and Render
+// would sometimes drop it, giving the browser a truncated HTML error page.
+const _backupStatus = { running: false, last: null };
+
 app.post("/admin/backups/run-now", auth.requireRole("admin"), async (req, res) => {
-  try {
-    const backups = require("./backup-system");
-    const result = await backups.runBackup({ manual: true });
-    res.json({ ok: true, result });
-  } catch (err) {
-    console.error("[backup run]:", err.message);
-    res.status(500).json({ ok: false, error: err.message });
+  if (_backupStatus.running) {
+    return res.json({ ok: true, status: "already_running", message: "A backup is already in progress. Check /admin/backups/status." });
   }
+  _backupStatus.running = true;
+  _backupStatus.last = { started_at: new Date().toISOString(), status: "running" };
+
+  // Kick off the backup in the background — do NOT await it in the request.
+  (async () => {
+    try {
+      const backups = require("./backup-system");
+      const result = await backups.runBackup({ manual: true });
+      _backupStatus.last = { ...result, status: "completed", finished_at: new Date().toISOString() };
+    } catch (err) {
+      console.error("[backup run]:", err.message);
+      _backupStatus.last = { status: "failed", error: err.message, finished_at: new Date().toISOString() };
+    } finally {
+      _backupStatus.running = false;
+    }
+  })();
+
+  // Respond immediately — browser will poll for completion
+  res.json({ ok: true, status: "started", message: "Backup started in background. Poll /admin/backups/status for progress." });
+});
+
+// Status polling — browser hits this every 2 sec while backup runs
+app.get("/admin/backups/status", auth.requireRole("admin"), (req, res) => {
+  res.json({
+    ok: true,
+    running: _backupStatus.running,
+    last: _backupStatus.last,
+  });
 });
 
 app.get("/admin/backups/preview", auth.requireRole("admin"), async (req, res) => {
