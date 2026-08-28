@@ -631,6 +631,82 @@ app.post("/admin/deadlines/sync-all", auth.requireRole("admin"), async (req, res
 });
 
 // ── EOIR Calendar (unified hearings + deadlines) ─────
+
+// Scan every client's Dropbox folder for new EOIR hearing notices.
+// Used by the calendar "Update from Dropbox" button.
+app.post("/admin/calendar/scan-all-notices", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const dbx = require("./dropbox-integration");
+    const hn = require("./hearing-notices");
+
+    const clients = await cp.aggregateClients();
+    const limit = parseInt(req.query.limit || "5", 10);  // per client, keep small
+
+    const results = {
+      total_clients: clients.length,
+      scanned: 0,
+      skipped_no_folder: 0,
+      errors: 0,
+      new_notices: 0,
+      updated_notices: 0,
+      per_client: [],
+    };
+
+    // Iterate serially to avoid Dropbox rate limits
+    for (const client of clients) {
+      try {
+        const folder = await dbx.resolveClientFolder({
+          clientKey: client.key, clientName: client.client_name, aNumber: client.a_number,
+        }).catch(() => null);
+
+        if (!folder) {
+          results.skipped_no_folder++;
+          continue;
+        }
+
+        const scan = await hn.scanClientFolder({
+          clientKey: client.key,
+          clientName: client.client_name,
+          aNumber: client.a_number,
+          dropboxFolderPath: folder,
+          limit,
+        }).catch((e) => ({ error: e.message }));
+
+        if (scan.error) {
+          results.errors++;
+          results.per_client.push({ client: client.client_name, error: scan.error });
+          continue;
+        }
+
+        results.scanned++;
+        const newCount = scan.new_notices || scan.newNotices || 0;
+        const updatedCount = scan.updated_notices || scan.updatedNotices || 0;
+        results.new_notices += newCount;
+        results.updated_notices += updatedCount;
+
+        if (newCount > 0 || updatedCount > 0) {
+          results.per_client.push({
+            client: client.client_name,
+            a_number: client.a_number,
+            new: newCount,
+            updated: updatedCount,
+          });
+        }
+      } catch (e) {
+        results.errors++;
+        console.warn(`[scan-all] ${client.client_name}: ${e.message}`);
+      }
+    }
+
+    console.log(`[calendar scan-all] Scanned ${results.scanned}/${results.total_clients} clients, found ${results.new_notices} new notices`);
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error("[calendar scan-all]:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/admin/calendar", async (req, res) => {
   try {
     const cal = require("./eoir-calendar");
