@@ -582,20 +582,55 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
     <script>
       async function runBackupNow() {
         const status = document.getElementById("backup-status");
-        status.innerHTML = '<span style="color:#666;">⏳ Running backup (this can take 10-30 seconds)…</span>';
+        status.innerHTML = '<span style="color:#666;">⏳ Starting backup…</span>';
         try {
+          // Trigger the backup (returns immediately, runs in background)
           const r = await fetch("/admin/backups/run-now", { method: "POST" });
-          const d = await r.json();
-          if (d.ok) {
-            status.innerHTML = '<span style="color:#2e7d32;">✅ Backup complete! ' +
-              d.result.total_rows + ' rows / ' + d.result.tables_backed_up + ' tables / ' +
-              (d.result.compressed_size_bytes / 1024).toFixed(1) + ' KB uploaded in ' + d.result.duration_seconds + 's.</span>';
-            setTimeout(() => location.reload(), 2500);
-          } else {
-            status.innerHTML = '<span style="color:#c00;">❌ ' + (d.error || "unknown error") + '</span>';
+          const responseText = await r.text();
+          let d;
+          try { d = JSON.parse(responseText); }
+          catch (parseErr) {
+            const snippet = responseText.substring(0, 500).replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim();
+            throw new Error("Server returned HTTP " + r.status + " with non-JSON body: " + snippet);
           }
+          if (!d.ok) {
+            status.innerHTML = '<span style="color:#c00;">❌ ' + (d.error || "unknown error") + '</span>';
+            return;
+          }
+
+          // Poll for status until backup completes
+          status.innerHTML = '<span style="color:#666;">⏳ Backup running in background (checking every 2 sec)…</span>';
+          const pollStart = Date.now();
+          const maxPollMs = 5 * 60 * 1000; // 5 min max
+          const pollInterval = setInterval(async () => {
+            if (Date.now() - pollStart > maxPollMs) {
+              clearInterval(pollInterval);
+              status.innerHTML = '<span style="color:#c00;">⏱️ Backup polling timed out after 5 min. Refresh to see if it eventually succeeded.</span>';
+              return;
+            }
+            try {
+              const sr = await fetch("/admin/backups/status");
+              const sd = await sr.json();
+              if (!sd.running && sd.last) {
+                clearInterval(pollInterval);
+                if (sd.last.status === "completed") {
+                  status.innerHTML = '<span style="color:#2e7d32;">✅ Backup complete! ' +
+                    sd.last.total_rows + ' rows / ' + sd.last.tables_backed_up + ' tables / ' +
+                    (sd.last.compressed_size_bytes / 1024).toFixed(1) + ' KB in ' + sd.last.duration_seconds + 's.</span>';
+                  setTimeout(() => location.reload(), 2500);
+                } else if (sd.last.status === "failed") {
+                  status.innerHTML = '<span style="color:#c00; word-break:break-word; display:block;">❌ Backup failed: ' + (sd.last.error || "unknown") + '</span>';
+                }
+              } else if (sd.running) {
+                const elapsed = Math.floor((Date.now() - pollStart) / 1000);
+                status.innerHTML = '<span style="color:#666;">⏳ Backup running… (' + elapsed + 's elapsed)</span>';
+              }
+            } catch (pollErr) {
+              console.warn("Poll error:", pollErr);
+            }
+          }, 2000);
         } catch (e) {
-          status.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
+          status.innerHTML = '<span style="color:#c00; word-break:break-word; display:block;">❌ ' + e.message + '</span>';
         }
       }
       async function previewBackup(path) {
