@@ -387,6 +387,39 @@ Do not include any preamble like "Here is the motion:" — output the motion dir
 
 // ─── DOCX generation from markdown ───────────────────
 
+// Generate DOCX for a motion. If a matching template exists, use it (with
+// placeholder substitution). Otherwise fall back to standalone generation.
+async function generateDocxForMotion(motion) {
+  const templates = require("./motion-templates");
+  const template = await templates.getTemplateForMotion(motion.motion_type).catch(() => null);
+
+  if (template && template.docx_content) {
+    // Apply template
+    const cfg = MOTION_TYPES[motion.motion_type] || {};
+    const buffer = Buffer.isBuffer(template.docx_content) ? template.docx_content : Buffer.from(template.docx_content);
+    return templates.applyTemplate(buffer, {
+      title: (motion.title || cfg.label || motion.motion_type).toUpperCase(),
+      client_name: motion.client_name || "",
+      a_number: motion.a_number || "",
+      court_name: motion.court_name || "",
+      judge_name: motion.judge_name || "",
+      case_number: "",
+      filing_deadline: motion.filing_deadline ? new Date(motion.filing_deadline).toLocaleDateString("en-US") : "",
+      content_markdown: motion.content_markdown || "",
+      date: new Date().toLocaleDateString("en-US"),
+    });
+  }
+
+  // No template — fall back to plain generation
+  return generateDocx({
+    title: motion.title || MOTION_TYPES[motion.motion_type]?.label,
+    motionType: motion.motion_type,
+    clientName: motion.client_name,
+    aNumber: motion.a_number,
+    markdown: motion.content_markdown || "",
+  });
+}
+
 // Simple markdown → DOCX converter. Handles:
 //   ## Header → bold, size 24pt, uppercase-friendly
 //   Regular paragraphs → 12pt
@@ -563,13 +596,7 @@ async function uploadToDropbox(motionId) {
   if (!motion) throw new Error("Motion not found");
   if (!motion.content_markdown) throw new Error("Motion has no content");
 
-  const docxBuffer = generateDocx({
-    title: motion.title || MOTION_TYPES[motion.motion_type]?.label,
-    motionType: motion.motion_type,
-    clientName: motion.client_name,
-    aNumber: motion.a_number,
-    markdown: motion.content_markdown,
-  });
+  const docxBuffer = await generateDocxForMotion(motion);
 
   // Sanitize client name for folder path
   const safeClientName = (motion.client_name || "unknown").replace(/[<>:"|?*\\/]/g, "_");
@@ -660,7 +687,10 @@ function renderMotionListPage(motions, filters = {}) {
   return `
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <h1 style="margin:0;">📜 Court Motions</h1>
-    <a href="/admin/motions/new" style="background:${brand.gold}; color:white; padding:9px 16px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px;">+ New motion</a>
+    <div style="display:flex; gap:8px;">
+      <a href="/admin/motions/templates" style="background:#eee; color:#333; padding:9px 16px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px;">📋 Templates</a>
+      <a href="/admin/motions/new" style="background:${brand.gold}; color:white; padding:9px 16px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px;">+ New motion</a>
+    </div>
   </div>
 
   <form method="GET" style="background:#f8f8f8; padding:12px; border-radius:6px; margin:16px 0; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
@@ -949,6 +979,11 @@ function renderMotionEditor(motion) {
         <div style="font-size:11px; color:#666;">Claude drafts are FIRST DRAFTS. Attorney must review every citation, fact, and application of law before filing. Verify all bracketed placeholders are filled.</div>
       </div>
 
+      <div style="background:#fff8e1; padding:10px 12px; border-radius:6px; border:1px solid #ffe082; margin-top:10px; font-size:11px; color:#555;">
+        <div style="font-weight:600; color:${brand.navy}; margin-bottom:4px;">📋 Pleading paper</div>
+        Downloaded .docx will use your uploaded template if one exists. <a href="/admin/motions/templates" style="color:${brand.gold};">Manage templates →</a>
+      </div>
+
       <button onclick="deleteMotion(${motion.id})" style="width:100%; margin-top:12px; padding:10px; background:#fee; color:#c00; border:1px solid #ffe0e0; border-radius:4px; cursor:pointer; font-size:12px;">🗑 Delete this motion</button>
     </div>
   </div>
@@ -1008,6 +1043,7 @@ module.exports = {
   listMotions,
   deleteMotion,
   generateDocx,
+  generateDocxForMotion,
   uploadToDropbox,
   renderMotionListPage,
   renderNewMotionForm,
