@@ -827,6 +827,7 @@ module.exports = {
   previewRestore,
   restoreFromBackup,
   pruneOldBackups,
+  uploadToDropbox,
   startCron,
   renderBackupsPage,
   BACKUP_FOLDER,
