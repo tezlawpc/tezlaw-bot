@@ -930,84 +930,266 @@ async function sendToParalegal(id) {
 // activeItem: which nav item to highlight — "notes" | "history" | null
 
 function renderAdminChrome({ title, body, activeItem = null }) {
-  const notesActive = activeItem === "notes" ? "active" : "";
-  const historyActive = activeItem === "history" ? "active" : "";
-  const indivActive = activeItem === "individual" ? "active" : "";
-  const indivHistActive = activeItem === "individual-history" ? "active" : "";
-  const clientsActive = activeItem === "clients" ? "active" : "";
-  const dropboxActive = activeItem === "dropbox" ? "active" : "";
+  // Helper to add active class
+  const isActive = (name) => activeItem === name ? "active" : "";
 
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(title)} — Zara Admin</title>
+<title>${escapeHtml(title)} — Zara</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; background: #f0ede6; color: #0C1C36; }
-
-  /* Sidebar (mirrors admin.js) */
-  .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 220px;
-             background: #0C1C36; padding: 0; z-index: 100;
-             overflow-y: auto; overflow-x: hidden; }
-  .sidebar::-webkit-scrollbar { width: 6px; }
-  .sidebar::-webkit-scrollbar-track { background: transparent; }
-  .sidebar::-webkit-scrollbar-thumb { background: rgba(183,156,98,.3); border-radius: 3px; }
-  .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(183,156,98,.6); }
-  .sidebar-logo { padding: 24px 20px; border-bottom: 1px solid rgba(183,156,98,.3); }
-  .sidebar-logo h2 { color: #B79C62; font-size: 18px; }
-  .sidebar-logo p { color: rgba(183,156,98,.6); font-size: 11px; margin-top: 2px; }
-  .nav-item { display: block; padding: 14px 20px; color: rgba(255,255,255,.7);
-              cursor: pointer; border-left: 3px solid transparent; transition: all .2s;
-              font-size: 14px; text-decoration: none; }
-  .nav-item:hover, .nav-item.active { color: #B79C62; background: rgba(183,156,98,.1);
-                                       border-left-color: #B79C62; }
-  .nav-item .icon { margin-right: 10px; }
-
-  /* Main */
-  .main { margin-left: 220px; padding: 28px; min-height: 100vh; }
-  .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-  .page-header h1 { color: #0C1C36; font-size: 24px; }
-  .back-link { color: #B79C62; text-decoration: none; font-size: 13px; }
-  .back-link:hover { text-decoration: underline; }
-
-  /* Mobile responsive */
-  @media (max-width: 768px) {
-    .sidebar { width: 56px; padding: 0; }
-    .sidebar-logo { padding: 14px 8px; text-align: center; border-bottom: 1px solid rgba(183,156,98,.3); }
-    .sidebar-logo img { width: 36px !important; margin: 0 auto 4px !important; }
-    .sidebar-logo h2 { font-size: 11px; letter-spacing: .04em; }
-    .sidebar-logo p { display: none; }
-    .nav-item { padding: 12px 0; text-align: center; font-size: 16px; }
-    .nav-item span:not(.icon) { display: none; }
-    .nav-item .icon { margin-right: 0; font-size: 18px; }
-    .main { margin-left: 56px; padding: 16px 12px; }
-    .page-header { flex-wrap: wrap; gap: 10px; }
-    .page-header h1 { font-size: 18px; }
+  :root {
+    --sidebar-bg: #0C1C36;
+    --sidebar-bg-elev: #142645;
+    --sidebar-width: 244px;
+    --sidebar-width-mobile: 60px;
+    --brand-gold: #B79C62;
+    --brand-gold-light: #d4b979;
+    --brand-navy: #0C1C36;
+    --text-primary: rgba(255,255,255,.94);
+    --text-secondary: rgba(255,255,255,.65);
+    --text-tertiary: rgba(255,255,255,.42);
+    --section-header: rgba(183,156,98,.55);
+    --hover-bg: rgba(255,255,255,.06);
+    --active-bg: rgba(183,156,98,.16);
+    --active-color: #e6c988;
+    --divider: rgba(255,255,255,.07);
+    --canvas: #f5f2ea;
   }
 
-  /* Hearing form specific */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+                 "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--canvas);
+    color: var(--brand-navy);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.005em;
+  }
+
+  /* ── Sidebar ─────────────────────────────────── */
+  .sidebar {
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    width: var(--sidebar-width);
+    background: var(--sidebar-bg);
+    overflow-y: auto;
+    overflow-x: hidden;
+    z-index: 100;
+    padding: 8px 12px 24px;
+  }
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-track { background: transparent; }
+  .sidebar::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,.08);
+    border-radius: 2px;
+  }
+  .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.15); }
+
+  .sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 12px 16px;
+    margin-bottom: 4px;
+  }
+  .sidebar-brand img {
+    width: 40px;
+    height: auto;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .brand-text { display: flex; flex-direction: column; overflow: hidden; }
+  .brand-name {
+    color: var(--brand-gold);
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .brand-role {
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: 500;
+    margin-top: 2px;
+    letter-spacing: 0.01em;
+  }
+
+  .nav-section {
+    margin-bottom: 6px;
+  }
+  .nav-section-header {
+    color: var(--section-header);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    padding: 12px 12px 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .nav-section-header .chevron {
+    font-size: 10px;
+    transition: transform .2s;
+    opacity: .6;
+    cursor: pointer;
+  }
+  .nav-section.collapsed .nav-link { display: none; }
+  .nav-section.collapsed .chevron { transform: rotate(-90deg); }
+
+  .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    margin-bottom: 1px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    transition: background-color .12s ease, color .12s ease;
+    position: relative;
+  }
+  .nav-link:hover {
+    background: var(--hover-bg);
+    color: var(--text-primary);
+  }
+  .nav-link.active {
+    background: var(--active-bg);
+    color: var(--active-color);
+    font-weight: 600;
+  }
+  .nav-link.active::before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 18px;
+    background: var(--brand-gold);
+    border-radius: 0 3px 3px 0;
+  }
+  .nav-icon {
+    font-size: 16px;
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  .nav-label {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .nav-badge {
+    background: var(--brand-gold);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 8px;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  /* Main content */
+  .main {
+    margin-left: var(--sidebar-width);
+    padding: 28px 32px 40px;
+    min-height: 100vh;
+  }
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .page-header h1 {
+    color: var(--brand-navy);
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .back-link {
+    color: var(--brand-gold);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: background .15s;
+  }
+  .back-link:hover { background: rgba(183,156,98,.1); }
+
+  /* ── Mobile ────────────────────────────────── */
+  @media (max-width: 768px) {
+    .sidebar {
+      width: var(--sidebar-width-mobile);
+      padding: 4px 4px 12px;
+    }
+    .sidebar-brand {
+      justify-content: center;
+      padding: 10px 4px 12px;
+      gap: 0;
+    }
+    .sidebar-brand img { width: 34px; }
+    .brand-text { display: none; }
+    .nav-section-header {
+      display: none;
+    }
+    .nav-section {
+      border-top: 1px solid var(--divider);
+      padding-top: 6px;
+      margin-top: 4px;
+    }
+    .nav-section:first-of-type { border-top: none; margin-top: 0; }
+    .nav-link {
+      justify-content: center;
+      padding: 11px 0;
+    }
+    .nav-label, .nav-badge { display: none; }
+    .nav-icon { font-size: 18px; width: auto; }
+    .nav-link.active::before { display: none; }
+    .main {
+      margin-left: var(--sidebar-width-mobile);
+      padding: 16px 12px 24px;
+    }
+    .page-header h1 { font-size: 20px; }
+  }
+
+  /* Form/table shared styles (kept from original) */
   label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 14px; }
   input[type="text"], input[type="datetime-local"], input[type="date"], select, textarea {
     width: 100%; padding: 8px; margin: 3px 0; box-sizing: border-box;
-    border: 1px solid #ccc; border-radius: 4px; font-size: 14px; font-family: inherit;
+    border: 1px solid #ccc; border-radius: 6px; font-size: 14px; font-family: inherit;
   }
   textarea { min-height: 60px; }
   input[type="checkbox"] { margin-right: 6px; transform: scale(1.15); }
   .row { display: flex; gap: 12px; margin: 6px 0; }
   .row > div { flex: 1; }
-  fieldset { border: 1px solid #ddd; padding: 15px; margin: 15px 0; border-radius: 4px; background: white; }
+  fieldset { border: 1px solid #ddd; padding: 15px; margin: 15px 0; border-radius: 8px; background: white; }
   legend { font-weight: 600; color: #0C1C36; padding: 0 8px; }
   .button-row { margin-top: 25px; display: flex; gap: 10px; flex-wrap: wrap; }
   button {
-    padding: 12px 24px; font-size: 15px; border-radius: 4px; cursor: pointer;
-    border: none; font-family: inherit;
+    padding: 12px 24px; font-size: 14px; border-radius: 6px; cursor: pointer;
+    border: none; font-family: inherit; font-weight: 600;
+    transition: opacity .15s;
   }
+  button:hover { opacity: 0.9; }
   button[type="submit"] { background: #B79C62; color: white; }
-  button[type="submit"]:hover { background: #8f7a4c; }
   button.secondary { background: #eee; color: #333; }
-  #raw_notes { min-height: 200px; font-family: monospace; font-size: 14px; }
+  #raw_notes { min-height: 200px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
   .deadlines-container { margin: 8px 0; }
   .deadline-row { display: flex; gap: 8px; margin: 6px 0; }
   .deadline-row input[type="date"] { flex: 0 0 160px; }
@@ -1015,73 +1197,104 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   .deadline-row button { flex: 0 0 auto; padding: 4px 10px; background: #eee; border: none; cursor: pointer; border-radius: 4px; }
   .add-deadline { background: #eee; padding: 6px 12px; border: none; cursor: pointer; border-radius: 4px; font-size: 13px; }
   .hint { color: #666; font-size: 12px; font-style: italic; margin: 2px 0; }
-  table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px; background: white; }
-  th, td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; }
-  th { background: #f5f5f5; color: #0C1C36; }
-  tr:hover { background: #fafafa; }
+  table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px; background: white; border-radius: 8px; overflow: hidden; }
+  th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #f8f7f2; color: #0C1C36; font-weight: 600; font-size: 12px; letter-spacing: 0.02em; text-transform: uppercase; }
+  tr:hover { background: #fafaf7; }
 </style>
 </head>
 <body>
 
-<div class="sidebar">
-  <div class="sidebar-logo">
-    <img src="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png" alt="TEZ Law" style="width:60px;height:auto;display:block;margin-bottom:8px">
-    <h2>Zara</h2>
-    <p>Admin Panel</p>
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <img src="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png" alt="TEZ Law">
+    <div class="brand-text">
+      <span class="brand-name">Zara</span>
+      <span class="brand-role" id="brand-role">Admin Panel</span>
+    </div>
   </div>
 
-  <!-- Primary work items — visible to everyone with role -->
-  <a href="/admin/dashboard" class="nav-item" data-perm="hearings.read" style="background:rgba(183,156,98,.08); border-left-color:rgba(183,156,98,.4); border-bottom:1px solid rgba(183,156,98,.2);">
-    <span class="icon">📊</span><span>→ Dashboard</span>
-  </a>
-  <a href="/admin/clients" class="nav-item ${clientsActive}" data-perm="clients.read" style="background:rgba(183,156,98,.08); ${clientsActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
-    <span class="icon">👥</span><span>→ Client Profiles</span>
-  </a>
-  <a href="/admin/hearing/notes" class="nav-item ${notesActive}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${notesActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
-    <span class="icon">📝</span><span>→ Master Hearing Notes</span>
-  </a>
-  <a href="/admin/hearing/individual" class="nav-item ${indivActive}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${indivActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
-    <span class="icon">⚖️</span><span>→ Individual Hearing Notes</span>
-  </a>
-  <a href="/admin/calendar" class="nav-item ${activeItem === "calendar" ? "active" : ""}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${activeItem === "calendar" ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
-    <span class="icon">🗓️</span><span>→ EOIR Calendar</span>
-  </a>
-  <a href="/admin/deadlines" class="nav-item ${activeItem === "deadlines" ? "active" : ""}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${activeItem === "deadlines" ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
-    <span class="icon">⏰</span><span>→ Deadlines</span>
-  </a>
-  <a href="/admin/motions" class="nav-item ${activeItem === "motions" ? "active" : ""}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${activeItem === "motions" ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
-    <span class="icon">📜</span><span>→ Court Motions</span>
-  </a>
-  <a href="/admin/hearing/history" class="nav-item ${historyActive}" data-perm="hearings.read" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
-    <span class="icon">📚</span><span>All Hearing History</span>
-  </a>
+  <nav>
+    <!-- ── Overview ── -->
+    <div class="nav-section" id="section-work">
+      <div class="nav-section-header">
+        <span>Overview</span>
+      </div>
+      <a href="/admin/dashboard" class="nav-link ${isActive('dashboard')}" data-perm="hearings.read">
+        <span class="nav-icon">◱</span><span class="nav-label">Dashboard</span>
+      </a>
+      <a href="/admin/clients" class="nav-link ${isActive('clients')}" data-perm="clients.read">
+        <span class="nav-icon">◐</span><span class="nav-label">Clients</span>
+      </a>
+      <a href="/admin/calendar" class="nav-link ${isActive('calendar')}" data-perm="hearings.read">
+        <span class="nav-icon">▦</span><span class="nav-label">Calendar</span>
+      </a>
+      <a href="/admin/deadlines" class="nav-link ${isActive('deadlines')}" data-perm="hearings.read">
+        <span class="nav-icon">◔</span><span class="nav-label">Deadlines</span>
+      </a>
+    </div>
 
-  <!-- Admin-only items — hidden for attorney/paralegal/viewer -->
-  <a href="/admin/matters/" class="nav-item" data-perm="matters.access" style="background:rgba(12,28,54,.06); border-left-color:rgba(12,28,54,.4); border-bottom:1px solid rgba(12,28,54,.15); font-size:13px;">
-    <span class="icon">⚖️</span><span>Matter Manager <span style="font-size:9px; opacity:.6;">(admin)</span></span>
-  </a>
-  <a href="/admin/dropbox/setup" class="nav-item ${dropboxActive}" data-perm="dropbox.setup" style="background:rgba(0,97,255,.06); ${dropboxActive ? "" : "border-left-color:rgba(0,97,255,.4);"} border-bottom:1px solid rgba(0,97,255,.15); font-size:13px;">
-    <span class="icon">📦</span><span>Dropbox Setup <span style="font-size:9px; opacity:.6;">(admin)</span></span>
-  </a>
-  <a href="/admin/email-setup" class="nav-item" data-perm="email.setup" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:13px; opacity:.85;">
-    <span class="icon">📬</span><span>Email Setup <span style="font-size:9px; opacity:.6;">(admin)</span></span>
-  </a>
-  <a href="/admin/reminders" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:13px; opacity:.85;">
-    <span class="icon">📣</span><span>Hearing Reminders <span style="font-size:9px; opacity:.6;">(admin)</span></span>
-  </a>
-  <a href="/admin/backups" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:13px; opacity:.85;">
-    <span class="icon">💾</span><span>Backups <span style="font-size:9px; opacity:.6;">(admin)</span></span>
-  </a>
-  <a href="/admin/audit-log" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:13px; opacity:.85;">
-    <span class="icon">📜</span><span>Audit Log <span style="font-size:9px; opacity:.6;">(admin)</span></span>
-  </a>
-  <a href="/admin/users" class="nav-item" data-perm="users.manage" style="border-bottom:1px solid rgba(183,156,98,.15); font-size:13px; opacity:.85;">
-    <span class="icon">👤</span><span>Admin Users <span style="font-size:9px; opacity:.6;">(admin)</span></span>
-  </a>
-</div>
+    <!-- ── Hearings ── -->
+    <div class="nav-section" id="section-hearings">
+      <div class="nav-section-header">
+        <span>Hearings</span>
+      </div>
+      <a href="/admin/hearing/notes" class="nav-link ${isActive('notes')}" data-perm="hearings.read">
+        <span class="nav-icon">≡</span><span class="nav-label">Master Notes</span>
+      </a>
+      <a href="/admin/hearing/individual" class="nav-link ${isActive('individual')}" data-perm="hearings.read">
+        <span class="nav-icon">◈</span><span class="nav-label">Individual Notes</span>
+      </a>
+      <a href="/admin/motions" class="nav-link ${isActive('motions')}" data-perm="hearings.read">
+        <span class="nav-icon">§</span><span class="nav-label">Court Motions</span>
+      </a>
+      <a href="/admin/hearing/history" class="nav-link ${isActive('history')}" data-perm="hearings.read">
+        <span class="nav-icon">⌘</span><span class="nav-label">Hearing History</span>
+      </a>
+    </div>
+
+    <!-- ── Integrations ── -->
+    <div class="nav-section" id="section-integrations">
+      <div class="nav-section-header">
+        <span>Integrations</span>
+      </div>
+      <a href="/admin/outlook-sync" class="nav-link ${isActive('outlook')}" data-perm="hearings.read">
+        <span class="nav-icon">◆</span><span class="nav-label">Outlook Sync</span>
+      </a>
+      <a href="/admin/dropbox/setup" class="nav-link ${isActive('dropbox')}" data-perm="dropbox.setup">
+        <span class="nav-icon">▲</span><span class="nav-label">Dropbox</span>
+      </a>
+      <a href="/admin/email-setup" class="nav-link" data-perm="email.setup">
+        <span class="nav-icon">✉</span><span class="nav-label">Email</span>
+      </a>
+    </div>
+
+    <!-- ── Admin only ── -->
+    <div class="nav-section" id="section-admin">
+      <div class="nav-section-header">
+        <span>Admin</span>
+      </div>
+      <a href="/admin/matters/" class="nav-link" data-perm="matters.access">
+        <span class="nav-icon">◇</span><span class="nav-label">Matter Manager</span>
+      </a>
+      <a href="/admin/reminders" class="nav-link" data-perm="users.manage">
+        <span class="nav-icon">◑</span><span class="nav-label">Reminders</span>
+      </a>
+      <a href="/admin/backups" class="nav-link" data-perm="users.manage">
+        <span class="nav-icon">◕</span><span class="nav-label">Backups</span>
+      </a>
+      <a href="/admin/audit-log" class="nav-link" data-perm="users.manage">
+        <span class="nav-icon">◉</span><span class="nav-label">Audit Log</span>
+      </a>
+      <a href="/admin/users" class="nav-link" data-perm="users.manage">
+        <span class="nav-icon">◎</span><span class="nav-label">Users</span>
+      </a>
+    </div>
+  </nav>
+</aside>
 
 <div class="main">
-  <div id="auth-user-chip" style="position:fixed; top:12px; right:20px; font-size:12px; color:#555; background:white; padding:6px 12px; border-radius:20px; box-shadow:0 1px 4px rgba(0,0,0,.08); z-index:100; display:flex; align-items:center; gap:8px;">
+  <div id="auth-user-chip" style="position:fixed; top:16px; right:24px; font-size:12px; color:#555; background:white; padding:8px 14px; border-radius:24px; box-shadow:0 2px 10px rgba(0,0,0,.08); z-index:100; display:flex; align-items:center; gap:10px;">
     <span id="auth-user-name" style="color:#0C1C36; font-weight:600;">…</span>
     <span id="auth-user-role" style="background:#666; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;"></span>
     <form method="POST" action="/admin/logout" style="display:inline; margin:0;">
@@ -1098,12 +1311,47 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       const roleEl = document.getElementById("auth-user-role");
       roleEl.textContent = d.role_label || d.role;
       roleEl.style.background = d.role_color || "#666";
+      // Sidebar brand role label reflects logged-in user role
+      const brandRole = document.getElementById("brand-role");
+      if (brandRole) brandRole.textContent = d.role_label || d.role || "Admin Panel";
       // Hide sidebar items the user's role can't access
       document.querySelectorAll("[data-perm]").forEach(el => {
         const p = el.dataset.perm;
         if (!(d.permissions && d.permissions[p])) el.style.display = "none";
       });
+      // Hide sections whose nav-links are all hidden
+      document.querySelectorAll(".nav-section").forEach(section => {
+        const links = section.querySelectorAll(".nav-link");
+        const visibleLinks = Array.from(links).filter(l => l.style.display !== "none");
+        if (visibleLinks.length === 0) section.style.display = "none";
+      });
     }).catch(() => document.getElementById("auth-user-chip").style.display = "none");
+
+    // Collapsible section headers (click to toggle)
+    document.querySelectorAll(".nav-section-header").forEach(header => {
+      header.style.cursor = "pointer";
+      header.addEventListener("click", () => {
+        const section = header.closest(".nav-section");
+        if (!section) return;
+        section.classList.toggle("collapsed");
+        // Persist state per section id
+        if (section.id) {
+          try {
+            localStorage.setItem("nav-collapsed-" + section.id,
+              section.classList.contains("collapsed") ? "1" : "0");
+          } catch {}
+        }
+      });
+    });
+    // Restore collapsed state
+    document.querySelectorAll(".nav-section").forEach(section => {
+      if (!section.id) return;
+      try {
+        if (localStorage.getItem("nav-collapsed-" + section.id) === "1") {
+          section.classList.add("collapsed");
+        }
+      } catch {}
+    });
   </script>
   ${body}
 </div>
