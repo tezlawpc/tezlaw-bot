@@ -1443,6 +1443,8 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
   <p style="margin-top:30px; color:#888; font-size:13px;">
     <a href="/admin/hearing/history" class="back-link">View all hearing notes →</a>
     &nbsp;·&nbsp;
+    <a href="/admin/hearing/notes/dictate" class="back-link" style="color:#B79C62;">🎙️ Voice dictate a hearing →</a>
+    &nbsp;·&nbsp;
     <a href="/admin/hearing/notes/bulk-upload" class="back-link" style="color:#0061FF;">📚 Bulk upload multiple documents →</a>
   </p>
 
