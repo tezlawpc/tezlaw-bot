@@ -239,10 +239,93 @@ async function backfillMeritsEvidenceDeadlines() {
   return results;
 }
 
+// Auto-create prep deadline for a master hearing (or any hearing_notes
+// record with a future next_hearing_date). Same 30-day-prior pattern as
+// merits, with alert schedule T-30 / T-15 / T-14 / T-7 / T-3 / T-1 / T-0.
+//
+// Label reflects next_hearing_type:
+//   - individual/merits → "Merits prep — supplemental evidence + briefs due"
+//   - other (master, status, etc.) → "Master hearing prep — pleadings + filings due"
+//
+// If the next hearing is in the past or missing, any existing pending deadline
+// is cleaned up.
+async function syncMasterHearingDeadline(hearingNoteId) {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, client_name, a_number, next_hearing_date, next_hearing_type
+       FROM hearing_notes WHERE id = $1`,
+      [hearingNoteId]
+    );
+    if (!rows.length) return { synced: 0 };
+
+    const note = rows[0];
+    const sourceRef = `master_prep:${hearingNoteId}`;
+
+    // Clean up any existing pending deadline for this note
+    await db.query(
+      `DELETE FROM deadlines
+       WHERE source_type = 'master_prep' AND source_id = $1 AND status = 'pending'`,
+      [hearingNoteId]
+    );
+
+    // Only create if next hearing is in the future
+    if (!note.next_hearing_date) return { synced: 0, reason: "no next_hearing_date" };
+    const hearingDate = new Date(note.next_hearing_date);
+    if (hearingDate <= new Date()) return { synced: 0, reason: "hearing in past" };
+
+    // Due date is 30 days before hearing
+    const dueDate = new Date(hearingDate.getTime() - 30 * 86400000);
+    const dueDateStr = dueDate.toISOString().split("T")[0];
+    const hearingStr = hearingDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const nextType = (note.next_hearing_type || "").toLowerCase();
+
+    // Choose description based on next hearing type
+    const isMerits = /individual|merits/.test(nextType);
+    const description = isMerits
+      ? `Supplemental evidence + briefs due (merits hearing ${hearingStr})`
+      : `Pleadings + filings prep due (${note.next_hearing_type || 'master'} hearing ${hearingStr})`;
+
+    await db.query(
+      `INSERT INTO deadlines (source_type, source_id, source_ref, client_name, a_number, due_date, description, priority, status)
+       VALUES ('master_prep', $1, $2, $3, $4, $5, $6, 'high', 'pending')
+       ON CONFLICT (source_ref) DO UPDATE SET
+         client_name = EXCLUDED.client_name,
+         a_number = EXCLUDED.a_number,
+         due_date = EXCLUDED.due_date,
+         description = EXCLUDED.description,
+         status = 'pending',
+         updated_at = NOW()`,
+      [hearingNoteId, sourceRef, note.client_name, note.a_number, dueDateStr, description]
+    );
+    return { synced: 1, due_date: dueDateStr };
+  } catch (e) {
+    console.error("[deadline-tracker] syncMasterHearingDeadline error:", e.message);
+    return { synced: 0, error: e.message };
+  }
+}
+
+async function backfillMasterHearingDeadlines() {
+  const { rows } = await db.query(
+    `SELECT id FROM hearing_notes
+     WHERE next_hearing_date IS NOT NULL AND next_hearing_date > NOW()`
+  );
+  const results = { synced: 0, skipped: 0, errors: [] };
+  for (const row of rows) {
+    try {
+      const r = await syncMasterHearingDeadline(row.id);
+      if (r.synced) results.synced++; else results.skipped++;
+    } catch (e) {
+      results.errors.push(`master ${row.id}: ${e.message}`);
+    }
+  }
+  console.log(`[deadline-tracker] Backfilled master prep: ${results.synced} synced, ${results.skipped} skipped, ${results.errors.length} errors`);
+  return results;
+}
+
 // Bulk resync from ALL hearing notes and individual hearing notes. Useful
 // for initial backfill or when the deadline table gets out of sync.
 async function syncAll() {
-  const results = { hearing_notes: 0, individual_hearings: 0, errors: [] };
+  const results = { hearing_notes: 0, individual_hearings: 0, master_prep: 0, merits_evidence: 0, errors: [] };
 
   try {
     const master = await db.query(`SELECT id FROM hearing_notes`);
@@ -250,6 +333,15 @@ async function syncAll() {
       const r = await syncFromHearingNote(row.id);
       results.hearing_notes += r.synced;
       if (r.error) results.errors.push(`master ${row.id}: ${r.error}`);
+    }
+    // Also sync master prep deadlines for hearings with future next_hearing_date
+    const withNext = await db.query(
+      `SELECT id FROM hearing_notes WHERE next_hearing_date IS NOT NULL AND next_hearing_date > NOW()`
+    );
+    for (const row of withNext.rows) {
+      const r = await syncMasterHearingDeadline(row.id);
+      if (r.synced) results.master_prep++;
+      if (r.error) results.errors.push(`master_prep ${row.id}: ${r.error}`);
     }
   } catch (e) {
     results.errors.push(`master query: ${e.message}`);
@@ -271,7 +363,6 @@ async function syncAll() {
       const merits = await db.query(
         `SELECT id FROM individual_hearing_notes WHERE hearing_date IS NOT NULL AND hearing_date > NOW()`
       );
-      results.merits_evidence = 0;
       for (const row of merits.rows) {
         const r = await syncMeritsEvidenceDeadline(row.id);
         if (r.synced) results.merits_evidence++;
@@ -464,10 +555,11 @@ async function runDailyAlerts() {
       const t7 = deadlines.filter(d => daysUntil(d.due_date) === 7);
       const t14 = deadlines.filter(d => daysUntil(d.due_date) === 14);
       // Merits-only extended lead time: fire at T-30 (60 days before hearing)
-      // and T-15 (45 days before hearing). Only for merits_evidence source
-      // type so we don't spam every long-lead deadline.
-      const t30_merits = deadlines.filter(d => daysUntil(d.due_date) === 30 && d.source_type === 'merits_evidence');
-      const t15_merits = deadlines.filter(d => daysUntil(d.due_date) === 15 && d.source_type === 'merits_evidence');
+      // and T-15 (45 days before hearing). Only for merits_evidence and
+      // master_prep source types so we don't spam every long-lead deadline.
+      const EXTENDED_ALERT_TYPES = new Set(['merits_evidence', 'master_prep']);
+      const t30_merits = deadlines.filter(d => daysUntil(d.due_date) === 30 && EXTENDED_ALERT_TYPES.has(d.source_type));
+      const t15_merits = deadlines.filter(d => daysUntil(d.due_date) === 15 && EXTENDED_ALERT_TYPES.has(d.source_type));
 
       // Only send if there's something to say
       const alertCount = overdue.length + dueToday.length + dueTomorrow.length + t3.length + t7.length + t14.length + t30_merits.length + t15_merits.length;
@@ -922,7 +1014,9 @@ module.exports = {
   syncFromHearingNote,
   syncFromIndividualHearing,
   syncMeritsEvidenceDeadline,
+  syncMasterHearingDeadline,
   backfillMeritsEvidenceDeadlines,
+  backfillMasterHearingDeadlines,
   syncAll,
   createManual,
   markComplete,
