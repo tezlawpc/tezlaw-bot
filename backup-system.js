@@ -23,14 +23,21 @@ const zlib = require("zlib");
 
 // Backup folder location — must be a path the OAuth user has WRITE access to.
 //
-// IMPORTANT: For Dropbox Business team spaces, writing to /XYZ/ at team root
-// often fails with path/no_write_permission (team-admin-only scope). We use
-// /USCIS/_ZARA_BACKUPS/ because /USCIS/ASYLUM_EOIR/ is where bulk client
-// imports write successfully — same parent tree, same permissions.
+// STRATEGY: Backups go to your HOME namespace (personal Dropbox area), not
+// team space. Home namespace has guaranteed write access; team-space root
+// requires team-admin OAuth scope which we don't have.
+//
+// This is different from client data which uses team-space paths via the
+// Dropbox-API-Path-Root header. Backups are system infrastructure — they
+// don't need to be visible to the team.
 //
 // Override via env var ZARA_BACKUP_FOLDER if you need to relocate.
-const BACKUP_FOLDER = process.env.ZARA_BACKUP_FOLDER || "/USCIS/_ZARA_BACKUPS";
+const BACKUP_FOLDER = process.env.ZARA_BACKUP_FOLDER || "/Zara-Backups";
 const RETENTION_DAYS = 30;
+// If true, skip the Dropbox-API-Path-Root header for backup operations —
+// this forces the API to operate against the user's home namespace instead
+// of the team space root, giving guaranteed write access.
+const USE_HOME_NAMESPACE = true;
 const TIMEZONE_OFFSET_HOURS = -8;   // Pacific (approx)
 const CRON_HOUR = 3;                 // Run at 3 AM Pacific
 
@@ -73,7 +80,9 @@ async function createSnapshot() {
 async function uploadToDropbox(filename, buffer) {
   const dbx = require("./dropbox-integration");
   const token = await dbx.getAccessToken();
-  const pathRootHeader = await dbx.getPathRootHeader();
+  // Skip path root header if configured — this operates in the user's
+  // home namespace where they have guaranteed write access.
+  const pathRootHeader = USE_HOME_NAMESPACE ? null : await dbx.getPathRootHeader();
 
   // Validate filename — Dropbox is strict about forbidden characters
   // (/ \ < > : " | ? * and trailing dots) and expects the full path to
@@ -178,8 +187,20 @@ async function uploadToDropbox(filename, buffer) {
 async function listBackups() {
   const dbx = require("./dropbox-integration");
   try {
-    const entries = await dbx.listFolder(BACKUP_FOLDER);
-    if (!entries) return [];
+    const token = await dbx.getAccessToken();
+    const pathRootHeader = USE_HOME_NAMESPACE ? null : await dbx.getPathRootHeader();
+    const headers = {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    };
+    if (pathRootHeader) headers["Dropbox-API-Path-Root"] = pathRootHeader;
+
+    const resp = await axios.post(
+      "https://api.dropboxapi.com/2/files/list_folder",
+      { path: BACKUP_FOLDER, recursive: false },
+      { headers, timeout: 30000 }
+    );
+    const entries = resp.data.entries || [];
     return entries
       .filter(e => e[".tag"] === "file" && e.name.startsWith("zara-backup-"))
       .map(e => ({
@@ -191,7 +212,10 @@ async function listBackups() {
       }))
       .sort((a, b) => new Date(b.server_modified) - new Date(a.server_modified));
   } catch (e) {
-    console.warn("[backup] list failed:", e.message);
+    // Folder may not exist yet — that's OK, return empty list
+    const msg = e.response?.data?.error_summary || "";
+    if (msg.includes("not_found") || msg.includes("path/not_found")) return [];
+    console.warn("[backup] list failed:", e.message, msg);
     return [];
   }
 }
@@ -202,11 +226,23 @@ async function pruneOldBackups() {
   const dbx = require("./dropbox-integration");
   const backups = await listBackups();
   const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const token = await dbx.getAccessToken();
+  const pathRootHeader = USE_HOME_NAMESPACE ? null : await dbx.getPathRootHeader();
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+  if (pathRootHeader) headers["Dropbox-API-Path-Root"] = pathRootHeader;
+
   let deleted = 0;
   for (const b of backups) {
     if (new Date(b.server_modified).getTime() < cutoff) {
       try {
-        await dbx.deleteFile(b.path);
+        await axios.post(
+          "https://api.dropboxapi.com/2/files/delete_v2",
+          { path: b.path },
+          { headers, timeout: 30000 }
+        );
         deleted++;
       } catch (e) {
         console.warn(`[backup] failed to delete old backup ${b.name}:`, e.message);
@@ -291,7 +327,7 @@ ${summary.manual ? "(triggered manually)" : "(scheduled 3 AM Pacific)"}`;
 async function downloadBackup(dropboxPath) {
   const dbx = require("./dropbox-integration");
   const token = await dbx.getAccessToken();
-  const pathRootHeader = await dbx.getPathRootHeader();
+  const pathRootHeader = USE_HOME_NAMESPACE ? null : await dbx.getPathRootHeader();
   const headers = {
     "Authorization": `Bearer ${token}`,
     "Dropbox-API-Arg": JSON.stringify({ path: dropboxPath }),
