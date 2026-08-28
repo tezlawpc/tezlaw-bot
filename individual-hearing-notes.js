@@ -1069,39 +1069,39 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       </button>
     </div>
 
-    <!-- Dictation modal — hidden by default -->
+    <!-- Dictation floating widget — visible ONLY while recording -->
+    <div id="dictation-widget" style="display:none; position:fixed; bottom:20px; right:20px; z-index:9999; background:linear-gradient(145deg, #0C1C36, #1a2f4f); color:white; padding:14px 18px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.35); min-width:280px; border:2px solid #B79C62;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:12px; height:12px; border-radius:50%; background:#c62828; animation:d-pulse 1.2s infinite;"></div>
+        <div style="flex:1;">
+          <div id="d-widget-timer" style="font-family:monospace; font-size:20px; font-weight:600; letter-spacing:1px;">00:00</div>
+          <div id="d-widget-status" style="font-size:11px; color:#B79C62; margin-top:2px;">Session 1</div>
+        </div>
+        <button type="button" onclick="dToggleRecording()" style="background:#c62828; color:white; border:none; padding:9px 14px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">⏹️ Stop</button>
+      </div>
+      <div id="d-widget-hint" style="font-size:10px; color:#888; margin-top:8px; text-align:center;">
+        Continue typing — auto-splits every 28 min
+      </div>
+    </div>
+    <style>
+      @keyframes d-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.5; transform: scale(1.3); }
+      }
+    </style>
+
+    <!-- Review modal — only shown after stop -->
     <div id="dictation-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:10000; align-items:center; justify-content:center; padding:20px;">
       <div style="background:white; padding:24px; border-radius:10px; max-width:520px; width:100%; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
           <div>
-            <h2 style="margin:0 0 4px 0; color:#0C1C36;">🎙️ Voice Dictate</h2>
-            <div style="font-size:12px; color:#666;">Zara will transcribe and add to your notes.</div>
+            <h2 style="margin:0 0 4px 0; color:#0C1C36;">🎙️ Voice Dictation</h2>
+            <div style="font-size:12px; color:#666;">Review below before applying.</div>
           </div>
           <button type="button" onclick="closeDictationModal()" style="background:transparent; border:none; font-size:20px; cursor:pointer; color:#888;">✕</button>
         </div>
 
-        <div id="d-record-panel" style="text-align:center; padding:20px 0;">
-          <button type="button" id="d-record-btn" onclick="dToggleRecording()"
-                  style="width:140px; height:140px; border-radius:50%; border:none; background:linear-gradient(145deg, #B79C62, #8f7a4c); color:white; font-size:14px; font-weight:600; cursor:pointer; box-shadow:0 8px 24px rgba(183,156,98,0.3);">
-            <div style="font-size:42px; margin-bottom:4px;" id="d-record-icon">🎙️</div>
-            <div id="d-record-label">Tap to record</div>
-          </button>
-          <div id="d-timer" style="font-family:monospace; font-size:22px; color:#0C1C36; margin-top:14px; letter-spacing:2px;">00:00</div>
-          <div id="d-hint" style="font-size:11px; color:#888; margin-top:6px; max-width:380px; margin:6px auto 0;">
-            Long hearings auto-split every ~28 min. Just keep talking.<br>
-            Mention client name, judge, DHS attorney, witnesses called, testimony highlights, evidence admitted/excluded, motions, and decision.
-          </div>
-        </div>
-
-        <div id="d-playback-panel" style="display:none;">
-          <audio id="d-audio-preview" controls style="width:100%;"></audio>
-          <div style="display:flex; gap:8px; margin-top:12px;">
-            <button type="button" onclick="dRerecord()" style="background:#eee; color:#333; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; flex:1;">🔄 Re-record</button>
-            <button type="button" onclick="dSubmitAudio()" style="background:#0C1C36; color:white; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600; flex:1;">🎯 Process</button>
-          </div>
-        </div>
-
-        <div id="d-processing-panel" style="display:none; padding:20px 0; text-align:center;">
+        <div id="d-processing-panel" style="padding:20px 0; text-align:center;">
           <div id="d-proc-icon" style="font-size:36px; margin-bottom:10px;">🎧</div>
           <div id="d-proc-status" style="font-size:14px; color:#0C1C36; font-weight:600;">Processing…</div>
           <div style="margin-top:14px;">
@@ -1121,7 +1121,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           </details>
           <div id="d-extracted-preview" style="font-size:12px; margin-bottom:14px;"></div>
           <div style="display:flex; gap:8px;">
-            <button type="button" onclick="dRerecord()" style="background:#eee; color:#333; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; flex:1;">🔄 Discard</button>
+            <button type="button" onclick="dDiscard()" style="background:#eee; color:#333; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; flex:1;">🗑️ Discard</button>
             <button type="button" onclick="dApplyToForm()" style="background:#0C1C36; color:white; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600; flex:1;">✓ Apply to form</button>
           </div>
         </div>
@@ -1388,104 +1388,77 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
     ` : ""}
 
     <script>
-      // ── Voice dictation with AUTO-CHUNKING for long individual hearings ─────
-      // Individual/merits hearings often run 2-3 hours. Whisper caps at 25 MB
-      // (~30 min per file). We auto-rotate the MediaRecorder every 28 minutes,
-      // uploading each finished chunk for transcription in the background while
-      // recording continues. When the attorney finally stops, all pending
-      // transcriptions complete and get combined, then Claude extracts fields.
-      const CHUNK_MINUTES = 28;   // rotate before Whisper's ceiling
+      // ── Voice dictation with auto-chunking + non-blocking widget ─────
+      // Recording shows only as a small floating widget in the corner so the
+      // attorney can keep typing in the form fields simultaneously. For long
+      // individual hearings, we auto-rotate the MediaRecorder every 28 min
+      // (Whisper caps at 25 MB = ~30 min per file).
+      const CHUNK_MINUTES = 28;
 
       let dMediaStream = null;
       let dMediaRecorder = null;
-      let dChunks = [];             // current in-progress recording's data chunks
-      let dRecordStart = 0;         // when overall recording started
-      let dChunkStart = 0;          // when current sub-chunk started
+      let dChunks = [];
+      let dRecordStart = 0;
+      let dChunkStart = 0;
       let dTimerInterval = null;
       let dRotationTimeout = null;
       let dAudioMime = "audio/webm";
       let dAudioExt = "webm";
-      let dChunkIndex = 0;                    // 0-based index of current chunk
-      let dSessionsPending = [];              // uploads in flight
-      let dSessionTranscripts = [];           // completed transcripts, indexed by chunk
-      let dLastBlobUrl = null;
-      let dIsFinishing = false;               // true when user clicked stop
+      let dChunkIndex = 0;
+      let dSessionsPending = [];
+      let dSessionTranscripts = [];
+      let dIsFinishing = false;
+      let dTranscript = "";
+      let dExtracted = null;
 
-      function openDictationModal() {
-        document.getElementById("dictation-modal").style.display = "flex";
-        dResetState();
-        dShowPanel("record");
-      }
-      function closeDictationModal() {
-        dCleanup();
-        document.getElementById("dictation-modal").style.display = "none";
-      }
-      function dShowPanel(name) {
-        ["record", "playback", "processing", "result"].forEach(p => {
-          document.getElementById("d-" + p + "-panel").style.display = p === name ? "block" : "none";
-        });
-        document.getElementById("d-error-panel").style.display = "none";
-      }
-      function dResetState() {
-        dChunks = [];
-        dChunkIndex = 0;
-        dSessionsPending = [];
-        dSessionTranscripts = [];
-        dIsFinishing = false;
-        if (dLastBlobUrl) { URL.revokeObjectURL(dLastBlobUrl); dLastBlobUrl = null; }
-        document.getElementById("d-timer").textContent = "00:00";
-        document.getElementById("d-record-icon").textContent = "🎙️";
-        document.getElementById("d-record-label").textContent = "Tap to record";
-        document.getElementById("d-record-btn").style.background = "linear-gradient(145deg, #B79C62, #8f7a4c)";
-        document.getElementById("d-hint").innerHTML = "Long hearings auto-split every ~28 min. Just keep talking.<br>Mention client name, judge, witnesses, testimony, evidence, motions, decision.";
-      }
-      function dCleanup() {
-        try {
-          if (dMediaRecorder && dMediaRecorder.state === "recording") dMediaRecorder.stop();
-        } catch { /* silent */ }
-        if (dMediaStream) {
-          dMediaStream.getTracks().forEach(t => t.stop());
-          dMediaStream = null;
-        }
-        dStopTimer();
-        if (dRotationTimeout) { clearTimeout(dRotationTimeout); dRotationTimeout = null; }
-      }
-
-      async function dToggleRecording() {
-        if (dMediaRecorder && dMediaRecorder.state === "recording") {
-          dIsFinishing = true;
-          dMediaRecorder.stop();   // this fires onstop → uploads final chunk
-          if (dRotationTimeout) { clearTimeout(dRotationTimeout); dRotationTimeout = null; }
-          dStopTimer();
-        } else {
-          await dStartRecording();
-        }
-      }
-
-      async function dStartRecording() {
+      async function openDictationModal() {
+        // Immediately request mic + start recording. Show floating widget only.
         try {
           dMediaStream = await navigator.mediaDevices.getUserMedia({
             audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 },
           });
-          const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
-          let selectedType = "";
-          for (const t of preferred) { if (MediaRecorder.isTypeSupported(t)) { selectedType = t; break; } }
-          dAudioMime = selectedType || "audio/webm";
-          dAudioExt = dAudioMime.includes("mp4") ? "mp4" : "webm";
-          dRecordStart = Date.now();
-          dStartNewChunkRecorder();
-          dStartTimer();
-          document.getElementById("d-record-icon").textContent = "⏹️";
-          document.getElementById("d-record-label").textContent = "Tap to stop";
-          document.getElementById("d-record-btn").style.background = "linear-gradient(145deg, #c62828, #8b1a1a)";
-          document.getElementById("d-hint").innerHTML = 'Recording… <span id="d-chunk-indicator">Session 1</span>';
-        } catch (e) { dShowError("Microphone access denied: " + e.message); }
+        } catch (e) {
+          alert("Microphone access denied: " + e.message);
+          return;
+        }
+        const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+        let selectedType = "";
+        for (const t of preferred) { if (MediaRecorder.isTypeSupported(t)) { selectedType = t; break; } }
+        dAudioMime = selectedType || "audio/webm";
+        dAudioExt = dAudioMime.includes("mp4") ? "mp4" : "webm";
+        dChunkIndex = 0;
+        dSessionsPending = [];
+        dSessionTranscripts = [];
+        dIsFinishing = false;
+        dRecordStart = Date.now();
+        dStartNewChunkRecorder();
+        dStartTimer();
+        document.getElementById("dictation-widget").style.display = "block";
+      }
+
+      function closeDictationModal() {
+        dCleanup();
+        document.getElementById("dictation-modal").style.display = "none";
+      }
+      function dCleanup() {
+        try { if (dMediaRecorder && dMediaRecorder.state === "recording") dMediaRecorder.stop(); } catch { /* silent */ }
+        if (dMediaStream) { dMediaStream.getTracks().forEach(t => t.stop()); dMediaStream = null; }
+        dStopTimer();
+        if (dRotationTimeout) { clearTimeout(dRotationTimeout); dRotationTimeout = null; }
+        document.getElementById("dictation-widget").style.display = "none";
+      }
+
+      function dToggleRecording() {
+        if (dMediaRecorder && dMediaRecorder.state === "recording" && !dIsFinishing) {
+          dIsFinishing = true;
+          document.getElementById("d-widget-status").textContent = "Finalizing…";
+          dMediaRecorder.stop();
+          if (dRotationTimeout) { clearTimeout(dRotationTimeout); dRotationTimeout = null; }
+          dStopTimer();
+        }
       }
 
       function dStartNewChunkRecorder() {
-        // Create a fresh MediaRecorder on the same stream. Each MediaRecorder
-        // produces one complete, standalone audio file. Rotating them lets
-        // us upload/transcribe finished chunks while recording keeps going.
         const chunkIdx = dChunkIndex;
         dChunks = [];
         dChunkStart = Date.now();
@@ -1495,25 +1468,14 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         dMediaRecorder.onstop = () => {
           const blob = new Blob(dChunks, { type: dAudioMime });
           const wasFinal = dIsFinishing;
-          if (wasFinal) {
-            // Show a playback preview of the LAST chunk only
-            if (dLastBlobUrl) URL.revokeObjectURL(dLastBlobUrl);
-            dLastBlobUrl = URL.createObjectURL(blob);
-            document.getElementById("d-audio-preview").src = dLastBlobUrl;
-          }
-          // Upload this chunk for transcription in background
           dUploadChunk(chunkIdx, blob).catch(err => console.warn("Chunk upload err:", err));
-
           if (wasFinal) {
-            // All chunks queued — wait for pending transcriptions to complete
+            if (dMediaStream) { dMediaStream.getTracks().forEach(t => t.stop()); dMediaStream = null; }
+            document.getElementById("dictation-widget").style.display = "none";
             dWaitForTranscriptionsThenExtract();
           } else {
-            // Rotation — immediately start a new recorder to continue capture
             dChunkIndex++;
             dStartNewChunkRecorder();
-            const indicator = document.getElementById("d-chunk-indicator");
-            if (indicator) indicator.textContent = "Session " + (dChunkIndex + 1);
-            dChunkStart = Date.now();
             dScheduleRotation();
           }
         };
@@ -1527,7 +1489,6 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           if (dMediaRecorder && dMediaRecorder.state === "recording" && !dIsFinishing) {
             console.log("[dictate] Auto-rotating chunk " + dChunkIndex);
             dMediaRecorder.stop();
-            // onstop will spawn the next recorder + upload this chunk
           }
         }, CHUNK_MINUTES * 60 * 1000);
       }
@@ -1543,14 +1504,12 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           let data; try { data = JSON.parse(text); } catch { throw new Error("Non-JSON: " + text.substring(0, 200)); }
           if (!resp.ok || !data.ok) throw new Error(data.error || "HTTP " + resp.status);
           dSessionTranscripts[chunkIdx] = data.transcript || "";
-          console.log("[dictate] Chunk " + chunkIdx + " transcribed: " + (data.transcript || "").length + " chars");
         } catch (e) {
           dSessionTranscripts[chunkIdx] = "[transcription failed for session " + (chunkIdx + 1) + ": " + e.message + "]";
-          console.error("[dictate] Chunk " + chunkIdx + " transcribe error:", e);
+          console.error("[dictate] Chunk " + chunkIdx + " error:", e);
         } finally {
           const i = dSessionsPending.indexOf(chunkIdx);
           if (i >= 0) dSessionsPending.splice(i, 1);
-          // Update processing panel if visible
           dUpdateProcessingStatus();
         }
       }
@@ -1566,24 +1525,25 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       }
 
       async function dWaitForTranscriptionsThenExtract() {
-        dShowPanel("processing");
+        // Open the modal in processing state
+        document.getElementById("dictation-modal").style.display = "flex";
+        document.getElementById("d-processing-panel").style.display = "block";
+        document.getElementById("d-result-panel").style.display = "none";
+        document.getElementById("d-error-panel").style.display = "none";
         document.getElementById("d-proc-icon").textContent = "🎧";
         document.getElementById("d-proc-status").textContent =
           "Transcribing " + (dChunkIndex + 1) + " session" + (dChunkIndex > 0 ? "s" : "") + "…";
         document.getElementById("d-proc-progress").style.width = "10%";
-        // Poll until all pending uploads finish
+
         while (dSessionsPending.length > 0) {
           await new Promise(r => setTimeout(r, 500));
         }
-        // Combine transcripts in order
         const combined = dSessionTranscripts.filter(t => typeof t === "string").join("\\n\\n");
         if (!combined || combined.length < 5) {
           dShowError("All transcripts came back empty. Recording may have been silent.");
-          dShowPanel("playback");
           return;
         }
         dTranscript = combined;
-        // Now extract fields
         document.getElementById("d-proc-icon").textContent = "🧠";
         document.getElementById("d-proc-status").textContent = "Claude extracting fields…";
         document.getElementById("d-proc-progress").style.width = "85%";
@@ -1603,11 +1563,9 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           if (!resp.ok || !data.ok) throw new Error(data.error || "HTTP " + resp.status);
           dExtracted = data.extracted;
           dShowExtractedPreview();
-          dShowPanel("result");
-        } catch (e) {
-          dShowError(e.message);
-          dShowPanel("playback");
-        }
+          document.getElementById("d-processing-panel").style.display = "none";
+          document.getElementById("d-result-panel").style.display = "block";
+        } catch (e) { dShowError(e.message); }
       }
 
       function dStartTimer() {
@@ -1619,27 +1577,12 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           const chunkRemain = Math.max(0, CHUNK_MINUTES * 60 - chunkSec);
           const cm = String(Math.floor(chunkRemain / 60)).padStart(2, "0");
           const cs = String(chunkRemain % 60).padStart(2, "0");
-          document.getElementById("d-timer").innerHTML =
-            mm + ":" + ss +
-            '<div style="font-size:11px; color:#888; letter-spacing:0; margin-top:2px;">' +
-            'Session ' + (dChunkIndex + 1) + ' · auto-splits in ' + cm + ':' + cs + '</div>';
+          document.getElementById("d-widget-timer").textContent = mm + ":" + ss;
+          document.getElementById("d-widget-status").textContent =
+            "Session " + (dChunkIndex + 1) + " · splits in " + cm + ":" + cs;
         }, 250);
       }
       function dStopTimer() { if (dTimerInterval) { clearInterval(dTimerInterval); dTimerInterval = null; } }
-
-      function dRerecord() {
-        dCleanup();
-        dResetState();
-        dShowPanel("record");
-      }
-
-      // dSubmitAudio is no longer used — chunks upload automatically on stop.
-      // Keep as no-op stub to prevent errors if anything still calls it.
-      async function dSubmitAudio() { /* no-op: chunks upload automatically */ }
-
-      // Track transcript/extracted at outer scope for the preview + apply steps
-      let dTranscript = "";
-      let dExtracted = null;
 
       function dShowExtractedPreview() {
         document.getElementById("d-transcript").textContent = dTranscript;
@@ -1665,6 +1608,11 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
                        : '<div style="color:#c00;">⚠️ No fields extracted, but transcript will still be appended.</div>');
       }
 
+      function dDiscard() {
+        dTranscript = ""; dExtracted = null;
+        closeDictationModal();
+      }
+
       function dApplyToForm() {
         const e = dExtracted || {};
         const setIfEmpty = (name, value) => {
@@ -1679,7 +1627,6 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         setIfEmpty("disposition", e.disposition);
         if (e.hearing_datetime) { const el = document.querySelector('[name="hearing_date"]'); if (el && !el.value) el.value = e.hearing_datetime.substring(0, 16); }
         if (e.next_hearing_date) { const el = document.querySelector('[name="next_hearing_date"]'); if (el && !el.value) el.value = e.next_hearing_date.substring(0, 16); }
-        // Append transcript to raw_notes textarea
         const rawNotes = document.querySelector('[name="raw_notes"], [name="attorney_notes"], [name="notes"]');
         if (rawNotes) {
           const stamp = new Date().toLocaleString();
@@ -1699,8 +1646,9 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       function dShowError(msg) {
         document.getElementById("d-error-panel").style.display = "block";
         document.getElementById("d-error-text").textContent = msg;
+        document.getElementById("d-processing-panel").style.display = "none";
       }
-      // ── End dictation modal ─────────────────────────
+      // ── End dictation ─────────────────────────
 
       const INITIAL_EXHIBITS = ${JSON.stringify(exhibits)};
       const INITIAL_EXAMS    = ${JSON.stringify(examinations)};
