@@ -26,6 +26,7 @@ const EVENT_COLORS = {
   individual_hearing: "#9c27b0",   // purple - merits/individual
   deadline:           "#f9a825",   // yellow - deadlines
   deadline_overdue:   "#c62828",   // red - overdue deadlines
+  outlook_event:      "#0078d4",   // Microsoft blue - Outlook events
 };
 
 const SOURCE_LABELS = {
@@ -35,6 +36,7 @@ const SOURCE_LABELS = {
   individual_hearing:    "Merits hearing",
   individual_upcoming:   "Next action",
   deadline:              "Deadline",
+  outlook_event:         "From Outlook",
 };
 
 // ─── Data fetching ───────────────────────────────────
@@ -169,6 +171,29 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
     )}
   `;
 
+  // ──────────────────────────────────────────────
+  // Query 6: Outlook synced events (hearing-related only)
+  // ──────────────────────────────────────────────
+  const q6 = `
+    SELECT 'outlook_event' as source, id::text as source_id,
+           COALESCE(matched_client_name, subject) as client_name,
+           matched_a_number as a_number,
+           start_datetime as event_date,
+           COALESCE(matched_hearing_type, 'outlook') as event_subtype,
+           NULL as judge_name,
+           location as court_name,
+           NULL as court_address,
+           subject as description,
+           NULL as priority, NULL as status
+    FROM outlook_synced_events
+    ${buildWhere(
+      "is_hearing_related = true",
+      "start_datetime IS NOT NULL",
+      dateRange("start_datetime"),
+      clientFilter("COALESCE(matched_client_name, subject)", "matched_a_number")
+    )}
+  `;
+
   // Combine all with UNION ALL. If any source table is missing, catch error.
   const results = [];
   const queries = [
@@ -178,6 +203,7 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
     ["individual_hearing past", q4a],
     ["individual_hearing upcoming", q4b],
     ["deadlines", q5],
+    ["outlook events", q6],
   ];
 
   for (const [label, sql] of queries) {
@@ -223,6 +249,7 @@ function dedupeEvents(events) {
   const HEARING_SOURCES = new Set([
     "hearing_note_upcoming", "hearing_note_past",
     "hearing_notice", "individual_hearing", "individual_upcoming",
+    "outlook_event",
   ]);
 
   // Split: hearings get deduped, deadlines pass through untouched
@@ -269,9 +296,12 @@ function dedupeEvents(events) {
       if (!existing.description && e.description) existing.description = e.description;
       if (!existing.a_number && e.a_number) existing.a_number = e.a_number;
       if (!existing.client_name && e.client_name) existing.client_name = e.client_name;
-      // Prefer EOIR notice as primary source (has official court info from paperwork)
-      // Priority: hearing_notice > hearing_note > individual_hearing
-      const sourcePriority = { hearing_notice: 3, hearing_note_upcoming: 2, hearing_note_past: 2, individual_hearing: 1, individual_upcoming: 1 };
+      // Priority (higher = more authoritative source):
+      //   outlook_event (4) - JJ's own Outlook calendar, source of truth
+      //   hearing_notice (3) - EOIR official paperwork
+      //   hearing_note (2) - attorney's notes
+      //   individual_hearing (1)
+      const sourcePriority = { outlook_event: 4, hearing_notice: 3, hearing_note_upcoming: 2, hearing_note_past: 2, individual_hearing: 1, individual_upcoming: 1 };
       if ((sourcePriority[e.source] || 0) > (sourcePriority[existing.source] || 0)) {
         existing.source = e.source;
         existing.event_subtype = e.event_subtype || existing.event_subtype;
@@ -279,8 +309,10 @@ function dedupeEvents(events) {
       // Use the earliest time known (many notes have placeholder times like 9:00; keep whichever is earlier if same day)
       const existingDt = new Date(existing.event_date);
       const eDt = new Date(e.event_date);
-      // Prefer the time from the EOIR notice source (most reliable)
-      if (e.source === "hearing_notice" && existing.source !== "hearing_notice") {
+      // Prefer the time from Outlook > EOIR notice > other sources
+      if (e.source === "outlook_event" && existing.source !== "outlook_event") {
+        existing.event_date = e.event_date;
+      } else if (e.source === "hearing_notice" && existing.source !== "hearing_notice" && existing.source !== "outlook_event") {
         existing.event_date = e.event_date;
       } else if (eDt < existingDt) {
         existing.event_date = e.event_date;
@@ -359,6 +391,7 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       <div style="font-size:12px; color:#666; margin-top:4px;">Unified view of hearings, notices, individual/merits, and deadlines.</div>
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <a href="/admin/outlook-sync" style="background:#0078d4; color:white; border:none; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:600;">📤 Outlook Sync</a>
       <button onclick="scanAllNotices()" id="scan-notices-btn" style="background:${brand.gold}; color:white; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600;">🔄 Update from Dropbox</button>
       <div style="background:#f0f0f0; border-radius:6px; padding:2px; display:inline-flex;">
         <button onclick="switchView('list')" id="view-list-btn" style="background:${activeView === 'list' ? brand.navy : 'transparent'}; color:${activeView === 'list' ? 'white' : '#666'}; padding:6px 14px; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">📋 List</button>
@@ -443,8 +476,9 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
 
   <!-- Legend -->
   <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px; font-size:11px; color:#666;">
-    <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.hearing}; border-radius:2px; vertical-align:middle;"></span> Hearing (from notes)</span>
+    <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.outlook_event}; border-radius:2px; vertical-align:middle;"></span> From Outlook</span>
     <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.hearing_notice}; border-radius:2px; vertical-align:middle;"></span> EOIR notice</span>
+    <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.hearing}; border-radius:2px; vertical-align:middle;"></span> Hearing (from notes)</span>
     <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.individual_hearing}; border-radius:2px; vertical-align:middle;"></span> Merits/individual</span>
     <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.deadline}; border-radius:2px; vertical-align:middle;"></span> Deadline</span>
     <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.hearing_past}; border-radius:2px; vertical-align:middle;"></span> Past hearing</span>
@@ -669,6 +703,8 @@ function renderEventCard(event, isPast) {
     linkHref = `/admin/notices`;
   } else if (primaryRef.source === "deadline") {
     linkHref = `/admin/deadlines`;
+  } else if (primaryRef.source === "outlook_event") {
+    linkHref = `/admin/outlook-sync`;
   }
 
   return `
