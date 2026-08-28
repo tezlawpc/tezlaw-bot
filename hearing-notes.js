@@ -518,6 +518,7 @@ async function saveNote(data, { generateSummaries = true, allowDuplicate = false
       try {
         const dt = require("./deadline-tracker");
         await dt.syncFromHearingNote(existing.id);
+        await dt.syncMasterHearingDeadline(existing.id);
       } catch (e) { console.warn("[hearing-notes] deadline sync warning:", e.message); }
       return { id: existing.id, paralegal_summary, client_summary, was_duplicate: true };
     }
@@ -579,6 +580,7 @@ async function saveNote(data, { generateSummaries = true, allowDuplicate = false
   try {
     const dt = require("./deadline-tracker");
     await dt.syncFromHearingNote(newId);
+    await dt.syncMasterHearingDeadline(newId);
   } catch (e) { console.warn("[hearing-notes] deadline sync warning:", e.message); }
   return { id: newId, paralegal_summary, client_summary, was_duplicate: false };
 }
@@ -702,6 +704,7 @@ async function updateNote(id, data, { user = null, skipRevision = false } = {}) 
   try {
     const dt = require("./deadline-tracker");
     await dt.syncFromHearingNote(id);
+    await dt.syncMasterHearingDeadline(id);
   } catch (e) { console.warn("[hearing-notes] deadline sync warning:", e.message); }
   return { id: r.rows[0].id, updated: true };
 }
