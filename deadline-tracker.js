@@ -281,9 +281,9 @@ async function listDeadlines({ status, assigned_to, client_name, source_type, fr
   if (to_date) { where.push(`due_date <= $${i++}`); params.push(to_date); }
 
   const sql = `
-    SELECT d.*, u.name AS assigned_name
+    SELECT d.*, u.full_name AS assigned_name
     FROM deadlines d
-    LEFT JOIN users u ON u.id = d.assigned_to
+    LEFT JOIN admin_users u ON u.id = d.assigned_to
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY
       CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
@@ -296,7 +296,7 @@ async function listDeadlines({ status, assigned_to, client_name, source_type, fr
 
 async function getDeadline(id) {
   const { rows } = await db.query(
-    `SELECT d.*, u.name AS assigned_name FROM deadlines d LEFT JOIN users u ON u.id = d.assigned_to WHERE d.id = $1`,
+    `SELECT d.*, u.full_name AS assigned_name FROM deadlines d LEFT JOIN admin_users u ON u.id = d.assigned_to WHERE d.id = $1`,
     [id]
   );
   return rows[0] || null;
