@@ -358,10 +358,29 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       <h1 style="margin:0;">🗓️ EOIR Calendar</h1>
       <div style="font-size:12px; color:#666; margin-top:4px;">Unified view of hearings, notices, individual/merits, and deadlines.</div>
     </div>
-    <div style="display:flex; gap:8px; align-items:center;">
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <button onclick="scanAllNotices()" id="scan-notices-btn" style="background:${brand.gold}; color:white; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600;">🔄 Update from Dropbox</button>
       <div style="background:#f0f0f0; border-radius:6px; padding:2px; display:inline-flex;">
         <button onclick="switchView('list')" id="view-list-btn" style="background:${activeView === 'list' ? brand.navy : 'transparent'}; color:${activeView === 'list' ? 'white' : '#666'}; padding:6px 14px; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">📋 List</button>
         <button onclick="switchView('month')" id="view-month-btn" style="background:${activeView === 'month' ? brand.navy : 'transparent'}; color:${activeView === 'month' ? 'white' : '#666'}; padding:6px 14px; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">📅 Month</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scan progress modal -->
+  <div id="scan-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; align-items:center; justify-content:center;">
+    <div style="background:white; padding:30px; border-radius:10px; max-width:500px; width:90%; max-height:80vh; overflow-y:auto;">
+      <div style="text-align:center; margin-bottom:16px;">
+        <div style="font-size:40px;">🔄</div>
+        <div id="scan-status-title" style="font-size:16px; font-weight:600; color:${brand.navy}; margin-top:8px;">Scanning Dropbox for new EOIR notices…</div>
+        <div id="scan-status-detail" style="font-size:12px; color:#666; margin-top:6px;">This scans every client's Dropbox folder. Please wait — may take 1-5 minutes.</div>
+      </div>
+      <div style="background:#eee; height:6px; border-radius:3px; overflow:hidden;">
+        <div id="scan-bar" style="background:linear-gradient(to right, ${brand.gold}, #d4b979); height:100%; width:5%; transition:width 0.5s;"></div>
+      </div>
+      <div id="scan-results" style="margin-top:20px; display:none; font-size:13px;"></div>
+      <div id="scan-close-wrap" style="margin-top:20px; text-align:right; display:none;">
+        <button onclick="closeScanModal()" style="background:${brand.navy}; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Close & refresh</button>
       </div>
     </div>
   </div>
@@ -484,6 +503,113 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       url.searchParams.delete("from");
       url.searchParams.delete("to");
       location.href = url.toString();
+    }
+
+    // ── Scan all clients' Dropbox for new EOIR notices ──
+    async function scanAllNotices() {
+      const btn = document.getElementById("scan-notices-btn");
+      const modal = document.getElementById("scan-modal");
+      const bar = document.getElementById("scan-bar");
+      const results = document.getElementById("scan-results");
+      const closeWrap = document.getElementById("scan-close-wrap");
+      const detail = document.getElementById("scan-status-detail");
+      const title = document.getElementById("scan-status-title");
+
+      btn.disabled = true;
+      btn.textContent = "🔄 Scanning…";
+      modal.style.display = "flex";
+      results.style.display = "none";
+      closeWrap.style.display = "none";
+      bar.style.width = "5%";
+
+      // Fake progress animation (real work is server-side)
+      let progress = 5;
+      const progressTimer = setInterval(() => {
+        progress = Math.min(85, progress + Math.random() * 8);
+        bar.style.width = progress + "%";
+        // Rotating status hints
+        const hints = [
+          "Scanning Dropbox for new EOIR notices…",
+          "Checking client folders…",
+          "Reading hearing notices with Claude Vision…",
+          "Extracting hearing dates and times…",
+          "Updating calendar entries…",
+        ];
+        title.textContent = hints[Math.floor(Math.random() * hints.length)];
+      }, 3000);
+
+      try {
+        const r = await fetch("/admin/calendar/scan-all-notices", { method: "POST" });
+        clearInterval(progressTimer);
+        const d = await r.json();
+
+        bar.style.width = "100%";
+        title.textContent = d.ok ? "✅ Scan complete" : "❌ Scan failed";
+
+        if (!d.ok) {
+          detail.textContent = "Error: " + (d.error || "unknown");
+          closeWrap.style.display = "block";
+          btn.disabled = false;
+          btn.textContent = "🔄 Update from Dropbox";
+          return;
+        }
+
+        const res = d.results;
+        detail.textContent = "";
+
+        let html = '<div style="background:#f8f8f8; padding:14px; border-radius:6px; margin-bottom:10px;">';
+        html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:13px;">';
+        html += '<div><b>Clients scanned:</b> ' + res.scanned + ' / ' + res.total_clients + '</div>';
+        html += '<div><b>Skipped (no folder):</b> ' + res.skipped_no_folder + '</div>';
+        html += '<div style="color:' + (res.new_notices > 0 ? '#2e7d32' : '#666') + ';"><b>New notices found:</b> ' + res.new_notices + '</div>';
+        html += '<div style="color:#0061FF;"><b>Updated notices:</b> ' + res.updated_notices + '</div>';
+        if (res.errors > 0) html += '<div style="color:#c62828;"><b>Errors:</b> ' + res.errors + '</div>';
+        html += '</div>';
+        html += '</div>';
+
+        if (res.per_client && res.per_client.length > 0) {
+          html += '<div style="max-height:250px; overflow-y:auto; border:1px solid #eee; border-radius:6px;">';
+          html += '<div style="padding:10px 12px; background:#f8f8f8; font-size:12px; font-weight:600; color:#666; border-bottom:1px solid #eee;">Changes by client:</div>';
+          for (const c of res.per_client) {
+            if (c.error) {
+              html += '<div style="padding:8px 12px; border-bottom:1px solid #f5f5f5; font-size:12px; color:#c00;">';
+              html += '⚠️ ' + escape(c.client) + ': ' + escape(c.error);
+              html += '</div>';
+            } else {
+              html += '<div style="padding:8px 12px; border-bottom:1px solid #f5f5f5; font-size:12px;">';
+              html += '<b>' + escape(c.client) + '</b>';
+              if (c.a_number) html += ' <span style="color:#888; font-family:monospace; font-size:11px;">' + escape(c.a_number) + '</span>';
+              html += '<span style="float:right; color:#2e7d32;">';
+              if (c.new > 0) html += '+' + c.new + ' new ';
+              if (c.updated > 0) html += '↻ ' + c.updated + ' updated';
+              html += '</span></div>';
+            }
+          }
+          html += '</div>';
+        } else if (res.new_notices === 0 && res.updated_notices === 0) {
+          html += '<div style="text-align:center; padding:16px; color:#666; font-size:13px;">No new notices found — calendar is up to date.</div>';
+        }
+
+        results.innerHTML = html;
+        results.style.display = "block";
+        closeWrap.style.display = "block";
+      } catch (e) {
+        clearInterval(progressTimer);
+        title.textContent = "❌ Scan failed";
+        detail.textContent = "Error: " + e.message;
+        closeWrap.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "🔄 Update from Dropbox";
+      }
+    }
+
+    function escape(s) {
+      return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function closeScanModal() {
+      document.getElementById("scan-modal").style.display = "none";
+      location.reload();  // Refresh calendar to show new data
     }
   </script>`;
 }
