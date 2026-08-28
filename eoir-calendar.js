@@ -539,7 +539,9 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       location.href = url.toString();
     }
 
-    // ── Scan all clients' Dropbox for new EOIR notices ──
+    // ── Scan all clients' Dropbox for new EOIR notices (async job pattern) ──
+    let scanPollInterval = null;
+
     async function scanAllNotices() {
       const btn = document.getElementById("scan-notices-btn");
       const modal = document.getElementById("scan-modal");
@@ -554,33 +556,16 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       modal.style.display = "flex";
       results.style.display = "none";
       closeWrap.style.display = "none";
-      bar.style.width = "5%";
-
-      // Fake progress animation (real work is server-side)
-      let progress = 5;
-      const progressTimer = setInterval(() => {
-        progress = Math.min(85, progress + Math.random() * 8);
-        bar.style.width = progress + "%";
-        // Rotating status hints
-        const hints = [
-          "Scanning Dropbox for new EOIR notices…",
-          "Checking client folders…",
-          "Reading hearing notices with Claude Vision…",
-          "Extracting hearing dates and times…",
-          "Updating calendar entries…",
-        ];
-        title.textContent = hints[Math.floor(Math.random() * hints.length)];
-      }, 3000);
+      bar.style.width = "3%";
+      title.textContent = "Starting scan…";
+      detail.textContent = "Kicking off background job — you can close this modal and check back later.";
 
       try {
         const r = await fetch("/admin/calendar/scan-all-notices", { method: "POST" });
-        clearInterval(progressTimer);
         const d = await r.json();
 
-        bar.style.width = "100%";
-        title.textContent = d.ok ? "✅ Scan complete" : "❌ Scan failed";
-
         if (!d.ok) {
+          title.textContent = "❌ Failed to start scan";
           detail.textContent = "Error: " + (d.error || "unknown");
           closeWrap.style.display = "block";
           btn.disabled = false;
@@ -588,48 +573,18 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
           return;
         }
 
-        const res = d.results;
-        detail.textContent = "";
-
-        let html = '<div style="background:#f8f8f8; padding:14px; border-radius:6px; margin-bottom:10px;">';
-        html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:13px;">';
-        html += '<div><b>Clients scanned:</b> ' + res.scanned + ' / ' + res.total_clients + '</div>';
-        html += '<div><b>Skipped (no folder):</b> ' + res.skipped_no_folder + '</div>';
-        html += '<div style="color:' + (res.new_notices > 0 ? '#2e7d32' : '#666') + ';"><b>New notices found:</b> ' + res.new_notices + '</div>';
-        html += '<div style="color:#0061FF;"><b>Updated notices:</b> ' + res.updated_notices + '</div>';
-        if (res.errors > 0) html += '<div style="color:#c62828;"><b>Errors:</b> ' + res.errors + '</div>';
-        html += '</div>';
-        html += '</div>';
-
-        if (res.per_client && res.per_client.length > 0) {
-          html += '<div style="max-height:250px; overflow-y:auto; border:1px solid #eee; border-radius:6px;">';
-          html += '<div style="padding:10px 12px; background:#f8f8f8; font-size:12px; font-weight:600; color:#666; border-bottom:1px solid #eee;">Changes by client:</div>';
-          for (const c of res.per_client) {
-            if (c.error) {
-              html += '<div style="padding:8px 12px; border-bottom:1px solid #f5f5f5; font-size:12px; color:#c00;">';
-              html += '⚠️ ' + escape(c.client) + ': ' + escape(c.error);
-              html += '</div>';
-            } else {
-              html += '<div style="padding:8px 12px; border-bottom:1px solid #f5f5f5; font-size:12px;">';
-              html += '<b>' + escape(c.client) + '</b>';
-              if (c.a_number) html += ' <span style="color:#888; font-family:monospace; font-size:11px;">' + escape(c.a_number) + '</span>';
-              html += '<span style="float:right; color:#2e7d32;">';
-              if (c.new > 0) html += '+' + c.new + ' new ';
-              if (c.updated > 0) html += '↻ ' + c.updated + ' updated';
-              html += '</span></div>';
-            }
-          }
-          html += '</div>';
-        } else if (res.new_notices === 0 && res.updated_notices === 0) {
-          html += '<div style="text-align:center; padding:16px; color:#666; font-size:13px;">No new notices found — calendar is up to date.</div>';
+        if (d.already_running) {
+          title.textContent = "🔄 Scan already running";
+          detail.textContent = "A scan started earlier is still in progress. Watching for updates…";
+        } else {
+          title.textContent = "🔄 Scanning Dropbox…";
+          detail.textContent = "Reading each client's folder and extracting EOIR notice details with Claude Vision.";
         }
 
-        results.innerHTML = html;
-        results.style.display = "block";
-        closeWrap.style.display = "block";
+        const scanId = d.scan_id;
+        pollScanStatus(scanId);
       } catch (e) {
-        clearInterval(progressTimer);
-        title.textContent = "❌ Scan failed";
+        title.textContent = "❌ Failed to start scan";
         detail.textContent = "Error: " + e.message;
         closeWrap.style.display = "block";
         btn.disabled = false;
@@ -637,14 +592,124 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       }
     }
 
+    async function pollScanStatus(scanId) {
+      if (scanPollInterval) clearInterval(scanPollInterval);
+
+      const poll = async () => {
+        try {
+          const r = await fetch("/admin/calendar/scan-status?scan_id=" + scanId);
+          const d = await r.json();
+          if (!d.ok || !d.exists) return;
+
+          const bar = document.getElementById("scan-bar");
+          const title = document.getElementById("scan-status-title");
+          const detail = document.getElementById("scan-status-detail");
+
+          // Update progress bar
+          const pct = d.progress_total > 0
+            ? Math.max(5, Math.min(95, Math.round((d.progress_current / d.progress_total) * 100)))
+            : 5;
+          bar.style.width = pct + "%";
+
+          if (d.running) {
+            title.textContent = "🔄 Scanning… " + d.progress_current + " / " + d.progress_total;
+            detail.textContent = d.current_client ? "Currently scanning: " + d.current_client : (d.phase || "");
+          } else {
+            // Done!
+            clearInterval(scanPollInterval);
+            scanPollInterval = null;
+            bar.style.width = "100%";
+            renderScanComplete(d);
+          }
+        } catch (e) {
+          console.warn("[scan poll] error:", e.message);
+        }
+      };
+
+      // Poll immediately, then every 3 seconds
+      await poll();
+      scanPollInterval = setInterval(poll, 3000);
+    }
+
+    function renderScanComplete(d) {
+      const btn = document.getElementById("scan-notices-btn");
+      const title = document.getElementById("scan-status-title");
+      const detail = document.getElementById("scan-status-detail");
+      const results = document.getElementById("scan-results");
+      const closeWrap = document.getElementById("scan-close-wrap");
+
+      title.textContent = d.error ? "⚠️ Scan finished with errors" : "✅ Scan complete";
+      detail.textContent = "";
+
+      const res = d.results || {};
+      let html = '<div style="background:#f8f8f8; padding:14px; border-radius:6px; margin-bottom:10px;">';
+      html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:13px;">';
+      html += '<div><b>Clients scanned:</b> ' + (res.scanned || 0) + ' / ' + (res.total_clients || 0) + '</div>';
+      html += '<div><b>Skipped (no folder):</b> ' + (res.skipped_no_folder || 0) + '</div>';
+      html += '<div style="color:' + ((res.new_notices || 0) > 0 ? '#2e7d32' : '#666') + ';"><b>New notices found:</b> ' + (res.new_notices || 0) + '</div>';
+      html += '<div style="color:#0061FF;"><b>Updated notices:</b> ' + (res.updated_notices || 0) + '</div>';
+      if ((res.errors || 0) > 0) html += '<div style="color:#c62828;"><b>Errors:</b> ' + res.errors + '</div>';
+      if ((res.timeout_clients || []).length > 0) html += '<div style="color:#f9a825; grid-column:1/-1; font-size:11px;"><b>⏱ Timed out:</b> ' + res.timeout_clients.join(", ") + '</div>';
+      html += '</div></div>';
+
+      if (d.error) {
+        html += '<div style="background:#ffebee; color:#c62828; padding:10px 14px; border-radius:6px; margin-bottom:10px; font-size:12px;">' + escape(d.error) + '</div>';
+      }
+
+      if (res.per_client && res.per_client.length > 0) {
+        html += '<div style="max-height:250px; overflow-y:auto; border:1px solid #eee; border-radius:6px;">';
+        html += '<div style="padding:10px 12px; background:#f8f8f8; font-size:12px; font-weight:600; color:#666; border-bottom:1px solid #eee;">Details:</div>';
+        for (const c of res.per_client) {
+          if (c.error) {
+            html += '<div style="padding:8px 12px; border-bottom:1px solid #f5f5f5; font-size:12px; color:#c00;">';
+            html += '⚠️ ' + escape(c.client) + ': ' + escape(c.error);
+            html += '</div>';
+          } else {
+            html += '<div style="padding:8px 12px; border-bottom:1px solid #f5f5f5; font-size:12px;">';
+            html += '<b>' + escape(c.client) + '</b>';
+            if (c.a_number) html += ' <span style="color:#888; font-family:monospace; font-size:11px;">' + escape(c.a_number) + '</span>';
+            html += '<span style="float:right; color:#2e7d32;">';
+            if (c.new > 0) html += '+' + c.new + ' new ';
+            if (c.updated > 0) html += '↻ ' + c.updated + ' updated';
+            html += '</span></div>';
+          }
+        }
+        html += '</div>';
+      } else if ((res.new_notices || 0) === 0 && (res.updated_notices || 0) === 0) {
+        html += '<div style="text-align:center; padding:16px; color:#666; font-size:13px;">No new notices found — calendar is up to date.</div>';
+      }
+
+      results.innerHTML = html;
+      results.style.display = "block";
+      closeWrap.style.display = "block";
+      btn.disabled = false;
+      btn.textContent = "🔄 Update from Dropbox";
+    }
+
     function escape(s) {
       return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
     function closeScanModal() {
+      if (scanPollInterval) { clearInterval(scanPollInterval); scanPollInterval = null; }
       document.getElementById("scan-modal").style.display = "none";
       location.reload();  // Refresh calendar to show new data
     }
+
+    // On page load, check if there's a scan already running and reattach modal to it
+    (async function checkExistingScan() {
+      try {
+        const r = await fetch("/admin/calendar/scan-status");
+        const d = await r.json();
+        if (d.ok && d.exists && d.running) {
+          // Auto-open modal and start polling
+          document.getElementById("scan-modal").style.display = "flex";
+          document.getElementById("scan-notices-btn").disabled = true;
+          document.getElementById("scan-notices-btn").textContent = "🔄 Scanning…";
+          pollScanStatus(d.scan_id);
+        }
+      } catch {}
+    })();
   </script>`;
 }
 
