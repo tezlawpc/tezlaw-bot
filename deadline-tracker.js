@@ -159,6 +159,86 @@ async function syncFromIndividualHearing(noteId) {
   }
 }
 
+// Auto-create supplemental evidence + brief deadline for a merits hearing.
+// EOIR requires all supplemental evidence and briefs to be filed 30 days
+// before the merits hearing. This function creates a single deadline at
+// hearing_date - 30 days. The daily alert cron will fire at T-30/15/7/3/1/0
+// relative to that deadline (which is 60/45/37/33/31/30 days before the
+// actual hearing).
+//
+// Only creates the deadline for FUTURE merits hearings. If the hearing has
+// already passed, no deadline is created (and any pending one is cleaned up).
+async function syncMeritsEvidenceDeadline(noteId) {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, client_name, a_number, hearing_date
+       FROM individual_hearing_notes WHERE id = $1`,
+      [noteId]
+    );
+    if (!rows.length) return { synced: 0 };
+
+    const note = rows[0];
+    const sourceRef = `merits_evidence:${noteId}`;
+
+    // Clean up any existing pending deadline for this note
+    await db.query(
+      `DELETE FROM deadlines
+       WHERE source_type = 'merits_evidence' AND source_id = $1 AND status = 'pending'`,
+      [noteId]
+    );
+
+    // Only create if hearing is in the future
+    if (!note.hearing_date) return { synced: 0, reason: "no hearing_date" };
+    const hearingDate = new Date(note.hearing_date);
+    if (hearingDate <= new Date()) return { synced: 0, reason: "hearing in past" };
+
+    // Due date is 30 days before hearing
+    const dueDate = new Date(hearingDate.getTime() - 30 * 86400000);
+    const dueDateStr = dueDate.toISOString().split("T")[0];
+    const hearingStr = hearingDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+    const description = `Supplemental evidence + briefs due (merits hearing ${hearingStr})`;
+
+    await db.query(
+      `INSERT INTO deadlines (source_type, source_id, source_ref, client_name, a_number, due_date, description, priority, status)
+       VALUES ('merits_evidence', $1, $2, $3, $4, $5, $6, 'high', 'pending')
+       ON CONFLICT (source_ref) DO UPDATE SET
+         client_name = EXCLUDED.client_name,
+         a_number = EXCLUDED.a_number,
+         due_date = EXCLUDED.due_date,
+         description = EXCLUDED.description,
+         status = 'pending',
+         updated_at = NOW()`,
+      [noteId, sourceRef, note.client_name, note.a_number, dueDateStr, description]
+    );
+    return { synced: 1, due_date: dueDateStr };
+  } catch (e) {
+    console.error("[deadline-tracker] syncMeritsEvidenceDeadline error:", e.message);
+    return { synced: 0, error: e.message };
+  }
+}
+
+// Backfill: run merits evidence sync for ALL individual hearing notes with
+// future hearing dates. Called on-demand from /admin/deadlines/sync-all or
+// via a one-time boot migration.
+async function backfillMeritsEvidenceDeadlines() {
+  const { rows } = await db.query(
+    `SELECT id FROM individual_hearing_notes
+     WHERE hearing_date IS NOT NULL AND hearing_date > NOW()`
+  );
+  const results = { synced: 0, skipped: 0, errors: [] };
+  for (const row of rows) {
+    try {
+      const r = await syncMeritsEvidenceDeadline(row.id);
+      if (r.synced) results.synced++; else results.skipped++;
+    } catch (e) {
+      results.errors.push(`hearing ${row.id}: ${e.message}`);
+    }
+  }
+  console.log(`[deadline-tracker] Backfilled merits evidence: ${results.synced} synced, ${results.skipped} skipped, ${results.errors.length} errors`);
+  return results;
+}
+
 // Bulk resync from ALL hearing notes and individual hearing notes. Useful
 // for initial backfill or when the deadline table gets out of sync.
 async function syncAll() {
@@ -186,6 +266,16 @@ async function syncAll() {
         const r = await syncFromIndividualHearing(row.id);
         results.individual_hearings += r.synced;
         if (r.error) results.errors.push(`individual ${row.id}: ${r.error}`);
+      }
+      // Also sync merits evidence deadlines for ALL individual hearings with future dates
+      const merits = await db.query(
+        `SELECT id FROM individual_hearing_notes WHERE hearing_date IS NOT NULL AND hearing_date > NOW()`
+      );
+      results.merits_evidence = 0;
+      for (const row of merits.rows) {
+        const r = await syncMeritsEvidenceDeadline(row.id);
+        if (r.synced) results.merits_evidence++;
+        if (r.error) results.errors.push(`merits ${row.id}: ${r.error}`);
       }
     }
   } catch (e) {
@@ -343,15 +433,16 @@ async function runDailyAlerts() {
   today.setHours(0, 0, 0, 0);
   const results = { alerted: 0, skipped: 0, errors: [] };
 
-  // Get pending deadlines with due_date up to 14 days out OR overdue by up to 30 days
+  // Widen range to catch merits_evidence at T-30/T-15 (which is 60 and 45
+  // days before the merits hearing). Other deadlines only fire T-14 and later.
   const thirtyDaysAgo = new Date(today.getTime() - 30 * 86400000);
-  const fourteenDaysOut = new Date(today.getTime() + 14 * 86400000);
+  const thirtyDaysOut = new Date(today.getTime() + 30 * 86400000);
 
   const { rows } = await db.query(
     `SELECT * FROM deadlines
      WHERE status = 'pending' AND due_date BETWEEN $1 AND $2
      ORDER BY due_date ASC`,
-    [thirtyDaysAgo.toISOString().split('T')[0], fourteenDaysOut.toISOString().split('T')[0]]
+    [thirtyDaysAgo.toISOString().split('T')[0], thirtyDaysOut.toISOString().split('T')[0]]
   );
 
   // Bucket by attorney
@@ -372,16 +463,21 @@ async function runDailyAlerts() {
       const t3 = deadlines.filter(d => daysUntil(d.due_date) === 3);
       const t7 = deadlines.filter(d => daysUntil(d.due_date) === 7);
       const t14 = deadlines.filter(d => daysUntil(d.due_date) === 14);
+      // Merits-only extended lead time: fire at T-30 (60 days before hearing)
+      // and T-15 (45 days before hearing). Only for merits_evidence source
+      // type so we don't spam every long-lead deadline.
+      const t30_merits = deadlines.filter(d => daysUntil(d.due_date) === 30 && d.source_type === 'merits_evidence');
+      const t15_merits = deadlines.filter(d => daysUntil(d.due_date) === 15 && d.source_type === 'merits_evidence');
 
       // Only send if there's something to say
-      const alertCount = overdue.length + dueToday.length + dueTomorrow.length + t3.length + t7.length + t14.length;
+      const alertCount = overdue.length + dueToday.length + dueTomorrow.length + t3.length + t7.length + t14.length + t30_merits.length + t15_merits.length;
       if (alertCount === 0) { results.skipped++; continue; }
 
-      const msg = buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14 });
+      const msg = buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14, t15_merits, t30_merits });
       await sendTelegramAlert(msg);
 
       // Log alert to each deadline's history
-      const allAlerted = [...overdue, ...dueToday, ...dueTomorrow, ...t3, ...t7, ...t14];
+      const allAlerted = [...overdue, ...dueToday, ...dueTomorrow, ...t3, ...t7, ...t14, ...t15_merits, ...t30_merits];
       for (const d of allAlerted) {
         await db.query(
           `UPDATE deadlines
@@ -409,7 +505,7 @@ function daysUntil(dateStr) {
   return Math.floor((target - today) / 86400000);
 }
 
-function buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14 }) {
+function buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14, t15_merits, t30_merits }) {
   const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   let msg = `⏰ *Deadline alerts — ${dateStr}*\n\n`;
 
@@ -455,6 +551,19 @@ function buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14 }) {
   if (t14.length) {
     msg += `📅 *In 14 days (${t14.length}):*\n`;
     for (const d of t14) msg += formatDeadline(d) + '\n';
+    msg += '\n';
+  }
+
+  // Merits evidence early-warning alerts (fired at 60/45 days before hearing)
+  if (t15_merits && t15_merits.length) {
+    msg += `⚖️ *45 days to merits hearing — evidence due in 15 days (${t15_merits.length}):*\n`;
+    for (const d of t15_merits) msg += formatDeadline(d) + '\n';
+    msg += '\n';
+  }
+
+  if (t30_merits && t30_merits.length) {
+    msg += `⚖️ *60 days to merits hearing — evidence due in 30 days (${t30_merits.length}):*\n`;
+    for (const d of t30_merits) msg += formatDeadline(d) + '\n';
     msg += '\n';
   }
 
@@ -812,6 +921,8 @@ module.exports = {
   init,
   syncFromHearingNote,
   syncFromIndividualHearing,
+  syncMeritsEvidenceDeadline,
+  backfillMeritsEvidenceDeadlines,
   syncAll,
   createManual,
   markComplete,
