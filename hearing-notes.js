@@ -125,6 +125,18 @@ async function extractDocumentFields(fileBuffer, mimeType, originalName = "") {
 
 First identify what type of document this is. If it's handwritten attorney notes from a hearing, extract EVERYTHING you can read about what happened: judge's decisions, deadlines, next hearing date, pleadings, applications discussed, DHS positions, motions ruled on, testimony highlights, and any specific dates/deadlines.
 
+CRITICAL — NEXT HEARING DATE EXTRACTION: For attorney hearing notes and court orders, ALWAYS look carefully for the next scheduled hearing. Common wordings to watch for:
+- "MCH continued to [date]" / "cont'd to [date]"
+- "Individual set for [date]" / "Individual hearing [date]"
+- "Merits hearing [date]"
+- "Next hearing [date]" / "Next MCH [date]"
+- "Reset to [date]"
+- "Adjourned to [date]"
+- Handwritten dates near arrows, checkmarks, or "next" annotations
+- A calendar-style date in the margin of hearing notes
+- On an EOIR NOA/hearing notice: the "date and time of hearing" IS the future hearing to schedule
+Put ANY future scheduled hearing date into next_hearing_date, even if the format is casual (e.g. "10/15" → guess year based on context, default to current or next year).
+
 Then extract as many of the following fields as possible. Use null for fields not present or illegible. Do NOT invent data.
 
 Return ONLY valid JSON with this structure (no preamble, no code fences):
@@ -1374,7 +1386,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       <div class="row">
         <div>
           <label>Hearing date/time</label>
-          <input type="datetime-local" name="hearing_date" step="1800" value="${escapeAttr(prev.hearing_date)}">
+          <input type="datetime-local" name="hearing_date" step="1800" value="${toDatetimeLocal(prev.hearing_date)}">
         </div>
         <div>
           <label>Case type</label>
@@ -1475,7 +1487,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         </div>
         <div>
           <label>Date/time</label>
-          <input type="datetime-local" name="next_hearing_date" step="1800" value="${escapeAttr(prev.next_hearing_date)}">
+          <input type="datetime-local" name="next_hearing_date" step="1800" value="${toDatetimeLocal(prev.next_hearing_date)}">
         </div>
       </div>
     </fieldset>
@@ -2361,6 +2373,17 @@ function escapeHtml(s) {
 }
 function escapeAttr(s) { return escapeHtml(s); }
 
+// Convert a Date object or ISO string to the "YYYY-MM-DDTHH:MM" format that
+// HTML <input type="datetime-local"> requires. Returns "" for null/invalid.
+// Uses local timezone (since datetime-local is timezone-naive).
+function toDatetimeLocal(v) {
+  if (!v) return "";
+  const d = v instanceof Date ? v : new Date(v);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // ── Exports ──────────────────────────────────────────────
 
 // ── Duplicate finder & merger ───────────────────────────
@@ -2692,6 +2715,12 @@ function renderCard(cardId) {
     content += e.client_name ? '<div><strong>Client:</strong> ' + escapeHTMLLocal2(e.client_name) + '</div>' : '<div style="color:#c00;">⚠️ No client name extracted</div>';
     if (e.a_number) content += '<div><strong>A#:</strong> ' + escapeHTMLLocal2(e.a_number) + '</div>';
     if (e.hearing_datetime) content += '<div><strong>Hearing:</strong> ' + escapeHTMLLocal2(new Date(e.hearing_datetime).toLocaleString()) + '</div>';
+    if (e.next_hearing_date) {
+      const nhd = new Date(e.next_hearing_date);
+      const nhdStr = isNaN(nhd) ? escapeHTMLLocal2(e.next_hearing_date) : escapeHTMLLocal2(nhd.toLocaleString());
+      const nhtLabel = e.next_hearing_type ? ' (' + escapeHTMLLocal2(e.next_hearing_type) + ')' : '';
+      content += '<div style="color:#B79C62;"><strong>➡️ Next hearing:</strong> ' + nhdStr + nhtLabel + '</div>';
+    }
     if (e.judge_name) content += '<div><strong>Judge:</strong> ' + escapeHTMLLocal2(e.judge_name) + '</div>';
     if (e.case_type) content += '<div style="font-size:12px; color:#666;"><strong>Type:</strong> ' + escapeHTMLLocal2(e.case_type) + '</div>';
     if (e.hearing_type) content += '<div style="font-size:12px; color:#666;"><strong>Master/Individual:</strong> ' + escapeHTMLLocal2(e.hearing_type) + '</div>';
