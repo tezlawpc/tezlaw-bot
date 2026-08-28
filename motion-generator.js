@@ -758,18 +758,21 @@ function renderNewMotionForm(prefill = {}) {
 
     <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:16px;">
       <h3 style="margin-top:0; color:${brand.navy};">Client</h3>
-      <p style="font-size:11px; color:#888; margin:0 0 10px 0;">Type either the client's name OR A-number — Zara will look up their court/judge info from prior hearings.</p>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-        <div style="position:relative;">
+        <div>
           <label style="display:block; font-size:12px; color:#666;">Client name *</label>
-          <input type="text" name="client_name" required autocomplete="off" value="${escapeHtml(prefill.client_name || "")}" oninput="lookupClient(this.value, 'name')" onblur="setTimeout(()=>{ document.getElementById('client-suggestions').style.display='none'; }, 200)" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <input type="text" name="client_name" required autocomplete="off" value="${escapeHtml(prefill.client_name || "")}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
         </div>
         <div>
           <label style="display:block; font-size:12px; color:#666;">A-number</label>
-          <input type="text" name="a_number" autocomplete="off" value="${escapeHtml(prefill.a_number || "")}" oninput="lookupClient(this.value, 'anum')" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <input type="text" name="a_number" autocomplete="off" value="${escapeHtml(prefill.a_number || "")}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
         </div>
       </div>
-      <div id="client-suggestions" style="display:none; margin-top:8px; background:#f8f8f8; border:1px solid #ddd; border-radius:4px; padding:6px; max-height:280px; overflow-y:auto;"></div>
+      <div style="margin-top:10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <button type="button" onclick="doClientLookup()" style="background:${brand.gold}; color:white; padding:7px 14px; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">🔍 Look up client info</button>
+        <span style="font-size:11px; color:#888;">Fills court/judge automatically from prior hearings</span>
+      </div>
+      <div id="client-suggestions" style="display:none; margin-top:10px; background:#f8f8f8; border:1px solid #ddd; border-radius:4px; padding:8px; max-height:280px; overflow-y:auto;"></div>
       <div id="lookup-status" style="font-size:11px; color:${brand.gold}; margin-top:6px; display:none;"></div>
       ${prefill.hearing_note_id ? `<input type="hidden" name="hearing_note_id" value="${prefill.hearing_note_id}"><div style="font-size:11px; color:${brand.gold}; margin-top:8px;">✓ Linked to hearing note #${prefill.hearing_note_id}</div>` : ""}
     </div>
@@ -824,28 +827,41 @@ function renderNewMotionForm(prefill = {}) {
   </div>
 
   <script>
-    // ── Client autocomplete lookup ─────────────────────────
-    let lookupTimeout = null;
-    async function lookupClient(query, sourceField) {
-      if (lookupTimeout) clearTimeout(lookupTimeout);
+    // ── Manual client lookup (click button to search) ────────
+    async function doClientLookup() {
+      const clientName = (document.querySelector('[name="client_name"]').value || "").trim();
+      const aNumber = (document.querySelector('[name="a_number"]').value || "").trim();
+      const query = aNumber || clientName;
       const suggestionsEl = document.getElementById("client-suggestions");
-      const trimmed = String(query || "").trim();
-      if (trimmed.length < 2) {
-        suggestionsEl.style.display = "none";
+      const statusEl = document.getElementById("lookup-status");
+
+      if (query.length < 2) {
+        statusEl.textContent = "⚠️ Enter at least 2 characters in client name or A#";
+        statusEl.style.color = "#c00";
+        statusEl.style.display = "block";
+        setTimeout(() => { statusEl.style.display = "none"; statusEl.style.color = "${brand.gold}"; }, 3500);
         return;
       }
-      // Debounce: wait 350ms after typing stops
-      lookupTimeout = setTimeout(async () => {
-        try {
-          const r = await fetch("/admin/motions/lookup-client?q=" + encodeURIComponent(trimmed));
-          const d = await r.json();
-          if (!d.ok || !d.matches || d.matches.length === 0) {
-            suggestionsEl.style.display = "none";
-            return;
-          }
-          renderSuggestions(d.matches);
-        } catch (e) { console.warn("Lookup error:", e); }
-      }, 350);
+
+      suggestionsEl.innerHTML = '<div style="text-align:center; color:#888; padding:14px; font-size:12px;">🔍 Searching…</div>';
+      suggestionsEl.style.display = "block";
+
+      try {
+        const r = await fetch("/admin/motions/lookup-client?q=" + encodeURIComponent(query));
+        const d = await r.json();
+        if (!d.ok) {
+          suggestionsEl.innerHTML = '<div style="color:#c00; padding:10px; font-size:12px;">Lookup failed: ' + (d.error || "unknown") + '</div>';
+          return;
+        }
+        if (!d.matches || d.matches.length === 0) {
+          suggestionsEl.innerHTML = '<div style="color:#666; padding:10px; font-size:12px;">No matching clients found in hearing notes or notices. Enter court/judge manually.</div>';
+          setTimeout(() => { suggestionsEl.style.display = "none"; }, 4000);
+          return;
+        }
+        renderSuggestions(d.matches);
+      } catch (e) {
+        suggestionsEl.innerHTML = '<div style="color:#c00; padding:10px; font-size:12px;">Lookup error: ' + e.message + '</div>';
+      }
     }
 
     function renderSuggestions(matches) {
@@ -872,13 +888,12 @@ function renderNewMotionForm(prefill = {}) {
     function selectClient(idx) {
       const m = window._clientMatches[idx];
       if (!m) return;
-      // Fill any fields that are empty (don't overwrite what user typed)
       const setIfEmpty = (name, value) => {
         if (!value) return;
         const el = document.querySelector('[name="' + name + '"]');
         if (el && !el.value.trim()) el.value = value;
       };
-      // Client fields — force-overwrite these since user is selecting a client
+      // Client fields force-fill (user is explicitly picking this client)
       const cnEl = document.querySelector('[name="client_name"]');
       const anEl = document.querySelector('[name="a_number"]');
       if (cnEl && m.client_name) cnEl.value = m.client_name;
