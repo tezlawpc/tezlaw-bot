@@ -3297,7 +3297,9 @@ app.post("/admin/hearing/notes/create-from-extraction", async (req, res) => {
       client_email:     extraction.client_email || null,
       client_phone:     extraction.client_phone || null,
       client_address:   extraction.client_address || null,
-      hearing_datetime: extraction.hearing_datetime || null,
+      // NOTE: saveNote uses `hearing_date` for the primary hearing timestamp
+      // (matches DB column). Extraction uses `hearing_datetime` — bridge here.
+      hearing_date:     extraction.hearing_datetime || null,
       hearing_type:     extraction.hearing_type || null,
       case_type:        extraction.case_type || null,
       judge_name:       extraction.judge_name || null,
