@@ -2621,6 +2621,50 @@ app.post("/admin/hearing/notes/dictate/extract-only", audioUpload.single("audio"
   }
 });
 
+// Chunk transcription — for long-form dictation split into multiple audio
+// chunks (Whisper has a 25 MB limit, ~30 min at typical opus bitrates).
+// Client uploads each chunk as it finishes recording, gets back just the
+// transcript. Client combines transcripts and calls extract-from-text.
+app.post("/admin/hearing/notes/dictate/transcribe-chunk", audioUpload.single("audio"), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ ok: false, error: "No audio file uploaded" });
+    }
+    const voice = require("./voice-dictation");
+    const filename = req.file.originalname || `chunk-${Date.now()}.webm`;
+    const chunkIndex = req.body.chunk_index || "?";
+    console.log(`[dictate-chunk] Chunk ${chunkIndex}: ${req.file.buffer.length} bytes`);
+    const transcript = await voice.transcribeAudio(req.file.buffer, filename);
+    console.log(`[dictate-chunk] Chunk ${chunkIndex} transcript: ${transcript.length} chars`);
+    res.json({ ok: true, chunk_index: chunkIndex, transcript });
+  } catch (err) {
+    console.error("[dictate-chunk]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Extract fields from a plain-text transcript (post multi-chunk combine).
+app.post("/admin/hearing/notes/dictate/extract-from-text", async (req, res) => {
+  try {
+    const transcript = String(req.body.transcript || "").trim();
+    if (transcript.length < 10) {
+      return res.status(400).json({ ok: false, error: "Transcript is too short" });
+    }
+    const voice = require("./voice-dictation");
+    const hint = {
+      client_name: String(req.body.client_name || "").trim() || null,
+      a_number: String(req.body.a_number || "").trim() || null,
+      hearing_type: String(req.body.hearing_type || "").trim() || null,
+    };
+    console.log(`[dictate-extract-from-text] Transcript: ${transcript.length} chars`);
+    const extracted = await voice.extractFieldsFromTranscript(transcript, hint);
+    res.json({ ok: true, extracted });
+  } catch (err) {
+    console.error("[dictate-extract-from-text]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.post("/admin/hearing/notes/dictate/process", audioUpload.single("audio"), async (req, res) => {
   try {
     if (!req.file || !req.file.buffer) {
