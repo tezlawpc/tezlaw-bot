@@ -700,7 +700,7 @@ app.get("/admin/motions/new", async (req, res) => {
   }
 });
 
-app.get("/admin/motions/:id", async (req, res) => {
+app.get("/admin/motions/:id(\\d+)", async (req, res) => {
   try {
     const motions = require("./motion-generator");
     const hearingNotes = require("./hearing-notes");
@@ -756,7 +756,7 @@ app.post("/admin/motions/generate", express.json({ limit: "2mb" }), async (req, 
   }
 });
 
-app.patch("/admin/motions/:id", express.json({ limit: "5mb" }), async (req, res) => {
+app.patch("/admin/motions/:id(\\d+)", express.json({ limit: "5mb" }), async (req, res) => {
   try {
     const motions = require("./motion-generator");
     await motions.updateMotion(parseInt(req.params.id, 10), req.body);
@@ -764,7 +764,7 @@ app.patch("/admin/motions/:id", express.json({ limit: "5mb" }), async (req, res)
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.delete("/admin/motions/:id", async (req, res) => {
+app.delete("/admin/motions/:id(\\d+)", async (req, res) => {
   try {
     const motions = require("./motion-generator");
     await motions.deleteMotion(parseInt(req.params.id, 10));
@@ -776,18 +776,12 @@ app.delete("/admin/motions/:id", async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get("/admin/motions/:id/download", async (req, res) => {
+app.get("/admin/motions/:id(\\d+)/download", async (req, res) => {
   try {
     const motions = require("./motion-generator");
     const motion = await motions.getMotion(parseInt(req.params.id, 10));
     if (!motion) return res.status(404).send("Motion not found");
-    const docx = motions.generateDocx({
-      title: motion.title,
-      motionType: motion.motion_type,
-      clientName: motion.client_name,
-      aNumber: motion.a_number,
-      markdown: motion.content_markdown || "",
-    });
+    const docx = await motions.generateDocxForMotion(motion);
     const cfg = motions.MOTION_TYPES[motion.motion_type];
     const safeName = (motion.client_name || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_");
     const filename = `${new Date().toISOString().substring(0, 10)}_${cfg?.short || motion.motion_type}_${safeName}.docx`;
@@ -800,7 +794,85 @@ app.get("/admin/motions/:id/download", async (req, res) => {
   }
 });
 
-app.post("/admin/motions/:id/upload-dropbox", async (req, res) => {
+// ── Motion Templates (pleading paper) ────────────────
+app.get("/admin/motions/templates", async (req, res) => {
+  try {
+    const templates = require("./motion-templates");
+    const motions = require("./motion-generator");
+    const hearingNotes = require("./hearing-notes");
+    const list = await templates.listTemplates();
+    const body = templates.renderTemplatesPage(list, motions.MOTION_TYPES);
+    res.send(hearingNotes.renderAdminChrome({ title: "Motion Templates", body, activeItem: "motions" }));
+  } catch (err) {
+    console.error("[templates list]:", err);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// Upload uses multer's memoryStorage (same as audio/document uploads)
+const templateUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },  // 10 MB max for a template
+});
+
+app.post("/admin/motions/templates", templateUpload.single("template_file"), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ ok: false, error: "No file uploaded" });
+    }
+    const templates = require("./motion-templates");
+    let motionTypes = [];
+    try { motionTypes = JSON.parse(req.body.motion_types || "[]"); } catch {}
+    const result = await templates.uploadTemplate({
+      name: req.body.name,
+      description: req.body.description,
+      docxBuffer: req.file.buffer,
+      filename: req.file.originalname,
+      motionTypes,
+      isDefault: req.body.is_default === "true",
+      userId: req.user?.id,
+    });
+    try {
+      const audit = require("./audit-log");
+      await audit.log({ user_id: req.user?.id, action: "motion_template.upload", target_type: "motion_template", target_id: result.id, changes: { name: req.body.name, filename: req.file.originalname } });
+    } catch {}
+    res.json({ ok: true, template: result });
+  } catch (err) {
+    console.error("[templates upload]:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/motions/templates/:id/download", async (req, res) => {
+  try {
+    const templates = require("./motion-templates");
+    const t = await templates.getTemplate(parseInt(req.params.id, 10));
+    if (!t) return res.status(404).send("Template not found");
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="${t.original_filename || 'template.docx'}"`);
+    res.send(t.docx_content);
+  } catch (err) {
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/motions/templates/:id/set-default", async (req, res) => {
+  try {
+    const templates = require("./motion-templates");
+    await templates.setDefault(parseInt(req.params.id, 10));
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.delete("/admin/motions/templates/:id", async (req, res) => {
+  try {
+    const templates = require("./motion-templates");
+    await templates.deleteTemplate(parseInt(req.params.id, 10));
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/motions/:id(\\d+)/upload-dropbox", async (req, res) => {
   try {
     const motions = require("./motion-generator");
     const result = await motions.uploadToDropbox(parseInt(req.params.id, 10));
@@ -5509,11 +5581,13 @@ app.listen(PORT, async () => {
     console.error("⚠️  Deadline tracker init failed:", e.message);
   }
 
-  // Initialize motion generator
+  // Initialize motion generator + templates
   try {
     const motions = require("./motion-generator");
     await motions.init();
-    console.log("✅ Motion generator ready");
+    const templates = require("./motion-templates");
+    await templates.init();
+    console.log("✅ Motion generator + templates ready");
   } catch (e) {
     console.error("⚠️  Motion generator init failed:", e.message);
   }
