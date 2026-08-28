@@ -672,16 +672,25 @@ app.get("/admin/motions/new", async (req, res) => {
     if (prefill.hearing_note_id) {
       try {
         const { rows } = await db.query(
-          `SELECT client_name, a_number, court_name, judge_name FROM hearing_notes WHERE id = $1`,
+          `SELECT client_name, a_number, judge_name FROM hearing_notes WHERE id = $1`,
           [prefill.hearing_note_id]
         );
         if (rows[0]) {
           prefill.client_name = prefill.client_name || rows[0].client_name;
           prefill.a_number = prefill.a_number || rows[0].a_number;
-          prefill.court_name = rows[0].court_name;
           prefill.judge_name = rows[0].judge_name;
+          // Court name lives on hearing_notices — try to pull from there
+          const nRes = await db.query(
+            `SELECT court_name FROM client_hearing_notices
+             WHERE (a_number = $1 OR client_name ILIKE $2) AND court_name IS NOT NULL
+             ORDER BY hearing_date DESC NULLS LAST LIMIT 1`,
+            [rows[0].a_number, rows[0].client_name]
+          ).catch(() => ({ rows: [] }));
+          if (nRes.rows[0]?.court_name) prefill.court_name = nRes.rows[0].court_name;
         }
-      } catch {}
+      } catch (e) {
+        console.warn("[motions new prefill]:", e.message);
+      }
     }
     const body = motions.renderNewMotionForm(prefill);
     res.send(hearingNotes.renderAdminChrome({ title: "New Motion", body, activeItem: "motions" }));
@@ -715,8 +724,7 @@ app.post("/admin/motions/generate", express.json({ limit: "2mb" }), async (req, 
       hearing_note_id: req.body.hearing_note_id ? parseInt(req.body.hearing_note_id, 10) : null,
       court_name: req.body.court_name,
       judge_name: req.body.judge_name,
-      case_number: req.body.case_number,
-      filing_deadline: req.body.filing_deadline,
+      filing_deadline: req.body.filing_deadline || null,
       grounds: req.body.grounds,
       additional_facts: req.body.additional_facts,
     });
@@ -728,7 +736,6 @@ app.post("/admin/motions/generate", express.json({ limit: "2mb" }), async (req, 
       hearing_note_id: req.body.hearing_note_id ? parseInt(req.body.hearing_note_id, 10) : null,
       court_name: req.body.court_name,
       judge_name: req.body.judge_name,
-      case_number: req.body.case_number,
       filing_deadline: req.body.filing_deadline || null,
       title: motions.MOTION_TYPES[req.body.motion_type]?.label,
       content_markdown: result.markdown,
@@ -804,6 +811,85 @@ app.post("/admin/motions/:id/upload-dropbox", async (req, res) => {
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error("[motions upload]:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Client lookup — searches across hearing_notes, client_hearing_notices, and
+// individual_hearing_notes for a client by name or A-number. Returns best
+// match with court, judge, and other info that can be auto-filled into
+// the motion form.
+app.get("/admin/motions/lookup-client", async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    if (q.length < 2) return res.json({ ok: true, matches: [] });
+
+    // Try A-number match first (higher precedence)
+    const anumRegex = /a?\s*[-]?\s*\d{2,3}[-\s]?\d{3}[-\s]?\d{3,4}/i;
+    const isANumQuery = anumRegex.test(q);
+    const wildcard = `%${q}%`;
+
+    const notesCond = isANumQuery ? `a_number ILIKE $1` : `(client_name ILIKE $1 OR a_number ILIKE $1)`;
+    const noticesCond = isANumQuery ? `a_number ILIKE $1` : `(client_name ILIKE $1 OR a_number ILIKE $1)`;
+
+    // Grab most recent hearing note for judge/client info
+    const hearingNoteRows = await db.query(
+      `SELECT client_name, a_number, judge_name, dhs_attorney, hearing_type, hearing_date
+       FROM hearing_notes
+       WHERE ${notesCond}
+       ORDER BY hearing_date DESC NULLS LAST
+       LIMIT 5`,
+      [wildcard]
+    ).then(r => r.rows).catch(() => []);
+
+    // Grab most recent hearing notice for court info
+    const noticeRows = await db.query(
+      `SELECT client_name, a_number, court_name, court_address, judge_name, hearing_date, hearing_type
+       FROM client_hearing_notices
+       WHERE ${noticesCond}
+       ORDER BY hearing_date DESC NULLS LAST
+       LIMIT 5`,
+      [wildcard]
+    ).then(r => r.rows).catch(() => []);
+
+    // Aggregate by client (name + a_number) — one entry per client with best info from each source
+    const byClient = new Map();
+    const addToClient = (row, source) => {
+      const key = `${(row.client_name || "").toLowerCase().trim()}|${(row.a_number || "").toLowerCase().trim()}`;
+      if (!byClient.has(key)) {
+        byClient.set(key, {
+          client_name: row.client_name,
+          a_number: row.a_number,
+          court_name: null,
+          judge_name: null,
+          dhs_attorney: null,
+          last_hearing_date: null,
+          last_hearing_type: null,
+          sources: [],
+        });
+      }
+      const c = byClient.get(key);
+      c.sources.push(source);
+      if (row.court_name && !c.court_name) c.court_name = row.court_name;
+      if (row.judge_name && !c.judge_name) c.judge_name = row.judge_name;
+      if (row.dhs_attorney && !c.dhs_attorney) c.dhs_attorney = row.dhs_attorney;
+      if (row.hearing_date) {
+        const rowDate = new Date(row.hearing_date);
+        if (!c.last_hearing_date || rowDate > new Date(c.last_hearing_date)) {
+          c.last_hearing_date = row.hearing_date;
+          c.last_hearing_type = row.hearing_type;
+        }
+      }
+    };
+
+    // Notices FIRST (they have court_name which is what we most want to pull)
+    for (const row of noticeRows) addToClient(row, "hearing_notice");
+    for (const row of hearingNoteRows) addToClient(row, "hearing_note");
+
+    const matches = Array.from(byClient.values()).slice(0, 10);
+    res.json({ ok: true, matches });
+  } catch (err) {
+    console.error("[motions lookup-client]:", err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
