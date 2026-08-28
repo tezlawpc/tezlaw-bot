@@ -165,7 +165,12 @@ app.post("/admin/backups/restore", auth.requireRole("admin"), async (req, res) =
 // pinpoint which specific Dropbox call is failing.
 app.get("/admin/backups/diagnose", auth.requireRole("admin"), async (req, res) => {
   const dbx = require("./dropbox-integration");
-  const diag = { steps: [], overall_ok: true };
+  const backups = require("./backup-system");
+  const diag = {
+    steps: [],
+    overall_ok: true,
+    backup_folder: backups.BACKUP_FOLDER,
+  };
 
   // Step 1: Access token
   try {
@@ -186,21 +191,20 @@ app.get("/admin/backups/diagnose", auth.requireRole("admin"), async (req, res) =
     diag.overall_ok = false;
   }
 
-  // Step 3: List /Zara-Backups
+  // Step 3: List backup folder
   try {
-    const backups = require("./backup-system");
     const list = await backups.listBackups();
-    diag.steps.push({ step: "3. List /Zara-Backups folder", ok: true, detail: `Found ${list.length} existing backup(s)` });
+    diag.steps.push({ step: `3. List ${backups.BACKUP_FOLDER} folder`, ok: true, detail: `Found ${list.length} existing backup(s)` });
   } catch (e) {
-    diag.steps.push({ step: "3. List /Zara-Backups folder", ok: false, error: e.message });
+    diag.steps.push({ step: `3. List ${backups.BACKUP_FOLDER} folder`, ok: false, error: e.message });
   }
 
-  // Step 4: Test upload with a tiny buffer
+  // Step 4: Test upload with a tiny buffer to the backup folder
   try {
     const token = await dbx.getAccessToken();
     const pathRoot = await dbx.getPathRootHeader();
     const testBuf = Buffer.from("test", "utf8");
-    const testPath = `/Zara-Backups/_diagnose_${Date.now()}.txt`;
+    const testPath = `${backups.BACKUP_FOLDER}/_diagnose_${Date.now()}.txt`;
     const headers = {
       "Authorization": `Bearer ${token}`,
       "Content-Type": "application/octet-stream",
@@ -210,7 +214,7 @@ app.get("/admin/backups/diagnose", auth.requireRole("admin"), async (req, res) =
     await axios.post("https://content.dropboxapi.com/2/files/upload", testBuf, {
       headers, timeout: 30000,
     });
-    diag.steps.push({ step: "4. Test upload (4 bytes)", ok: true, detail: `Uploaded to ${testPath}` });
+    diag.steps.push({ step: "4. Test upload (4 bytes) to backup folder", ok: true, detail: `Uploaded to ${testPath}` });
     try { await dbx.deleteFile(testPath); } catch { /* silent */ }
   } catch (e) {
     const errData = e.response?.data;
@@ -221,11 +225,14 @@ app.get("/admin/backups/diagnose", auth.requireRole("admin"), async (req, res) =
              : JSON.stringify(errData).substring(0, 300);
     }
     diag.steps.push({
-      step: "4. Test upload (4 bytes)",
+      step: "4. Test upload (4 bytes) to backup folder",
       ok: false,
       error: e.message,
       dropbox_response: dbxMsg,
       status: e.response?.status,
+      hint: dbxMsg.includes("no_write_permission")
+        ? `You don't have write permission to ${backups.BACKUP_FOLDER}. Set env var ZARA_BACKUP_FOLDER to a folder you have write access to (e.g. /USCIS/ASYLUM_EOIR/_ZARA_BACKUPS), or use the Dropbox web UI to grant write access.`
+        : null,
     });
     diag.overall_ok = false;
   }
