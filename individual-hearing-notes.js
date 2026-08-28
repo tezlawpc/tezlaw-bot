@@ -1088,6 +1088,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           </button>
           <div id="d-timer" style="font-family:monospace; font-size:22px; color:#0C1C36; margin-top:14px; letter-spacing:2px;">00:00</div>
           <div id="d-hint" style="font-size:11px; color:#888; margin-top:6px; max-width:380px; margin:6px auto 0;">
+            Long hearings auto-split every ~28 min. Just keep talking.<br>
             Mention client name, judge, DHS attorney, witnesses called, testimony highlights, evidence admitted/excluded, motions, and decision.
           </div>
         </div>
@@ -1387,18 +1388,36 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
     ` : ""}
 
     <script>
-      // ── Voice dictation modal (individual hearing) ─────────────────────────
-      let dMediaRecorder = null, dChunks = [], dRecordStart = 0, dTimerInterval = null;
-      let dAudioBlob = null, dAudioMime = "audio/webm", dAudioExt = "webm";
-      let dExtracted = null, dTranscript = "";
+      // ── Voice dictation with AUTO-CHUNKING for long individual hearings ─────
+      // Individual/merits hearings often run 2-3 hours. Whisper caps at 25 MB
+      // (~30 min per file). We auto-rotate the MediaRecorder every 28 minutes,
+      // uploading each finished chunk for transcription in the background while
+      // recording continues. When the attorney finally stops, all pending
+      // transcriptions complete and get combined, then Claude extracts fields.
+      const CHUNK_MINUTES = 28;   // rotate before Whisper's ceiling
+
+      let dMediaStream = null;
+      let dMediaRecorder = null;
+      let dChunks = [];             // current in-progress recording's data chunks
+      let dRecordStart = 0;         // when overall recording started
+      let dChunkStart = 0;          // when current sub-chunk started
+      let dTimerInterval = null;
+      let dRotationTimeout = null;
+      let dAudioMime = "audio/webm";
+      let dAudioExt = "webm";
+      let dChunkIndex = 0;                    // 0-based index of current chunk
+      let dSessionsPending = [];              // uploads in flight
+      let dSessionTranscripts = [];           // completed transcripts, indexed by chunk
+      let dLastBlobUrl = null;
+      let dIsFinishing = false;               // true when user clicked stop
 
       function openDictationModal() {
         document.getElementById("dictation-modal").style.display = "flex";
+        dResetState();
         dShowPanel("record");
       }
       function closeDictationModal() {
-        if (dMediaRecorder && dMediaRecorder.state === "recording") dMediaRecorder.stop();
-        dStopTimer();
+        dCleanup();
         document.getElementById("dictation-modal").style.display = "none";
       }
       function dShowPanel(name) {
@@ -1407,86 +1426,221 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         });
         document.getElementById("d-error-panel").style.display = "none";
       }
-      async function dToggleRecording() {
-        if (dMediaRecorder && dMediaRecorder.state === "recording") {
-          dMediaRecorder.stop(); dStopTimer();
-        } else {
-          try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-              audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 },
-            });
-            const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
-            let selectedType = "";
-            for (const t of preferred) { if (MediaRecorder.isTypeSupported(t)) { selectedType = t; break; } }
-            dAudioMime = selectedType || "audio/webm";
-            dAudioExt = dAudioMime.includes("mp4") ? "mp4" : "webm";
-            dMediaRecorder = new MediaRecorder(stream, selectedType ? { mimeType: selectedType } : undefined);
-            dChunks = [];
-            dMediaRecorder.ondataavailable = (e) => { if (e.data?.size > 0) dChunks.push(e.data); };
-            dMediaRecorder.onstop = () => {
-              dAudioBlob = new Blob(dChunks, { type: dAudioMime });
-              stream.getTracks().forEach(t => t.stop());
-              document.getElementById("d-audio-preview").src = URL.createObjectURL(dAudioBlob);
-              dShowPanel("playback");
-            };
-            dMediaRecorder.start();
-            dRecordStart = Date.now();
-            dStartTimer();
-            document.getElementById("d-record-icon").textContent = "⏹️";
-            document.getElementById("d-record-label").textContent = "Tap to stop";
-            document.getElementById("d-record-btn").style.background = "linear-gradient(145deg, #c62828, #8b1a1a)";
-            document.getElementById("d-hint").textContent = "Recording…";
-          } catch (e) { dShowError("Microphone access denied: " + e.message); }
-        }
-      }
-      function dStartTimer() {
-        dTimerInterval = setInterval(() => {
-          const s = Math.floor((Date.now() - dRecordStart) / 1000);
-          document.getElementById("d-timer").textContent = String(Math.floor(s/60)).padStart(2,"0") + ":" + String(s%60).padStart(2,"0");
-        }, 250);
-      }
-      function dStopTimer() { if (dTimerInterval) { clearInterval(dTimerInterval); dTimerInterval = null; } }
-      function dRerecord() {
-        dAudioBlob = null; dExtracted = null; dTranscript = "";
-        document.getElementById("d-audio-preview").src = "";
+      function dResetState() {
+        dChunks = [];
+        dChunkIndex = 0;
+        dSessionsPending = [];
+        dSessionTranscripts = [];
+        dIsFinishing = false;
+        if (dLastBlobUrl) { URL.revokeObjectURL(dLastBlobUrl); dLastBlobUrl = null; }
         document.getElementById("d-timer").textContent = "00:00";
         document.getElementById("d-record-icon").textContent = "🎙️";
         document.getElementById("d-record-label").textContent = "Tap to record";
         document.getElementById("d-record-btn").style.background = "linear-gradient(145deg, #B79C62, #8f7a4c)";
-        document.getElementById("d-hint").textContent = "Mention client name, judge, testimony, evidence, motions, decision.";
-        dShowPanel("record");
+        document.getElementById("d-hint").innerHTML = "Long hearings auto-split every ~28 min. Just keep talking.<br>Mention client name, judge, witnesses, testimony, evidence, motions, decision.";
       }
-      async function dSubmitAudio() {
-        if (!dAudioBlob) return;
-        dShowPanel("processing");
-        document.getElementById("d-proc-progress").style.width = "15%";
-        document.getElementById("d-proc-status").textContent = "Uploading…";
-        const fd = new FormData();
-        fd.append("audio", dAudioBlob, "dictation-" + Date.now() + "." + dAudioExt);
-        fd.append("client_name", document.querySelector('[name="client_name"]')?.value || "");
-        fd.append("a_number", document.querySelector('[name="a_number"]')?.value || "");
-        fd.append("hearing_type", "individual");
-        setTimeout(() => {
-          document.getElementById("d-proc-progress").style.width = "50%";
-          document.getElementById("d-proc-status").textContent = "Whisper transcribing…";
-          document.getElementById("d-proc-icon").textContent = "🎧";
-        }, 2000);
-        setTimeout(() => {
-          document.getElementById("d-proc-progress").style.width = "80%";
-          document.getElementById("d-proc-status").textContent = "Claude extracting…";
-          document.getElementById("d-proc-icon").textContent = "🧠";
-        }, 8000);
+      function dCleanup() {
         try {
-          const resp = await fetch("/admin/hearing/notes/dictate/extract-only", { method: "POST", body: fd });
+          if (dMediaRecorder && dMediaRecorder.state === "recording") dMediaRecorder.stop();
+        } catch { /* silent */ }
+        if (dMediaStream) {
+          dMediaStream.getTracks().forEach(t => t.stop());
+          dMediaStream = null;
+        }
+        dStopTimer();
+        if (dRotationTimeout) { clearTimeout(dRotationTimeout); dRotationTimeout = null; }
+      }
+
+      async function dToggleRecording() {
+        if (dMediaRecorder && dMediaRecorder.state === "recording") {
+          dIsFinishing = true;
+          dMediaRecorder.stop();   // this fires onstop → uploads final chunk
+          if (dRotationTimeout) { clearTimeout(dRotationTimeout); dRotationTimeout = null; }
+          dStopTimer();
+        } else {
+          await dStartRecording();
+        }
+      }
+
+      async function dStartRecording() {
+        try {
+          dMediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 },
+          });
+          const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+          let selectedType = "";
+          for (const t of preferred) { if (MediaRecorder.isTypeSupported(t)) { selectedType = t; break; } }
+          dAudioMime = selectedType || "audio/webm";
+          dAudioExt = dAudioMime.includes("mp4") ? "mp4" : "webm";
+          dRecordStart = Date.now();
+          dStartNewChunkRecorder();
+          dStartTimer();
+          document.getElementById("d-record-icon").textContent = "⏹️";
+          document.getElementById("d-record-label").textContent = "Tap to stop";
+          document.getElementById("d-record-btn").style.background = "linear-gradient(145deg, #c62828, #8b1a1a)";
+          document.getElementById("d-hint").innerHTML = 'Recording… <span id="d-chunk-indicator">Session 1</span>';
+        } catch (e) { dShowError("Microphone access denied: " + e.message); }
+      }
+
+      function dStartNewChunkRecorder() {
+        // Create a fresh MediaRecorder on the same stream. Each MediaRecorder
+        // produces one complete, standalone audio file. Rotating them lets
+        // us upload/transcribe finished chunks while recording keeps going.
+        const chunkIdx = dChunkIndex;
+        dChunks = [];
+        dChunkStart = Date.now();
+        const opts = dAudioMime ? { mimeType: dAudioMime } : undefined;
+        dMediaRecorder = new MediaRecorder(dMediaStream, opts);
+        dMediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) dChunks.push(e.data); };
+        dMediaRecorder.onstop = () => {
+          const blob = new Blob(dChunks, { type: dAudioMime });
+          const wasFinal = dIsFinishing;
+          if (wasFinal) {
+            // Show a playback preview of the LAST chunk only
+            if (dLastBlobUrl) URL.revokeObjectURL(dLastBlobUrl);
+            dLastBlobUrl = URL.createObjectURL(blob);
+            document.getElementById("d-audio-preview").src = dLastBlobUrl;
+          }
+          // Upload this chunk for transcription in background
+          dUploadChunk(chunkIdx, blob).catch(err => console.warn("Chunk upload err:", err));
+
+          if (wasFinal) {
+            // All chunks queued — wait for pending transcriptions to complete
+            dWaitForTranscriptionsThenExtract();
+          } else {
+            // Rotation — immediately start a new recorder to continue capture
+            dChunkIndex++;
+            dStartNewChunkRecorder();
+            const indicator = document.getElementById("d-chunk-indicator");
+            if (indicator) indicator.textContent = "Session " + (dChunkIndex + 1);
+            dChunkStart = Date.now();
+            dScheduleRotation();
+          }
+        };
+        dMediaRecorder.start();
+        dScheduleRotation();
+      }
+
+      function dScheduleRotation() {
+        if (dRotationTimeout) clearTimeout(dRotationTimeout);
+        dRotationTimeout = setTimeout(() => {
+          if (dMediaRecorder && dMediaRecorder.state === "recording" && !dIsFinishing) {
+            console.log("[dictate] Auto-rotating chunk " + dChunkIndex);
+            dMediaRecorder.stop();
+            // onstop will spawn the next recorder + upload this chunk
+          }
+        }, CHUNK_MINUTES * 60 * 1000);
+      }
+
+      async function dUploadChunk(chunkIdx, blob) {
+        dSessionsPending.push(chunkIdx);
+        const fd = new FormData();
+        fd.append("audio", blob, "chunk-" + chunkIdx + "-" + Date.now() + "." + dAudioExt);
+        fd.append("chunk_index", String(chunkIdx));
+        try {
+          const resp = await fetch("/admin/hearing/notes/dictate/transcribe-chunk", { method: "POST", body: fd });
           const text = await resp.text();
-          let data; try { data = JSON.parse(text); } catch { throw new Error("Non-JSON response: " + text.substring(0, 200)); }
+          let data; try { data = JSON.parse(text); } catch { throw new Error("Non-JSON: " + text.substring(0, 200)); }
           if (!resp.ok || !data.ok) throw new Error(data.error || "HTTP " + resp.status);
-          dTranscript = data.transcript;
+          dSessionTranscripts[chunkIdx] = data.transcript || "";
+          console.log("[dictate] Chunk " + chunkIdx + " transcribed: " + (data.transcript || "").length + " chars");
+        } catch (e) {
+          dSessionTranscripts[chunkIdx] = "[transcription failed for session " + (chunkIdx + 1) + ": " + e.message + "]";
+          console.error("[dictate] Chunk " + chunkIdx + " transcribe error:", e);
+        } finally {
+          const i = dSessionsPending.indexOf(chunkIdx);
+          if (i >= 0) dSessionsPending.splice(i, 1);
+          // Update processing panel if visible
+          dUpdateProcessingStatus();
+        }
+      }
+
+      function dUpdateProcessingStatus() {
+        if (document.getElementById("d-processing-panel").style.display !== "block") return;
+        const total = dChunkIndex + 1;
+        const done = total - dSessionsPending.length;
+        const pct = Math.round((done / total) * 100);
+        document.getElementById("d-proc-progress").style.width = pct + "%";
+        document.getElementById("d-proc-status").textContent =
+          "Transcribing session " + done + " of " + total + "…";
+      }
+
+      async function dWaitForTranscriptionsThenExtract() {
+        dShowPanel("processing");
+        document.getElementById("d-proc-icon").textContent = "🎧";
+        document.getElementById("d-proc-status").textContent =
+          "Transcribing " + (dChunkIndex + 1) + " session" + (dChunkIndex > 0 ? "s" : "") + "…";
+        document.getElementById("d-proc-progress").style.width = "10%";
+        // Poll until all pending uploads finish
+        while (dSessionsPending.length > 0) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+        // Combine transcripts in order
+        const combined = dSessionTranscripts.filter(t => typeof t === "string").join("\\n\\n");
+        if (!combined || combined.length < 5) {
+          dShowError("All transcripts came back empty. Recording may have been silent.");
+          dShowPanel("playback");
+          return;
+        }
+        dTranscript = combined;
+        // Now extract fields
+        document.getElementById("d-proc-icon").textContent = "🧠";
+        document.getElementById("d-proc-status").textContent = "Claude extracting fields…";
+        document.getElementById("d-proc-progress").style.width = "85%";
+        try {
+          const resp = await fetch("/admin/hearing/notes/dictate/extract-from-text", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              transcript: combined,
+              client_name: document.querySelector('[name="client_name"]')?.value || "",
+              a_number: document.querySelector('[name="a_number"]')?.value || "",
+              hearing_type: "individual",
+            }),
+          });
+          const text = await resp.text();
+          let data; try { data = JSON.parse(text); } catch { throw new Error("Non-JSON: " + text.substring(0, 200)); }
+          if (!resp.ok || !data.ok) throw new Error(data.error || "HTTP " + resp.status);
           dExtracted = data.extracted;
           dShowExtractedPreview();
           dShowPanel("result");
-        } catch (e) { dShowError(e.message); dShowPanel("playback"); }
+        } catch (e) {
+          dShowError(e.message);
+          dShowPanel("playback");
+        }
       }
+
+      function dStartTimer() {
+        dTimerInterval = setInterval(() => {
+          const totalSec = Math.floor((Date.now() - dRecordStart) / 1000);
+          const chunkSec = Math.floor((Date.now() - dChunkStart) / 1000);
+          const mm = String(Math.floor(totalSec / 60)).padStart(2, "0");
+          const ss = String(totalSec % 60).padStart(2, "0");
+          const chunkRemain = Math.max(0, CHUNK_MINUTES * 60 - chunkSec);
+          const cm = String(Math.floor(chunkRemain / 60)).padStart(2, "0");
+          const cs = String(chunkRemain % 60).padStart(2, "0");
+          document.getElementById("d-timer").innerHTML =
+            mm + ":" + ss +
+            '<div style="font-size:11px; color:#888; letter-spacing:0; margin-top:2px;">' +
+            'Session ' + (dChunkIndex + 1) + ' · auto-splits in ' + cm + ':' + cs + '</div>';
+        }, 250);
+      }
+      function dStopTimer() { if (dTimerInterval) { clearInterval(dTimerInterval); dTimerInterval = null; } }
+
+      function dRerecord() {
+        dCleanup();
+        dResetState();
+        dShowPanel("record");
+      }
+
+      // dSubmitAudio is no longer used — chunks upload automatically on stop.
+      // Keep as no-op stub to prevent errors if anything still calls it.
+      async function dSubmitAudio() { /* no-op: chunks upload automatically */ }
+
+      // Track transcript/extracted at outer scope for the preview + apply steps
+      let dTranscript = "";
+      let dExtracted = null;
+
       function dShowExtractedPreview() {
         document.getElementById("d-transcript").textContent = dTranscript;
         const e = dExtracted || {};
@@ -1498,13 +1652,19 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         if (e.hearing_datetime) rows.push(["Hearing time", new Date(e.hearing_datetime).toLocaleString()]);
         if (e.next_hearing_date) rows.push(["Next hearing", new Date(e.next_hearing_date).toLocaleString()]);
         if (e.disposition) rows.push(["Disposition", e.disposition]);
+        const sessionCount = dChunkIndex + 1;
+        const durationMin = Math.round((Date.now() - dRecordStart) / 60000);
         const html = rows.map(([k, v]) =>
           '<tr><td style="padding:3px 8px 3px 0; color:#666; white-space:nowrap;">' + k + '</td><td style="padding:3px 0; font-weight:500;">' + String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</td></tr>'
         ).join("");
         document.getElementById("d-extracted-preview").innerHTML =
-          rows.length ? '<div style="font-weight:600; margin-bottom:6px; color:#0C1C36;">Extracted fields:</div><table style="width:100%; font-size:12px;">' + html + '</table><div style="font-size:11px; color:#888; margin-top:6px;">Full transcript will append to the raw notes textarea.</div>'
-                      : '<div style="color:#c00;">⚠️ No fields extracted.</div>';
+          '<div style="background:#e8f5e9; color:#2e7d32; padding:8px 12px; border-radius:4px; margin-bottom:10px; font-size:11px;">' +
+          '📊 ' + sessionCount + ' session' + (sessionCount > 1 ? "s" : "") + ' · ~' + durationMin + ' min total · ' + dTranscript.length + ' chars transcribed' +
+          '</div>' +
+          (rows.length ? '<div style="font-weight:600; margin-bottom:6px; color:#0C1C36;">Extracted fields:</div><table style="width:100%; font-size:12px;">' + html + '</table><div style="font-size:11px; color:#888; margin-top:6px;">Full transcript will append to the raw notes textarea.</div>'
+                       : '<div style="color:#c00;">⚠️ No fields extracted, but transcript will still be appended.</div>');
       }
+
       function dApplyToForm() {
         const e = dExtracted || {};
         const setIfEmpty = (name, value) => {
@@ -1523,16 +1683,18 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         const rawNotes = document.querySelector('[name="raw_notes"], [name="attorney_notes"], [name="notes"]');
         if (rawNotes) {
           const stamp = new Date().toLocaleString();
-          const prefix = rawNotes.value ? "\\n\\n[Voice dictation " + stamp + "]\\n" : "";
+          const sessionCount = dChunkIndex + 1;
+          const header = "\\n\\n[Voice dictation " + stamp + " — " + sessionCount + " session" + (sessionCount > 1 ? "s" : "") + "]\\n";
+          const prefix = rawNotes.value ? header : header.trim() + "\\n";
           rawNotes.value = rawNotes.value + prefix + dTranscript;
           rawNotes.dispatchEvent(new Event('input', { bubbles: true }));
         }
         closeDictationModal();
         const toast = document.createElement("div");
         toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2e7d32; color:white; padding:12px 20px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:10001; font-size:14px;";
-        toast.textContent = "✅ Voice dictation applied to form";
+        toast.textContent = "✅ Voice dictation applied (" + (dChunkIndex + 1) + " session" + (dChunkIndex > 0 ? "s" : "") + ")";
         document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 3000);
+        setTimeout(() => toast.remove(), 3500);
       }
       function dShowError(msg) {
         document.getElementById("d-error-panel").style.display = "block";
