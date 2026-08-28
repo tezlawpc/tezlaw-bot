@@ -161,6 +161,78 @@ app.post("/admin/backups/restore", auth.requireRole("admin"), async (req, res) =
   }
 });
 
+// Diagnostic — tests each step of the backup flow in isolation so we can
+// pinpoint which specific Dropbox call is failing.
+app.get("/admin/backups/diagnose", auth.requireRole("admin"), async (req, res) => {
+  const dbx = require("./dropbox-integration");
+  const diag = { steps: [], overall_ok: true };
+
+  // Step 1: Access token
+  try {
+    const token = await dbx.getAccessToken();
+    diag.steps.push({ step: "1. Get access token", ok: true, detail: `Token starts with: ${token.substring(0, 8)}...` });
+  } catch (e) {
+    diag.steps.push({ step: "1. Get access token", ok: false, error: e.message });
+    diag.overall_ok = false;
+    return res.json(diag);
+  }
+
+  // Step 2: Path root header
+  try {
+    const header = await dbx.getPathRootHeader();
+    diag.steps.push({ step: "2. Get path root header", ok: true, detail: `Header value: ${header || "(none — falls back to personal namespace)"}` });
+  } catch (e) {
+    diag.steps.push({ step: "2. Get path root header", ok: false, error: e.message });
+    diag.overall_ok = false;
+  }
+
+  // Step 3: List /Zara-Backups
+  try {
+    const backups = require("./backup-system");
+    const list = await backups.listBackups();
+    diag.steps.push({ step: "3. List /Zara-Backups folder", ok: true, detail: `Found ${list.length} existing backup(s)` });
+  } catch (e) {
+    diag.steps.push({ step: "3. List /Zara-Backups folder", ok: false, error: e.message });
+  }
+
+  // Step 4: Test upload with a tiny buffer
+  try {
+    const token = await dbx.getAccessToken();
+    const pathRoot = await dbx.getPathRootHeader();
+    const testBuf = Buffer.from("test", "utf8");
+    const testPath = `/Zara-Backups/_diagnose_${Date.now()}.txt`;
+    const headers = {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/octet-stream",
+      "Dropbox-API-Arg": JSON.stringify({ path: testPath, mode: "overwrite", autorename: false, mute: true }),
+    };
+    if (pathRoot) headers["Dropbox-API-Path-Root"] = pathRoot;
+    await axios.post("https://content.dropboxapi.com/2/files/upload", testBuf, {
+      headers, timeout: 30000,
+    });
+    diag.steps.push({ step: "4. Test upload (4 bytes)", ok: true, detail: `Uploaded to ${testPath}` });
+    try { await dbx.deleteFile(testPath); } catch { /* silent */ }
+  } catch (e) {
+    const errData = e.response?.data;
+    let dbxMsg = "";
+    if (errData) {
+      dbxMsg = typeof errData === "string" ? errData
+             : errData.error_summary ? errData.error_summary
+             : JSON.stringify(errData).substring(0, 300);
+    }
+    diag.steps.push({
+      step: "4. Test upload (4 bytes)",
+      ok: false,
+      error: e.message,
+      dropbox_response: dbxMsg,
+      status: e.response?.status,
+    });
+    diag.overall_ok = false;
+  }
+
+  res.json(diag);
+});
+
 // Version check endpoint — hit this to verify which build of the code is
 // actually running on Render. Helps diagnose "changes didn't deploy" issues.
 app.get("/version", (req, res) => {
