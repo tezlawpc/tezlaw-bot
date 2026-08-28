@@ -67,6 +67,18 @@ async function uploadToDropbox(filename, buffer) {
   const token = await dbx.getAccessToken();
   const pathRootHeader = await dbx.getPathRootHeader();
 
+  // Validate filename — Dropbox is strict about forbidden characters
+  // (/ \ < > : " | ? * and trailing dots) and expects the full path to
+  // start with /. Reject early with a clear message.
+  if (/[<>:"|?*\\]/.test(filename)) {
+    throw new Error(`Backup filename contains forbidden characters: ${filename}`);
+  }
+  if (!BACKUP_FOLDER.startsWith("/")) {
+    throw new Error(`BACKUP_FOLDER must start with /: ${BACKUP_FOLDER}`);
+  }
+
+  const fullPath = `${BACKUP_FOLDER}/${filename}`;
+
   // Ensure /Zara-Backups folder exists (create_folder is idempotent-safe with autorename=false)
   try {
     const createFolderHeaders = {
@@ -79,37 +91,77 @@ async function uploadToDropbox(filename, buffer) {
       { path: BACKUP_FOLDER, autorename: false },
       { headers: createFolderHeaders, timeout: 15000 }
     );
+    console.log(`[backup] Created folder ${BACKUP_FOLDER}`);
   } catch (e) {
-    // Ignore "folder exists" errors, throw others
-    const msg = e.response?.data?.error_summary || "";
-    if (!msg.includes("conflict")) {
-      console.warn("[backup] create_folder warning:", msg);
+    // "conflict" errors are OK — folder already exists
+    const dbxError = e.response?.data?.error_summary || "";
+    const dbxRawError = e.response?.data || null;
+    if (dbxError.includes("conflict") || dbxError.includes("path/conflict")) {
+      // Folder exists, that's fine
+    } else {
+      console.warn(`[backup] create_folder failed with non-conflict error. Dropbox response:`,
+        JSON.stringify(dbxRawError).substring(0, 500));
+      // Don't throw — try the upload anyway since folder might exist from before
     }
   }
 
-  const fullPath = `${BACKUP_FOLDER}/${filename}`;
+  const uploadArgs = {
+    path: fullPath,
+    mode: "overwrite",
+    autorename: false,
+    mute: true,
+  };
+
   const uploadHeaders = {
     "Authorization": `Bearer ${token}`,
     "Content-Type": "application/octet-stream",
-    "Dropbox-API-Arg": JSON.stringify({
-      path: fullPath,
-      mode: "overwrite",
-      autorename: false,
-      mute: true,
-    }),
+    "Dropbox-API-Arg": JSON.stringify(uploadArgs),
   };
   if (pathRootHeader) uploadHeaders["Dropbox-API-Path-Root"] = pathRootHeader;
 
-  const resp = await axios.post(
-    "https://content.dropboxapi.com/2/files/upload",
-    buffer,
-    {
-      headers: uploadHeaders,
-      maxBodyLength: 200 * 1024 * 1024,   // 200MB safety cap
-      maxContentLength: 200 * 1024 * 1024,
-      timeout: 120000,
+  console.log(`[backup] Uploading ${(buffer.length / 1024).toFixed(1)}KB to ${fullPath}`);
+  console.log(`[backup] Using path root header:`, pathRootHeader || "(none)");
+
+  let resp;
+  try {
+    resp = await axios.post(
+      "https://content.dropboxapi.com/2/files/upload",
+      buffer,
+      {
+        headers: uploadHeaders,
+        maxBodyLength: 200 * 1024 * 1024,
+        maxContentLength: 200 * 1024 * 1024,
+        timeout: 120000,
+      }
+    );
+  } catch (e) {
+    // Extract detailed error from Dropbox response body
+    const status = e.response?.status;
+    const errData = e.response?.data;
+    let dbxMessage = "";
+    if (errData) {
+      // Dropbox may return either a JSON object or a raw string
+      if (typeof errData === "string") {
+        dbxMessage = errData;
+      } else if (errData.error_summary) {
+        dbxMessage = errData.error_summary;
+      } else if (errData.error) {
+        dbxMessage = typeof errData.error === "string" ? errData.error : JSON.stringify(errData.error);
+      } else {
+        dbxMessage = JSON.stringify(errData).substring(0, 300);
+      }
     }
-  );
+    console.error(`[backup] Upload failed HTTP ${status}: ${dbxMessage}`);
+    console.error(`[backup] Path root header sent:`, pathRootHeader);
+    console.error(`[backup] Upload path:`, fullPath);
+    // Throw a rich error that includes context so it flows to the UI
+    throw new Error(
+      `Dropbox upload failed (HTTP ${status || "?"}): ${dbxMessage || e.message}. ` +
+      `Path: ${fullPath}. ` +
+      (pathRootHeader ? `Path root header was sent. ` : `No path root header sent. `) +
+      `Check server logs for full details.`
+    );
+  }
   return { path: fullPath, size: resp.data.size, uploaded_at: resp.data.server_modified };
 }
 
