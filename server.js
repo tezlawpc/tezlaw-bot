@@ -481,7 +481,7 @@ app.get("/admin/backups/diagnose", auth.requireRole("admin"), async (req, res) =
 // actually running on Render. Helps diagnose "changes didn't deploy" issues.
 app.get("/version", (req, res) => {
   res.json({
-    version: "v5-deadline-tracker-2026-08-28",
+    version: "v6-motion-generator-2026-08-28",
     features: {
       auto_match_tool_use: true,
       hearing_note_dedup: true,
@@ -637,6 +637,175 @@ app.post("/admin/deadlines/run-alerts", auth.requireRole("admin"), async (req, r
     const results = await deadlines.runDailyAlerts();
     res.json({ ok: true, results });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ── Court Motion Draft Generator ─────────────────────
+app.get("/admin/motions", async (req, res) => {
+  try {
+    const motions = require("./motion-generator");
+    const hearingNotes = require("./hearing-notes");
+    const filters = {
+      client_name: req.query.client || undefined,
+      motion_type: req.query.type || undefined,
+      status: req.query.status || undefined,
+    };
+    const list = await motions.listMotions(filters);
+    const body = motions.renderMotionListPage(list, filters);
+    res.send(hearingNotes.renderAdminChrome({ title: "Court Motions", body, activeItem: "motions" }));
+  } catch (err) {
+    console.error("[motions list]:", err);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.get("/admin/motions/new", async (req, res) => {
+  try {
+    const motions = require("./motion-generator");
+    const hearingNotes = require("./hearing-notes");
+    const prefill = {
+      client_name: req.query.client_name || undefined,
+      a_number: req.query.a_number || undefined,
+      hearing_note_id: req.query.hearing_note_id ? parseInt(req.query.hearing_note_id, 10) : undefined,
+      motion_type: req.query.type || undefined,
+    };
+    // If linked to a hearing note, pull court/judge info from it
+    if (prefill.hearing_note_id) {
+      try {
+        const { rows } = await db.query(
+          `SELECT client_name, a_number, court_name, judge_name FROM hearing_notes WHERE id = $1`,
+          [prefill.hearing_note_id]
+        );
+        if (rows[0]) {
+          prefill.client_name = prefill.client_name || rows[0].client_name;
+          prefill.a_number = prefill.a_number || rows[0].a_number;
+          prefill.court_name = rows[0].court_name;
+          prefill.judge_name = rows[0].judge_name;
+        }
+      } catch {}
+    }
+    const body = motions.renderNewMotionForm(prefill);
+    res.send(hearingNotes.renderAdminChrome({ title: "New Motion", body, activeItem: "motions" }));
+  } catch (err) {
+    console.error("[motions new]:", err);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.get("/admin/motions/:id", async (req, res) => {
+  try {
+    const motions = require("./motion-generator");
+    const hearingNotes = require("./hearing-notes");
+    const motion = await motions.getMotion(parseInt(req.params.id, 10));
+    if (!motion) return res.status(404).send("<h1>Motion not found</h1>");
+    const body = motions.renderMotionEditor(motion);
+    res.send(hearingNotes.renderAdminChrome({ title: "Motion Editor", body, activeItem: "motions" }));
+  } catch (err) {
+    console.error("[motions view]:", err);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/motions/generate", express.json({ limit: "2mb" }), async (req, res) => {
+  try {
+    const motions = require("./motion-generator");
+    const result = await motions.generateMotion({
+      motion_type: req.body.motion_type,
+      client_name: req.body.client_name,
+      a_number: req.body.a_number,
+      hearing_note_id: req.body.hearing_note_id ? parseInt(req.body.hearing_note_id, 10) : null,
+      court_name: req.body.court_name,
+      judge_name: req.body.judge_name,
+      case_number: req.body.case_number,
+      filing_deadline: req.body.filing_deadline,
+      grounds: req.body.grounds,
+      additional_facts: req.body.additional_facts,
+    });
+    // Save as new motion
+    const motion_id = await motions.createMotion({
+      motion_type: req.body.motion_type,
+      client_name: req.body.client_name,
+      a_number: req.body.a_number,
+      hearing_note_id: req.body.hearing_note_id ? parseInt(req.body.hearing_note_id, 10) : null,
+      court_name: req.body.court_name,
+      judge_name: req.body.judge_name,
+      case_number: req.body.case_number,
+      filing_deadline: req.body.filing_deadline || null,
+      title: motions.MOTION_TYPES[req.body.motion_type]?.label,
+      content_markdown: result.markdown,
+      ai_grounds: req.body.grounds,
+      ai_facts: req.body.additional_facts,
+      ai_notes: JSON.stringify({ generation_seconds: result.generation_seconds, tokens_used: result.tokens_used, context_summary: result.context_summary }),
+      generated_by: req.user?.id || null,
+      status: "draft",
+    });
+    try {
+      const audit = require("./audit-log");
+      await audit.log({ user_id: req.user?.id, action: "motion.generate", target_type: "motion", target_id: motion_id, changes: { motion_type: req.body.motion_type, client_name: req.body.client_name } });
+    } catch { /* silent */ }
+    res.json({ ok: true, motion_id, ...result });
+  } catch (err) {
+    console.error("[motions generate]:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.patch("/admin/motions/:id", express.json({ limit: "5mb" }), async (req, res) => {
+  try {
+    const motions = require("./motion-generator");
+    await motions.updateMotion(parseInt(req.params.id, 10), req.body);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.delete("/admin/motions/:id", async (req, res) => {
+  try {
+    const motions = require("./motion-generator");
+    await motions.deleteMotion(parseInt(req.params.id, 10));
+    try {
+      const audit = require("./audit-log");
+      await audit.log({ user_id: req.user?.id, action: "motion.delete", target_type: "motion", target_id: parseInt(req.params.id, 10) });
+    } catch {}
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get("/admin/motions/:id/download", async (req, res) => {
+  try {
+    const motions = require("./motion-generator");
+    const motion = await motions.getMotion(parseInt(req.params.id, 10));
+    if (!motion) return res.status(404).send("Motion not found");
+    const docx = motions.generateDocx({
+      title: motion.title,
+      motionType: motion.motion_type,
+      clientName: motion.client_name,
+      aNumber: motion.a_number,
+      markdown: motion.content_markdown || "",
+    });
+    const cfg = motions.MOTION_TYPES[motion.motion_type];
+    const safeName = (motion.client_name || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const filename = `${new Date().toISOString().substring(0, 10)}_${cfg?.short || motion.motion_type}_${safeName}.docx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(docx);
+  } catch (err) {
+    console.error("[motions download]:", err);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/motions/:id/upload-dropbox", async (req, res) => {
+  try {
+    const motions = require("./motion-generator");
+    const result = await motions.uploadToDropbox(parseInt(req.params.id, 10));
+    try {
+      const audit = require("./audit-log");
+      await audit.log({ user_id: req.user?.id, action: "motion.upload_dropbox", target_type: "motion", target_id: parseInt(req.params.id, 10), changes: { path: result.path } });
+    } catch {}
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[motions upload]:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ── Audit Log Viewer (admin only) ────────────────────────
@@ -5250,6 +5419,15 @@ app.listen(PORT, async () => {
     console.log("✅ Deadline tracker + alert cron scheduled (7 AM Pacific)");
   } catch (e) {
     console.error("⚠️  Deadline tracker init failed:", e.message);
+  }
+
+  // Initialize motion generator
+  try {
+    const motions = require("./motion-generator");
+    await motions.init();
+    console.log("✅ Motion generator ready");
+  } catch (e) {
+    console.error("⚠️  Motion generator init failed:", e.message);
   }
 
   // Initialize backup system + start cron
