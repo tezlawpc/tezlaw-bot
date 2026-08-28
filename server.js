@@ -481,7 +481,7 @@ app.get("/admin/backups/diagnose", auth.requireRole("admin"), async (req, res) =
 // actually running on Render. Helps diagnose "changes didn't deploy" issues.
 app.get("/version", (req, res) => {
   res.json({
-    version: "v6-motion-generator-2026-08-28",
+    version: "v7-eoir-calendar-2026-08-28",
     features: {
       auto_match_tool_use: true,
       hearing_note_dedup: true,
@@ -628,6 +628,67 @@ app.post("/admin/deadlines/sync-all", auth.requireRole("admin"), async (req, res
     const results = await deadlines.syncAll();
     res.json({ ok: true, results });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ── EOIR Calendar (unified hearings + deadlines) ─────
+app.get("/admin/calendar", async (req, res) => {
+  try {
+    const cal = require("./eoir-calendar");
+    const hearingNotes = require("./hearing-notes");
+
+    // Determine date range for month view vs list view
+    const view = req.query.view === "month" ? "month" : "list";
+    const now = new Date();
+    let fromDate, toDate, monthYear = null;
+
+    if (view === "month") {
+      const m = parseInt(req.query.m, 10) || (now.getMonth() + 1);
+      const y = parseInt(req.query.y, 10) || now.getFullYear();
+      monthYear = { month: m, year: y };
+      // Pull events for this month plus a buffer
+      fromDate = new Date(y, m - 1, 1).toISOString();
+      toDate = new Date(y, m, 1).toISOString();
+    } else {
+      // List view: default to 30 days back, 90 days forward
+      fromDate = req.query.from
+        ? new Date(req.query.from).toISOString()
+        : new Date(now.getTime() - 30 * 86400000).toISOString();
+      toDate = req.query.to
+        ? new Date(req.query.to + "T23:59:59").toISOString()
+        : new Date(now.getTime() + 90 * 86400000).toISOString();
+    }
+
+    const filters = {
+      from_date: fromDate,
+      to_date: toDate,
+      from_date_str: req.query.from || "",
+      to_date_str: req.query.to || "",
+      client_search: req.query.client || "",
+      court: req.query.court || "",
+      judge: req.query.judge || "",
+    };
+
+    const events = await cal.getUnifiedEvents({
+      from_date: fromDate,
+      to_date: toDate,
+      client_search: req.query.client,
+      court: req.query.court,
+      judge: req.query.judge,
+    });
+
+    // Stats always include full range so numbers are meaningful
+    const statsEvents = await cal.getUnifiedEvents({
+      from_date: new Date(now.getTime() - 30 * 86400000).toISOString(),
+      to_date: new Date(now.getTime() + 90 * 86400000).toISOString(),
+    });
+    const stats = cal.computeStats(statsEvents);
+
+    const body = cal.renderCalendarPage({ events, stats, filters, view, monthYear });
+    res.send(hearingNotes.renderAdminChrome({ title: "EOIR Calendar", body, activeItem: "calendar" }));
+  } catch (err) {
+    console.error("[calendar]:", err);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><pre>${err.stack}</pre>`);
+  }
 });
 
 // Manual trigger for daily alerts (testing/debugging)
