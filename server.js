@@ -125,44 +125,123 @@ app.get("/admin/backups", auth.requireRole("admin"), async (req, res) => {
   }
 });
 
-// In-memory backup status tracking so the browser can poll while a backup
-// runs in the background. Solves Render's request-timeout issue: previously
-// the browser held the connection for 30-60 sec while backups ran and Render
-// would sometimes drop it, giving the browser a truncated HTML error page.
-const _backupStatus = { running: false, last: null };
+// Persistent backup status via DB so it survives Render restarts. Also
+// captures progress phases (querying/serializing/compressing/uploading/pruning)
+// so the client can show what stage is running.
+async function initBackupStatusTable() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS backup_status (
+      id           INTEGER PRIMARY KEY DEFAULT 1,
+      running      BOOLEAN DEFAULT false,
+      phase        TEXT,
+      progress     JSONB DEFAULT '{}'::jsonb,
+      last_result  JSONB,
+      started_at   TIMESTAMP,
+      finished_at  TIMESTAMP,
+      updated_at   TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await db.query(`INSERT INTO backup_status (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+  // Reset stale "running" state on boot — if the process died mid-backup,
+  // don't leave the status locked forever.
+  await db.query(`UPDATE backup_status SET running = false, phase = 'reset_on_restart', updated_at = NOW() WHERE running = true AND updated_at < NOW() - INTERVAL '10 minutes'`);
+}
+
+async function setBackupStatus({ running, phase, progress, last_result, started_at, finished_at }) {
+  const sets = [];
+  const vals = [];
+  let i = 1;
+  if (running !== undefined) { sets.push(`running = $${i++}`); vals.push(running); }
+  if (phase !== undefined) { sets.push(`phase = $${i++}`); vals.push(phase); }
+  if (progress !== undefined) { sets.push(`progress = $${i++}::jsonb`); vals.push(JSON.stringify(progress)); }
+  if (last_result !== undefined) { sets.push(`last_result = $${i++}::jsonb`); vals.push(JSON.stringify(last_result)); }
+  if (started_at !== undefined) { sets.push(`started_at = $${i++}`); vals.push(started_at); }
+  if (finished_at !== undefined) { sets.push(`finished_at = $${i++}`); vals.push(finished_at); }
+  sets.push(`updated_at = NOW()`);
+  await db.query(`UPDATE backup_status SET ${sets.join(", ")} WHERE id = 1`, vals);
+}
+
+async function getBackupStatus() {
+  await initBackupStatusTable();
+  const { rows } = await db.query(`SELECT * FROM backup_status WHERE id = 1`);
+  return rows[0] || { running: false, phase: null, progress: {}, last_result: null };
+}
 
 app.post("/admin/backups/run-now", auth.requireRole("admin"), async (req, res) => {
-  if (_backupStatus.running) {
-    return res.json({ ok: true, status: "already_running", message: "A backup is already in progress. Check /admin/backups/status." });
+  const current = await getBackupStatus();
+  if (current.running) {
+    return res.json({ ok: true, status: "already_running", message: "A backup is already in progress. Check /admin/backups/status.", started_at: current.started_at });
   }
-  _backupStatus.running = true;
-  _backupStatus.last = { started_at: new Date().toISOString(), status: "running" };
+  await setBackupStatus({
+    running: true,
+    phase: "starting",
+    progress: {},
+    started_at: new Date(),
+    finished_at: null,
+  });
 
   // Kick off the backup in the background — do NOT await it in the request.
   (async () => {
     try {
       const backups = require("./backup-system");
-      const result = await backups.runBackup({ manual: true });
-      _backupStatus.last = { ...result, status: "completed", finished_at: new Date().toISOString() };
+      const result = await backups.runBackup({
+        manual: true,
+        onProgress: async (progress) => {
+          try {
+            await setBackupStatus({ phase: progress.phase, progress });
+          } catch (e) { console.warn("[backup] progress update failed:", e.message); }
+        },
+      });
+      await setBackupStatus({
+        running: false,
+        phase: "completed",
+        last_result: { ...result, status: "completed", finished_at: new Date().toISOString() },
+        finished_at: new Date(),
+      });
     } catch (err) {
-      console.error("[backup run]:", err.message);
-      _backupStatus.last = { status: "failed", error: err.message, finished_at: new Date().toISOString() };
-    } finally {
-      _backupStatus.running = false;
+      console.error("[backup run]:", err.message, err.stack);
+      await setBackupStatus({
+        running: false,
+        phase: "failed",
+        last_result: { status: "failed", error: err.message, finished_at: new Date().toISOString() },
+        finished_at: new Date(),
+      });
     }
   })();
 
-  // Respond immediately — browser will poll for completion
   res.json({ ok: true, status: "started", message: "Backup started in background. Poll /admin/backups/status for progress." });
 });
 
-// Status polling — browser hits this every 2 sec while backup runs
-app.get("/admin/backups/status", auth.requireRole("admin"), (req, res) => {
-  res.json({
-    ok: true,
-    running: _backupStatus.running,
-    last: _backupStatus.last,
-  });
+app.get("/admin/backups/status", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const status = await getBackupStatus();
+    res.json({
+      ok: true,
+      running: status.running,
+      phase: status.phase,
+      progress: status.progress || {},
+      started_at: status.started_at,
+      finished_at: status.finished_at,
+      last: status.last_result,
+      updated_at: status.updated_at,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Reset stuck backup status manually (admin escape hatch)
+app.post("/admin/backups/reset-status", auth.requireRole("admin"), async (req, res) => {
+  try {
+    await setBackupStatus({
+      running: false,
+      phase: "manually_reset",
+      finished_at: new Date(),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 app.get("/admin/backups/preview", auth.requireRole("admin"), async (req, res) => {
@@ -5058,6 +5137,8 @@ app.listen(PORT, async () => {
   try {
     const backups = require("./backup-system");
     backups.startCron();
+    // Ensure backup_status table exists and clean up any stale "running" state
+    try { await initBackupStatusTable(); } catch (e) { console.warn("[backup] status table init:", e.message); }
     console.log("✅ Backup cron scheduled (3 AM Pacific daily)");
   } catch (e) {
     console.error("⚠️  Backup init failed:", e.message);
