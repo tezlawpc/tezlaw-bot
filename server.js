@@ -849,6 +849,16 @@ app.post("/admin/deadlines/backfill-merits", auth.requireRole("admin"), async (r
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// Backfill: create master hearing prep deadlines for ALL hearing_notes with
+// future next_hearing_date.
+app.post("/admin/deadlines/backfill-master", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const deadlines = require("./deadline-tracker");
+    const results = await deadlines.backfillMasterHearingDeadlines();
+    res.json({ ok: true, results });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // ── Court Motion Draft Generator ─────────────────────
 app.get("/admin/motions", async (req, res) => {
   try {
