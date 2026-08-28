@@ -21,7 +21,15 @@ const db = require("./db");
 const axios = require("axios");
 const zlib = require("zlib");
 
-const BACKUP_FOLDER = "/Zara-Backups";
+// Backup folder location — must be a path the OAuth user has WRITE access to.
+//
+// IMPORTANT: For Dropbox Business team spaces, writing to /XYZ/ at team root
+// often fails with path/no_write_permission (team-admin-only scope). We use
+// /USCIS/_ZARA_BACKUPS/ because /USCIS/ASYLUM_EOIR/ is where bulk client
+// imports write successfully — same parent tree, same permissions.
+//
+// Override via env var ZARA_BACKUP_FOLDER if you need to relocate.
+const BACKUP_FOLDER = process.env.ZARA_BACKUP_FOLDER || "/USCIS/_ZARA_BACKUPS";
 const RETENTION_DAYS = 30;
 const TIMEZONE_OFFSET_HOURS = -8;   // Pacific (approx)
 const CRON_HOUR = 3;                 // Run at 3 AM Pacific
