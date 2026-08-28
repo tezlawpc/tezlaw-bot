@@ -148,10 +148,10 @@ async function createMotion(fields) {
   const { rows } = await db.query(
     `INSERT INTO motions (
        client_name, a_number, motion_type, practice_area, court_name, judge_name,
-       case_number, hearing_note_id, filing_deadline, title, content_markdown,
+       hearing_note_id, filing_deadline, title, content_markdown,
        ai_grounds, ai_facts, ai_notes, generated_by, status
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      RETURNING id`,
     [
       fields.client_name || null,
@@ -160,7 +160,6 @@ async function createMotion(fields) {
       fields.practice_area || "immigration",
       fields.court_name || null,
       fields.judge_name || null,
-      fields.case_number || null,
       fields.hearing_note_id || null,
       fields.filing_deadline || null,
       fields.title || null,
@@ -177,7 +176,7 @@ async function createMotion(fields) {
 
 async function updateMotion(id, fields) {
   const allowed = [
-    "client_name", "a_number", "court_name", "judge_name", "case_number",
+    "client_name", "a_number", "court_name", "judge_name",
     "filing_deadline", "title", "content_markdown", "status", "dropbox_path",
     "filed_at",
   ];
@@ -249,11 +248,11 @@ async function getCaseContext({ client_name, a_number, hearing_note_id }) {
     if (a_number) { identifiers.push(`a_number = $${idParams.length + 1}`); idParams.push(a_number); }
     if (client_name) { identifiers.push(`client_name ILIKE $${idParams.length + 1}`); idParams.push(client_name); }
     const { rows } = await db.query(
-      `SELECT id, hearing_datetime, hearing_type, court_name, judge_name, dhs_attorney,
+      `SELECT id, hearing_date, hearing_type, judge_name, dhs_attorney,
               disposition, disposition_notes, paralegal_summary, deadlines, next_hearing_date
        FROM hearing_notes
        WHERE ${identifiers.join(" OR ")}
-       ORDER BY hearing_datetime DESC
+       ORDER BY hearing_date DESC NULLS LAST
        LIMIT 20`,
       idParams
     );
@@ -302,7 +301,7 @@ async function getCaseContext({ client_name, a_number, hearing_note_id }) {
 
 // ─── Claude generation ───────────────────────────────
 
-async function generateMotion({ motion_type, client_name, a_number, hearing_note_id, court_name, judge_name, case_number, filing_deadline, grounds, additional_facts }) {
+async function generateMotion({ motion_type, client_name, a_number, hearing_note_id, court_name, judge_name, filing_deadline, grounds, additional_facts }) {
   const motionConfig = MOTION_TYPES[motion_type];
   if (!motionConfig) throw new Error(`Unknown motion type: ${motion_type}`);
 
@@ -313,7 +312,7 @@ async function generateMotion({ motion_type, client_name, a_number, hearing_note
   if (context.hearing_history?.length) {
     historyBlock += "\n\nPRIOR HEARING NOTES:\n";
     for (const h of context.hearing_history.slice(0, 5)) {
-      const dt = h.hearing_datetime ? new Date(h.hearing_datetime).toLocaleDateString() : "unknown date";
+      const dt = h.hearing_date ? new Date(h.hearing_date).toLocaleDateString() : "unknown date";
       historyBlock += `- ${dt}: ${h.hearing_type || "hearing"}, Judge ${h.judge_name || "unknown"}, DHS ${h.dhs_attorney || "unknown"}. Disposition: ${h.disposition || "n/a"}. ${h.disposition_notes || ""}\n`;
       if (h.paralegal_summary) {
         historyBlock += `  Summary: ${h.paralegal_summary.substring(0, 400)}\n`;
@@ -343,7 +342,7 @@ CLIENT: ${client_name || "[client name to be filled]"}
 A-NUMBER: ${a_number || "[A-number to be filled]"}
 COURT: ${court_name || "[court name to be filled]"}
 JUDGE: ${judge_name || "[judge to be filled]"}
-${case_number ? `CASE NUMBER: ${case_number}\n` : ""}${filing_deadline ? `FILING DEADLINE: ${filing_deadline}\n` : ""}
+${filing_deadline ? `FILING DEADLINE: ${filing_deadline}\n` : ""}
 GROUNDS FOR MOTION:
 ${grounds || "(counsel will supply — draft with placeholder [GROUNDS TO BE SUPPLIED])"}
 
@@ -729,16 +728,19 @@ function renderNewMotionForm(prefill = {}) {
 
     <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:16px;">
       <h3 style="margin-top:0; color:${brand.navy};">Client</h3>
+      <p style="font-size:11px; color:#888; margin:0 0 10px 0;">Type either the client's name OR A-number — Zara will look up their court/judge info from prior hearings.</p>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-        <div>
+        <div style="position:relative;">
           <label style="display:block; font-size:12px; color:#666;">Client name *</label>
-          <input type="text" name="client_name" required value="${escapeHtml(prefill.client_name || "")}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <input type="text" name="client_name" required autocomplete="off" value="${escapeHtml(prefill.client_name || "")}" oninput="lookupClient(this.value, 'name')" onblur="setTimeout(()=>{ document.getElementById('client-suggestions').style.display='none'; }, 200)" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
         </div>
         <div>
           <label style="display:block; font-size:12px; color:#666;">A-number</label>
-          <input type="text" name="a_number" value="${escapeHtml(prefill.a_number || "")}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <input type="text" name="a_number" autocomplete="off" value="${escapeHtml(prefill.a_number || "")}" oninput="lookupClient(this.value, 'anum')" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
         </div>
       </div>
+      <div id="client-suggestions" style="display:none; margin-top:8px; background:#f8f8f8; border:1px solid #ddd; border-radius:4px; padding:6px; max-height:280px; overflow-y:auto;"></div>
+      <div id="lookup-status" style="font-size:11px; color:${brand.gold}; margin-top:6px; display:none;"></div>
       ${prefill.hearing_note_id ? `<input type="hidden" name="hearing_note_id" value="${prefill.hearing_note_id}"><div style="font-size:11px; color:${brand.gold}; margin-top:8px;">✓ Linked to hearing note #${prefill.hearing_note_id}</div>` : ""}
     </div>
 
@@ -754,12 +756,9 @@ function renderNewMotionForm(prefill = {}) {
           <input type="text" name="judge_name" value="${escapeHtml(prefill.judge_name || "")}" placeholder="e.g. Hon. Kevin Riley" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
         </div>
         <div>
-          <label style="display:block; font-size:12px; color:#666;">Case number</label>
-          <input type="text" name="case_number" value="${escapeHtml(prefill.case_number || "")}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
-        </div>
-        <div>
           <label style="display:block; font-size:12px; color:#666;">Filing deadline</label>
           <input type="date" name="filing_deadline" value="${prefill.filing_deadline || ""}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div style="font-size:10px; color:#888; margin-top:2px;">Optional — leave blank if unknown</div>
         </div>
       </div>
     </div>
@@ -795,6 +794,75 @@ function renderNewMotionForm(prefill = {}) {
   </div>
 
   <script>
+    // ── Client autocomplete lookup ─────────────────────────
+    let lookupTimeout = null;
+    async function lookupClient(query, sourceField) {
+      if (lookupTimeout) clearTimeout(lookupTimeout);
+      const suggestionsEl = document.getElementById("client-suggestions");
+      const trimmed = String(query || "").trim();
+      if (trimmed.length < 2) {
+        suggestionsEl.style.display = "none";
+        return;
+      }
+      // Debounce: wait 350ms after typing stops
+      lookupTimeout = setTimeout(async () => {
+        try {
+          const r = await fetch("/admin/motions/lookup-client?q=" + encodeURIComponent(trimmed));
+          const d = await r.json();
+          if (!d.ok || !d.matches || d.matches.length === 0) {
+            suggestionsEl.style.display = "none";
+            return;
+          }
+          renderSuggestions(d.matches);
+        } catch (e) { console.warn("Lookup error:", e); }
+      }, 350);
+    }
+
+    function renderSuggestions(matches) {
+      const suggestionsEl = document.getElementById("client-suggestions");
+      let html = '<div style="font-size:11px; color:#666; margin-bottom:6px;">💡 Found ' + matches.length + ' client' + (matches.length > 1 ? 's' : '') + ' — click to auto-fill court/judge:</div>';
+      for (let i = 0; i < matches.length; i++) {
+        const m = matches[i];
+        const escStr = (s) => String(s || "").replace(/'/g, "\\\\'").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+        html += '<div onclick="selectClient(' + i + ')" style="padding:8px 10px; margin-bottom:4px; background:white; border:1px solid #ddd; border-radius:4px; cursor:pointer; font-size:12px;" onmouseover="this.style.background=\\'#fffbe6\\'" onmouseout="this.style.background=\\'white\\'">';
+        html +=   '<div style="font-weight:600; color:#0C1C36;">' + escStr(m.client_name || "(no name)") + (m.a_number ? ' <span style="color:#888; font-size:11px;">' + escStr(m.a_number) + '</span>' : '') + '</div>';
+        if (m.court_name) html += '<div style="color:#666; margin-top:2px;">📍 ' + escStr(m.court_name) + '</div>';
+        if (m.judge_name) html += '<div style="color:#666;">⚖️ ' + escStr(m.judge_name) + '</div>';
+        if (m.last_hearing_date) {
+          const dt = new Date(m.last_hearing_date).toLocaleDateString();
+          html += '<div style="color:#888; font-size:10px; margin-top:2px;">Last hearing: ' + dt + ' (' + escStr(m.last_hearing_type || "hearing") + ')</div>';
+        }
+        html += '</div>';
+      }
+      suggestionsEl.innerHTML = html;
+      suggestionsEl.style.display = "block";
+      window._clientMatches = matches;
+    }
+
+    function selectClient(idx) {
+      const m = window._clientMatches[idx];
+      if (!m) return;
+      // Fill any fields that are empty (don't overwrite what user typed)
+      const setIfEmpty = (name, value) => {
+        if (!value) return;
+        const el = document.querySelector('[name="' + name + '"]');
+        if (el && !el.value.trim()) el.value = value;
+      };
+      // Client fields — force-overwrite these since user is selecting a client
+      const cnEl = document.querySelector('[name="client_name"]');
+      const anEl = document.querySelector('[name="a_number"]');
+      if (cnEl && m.client_name) cnEl.value = m.client_name;
+      if (anEl && m.a_number) anEl.value = m.a_number;
+      setIfEmpty("court_name", m.court_name);
+      setIfEmpty("judge_name", m.judge_name);
+      document.getElementById("client-suggestions").style.display = "none";
+      const status = document.getElementById("lookup-status");
+      status.textContent = "✓ Filled court/judge info for " + m.client_name;
+      status.style.display = "block";
+      setTimeout(() => { status.style.display = "none"; }, 4000);
+    }
+    // ── End client lookup ─────────────────────────
+
     async function submitNewMotion(e) {
       e.preventDefault();
       const fd = new FormData(e.target);
