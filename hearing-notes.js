@@ -503,6 +503,10 @@ async function saveNote(data, { generateSummaries = true, allowDuplicate = false
         paralegal_summary = summaries?.paralegal_summary || null;
         client_summary = summaries?.client_summary || null;
       }
+      try {
+        const dt = require("./deadline-tracker");
+        await dt.syncFromHearingNote(existing.id);
+      } catch (e) { console.warn("[hearing-notes] deadline sync warning:", e.message); }
       return { id: existing.id, paralegal_summary, client_summary, was_duplicate: true };
     }
   }
@@ -560,6 +564,10 @@ async function saveNote(data, { generateSummaries = true, allowDuplicate = false
   const newId = r.rows[0].id;
   // Log initial revision
   await saveRevision(newId, "created", data, null);
+  try {
+    const dt = require("./deadline-tracker");
+    await dt.syncFromHearingNote(newId);
+  } catch (e) { console.warn("[hearing-notes] deadline sync warning:", e.message); }
   return { id: newId, paralegal_summary, client_summary, was_duplicate: false };
 }
 
@@ -679,6 +687,10 @@ async function updateNote(id, data, { user = null, skipRevision = false } = {}) 
   if (!skipRevision) {
     await saveRevision(id, "updated", data, oldNote, { user });
   }
+  try {
+    const dt = require("./deadline-tracker");
+    await dt.syncFromHearingNote(id);
+  } catch (e) { console.warn("[hearing-notes] deadline sync warning:", e.message); }
   return { id: r.rows[0].id, updated: true };
 }
 
@@ -1015,6 +1027,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   </a>
   <a href="/admin/hearing/individual" class="nav-item ${indivActive}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${indivActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">⚖️</span><span>→ Individual Hearing Notes</span>
+  </a>
+  <a href="/admin/deadlines" class="nav-item ${activeItem === "deadlines" ? "active" : ""}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${activeItem === "deadlines" ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">⏰</span><span>→ Deadlines</span>
   </a>
   <a href="/admin/hearing/history" class="nav-item ${historyActive}" data-perm="hearings.read" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">📚</span><span>All Hearing History</span>
