@@ -1203,8 +1203,20 @@ app.get("/admin/audit-log", auth.requireRole("admin"), async (req, res) => {
       actions: Object.values(audit.ACTIONS),
     }));
   } catch (err) {
-    console.error("[audit log]:", err.message);
-    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+    console.error("[audit log]:", err.message, "\n", err.stack);
+    // Send a diagnostic page rather than blank error
+    res.status(500).send(`<!DOCTYPE html><html><head><title>Audit Log Error</title>
+      <style>body{font-family:-apple-system,sans-serif;padding:40px;background:#f5f2ea;color:#0C1C36;}
+      pre{background:white;padding:16px;border-radius:8px;overflow-x:auto;font-size:12px;border-left:3px solid #c00;}
+      a{color:#B79C62;}</style></head><body>
+      <h1>⚠️ Audit Log Error</h1>
+      <p>The audit log page failed to render. Details below (also logged server-side):</p>
+      <pre>${String(err.message || err).replace(/</g, '&lt;')}</pre>
+      <details><summary>Stack trace</summary>
+      <pre>${String(err.stack || '').replace(/</g, '&lt;')}</pre>
+      </details>
+      <p><a href="/admin/dashboard">← Back to dashboard</a></p>
+      </body></html>`);
   }
 });
 
