@@ -1040,6 +1040,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   <a href="/admin/hearing/individual" class="nav-item ${indivActive}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${indivActive ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">⚖️</span><span>→ Individual Hearing Notes</span>
   </a>
+  <a href="/admin/calendar" class="nav-item ${activeItem === "calendar" ? "active" : ""}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${activeItem === "calendar" ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">🗓️</span><span>→ EOIR Calendar</span>
+  </a>
   <a href="/admin/deadlines" class="nav-item ${activeItem === "deadlines" ? "active" : ""}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${activeItem === "deadlines" ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">⏰</span><span>→ Deadlines</span>
   </a>
