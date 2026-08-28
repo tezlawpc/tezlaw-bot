@@ -774,6 +774,7 @@ async function saveIndividualNote(data, id = null) {
     try {
       const dt = require("./deadline-tracker");
       await dt.syncFromIndividualHearing(r.rows[0].id);
+      await dt.syncMeritsEvidenceDeadline(r.rows[0].id);
     } catch (e) { console.warn("[individual-hearing-notes] deadline sync warning:", e.message); }
     return { id: r.rows[0].id, updated: true };
   }
@@ -812,6 +813,7 @@ async function saveIndividualNote(data, id = null) {
   try {
     const dt = require("./deadline-tracker");
     await dt.syncFromIndividualHearing(newId);
+    await dt.syncMeritsEvidenceDeadline(newId);
   } catch (e) { console.warn("[individual-hearing-notes] deadline sync warning:", e.message); }
   return { id: newId, updated: false };
 }
