@@ -695,79 +695,249 @@ app.delete("/admin/outlook-sync/events", async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// Scan every client's Dropbox folder for new EOIR hearing notices.
-// Used by the calendar "Update from Dropbox" button.
-app.post("/admin/calendar/scan-all-notices", async (req, res) => {
-  try {
-    const cp = require("./client-profiles");
-    const dbx = require("./dropbox-integration");
-    const hn = require("./hearing-notices");
+// Track scan status in DB (survives Render restarts, allows polling)
+async function initScanStatusTable() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS scan_status (
+      id                SERIAL PRIMARY KEY,
+      scan_type         TEXT NOT NULL,
+      running           BOOLEAN DEFAULT true,
+      phase             TEXT,
+      current_client    TEXT,
+      progress_current  INTEGER DEFAULT 0,
+      progress_total    INTEGER DEFAULT 0,
+      results           JSONB,
+      error             TEXT,
+      started_at        TIMESTAMP DEFAULT NOW(),
+      updated_at        TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  // On boot, clear any stale "running" scans older than 30 minutes
+  await db.query(`
+    UPDATE scan_status
+    SET running = false, error = 'Interrupted (server restarted)', updated_at = NOW()
+    WHERE running = true AND updated_at < NOW() - INTERVAL '30 minutes'
+  `);
+}
+initScanStatusTable().catch(e => console.warn("[scan-status] init:", e.message));
 
-    const clients = await cp.aggregateClients();
-    const limit = parseInt(req.query.limit || "5", 10);  // per client, keep small
+async function setScanStatus(id, updates) {
+  const allowed = ["running", "phase", "current_client", "progress_current", "progress_total", "results", "error"];
+  const sets = [];
+  const values = [];
+  let i = 1;
+  for (const key of allowed) {
+    if (updates[key] !== undefined) {
+      if (key === "results" && updates[key] != null) {
+        sets.push(`${key} = $${i++}::jsonb`);
+        values.push(JSON.stringify(updates[key]));
+      } else {
+        sets.push(`${key} = $${i++}`);
+        values.push(updates[key]);
+      }
+    }
+  }
+  if (!sets.length) return;
+  sets.push(`updated_at = NOW()`);
+  values.push(id);
+  await db.query(`UPDATE scan_status SET ${sets.join(", ")} WHERE id = $${i}`, values);
+}
 
-    const results = {
-      total_clients: clients.length,
-      scanned: 0,
-      skipped_no_folder: 0,
-      errors: 0,
-      new_notices: 0,
-      updated_notices: 0,
-      per_client: [],
-    };
+async function startScanAllNoticesJob() {
+  // Check for existing running scan
+  const running = await db.query(
+    `SELECT id FROM scan_status WHERE scan_type = 'dropbox_notices' AND running = true LIMIT 1`
+  );
+  if (running.rows.length) {
+    return { already_running: true, scan_id: running.rows[0].id };
+  }
 
-    // Iterate serially to avoid Dropbox rate limits
-    for (const client of clients) {
-      try {
-        const folder = await dbx.resolveClientFolder({
+  // Create new scan status row
+  const inserted = await db.query(
+    `INSERT INTO scan_status (scan_type, running, phase) VALUES ('dropbox_notices', true, 'starting') RETURNING id`
+  );
+  const scanId = inserted.rows[0].id;
+
+  // Fire and forget — do the actual work asynchronously so HTTP returns fast
+  runScanAllNoticesAsync(scanId).catch(err => {
+    console.error("[scan-all-notices] fatal:", err);
+    setScanStatus(scanId, { running: false, error: err.message }).catch(() => {});
+  });
+
+  return { started: true, scan_id: scanId };
+}
+
+async function runScanAllNoticesAsync(scanId) {
+  const cp = require("./client-profiles");
+  const dbx = require("./dropbox-integration");
+  const hn = require("./hearing-notices");
+
+  await setScanStatus(scanId, { phase: "loading_clients" });
+  const clients = await cp.aggregateClients();
+  const total = clients.length;
+
+  const results = {
+    total_clients: total,
+    scanned: 0,
+    skipped_no_folder: 0,
+    errors: 0,
+    new_notices: 0,
+    updated_notices: 0,
+    per_client: [],
+    timeout_clients: [],
+  };
+
+  await setScanStatus(scanId, {
+    phase: "scanning",
+    progress_current: 0,
+    progress_total: total,
+  });
+
+  // Per-client hard timeout to prevent one stuck client from blocking whole batch
+  const PER_CLIENT_TIMEOUT_MS = 90 * 1000;  // 90 seconds each
+  const LIMIT_PER_CLIENT = 5;  // Max files scanned per client
+
+  const withTimeout = (promise, ms, label) => {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout after ${ms/1000}s: ${label}`)), ms)),
+    ]);
+  };
+
+  for (let i = 0; i < clients.length; i++) {
+    const client = clients[i];
+    const clientLabel = client.client_name || "unknown";
+
+    await setScanStatus(scanId, {
+      progress_current: i,
+      current_client: clientLabel,
+    });
+
+    try {
+      const folder = await withTimeout(
+        dbx.resolveClientFolder({
           clientKey: client.key, clientName: client.client_name, aNumber: client.a_number,
-        }).catch(() => null);
+        }),
+        15000,
+        `resolveClientFolder(${clientLabel})`
+      ).catch(() => null);
 
-        if (!folder) {
-          results.skipped_no_folder++;
-          continue;
-        }
+      if (!folder) {
+        results.skipped_no_folder++;
+        continue;
+      }
 
-        const scan = await hn.scanClientFolder({
+      const scan = await withTimeout(
+        hn.scanClientFolder({
           clientKey: client.key,
           clientName: client.client_name,
           aNumber: client.a_number,
           dropboxFolderPath: folder,
-          limit,
-        }).catch((e) => ({ error: e.message }));
+          limit: LIMIT_PER_CLIENT,
+        }),
+        PER_CLIENT_TIMEOUT_MS,
+        `scanClientFolder(${clientLabel})`
+      ).catch((e) => ({ error: e.message }));
 
-        if (scan.error) {
-          results.errors++;
-          results.per_client.push({ client: client.client_name, error: scan.error });
-          continue;
-        }
-
-        results.scanned++;
-        const newCount = scan.new_notices || scan.newNotices || 0;
-        const updatedCount = scan.updated_notices || scan.updatedNotices || 0;
-        results.new_notices += newCount;
-        results.updated_notices += updatedCount;
-
-        if (newCount > 0 || updatedCount > 0) {
-          results.per_client.push({
-            client: client.client_name,
-            a_number: client.a_number,
-            new: newCount,
-            updated: updatedCount,
-          });
-        }
-      } catch (e) {
+      if (scan.error) {
         results.errors++;
-        console.warn(`[scan-all] ${client.client_name}: ${e.message}`);
+        const isTimeout = /Timeout after/.test(scan.error);
+        if (isTimeout) results.timeout_clients.push(clientLabel);
+        results.per_client.push({ client: clientLabel, error: scan.error });
+        // Update progress after each error too
+        await setScanStatus(scanId, { results });
+        continue;
       }
-    }
 
-    console.log(`[calendar scan-all] Scanned ${results.scanned}/${results.total_clients} clients, found ${results.new_notices} new notices`);
-    res.json({ ok: true, results });
+      results.scanned++;
+      const newCount = scan.new_notices || scan.newNotices || 0;
+      const updatedCount = scan.updated_notices || scan.updatedNotices || 0;
+      results.new_notices += newCount;
+      results.updated_notices += updatedCount;
+
+      if (newCount > 0 || updatedCount > 0) {
+        results.per_client.push({
+          client: clientLabel,
+          a_number: client.a_number,
+          new: newCount,
+          updated: updatedCount,
+        });
+      }
+
+      // Periodic status write (every 5 clients) so UI polling sees progress
+      if (i % 5 === 0) {
+        await setScanStatus(scanId, { results });
+      }
+    } catch (e) {
+      results.errors++;
+      console.warn(`[scan-all] ${clientLabel}: ${e.message}`);
+      results.per_client.push({ client: clientLabel, error: e.message });
+    }
+  }
+
+  await setScanStatus(scanId, {
+    running: false,
+    phase: "complete",
+    progress_current: total,
+    current_client: null,
+    results,
+  });
+
+  console.log(`[scan-all-notices] Complete: ${results.scanned}/${total} scanned, ${results.new_notices} new notices, ${results.errors} errors`);
+}
+
+app.post("/admin/calendar/scan-all-notices", async (req, res) => {
+  try {
+    const result = await startScanAllNoticesJob();
+    if (result.already_running) {
+      return res.json({ ok: true, already_running: true, scan_id: result.scan_id });
+    }
+    res.json({ ok: true, started: true, scan_id: result.scan_id });
   } catch (err) {
     console.error("[calendar scan-all]:", err);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+app.get("/admin/calendar/scan-status", async (req, res) => {
+  try {
+    const scanId = req.query.scan_id ? parseInt(req.query.scan_id, 10) : null;
+    let row;
+    if (scanId) {
+      const { rows } = await db.query(`SELECT * FROM scan_status WHERE id = $1`, [scanId]);
+      row = rows[0];
+    } else {
+      // Return most recent
+      const { rows } = await db.query(
+        `SELECT * FROM scan_status WHERE scan_type = 'dropbox_notices' ORDER BY started_at DESC LIMIT 1`
+      );
+      row = rows[0];
+    }
+    if (!row) return res.json({ ok: true, exists: false });
+    res.json({
+      ok: true,
+      exists: true,
+      scan_id: row.id,
+      running: row.running,
+      phase: row.phase,
+      current_client: row.current_client,
+      progress_current: row.progress_current,
+      progress_total: row.progress_total,
+      results: row.results,
+      error: row.error,
+      started_at: row.started_at,
+      updated_at: row.updated_at,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/calendar/scan-status/reset", async (req, res) => {
+  try {
+    await db.query(`UPDATE scan_status SET running = false WHERE scan_type = 'dropbox_notices' AND running = true`);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 app.get("/admin/calendar", async (req, res) => {
