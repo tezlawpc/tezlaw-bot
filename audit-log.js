@@ -149,27 +149,37 @@ function renderAuditLogPage({ entries, filters, users, actions }) {
     "notice.sent": "✉️ Client notified",
     "notice.scanned": "🔍 Notice scanned",
     "bulk.import": "📦 Bulk import",
+    // Motion generator (added post-launch)
+    "motion.generate": "📜 Motion drafted",
+    "motion.delete": "🗑️ Motion deleted",
+    "motion.upload_dropbox": "☁️ Motion uploaded to Dropbox",
+    "motion_template.upload": "📋 Motion template uploaded",
   };
 
   const rows = entries.length ? entries.map(e => {
-    const ts = new Date(e.created_at).toLocaleString();
-    const roleColor = { admin: "#0C1C36", attorney: "#B79C62", paralegal: "#0061FF", viewer: "#666" }[e.user_role] || "#999";
-    const changesPreview = e.changes ? shortenJson(e.changes) : "";
-    return `
-      <tr>
-        <td style="white-space:nowrap; font-size:11px; color:#666;">${escapeHtml(ts)}</td>
-        <td>
-          <strong>${escapeHtml(e.username || "(system)")}</strong>
-          ${e.user_role ? `<span style="background:${roleColor}; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:4px;">${escapeHtml(e.user_role)}</span>` : ""}
-        </td>
-        <td>${escapeHtml(ACTION_LABELS[e.action] || e.action)}</td>
-        <td>
-          ${e.target_label ? `<strong>${escapeHtml(e.target_label)}</strong>` : ""}
-          ${e.target_type ? `<div style="font-size:10px; color:#999;">${escapeHtml(e.target_type)}${e.target_id ? ":" + escapeHtml(e.target_id) : ""}</div>` : ""}
-        </td>
-        <td style="font-size:11px; color:#666; font-family:monospace; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(changesPreview)}">${escapeHtml(changesPreview)}</td>
-        <td style="font-size:10px; color:#999; font-family:monospace;">${escapeHtml(e.ip_address || "")}</td>
-      </tr>`;
+    try {
+      const ts = e.created_at ? new Date(e.created_at).toLocaleString() : "";
+      const roleColor = { admin: "#0C1C36", attorney: "#B79C62", paralegal: "#0061FF", viewer: "#666" }[e.user_role] || "#999";
+      const changesPreview = shortenJson(e.changes);
+      return `
+        <tr>
+          <td style="white-space:nowrap; font-size:11px; color:#666;">${escapeHtml(ts)}</td>
+          <td>
+            <strong>${escapeHtml(e.username || "(system)")}</strong>
+            ${e.user_role ? `<span style="background:${roleColor}; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:4px;">${escapeHtml(e.user_role)}</span>` : ""}
+          </td>
+          <td>${escapeHtml(ACTION_LABELS[e.action] || e.action || "")}</td>
+          <td>
+            ${e.target_label ? `<strong>${escapeHtml(e.target_label)}</strong>` : ""}
+            ${e.target_type ? `<div style="font-size:10px; color:#999;">${escapeHtml(e.target_type)}${e.target_id ? ":" + escapeHtml(e.target_id) : ""}</div>` : ""}
+          </td>
+          <td style="font-size:11px; color:#666; font-family:monospace; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(changesPreview)}">${escapeHtml(changesPreview)}</td>
+          <td style="font-size:10px; color:#999; font-family:monospace;">${escapeHtml(e.ip_address || "")}</td>
+        </tr>`;
+    } catch (renderErr) {
+      // Skip individual bad rows rather than crashing the whole page
+      return `<tr><td colspan="6" style="color:#c00; font-size:11px; padding:6px;">⚠️ Skipped entry #${e.id}: ${escapeHtml(renderErr.message)}</td></tr>`;
+    }
   }).join("") : `<tr><td colspan="6" style="text-align:center; color:#888; padding:30px;">No audit entries match your filters.</td></tr>`;
 
   const userOptions = users.map(u =>
@@ -234,10 +244,22 @@ function escapeHtml(s) {
 }
 
 function shortenJson(obj) {
+  if (obj == null) return "";
   try {
-    const j = JSON.stringify(obj);
-    return j.length > 120 ? j.substring(0, 117) + "…" : j;
-  } catch { return ""; }
+    // Handle strings that were double-encoded
+    let str;
+    if (typeof obj === "string") {
+      str = obj;
+    } else {
+      str = JSON.stringify(obj, (k, v) => {
+        if (typeof v === "bigint") return v.toString();
+        if (v instanceof Date) return v.toISOString();
+        return v;
+      });
+    }
+    if (!str) return "";
+    return str.length > 120 ? str.substring(0, 117) + "…" : str;
+  } catch { return "[unrenderable]"; }
 }
 
 module.exports = {
