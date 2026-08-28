@@ -142,20 +142,20 @@ app.post("/admin/backups/test-mini", auth.requireRole("admin"), async (req, res)
   };
 
   try {
-    // Phase 1: Query a small table (users)
-    let p = startPhase("query_users");
-    const usersRes = await db.query(`SELECT id, name, email, role, active, created_at FROM users LIMIT 100`);
+    // Phase 1: Query a small table (admin_users) — schema-aware
+    let p = startPhase("query_admin_users");
+    const usersRes = await db.query(`SELECT id, username, full_name, role FROM admin_users LIMIT 100`);
     endPhase(p, { row_count: usersRes.rows.length });
 
     // Phase 2: Discover all tables (metadata only)
     p = startPhase("list_tables");
     const tables = await db.query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`);
-    endPhase(p, { table_count: tables.rows.length, tables: tables.rows.map(r => r.tablename) });
+    endPhase(p, { table_count: tables.rows.length });
 
     // Phase 3: Detect BYTEA columns across all tables
     p = startPhase("detect_bytea");
     const byteaMap = {};
-    for (const t of tables.rows.slice(0, 30)) {
+    for (const t of tables.rows) {
       const cols = await db.query(
         `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND data_type='bytea'`,
         [t.tablename]
@@ -164,18 +164,39 @@ app.post("/admin/backups/test-mini", auth.requireRole("admin"), async (req, res)
     }
     endPhase(p, { bytea_columns: byteaMap });
 
-    // Phase 4: Estimate table sizes (heaviest tables)
+    // Phase 4: Table sizes — critical for identifying the hang culprit
     p = startPhase("table_sizes");
     const sizes = await db.query(`
       SELECT
         relname AS table_name,
         pg_size_pretty(pg_total_relation_size(relid)) AS total_size,
-        pg_total_relation_size(relid) AS total_size_bytes
+        pg_total_relation_size(relid) AS total_size_bytes,
+        n_live_tup AS row_estimate
       FROM pg_stat_user_tables
       ORDER BY pg_total_relation_size(relid) DESC
-      LIMIT 10
+      LIMIT 20
     `);
     endPhase(p, { top_tables: sizes.rows });
+
+    // Phase 4b: Investigate case_files specifically — this is where the last
+    // real backup hung. Get its exact schema.
+    p = startPhase("investigate_case_files");
+    try {
+      const caseCols = await db.query(`
+        SELECT column_name, data_type, character_maximum_length
+        FROM information_schema.columns
+        WHERE table_schema='public' AND table_name='case_files'
+        ORDER BY ordinal_position
+      `);
+      const caseRowCount = await db.query(`SELECT COUNT(*) FROM case_files`);
+      endPhase(p, {
+        exists: true,
+        columns: caseCols.rows,
+        row_count: parseInt(caseRowCount.rows[0].count, 10),
+      });
+    } catch (e) {
+      endPhase(p, { exists: false, error: e.message });
+    }
 
     // Phase 5: Compress a small JSON payload
     p = startPhase("compress_test");
@@ -208,6 +229,8 @@ app.post("/admin/backups/test-mini", auth.requireRole("admin"), async (req, res)
 
     trace.overall_ok = true;
     trace.total_seconds = ((Date.now() - trace.phases[0].started_ms) / 1000).toFixed(2);
+    // Strip started_ms from output for cleanliness
+    for (const ph of trace.phases) { delete ph.started_ms; }
     res.json(trace);
   } catch (err) {
     const currentPhase = trace.phases[trace.phases.length - 1];
@@ -506,12 +529,11 @@ app.get("/admin/deadlines", async (req, res) => {
     // Get all users for the assign dropdown
     let users = [];
     try {
-      const result = await db.query(`SELECT id, name FROM users WHERE active = true ORDER BY name`);
+      const result = await db.query(`SELECT id, full_name AS name FROM admin_users WHERE COALESCE(disabled, false) = false ORDER BY full_name`);
       users = result.rows;
     } catch {
-      // fallback: users table may not exist or have different columns
       try {
-        const result = await db.query(`SELECT id, name FROM users ORDER BY name LIMIT 20`);
+        const result = await db.query(`SELECT id, full_name AS name FROM admin_users ORDER BY full_name LIMIT 20`);
         users = result.rows;
       } catch { users = []; }
     }
