@@ -1031,6 +1031,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   <a href="/admin/deadlines" class="nav-item ${activeItem === "deadlines" ? "active" : ""}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${activeItem === "deadlines" ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
     <span class="icon">⏰</span><span>→ Deadlines</span>
   </a>
+  <a href="/admin/motions" class="nav-item ${activeItem === "motions" ? "active" : ""}" data-perm="hearings.read" style="background:rgba(183,156,98,.08); ${activeItem === "motions" ? "" : "border-left-color:rgba(183,156,98,.4);"} border-bottom:1px solid rgba(183,156,98,.2);">
+    <span class="icon">📜</span><span>→ Court Motions</span>
+  </a>
   <a href="/admin/hearing/history" class="nav-item ${historyActive}" data-perm="hearings.read" style="border-bottom:1px solid rgba(183,156,98,.2); font-size:13px; opacity:.85;">
     <span class="icon">📚</span><span>All Hearing History</span>
   </a>
@@ -1229,6 +1232,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       <button type="button" onclick="openDictationModal()" style="background:linear-gradient(135deg, #B79C62, #d4b979); color:white; padding:10px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; box-shadow:0 2px 6px rgba(183,156,98,0.3); display:flex; align-items:center; gap:6px;">
         🎙️ <span>Voice dictate ${isEdit ? "additional notes" : "this hearing"}</span>
       </button>
+      ${isEdit ? `<a href="/admin/motions/new?hearing_note_id=${noteId}" style="text-decoration:none; background:#0C1C36; color:white; padding:10px 16px; border-radius:6px; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:6px;">📜 Draft motion</a>` : ""}
       ${!isEdit ? `<a href="/admin/hearing/notes/bulk-upload" style="text-decoration:none; background:#0061FF; color:white; padding:10px 16px; border-radius:6px; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:6px;">📚 Bulk upload</a>` : ""}
     </div>
   </div>
