@@ -43,7 +43,7 @@ const CRON_HOUR = 3;                 // Run at 3 AM Pacific
 
 // ── Snapshot all tables to a JSON object ─────────────────
 
-async function createSnapshot() {
+async function createSnapshot(onProgress) {
   // Discover all tables in the public schema — nothing hardcoded so new
   // features automatically get backed up as they add tables.
   const tablesResult = await db.query(`
@@ -55,18 +55,69 @@ async function createSnapshot() {
   const tables = tablesResult.rows.map(r => r.tablename);
 
   const snapshot = {
-    version: "1.0",
+    version: "2.0",
     created_at: new Date().toISOString(),
     tables: {},
     counts: {},
+    skipped_bytea_columns: {},
+    table_timings_sec: {},
   };
 
-  for (const tbl of tables) {
+  for (let i = 0; i < tables.length; i++) {
+    const tbl = tables[i];
+    const tblStart = Date.now();
     try {
-      // Safely quote table name to prevent identifier issues
-      const dataRes = await db.query(`SELECT * FROM "${tbl.replace(/"/g, '""')}"`);
+      // Detect column types — skip BYTEA columns (binary file content) because
+      // they inflate the JSON snapshot dramatically (client_documents holds
+      // actual PDF/image bytes). We keep row count + metadata; the actual file
+      // bytes live in the DB itself and can be re-uploaded via the client
+      // documents hub if a restore is ever needed.
+      const colsRes = await db.query(`
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1
+        ORDER BY ordinal_position
+      `, [tbl]);
+
+      const byteaCols = colsRes.rows.filter(c => c.data_type === 'bytea').map(c => c.column_name);
+      const otherCols = colsRes.rows.filter(c => c.data_type !== 'bytea').map(c => c.column_name);
+
+      let selectSql;
+      if (byteaCols.length > 0 && otherCols.length > 0) {
+        const scalarList = otherCols.map(c => `"${c.replace(/"/g, '""')}"`).join(", ");
+        // Include placeholder + size for each BYTEA so the restore layer knows content existed
+        const sizeExprs = byteaCols.map(c =>
+          `octet_length("${c.replace(/"/g, '""')}") AS "${c.replace(/"/g, '""')}_size_bytes"`
+        ).join(", ");
+        selectSql = `SELECT ${scalarList}, ${sizeExprs} FROM "${tbl.replace(/"/g, '""')}"`;
+        snapshot.skipped_bytea_columns[tbl] = byteaCols;
+      } else if (otherCols.length === 0) {
+        // Table has ONLY BYTEA columns (unusual) — skip entirely
+        snapshot.tables[tbl] = [];
+        snapshot.counts[tbl] = "SKIPPED (all BYTEA)";
+        continue;
+      } else {
+        selectSql = `SELECT * FROM "${tbl.replace(/"/g, '""')}"`;
+      }
+
+      const dataRes = await db.query(selectSql);
       snapshot.tables[tbl] = dataRes.rows;
       snapshot.counts[tbl] = dataRes.rows.length;
+      const elapsed = ((Date.now() - tblStart) / 1000).toFixed(1);
+      snapshot.table_timings_sec[tbl] = parseFloat(elapsed);
+      const skipMsg = byteaCols.length ? ` (skipped BYTEA cols: ${byteaCols.join(", ")})` : "";
+      console.log(`[backup] ${tbl}: ${dataRes.rows.length} rows${skipMsg} in ${elapsed}s`);
+
+      // Progress callback for status endpoint
+      if (typeof onProgress === "function") {
+        onProgress({
+          phase: "querying",
+          current_table: tbl,
+          tables_done: i + 1,
+          tables_total: tables.length,
+          rows_so_far: Object.values(snapshot.counts).reduce((sum, v) => typeof v === "number" ? sum + v : sum, 0),
+        });
+      }
     } catch (e) {
       console.warn(`[backup] Failed to snapshot table ${tbl}:`, e.message);
       snapshot.counts[tbl] = "ERROR: " + e.message;
@@ -254,24 +305,38 @@ async function pruneOldBackups() {
 
 // ── Full backup: snapshot + upload + prune ───────────────
 
-async function runBackup({ manual = false } = {}) {
+async function runBackup({ manual = false, onProgress = null } = {}) {
   const startTime = Date.now();
   console.log(`[backup] Starting ${manual ? "manual" : "scheduled"} backup at`, new Date().toISOString());
 
-  const snapshot = await createSnapshot();
+  const progress = (phase, extra = {}) => {
+    if (typeof onProgress === "function") {
+      onProgress({ phase, elapsed_seconds: Math.round((Date.now() - startTime) / 1000), ...extra });
+    }
+  };
+
+  progress("starting");
+
+  const snapshot = await createSnapshot((snapProgress) => {
+    progress("querying", snapProgress);
+  });
   const totalRows = Object.values(snapshot.counts).reduce(
     (sum, c) => sum + (typeof c === "number" ? c : 0), 0
   );
 
-  // Compress with gzip — legal data compresses ~90%
+  progress("serializing", { total_rows: totalRows });
   const json = JSON.stringify(snapshot);
+
+  progress("compressing", { raw_bytes: json.length });
   const compressed = zlib.gzipSync(json);
 
+  progress("uploading", { compressed_bytes: compressed.length });
   const dateStr = new Date().toISOString().substring(0, 10);
   const timeStr = new Date().toISOString().substring(11, 19).replace(/:/g, "-");
   const filename = `zara-backup-${dateStr}_${timeStr}.json.gz`;
-
   const uploadResult = await uploadToDropbox(filename, compressed);
+
+  progress("pruning");
   const deletedOld = await pruneOldBackups();
   const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
 
@@ -286,18 +351,16 @@ async function runBackup({ manual = false } = {}) {
     compression_ratio: (100 * (1 - compressed.length / json.length)).toFixed(1) + "%",
     old_backups_deleted: deletedOld,
     duration_seconds: durationSec,
+    skipped_bytea_columns: snapshot.skipped_bytea_columns || {},
+    slowest_tables: Object.entries(snapshot.table_timings_sec || {})
+      .sort(([, a], [, b]) => b - a).slice(0, 5)
+      .map(([tbl, sec]) => ({ table: tbl, seconds: sec })),
     manual,
   };
 
   console.log(`[backup] ✅ Done in ${durationSec}s — ${totalRows} rows across ${Object.keys(snapshot.tables).length} tables — ${(compressed.length / 1024).toFixed(1)}KB uploaded`);
 
-  // Send Telegram alert with summary
-  try {
-    await sendTelegramAlert(summary);
-  } catch (e) {
-    console.warn("[backup] Telegram alert failed:", e.message);
-  }
-
+  try { await sendTelegramAlert(summary); } catch (e) { console.warn("[backup] Telegram alert failed:", e.message); }
   return summary;
 }
 
@@ -547,7 +610,10 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
           <strong>Manual backup:</strong>
           <span style="font-size:12px; color:#666;">Force a backup right now (in addition to the daily 3 AM run).</span>
         </div>
-        <button onclick="runBackupNow()" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">🚀 Backup now</button>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button onclick="runBackupNow()" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">🚀 Backup now</button>
+          <button onclick="resetBackupStatus()" title="If a previous backup crashed and status is stuck, reset it" style="background:transparent; color:#c00; padding:8px 10px; border:1px solid #ffe0e0; border-radius:4px; cursor:pointer; font-size:11px;">↻ Reset</button>
+        </div>
       </div>
       <div id="backup-status" style="margin-top:10px; font-size:13px;"></div>
     </div>
@@ -584,7 +650,6 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
         const status = document.getElementById("backup-status");
         status.innerHTML = '<span style="color:#666;">⏳ Starting backup…</span>';
         try {
-          // Trigger the backup (returns immediately, runs in background)
           const r = await fetch("/admin/backups/run-now", { method: "POST" });
           const responseText = await r.text();
           let d;
@@ -598,32 +663,44 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
             return;
           }
 
-          // Poll for status until backup completes
-          status.innerHTML = '<span style="color:#666;">⏳ Backup running in background (checking every 2 sec)…</span>';
+          // Poll for status. Allow up to 20 min for large backups.
           const pollStart = Date.now();
-          const maxPollMs = 5 * 60 * 1000; // 5 min max
+          const maxPollMs = 20 * 60 * 1000;
           const pollInterval = setInterval(async () => {
             if (Date.now() - pollStart > maxPollMs) {
               clearInterval(pollInterval);
-              status.innerHTML = '<span style="color:#c00;">⏱️ Backup polling timed out after 5 min. Refresh to see if it eventually succeeded.</span>';
+              status.innerHTML = '<span style="color:#c00;">⏱️ Backup polling timed out after 20 min — but the server may still finish. Refresh in a few minutes to check.</span>';
               return;
             }
             try {
               const sr = await fetch("/admin/backups/status");
               const sd = await sr.json();
+              const elapsed = Math.floor((Date.now() - pollStart) / 1000);
               if (!sd.running && sd.last) {
                 clearInterval(pollInterval);
                 if (sd.last.status === "completed") {
+                  const bytea = sd.last.skipped_bytea_columns || {};
+                  const skipMsg = Object.keys(bytea).length ? '<div style="font-size:11px; color:#888; margin-top:4px;">(Skipped BYTEA columns: ' + Object.entries(bytea).map(([t, cs]) => t + '.' + cs.join('+')).join(', ') + ')</div>' : "";
                   status.innerHTML = '<span style="color:#2e7d32;">✅ Backup complete! ' +
                     sd.last.total_rows + ' rows / ' + sd.last.tables_backed_up + ' tables / ' +
-                    (sd.last.compressed_size_bytes / 1024).toFixed(1) + ' KB in ' + sd.last.duration_seconds + 's.</span>';
-                  setTimeout(() => location.reload(), 2500);
+                    (sd.last.compressed_size_bytes / 1024).toFixed(1) + ' KB in ' + sd.last.duration_seconds + 's.</span>' + skipMsg;
+                  setTimeout(() => location.reload(), 3000);
                 } else if (sd.last.status === "failed") {
                   status.innerHTML = '<span style="color:#c00; word-break:break-word; display:block;">❌ Backup failed: ' + (sd.last.error || "unknown") + '</span>';
                 }
               } else if (sd.running) {
-                const elapsed = Math.floor((Date.now() - pollStart) / 1000);
-                status.innerHTML = '<span style="color:#666;">⏳ Backup running… (' + elapsed + 's elapsed)</span>';
+                // Show phase + progress
+                const phase = sd.phase || "running";
+                let detail = "";
+                if (sd.progress) {
+                  if (sd.progress.current_table) {
+                    detail = " · " + sd.progress.current_table + " (" + sd.progress.tables_done + "/" + sd.progress.tables_total + ")";
+                  }
+                  if (sd.progress.raw_bytes) {
+                    detail += " · " + (sd.progress.raw_bytes / 1024 / 1024).toFixed(1) + " MB";
+                  }
+                }
+                status.innerHTML = '<span style="color:#666;">⏳ ' + phase + detail + ' (' + elapsed + 's)</span>';
               }
             } catch (pollErr) {
               console.warn("Poll error:", pollErr);
@@ -633,6 +710,61 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
           status.innerHTML = '<span style="color:#c00; word-break:break-word; display:block;">❌ ' + e.message + '</span>';
         }
       }
+
+      async function resetBackupStatus() {
+        if (!confirm("Force-reset stuck backup status? Use this if a previous backup crashed and the button says 'already running' incorrectly.")) return;
+        try {
+          const r = await fetch("/admin/backups/reset-status", { method: "POST" });
+          const d = await r.json();
+          if (d.ok) { alert("Status reset."); location.reload(); }
+          else alert("Failed: " + (d.error || "unknown"));
+        } catch (e) { alert("Failed: " + e.message); }
+      }
+
+      // On page load: if a backup is running server-side, resume polling
+      // so the user sees progress even if they closed the tab or Render
+      // restarted mid-backup.
+      (async () => {
+        try {
+          const sr = await fetch("/admin/backups/status");
+          const sd = await sr.json();
+          if (sd.running) {
+            const status = document.getElementById("backup-status");
+            status.innerHTML = '<span style="color:#666;">⏳ Backup in progress (' + (sd.phase || 'running') + ')… resuming polling.</span>';
+            const pollStart = Date.now() - (sd.started_at ? (new Date() - new Date(sd.started_at)) : 0);
+            const maxPollMs = 20 * 60 * 1000;
+            const iv = setInterval(async () => {
+              if (Date.now() - pollStart > maxPollMs) { clearInterval(iv); return; }
+              try {
+                const r2 = await fetch("/admin/backups/status");
+                const d2 = await r2.json();
+                const elapsed = Math.floor((Date.now() - pollStart) / 1000);
+                if (!d2.running && d2.last) {
+                  clearInterval(iv);
+                  if (d2.last.status === "completed") {
+                    status.innerHTML = '<span style="color:#2e7d32;">✅ Backup complete! ' +
+                      d2.last.total_rows + ' rows / ' + d2.last.tables_backed_up + ' tables / ' +
+                      (d2.last.compressed_size_bytes / 1024).toFixed(1) + ' KB in ' + d2.last.duration_seconds + 's.</span>';
+                    setTimeout(() => location.reload(), 3000);
+                  } else if (d2.last.status === "failed") {
+                    status.innerHTML = '<span style="color:#c00; word-break:break-word;">❌ Backup failed: ' + (d2.last.error || 'unknown') + '</span>';
+                  }
+                } else if (d2.running) {
+                  const phase = d2.phase || "running";
+                  let detail = "";
+                  if (d2.progress?.current_table) detail = " · " + d2.progress.current_table + " (" + d2.progress.tables_done + "/" + d2.progress.tables_total + ")";
+                  if (d2.progress?.raw_bytes) detail += " · " + (d2.progress.raw_bytes / 1024 / 1024).toFixed(1) + " MB";
+                  status.innerHTML = '<span style="color:#666;">⏳ ' + phase + detail + ' (' + elapsed + 's)</span>';
+                }
+              } catch { /* silent */ }
+            }, 2000);
+          } else if (sd.last && sd.last.status === "failed") {
+            // Show the last failure so user knows why previous run failed
+            const status = document.getElementById("backup-status");
+            status.innerHTML = '<span style="color:#c00; word-break:break-word;">Last run failed: ' + (sd.last.error || "unknown") + '</span>';
+          }
+        } catch { /* silent — status endpoint may not be available */ }
+      })();
       async function previewBackup(path) {
         const modal = document.getElementById("preview-modal");
         const content = document.getElementById("preview-content");
