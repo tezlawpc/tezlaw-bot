@@ -771,6 +771,10 @@ async function saveIndividualNote(data, id = null) {
       ]
     );
     if (!r.rows[0]) throw new Error(`Individual hearing note ${id} not found`);
+    try {
+      const dt = require("./deadline-tracker");
+      await dt.syncFromIndividualHearing(r.rows[0].id);
+    } catch (e) { console.warn("[individual-hearing-notes] deadline sync warning:", e.message); }
     return { id: r.rows[0].id, updated: true };
   }
   const r = await db.query(
@@ -804,7 +808,12 @@ async function saveIndividualNote(data, id = null) {
       data.client_address || null,
     ]
   );
-  return { id: r.rows[0].id, updated: false };
+  const newId = r.rows[0].id;
+  try {
+    const dt = require("./deadline-tracker");
+    await dt.syncFromIndividualHearing(newId);
+  } catch (e) { console.warn("[individual-hearing-notes] deadline sync warning:", e.message); }
+  return { id: newId, updated: false };
 }
 
 async function listIndividualNotes(limit = 50) {
