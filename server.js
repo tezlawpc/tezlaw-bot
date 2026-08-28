@@ -165,13 +165,15 @@ app.post("/admin/backups/restore", auth.requireRole("admin"), async (req, res) =
 // actually running on Render. Helps diagnose "changes didn't deploy" issues.
 app.get("/version", (req, res) => {
   res.json({
-    version: "v3-tooluse-2026-08-28",
+    version: "v4-voice-audit-2026-08-28",
     features: {
       auto_match_tool_use: true,
       hearing_note_dedup: true,
       revision_history: true,
       backup_system: true,
       bulk_upload: true,
+      voice_dictation: true,
+      audit_log_instrumented: true,
     },
     server_time: new Date().toISOString(),
   });
@@ -2392,6 +2394,18 @@ app.post("/admin/hearing/notes", async (req, res) => {
 
     if (action === "save") {
       const saved = await hn.saveNote(parsed, { generateSummaries: true });
+      // Audit log
+      try {
+        const audit = require("./audit-log");
+        await audit.log({
+          req,
+          action: saved.was_duplicate ? audit.ACTIONS.HEARING_UPDATED : audit.ACTIONS.HEARING_CREATED,
+          target_type: "hearing_note",
+          target_id: saved.id,
+          target_label: parsed.client_name,
+          changes: { hearing_type: parsed.hearing_type, hearing_date: parsed.hearing_date, was_duplicate: saved.was_duplicate },
+        });
+      } catch { /* silent */ }
       // Redirect to the edit URL so:
       //  - the form comes back in EDIT mode (subsequent saves UPDATE, not INSERT)
       //  - browser refresh or back button won't create a duplicate row
@@ -2440,6 +2454,126 @@ app.get("/admin/hearing/notes/duplicates", async (req, res) => {
     res.send(hn.renderDuplicatesPage(groups));
   } catch (err) {
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// ── Voice dictation ─────────────────────────────────────
+// Attorney records audio in browser → Whisper transcribes →
+// Claude extracts fields → creates draft hearing note.
+app.get("/admin/hearing/notes/dictate", (req, res) => {
+  const voice = require("./voice-dictation");
+  res.send(voice.renderDictatePage());
+});
+
+// Multer config for audio uploads — 30MB cap covers ~35 min at 128kbps opus
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 },
+});
+
+app.post("/admin/hearing/notes/dictate/process", audioUpload.single("audio"), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ ok: false, error: "No audio file uploaded" });
+    }
+    const voice = require("./voice-dictation");
+    const hn = require("./hearing-notes");
+
+    console.log(`[dictate] Received ${req.file.buffer.length} bytes, filename=${req.file.originalname}`);
+
+    // Whisper
+    const filename = req.file.originalname || "dictation.webm";
+    const transcript = await voice.transcribeAudio(req.file.buffer, filename);
+    console.log(`[dictate] Whisper transcript: ${transcript.length} chars`);
+
+    if (!transcript || transcript.trim().length < 5) {
+      return res.status(400).json({
+        ok: false,
+        error: "Transcript was empty or too short. Recording may have been silent or too quiet.",
+      });
+    }
+
+    // Claude extraction with hints
+    const hint = {
+      client_name: String(req.body.client_name || "").trim() || null,
+      a_number: String(req.body.a_number || "").trim() || null,
+      hearing_type: String(req.body.hearing_type || "").trim() || null,
+    };
+    const extracted = await voice.extractFieldsFromTranscript(transcript, hint);
+    console.log(`[dictate] Claude extracted: client=${extracted.client_name}, type=${extracted.hearing_type}`);
+
+    if (!extracted.client_name) {
+      return res.status(400).json({
+        ok: false,
+        error: "Couldn't identify a client name from the dictation. Try again and start with 'This is [client name]'s hearing.'",
+        transcript,
+      });
+    }
+
+    // Build note object (matches saveNote schema). Default hearing_datetime
+    // to now if Claude didn't set one — dictation happens right after court.
+    const note = {
+      client_name: extracted.client_name,
+      a_number: extracted.a_number || hint.a_number || null,
+      client_language: extracted.client_language || "en",
+      hearing_datetime: extracted.hearing_datetime || new Date().toISOString(),
+      hearing_type: extracted.hearing_type || hint.hearing_type || "master",
+      case_type: extracted.case_type || null,
+      judge_name: extracted.judge_name || null,
+      dhs_attorney: extracted.dhs_attorney || null,
+      client_attendance: extracted.client_attendance || null,
+      attorney_appearance: extracted.attorney_appearance || null,
+      pleadings_admitted: extracted.pleadings_admitted || null,
+      pleadings_denied: extracted.pleadings_denied || null,
+      pleadings_contested: extracted.pleadings_contested || null,
+      pleadings_method: extracted.pleadings_method || null,
+      removability_conceded: !!extracted.removability_conceded,
+      applications: extracted.applications || [],
+      asylum_fee_needed: !!extracted.asylum_fee_needed,
+      biometrics_needed: !!extracted.biometrics_needed,
+      disposition: extracted.disposition || null,
+      disposition_notes: extracted.disposition_notes || null,
+      next_hearing_date: extracted.next_hearing_date || null,
+      next_hearing_type: extracted.next_hearing_type || null,
+      deadlines: extracted.deadlines || [],
+      raw_notes: extracted.raw_notes || transcript,
+    };
+
+    // Save as draft — dedup + revision logic applies automatically.
+    // Do NOT generate summaries yet — attorney needs to review the transcript
+    // extraction before triggering paralegal/client comms.
+    const saved = await hn.saveNote(note, { generateSummaries: false });
+    console.log(`[dictate] Created draft note #${saved.id} (was_duplicate=${saved.was_duplicate})`);
+
+    // Audit log
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req,
+        action: saved.was_duplicate ? audit.ACTIONS.HEARING_UPDATED : audit.ACTIONS.HEARING_CREATED,
+        target_type: "hearing_note",
+        target_id: saved.id,
+        target_label: extracted.client_name,
+        changes: { source: "voice_dictation", transcript_length: transcript.length, was_duplicate: saved.was_duplicate },
+      });
+    } catch (auditErr) { /* silent */ }
+
+    res.json({
+      ok: true,
+      note_id: saved.id,
+      was_duplicate: saved.was_duplicate,
+      transcript,
+      extracted_summary: {
+        client_name: extracted.client_name,
+        hearing_type: extracted.hearing_type,
+        judge_name: extracted.judge_name,
+        applications_count: (extracted.applications || []).length,
+        deadlines_count: (extracted.deadlines || []).length,
+      },
+    });
+  } catch (err) {
+    console.error("[dictate] Error:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -2532,6 +2666,15 @@ app.post("/admin/hearing/notes/:id", async (req, res) => {
       }));
     }
     await hn.updateNote(id, parsed, { user: req.user });
+    // Audit log
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: audit.ACTIONS.HEARING_UPDATED,
+        target_type: "hearing_note", target_id: id, target_label: parsed.client_name,
+        changes: { hearing_type: parsed.hearing_type, hearing_date: parsed.hearing_date },
+      });
+    } catch { /* silent */ }
     if (req.body.action === "update_and_regenerate") {
       await hn.generateAndSaveSummariesForMaster(id);
     }
@@ -2548,6 +2691,16 @@ app.post("/admin/hearing/notes/:id/send-paralegal", async (req, res) => {
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
     const result = await hn.sendToParalegal(id);
+    // Audit log
+    try {
+      const audit = require("./audit-log");
+      const note = await hn.getNote(id).catch(() => ({}));
+      await audit.log({
+        req, action: audit.ACTIONS.HEARING_SUMMARY_SENT,
+        target_type: "hearing_note", target_id: id, target_label: note?.client_name || null,
+        changes: { chunks: result.chunks },
+      });
+    } catch { /* silent */ }
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error("[send-paralegal]:", err.message);
@@ -2616,6 +2769,15 @@ app.post("/admin/hearing/individual", async (req, res) => {
       return res.send(ih.renderForm({ error: "Client name is required.", prev: parsed }));
     }
     const saved = await ih.saveIndividualNote(parsed);
+    // Audit log
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: audit.ACTIONS.HEARING_CREATED,
+        target_type: "individual_hearing", target_id: saved.id, target_label: parsed.client_name,
+        changes: { hearing_date: parsed.hearing_date, judge_name: parsed.judge_name },
+      });
+    } catch { /* silent */ }
     res.redirect(`/admin/hearing/individual/${saved.id}?saved=1`);
   } catch (err) {
     console.error("[/admin/hearing/individual POST]:", err.message, err.stack);
@@ -2710,7 +2872,17 @@ app.post("/admin/clients/:key/hearing-notices/:id/notified", async (req, res) =>
     const hn = require("./hearing-notices");
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
-    await hn.markNotified(id, (req.body.channel || "").trim() || "unknown");
+    const channel = (req.body.channel || "").trim() || "unknown";
+    await hn.markNotified(id, channel);
+    // Audit log
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: audit.ACTIONS.NOTICE_SENT,
+        target_type: "hearing_notice", target_id: id, target_label: req.params.key,
+        changes: { channel },
+      });
+    } catch { /* silent */ }
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -3273,6 +3445,15 @@ app.post("/admin/clients/:key/dropbox/upload", docUpload.single("file"), async (
       autorename: true,
     });
     dbx.clearListCache(folder);
+    // Audit log
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: audit.ACTIONS.DROPBOX_FILE_UPLOADED,
+        target_type: "dropbox_file", target_id: result.path_display, target_label: client.client_name,
+        changes: { filename: result.name, size: result.size },
+      });
+    } catch { /* silent */ }
     res.json({ ok: true, path: result.path_display, name: result.name, size: result.size });
   } catch (err) {
     console.error("[dropbox upload]:", err.message);
@@ -3324,6 +3505,14 @@ app.post("/admin/clients/:key/dropbox/delete", async (req, res) => {
       });
       if (folder) dbx.clearListCache(folder);
     }
+    // Audit log
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: audit.ACTIONS.DROPBOX_FILE_DELETED,
+        target_type: "dropbox_file", target_id: filePath, target_label: client?.client_name || null,
+      });
+    } catch { /* silent */ }
     res.json({ ok: true });
   } catch (err) {
     console.error("[dropbox delete]:", err.message);
@@ -3405,6 +3594,15 @@ app.post("/admin/clients/:key/documents", docUpload.single("file"), async (req, 
       category: (req.body.category || "").trim() || null,
       description: (req.body.description || "").trim() || null,
     });
+    // Audit log
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: audit.ACTIONS.CLIENT_DOC_UPLOADED,
+        target_type: "client_document", target_id: result.id || null, target_label: client.client_name,
+        changes: { filename: originalName, size: req.file.buffer.length, category: req.body.category || null },
+      });
+    } catch { /* silent */ }
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error("[client docs upload]:", err.message);
@@ -4237,6 +4435,14 @@ app.post("/admin/hearing/individual/:id", async (req, res) => {
       return res.send(ih.renderForm({ noteId: id, error: "Client name is required.", prev: parsed, siblings }));
     }
     await ih.saveIndividualNote(parsed, id);
+    // Audit log
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: audit.ACTIONS.HEARING_UPDATED,
+        target_type: "individual_hearing", target_id: id, target_label: parsed.client_name,
+      });
+    } catch { /* silent */ }
     res.redirect(`/admin/hearing/individual/${id}?saved=1`);
   } catch (err) {
     console.error("[/admin/hearing/individual/:id POST]:", err.message);
@@ -4297,6 +4503,15 @@ app.post("/admin/hearing/individual/:id/send-paralegal", async (req, res) => {
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
     const result = await ih.sendToTeamGroup(id);
+    // Audit log
+    try {
+      const audit = require("./audit-log");
+      const note = await ih.getIndividualNote(id).catch(() => ({}));
+      await audit.log({
+        req, action: audit.ACTIONS.HEARING_SUMMARY_SENT,
+        target_type: "individual_hearing", target_id: id, target_label: note?.client_name || null,
+      });
+    } catch { /* silent */ }
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error("[individual send-paralegal]:", err.message);
