@@ -632,6 +632,69 @@ app.post("/admin/deadlines/sync-all", auth.requireRole("admin"), async (req, res
 
 // ── EOIR Calendar (unified hearings + deadlines) ─────
 
+// ── Outlook Sync ─────────────────────────────────────
+app.get("/admin/outlook-sync", async (req, res) => {
+  try {
+    const outlook = require("./outlook-sync");
+    const hearingNotes = require("./hearing-notes");
+    const config = await outlook.getConfig();
+    const events = await outlook.listRecentEvents(100);
+    const body = outlook.renderSettingsPage(config, events);
+    res.send(hearingNotes.renderAdminChrome({ title: "Outlook Sync", body, activeItem: "calendar" }));
+  } catch (err) {
+    console.error("[outlook-sync]:", err);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><pre>${err.stack}</pre>`);
+  }
+});
+
+app.post("/admin/outlook-sync/config", express.json(), async (req, res) => {
+  try {
+    const outlook = require("./outlook-sync");
+    await outlook.updateConfig({
+      ical_url: req.body.ical_url,
+      keyword_filter: req.body.keyword_filter,
+      auto_sync_enabled: !!req.body.auto_sync_enabled,
+    });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/outlook-sync/run", async (req, res) => {
+  try {
+    const outlook = require("./outlook-sync");
+    const result = await outlook.syncFromUrl();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[outlook-sync run]:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+const icsUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
+app.post("/admin/outlook-sync/upload", icsUpload.single("ics_file"), async (req, res) => {
+  try {
+    if (!req.file?.buffer) return res.status(400).json({ ok: false, error: "No file uploaded" });
+    const outlook = require("./outlook-sync");
+    const result = await outlook.importFromBuffer(req.file.buffer);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[outlook-sync upload]:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.delete("/admin/outlook-sync/events", async (req, res) => {
+  try {
+    const outlook = require("./outlook-sync");
+    await outlook.purgeAll();
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // Scan every client's Dropbox folder for new EOIR hearing notices.
 // Used by the calendar "Update from Dropbox" button.
 app.post("/admin/calendar/scan-all-notices", async (req, res) => {
@@ -5737,6 +5800,16 @@ app.listen(PORT, async () => {
     console.log("✅ Motion generator + templates ready");
   } catch (e) {
     console.error("⚠️  Motion generator init failed:", e.message);
+  }
+
+  // Initialize Outlook sync
+  try {
+    const outlook = require("./outlook-sync");
+    await outlook.init();
+    outlook.scheduleHourlySync();
+    console.log("✅ Outlook sync ready (hourly cron scheduled)");
+  } catch (e) {
+    console.error("⚠️  Outlook sync init failed:", e.message);
   }
 
   // Initialize backup system + start cron
