@@ -1059,9 +1059,76 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
     </div>` : "";
 
   const body = `
-    <div class="page-header">
-      <h1>⚖️ Individual Hearing ${isEdit ? "— Editing #" + noteId : "— New"}</h1>
-      <a href="/admin/hearing/history" class="back-link">← All Hearings</a>
+    <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1 style="margin:0;">⚖️ Individual Hearing ${isEdit ? "— Editing #" + noteId : "— New"}</h1>
+        <a href="/admin/hearing/history" class="back-link">← All Hearings</a>
+      </div>
+      <button type="button" onclick="openDictationModal()" style="background:linear-gradient(135deg, #B79C62, #d4b979); color:white; padding:10px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; box-shadow:0 2px 6px rgba(183,156,98,0.3); display:flex; align-items:center; gap:6px;">
+        🎙️ <span>Voice dictate ${isEdit ? "additional notes" : "this hearing"}</span>
+      </button>
+    </div>
+
+    <!-- Dictation modal — hidden by default -->
+    <div id="dictation-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:10000; align-items:center; justify-content:center; padding:20px;">
+      <div style="background:white; padding:24px; border-radius:10px; max-width:520px; width:100%; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+          <div>
+            <h2 style="margin:0 0 4px 0; color:#0C1C36;">🎙️ Voice Dictate</h2>
+            <div style="font-size:12px; color:#666;">Zara will transcribe and add to your notes.</div>
+          </div>
+          <button type="button" onclick="closeDictationModal()" style="background:transparent; border:none; font-size:20px; cursor:pointer; color:#888;">✕</button>
+        </div>
+
+        <div id="d-record-panel" style="text-align:center; padding:20px 0;">
+          <button type="button" id="d-record-btn" onclick="dToggleRecording()"
+                  style="width:140px; height:140px; border-radius:50%; border:none; background:linear-gradient(145deg, #B79C62, #8f7a4c); color:white; font-size:14px; font-weight:600; cursor:pointer; box-shadow:0 8px 24px rgba(183,156,98,0.3);">
+            <div style="font-size:42px; margin-bottom:4px;" id="d-record-icon">🎙️</div>
+            <div id="d-record-label">Tap to record</div>
+          </button>
+          <div id="d-timer" style="font-family:monospace; font-size:22px; color:#0C1C36; margin-top:14px; letter-spacing:2px;">00:00</div>
+          <div id="d-hint" style="font-size:11px; color:#888; margin-top:6px; max-width:380px; margin:6px auto 0;">
+            Mention client name, judge, DHS attorney, witnesses called, testimony highlights, evidence admitted/excluded, motions, and decision.
+          </div>
+        </div>
+
+        <div id="d-playback-panel" style="display:none;">
+          <audio id="d-audio-preview" controls style="width:100%;"></audio>
+          <div style="display:flex; gap:8px; margin-top:12px;">
+            <button type="button" onclick="dRerecord()" style="background:#eee; color:#333; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; flex:1;">🔄 Re-record</button>
+            <button type="button" onclick="dSubmitAudio()" style="background:#0C1C36; color:white; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600; flex:1;">🎯 Process</button>
+          </div>
+        </div>
+
+        <div id="d-processing-panel" style="display:none; padding:20px 0; text-align:center;">
+          <div id="d-proc-icon" style="font-size:36px; margin-bottom:10px;">🎧</div>
+          <div id="d-proc-status" style="font-size:14px; color:#0C1C36; font-weight:600;">Processing…</div>
+          <div style="margin-top:14px;">
+            <div style="background:#eee; height:5px; border-radius:3px; overflow:hidden;">
+              <div id="d-proc-progress" style="background:linear-gradient(to right, #B79C62, #d4b979); height:100%; width:0%; transition:width 0.4s;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="d-result-panel" style="display:none;">
+          <div style="background:#e8f5e9; color:#2e7d32; padding:10px 14px; border-radius:4px; font-size:13px; margin-bottom:12px;">
+            ✅ Transcription complete. Preview below before applying.
+          </div>
+          <details style="background:#f8f8f8; padding:8px 12px; border-radius:4px; margin-bottom:12px; font-size:12px;">
+            <summary style="cursor:pointer; font-weight:600;">📝 Full transcript</summary>
+            <div id="d-transcript" style="margin-top:8px; white-space:pre-wrap; max-height:200px; overflow-y:auto; color:#333;"></div>
+          </details>
+          <div id="d-extracted-preview" style="font-size:12px; margin-bottom:14px;"></div>
+          <div style="display:flex; gap:8px;">
+            <button type="button" onclick="dRerecord()" style="background:#eee; color:#333; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; flex:1;">🔄 Discard</button>
+            <button type="button" onclick="dApplyToForm()" style="background:#0C1C36; color:white; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600; flex:1;">✓ Apply to form</button>
+          </div>
+        </div>
+
+        <div id="d-error-panel" style="display:none; background:#fee; color:#900; padding:12px; border-radius:4px; margin-top:10px; font-size:12px;">
+          <strong>❌</strong> <span id="d-error-text"></span>
+        </div>
+      </div>
     </div>
 
     ${tabsSection}
@@ -1320,6 +1387,159 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
     ` : ""}
 
     <script>
+      // ── Voice dictation modal (individual hearing) ─────────────────────────
+      let dMediaRecorder = null, dChunks = [], dRecordStart = 0, dTimerInterval = null;
+      let dAudioBlob = null, dAudioMime = "audio/webm", dAudioExt = "webm";
+      let dExtracted = null, dTranscript = "";
+
+      function openDictationModal() {
+        document.getElementById("dictation-modal").style.display = "flex";
+        dShowPanel("record");
+      }
+      function closeDictationModal() {
+        if (dMediaRecorder && dMediaRecorder.state === "recording") dMediaRecorder.stop();
+        dStopTimer();
+        document.getElementById("dictation-modal").style.display = "none";
+      }
+      function dShowPanel(name) {
+        ["record", "playback", "processing", "result"].forEach(p => {
+          document.getElementById("d-" + p + "-panel").style.display = p === name ? "block" : "none";
+        });
+        document.getElementById("d-error-panel").style.display = "none";
+      }
+      async function dToggleRecording() {
+        if (dMediaRecorder && dMediaRecorder.state === "recording") {
+          dMediaRecorder.stop(); dStopTimer();
+        } else {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 },
+            });
+            const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+            let selectedType = "";
+            for (const t of preferred) { if (MediaRecorder.isTypeSupported(t)) { selectedType = t; break; } }
+            dAudioMime = selectedType || "audio/webm";
+            dAudioExt = dAudioMime.includes("mp4") ? "mp4" : "webm";
+            dMediaRecorder = new MediaRecorder(stream, selectedType ? { mimeType: selectedType } : undefined);
+            dChunks = [];
+            dMediaRecorder.ondataavailable = (e) => { if (e.data?.size > 0) dChunks.push(e.data); };
+            dMediaRecorder.onstop = () => {
+              dAudioBlob = new Blob(dChunks, { type: dAudioMime });
+              stream.getTracks().forEach(t => t.stop());
+              document.getElementById("d-audio-preview").src = URL.createObjectURL(dAudioBlob);
+              dShowPanel("playback");
+            };
+            dMediaRecorder.start();
+            dRecordStart = Date.now();
+            dStartTimer();
+            document.getElementById("d-record-icon").textContent = "⏹️";
+            document.getElementById("d-record-label").textContent = "Tap to stop";
+            document.getElementById("d-record-btn").style.background = "linear-gradient(145deg, #c62828, #8b1a1a)";
+            document.getElementById("d-hint").textContent = "Recording…";
+          } catch (e) { dShowError("Microphone access denied: " + e.message); }
+        }
+      }
+      function dStartTimer() {
+        dTimerInterval = setInterval(() => {
+          const s = Math.floor((Date.now() - dRecordStart) / 1000);
+          document.getElementById("d-timer").textContent = String(Math.floor(s/60)).padStart(2,"0") + ":" + String(s%60).padStart(2,"0");
+        }, 250);
+      }
+      function dStopTimer() { if (dTimerInterval) { clearInterval(dTimerInterval); dTimerInterval = null; } }
+      function dRerecord() {
+        dAudioBlob = null; dExtracted = null; dTranscript = "";
+        document.getElementById("d-audio-preview").src = "";
+        document.getElementById("d-timer").textContent = "00:00";
+        document.getElementById("d-record-icon").textContent = "🎙️";
+        document.getElementById("d-record-label").textContent = "Tap to record";
+        document.getElementById("d-record-btn").style.background = "linear-gradient(145deg, #B79C62, #8f7a4c)";
+        document.getElementById("d-hint").textContent = "Mention client name, judge, testimony, evidence, motions, decision.";
+        dShowPanel("record");
+      }
+      async function dSubmitAudio() {
+        if (!dAudioBlob) return;
+        dShowPanel("processing");
+        document.getElementById("d-proc-progress").style.width = "15%";
+        document.getElementById("d-proc-status").textContent = "Uploading…";
+        const fd = new FormData();
+        fd.append("audio", dAudioBlob, "dictation-" + Date.now() + "." + dAudioExt);
+        fd.append("client_name", document.querySelector('[name="client_name"]')?.value || "");
+        fd.append("a_number", document.querySelector('[name="a_number"]')?.value || "");
+        fd.append("hearing_type", "individual");
+        setTimeout(() => {
+          document.getElementById("d-proc-progress").style.width = "50%";
+          document.getElementById("d-proc-status").textContent = "Whisper transcribing…";
+          document.getElementById("d-proc-icon").textContent = "🎧";
+        }, 2000);
+        setTimeout(() => {
+          document.getElementById("d-proc-progress").style.width = "80%";
+          document.getElementById("d-proc-status").textContent = "Claude extracting…";
+          document.getElementById("d-proc-icon").textContent = "🧠";
+        }, 8000);
+        try {
+          const resp = await fetch("/admin/hearing/notes/dictate/extract-only", { method: "POST", body: fd });
+          const text = await resp.text();
+          let data; try { data = JSON.parse(text); } catch { throw new Error("Non-JSON response: " + text.substring(0, 200)); }
+          if (!resp.ok || !data.ok) throw new Error(data.error || "HTTP " + resp.status);
+          dTranscript = data.transcript;
+          dExtracted = data.extracted;
+          dShowExtractedPreview();
+          dShowPanel("result");
+        } catch (e) { dShowError(e.message); dShowPanel("playback"); }
+      }
+      function dShowExtractedPreview() {
+        document.getElementById("d-transcript").textContent = dTranscript;
+        const e = dExtracted || {};
+        const rows = [];
+        if (e.client_name) rows.push(["Client", e.client_name]);
+        if (e.a_number) rows.push(["A#", e.a_number]);
+        if (e.judge_name) rows.push(["Judge", e.judge_name]);
+        if (e.dhs_attorney) rows.push(["DHS", e.dhs_attorney]);
+        if (e.hearing_datetime) rows.push(["Hearing time", new Date(e.hearing_datetime).toLocaleString()]);
+        if (e.next_hearing_date) rows.push(["Next hearing", new Date(e.next_hearing_date).toLocaleString()]);
+        if (e.disposition) rows.push(["Disposition", e.disposition]);
+        const html = rows.map(([k, v]) =>
+          '<tr><td style="padding:3px 8px 3px 0; color:#666; white-space:nowrap;">' + k + '</td><td style="padding:3px 0; font-weight:500;">' + String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</td></tr>'
+        ).join("");
+        document.getElementById("d-extracted-preview").innerHTML =
+          rows.length ? '<div style="font-weight:600; margin-bottom:6px; color:#0C1C36;">Extracted fields:</div><table style="width:100%; font-size:12px;">' + html + '</table><div style="font-size:11px; color:#888; margin-top:6px;">Full transcript will append to the raw notes textarea.</div>'
+                      : '<div style="color:#c00;">⚠️ No fields extracted.</div>';
+      }
+      function dApplyToForm() {
+        const e = dExtracted || {};
+        const setIfEmpty = (name, value) => {
+          if (!value) return;
+          const el = document.querySelector('[name="' + name + '"]');
+          if (el && !el.value) el.value = value;
+        };
+        setIfEmpty("client_name", e.client_name);
+        setIfEmpty("a_number", e.a_number);
+        setIfEmpty("judge_name", e.judge_name);
+        setIfEmpty("dhs_attorney", e.dhs_attorney);
+        setIfEmpty("disposition", e.disposition);
+        if (e.hearing_datetime) { const el = document.querySelector('[name="hearing_date"]'); if (el && !el.value) el.value = e.hearing_datetime.substring(0, 16); }
+        if (e.next_hearing_date) { const el = document.querySelector('[name="next_hearing_date"]'); if (el && !el.value) el.value = e.next_hearing_date.substring(0, 16); }
+        // Append transcript to raw_notes textarea
+        const rawNotes = document.querySelector('[name="raw_notes"], [name="attorney_notes"], [name="notes"]');
+        if (rawNotes) {
+          const stamp = new Date().toLocaleString();
+          const prefix = rawNotes.value ? "\\n\\n[Voice dictation " + stamp + "]\\n" : "";
+          rawNotes.value = rawNotes.value + prefix + dTranscript;
+          rawNotes.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        closeDictationModal();
+        const toast = document.createElement("div");
+        toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2e7d32; color:white; padding:12px 20px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:10001; font-size:14px;";
+        toast.textContent = "✅ Voice dictation applied to form";
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+      }
+      function dShowError(msg) {
+        document.getElementById("d-error-panel").style.display = "block";
+        document.getElementById("d-error-text").textContent = msg;
+      }
+      // ── End dictation modal ─────────────────────────
+
       const INITIAL_EXHIBITS = ${JSON.stringify(exhibits)};
       const INITIAL_EXAMS    = ${JSON.stringify(examinations)};
 
