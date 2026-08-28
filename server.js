@@ -125,6 +125,103 @@ app.get("/admin/backups", auth.requireRole("admin"), async (req, res) => {
   }
 });
 
+// Mini-backup diagnostic — runs the FULL pipeline with just the users table
+// to isolate where things fail. Returns detailed timing and phase info.
+app.post("/admin/backups/test-mini", auth.requireRole("admin"), async (req, res) => {
+  const trace = { phases: [], overall_ok: false };
+  const startPhase = (name) => {
+    const p = { phase: name, started_at: new Date().toISOString(), started_ms: Date.now() };
+    trace.phases.push(p);
+    return p;
+  };
+  const endPhase = (p, extra = {}) => {
+    p.finished_at = new Date().toISOString();
+    p.duration_seconds = ((Date.now() - p.started_ms) / 1000).toFixed(2);
+    Object.assign(p, extra);
+    delete p.started_ms;
+  };
+
+  try {
+    // Phase 1: Query a small table (users)
+    let p = startPhase("query_users");
+    const usersRes = await db.query(`SELECT id, name, email, role, active, created_at FROM users LIMIT 100`);
+    endPhase(p, { row_count: usersRes.rows.length });
+
+    // Phase 2: Discover all tables (metadata only)
+    p = startPhase("list_tables");
+    const tables = await db.query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`);
+    endPhase(p, { table_count: tables.rows.length, tables: tables.rows.map(r => r.tablename) });
+
+    // Phase 3: Detect BYTEA columns across all tables
+    p = startPhase("detect_bytea");
+    const byteaMap = {};
+    for (const t of tables.rows.slice(0, 30)) {
+      const cols = await db.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND data_type='bytea'`,
+        [t.tablename]
+      );
+      if (cols.rows.length) byteaMap[t.tablename] = cols.rows.map(c => c.column_name);
+    }
+    endPhase(p, { bytea_columns: byteaMap });
+
+    // Phase 4: Estimate table sizes (heaviest tables)
+    p = startPhase("table_sizes");
+    const sizes = await db.query(`
+      SELECT
+        relname AS table_name,
+        pg_size_pretty(pg_total_relation_size(relid)) AS total_size,
+        pg_total_relation_size(relid) AS total_size_bytes
+      FROM pg_stat_user_tables
+      ORDER BY pg_total_relation_size(relid) DESC
+      LIMIT 10
+    `);
+    endPhase(p, { top_tables: sizes.rows });
+
+    // Phase 5: Compress a small JSON payload
+    p = startPhase("compress_test");
+    const zlib = require("zlib");
+    const testJson = JSON.stringify({ test: usersRes.rows });
+    const compressed = zlib.gzipSync(testJson);
+    endPhase(p, { raw_bytes: testJson.length, compressed_bytes: compressed.length });
+
+    // Phase 6: Upload the small payload to Dropbox
+    p = startPhase("upload_dropbox");
+    const backups = require("./backup-system");
+    const uploadRes = await backups.uploadToDropbox("zara-test-mini-" + Date.now() + ".json.gz", compressed);
+    endPhase(p, { uploaded_to: uploadRes.path, size: uploadRes.size });
+
+    // Phase 7: Delete the test file
+    p = startPhase("cleanup_test_file");
+    try {
+      const dbx = require("./dropbox-integration");
+      const token = await dbx.getAccessToken();
+      const axios = require("axios");
+      await axios.post(
+        "https://api.dropboxapi.com/2/files/delete_v2",
+        { path: uploadRes.path },
+        { headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" }, timeout: 15000 }
+      );
+      endPhase(p, { deleted: true });
+    } catch (delErr) {
+      endPhase(p, { deleted: false, warning: delErr.message });
+    }
+
+    trace.overall_ok = true;
+    trace.total_seconds = ((Date.now() - trace.phases[0].started_ms) / 1000).toFixed(2);
+    res.json(trace);
+  } catch (err) {
+    const currentPhase = trace.phases[trace.phases.length - 1];
+    if (currentPhase && !currentPhase.finished_at) {
+      currentPhase.finished_at = new Date().toISOString();
+      currentPhase.error = err.message;
+      currentPhase.stack = err.stack ? err.stack.split("\n").slice(0, 5).join("\n") : null;
+    }
+    trace.error = err.message;
+    trace.stack = err.stack ? err.stack.split("\n").slice(0, 8).join("\n") : null;
+    res.status(500).json(trace);
+  }
+});
+
 // Persistent backup status via DB so it survives Render restarts. Also
 // captures progress phases (querying/serializing/compressing/uploading/pruning)
 // so the client can show what stage is running.
