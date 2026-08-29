@@ -937,7 +937,17 @@ function renderAdminChrome({ title, body, activeItem = null }) {
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+
+<!-- ── PWA / iOS Install Support ── -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0C1C36">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Zara">
+<link rel="apple-touch-icon" href="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png">
+<link rel="apple-touch-icon" sizes="180x180" href="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png">
+<link rel="icon" type="image/png" href="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png">
 <title>${escapeHtml(title)} — Zara</title>
 <style>
   :root {
@@ -1379,6 +1389,13 @@ function renderAdminChrome({ title, body, activeItem = null }) {
         if (visibleLinks.length === 0) section.style.display = "none";
       });
     }).catch(() => document.getElementById("auth-user-chip").style.display = "none");
+
+    // Register PWA service worker for iOS/Android home screen install
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+      });
+    }
 
     // Collapsible section headers (click to toggle)
     document.querySelectorAll(".nav-section-header").forEach(header => {
