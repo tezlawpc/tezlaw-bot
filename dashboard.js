@@ -788,7 +788,7 @@ function renderDashboard(data) {
     <!-- Top-line stats: color-coded urgency -->
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
       ${statCard("Upcoming Hearings", upcoming.length, `${clientStats.master_clients + clientStats.indiv_clients} total clients`, brand.gold, "/admin/calendar")}
-      ${statCard("New Intakes (7d)", intakeStats.this_week, `${intakeStats.urgent_this_week} urgent · ${intakeStats.unreviewed_this_week} unreviewed`, intakeStats.urgent_this_week ? "#c62828" : "#0061FF", "/admin/#intakes")}
+      ${statCard("New Intakes (7d)", intakeStats.this_week, `${intakeStats.urgent_this_week} urgent · ${intakeStats.unreviewed_this_week} unreviewed`, intakeStats.urgent_this_week ? "#c62828" : "#0061FF", "/admin/panel/intakes")}
       ${statCard("Motions Pending", motionStats.drafts + motionStats.reviewed, `${motionStats.past_due} past due · ${motionStats.filed_this_month} filed 30d`, motionStats.past_due ? "#c62828" : brand.gold, "/admin/motions")}
       ${statCard("Deadlines", deadlineStats.total_pending, `${deadlineStats.past_due} past due · ${deadlineStats.due_this_week} this week`, deadlineStats.past_due ? "#c62828" : "#f9a825", "/admin/deadlines")}
       ${statCard("Unnotified Notices", unnotified.length, "Clients need to know", unnotified.length ? "#c62828" : "#2e7d32", "/admin/calendar")}
@@ -821,7 +821,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>🆕 Recent Intakes</span>
-            <a href="/admin/#intakes" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/panel/intakes" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           ${intakeHtml}
         </div>
@@ -866,11 +866,11 @@ function renderDashboard(data) {
 
     <!-- Content stat cards -->
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
-      ${statCard("Blog Posts (30d)", postStats.this_month, `${postStats.auto_total} auto · ${postStats.manual_total} manual`, "#2e7d32", "/admin/#post")}
-      ${statCard("Active Drip Campaigns", dripStats.active, `${dripStats.sent_this_week} sent this week · ${dripStats.pending_msgs} pending`, "#0061FF", "/admin/#drip")}
-      ${statCard("Research Pending", researchStats.pending_review, `${researchStats.citations_this_week} citations added 7d`, researchStats.pending_review > 0 ? "#f9a825" : "#666", "/admin/#research")}
+      ${statCard("Blog Posts (30d)", postStats.this_month, `${postStats.auto_total} auto · ${postStats.manual_total} manual`, "#2e7d32", "/admin/panel/post")}
+      ${statCard("Active Drip Campaigns", dripStats.active, `${dripStats.sent_this_week} sent this week · ${dripStats.pending_msgs} pending`, "#0061FF", "/admin/panel/drip")}
+      ${statCard("Research Pending", researchStats.pending_review, `${researchStats.citations_this_week} citations added 7d`, researchStats.pending_review > 0 ? "#f9a825" : "#666", "/admin/panel/research")}
       ${statCard("USPTO New Matches", usptoStats.unnotified, `${usptoStats.active_watches} active watches · ${usptoStats.new_this_week} new 7d`, usptoStats.unnotified > 0 ? "#c62828" : "#666", "/admin/uspto")}
-      ${statCard("SoL Deadlines", solStats.next_30d, `${solStats.past_due} past due · ${solStats.next_90d} in 90d`, solStats.past_due > 0 ? "#c62828" : solStats.next_30d > 0 ? "#f9a825" : "#666", "/admin/#sol")}
+      ${statCard("SoL Deadlines", solStats.next_30d, `${solStats.past_due} past due · ${solStats.next_90d} in 90d`, solStats.past_due > 0 ? "#c62828" : solStats.next_30d > 0 ? "#f9a825" : "#666", "/admin/panel/sol")}
     </div>
 
     <!-- Content detail grid -->
@@ -880,7 +880,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>✍️ Recent Blog Posts</span>
-            <a href="/admin/#post" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/panel/post" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           ${postsHtml}
         </div>
@@ -888,7 +888,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>🏰 Moat Update</span>
-            <a href="/admin/#research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">History →</a>
+            <a href="/admin/panel/research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">History →</a>
           </h3>
           ${moatHtml}
         </div>
@@ -899,7 +899,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>💧 Drip Pipeline</span>
-            <a href="/admin/#drip" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/panel/drip" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           ${dripHtml}
         </div>
@@ -907,7 +907,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>⚖️ SoL Deadlines</span>
-            <a href="/admin/#sol" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/panel/sol" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           ${solHtml}
         </div>
@@ -918,7 +918,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>🔬 Research Digest</span>
-            <a href="/admin/#research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/panel/research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           <div style="font-size:11px; color:#666; margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Pending Review</div>
           ${researchHtml}
@@ -929,7 +929,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>®️ USPTO Watches</span>
-            <a href="/admin/#research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/panel/research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           ${usptoHtml}
         </div>
