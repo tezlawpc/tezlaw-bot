@@ -1062,6 +1062,19 @@ app.post("/admin/calendar/scan-status/cancel", async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// Manually trigger cleanup of past hearing notices (same as daily cron does)
+app.post("/admin/calendar/cleanup-past", async (req, res) => {
+  try {
+    const hn = require("./hearing-notices");
+    const grace = req.body && req.body.grace_period_days ? parseInt(req.body.grace_period_days, 10) : 1;
+    const result = await hn.dismissPastNotices({ gracePeriodDays: grace });
+    res.json({ ok: true, dismissed_count: result.dismissed_count, dismissed: result.dismissed.slice(0, 20) });
+  } catch (err) {
+    console.error("[cleanup-past]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/admin/calendar", async (req, res) => {
   try {
     const cal = require("./eoir-calendar");
@@ -6259,6 +6272,80 @@ app.listen(PORT, async () => {
     console.log("✅ Backup cron scheduled (3 AM Pacific daily)");
   } catch (e) {
     console.error("⚠️  Backup init failed:", e.message);
+  }
+
+  // ── Daily calendar refresh ─────────────────────────────
+  // Runs at 6 AM Pacific:
+  //   1. Auto-dismisses past hearing notices (hearing_date < yesterday)
+  //   2. Runs an incremental Dropbox scan (last 7 days of files only,
+  //      strict filename filter) to catch new notices with minimal token spend.
+  try {
+    const { default: cron } = await import("node-cron").catch(() => ({ default: require("node-cron") }));
+    cron.schedule("0 6 * * *", async () => {
+      console.log("🌅 [daily-calendar-refresh] Starting…");
+
+      // Step 1: dismiss past notices
+      try {
+        const hn = require("./hearing-notices");
+        const cleanup = await hn.dismissPastNotices({ gracePeriodDays: 1 });
+        console.log(`🧹 [daily-calendar-refresh] Auto-dismissed ${cleanup.dismissed_count} past hearing notices`);
+      } catch (e) {
+        console.error("[daily-calendar-refresh] dismiss error:", e.message);
+      }
+
+      // Step 2: incremental Dropbox scan in "daily" mode
+      // Only files modified in last 7 days, strict filename filter → far fewer Claude Vision calls
+      try {
+        const cp = require("./client-profiles");
+        const dbx = require("./dropbox-integration");
+        const hn = require("./hearing-notices");
+
+        const clients = await cp.aggregateClients();
+        let scannedFiles = 0;
+        let newNotices = 0;
+        let clientsScanned = 0;
+
+        // Serial to respect rate limits & avoid runaway spend if something goes wrong
+        for (const client of clients) {
+          try {
+            const folder = await Promise.race([
+              dbx.resolveClientFolder({
+                clientKey: client.key, clientName: client.client_name, aNumber: client.a_number,
+              }),
+              new Promise(r => setTimeout(() => r(null), 8000)),  // 8s timeout on folder resolve
+            ]).catch(() => null);
+            if (!folder) continue;
+
+            const scan = await Promise.race([
+              hn.scanClientFolder({
+                clientKey: client.key,
+                clientName: client.client_name,
+                aNumber: client.a_number,
+                dropboxFolderPath: folder,
+                mode: "daily",
+                daysBack: 7,
+                limit: 3,  // Small cap — daily scan should be cheap
+              }),
+              new Promise(r => setTimeout(() => r({ error: "timeout" }), 30000)),  // 30s per client
+            ]).catch((e) => ({ error: e.message }));
+
+            if (!scan.error) {
+              clientsScanned++;
+              scannedFiles += scan.scanned || 0;
+              newNotices += scan.new_notices || scan.newNotices || 0;
+            }
+          } catch (e) {
+            console.warn(`[daily-calendar-refresh] ${client.client_name}: ${e.message}`);
+          }
+        }
+        console.log(`✅ [daily-calendar-refresh] Complete: ${clientsScanned}/${clients.length} clients, ${scannedFiles} files sent to Claude, ${newNotices} new notices found`);
+      } catch (e) {
+        console.error("[daily-calendar-refresh] scan error:", e.message);
+      }
+    }, { timezone: "America/Los_Angeles" });
+    console.log("✅ Daily calendar refresh scheduled (6 AM Pacific)");
+  } catch (e) {
+    console.error("⚠️  Daily calendar cron failed:", e.message);
   }
 
   // Load saved system prompt from DB (if admin has edited it)
