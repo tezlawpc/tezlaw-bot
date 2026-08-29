@@ -42,9 +42,12 @@ async function initTable() {
       notified_at        TIMESTAMPTZ,
       notification_channel TEXT,
       dismissed_at       TIMESTAMPTZ,
+      dismiss_reason     TEXT,
       created_at         TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // Migrate pre-existing tables that lack dismiss_reason
+  try { await db.query(`ALTER TABLE client_hearing_notices ADD COLUMN IF NOT EXISTS dismiss_reason TEXT`); } catch {}
   await db.query(`
     CREATE INDEX IF NOT EXISTS idx_client_hearing_notices_client
       ON client_hearing_notices (client_key)
@@ -165,18 +168,42 @@ function looksLikeNoticeCandidate(filename) {
   return false;
 }
 
+// Stricter filter for daily incremental scans — skips things unlikely to be a notice
+// to keep token spend low. Full manual "Update from Dropbox" still uses the broad filter.
+function looksLikeNoticeCandidateStrict(filename) {
+  const n = String(filename || "").toLowerCase();
+  if (!/\.(pdf|jpg|jpeg|png|webp|heic|heif)$/.test(n)) return false;
+
+  // Strong POSITIVE signals — must have at least one to qualify for daily scan
+  const positive = /(eoir|uscis|notice|noa|hearing|master|individual|mch|nta|nto|master calendar|interview|biometric|court|immigration|ij[_\s-]|judge|na[_\-]?|nnta|scheduled)/i;
+  if (positive.test(n)) return true;
+
+  // Negative signals — files that are almost certainly not hearing notices
+  const negative = /(retainer|engagement|invoice|receipt|payment|photo|selfie|passport|id[_\s-]|driver|license|birth cert|marriage cert|divorce|tax return|w[_\-]?2|1099|paystub|paycheck|application|form i-|form g-|i-\d+|g-\d+|evidence|exhibit|declaration|affidavit|letter|correspondence|email)/i;
+  if (negative.test(n)) return false;
+
+  // Ambiguous — for daily scan, skip. Manual scan will catch these.
+  return false;
+}
+
 // ── Scan a client's Dropbox folder ───────────────────────
 
 // Returns { scanned, hearing_notices_found, skipped }
-async function scanClientFolder({ clientKey, clientName, aNumber, dropboxFolderPath, limit = 20 }) {
+// mode: "full" (default, broad file filter) | "daily" (strict filter + only recent files)
+async function scanClientFolder({ clientKey, clientName, aNumber, dropboxFolderPath, limit = 20, mode = "full", daysBack = 7 }) {
   await initTable();
   const dbx = require("./dropbox-integration");
 
   const entries = await dbx.listFolder(dropboxFolderPath);
   if (!entries) return { scanned: 0, notices: [], error: "Folder not found or empty" };
 
+  // Pick filter based on mode
+  const filterFn = mode === "daily" ? looksLikeNoticeCandidateStrict : looksLikeNoticeCandidate;
+  const cutoffMs = mode === "daily" ? Date.now() - daysBack * 24 * 60 * 60 * 1000 : 0;
+
   const files = entries
-    .filter(e => e[".tag"] === "file" && looksLikeNoticeCandidate(e.name))
+    .filter(e => e[".tag"] === "file" && filterFn(e.name))
+    .filter(e => mode !== "daily" || new Date(e.server_modified).getTime() >= cutoffMs)
     .sort((a, b) => new Date(b.server_modified).getTime() - new Date(a.server_modified).getTime())  // newest first
     .slice(0, limit);
 
@@ -358,6 +385,25 @@ function buildContactLinks({ notice, clientEmail, clientPhone, clientLang }) {
   };
 }
 
+// Auto-dismiss notices whose hearing has passed. Called by the daily cron.
+// Grace period (default 1 day) prevents dismissing notices from earlier today
+// in case timezones cause off-by-one confusion.
+async function dismissPastNotices({ gracePeriodDays = 1 } = {}) {
+  await initTable();
+  const result = await db.query(
+    `UPDATE client_hearing_notices
+     SET dismissed_at = NOW(),
+         dismiss_reason = COALESCE(dismiss_reason, 'auto: hearing date passed')
+     WHERE dismissed_at IS NULL
+       AND is_hearing_notice = TRUE
+       AND hearing_date IS NOT NULL
+       AND hearing_date < NOW() - $1::interval
+     RETURNING id, client_name, hearing_date`,
+    [`${gracePeriodDays} days`]
+  );
+  return { dismissed_count: result.rowCount, dismissed: result.rows };
+}
+
 module.exports = {
   initTable,
   extractFromFile,
@@ -366,6 +412,7 @@ module.exports = {
   listClientNotices,
   markNotified,
   dismissNotice,
+  dismissPastNotices,
   buildNotificationMessage,
   buildContactLinks,
 };
