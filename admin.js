@@ -1117,9 +1117,26 @@ function dashboardHtml() {
       .stat-num { font-size: 24px; }
       .card { padding: 16px; }
     }
+
+    /* ── EMBEDDED MODE (loaded inside main admin chrome via iframe) ── */
+    body.embedded .sidebar { display: none !important; }
+    body.embedded .main { margin-left: 0 !important; padding: 20px !important; }
+    body.embedded #topbar,
+    body.embedded .topbar,
+    body.embedded .user-chip,
+    body.embedded #auth-user-chip { display: none !important; }
+    @media (max-width: 768px) {
+      body.embedded .main { margin-left: 0 !important; padding: 12px !important; }
+    }
   </style>
 </head>
 <body>
+<script>
+  // If loaded inside main admin chrome (iframe with ?embed=1), hide our own sidebar
+  if (new URLSearchParams(location.search).get('embed') === '1') {
+    document.body.classList.add('embedded');
+  }
+</script>
 
 <div class="sidebar">
   <div class="sidebar-logo">
