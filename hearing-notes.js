@@ -1232,7 +1232,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/deadlines" class="nav-link ${isActive('deadlines')}" data-perm="hearings.read">
         <span class="nav-icon">◔</span><span class="nav-label">Deadlines</span>
       </a>
-      <a href="/admin/#analytics" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/analytics" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◵</span><span class="nav-label">Analytics</span>
       </a>
     </div>
@@ -1261,22 +1261,22 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <div class="nav-section-header">
         <span>Intake & Pipeline</span>
       </div>
-      <a href="/admin/#intakes" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/intakes" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◊</span><span class="nav-label">Intakes</span>
       </a>
-      <a href="/admin/#messages" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/messages" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◨</span><span class="nav-label">Messages</span>
       </a>
-      <a href="/admin/#pipeline" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/pipeline" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◪</span><span class="nav-label">Pipeline</span>
       </a>
-      <a href="/admin/#drip" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/drip" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◍</span><span class="nav-label">Drip Campaigns</span>
       </a>
-      <a href="/admin/#conflicts" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/conflicts" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◆</span><span class="nav-label">Conflicts</span>
       </a>
-      <a href="/admin/#sol" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/sol" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◒</span><span class="nav-label">SoL Deadlines</span>
       </a>
     </div>
@@ -1286,16 +1286,16 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <div class="nav-section-header">
         <span>Research & Content</span>
       </div>
-      <a href="/admin/#research" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/research" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◇</span><span class="nav-label">Legal Research</span>
       </a>
-      <a href="/admin/#post" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/post" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">▤</span><span class="nav-label">Post Creator</span>
       </a>
-      <a href="/admin/#questions" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/questions" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◌</span><span class="nav-label">Questions</span>
       </a>
-      <a href="/admin/#scores" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/scores" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◙</span><span class="nav-label">Conv Scores</span>
       </a>
     </div>
@@ -1324,10 +1324,10 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/matters/" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◇</span><span class="nav-label">Matter Manager</span>
       </a>
-      <a href="/admin/#prompt" class="nav-link" data-perm="users.manage">
+      <a href="/admin/panel/prompt" class="nav-link" data-perm="users.manage">
         <span class="nav-icon">◘</span><span class="nav-label">System Prompt</span>
       </a>
-      <a href="/admin/#compliance" class="nav-link" data-perm="users.manage">
+      <a href="/admin/panel/compliance" class="nav-link" data-perm="users.manage">
         <span class="nav-icon">◐</span><span class="nav-label">Compliance</span>
       </a>
       <a href="/admin/reminders" class="nav-link" data-perm="users.manage">
