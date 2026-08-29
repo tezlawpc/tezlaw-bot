@@ -499,17 +499,30 @@ app.get("/version", (req, res) => {
 app.get("/admin/dashboard", async (req, res) => {
   try {
     const dashboard = require("./dashboard");
-    const [upcoming, unnotified, recent, reminderStats, clientStats] = await Promise.all([
+    const [
+      upcoming, unnotified, recent, reminderStats, clientStats,
+      intakes, intakeStats, motions, motionStats, deadlines, deadlineStats, health,
+    ] = await Promise.all([
       dashboard.getUpcomingHearings(14),
       dashboard.getUnnotifiedNotices(),
       dashboard.getRecentHearings(10),
       dashboard.getReminderStats(),
       dashboard.getClientStats(),
+      dashboard.getRecentIntakes(10),
+      dashboard.getIntakeStats(),
+      dashboard.getPendingMotions(10),
+      dashboard.getMotionStats(),
+      dashboard.getUrgentDeadlines(15),
+      dashboard.getDeadlineStats(),
+      dashboard.getSystemHealth(),
     ]);
-    res.send(dashboard.renderDashboard({ upcoming, unnotified, recent, reminderStats, clientStats }));
+    res.send(dashboard.renderDashboard({
+      upcoming, unnotified, recent, reminderStats, clientStats,
+      intakes, intakeStats, motions, motionStats, deadlines, deadlineStats, health,
+    }));
   } catch (err) {
-    console.error("[dashboard]:", err.message);
-    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+    console.error("[dashboard]:", err.message, err.stack);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><pre>${err.stack}</pre>`);
   }
 });
 
