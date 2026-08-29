@@ -30,9 +30,26 @@ async function initTable() {
       user_agent   TEXT
     )
   `);
-  await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log (created_at DESC)`);
-  await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log (user_id, created_at DESC)`);
-  await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action, created_at DESC)`);
+  // Migrate: if the table pre-existed with a different schema, add any missing columns
+  const migrations = [
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS user_id INTEGER`,
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS username TEXT`,
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS user_role TEXT`,
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS target_type TEXT`,
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS target_id TEXT`,
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS target_label TEXT`,
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS changes JSONB`,
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS ip_address TEXT`,
+    `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS user_agent TEXT`,
+  ];
+  for (const sql of migrations) {
+    try { await db.query(sql); }
+    catch (e) { console.warn("[audit] migration:", e.message); }
+  }
+  // Indexes are created AFTER migration so columns exist
+  try { await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log (created_at DESC)`); } catch (e) { console.warn("[audit] idx_audit_created:", e.message); }
+  try { await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log (user_id, created_at DESC)`); } catch (e) { console.warn("[audit] idx_audit_user:", e.message); }
+  try { await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log (action, created_at DESC)`); } catch (e) { console.warn("[audit] idx_audit_action:", e.message); }
 }
 
 // Standard action identifiers — use these constants when calling log().
