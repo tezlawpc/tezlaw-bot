@@ -1387,19 +1387,25 @@ app.get("/admin/audit-log", auth.requireRole("admin"), async (req, res) => {
     }));
   } catch (err) {
     console.error("[audit log]:", err.message, "\n", err.stack);
-    // Send a diagnostic page rather than blank error
-    res.status(500).send(`<!DOCTYPE html><html><head><title>Audit Log Error</title>
-      <style>body{font-family:-apple-system,sans-serif;padding:40px;background:#f5f2ea;color:#0C1C36;}
-      pre{background:white;padding:16px;border-radius:8px;overflow-x:auto;font-size:12px;border-left:3px solid #c00;}
-      a{color:#B79C62;}</style></head><body>
-      <h1>⚠️ Audit Log Error</h1>
-      <p>The audit log page failed to render. Details below (also logged server-side):</p>
-      <pre>${String(err.message || err).replace(/</g, '&lt;')}</pre>
-      <details><summary>Stack trace</summary>
-      <pre>${String(err.stack || '').replace(/</g, '&lt;')}</pre>
-      </details>
-      <p><a href="/admin/dashboard">← Back to dashboard</a></p>
-      </body></html>`);
+    try {
+      const hearingNotes = require("./hearing-notes");
+      res.status(500).send(hearingNotes.renderAdminChrome({
+        title: "Audit Log Error",
+        body: `
+          <div class="page-header"><h1 style="color:#c00;">⚠️ Audit Log Error</h1></div>
+          <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:900px;">
+            <p>The audit log page failed to render. Details below (also logged server-side):</p>
+            <pre style="background:#fef3f0; padding:14px; border-radius:6px; overflow-x:auto; font-size:12px; border-left:3px solid #c00; color:#c00;">${String(err.message || err).replace(/</g, '&lt;')}</pre>
+            <details style="margin-top:12px;"><summary style="cursor:pointer; color:#666; font-size:13px;">Stack trace</summary>
+              <pre style="background:#f8f8f8; padding:12px; border-radius:6px; overflow-x:auto; font-size:11px; margin-top:8px;">${String(err.stack || '').replace(/</g, '&lt;')}</pre>
+            </details>
+            <p style="margin-top:20px;"><a href="/admin/dashboard" style="color:#B79C62;">← Back to dashboard</a></p>
+          </div>`,
+        activeItem: null,
+      }));
+    } catch {
+      res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+    }
   }
 });
 
@@ -3350,95 +3356,104 @@ app.get("/admin/init-drafts", async (req, res) => {
 app.get("/admin/email-setup", async (req, res) => {
   try {
     const paralegal = require("./email-paralegal");
+    const hearingNotes = require("./hearing-notes");
     const accounts = await paralegal.listAccounts();
 
     const accountsHtml = accounts.length ? accounts.map(a => `
-      <div style="background:#f5f5f5; padding:12px; margin:8px 0; border-left: 4px solid ${a.active ? "#4CAF50" : "#999"};">
-        <strong>${a.email}</strong> <span style="color:#666;">(${a.imap_host}:${a.imap_port})</span>
-        <br><small>Last scan: ${a.last_scan_at ? new Date(a.last_scan_at).toLocaleString() : "never"}</small>
-        ${a.last_error ? `<br><small style="color:red;">Error: ${a.last_error}</small>` : ""}
-      </div>
-    `).join("") : "<p><em>No accounts linked yet.</em></p>";
-
-    res.send(`
-      <html><head><title>Zara Email Setup</title>
-      <style>
-        body { font-family: sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; }
-        h1 { color: #0C1C36; }
-        h2 { color: #B79C62; margin-top: 30px; }
-        input, select, button { padding: 8px; margin: 4px 0; font-size: 14px; }
-        input[type="text"], input[type="password"], input[type="email"] { width: 100%; box-sizing: border-box; }
-        button { background: #B79C62; color: white; border: none; padding: 10px 20px; cursor: pointer; }
-        button:hover { background: #8f7a4c; }
-        .preset { display: inline-block; margin: 3px; padding: 4px 10px; background: #eee; cursor: pointer; border-radius: 3px; font-size: 12px; }
-        .preset:hover { background: #ddd; }
-        .warn { background: #fff3cd; padding: 12px; border-left: 4px solid #ffc107; margin: 20px 0; }
-      </style>
-      </head><body>
-        <h1>📬 Zara Email Setup</h1>
-        <p>Configure IMAP credentials for accounts you want Zara to monitor.</p>
-
-        <h2>Linked Accounts</h2>
-        ${accountsHtml}
-
-        <h2>Add / Update Account</h2>
-        <div class="warn">
-          <strong>⚠️ App passwords:</strong> For Gmail, Hotmail, and Google Workspace accounts with 2FA, you likely need an <em>app-specific password</em> (not your login password). 
-          <br>• Gmail: <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a>
-          <br>• Hotmail/Outlook: <a href="https://account.microsoft.com/security" target="_blank">account.microsoft.com/security</a> → App passwords
-        </div>
-
-        <form method="POST" action="/admin/email-setup">
-          <label>Email address:<br>
-          <input type="email" name="email" required placeholder="jj@tezlawfirm.com"></label><br>
-
-          <label>Display name (optional):<br>
-          <input type="text" name="display_name" placeholder="Tez Law primary"></label><br>
-
-          <label>IMAP host:<br>
-          <input type="text" name="imap_host" required placeholder="imap.secureserver.net" id="imap_host"></label>
+      <div style="background:white; padding:14px 16px; margin:8px 0; border-radius:8px; border:1px solid #eee; border-left: 4px solid ${a.active ? "#4CAF50" : "#999"};">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
           <div>
-            <small>Quick fill:</small>
-            <span class="preset" onclick="fillPreset('imap.secureserver.net',993)">GoDaddy Workspace</span>
-            <span class="preset" onclick="fillPreset('outlook.office365.com',993)">GoDaddy 365 / Hotmail / Outlook</span>
-            <span class="preset" onclick="fillPreset('imap.gmail.com',993)">Gmail</span>
-            <span class="preset" onclick="fillPreset('imap.mail.yahoo.com',993)">Yahoo</span>
-            <span class="preset" onclick="fillPreset('imap.zoho.com',993)">Zoho</span>
+            <strong style="color:#0C1C36;">${a.email}</strong>
+            <div style="color:#666; font-size:12px; margin-top:2px;">${a.imap_host}:${a.imap_port}</div>
+            <div style="color:#888; font-size:11px; margin-top:4px;">Last scan: ${a.last_scan_at ? new Date(a.last_scan_at).toLocaleString() : "never"}</div>
+            ${a.last_error ? `<div style="color:#c00; font-size:11px; margin-top:4px;">Error: ${a.last_error}</div>` : ""}
+          </div>
+        </div>
+      </div>
+    `).join("") : `<div style="text-align:center; padding:20px; color:#888; font-style:italic;">No accounts linked yet.</div>`;
+
+    const body = `
+      <div class="page-header">
+        <h1>📬 Email Setup</h1>
+        <div style="font-size:13px; color:#666;">Configure IMAP credentials for accounts you want Zara to monitor.</div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <!-- Left: Linked Accounts + Remove -->
+        <div>
+          <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+            <h2 style="margin:0 0 12px 0; font-size:15px; color:#0C1C36;">Linked Accounts</h2>
+            ${accountsHtml}
           </div>
 
-          <label>IMAP port:<br>
-          <input type="number" name="imap_port" value="993" id="imap_port" required></label><br>
+          <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
+            <h2 style="margin:0 0 12px 0; font-size:15px; color:#0C1C36;">Remove Account</h2>
+            <form method="POST" action="/admin/email-setup">
+              <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Email to remove</label>
+              <input type="email" name="email" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
+              <button type="submit" name="action" value="remove" style="background:#c00; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600;">Remove</button>
+            </form>
+          </div>
+        </div>
 
-          <label>Username (usually same as email):<br>
-          <input type="text" name="imap_user" required placeholder="jj@tezlawfirm.com"></label><br>
+        <!-- Right: Add/Update Account -->
+        <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
+          <h2 style="margin:0 0 12px 0; font-size:15px; color:#0C1C36;">Add / Update Account</h2>
 
-          <label>Password (or app-specific password):<br>
-          <input type="password" name="password" required></label><br>
+          <div style="background:#fff3cd; padding:12px; border-left:4px solid #ffc107; margin-bottom:16px; border-radius:4px; font-size:12px; line-height:1.5;">
+            <strong>⚠️ App passwords:</strong> For Gmail, Hotmail, and Google Workspace accounts with 2FA, use an <em>app-specific password</em> (not your login password).
+            <br>• Gmail: <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a>
+            <br>• Hotmail/Outlook: <a href="https://account.microsoft.com/security" target="_blank">account.microsoft.com/security</a> → App passwords
+          </div>
 
-          <label>
-            <input type="checkbox" name="use_tls" value="1" checked>
-            Use TLS/SSL (recommended)
-          </label><br><br>
+          <form method="POST" action="/admin/email-setup">
+            <label style="font-size:12px; color:#666;">Email address</label>
+            <input type="email" name="email" required placeholder="jj@tezlawfirm.com" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
 
-          <button type="submit" name="action" value="test">Test connection</button>
-          <button type="submit" name="action" value="save">Test + Save</button>
-        </form>
+            <label style="font-size:12px; color:#666;">Display name (optional)</label>
+            <input type="text" name="display_name" placeholder="Tez Law primary" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
 
-        <h2>Remove Account</h2>
-        <form method="POST" action="/admin/email-setup">
-          <label>Email to remove:<br>
-          <input type="email" name="email" required></label>
-          <button type="submit" name="action" value="remove" style="background:#c00;">Remove</button>
-        </form>
+            <label style="font-size:12px; color:#666;">IMAP host</label>
+            <input type="text" name="imap_host" required placeholder="imap.secureserver.net" id="imap_host" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:6px;">
 
-        <script>
-          function fillPreset(host, port) {
-            document.getElementById("imap_host").value = host;
-            document.getElementById("imap_port").value = port;
-          }
-        </script>
-      </body></html>
-    `);
+            <div style="margin-bottom:10px;">
+              <small style="color:#888; font-size:11px;">Quick fill:</small>
+              <span onclick="fillPreset('imap.secureserver.net',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#eee; cursor:pointer; border-radius:3px; font-size:11px;">GoDaddy Workspace</span>
+              <span onclick="fillPreset('outlook.office365.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#eee; cursor:pointer; border-radius:3px; font-size:11px;">GoDaddy 365 / Hotmail / Outlook</span>
+              <span onclick="fillPreset('imap.gmail.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#eee; cursor:pointer; border-radius:3px; font-size:11px;">Gmail</span>
+              <span onclick="fillPreset('imap.mail.yahoo.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#eee; cursor:pointer; border-radius:3px; font-size:11px;">Yahoo</span>
+              <span onclick="fillPreset('imap.zoho.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#eee; cursor:pointer; border-radius:3px; font-size:11px;">Zoho</span>
+            </div>
+
+            <label style="font-size:12px; color:#666;">IMAP port</label>
+            <input type="number" name="imap_port" value="993" id="imap_port" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
+
+            <label style="font-size:12px; color:#666;">Username (usually same as email)</label>
+            <input type="text" name="imap_user" required placeholder="jj@tezlawfirm.com" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
+
+            <label style="font-size:12px; color:#666;">Password (or app-specific password)</label>
+            <input type="password" name="password" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
+
+            <label style="display:inline-flex; align-items:center; font-weight:normal; margin-bottom:16px;">
+              <input type="checkbox" name="use_tls" value="1" checked style="margin-right:6px;"> Use TLS/SSL (recommended)
+            </label>
+
+            <div style="display:flex; gap:8px;">
+              <button type="submit" name="action" value="test" style="background:#eee; color:#333; border:none; padding:10px 16px; border-radius:4px; cursor:pointer; font-weight:600; flex:1;">Test connection</button>
+              <button type="submit" name="action" value="save" style="background:#B79C62; color:white; border:none; padding:10px 16px; border-radius:4px; cursor:pointer; font-weight:600; flex:1;">Test + Save</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <script>
+        function fillPreset(host, port) {
+          document.getElementById("imap_host").value = host;
+          document.getElementById("imap_port").value = port;
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: "Email Setup", body, activeItem: null }));
   } catch (err) {
     res.status(500).send(`Error: ${err.message}`);
   }
@@ -3447,16 +3462,24 @@ app.get("/admin/email-setup", async (req, res) => {
 app.post("/admin/email-setup", async (req, res) => {
   try {
     const paralegal = require("./email-paralegal");
+    const hearingNotes = require("./hearing-notes");
     const { email, imap_host, imap_port, imap_user, password, use_tls, display_name, action } = req.body;
+
+    const wrap = (title, bodyHtml) => hearingNotes.renderAdminChrome({
+      title, body: bodyHtml, activeItem: null,
+    });
 
     if (action === "remove") {
       const removed = await paralegal.removeAccount(email);
-      return res.send(`
-        <html><body style="font-family:sans-serif; padding:40px;">
-          ${removed ? `<h1 style="color:#c00;">🗑️ Removed</h1><p>Account <strong>${email}</strong> has been removed.</p>` : `<h1>Not found</h1><p>${email} was not in the account list.</p>`}
-          <p><a href="/admin/email-setup">← Back to setup</a></p>
-        </body></html>
-      `);
+      return res.send(wrap("Email Setup", `
+        <div class="page-header"><h1>${removed ? "🗑️ Account Removed" : "Not Found"}</h1></div>
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:600px;">
+          ${removed
+            ? `<p>Account <strong>${email}</strong> has been removed.</p>`
+            : `<p><em>${email} was not in the account list.</em></p>`}
+          <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Back to setup</a></p>
+        </div>
+      `));
     }
 
     // Test the connection first
@@ -3466,34 +3489,38 @@ app.post("/admin/email-setup", async (req, res) => {
     });
 
     if (!testResult.ok) {
-      return res.send(`
-        <html><body style="font-family:sans-serif; padding:40px; max-width:600px;">
-          <h1 style="color:#c00;">❌ Connection failed</h1>
-          <p><strong>Host:</strong> ${imap_host}:${imap_port}</p>
-          <p><strong>User:</strong> ${imap_user}</p>
-          <p><strong>Error:</strong> <code>${testResult.error}</code></p>
-          <h3>Common fixes:</h3>
-          <ul>
-            <li>Verify the password is correct — try app-specific password if 2FA is enabled</li>
+      return res.send(wrap("Email Setup — Failed", `
+        <div class="page-header"><h1 style="color:#c00;">❌ Connection Failed</h1></div>
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:700px;">
+          <div style="background:#fef3f0; padding:12px 16px; border-left:4px solid #c62828; border-radius:4px; margin-bottom:16px; font-family:monospace; font-size:12px;">
+            ${testResult.error}
+          </div>
+          <table style="font-size:13px;">
+            <tr><td style="padding:4px 12px 4px 0; color:#666;">Host:</td><td><code>${imap_host}:${imap_port}</code></td></tr>
+            <tr><td style="padding:4px 12px 4px 0; color:#666;">User:</td><td><code>${imap_user}</code></td></tr>
+          </table>
+          <h3 style="margin-top:20px; font-size:14px;">Common fixes</h3>
+          <ul style="font-size:13px; line-height:1.7;">
+            <li>Verify the password — try app-specific password if 2FA is enabled</li>
             <li>Check IMAP is enabled in your email provider settings</li>
             <li>Confirm the host and port match your provider's docs</li>
             <li>Some providers block IMAP for OAuth-only accounts (e.g., Microsoft may require Modern Auth)</li>
           </ul>
-          <p><a href="/admin/email-setup">← Try again</a></p>
-        </body></html>
-      `);
+          <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Try again</a></p>
+        </div>
+      `));
     }
 
     if (action === "test") {
-      return res.send(`
-        <html><body style="font-family:sans-serif; padding:40px;">
-          <h1 style="color:#4CAF50;">✅ Connection works!</h1>
+      return res.send(wrap("Email Setup — Test OK", `
+        <div class="page-header"><h1 style="color:#4CAF50;">✅ Connection Works</h1></div>
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:600px;">
           <p>Successfully connected to <strong>${imap_host}:${imap_port}</strong> as <strong>${imap_user}</strong>.</p>
-          <p>INBOX contains ${testResult.messageCount} messages.</p>
-          <p>Click "Test + Save" if you're ready to store this account.</p>
-          <p><a href="/admin/email-setup">← Back to setup</a></p>
-        </body></html>
-      `);
+          <p>INBOX contains <strong>${testResult.messageCount}</strong> messages.</p>
+          <p style="color:#666; font-size:13px;">Click "Test + Save" if you're ready to store this account.</p>
+          <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Back to setup</a></p>
+        </div>
+      `));
     }
 
     // action === "save"
@@ -3503,17 +3530,30 @@ app.post("/admin/email-setup", async (req, res) => {
       display_name,
     });
 
-    res.send(`
-      <html><body style="font-family:sans-serif; padding:40px;">
-        <h1 style="color:#4CAF50;">✅ Saved!</h1>
+    res.send(wrap("Email Setup — Saved", `
+      <div class="page-header"><h1 style="color:#4CAF50;">✅ Saved</h1></div>
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:600px;">
         <p>Account <strong>${account.email}</strong> is now linked to Zara (id: ${account.id}).</p>
         <p>${testResult.messageCount} messages in INBOX. Zara will scan every 30 min.</p>
-        <p><a href="/admin/email-setup">← Add another account</a></p>
-      </body></html>
-    `);
+        <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Add another account</a></p>
+      </div>
+    `));
   } catch (err) {
     console.error("[/admin/email-setup POST] error:", err.message);
-    res.status(500).send(`<html><body><h1>Error</h1><p>${err.message}</p><p><a href="/admin/email-setup">← Back</a></p></body></html>`);
+    try {
+      const hearingNotes = require("./hearing-notes");
+      res.status(500).send(hearingNotes.renderAdminChrome({
+        title: "Email Setup — Error",
+        body: `<div class="page-header"><h1 style="color:#c00;">Error</h1></div>
+               <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:600px;">
+                 <p style="font-family:monospace; color:#c00;">${err.message}</p>
+                 <p><a href="/admin/email-setup">← Back</a></p>
+               </div>`,
+        activeItem: null,
+      }));
+    } catch {
+      res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+    }
   }
 });
 
