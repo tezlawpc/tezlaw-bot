@@ -793,10 +793,16 @@ async function initScanStatusTable() {
       progress_total    INTEGER DEFAULT 0,
       results           JSONB,
       error             TEXT,
+      cancel_requested  BOOLEAN DEFAULT FALSE,
       started_at        TIMESTAMP DEFAULT NOW(),
       updated_at        TIMESTAMP DEFAULT NOW()
     )
   `);
+  // Migration: add cancel_requested if the table already existed
+  try {
+    await db.query(`ALTER TABLE scan_status ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN DEFAULT FALSE`);
+  } catch (e) { console.warn("[scan-status] migration cancel_requested:", e.message); }
+
   // On boot, clear any stale "running" scans older than 30 minutes
   await db.query(`
     UPDATE scan_status
@@ -890,6 +896,21 @@ async function runScanAllNoticesAsync(scanId) {
   };
 
   for (let i = 0; i < clients.length; i++) {
+    // Check if user requested cancellation between each client
+    const cancelCheck = await db.query(`SELECT cancel_requested FROM scan_status WHERE id = $1`, [scanId]);
+    if (cancelCheck.rows[0] && cancelCheck.rows[0].cancel_requested) {
+      results.cancelled = true;
+      results.cancelled_at_index = i;
+      await setScanStatus(scanId, {
+        running: false,
+        phase: "cancelled",
+        error: `Cancelled by user after ${i} of ${clients.length} clients`,
+        results,
+      });
+      console.log(`[scan-all-notices] Cancelled by user after ${i}/${clients.length}`);
+      return;
+    }
+
     const client = clients[i];
     const clientLabel = client.client_name || "unknown";
 
@@ -1010,6 +1031,7 @@ app.get("/admin/calendar/scan-status", async (req, res) => {
       progress_total: row.progress_total,
       results: row.results,
       error: row.error,
+      cancel_requested: row.cancel_requested || false,
       started_at: row.started_at,
       updated_at: row.updated_at,
     });
@@ -1022,6 +1044,21 @@ app.post("/admin/calendar/scan-status/reset", async (req, res) => {
   try {
     await db.query(`UPDATE scan_status SET running = false WHERE scan_type = 'dropbox_notices' AND running = true`);
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Request cancellation of a running scan. The scan loop checks this flag
+// between each client and exits gracefully with partial results.
+app.post("/admin/calendar/scan-status/cancel", async (req, res) => {
+  try {
+    const scanId = req.body && req.body.scan_id ? parseInt(req.body.scan_id, 10) : null;
+    if (scanId) {
+      await db.query(`UPDATE scan_status SET cancel_requested = TRUE WHERE id = $1 AND running = TRUE`, [scanId]);
+    } else {
+      // No specific ID — cancel any running scan of this type
+      await db.query(`UPDATE scan_status SET cancel_requested = TRUE WHERE scan_type = 'dropbox_notices' AND running = TRUE`);
+    }
+    res.json({ ok: true, cancel_requested: true });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -3392,6 +3429,90 @@ app.get("/legal/cache-stats", async (req, res) => {
 //  HEALTH CHECK + START
 // ────────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.send("Tez Law P.C. — Zara running on all channels ✅"));
+
+// ── PWA support: manifest + service worker ─────────
+// Makes Zara installable as an app on iOS/Android home screens.
+app.get("/manifest.json", (req, res) => {
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.json({
+    name: "Zara Admin — Tez Law P.C.",
+    short_name: "Zara",
+    description: "Legal case management for Tez Law P.C.",
+    start_url: "/admin/dashboard",
+    scope: "/admin/",
+    display: "standalone",
+    orientation: "portrait-primary",
+    background_color: "#0C1C36",
+    theme_color: "#0C1C36",
+    icons: [
+      {
+        src: "https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png",
+        sizes: "180x180",
+        type: "image/png",
+        purpose: "any maskable"
+      },
+      {
+        src: "https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "any maskable"
+      }
+    ],
+    shortcuts: [
+      { name: "Dashboard",    url: "/admin/dashboard" },
+      { name: "Calendar",     url: "/admin/calendar" },
+      { name: "Master Notes", url: "/admin/hearing/notes" },
+      { name: "Deadlines",    url: "/admin/deadlines" }
+    ]
+  });
+});
+
+// Minimal service worker — required by iOS for "Add to Home Screen"
+// to render as a proper standalone app. Does network-first with graceful
+// offline fallback. Doesn't cache API responses (keeps data fresh).
+app.get("/sw.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(`
+// Zara Service Worker — network-first, minimal caching
+const CACHE_NAME = 'zara-v1';
+
+self.addEventListener('install', (e) => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (e) => {
+  e.waitUntil(clients.claim());
+});
+
+self.addEventListener('fetch', (event) => {
+  // Only handle GET requests
+  if (event.request.method !== 'GET') return;
+
+  // Bypass API and auth calls — always fresh
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/admin/api/') ||
+      url.pathname.startsWith('/api/') ||
+      url.pathname.includes('/scan-status') ||
+      url.pathname.includes('/backup-status')) {
+    return; // let browser handle normally
+  }
+
+  event.respondWith(
+    fetch(event.request)
+      .catch(() => {
+        // Offline fallback: try cache
+        return caches.match(event.request).then(cached => {
+          return cached || new Response('Offline — please reconnect.', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain' }
+          });
+        });
+      })
+  );
+});
+  `);
+});
 
 // ── Draft templates admin ─────────────────────────────────
 // One-time initialization endpoint (idempotent) — creates the three
