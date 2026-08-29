@@ -502,6 +502,8 @@ app.get("/admin/dashboard", async (req, res) => {
     const [
       upcoming, unnotified, recent, reminderStats, clientStats,
       intakes, intakeStats, motions, motionStats, deadlines, deadlineStats, health,
+      posts, postStats, drips, dripStats, sols, solStats,
+      pendingResearch, citations, researchStats, usptoMatches, usptoStats, moat,
     ] = await Promise.all([
       dashboard.getUpcomingHearings(14),
       dashboard.getUnnotifiedNotices(),
@@ -515,10 +517,24 @@ app.get("/admin/dashboard", async (req, res) => {
       dashboard.getUrgentDeadlines(15),
       dashboard.getDeadlineStats(),
       dashboard.getSystemHealth(),
+      dashboard.getRecentPosts(10),
+      dashboard.getPostStats(),
+      dashboard.getDripCampaigns(10),
+      dashboard.getDripStats(),
+      dashboard.getUrgentSolDeadlines(8),
+      dashboard.getSolStats(),
+      dashboard.getPendingResearch(8),
+      dashboard.getRecentCitations(6),
+      dashboard.getResearchStats(),
+      dashboard.getUsptoMatches(8),
+      dashboard.getUsptoStats(),
+      dashboard.getMoatStats(),
     ]);
     res.send(dashboard.renderDashboard({
       upcoming, unnotified, recent, reminderStats, clientStats,
       intakes, intakeStats, motions, motionStats, deadlines, deadlineStats, health,
+      posts, postStats, drips, dripStats, sols, solStats,
+      pendingResearch, citations, researchStats, usptoMatches, usptoStats, moat,
     }));
   } catch (err) {
     console.error("[dashboard]:", err.message, err.stack);
