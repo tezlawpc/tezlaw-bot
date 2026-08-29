@@ -280,6 +280,188 @@ async function getSystemHealth() {
   return health;
 }
 
+// ─── Blog posts ─────────────────────────────────────
+
+async function getRecentPosts(limit = 10) {
+  try {
+    const r = await db.query(
+      `SELECT id, title, practice_area, topic, published_by, wp_post_ids, created_at
+       FROM manual_posts ORDER BY created_at DESC LIMIT $1`,
+      [limit]
+    );
+    return r.rows;
+  } catch (e) { return []; }
+}
+
+async function getPostStats() {
+  try {
+    const r = await db.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS this_week,
+         COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days')::int AS this_month,
+         COUNT(*) FILTER (WHERE published_by = 'autoposter')::int AS auto_total,
+         COUNT(*) FILTER (WHERE published_by != 'autoposter' OR published_by IS NULL)::int AS manual_total
+       FROM manual_posts`
+    );
+    return r.rows[0] || { total: 0, this_week: 0, this_month: 0, auto_total: 0, manual_total: 0 };
+  } catch (e) {
+    return { total: 0, this_week: 0, this_month: 0, auto_total: 0, manual_total: 0 };
+  }
+}
+
+// ─── Drip campaigns ─────────────────────────────────
+
+async function getDripCampaigns(limit = 10) {
+  try {
+    const r = await db.query(
+      `SELECT dc.id, dc.platform, dc.client_name, dc.case_type, dc.status, dc.started_at,
+              (SELECT COUNT(*)::int FROM drip_messages WHERE campaign_id = dc.id) AS msg_total,
+              (SELECT COUNT(*)::int FROM drip_messages WHERE campaign_id = dc.id AND status = 'sent') AS msg_sent,
+              (SELECT COUNT(*)::int FROM drip_messages WHERE campaign_id = dc.id AND status = 'pending' AND sent_at IS NULL) AS msg_pending
+       FROM drip_campaigns dc
+       WHERE dc.status = 'active'
+       ORDER BY dc.started_at DESC LIMIT $1`,
+      [limit]
+    );
+    return r.rows;
+  } catch (e) { return []; }
+}
+
+async function getDripStats() {
+  try {
+    const r = await db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'active')::int AS active,
+         COUNT(*) FILTER (WHERE status = 'stopped')::int AS stopped,
+         (SELECT COUNT(*) FILTER (WHERE sent_at > NOW() - INTERVAL '7 days')::int FROM drip_messages) AS sent_this_week,
+         (SELECT COUNT(*) FILTER (WHERE status = 'pending')::int FROM drip_messages) AS pending_msgs
+       FROM drip_campaigns`
+    );
+    return r.rows[0] || { active: 0, stopped: 0, sent_this_week: 0, pending_msgs: 0 };
+  } catch (e) {
+    return { active: 0, stopped: 0, sent_this_week: 0, pending_msgs: 0 };
+  }
+}
+
+// ─── SoL deadlines ──────────────────────────────────
+
+async function getUrgentSolDeadlines(limit = 8) {
+  try {
+    const r = await db.query(
+      `SELECT id, client_name, case_type, incident_date, deadline_date, notes,
+              alerted_90, alerted_30, alerted_7, alerted_1
+       FROM sol_deadlines
+       WHERE deadline_date >= CURRENT_DATE - INTERVAL '30 days'
+       ORDER BY deadline_date ASC LIMIT $1`,
+      [limit]
+    );
+    return r.rows;
+  } catch (e) { return []; }
+}
+
+async function getSolStats() {
+  try {
+    const r = await db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE deadline_date < CURRENT_DATE)::int AS past_due,
+         COUNT(*) FILTER (WHERE deadline_date >= CURRENT_DATE AND deadline_date <= CURRENT_DATE + INTERVAL '30 days')::int AS next_30d,
+         COUNT(*) FILTER (WHERE deadline_date >= CURRENT_DATE AND deadline_date <= CURRENT_DATE + INTERVAL '90 days')::int AS next_90d
+       FROM sol_deadlines`
+    );
+    return r.rows[0] || { past_due: 0, next_30d: 0, next_90d: 0 };
+  } catch (e) {
+    return { past_due: 0, next_30d: 0, next_90d: 0 };
+  }
+}
+
+// ─── Legal research digest ─────────────────────────
+
+async function getPendingResearch(limit = 8) {
+  try {
+    const r = await db.query(
+      `SELECT id, question, practice_area, opinion_title, opinion_court, opinion_date,
+              status, created_at
+       FROM pending_cache_updates
+       WHERE status = 'pending'
+       ORDER BY created_at DESC LIMIT $1`,
+      [limit]
+    );
+    return r.rows;
+  } catch (e) { return []; }
+}
+
+async function getRecentCitations(limit = 6) {
+  try {
+    const r = await db.query(
+      `SELECT id, case_name, citation, court, date_filed, url, relevance_score
+       FROM legal_citations
+       ORDER BY created_at DESC LIMIT $1`,
+      [limit]
+    );
+    return r.rows;
+  } catch (e) { return []; }
+}
+
+async function getResearchStats() {
+  try {
+    const r = await db.query(
+      `SELECT
+         (SELECT COUNT(*) FILTER (WHERE status = 'pending')::int FROM pending_cache_updates) AS pending_review,
+         (SELECT COUNT(*)::int FROM legal_citations) AS total_citations,
+         (SELECT COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int FROM legal_citations) AS citations_this_week`
+    );
+    return r.rows[0] || { pending_review: 0, total_citations: 0, citations_this_week: 0 };
+  } catch (e) {
+    return { pending_review: 0, total_citations: 0, citations_this_week: 0 };
+  }
+}
+
+// ─── USPTO watches ──────────────────────────────────
+
+async function getUsptoMatches(limit = 8) {
+  try {
+    const r = await db.query(
+      `SELECT m.id, m.serial_number, m.mark_text, m.owner_name, m.filing_date,
+              m.status_desc, m.notified, m.first_seen_at,
+              w.search_term, w.client_name
+       FROM uspto_matches m
+       JOIN uspto_watches w ON m.watch_id = w.id
+       WHERE m.notified = FALSE
+       ORDER BY m.first_seen_at DESC LIMIT $1`,
+      [limit]
+    );
+    return r.rows;
+  } catch (e) { return []; }
+}
+
+async function getUsptoStats() {
+  try {
+    const r = await db.query(
+      `SELECT
+         (SELECT COUNT(*) FILTER (WHERE active = TRUE)::int FROM uspto_watches) AS active_watches,
+         (SELECT COUNT(*) FILTER (WHERE notified = FALSE)::int FROM uspto_matches) AS unnotified,
+         (SELECT COUNT(*) FILTER (WHERE first_seen_at > NOW() - INTERVAL '7 days')::int FROM uspto_matches) AS new_this_week`
+    );
+    return r.rows[0] || { active_watches: 0, unnotified: 0, new_this_week: 0 };
+  } catch (e) {
+    return { active_watches: 0, unnotified: 0, new_this_week: 0 };
+  }
+}
+
+// ─── Moat/marketing update ─────────────────────────
+
+async function getMoatStats() {
+  try {
+    const r = await db.query(
+      `SELECT started_at, completed_at, status, delta, cost_usd, duration_sec
+       FROM moat_update_history
+       ORDER BY started_at DESC LIMIT 1`
+    );
+    return r.rows[0] || null;
+  } catch (e) { return null; }
+}
+
 // ─── Render ──────────────────────────────────────────
 
 function renderDashboard(data) {
@@ -287,6 +469,8 @@ function renderDashboard(data) {
   const {
     upcoming, unnotified, recent, reminderStats, clientStats,
     intakes, intakeStats, motions, motionStats, deadlines, deadlineStats, health,
+    posts, postStats, drips, dripStats, sols, solStats,
+    pendingResearch, citations, researchStats, usptoMatches, usptoStats, moat,
   } = data;
 
   const brand = { gold: "#B79C62", navy: "#0C1C36" };
@@ -460,10 +644,144 @@ function renderDashboard(data) {
     </a>`;
   };
 
+  // ── Post creator block ──
+  const postsHtml = posts.length ? posts.slice(0, 8).map(p => {
+    const dt = new Date(p.created_at);
+    const relTime = timeAgo(dt);
+    const wpIds = p.wp_post_ids || {};
+    const langCount = Object.keys(wpIds).length;
+    const isAuto = p.published_by === "autoposter";
+    return `
+      <div style="padding:8px 12px; background:#fdfaf3; border-left:3px solid ${isAuto ? "#2e7d32" : brand.gold}; border-radius:4px; margin-bottom:6px;">
+        <div style="font-weight:600; font-size:12px; color:${brand.navy}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          ${escapeHtml(p.title || p.topic || "(untitled)")}
+          ${isAuto ? '<span style="background:#2e7d32; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">AUTO</span>' : '<span style="background:#B79C62; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">MANUAL</span>'}
+        </div>
+        <div style="font-size:11px; color:#666; margin-top:2px;">
+          ${p.practice_area ? `<span style="color:${brand.gold}; font-weight:600;">${escapeHtml(p.practice_area)}</span> · ` : ""}
+          ${langCount > 0 ? `${langCount} language${langCount === 1 ? "" : "s"} · ` : ""}
+          <span style="color:#999;">${escapeHtml(relTime)}</span>
+        </div>
+      </div>`;
+  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No posts published yet.</div>`;
+
+  // ── Drip pipeline block ──
+  const dripHtml = drips.length ? drips.slice(0, 6).map(d => {
+    const dt = new Date(d.started_at);
+    const progress = d.msg_total > 0 ? Math.round((d.msg_sent / d.msg_total) * 100) : 0;
+    return `
+      <div style="padding:8px 12px; background:#f5f9ff; border-left:3px solid #0061FF; border-radius:4px; margin-bottom:6px;">
+        <div style="font-weight:600; font-size:12px; color:${brand.navy};">
+          ${escapeHtml(d.client_name || "(anon)")}
+          <span style="font-size:10px; color:#888; margin-left:4px;">${escapeHtml(d.platform || "")}</span>
+        </div>
+        <div style="font-size:11px; color:#666; margin-top:2px;">
+          ${escapeHtml(d.case_type || "")} · ${d.msg_sent}/${d.msg_total} sent
+          ${d.msg_pending > 0 ? ` · <span style="color:#f9a825;">${d.msg_pending} queued</span>` : ""}
+        </div>
+        <div style="background:#eee; height:3px; border-radius:2px; margin-top:4px; overflow:hidden;">
+          <div style="width:${progress}%; height:100%; background:#0061FF;"></div>
+        </div>
+      </div>`;
+  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No active drip campaigns.</div>`;
+
+  // ── SoL deadlines block ──
+  const solHtml = sols.length ? sols.slice(0, 6).map(s => {
+    const dueDate = new Date(s.deadline_date);
+    const diffDays = Math.ceil((dueDate - new Date()) / 86400000);
+    const isOverdue = diffDays < 0;
+    const label = isOverdue ? `${Math.abs(diffDays)}d past`
+                : diffDays === 0 ? "TODAY"
+                : diffDays <= 30 ? `${diffDays}d`
+                : dueDate.toLocaleDateString();
+    const color = isOverdue ? "#c62828" : diffDays <= 7 ? "#c62828" : diffDays <= 30 ? "#f9a825" : "#666";
+    return `
+      <div style="padding:6px 10px; border-left:3px solid ${color}; background:${isOverdue ? '#fef3f0' : '#f8f8f8'}; border-radius:4px; margin-bottom:4px; display:flex; justify-content:space-between; gap:8px; align-items:center;">
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:12px; font-weight:600; color:${brand.navy};">${escapeHtml(s.client_name || "(no client)")}</div>
+          <div style="font-size:11px; color:#666;">${escapeHtml(s.case_type || "")}</div>
+        </div>
+        <div style="font-size:11px; font-weight:600; color:${color}; white-space:nowrap;">${escapeHtml(label)}</div>
+      </div>`;
+  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No SoL deadlines tracked ✓</div>`;
+
+  // ── Legal research block ──
+  const researchHtml = pendingResearch.length ? pendingResearch.slice(0, 5).map(r => {
+    return `
+      <div style="padding:8px 12px; background:#fdf7f0; border-left:3px solid #f9a825; border-radius:4px; margin-bottom:6px;">
+        <div style="font-weight:600; font-size:12px; color:${brand.navy}; overflow:hidden; text-overflow:ellipsis;">
+          ${escapeHtml(r.question ? r.question.substring(0, 80) + (r.question.length > 80 ? "…" : "") : "(no question)")}
+        </div>
+        <div style="font-size:11px; color:#666; margin-top:2px;">
+          ${r.opinion_title ? `<span style="color:${brand.gold};">${escapeHtml(r.opinion_title.substring(0, 50))}${r.opinion_title.length > 50 ? "…" : ""}</span>` : ""}
+          ${r.opinion_court ? ` · ${escapeHtml(r.opinion_court)}` : ""}
+        </div>
+      </div>`;
+  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">Nothing pending review ✓</div>`;
+
+  const citationsHtml = citations.length ? citations.slice(0, 5).map(c => `
+    <div style="padding:5px 10px; font-size:12px; border-bottom:1px solid #f5f5f5;">
+      ${c.url ? `<a href="${escapeHtml(c.url)}" target="_blank" style="color:${brand.navy}; text-decoration:none; font-weight:600;">${escapeHtml(c.case_name || c.citation || "(unnamed)")}</a>`
+             : `<strong>${escapeHtml(c.case_name || c.citation || "(unnamed)")}</strong>`}
+      <div style="font-size:10px; color:#888;">
+        ${c.court ? escapeHtml(c.court) : ""}
+        ${c.date_filed ? ` · ${escapeHtml(c.date_filed)}` : ""}
+        ${c.citation && c.case_name ? ` · ${escapeHtml(c.citation)}` : ""}
+      </div>
+    </div>`).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No recent citations.</div>`;
+
+  // ── USPTO matches block ──
+  const usptoHtml = usptoMatches.length ? usptoMatches.slice(0, 6).map(m => {
+    const dt = new Date(m.first_seen_at);
+    return `
+      <div style="padding:8px 12px; background:#fdf7f0; border-left:3px solid ${brand.gold}; border-radius:4px; margin-bottom:6px;">
+        <div style="font-weight:600; font-size:12px; color:${brand.navy};">
+          ${escapeHtml(m.mark_text || m.serial_number || "(no mark)")}
+          <span style="background:#f9a825; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">NEW</span>
+        </div>
+        <div style="font-size:11px; color:#666; margin-top:2px;">
+          Watch: <em>${escapeHtml(m.search_term || "")}</em>
+          ${m.owner_name ? ` · ${escapeHtml(m.owner_name)}` : ""}
+        </div>
+        <div style="font-size:10px; color:#888; margin-top:2px;">
+          ${escapeHtml(m.serial_number || "")}
+          ${m.status_desc ? ` · ${escapeHtml(m.status_desc)}` : ""}
+          · ${timeAgo(dt)}
+        </div>
+      </div>`;
+  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No new USPTO matches ✓</div>`;
+
+  // ── Moat update block ──
+  const moatHtml = moat ? (() => {
+    const dt = new Date(moat.started_at);
+    const statusColor = moat.status === "success" || moat.status === "completed" ? "#2e7d32"
+                      : moat.status === "running" ? "#0061FF"
+                      : moat.status === "failed" || moat.status === "error" ? "#c62828"
+                      : "#666";
+    const delta = moat.delta || {};
+    const deltaLines = Object.entries(delta).slice(0, 4).map(([k, v]) =>
+      `<div style="font-size:11px; color:#666;">${escapeHtml(k)}: <strong style="color:${brand.navy};">${escapeHtml(String(v))}</strong></div>`
+    ).join("");
+    return `
+      <div style="padding:10px 12px; background:#f5f9ff; border-left:3px solid ${statusColor}; border-radius:4px;">
+        <div style="font-weight:600; font-size:12px; color:${brand.navy};">
+          Last run: ${dt.toLocaleDateString()}
+          <span style="background:${statusColor}; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">${escapeHtml(moat.status || "?")}</span>
+        </div>
+        ${deltaLines || `<div style="font-size:11px; color:#888; font-style:italic; margin-top:4px;">No changes detected</div>`}
+        ${moat.cost_usd ? `<div style="font-size:10px; color:#999; margin-top:4px;">Cost: $${Number(moat.cost_usd).toFixed(2)}</div>` : ""}
+      </div>`;
+  })() : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">Moat update never run.</div>`;
+
   const body = `
     <div class="page-header">
       <h1>Triage Dashboard</h1>
       <div style="font-size:13px; color:#666;">Everything demanding your attention across the firm.</div>
+    </div>
+
+    <!-- ── Section 1: LEGAL PRACTICE ── -->
+    <div style="font-size:11px; color:${brand.gold}; text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid rgba(183,156,98,.2);">
+      Legal Practice
     </div>
 
     <!-- Top-line stats: color-coded urgency -->
@@ -477,7 +795,7 @@ function renderDashboard(data) {
     </div>
 
     <!-- Main content grid: 3 columns on wide screens -->
-    <div class="dashboard-grid" style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:15px; margin-bottom:15px;">
+    <div class="dashboard-grid" style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:15px; margin-bottom:25px;">
       <!-- Column 1: Upcoming hearings + Notifications -->
       <div>
         <div style="background:white; padding:18px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
@@ -540,6 +858,83 @@ function renderDashboard(data) {
       </div>
     </div>
 
+    <!-- ── Section 2: CONTENT, MARKETING & RESEARCH ── -->
+    <div style="font-size:11px; color:${brand.gold}; text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid rgba(183,156,98,.2);">
+      Content, Marketing & Research
+    </div>
+
+    <!-- Content stat cards -->
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
+      ${statCard("Blog Posts (30d)", postStats.this_month, `${postStats.auto_total} auto · ${postStats.manual_total} manual`, "#2e7d32", "/admin/posts")}
+      ${statCard("Active Drip Campaigns", dripStats.active, `${dripStats.sent_this_week} sent this week · ${dripStats.pending_msgs} pending`, "#0061FF", "/admin/drip")}
+      ${statCard("Research Pending", researchStats.pending_review, `${researchStats.citations_this_week} citations added 7d`, researchStats.pending_review > 0 ? "#f9a825" : "#666", "/admin/research")}
+      ${statCard("USPTO New Matches", usptoStats.unnotified, `${usptoStats.active_watches} active watches · ${usptoStats.new_this_week} new 7d`, usptoStats.unnotified > 0 ? "#c62828" : "#666", "/admin/uspto")}
+      ${statCard("SoL Deadlines", solStats.next_30d, `${solStats.past_due} past due · ${solStats.next_90d} in 90d`, solStats.past_due > 0 ? "#c62828" : solStats.next_30d > 0 ? "#f9a825" : "#666", "/admin/sol")}
+    </div>
+
+    <!-- Content detail grid -->
+    <div class="dashboard-grid" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:15px;">
+      <!-- Column 1: Posts + Moat -->
+      <div>
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+          <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
+            <span>✍️ Recent Blog Posts</span>
+            <a href="/admin/posts" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+          </h3>
+          ${postsHtml}
+        </div>
+
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
+          <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
+            <span>🏰 Moat Update</span>
+            <a href="/admin/moat" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">History →</a>
+          </h3>
+          ${moatHtml}
+        </div>
+      </div>
+
+      <!-- Column 2: Drips + SoL -->
+      <div>
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+          <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
+            <span>💧 Drip Pipeline</span>
+            <a href="/admin/drip" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+          </h3>
+          ${dripHtml}
+        </div>
+
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
+          <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
+            <span>⚖️ SoL Deadlines</span>
+            <a href="/admin/sol" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+          </h3>
+          ${solHtml}
+        </div>
+      </div>
+
+      <!-- Column 3: Research + USPTO -->
+      <div>
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+          <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
+            <span>🔬 Research Digest</span>
+            <a href="/admin/research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+          </h3>
+          <div style="font-size:11px; color:#666; margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Pending Review</div>
+          ${researchHtml}
+          <div style="font-size:11px; color:#666; margin:12px 0 6px 0; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Recent Citations</div>
+          ${citationsHtml}
+        </div>
+
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
+          <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
+            <span>®️ USPTO Watches</span>
+            <a href="/admin/uspto" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+          </h3>
+          ${usptoHtml}
+        </div>
+      </div>
+    </div>
+
     <style>
       @media (max-width: 1200px) {
         .dashboard-grid { grid-template-columns: 1fr 1fr !important; }
@@ -595,5 +990,17 @@ module.exports = {
   getUrgentDeadlines,
   getDeadlineStats,
   getSystemHealth,
+  getRecentPosts,
+  getPostStats,
+  getDripCampaigns,
+  getDripStats,
+  getUrgentSolDeadlines,
+  getSolStats,
+  getPendingResearch,
+  getRecentCitations,
+  getResearchStats,
+  getUsptoMatches,
+  getUsptoStats,
+  getMoatStats,
   renderDashboard,
 };
