@@ -412,6 +412,10 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
         <div id="scan-bar" style="background:linear-gradient(to right, ${brand.gold}, #d4b979); height:100%; width:5%; transition:width 0.5s;"></div>
       </div>
       <div id="scan-results" style="margin-top:20px; display:none; font-size:13px;"></div>
+      <div id="scan-cancel-wrap" style="margin-top:20px; text-align:center; display:none;">
+        <button onclick="cancelScan()" id="scan-cancel-btn" style="background:#c62828; color:white; padding:10px 24px; border:none; border-radius:4px; cursor:pointer; font-weight:600; font-size:14px;">🛑 Cancel Scan</button>
+        <div style="font-size:11px; color:#888; margin-top:6px;">Will finish current client, then stop.</div>
+      </div>
       <div id="scan-close-wrap" style="margin-top:20px; text-align:right; display:none;">
         <button onclick="closeScanModal()" style="background:${brand.navy}; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Close & refresh</button>
       </div>
@@ -548,6 +552,7 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       const bar = document.getElementById("scan-bar");
       const results = document.getElementById("scan-results");
       const closeWrap = document.getElementById("scan-close-wrap");
+      const cancelWrap = document.getElementById("scan-cancel-wrap");
       const detail = document.getElementById("scan-status-detail");
       const title = document.getElementById("scan-status-title");
 
@@ -556,6 +561,7 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       modal.style.display = "flex";
       results.style.display = "none";
       closeWrap.style.display = "none";
+      cancelWrap.style.display = "block";  // Show cancel from start
       bar.style.width = "3%";
       title.textContent = "Starting scan…";
       detail.textContent = "Kicking off background job — you can close this modal and check back later.";
@@ -567,6 +573,7 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
         if (!d.ok) {
           title.textContent = "❌ Failed to start scan";
           detail.textContent = "Error: " + (d.error || "unknown");
+          cancelWrap.style.display = "none";
           closeWrap.style.display = "block";
           btn.disabled = false;
           btn.textContent = "🔄 Update from Dropbox";
@@ -581,15 +588,42 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
           detail.textContent = "Reading each client's folder and extracting EOIR notice details with Claude Vision.";
         }
 
-        const scanId = d.scan_id;
-        pollScanStatus(scanId);
+        window.currentScanId = d.scan_id;
+        pollScanStatus(d.scan_id);
       } catch (e) {
         title.textContent = "❌ Failed to start scan";
         detail.textContent = "Error: " + e.message;
+        cancelWrap.style.display = "none";
         closeWrap.style.display = "block";
         btn.disabled = false;
         btn.textContent = "🔄 Update from Dropbox";
       }
+    }
+
+    async function cancelScan() {
+      const cancelBtn = document.getElementById("scan-cancel-btn");
+      const title = document.getElementById("scan-status-title");
+      const detail = document.getElementById("scan-status-detail");
+      if (!window.currentScanId) return;
+      if (!confirm("Cancel this scan? Progress so far will be saved.")) return;
+
+      cancelBtn.disabled = true;
+      cancelBtn.textContent = "⏳ Cancelling…";
+      title.textContent = "⏳ Cancelling scan…";
+      detail.textContent = "Waiting for the current client to finish before stopping.";
+
+      try {
+        await fetch("/admin/calendar/scan-status/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scan_id: window.currentScanId })
+        });
+      } catch (e) {
+        alert("Failed to cancel: " + e.message);
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = "🛑 Cancel Scan";
+      }
+      // Polling will continue and pick up the cancelled state
     }
 
     async function pollScanStatus(scanId) {
@@ -612,13 +646,19 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
           bar.style.width = pct + "%";
 
           if (d.running) {
-            title.textContent = "🔄 Scanning… " + d.progress_current + " / " + d.progress_total;
-            detail.textContent = d.current_client ? "Currently scanning: " + d.current_client : (d.phase || "");
+            if (d.cancel_requested) {
+              title.textContent = "⏳ Cancelling…";
+              detail.textContent = "Finishing current client (" + (d.current_client || "…") + ") then stopping.";
+            } else {
+              title.textContent = "🔄 Scanning… " + d.progress_current + " / " + d.progress_total;
+              detail.textContent = d.current_client ? "Currently scanning: " + d.current_client : (d.phase || "");
+            }
           } else {
             // Done!
             clearInterval(scanPollInterval);
             scanPollInterval = null;
             bar.style.width = "100%";
+            document.getElementById("scan-cancel-wrap").style.display = "none";
             renderScanComplete(d);
           }
         } catch (e) {
@@ -637,11 +677,16 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       const detail = document.getElementById("scan-status-detail");
       const results = document.getElementById("scan-results");
       const closeWrap = document.getElementById("scan-close-wrap");
-
-      title.textContent = d.error ? "⚠️ Scan finished with errors" : "✅ Scan complete";
-      detail.textContent = "";
-
       const res = d.results || {};
+
+      if (res.cancelled) {
+        title.textContent = "🛑 Scan Cancelled";
+      } else if (d.error) {
+        title.textContent = "⚠️ Scan finished with errors";
+      } else {
+        title.textContent = "✅ Scan complete";
+      }
+      detail.textContent = "";
       let html = '<div style="background:#f8f8f8; padding:14px; border-radius:6px; margin-bottom:10px;">';
       html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:13px;">';
       html += '<div><b>Clients scanned:</b> ' + (res.scanned || 0) + ' / ' + (res.total_clients || 0) + '</div>';
@@ -704,8 +749,10 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
         if (d.ok && d.exists && d.running) {
           // Auto-open modal and start polling
           document.getElementById("scan-modal").style.display = "flex";
+          document.getElementById("scan-cancel-wrap").style.display = "block";
           document.getElementById("scan-notices-btn").disabled = true;
           document.getElementById("scan-notices-btn").textContent = "🔄 Scanning…";
+          window.currentScanId = d.scan_id;
           pollScanStatus(d.scan_id);
         }
       } catch {}
