@@ -496,6 +496,62 @@ app.get("/version", (req, res) => {
 });
 
 // ── Triage Dashboard ─────────────────────────────────────
+// ── Zara SPA tabs wrapped in the main admin chrome ─────
+// Loads /admin/?embed=1#tab in an iframe so the outer sidebar stays visible.
+// This lets JJ browse Intakes, Messages, Prompt, Research, etc. without leaving
+// the unified navigation.
+app.get("/admin/panel/:tab", async (req, res) => {
+  try {
+    const { tab } = req.params;
+    const validTabs = {
+      dashboard:  "Zara Overview",
+      prompt:     "System Prompt",
+      intakes:    "Intakes",
+      messages:   "Messages",
+      compliance: "Compliance",
+      analytics:  "Analytics",
+      research:   "Legal Research",
+      pipeline:   "Pipeline",
+      conflicts:  "Conflicts",
+      questions:  "Questions",
+      audit:      "Audit",
+      post:       "Post Creator",
+      scores:     "Conversation Scores",
+      sol:        "SoL Deadlines",
+      drip:       "Drip Campaigns",
+    };
+    if (!validTabs[tab]) return res.redirect("/admin/dashboard");
+
+    const hearingNotes = require("./hearing-notes");
+    res.send(hearingNotes.renderAdminChrome({
+      title: validTabs[tab],
+      activeItem: null,
+      body: `
+        <div style="margin:-28px -32px -40px 0; padding:0; min-height:calc(100vh - 0px);">
+          <iframe
+            src="/admin/?embed=1#${tab}"
+            id="zara-embed"
+            style="width:100%; min-height:calc(100vh - 8px); height:calc(100vh - 8px); border:0; display:block; background:white; border-radius:8px 0 0 0;"
+            allow="clipboard-read; clipboard-write"
+          ></iframe>
+        </div>
+        <script>
+          // Keep iframe height synced to viewport
+          function resizeEmbed() {
+            const f = document.getElementById('zara-embed');
+            if (f) f.style.height = (window.innerHeight - 8) + 'px';
+          }
+          window.addEventListener('resize', resizeEmbed);
+          resizeEmbed();
+        </script>
+      `,
+    }));
+  } catch (err) {
+    console.error("[/admin/panel]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 app.get("/admin/dashboard", async (req, res) => {
   try {
     const dashboard = require("./dashboard");
