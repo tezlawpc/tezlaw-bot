@@ -249,12 +249,13 @@ async function getSystemHealth() {
   };
   try {
     const b = await db.query(
-      `SELECT started_at, running, error FROM backup_status
-       ORDER BY started_at DESC LIMIT 1`
+      `SELECT started_at, running, phase, last_result FROM backup_status WHERE id = 1`
     );
     if (b.rows[0]) {
-      health.last_backup = b.rows[0].started_at;
-      health.last_backup_status = b.rows[0].running ? "running" : (b.rows[0].error ? "error" : "ok");
+      const row = b.rows[0];
+      health.last_backup = row.started_at;
+      const errored = row.last_result && row.last_result.error;
+      health.last_backup_status = row.running ? "running" : (errored ? "error" : "ok");
     }
   } catch {}
   try {
@@ -787,10 +788,10 @@ function renderDashboard(data) {
     <!-- Top-line stats: color-coded urgency -->
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
       ${statCard("Upcoming Hearings", upcoming.length, `${clientStats.master_clients + clientStats.indiv_clients} total clients`, brand.gold, "/admin/calendar")}
-      ${statCard("New Intakes (7d)", intakeStats.this_week, `${intakeStats.urgent_this_week} urgent · ${intakeStats.unreviewed_this_week} unreviewed`, intakeStats.urgent_this_week ? "#c62828" : "#0061FF", "/admin/intakes")}
+      ${statCard("New Intakes (7d)", intakeStats.this_week, `${intakeStats.urgent_this_week} urgent · ${intakeStats.unreviewed_this_week} unreviewed`, intakeStats.urgent_this_week ? "#c62828" : "#0061FF", "/admin/#intakes")}
       ${statCard("Motions Pending", motionStats.drafts + motionStats.reviewed, `${motionStats.past_due} past due · ${motionStats.filed_this_month} filed 30d`, motionStats.past_due ? "#c62828" : brand.gold, "/admin/motions")}
       ${statCard("Deadlines", deadlineStats.total_pending, `${deadlineStats.past_due} past due · ${deadlineStats.due_this_week} this week`, deadlineStats.past_due ? "#c62828" : "#f9a825", "/admin/deadlines")}
-      ${statCard("Unnotified Notices", unnotified.length, "Clients need to know", unnotified.length ? "#c62828" : "#2e7d32", "/admin/notices")}
+      ${statCard("Unnotified Notices", unnotified.length, "Clients need to know", unnotified.length ? "#c62828" : "#2e7d32", "/admin/calendar")}
       ${statCard("Reminders (7d)", reminderStats.sent_this_week, reminderStats.failed_this_week ? `${reminderStats.failed_this_week} failed` : "all delivered", reminderStats.failed_this_week ? "#c62828" : "#2e7d32", "/admin/reminders")}
     </div>
 
@@ -809,7 +810,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:#c62828; display:flex; justify-content:space-between; align-items:center;">
             <span>⚠️ Needs Client Notification (${unnotified.length})</span>
-            <a href="/admin/notices" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All notices →</a>
+            <a href="/admin/calendar" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All notices →</a>
           </h3>
           ${unnotifiedHtml}
         </div>
@@ -820,7 +821,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>🆕 Recent Intakes</span>
-            <a href="/admin/intakes" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/#intakes" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           ${intakeHtml}
         </div>
@@ -865,11 +866,11 @@ function renderDashboard(data) {
 
     <!-- Content stat cards -->
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
-      ${statCard("Blog Posts (30d)", postStats.this_month, `${postStats.auto_total} auto · ${postStats.manual_total} manual`, "#2e7d32", "/admin/posts")}
-      ${statCard("Active Drip Campaigns", dripStats.active, `${dripStats.sent_this_week} sent this week · ${dripStats.pending_msgs} pending`, "#0061FF", "/admin/drip")}
-      ${statCard("Research Pending", researchStats.pending_review, `${researchStats.citations_this_week} citations added 7d`, researchStats.pending_review > 0 ? "#f9a825" : "#666", "/admin/research")}
+      ${statCard("Blog Posts (30d)", postStats.this_month, `${postStats.auto_total} auto · ${postStats.manual_total} manual`, "#2e7d32", "/admin/#post")}
+      ${statCard("Active Drip Campaigns", dripStats.active, `${dripStats.sent_this_week} sent this week · ${dripStats.pending_msgs} pending`, "#0061FF", "/admin/#drip")}
+      ${statCard("Research Pending", researchStats.pending_review, `${researchStats.citations_this_week} citations added 7d`, researchStats.pending_review > 0 ? "#f9a825" : "#666", "/admin/#research")}
       ${statCard("USPTO New Matches", usptoStats.unnotified, `${usptoStats.active_watches} active watches · ${usptoStats.new_this_week} new 7d`, usptoStats.unnotified > 0 ? "#c62828" : "#666", "/admin/uspto")}
-      ${statCard("SoL Deadlines", solStats.next_30d, `${solStats.past_due} past due · ${solStats.next_90d} in 90d`, solStats.past_due > 0 ? "#c62828" : solStats.next_30d > 0 ? "#f9a825" : "#666", "/admin/sol")}
+      ${statCard("SoL Deadlines", solStats.next_30d, `${solStats.past_due} past due · ${solStats.next_90d} in 90d`, solStats.past_due > 0 ? "#c62828" : solStats.next_30d > 0 ? "#f9a825" : "#666", "/admin/#sol")}
     </div>
 
     <!-- Content detail grid -->
@@ -879,7 +880,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>✍️ Recent Blog Posts</span>
-            <a href="/admin/posts" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/#post" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           ${postsHtml}
         </div>
@@ -887,7 +888,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>🏰 Moat Update</span>
-            <a href="/admin/moat" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">History →</a>
+            <a href="/admin/#research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">History →</a>
           </h3>
           ${moatHtml}
         </div>
@@ -898,7 +899,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>💧 Drip Pipeline</span>
-            <a href="/admin/drip" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/#drip" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           ${dripHtml}
         </div>
@@ -906,7 +907,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>⚖️ SoL Deadlines</span>
-            <a href="/admin/sol" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/#sol" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           ${solHtml}
         </div>
@@ -917,7 +918,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>🔬 Research Digest</span>
-            <a href="/admin/research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/#research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           <div style="font-size:11px; color:#666; margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Pending Review</div>
           ${researchHtml}
@@ -928,7 +929,7 @@ function renderDashboard(data) {
         <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>®️ USPTO Watches</span>
-            <a href="/admin/uspto" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
+            <a href="/admin/#research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
           ${usptoHtml}
         </div>
