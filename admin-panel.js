@@ -33,8 +33,16 @@
   function showPage(name) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    document.getElementById('page-' + name).classList.add('active');
-    document.getElementById('nav-' + name).classList.add('active');
+    const pageEl = document.getElementById('page-' + name);
+    const navEl = document.getElementById('nav-' + name);
+    if (!pageEl) { console.warn('[showPage] page not found:', name); return; }
+    pageEl.classList.add('active');
+    if (navEl) navEl.classList.add('active');
+
+    // Persist to URL hash for deep-linking
+    if (window.location.hash !== '#' + name) {
+      history.replaceState(null, '', '#' + name);
+    }
 
     if (name === 'dashboard') loadDashboard();
     if (name === 'prompt') loadPrompt();
@@ -54,6 +62,23 @@
     if (name === 'research') showResearchTab('caselaw');
     if (name === 'post') loadManualPost();
   }
+
+  // Auto-open the right tab from URL hash (for deep-links from main sidebar)
+  function openTabFromHash() {
+    const hash = window.location.hash.replace('#', '').trim();
+    if (!hash) return false;
+    // Whitelist to avoid trying random hashes
+    const valid = ['dashboard','prompt','intakes','messages','compliance','analytics',
+                   'research','pipeline','conflicts','questions','audit','post','poster',
+                   'scores','sol','drip'];
+    if (valid.includes(hash)) {
+      showPage(hash);
+      return true;
+    }
+    return false;
+  }
+  window.addEventListener('DOMContentLoaded', () => setTimeout(openTabFromHash, 100));
+  window.addEventListener('hashchange', openTabFromHash);
 
   // Dashboard
   async function loadDashboard() {
@@ -1104,3 +1129,4 @@ function loadClToken() {
     if (saved) input.value = saved;
   }
 }
+
