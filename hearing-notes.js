@@ -98,11 +98,22 @@ async function initHearingNotesTables() {
 // and extracts any client/case fields it can find, PLUS narrative
 // content usable in the free-form notes section.
 
+// Max PDF/image size to send to Claude Vision. Bigger files are usually
+// full case exhibits/records, not intake documents — reject them upfront
+// so we don't burn tokens processing 40-page evidence packets.
+const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;  // 6MB
+
 async function extractDocumentFields(fileBuffer, mimeType, originalName = "") {
   // Normalize HEIC (iPhone photos) — treat as jpeg for Anthropic vision API
   let normalizedMime = mimeType;
   if (mimeType === "image/heic" || mimeType === "image/heif" || /\.(heic|heif)$/i.test(originalName)) {
     normalizedMime = "image/jpeg";  // Anthropic accepts jpeg/png/gif/webp
+  }
+  if (fileBuffer.length > MAX_UPLOAD_BYTES) {
+    throw new Error(
+      `File too large (${Math.round(fileBuffer.length / 1024 / 1024 * 10) / 10}MB > 6MB limit). ` +
+      `Split large evidence packets and upload the key pages only, or compress the PDF.`
+    );
   }
   const base64 = fileBuffer.toString("base64");
 
@@ -186,7 +197,11 @@ Rules:
   const resp = await axios.post(
     "https://api.anthropic.com/v1/messages",
     {
-      model: "claude-sonnet-4-6",
+      // Haiku 4.5 is ~5x cheaper than Sonnet and handles structured JSON extraction
+      // from single-document uploads (I-589s, NTAs, hearing notices) with equivalent
+      // accuracy. For handwritten attorney notes or unusual documents, low-confidence
+      // results are surfaced in the UI so the attorney can correct them.
+      model: ANTHROPIC_MODEL,  // = claude-haiku-4-5
       max_tokens: 2500,
       messages: [
         {
