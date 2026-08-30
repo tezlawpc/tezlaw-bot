@@ -205,6 +205,38 @@ async function savePrompt(prompt) {
 
 // ── Routes ────────────────────────────────────────────────
 
+// Zara operational panel is admin-only. Enforce the role gate for the
+// SPA-owned API routes and static assets. Other /admin/* routes defined
+// in server.js will fall through untouched (because Express only invokes
+// this middleware when adminRouter has a matching route).
+router.use((req, res, next) => {
+  // Whitelist paths that must remain reachable regardless of role:
+  //   - login/logout/setup (would-be login attempts)
+  //   - whoami (client-side auth status probe)
+  //   - health (uptime monitoring)
+  const openPaths = new Set([
+    "/login", "/logout", "/setup", "/whoami", "/whoami-early",
+    "/api/logout", "/health", "/choose",
+  ]);
+  if (openPaths.has(req.path)) return next();
+
+  // For everything else adminRouter owns (/, /api/*, /panel.js, etc.),
+  // require an authenticated admin session.
+  if (!req.user) {
+    // requireAuth hasn't run yet for this path — let downstream routes handle
+    // their own auth (e.g. /whoami returns a JSON payload).
+    return next();
+  }
+  if (req.user.r !== "admin") {
+    if (req.method === "GET") {
+      // Attorney/paralegal/viewer trying to reach SPA — bounce to dashboard
+      return res.redirect("/admin/dashboard");
+    }
+    return res.status(403).json({ ok: false, error: "Admin role required." });
+  }
+  next();
+});
+
 // Research module — mounts at /admin/api/research/*
 // Inherits admin auth via requireAuth middleware
 if (researchRouter) {
@@ -863,9 +895,7 @@ router.post("/api/migrate-wave2", requireAuth, async (req, res) => {
 
 // Main admin dashboard
 router.get("/", requireAuth, (req, res) => {
-  // Only admins should access the Zara operational panel (Intakes, Messages,
-  // Prompt, Compliance, etc.). Attorney/paralegal/viewer roles are redirected
-  // to the case-work dashboard.
+  // Zara operational panel is admin-only. Others → dashboard.
   const role = req.user?.r;
   if (role && role !== "admin") {
     return res.redirect("/admin/dashboard");
