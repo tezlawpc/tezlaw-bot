@@ -874,6 +874,8 @@ async function runScanAllNoticesAsync(scanId) {
     errors: 0,
     new_notices: 0,
     updated_notices: 0,
+    total_files_processed: 0,
+    estimated_cost_usd: 0,
     per_client: [],
     timeout_clients: [],
   };
@@ -886,7 +888,7 @@ async function runScanAllNoticesAsync(scanId) {
 
   // Per-client hard timeout to prevent one stuck client from blocking whole batch
   const PER_CLIENT_TIMEOUT_MS = 90 * 1000;  // 90 seconds each
-  const LIMIT_PER_CLIENT = 5;  // Max files scanned per client
+  const LIMIT_PER_CLIENT = 3;  // Max NEW files scanned per client per run (already-scanned ones auto-skipped)
 
   const withTimeout = (promise, ms, label) => {
     return Promise.race([
@@ -960,6 +962,8 @@ async function runScanAllNoticesAsync(scanId) {
       const updatedCount = scan.updated_notices || scan.updatedNotices || 0;
       results.new_notices += newCount;
       results.updated_notices += updatedCount;
+      results.total_files_processed += (scan.scanned || 0);
+      results.estimated_cost_usd = +(results.estimated_cost_usd + (scan.estimated_cost_usd || 0)).toFixed(4);
 
       if (newCount > 0 || updatedCount > 0) {
         results.per_client.push({
