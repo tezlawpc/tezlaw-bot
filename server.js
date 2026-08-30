@@ -1720,7 +1720,11 @@ app.get("/admin/", (req, res, next) => {
 });
 
 app.use("/admin/matters", auth.requireRole("admin"), matterManagerRouter);
-app.use("/admin", auth.requireRole("admin"), adminRouter);
+// NOTE: The role gate that used to be here has moved INSIDE adminRouter itself
+// (see admin.js). Applying requireRole("admin") on the mount blocked EVERY /admin/*
+// request from non-admins because Express runs mount middleware before route
+// matching — even routes handled by app.get() later in this file never fired.
+app.use("/admin", adminRouter);
 app.get("/admin", (req, res) => res.redirect("/admin/"));
 
 // ──────────────────────────────────────────────────────────────
