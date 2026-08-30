@@ -3441,6 +3441,52 @@ app.get("/legal/cache-stats", async (req, res) => {
 // ────────────────────────────────────────────────────────────
 //  HEALTH CHECK + START
 // ────────────────────────────────────────────────────────────
+// ── Mobile PWA ────────────────────────────────────────────
+// Optimized for iPhone/Android home-screen install.
+// Universal client search + tap-to-call detail views.
+app.get("/admin/mobile", (req, res) => {
+  const mobile = require("./mobile-app");
+  res.send(mobile.renderMobileSearchPage());
+});
+
+app.get("/admin/mobile/client/:key", async (req, res) => {
+  try {
+    const mobile = require("./mobile-app");
+    const client = await mobile.getClientDetail(req.params.key);
+    res.send(mobile.renderMobileClientPage(client));
+  } catch (err) {
+    console.error("[mobile client]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// JSON APIs — used by the mobile app, but also available for
+// future native iOS/Android app builds
+app.get("/admin/api/clients/search", async (req, res) => {
+  try {
+    const mobile = require("./mobile-app");
+    const q = req.query.q || "";
+    const limit = Math.min(parseInt(req.query.limit || "25", 10), 100);
+    const results = await mobile.searchClients(q, limit);
+    res.json({ ok: true, query: q, count: results.length, results });
+  } catch (err) {
+    console.error("[api/clients/search]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/api/clients/:key", async (req, res) => {
+  try {
+    const mobile = require("./mobile-app");
+    const client = await mobile.getClientDetail(req.params.key);
+    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    res.json({ ok: true, client });
+  } catch (err) {
+    console.error("[api/clients/:key]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/", (req, res) => res.send("Tez Law P.C. — Zara running on all channels ✅"));
 
 // ── PWA support: manifest + service worker ─────────
@@ -3451,7 +3497,7 @@ app.get("/manifest.json", (req, res) => {
     name: "Zara Admin — Tez Law P.C.",
     short_name: "Zara",
     description: "Legal case management for Tez Law P.C.",
-    start_url: "/admin/dashboard",
+    start_url: "/admin/mobile",
     scope: "/admin/",
     display: "standalone",
     orientation: "portrait-primary",
@@ -3472,10 +3518,10 @@ app.get("/manifest.json", (req, res) => {
       }
     ],
     shortcuts: [
-      { name: "Dashboard",    url: "/admin/dashboard" },
-      { name: "Calendar",     url: "/admin/calendar" },
-      { name: "Master Notes", url: "/admin/hearing/notes" },
-      { name: "Deadlines",    url: "/admin/deadlines" }
+      { name: "Search Client",  url: "/admin/mobile" },
+      { name: "Dashboard",      url: "/admin/dashboard" },
+      { name: "Calendar",       url: "/admin/calendar" },
+      { name: "Master Notes",   url: "/admin/hearing/notes" }
     ]
   });
 });
