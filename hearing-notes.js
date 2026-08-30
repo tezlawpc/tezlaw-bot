@@ -1005,7 +1005,79 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     overflow-y: auto;
     overflow-x: hidden;
     z-index: 100;
-    padding: 8px 12px 24px;
+    padding: 8px 12px 0;
+    /* Flex column so user footer can pin to bottom */
+    display: flex;
+    flex-direction: column;
+  }
+  .sidebar > nav { flex: 1; }
+
+  /* ── User footer at bottom of sidebar ── */
+  .sidebar-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    margin: 8px -4px 0;
+    border-top: 1px solid var(--divider);
+    position: sticky;
+    bottom: 0;
+    background: var(--sidebar-bg);
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0));
+  }
+  .user-avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--brand-gold);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .user-info {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .user-name {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+  .user-role {
+    color: var(--section-header);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .user-logout {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,.12);
+    color: rgba(255,255,255,.5);
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 15px;
+    padding: 0;
+    transition: all .15s;
+    flex-shrink: 0;
+  }
+  .user-logout:hover {
+    background: rgba(255,60,60,.15);
+    color: #ff8080;
+    border-color: rgba(255,80,80,.4);
   }
   .sidebar::-webkit-scrollbar { width: 4px; }
   .sidebar::-webkit-scrollbar-track { background: transparent; }
@@ -1161,7 +1233,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   @media (max-width: 768px) {
     .sidebar {
       width: var(--sidebar-width-mobile);
-      padding: 4px 4px 12px;
+      padding: 4px 4px 0;
     }
     .sidebar-brand {
       justify-content: center;
@@ -1191,6 +1263,15 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       padding: 16px 12px 24px;
     }
     .page-header h1 { font-size: 20px; }
+
+    /* Mobile: user footer collapses to just avatar */
+    .sidebar-user {
+      padding: 8px 4px;
+      justify-content: center;
+      gap: 0;
+    }
+    .user-info, .user-logout { display: none; }
+    .user-avatar { width: 30px; height: 30px; font-size: 12px; }
   }
 
   /* Form/table shared styles (kept from original) */
@@ -1372,27 +1453,42 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
     </div>
   </nav>
+
+  <!-- ── User footer (pinned to bottom of sidebar) ── -->
+  <div class="sidebar-user" id="sidebar-user" style="display:none;">
+    <div class="user-avatar" id="user-avatar">?</div>
+    <div class="user-info">
+      <div class="user-name" id="user-name">…</div>
+      <div class="user-role" id="user-role"></div>
+    </div>
+    <form method="POST" action="/admin/logout" style="margin:0;">
+      <button type="submit" class="user-logout" title="Log out" aria-label="Log out">↪</button>
+    </form>
+  </div>
 </aside>
 
 <div class="main">
-  <div id="auth-user-chip" style="position:fixed; top:16px; right:24px; font-size:12px; color:#555; background:white; padding:8px 14px; border-radius:24px; box-shadow:0 2px 10px rgba(0,0,0,.08); z-index:100; display:flex; align-items:center; gap:10px;">
-    <span id="auth-user-name" style="color:#0C1C36; font-weight:600;">…</span>
-    <span id="auth-user-role" style="background:#666; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;"></span>
-    <form method="POST" action="/admin/logout" style="display:inline; margin:0;">
-      <button type="submit" style="background:none; border:none; color:#c00; font-size:11px; cursor:pointer; padding:0; text-decoration:underline;">Logout</button>
-    </form>
-  </div>
   <script>
     fetch("/admin/whoami").then(r => r.json()).then(d => {
-      if (!d.authenticated) {
-        document.getElementById("auth-user-chip").style.display = "none";
-        return;
+      if (!d.authenticated) return;
+      const footer = document.getElementById("sidebar-user");
+      const avatar = document.getElementById("user-avatar");
+      const nameEl = document.getElementById("user-name");
+      const roleEl = document.getElementById("user-role");
+      if (footer) footer.style.display = "flex";
+      const displayName = d.name || d.username || "User";
+      if (nameEl) nameEl.textContent = displayName;
+      if (roleEl) roleEl.textContent = d.role_label || d.role || "";
+      if (avatar) {
+        // Initials from name (first letter of first two words, or first two letters)
+        const parts = displayName.trim().split(/\s+/);
+        const initials = parts.length >= 2
+          ? (parts[0][0] + parts[1][0]).toUpperCase()
+          : displayName.substring(0, 2).toUpperCase();
+        avatar.textContent = initials;
+        if (d.role_color) avatar.style.background = d.role_color;
       }
-      document.getElementById("auth-user-name").textContent = d.name || d.username;
-      const roleEl = document.getElementById("auth-user-role");
-      roleEl.textContent = d.role_label || d.role;
-      roleEl.style.background = d.role_color || "#666";
-      // Sidebar brand role label reflects logged-in user role
+      // Also update sidebar brand role tagline
       const brandRole = document.getElementById("brand-role");
       if (brandRole) brandRole.textContent = d.role_label || d.role || "Admin Panel";
       // Hide sidebar items the user's role can't access
@@ -1406,7 +1502,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
         const visibleLinks = Array.from(links).filter(l => l.style.display !== "none");
         if (visibleLinks.length === 0) section.style.display = "none";
       });
-    }).catch(() => document.getElementById("auth-user-chip").style.display = "none");
+    }).catch(() => {});
 
     // Register PWA service worker for iOS/Android home screen install
     if ('serviceWorker' in navigator) {
