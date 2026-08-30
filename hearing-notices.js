@@ -70,6 +70,29 @@ async function initTable() {
       updated_at            TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // Global scan state (key-value). Tracks last_full_scan_completed_at — daily
+  // scans use this as an authoritative floor: any file uploaded before this
+  // timestamp was already checked during the full scan, so no need to re-look.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS notice_scan_settings (
+      key    TEXT PRIMARY KEY,
+      value  TEXT,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+}
+
+// Get / set global scan settings (simple key-value)
+async function getScanSetting(key) {
+  const r = await db.query(`SELECT value FROM notice_scan_settings WHERE key = $1`, [key]);
+  return r.rows[0]?.value || null;
+}
+async function setScanSetting(key, value) {
+  await db.query(
+    `INSERT INTO notice_scan_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    [key, String(value)]
+  );
 }
 
 // ── Fetch file from Dropbox ──────────────────────────────
@@ -225,27 +248,31 @@ async function scanClientFolder({ clientKey, clientName, aNumber, dropboxFolderP
   const maxSizeThisMode = mode === "daily" ? 1024 * 1024 : MAX_SCAN_FILE_BYTES;
 
   // ── DELTA CHECK (daily mode only) ─────────────────────────
-  // Look up when we last scanned this client. If NO file matching our filter
-  // has been modified since then, skip the client entirely (0 Claude calls).
+  // Two-layer cutoff:
+  //   1. Global floor: last_full_scan_completed_at (all files present during the
+  //      last full scan were already checked, so we can safely ignore them).
+  //   2. Per-client watermark: last_max_modified from prior daily scans.
+  // A file is only worth scanning if server_modified > MAX(floor, watermark).
   let deltaSkipped = false;
   if (mode === "daily") {
-    const stateRes = await db.query(
-      `SELECT last_max_modified FROM client_scan_state WHERE client_key = $1`,
-      [clientKey]
-    );
-    const lastMaxModified = stateRes.rows[0]?.last_max_modified
+    const [stateRes, floorStr] = await Promise.all([
+      db.query(`SELECT last_max_modified FROM client_scan_state WHERE client_key = $1`, [clientKey]),
+      getScanSetting("last_full_scan_completed_at"),
+    ]);
+    const perClientCutoff = stateRes.rows[0]?.last_max_modified
       ? new Date(stateRes.rows[0].last_max_modified).getTime()
       : 0;
+    const globalFloor = floorStr ? new Date(floorStr).getTime() : 0;
+    const effectiveCutoff = Math.max(perClientCutoff, globalFloor);
 
-    if (lastMaxModified > 0) {
-      // Any candidate file newer than last scan?
+    if (effectiveCutoff > 0) {
+      // Any candidate file newer than the effective cutoff?
       const newestCandidate = entries
         .filter(e => e[".tag"] === "file" && filterFn(e.name))
         .reduce((max, e) => Math.max(max, new Date(e.server_modified).getTime()), 0);
 
-      if (newestCandidate <= lastMaxModified) {
+      if (newestCandidate <= effectiveCutoff) {
         deltaSkipped = true;
-        // Update just the last_scanned_at so we know we checked (even though skipped)
         await db.query(
           `INSERT INTO client_scan_state (client_key, dropbox_folder_path, last_scanned_at, updated_at)
            VALUES ($1, $2, NOW(), NOW())
@@ -261,9 +288,25 @@ async function scanClientFolder({ clientKey, clientName, aNumber, dropboxFolderP
     }
   }
 
+  // Get the effective cutoff again (or 0 for full mode) so we filter files below.
+  let hardCutoffMs = 0;
+  if (mode === "daily") {
+    const [stateRes, floorStr] = await Promise.all([
+      db.query(`SELECT last_max_modified FROM client_scan_state WHERE client_key = $1`, [clientKey]),
+      getScanSetting("last_full_scan_completed_at"),
+    ]);
+    const perClientCutoff = stateRes.rows[0]?.last_max_modified
+      ? new Date(stateRes.rows[0].last_max_modified).getTime()
+      : 0;
+    const globalFloor = floorStr ? new Date(floorStr).getTime() : 0;
+    hardCutoffMs = Math.max(perClientCutoff, globalFloor);
+  }
+
   const files = entries
     .filter(e => e[".tag"] === "file" && filterFn(e.name))
     .filter(e => mode !== "daily" || new Date(e.server_modified).getTime() >= cutoffMs)
+    // Delta floor: skip files uploaded before the last full scan or watermark
+    .filter(e => !hardCutoffMs || new Date(e.server_modified).getTime() > hardCutoffMs)
     .filter(e => !e.size || e.size <= maxSizeThisMode)
     .sort((a, b) => new Date(b.server_modified).getTime() - new Date(a.server_modified).getTime())  // newest first
     .slice(0, limit);
@@ -508,4 +551,6 @@ module.exports = {
   dismissPastNotices,
   buildNotificationMessage,
   buildContactLinks,
+  getScanSetting,
+  setScanSetting,
 };
