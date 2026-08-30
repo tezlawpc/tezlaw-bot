@@ -1097,10 +1097,12 @@ app.get("/admin/calendar", async (req, res) => {
       fromDate = new Date(y, m - 1, 1).toISOString();
       toDate = new Date(y, m, 1).toISOString();
     } else {
-      // List view: default to 30 days back, 90 days forward
+      // List view: default to TODAY (00:00 local) forward 90 days.
+      // If the user explicitly passes ?from=YYYY-MM-DD they can look at past hearings.
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
       fromDate = req.query.from
         ? new Date(req.query.from).toISOString()
-        : new Date(now.getTime() - 30 * 86400000).toISOString();
+        : startOfToday.toISOString();
       toDate = req.query.to
         ? new Date(req.query.to + "T23:59:59").toISOString()
         : new Date(now.getTime() + 90 * 86400000).toISOString();
