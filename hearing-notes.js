@@ -1338,10 +1338,10 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/deadlines" class="nav-link ${isActive('deadlines')}" data-perm="hearings.read">
         <span class="nav-icon">◔</span><span class="nav-label">Deadlines</span>
       </a>
-      <a href="/admin/panel/analytics" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/analytics" class="nav-link" data-perm="analytics.read">
         <span class="nav-icon">◵</span><span class="nav-label">Analytics</span>
       </a>
-      <a href="/admin/mobile" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/mobile" class="nav-link" data-perm="mobile.search">
         <span class="nav-icon">▢</span><span class="nav-label">Mobile Search</span>
       </a>
     </div>
@@ -1357,7 +1357,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/hearing/individual" class="nav-link ${isActive('individual')}" data-perm="hearings.read">
         <span class="nav-icon">◈</span><span class="nav-label">Individual Notes</span>
       </a>
-      <a href="/admin/motions" class="nav-link ${isActive('motions')}" data-perm="hearings.read">
+      <a href="/admin/motions" class="nav-link ${isActive('motions')}" data-perm="motions.read">
         <span class="nav-icon">§</span><span class="nav-label">Court Motions</span>
       </a>
       <a href="/admin/hearing/history" class="nav-link ${isActive('history')}" data-perm="hearings.read">
@@ -1370,22 +1370,22 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <div class="nav-section-header">
         <span>Intake & Pipeline</span>
       </div>
-      <a href="/admin/panel/intakes" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/intakes" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◊</span><span class="nav-label">Intakes</span>
       </a>
-      <a href="/admin/panel/messages" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/messages" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◨</span><span class="nav-label">Messages</span>
       </a>
-      <a href="/admin/panel/pipeline" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/pipeline" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◪</span><span class="nav-label">Pipeline</span>
       </a>
-      <a href="/admin/panel/drip" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/drip" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◍</span><span class="nav-label">Drip Campaigns</span>
       </a>
-      <a href="/admin/panel/conflicts" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/conflicts" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◆</span><span class="nav-label">Conflicts</span>
       </a>
-      <a href="/admin/panel/sol" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/sol" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◒</span><span class="nav-label">SoL Deadlines</span>
       </a>
     </div>
@@ -1395,16 +1395,16 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <div class="nav-section-header">
         <span>Research & Content</span>
       </div>
-      <a href="/admin/panel/research" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/research" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◇</span><span class="nav-label">Legal Research</span>
       </a>
-      <a href="/admin/panel/post" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/post" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">▤</span><span class="nav-label">Post Creator</span>
       </a>
-      <a href="/admin/panel/questions" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/questions" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◌</span><span class="nav-label">Questions</span>
       </a>
-      <a href="/admin/panel/scores" class="nav-link" data-perm="hearings.read">
+      <a href="/admin/panel/scores" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◙</span><span class="nav-label">Conv Scores</span>
       </a>
     </div>
@@ -1414,7 +1414,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <div class="nav-section-header">
         <span>Integrations</span>
       </div>
-      <a href="/admin/outlook-sync" class="nav-link ${isActive('outlook')}" data-perm="hearings.read">
+      <a href="/admin/outlook-sync" class="nav-link ${isActive('outlook')}" data-perm="outlook.setup">
         <span class="nav-icon">◆</span><span class="nav-label">Outlook Sync</span>
       </a>
       <a href="/admin/dropbox/setup" class="nav-link ${isActive('dropbox')}" data-perm="dropbox.setup">
