@@ -57,6 +57,19 @@ async function initTable() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_hearing_notices_dedup
       ON client_hearing_notices (client_key, dropbox_path, dropbox_hash)
   `);
+  // Per-client scan-state tracking — lets daily scans skip clients whose folders
+  // haven't changed since last scan (huge cost saving)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS client_scan_state (
+      client_key            TEXT PRIMARY KEY,
+      dropbox_folder_path   TEXT,
+      last_scanned_at       TIMESTAMPTZ,
+      last_max_modified     TIMESTAMPTZ,
+      files_scanned_last    INTEGER DEFAULT 0,
+      notices_found_last    INTEGER DEFAULT 0,
+      updated_at            TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 }
 
 // ── Fetch file from Dropbox ──────────────────────────────
@@ -211,6 +224,43 @@ async function scanClientFolder({ clientKey, clientName, aNumber, dropboxFolderP
   // Big PDFs in a recent-files window are almost always exhibits or motions.
   const maxSizeThisMode = mode === "daily" ? 1024 * 1024 : MAX_SCAN_FILE_BYTES;
 
+  // ── DELTA CHECK (daily mode only) ─────────────────────────
+  // Look up when we last scanned this client. If NO file matching our filter
+  // has been modified since then, skip the client entirely (0 Claude calls).
+  let deltaSkipped = false;
+  if (mode === "daily") {
+    const stateRes = await db.query(
+      `SELECT last_max_modified FROM client_scan_state WHERE client_key = $1`,
+      [clientKey]
+    );
+    const lastMaxModified = stateRes.rows[0]?.last_max_modified
+      ? new Date(stateRes.rows[0].last_max_modified).getTime()
+      : 0;
+
+    if (lastMaxModified > 0) {
+      // Any candidate file newer than last scan?
+      const newestCandidate = entries
+        .filter(e => e[".tag"] === "file" && filterFn(e.name))
+        .reduce((max, e) => Math.max(max, new Date(e.server_modified).getTime()), 0);
+
+      if (newestCandidate <= lastMaxModified) {
+        deltaSkipped = true;
+        // Update just the last_scanned_at so we know we checked (even though skipped)
+        await db.query(
+          `INSERT INTO client_scan_state (client_key, dropbox_folder_path, last_scanned_at, updated_at)
+           VALUES ($1, $2, NOW(), NOW())
+           ON CONFLICT (client_key) DO UPDATE SET last_scanned_at = NOW(), updated_at = NOW()`,
+          [clientKey, dropboxFolderPath]
+        );
+        return {
+          scanned: 0, skipped: 0, notices: [], errors: [],
+          total_candidates: 0, estimated_cost_usd: 0,
+          delta_skipped: true,
+        };
+      }
+    }
+  }
+
   const files = entries
     .filter(e => e[".tag"] === "file" && filterFn(e.name))
     .filter(e => mode !== "daily" || new Date(e.server_modified).getTime() >= cutoffMs)
@@ -288,7 +338,34 @@ async function scanClientFolder({ clientKey, clientName, aNumber, dropboxFolderP
   // Average ≈ $0.0035/file. Actual costs will vary based on PDF page count.
   const estimatedCostUsd = +(scanned * 0.0035).toFixed(4);
 
-  return { scanned, skipped, notices, errors, total_candidates: files.length, estimated_cost_usd: estimatedCostUsd };
+  // Record scan state so next daily run can skip this client if nothing changed.
+  // Track the highest server_modified we saw among candidate files — this is
+  // our watermark for delta detection.
+  try {
+    const candidateMaxModified = entries
+      .filter(e => e[".tag"] === "file" && filterFn(e.name))
+      .reduce((max, e) => Math.max(max, new Date(e.server_modified).getTime()), 0);
+    if (candidateMaxModified > 0) {
+      await db.query(
+        `INSERT INTO client_scan_state
+           (client_key, dropbox_folder_path, last_scanned_at, last_max_modified,
+            files_scanned_last, notices_found_last, updated_at)
+         VALUES ($1, $2, NOW(), $3, $4, $5, NOW())
+         ON CONFLICT (client_key) DO UPDATE SET
+           dropbox_folder_path = EXCLUDED.dropbox_folder_path,
+           last_scanned_at = NOW(),
+           last_max_modified = GREATEST(client_scan_state.last_max_modified, EXCLUDED.last_max_modified),
+           files_scanned_last = EXCLUDED.files_scanned_last,
+           notices_found_last = EXCLUDED.notices_found_last,
+           updated_at = NOW()`,
+        [clientKey, dropboxFolderPath, new Date(candidateMaxModified).toISOString(), scanned, notices.length]
+      );
+    }
+  } catch (stateErr) {
+    console.warn(`[scan-state] ${clientKey}: ${stateErr.message}`);
+  }
+
+  return { scanned, skipped, notices, errors, total_candidates: files.length, estimated_cost_usd: estimatedCostUsd, delta_skipped: false };
 }
 
 // ── Retrieval ────────────────────────────────────────────
