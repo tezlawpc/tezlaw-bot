@@ -693,6 +693,8 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       html += '<div><b>Skipped (no folder):</b> ' + (res.skipped_no_folder || 0) + '</div>';
       html += '<div style="color:' + ((res.new_notices || 0) > 0 ? '#2e7d32' : '#666') + ';"><b>New notices found:</b> ' + (res.new_notices || 0) + '</div>';
       html += '<div style="color:#0061FF;"><b>Updated notices:</b> ' + (res.updated_notices || 0) + '</div>';
+      html += '<div style="color:#666;"><b>Files processed:</b> ' + (res.total_files_processed || 0) + '</div>';
+      html += '<div style="color:#2e7d32;"><b>Est. cost:</b> $' + (res.estimated_cost_usd || 0).toFixed(2) + '</div>';
       if ((res.errors || 0) > 0) html += '<div style="color:#c62828;"><b>Errors:</b> ' + res.errors + '</div>';
       if ((res.timeout_clients || []).length > 0) html += '<div style="color:#f9a825; grid-column:1/-1; font-size:11px;"><b>⏱ Timed out:</b> ' + res.timeout_clients.join(", ") + '</div>';
       html += '</div></div>';
