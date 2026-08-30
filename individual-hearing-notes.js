@@ -31,8 +31,14 @@ const XLSX = require("xlsx");
 const hearingNotes = require("./hearing-notes");
 
 const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
-const EXTRACT_MODEL   = "claude-sonnet-4-6";  // used for PDF extraction (needs vision reasoning)
-const TEXT_EXTRACT_MODEL = "claude-haiku-4-5-20251001";  // 5-10x faster for text-only extraction from Word/txt
+// Both PDF and text extraction now use Haiku 4.5. It's ~5x cheaper than Sonnet
+// and handles structured JSON extraction fine. If accuracy issues surface on
+// specific unusual documents, we can add per-call opt-in to Sonnet.
+const EXTRACT_MODEL      = "claude-haiku-4-5-20251001";
+const TEXT_EXTRACT_MODEL = "claude-haiku-4-5-20251001";
+
+// Max file size for individual hearing note upload
+const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;  // 6MB
 
 // ── Schema ───────────────────────────────────────────────
 
@@ -192,6 +198,13 @@ function findCol(headers, keywords) {
 // Accept PDF or plain text, ask Claude to extract structured
 // examination Q&A pairs, witness list, and closing argument.
 async function extractHearingSummary({ pdfBuffer, textContent, mimeType, filename = "summary" }) {
+  // Reject oversized files upfront - large merits packets should be split
+  if (pdfBuffer && pdfBuffer.length > MAX_UPLOAD_BYTES) {
+    throw new Error(
+      `File too large (${Math.round(pdfBuffer.length / 1024 / 1024 * 10) / 10}MB > 6MB limit). ` +
+      `Merits hearing summaries should be under 6MB. Split into witness-testimony half + closing-argument half.`
+    );
+  }
   const prompt = `You are analyzing an immigration attorney's hearing summary / prep outline for an individual (merits) hearing. The document may contain:
 - Case caption (client name, A-Number, court, judge, hearing date at the top)
 - Notes about the case background
