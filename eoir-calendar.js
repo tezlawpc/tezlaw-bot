@@ -104,6 +104,7 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
 
   // ──────────────────────────────────────────────
   // Query 3: client_hearing_notices (Dropbox extractions)
+  // Only NON-dismissed, actually-a-hearing-notice ones.
   // ──────────────────────────────────────────────
   const q3 = `
     SELECT 'hearing_notice' as source, id::text as source_id,
@@ -114,6 +115,8 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
     FROM client_hearing_notices
     ${buildWhere(
       "hearing_date IS NOT NULL",
+      "is_hearing_notice = TRUE",
+      "dismissed_at IS NULL",
       dateRange("hearing_date"),
       clientFilter("client_name", "a_number")
     )}
