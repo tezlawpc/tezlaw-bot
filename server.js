@@ -993,6 +993,16 @@ async function runScanAllNoticesAsync(scanId) {
     results,
   });
 
+  // Record the full-scan completion timestamp. Daily scans use this as a
+  // hard floor — any file uploaded before this was already checked, so it
+  // will never be re-scanned by a daily job.
+  try {
+    const hn = require("./hearing-notices");
+    await hn.setScanSetting("last_full_scan_completed_at", new Date().toISOString());
+  } catch (e) {
+    console.warn("[scan-all-notices] failed to record completion timestamp:", e.message);
+  }
+
   console.log(`[scan-all-notices] Complete: ${results.scanned}/${total} scanned, ${results.new_notices} new notices, ${results.errors} errors`);
 }
 
@@ -1075,6 +1085,32 @@ app.post("/admin/calendar/cleanup-past", async (req, res) => {
     res.json({ ok: true, dismissed_count: result.dismissed_count, dismissed: result.dismissed.slice(0, 20) });
   } catch (err) {
     console.error("[cleanup-past]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Set the "last full scan completed" watermark to NOW. Useful for seeding daily
+// scans so they don't re-scan every file on their first run before a real full
+// scan has been done.
+app.post("/admin/calendar/scan-floor/seed-now", async (req, res) => {
+  try {
+    const hn = require("./hearing-notices");
+    const iso = new Date().toISOString();
+    await hn.setScanSetting("last_full_scan_completed_at", iso);
+    res.json({ ok: true, last_full_scan_completed_at: iso });
+  } catch (err) {
+    console.error("[scan-floor seed]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Read the current scan floor value
+app.get("/admin/calendar/scan-floor", async (req, res) => {
+  try {
+    const hn = require("./hearing-notices");
+    const value = await hn.getScanSetting("last_full_scan_completed_at");
+    res.json({ ok: true, last_full_scan_completed_at: value });
+  } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
