@@ -6346,7 +6346,11 @@ app.listen(PORT, async () => {
       }
 
       // Step 2: incremental Dropbox scan in "daily" mode
-      // Only files modified in last 7 days, strict filename filter → far fewer Claude Vision calls
+      // - Only files modified in last 2 days (was 7 days)
+      // - Strict filename filter → skips retainers/receipts/etc
+      // - Delta check: clients whose folders haven't changed since last scan cost $0
+      // - Max 2 files per client per day
+      // Typical run: ~90% of clients skipped due to no changes, ~5-15 files sent to Claude.
       try {
         const cp = require("./client-profiles");
         const dbx = require("./dropbox-integration");
@@ -6356,6 +6360,9 @@ app.listen(PORT, async () => {
         let scannedFiles = 0;
         let newNotices = 0;
         let clientsScanned = 0;
+        let clientsSkippedDelta = 0;
+        let clientsSkippedNoFolder = 0;
+        let totalCost = 0;
 
         // Serial to respect rate limits & avoid runaway spend if something goes wrong
         for (const client of clients) {
@@ -6366,7 +6373,10 @@ app.listen(PORT, async () => {
               }),
               new Promise(r => setTimeout(() => r(null), 8000)),  // 8s timeout on folder resolve
             ]).catch(() => null);
-            if (!folder) continue;
+            if (!folder) {
+              clientsSkippedNoFolder++;
+              continue;
+            }
 
             const scan = await Promise.race([
               hn.scanClientFolder({
@@ -6375,22 +6385,32 @@ app.listen(PORT, async () => {
                 aNumber: client.a_number,
                 dropboxFolderPath: folder,
                 mode: "daily",
-                daysBack: 7,
-                limit: 3,  // Small cap — daily scan should be cheap
+                daysBack: 2,   // Only very recent additions (was 7)
+                limit: 2,      // Max NEW files per client (was 3)
               }),
-              new Promise(r => setTimeout(() => r({ error: "timeout" }), 30000)),  // 30s per client
+              new Promise(r => setTimeout(() => r({ error: "timeout" }), 30000)),
             ]).catch((e) => ({ error: e.message }));
 
+            if (scan.delta_skipped) {
+              clientsSkippedDelta++;
+              continue;
+            }
             if (!scan.error) {
               clientsScanned++;
               scannedFiles += scan.scanned || 0;
-              newNotices += scan.new_notices || scan.newNotices || 0;
+              newNotices += scan.new_notices || scan.newNotices || (scan.notices || []).length || 0;
+              totalCost += scan.estimated_cost_usd || 0;
             }
           } catch (e) {
             console.warn(`[daily-calendar-refresh] ${client.client_name}: ${e.message}`);
           }
         }
-        console.log(`✅ [daily-calendar-refresh] Complete: ${clientsScanned}/${clients.length} clients, ${scannedFiles} files sent to Claude, ${newNotices} new notices found`);
+        console.log(
+          `✅ [daily-calendar-refresh] Complete: ` +
+          `${clientsScanned} scanned / ${clientsSkippedDelta} skipped (no changes) / ${clientsSkippedNoFolder} skipped (no folder) / ${clients.length} total. ` +
+          `${scannedFiles} files sent to Claude, ${newNotices} new notices found. ` +
+          `Est. cost: $${totalCost.toFixed(4)}`
+        );
       } catch (e) {
         console.error("[daily-calendar-refresh] scan error:", e.message);
       }
