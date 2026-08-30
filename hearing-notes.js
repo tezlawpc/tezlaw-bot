@@ -1245,6 +1245,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/panel/analytics" class="nav-link" data-perm="hearings.read">
         <span class="nav-icon">◵</span><span class="nav-label">Analytics</span>
       </a>
+      <a href="/admin/mobile" class="nav-link" data-perm="hearings.read">
+        <span class="nav-icon">▢</span><span class="nav-label">Mobile Search</span>
+      </a>
     </div>
 
     <!-- ── Hearings ── -->
