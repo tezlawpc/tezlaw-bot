@@ -88,10 +88,30 @@ const PERMISSIONS = {
   // Dropbox files — download for all authed, upload/delete for staff
   "dropbox.files.write":  ["admin", "attorney", "paralegal"],
   "dropbox.files.read":   ["admin", "attorney", "paralegal", "viewer"],
+  // Configuring the Dropbox integration itself (auth tokens, folder scan) — admin
+  "dropbox.setup":        ["admin"],
 
   // Hearing notices — everyone can view + send
   "notices.send":         ["admin", "attorney", "paralegal"],
   "notices.read":         ["admin", "attorney", "paralegal", "viewer"],
+
+  // Integration configuration — admin only
+  "outlook.setup":        ["admin"],
+
+  // Motions — attorneys draft and file, paralegals prepare, viewers read only
+  "motions.write":        ["admin", "attorney", "paralegal"],
+  "motions.read":         ["admin", "attorney", "paralegal", "viewer"],
+
+  // Calendar + deadlines — everyone reads, staff can edit
+  "calendar.read":        ["admin", "attorney", "paralegal", "viewer"],
+  "deadlines.read":       ["admin", "attorney", "paralegal", "viewer"],
+  "deadlines.write":      ["admin", "attorney", "paralegal"],
+
+  // Analytics / reports — admin only (may include revenue, cost data)
+  "analytics.read":       ["admin"],
+
+  // Mobile PWA search — same as clients.read
+  "mobile.search":        ["admin", "attorney", "paralegal", "viewer"],
 };
 
 function hasPermission(user, permKey) {
