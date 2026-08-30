@@ -502,6 +502,29 @@ app.get("/version", (req, res) => {
 // the unified navigation.
 app.get("/admin/panel/:tab", async (req, res) => {
   try {
+    // Only admin role can see Zara operational tabs. Others → dashboard.
+    if (!req.user) return res.redirect("/admin/login?next=" + encodeURIComponent(req.originalUrl));
+    if (req.user.r !== "admin") {
+      const hearingNotes = require("./hearing-notes");
+      return res.status(403).send(hearingNotes.renderAdminChrome({
+        title: "Access Denied",
+        activeItem: null,
+        body: `
+          <div class="page-header"><h1 style="color:#c00;">🔒 Not Available</h1></div>
+          <div style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:520px;">
+            <p style="margin-bottom:16px; font-size:14px; line-height:1.5;">
+              This section is only available to Admin users. Your role
+              (<strong>${req.user.r}</strong>) doesn't have access.
+            </p>
+            <p style="margin-bottom:20px; font-size:13px; color:#666;">
+              If you think this is wrong, ask JJ to update your role via
+              <a href="/admin/users" style="color:#B79C62;">Admin Users</a>.
+            </p>
+            <a href="/admin/dashboard" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px;">← Dashboard</a>
+          </div>`,
+      }));
+    }
+
     const { tab } = req.params;
     const validTabs = {
       dashboard:  "Zara Overview",
