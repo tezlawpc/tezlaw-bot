@@ -863,6 +863,13 @@ router.post("/api/migrate-wave2", requireAuth, async (req, res) => {
 
 // Main admin dashboard
 router.get("/", requireAuth, (req, res) => {
+  // Only admins should access the Zara operational panel (Intakes, Messages,
+  // Prompt, Compliance, etc.). Attorney/paralegal/viewer roles are redirected
+  // to the case-work dashboard.
+  const role = req.user?.r;
+  if (role && role !== "admin") {
+    return res.redirect("/admin/dashboard");
+  }
   res.send(dashboardHtml());
 });
 
