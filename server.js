@@ -630,6 +630,247 @@ app.post("/admin/pi/case/:id/disbursement", async (req, res) => {
   }
 });
 
+// ── Accounting Module ────────────────────────────────
+// Double-entry ledger with CA Bar RRC 1.15 IOLTA trust compliance.
+// Auto-syncs from PI disbursements. Exports to Excel, IIF (QB Desktop),
+// CSV (QBO).
+
+app.get("/admin/accounting", async (req, res) => {
+  try {
+    const ui = require("./accounting-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await ui.renderDashboard();
+    res.send(hearingNotes.renderAdminChrome({ title: "Accounting", body, activeItem: "accounting" }));
+  } catch (err) {
+    console.error("[accounting dashboard]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/accounting/ledger", async (req, res) => {
+  try {
+    const ui = require("./accounting-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await ui.renderLedger(req.query || {});
+    res.send(hearingNotes.renderAdminChrome({ title: "General Ledger", body, activeItem: "accounting-ledger" }));
+  } catch (err) {
+    console.error("[accounting ledger]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/accounting/income-statement", async (req, res) => {
+  try {
+    const ui = require("./accounting-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await ui.renderIncomeStatement(req.query || {});
+    res.send(hearingNotes.renderAdminChrome({ title: "Income Statement", body, activeItem: "accounting" }));
+  } catch (err) {
+    console.error("[accounting P&L]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/accounting/balance-sheet", async (req, res) => {
+  try {
+    const ui = require("./accounting-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await ui.renderBalanceSheet(req.query || {});
+    res.send(hearingNotes.renderAdminChrome({ title: "Balance Sheet", body, activeItem: "accounting" }));
+  } catch (err) {
+    console.error("[accounting BS]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/accounting/trust", async (req, res) => {
+  try {
+    const ui = require("./accounting-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await ui.renderTrustReconciliation(req.query || {});
+    res.send(hearingNotes.renderAdminChrome({ title: "Trust Reconciliation", body, activeItem: "accounting-trust" }));
+  } catch (err) {
+    console.error("[accounting trust]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/accounting/trust/:clientKey", async (req, res) => {
+  try {
+    const ui = require("./accounting-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await ui.renderClientTrustLedger(req.params.clientKey);
+    res.send(hearingNotes.renderAdminChrome({ title: "Client Trust Ledger", body, activeItem: "accounting-trust" }));
+  } catch (err) {
+    console.error("[accounting client trust]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/accounting/chart", async (req, res) => {
+  try {
+    const ui = require("./accounting-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await ui.renderChartOfAccounts();
+    res.send(hearingNotes.renderAdminChrome({ title: "Chart of Accounts", body, activeItem: "accounting" }));
+  } catch (err) {
+    console.error("[accounting COA]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/accounting/new-entry", async (req, res) => {
+  try {
+    const ui = require("./accounting-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await ui.renderNewEntry();
+    res.send(hearingNotes.renderAdminChrome({ title: "New Journal Entry", body, activeItem: "accounting" }));
+  } catch (err) {
+    console.error("[accounting new entry]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/accounting/entry/:id", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const hearingNotes = require("./hearing-notes");
+    const entries = await accounting.getLedger({ limit: 1 });
+    // Get single entry with its lines
+    const full = await accounting.getLedger({});
+    const entry = full.find(e => e.id === parseInt(req.params.id, 10));
+    if (!entry) return res.status(404).send("Entry not found");
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const fmt$ = n => "$" + (Number(n || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const linesHtml = (entry.lines || []).map(l => `
+      <tr>
+        <td style="padding:10px 12px; border-bottom:1px solid #eee; font-family:ui-monospace, Menlo, monospace; font-size:12px;">${l.account_number}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #eee;">${esc(l.account_name)}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:12px; color:#666;">${esc(l.memo || "")}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #eee; text-align:right; font-family:ui-monospace, Menlo, monospace;">${Number(l.debit) > 0 ? fmt$(l.debit) : ""}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #eee; text-align:right; font-family:ui-monospace, Menlo, monospace;">${Number(l.credit) > 0 ? fmt$(l.credit) : ""}</td>
+      </tr>`).join("");
+    const totalD = (entry.lines || []).reduce((s, l) => s + Number(l.debit || 0), 0);
+    const totalC = (entry.lines || []).reduce((s, l) => s + Number(l.credit || 0), 0);
+    const body = `
+      <div class="page-header">
+        <h1>Journal Entry #${entry.id}</h1>
+        <a href="/admin/accounting/ledger" class="back-link">← Ledger</a>
+      </div>
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; font-size:13px;">
+          <div><strong>Date:</strong> ${new Date(entry.entry_date).toLocaleDateString()}</div>
+          <div><strong>Reference:</strong> ${esc(entry.reference || "—")}</div>
+          <div><strong>Description:</strong> ${esc(entry.description)}</div>
+          <div><strong>Client:</strong> ${esc(entry.client_name || "—")}</div>
+          <div><strong>Matter:</strong> ${esc(entry.matter_type || "—")}</div>
+          <div><strong>Source:</strong> ${esc(entry.source_module)}${entry.source_id ? " #" + entry.source_id : ""}</div>
+          ${entry.is_trust ? '<div><strong>🔒 TRUST TRANSACTION</strong></div>' : ""}
+        </div>
+      </div>
+      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="background:#fafaf7;">
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Acct #</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Account</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Memo</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase;">Debit</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase;">Credit</th>
+          </tr></thead>
+          <tbody>${linesHtml}
+            <tr style="background:#fafaf7; font-weight:700;">
+              <td colspan="3" style="padding:10px 12px;">TOTALS</td>
+              <td style="padding:10px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(totalD)}</td>
+              <td style="padding:10px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(totalC)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "Journal Entry", body, activeItem: "accounting-ledger" }));
+  } catch (err) {
+    console.error("[accounting entry]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Actions
+app.post("/admin/accounting/sync-pi", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const results = await accounting.syncFromPI();
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error("[accounting sync-pi]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/accounting/entry", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const entry = await accounting.postJournalEntry({
+      ...req.body,
+      created_by: req.user?.id || null,
+    });
+    res.json({ ok: true, id: entry.id });
+  } catch (err) {
+    console.error("[accounting post entry]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Exports
+app.get("/admin/accounting/export/excel", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const buf = await accounting.exportToExcel({
+      from_date: req.query.from || null,
+      to_date: req.query.to || null,
+    });
+    const filename = `tez-accounting-${new Date().toISOString().split("T")[0]}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buf);
+  } catch (err) {
+    console.error("[accounting excel]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/accounting/export/iif", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const iif = await accounting.exportToIIF({
+      from_date: req.query.from || null,
+      to_date: req.query.to || null,
+    });
+    const filename = `tez-quickbooks-${new Date().toISOString().split("T")[0]}.iif`;
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(iif);
+  } catch (err) {
+    console.error("[accounting iif]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/accounting/export/csv", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const csv = await accounting.exportToCSV({
+      from_date: req.query.from || null,
+      to_date: req.query.to || null,
+    });
+    const filename = `tez-quickbooks-${new Date().toISOString().split("T")[0]}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (err) {
+    console.error("[accounting csv]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 // ── PI Demand Letter Generator ────────────────────────
 // Time-limited policy limits demand compliant with CCP §§ 999-999.5.
 // Uses only verified case law from firm's GOAT/MOAT (zero hallucinated cites).
@@ -2114,6 +2355,11 @@ try {
 try {
   require("./pi-demand-letter").initTable().catch(e => console.warn("[pi-demand] init:", e.message));
 } catch (e) { console.warn("[pi-demand] module load:", e.message); }
+
+// Init Accounting tables on boot (seeds default chart of accounts if empty)
+try {
+  require("./accounting").initTables().catch(e => console.warn("[accounting] init:", e.message));
+} catch (e) { console.warn("[accounting] module load:", e.message); }
 
 async function setScanStatus(id, updates) {
   const allowed = ["running", "phase", "current_client", "progress_current", "progress_total", "results", "error"];
