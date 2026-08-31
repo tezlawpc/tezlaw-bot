@@ -496,6 +496,140 @@ app.get("/version", (req, res) => {
 });
 
 // ── Triage Dashboard ─────────────────────────────────────
+// ── Personal Injury Case Management ───────────────────────
+// CA-specific PI workflow: intake → treatment → demand → settlement → disbursement
+// Auto-discovers cases from Dropbox folders ending in "-PI"
+
+app.get("/admin/pi", async (req, res) => {
+  try {
+    const piUI = require("./personal-injury-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await piUI.renderDashboard();
+    res.send(hearingNotes.renderAdminChrome({ title: "PI Dashboard", body, activeItem: "pi-dashboard" }));
+  } catch (err) {
+    console.error("[pi dashboard]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/pi/cases", async (req, res) => {
+  try {
+    const piUI = require("./personal-injury-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await piUI.renderCaseList(req.query || {});
+    res.send(hearingNotes.renderAdminChrome({ title: "PI Cases", body, activeItem: "pi-cases" }));
+  } catch (err) {
+    console.error("[pi cases]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/pi/case/:id", async (req, res) => {
+  try {
+    const piUI = require("./personal-injury-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await piUI.renderCaseDetail(parseInt(req.params.id, 10));
+    res.send(hearingNotes.renderAdminChrome({ title: "PI Case", body, activeItem: "pi-cases" }));
+  } catch (err) {
+    console.error("[pi case detail]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/pi/case/:id/disbursement", async (req, res) => {
+  try {
+    const piUI = require("./personal-injury-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await piUI.renderDisbursement(parseInt(req.params.id, 10));
+    res.send(hearingNotes.renderAdminChrome({ title: "Disbursement", body, activeItem: "pi-cases" }));
+  } catch (err) {
+    console.error("[pi disbursement]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Action endpoints
+app.post("/admin/pi/discover", async (req, res) => {
+  try {
+    const pi = require("./personal-injury");
+    const results = await pi.discoverPICasesFromDropbox();
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error("[pi discover]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/pi/case/:id", async (req, res) => {
+  try {
+    const pi = require("./personal-injury");
+    const updated = await pi.updateCase(parseInt(req.params.id, 10), req.body || {});
+    res.json({ ok: true, case: updated });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/pi/case/:id/providers", async (req, res) => {
+  try {
+    const pi = require("./personal-injury");
+    const provider = await pi.addProvider(parseInt(req.params.id, 10), req.body || {});
+    res.json({ ok: true, provider });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/pi/case/:id/bills", async (req, res) => {
+  try {
+    const pi = require("./personal-injury");
+    const bill = await pi.addBill(parseInt(req.params.id, 10), req.body || {});
+    res.json({ ok: true, bill });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/pi/case/:id/insurance", async (req, res) => {
+  try {
+    const pi = require("./personal-injury");
+    const ins = await pi.addInsurance(parseInt(req.params.id, 10), req.body || {});
+    res.json({ ok: true, insurance: ins });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/pi/case/:id/costs", async (req, res) => {
+  try {
+    const pi = require("./personal-injury");
+    const cost = await pi.addCost(parseInt(req.params.id, 10), req.body || {});
+    res.json({ ok: true, cost });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/pi/case/:id/settlements", async (req, res) => {
+  try {
+    const pi = require("./personal-injury");
+    const s = await pi.addSettlementOffer(parseInt(req.params.id, 10), req.body || {});
+    res.json({ ok: true, settlement: s });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/pi/case/:id/disbursement", async (req, res) => {
+  try {
+    const pi = require("./personal-injury");
+    const d = await pi.saveDisbursement(parseInt(req.params.id, 10), req.body || {});
+    res.json({ ok: true, disbursement: d });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── AI Audit Trail — malpractice / bar-complaint defense ──
 // Every AI-generated output is logged with immutable original + attorney
 // review + delivery record. This is the compliance backbone for a firm
@@ -1543,6 +1677,11 @@ initScanStatusTable().catch(e => console.warn("[scan-status] init:", e.message))
 try {
   require("./ai-audit-trail").initTable().catch(e => console.warn("[audit-trail] init:", e.message));
 } catch (e) { console.warn("[audit-trail] module load:", e.message); }
+
+// Init Personal Injury tables on boot
+try {
+  require("./personal-injury").initTables().catch(e => console.warn("[pi] init:", e.message));
+} catch (e) { console.warn("[pi] module load:", e.message); }
 
 async function setScanStatus(id, updates) {
   const allowed = ["running", "phase", "current_client", "progress_current", "progress_total", "results", "error"];
