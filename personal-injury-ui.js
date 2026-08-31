@@ -358,6 +358,7 @@ async function renderCaseDetail(caseId) {
         </div>
       </div>
       <div style="display:flex; gap:8px;">
+        <a href="/admin/pi/case/${c.id}/demand" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">📝 Demand Letters</a>
         <a href="/admin/pi/case/${c.id}/disbursement" style="background:#2e7d32; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">💰 Disbursement</a>
         <a href="/admin/pi/cases" class="back-link" style="padding:10px 16px;">← All Cases</a>
       </div>
