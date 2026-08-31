@@ -361,6 +361,25 @@ async function scanClientFolder({ clientKey, clientName, aNumber, dropboxFolderP
           ]
         );
         notices.push({ ...inserted.rows[0], filename: file.name, dropbox_path: file.path_display });
+
+        // Log to universal audit trail (only for actual hearing notices)
+        try {
+          const audit = require("./ai-audit-trail");
+          await audit.log({
+            feature_type: "notice_scan",
+            source_module: "hearing-notices.js",
+            related_table: "client_hearing_notices",
+            related_id: inserted.rows[0].id,
+            client_key: clientKey,
+            client_name: clientName || null,
+            a_number: aNumber || null,
+            matter_type: "immigration",
+            original_output: JSON.stringify(extraction, null, 2),
+            input_context_summary: `Extracted from ${file.name} (${Math.round((file.size || 0) / 1024)}KB, modified ${file.server_modified})`,
+            model_used: EXTRACTION_MODEL,
+            estimated_cost_usd: 0.0035,
+          });
+        } catch (e) { console.warn("[audit-trail] notice-scan log:", e.message); }
       } else {
         // Record the non-hearing-notice files too so we don't re-scan them
         await db.query(
