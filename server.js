@@ -496,6 +496,205 @@ app.get("/version", (req, res) => {
 });
 
 // ── Triage Dashboard ─────────────────────────────────────
+// ── Closing Oral Argument generator ──────────────────────
+// Drafts the closing argument for an individual (merits) hearing using ONLY
+// case law verified from the firm's GOAT/MOAT documents. Zero hallucination.
+
+app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
+  try {
+    const cag = require("./closing-argument-generator");
+    const hearingNotes = require("./hearing-notes");
+    const noteId = parseInt(req.params.id, 10);
+    if (!noteId) return res.status(400).send("Invalid note ID");
+
+    const args = await cag.listForNote(noteId);
+    const verifiedPool = await cag.retrieveVerifiedCaseLaw();
+
+    const argsHtml = args.length ? args.map(a => {
+      const dt = new Date(a.generated_at).toLocaleString();
+      const preview = (a.argument_text || "").substring(0, 300).replace(/</g, "&lt;");
+      const status = a.status || "draft";
+      const statusColor = { draft: "#B79C62", finalized: "#0061FF", delivered: "#2e7d32" }[status] || "#666";
+      return `
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;">
+            <div>
+              <strong style="color:#0C1C36;">Closing #${a.id}</strong>
+              <span style="background:${statusColor}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; margin-left:6px;">${status.toUpperCase()}</span>
+              <div style="font-size:11px; color:#888; margin-top:2px;">${dt} · ${a.model} · $${(a.estimated_cost_usd || 0).toFixed(3)}</div>
+              <div style="font-size:11px; color:#666; margin-top:4px;">Cases cited: ${(a.cases_cited || []).length}</div>
+            </div>
+            <a href="/admin/hearing/individual/${noteId}/closing/${a.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+          </div>
+          <div style="font-size:12px; color:#555; padding:10px; background:#fafaf7; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${a.argument_text && a.argument_text.length > 300 ? "…" : ""}</div>
+        </div>`;
+    }).join("") : `<div style="text-align:center; padding:40px; color:#888;">No closing arguments generated yet.</div>`;
+
+    const body = `
+      <div class="page-header">
+        <h1>🏛️ Closing Arguments — Individual Hearing #${noteId}</h1>
+        <a href="/admin/hearing/individual/${noteId}" class="back-link">← Back to hearing note</a>
+      </div>
+
+      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+        <strong>Verified case law pool:</strong> ${verifiedPool.length} cases available from your firm's GOAT/MOAT + legal_citations.
+        ${verifiedPool.length < 5 ? `<span style="color:#c62828; font-weight:600;"> ⚠️ Need at least 5 asylum cases to generate. Add briefs at <a href="/admin/firm-documents" style="color:#c62828;">/admin/firm-documents</a>.</span>` : ""}
+      </div>
+
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <h2 style="font-size:16px; margin:0 0 12px 0; color:#0C1C36;">✨ Generate New Closing Argument</h2>
+        <p style="font-size:13px; color:#666; margin-bottom:10px;">
+          This will draft a closing oral argument covering REAL ID Act, credibility, past persecution (including single-incident doctrine), and well-founded fear (subjective + objective prongs). Only cases from your verified pool will be cited.
+        </p>
+        <label style="font-size:12px; color:#666; display:block; margin-bottom:4px;">Additional context for the AI (optional)</label>
+        <textarea id="additional-context" placeholder="e.g., 'emphasize country conditions evidence from Exhibit 12', 'address government's argument that harm was localized', 'client has minor inconsistencies about dates — explain via trauma'..." style="width:100%; min-height:80px; padding:10px; border:1px solid #ccc; border-radius:6px; font-family:inherit; font-size:13px; box-sizing:border-box;"></textarea>
+        <button onclick="generateClosing()" id="gen-btn" ${verifiedPool.length < 5 ? "disabled" : ""} style="margin-top:10px; background:${verifiedPool.length < 5 ? "#ccc" : "#B79C62"}; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:${verifiedPool.length < 5 ? "not-allowed" : "pointer"}; font-weight:600; font-size:14px;">
+          🏛️ Generate Closing Argument
+        </button>
+        <div id="gen-status" style="margin-top:10px; font-size:12px; color:#666;"></div>
+      </div>
+
+      <h3 style="margin:20px 0 12px 0; font-size:14px; color:#666; text-transform:uppercase; letter-spacing:0.05em;">Generated Arguments (${args.length})</h3>
+      ${argsHtml}
+
+      <script>
+        async function generateClosing() {
+          const btn = document.getElementById("gen-btn");
+          const status = document.getElementById("gen-status");
+          const ctx = document.getElementById("additional-context").value.trim();
+          btn.disabled = true;
+          btn.textContent = "⏳ Drafting (30-90s)…";
+          status.innerHTML = "<div style='color:#0061FF;'>Reading case facts, retrieving verified case law, drafting…</div>";
+          try {
+            const r = await fetch("/admin/hearing/individual/${noteId}/generate-closing", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ additional_context: ctx }),
+            });
+            const d = await r.json();
+            if (d.ok) {
+              status.innerHTML = "<div style='color:#2e7d32;'>✅ Generated! Redirecting…</div>";
+              setTimeout(() => location.href = "/admin/hearing/individual/${noteId}/closing/" + d.id, 500);
+            } else {
+              status.innerHTML = "<div style='color:#c62828;'>❌ " + (d.error || "Failed") + "</div>";
+              btn.disabled = false;
+              btn.textContent = "🏛️ Generate Closing Argument";
+            }
+          } catch (e) {
+            status.innerHTML = "<div style='color:#c62828;'>❌ " + e.message + "</div>";
+            btn.disabled = false;
+            btn.textContent = "🏛️ Generate Closing Argument";
+          }
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: "Closing Arguments", body, activeItem: "individual" }));
+  } catch (err) {
+    console.error("[closing list]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/admin/hearing/individual/:id/generate-closing", async (req, res) => {
+  try {
+    const cag = require("./closing-argument-generator");
+    const noteId = parseInt(req.params.id, 10);
+    if (!noteId) return res.status(400).json({ ok: false, error: "Invalid note ID" });
+
+    const result = await cag.generateClosingArgument({
+      individualNoteId: noteId,
+      additionalContext: (req.body && req.body.additional_context) || "",
+      createdBy: req.user?.id || null,
+    });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[closing generate]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res) => {
+  try {
+    const cag = require("./closing-argument-generator");
+    const hearingNotes = require("./hearing-notes");
+    const closing = await cag.getClosingArgument(parseInt(req.params.closingId, 10));
+    if (!closing) return res.status(404).send("Closing argument not found");
+
+    const displayText = closing.user_edits || closing.argument_text;
+    const escaped = String(displayText).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const body = `
+      <div class="page-header">
+        <h1>🏛️ Closing Argument #${closing.id}</h1>
+        <a href="/admin/hearing/individual/${req.params.noteId}/closing" class="back-link">← All closings for this hearing</a>
+      </div>
+
+      <div style="background:#f5f9ff; padding:12px 14px; border-radius:8px; font-size:12px; color:#555; margin-bottom:16px; display:flex; gap:16px; flex-wrap:wrap;">
+        <div><strong>Client:</strong> ${(closing.client_name || "").replace(/</g, "&lt;")}</div>
+        ${closing.a_number ? `<div><strong>A#:</strong> ${closing.a_number.replace(/</g, "&lt;")}</div>` : ""}
+        <div><strong>Generated:</strong> ${new Date(closing.generated_at).toLocaleString()}</div>
+        <div><strong>Model:</strong> ${closing.model}</div>
+        <div><strong>Cost:</strong> $${(closing.estimated_cost_usd || 0).toFixed(4)}</div>
+        <div><strong>Cases cited:</strong> ${(closing.cases_cited || []).length}</div>
+        <div><strong>Status:</strong> ${closing.status}</div>
+      </div>
+
+      <div style="background:white; padding:32px 40px; border-radius:8px; border:1px solid #eee; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:15px; line-height:1.75; color:#0C1C36; white-space:pre-wrap;" id="argument-text">${escaped}</div>
+
+      <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button onclick="copyText()" style="background:#0C1C36; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy to clipboard</button>
+        <button onclick="printArgument()" style="background:#B79C62; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
+        <button onclick="markStatus('finalized')" style="background:#0061FF; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Mark finalized</button>
+        <button onclick="markStatus('delivered')" style="background:#2e7d32; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Mark delivered</button>
+      </div>
+
+      ${(closing.cases_cited || []).length > 0 ? `
+      <details style="margin-top:20px; background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
+        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">📚 Cases cited in this closing (${closing.cases_cited.length})</summary>
+        <ul style="margin-top:10px; font-size:12px; color:#555; line-height:1.7;">
+          ${closing.cases_cited.map(c => `<li>${String(c).replace(/</g, "&lt;")}</li>`).join("")}
+        </ul>
+      </details>` : ""}
+
+      <script>
+        function copyText() {
+          const text = document.getElementById("argument-text").innerText;
+          navigator.clipboard.writeText(text).then(() => alert("✓ Copied to clipboard"));
+        }
+        function printArgument() { window.print(); }
+        async function markStatus(status) {
+          const r = await fetch("/admin/hearing/individual/${req.params.noteId}/closing/${closing.id}/status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status }),
+          });
+          const d = await r.json();
+          if (d.ok) location.reload();
+          else alert("Error: " + (d.error || "unknown"));
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: "Closing Argument", body, activeItem: "individual" }));
+  } catch (err) {
+    console.error("[closing view]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/admin/hearing/individual/:noteId/closing/:closingId/status", async (req, res) => {
+  try {
+    const cag = require("./closing-argument-generator");
+    const status = req.body && req.body.status;
+    if (!["draft", "finalized", "delivered"].includes(status)) {
+      return res.status(400).json({ ok: false, error: "Invalid status" });
+    }
+    const updated = await cag.updateClosingArgument(parseInt(req.params.closingId, 10), { status });
+    res.json({ ok: true, closing: updated });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Zara SPA tabs wrapped in the main admin chrome ─────
 // Loads /admin/?embed=1#tab in an iframe so the outer sidebar stays visible.
 // This lets JJ browse Intakes, Messages, Prompt, Research, etc. without leaving
