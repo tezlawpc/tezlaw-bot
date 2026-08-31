@@ -379,6 +379,29 @@ Output only the closing argument text, ready to be read aloud. Start with "Your 
     ]
   );
 
+  // Log to universal audit trail for malpractice / bar-complaint defense
+  try {
+    const audit = require("./ai-audit-trail");
+    await audit.log({
+      feature_type: "closing_argument",
+      source_module: "closing-argument-generator.js",
+      related_table: "closing_arguments",
+      related_id: inserted.rows[0].id,
+      client_key: null,       // individual_hearing_notes doesn't have a stable client_key
+      client_name: note.client_name,
+      a_number: note.a_number,
+      matter_type: "asylum",
+      original_output: argument,
+      input_context_summary: `Closing arg v${version} for hearing #${individualNoteId}. ${(note.examinations || []).length} witnesses, ${verifiedCases.length} verified cases in pool. Attorney context: ${additionalContext ? additionalContext.substring(0, 200) : "(none)"}`,
+      input_context_full: prompt,
+      model_used: MODEL,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      estimated_cost_usd: costUsd,
+      generated_by: createdBy,
+    });
+  } catch (e) { console.warn("[audit-trail] closing-arg log failed:", e.message); }
+
   return {
     id: inserted.rows[0].id,
     argument,
