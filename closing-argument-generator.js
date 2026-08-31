@@ -44,10 +44,24 @@ async function initTable() {
       estimated_cost_usd NUMERIC(10, 4),
       user_edits         TEXT,          -- attorney's edited final version
       created_by         INTEGER,       -- admin_users.id
-      status             TEXT DEFAULT 'draft'  -- draft | finalized | delivered
+      status             TEXT DEFAULT 'draft',  -- draft | finalized | delivered | superseded
+      version            INTEGER DEFAULT 1,     -- 1, 2, 3… for this hearing
+      parent_id          INTEGER,               -- id of previous version this was regenerated from
+      additional_context TEXT,                  -- attorney's added context at generation time
+      testimony_snapshot JSONB                  -- the examinations data used, for audit
     )
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_closing_arg_note ON closing_arguments (individual_note_id)`);
+  // Migrations
+  const alters = [
+    "ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1",
+    "ADD COLUMN IF NOT EXISTS parent_id INTEGER",
+    "ADD COLUMN IF NOT EXISTS additional_context TEXT",
+    "ADD COLUMN IF NOT EXISTS testimony_snapshot JSONB",
+  ];
+  for (const alter of alters) {
+    try { await db.query(`ALTER TABLE closing_arguments ${alter}`); } catch {}
+  }
 }
 
 // ─── Verified case-law retrieval ────────────────────────
@@ -122,24 +136,91 @@ async function retrieveVerifiedCaseLaw() {
 }
 
 // ─── Case facts retrieval ───────────────────────────────
+//
+// Reads from the ACTUAL individual_hearing_notes schema:
+//   - pre_examination_notes: attorney's outline and prep notes
+//   - examinations JSONB: witness Q&A with actual responses recorded in judge_notes
+//   - evidence_objections, disposition_notes: hearing-time observations
+//   - hearing_summary_raw, paralegal_summary: post-hearing summaries
+//   - exhibits JSONB: exhibit list
 
 async function getHearingContext(individualNoteId) {
   const r = await db.query(
-    `SELECT id, client_name, a_number, hearing_date, next_hearing_date,
-            hearing_type, case_type, court_location, judge_name,
-            summary, notes, testimony_summary, key_facts,
-            country_of_origin, protected_ground,
-            past_persecution_facts, future_fear_facts,
-            corroborating_evidence, credibility_notes
+    `SELECT id, client_name, a_number, client_language,
+            hearing_date, next_hearing_date,
+            case_type, court_location, court_address,
+            judge_name, dhs_attorney,
+            attorney_appearance, respondent_appearance,
+            exhibits, evidence_objections,
+            pre_examination_notes, examinations,
+            closing_argument, disposition, disposition_notes,
+            hearing_summary_raw, paralegal_summary, client_summary
      FROM individual_hearing_notes WHERE id = $1`,
     [individualNoteId]
   );
   return r.rows[0] || null;
 }
 
+// Formats the JSONB examinations array into a rich, structured testimony
+// block for Claude. Prioritizes ACTUAL testimony given (judge_notes column
+// on each Q&A row), which the attorney fills in DURING the hearing.
+// Also includes expected answers (from prep) as fallback context.
+function formatExaminations(examinations) {
+  if (!Array.isArray(examinations) || examinations.length === 0) {
+    return "(No witness examinations recorded)";
+  }
+  const parts = [];
+  for (const ex of examinations) {
+    const role = ex.witness_role || "Witness";
+    const name = ex.witness_name || "";
+    const type = ex.examination_type || "examination";
+    const header = name ? `${role} (${name}) — ${type}` : `${role} — ${type}`;
+    parts.push(`\n#### ${header}`);
+
+    const sections = Array.isArray(ex.sections) ? ex.sections : [];
+    for (const sec of sections) {
+      const rows = Array.isArray(sec.qa_rows) ? sec.qa_rows : [];
+      // Only include rows with an actual response (judge_notes) OR an expected
+      // answer — skip empty rows so the prompt stays focused.
+      const meaningful = rows.filter(r =>
+        (r.judge_notes && r.judge_notes.trim()) ||
+        (r.expected_answer && r.expected_answer.trim())
+      );
+      if (!meaningful.length) continue;
+
+      parts.push(`\n**${sec.title || "Testimony"}**`);
+      for (const row of meaningful) {
+        const q = (row.question || "").trim();
+        const actualAnswer = (row.judge_notes || "").trim();
+        const expectedAnswer = (row.expected_answer || "").trim();
+        if (q) parts.push(`Q: ${q}`);
+        // Actual testimony given (from attorney's notes during hearing) takes priority
+        if (actualAnswer) {
+          parts.push(`A [as testified]: ${actualAnswer}`);
+        } else if (expectedAnswer) {
+          parts.push(`A [prep note, not yet given at hearing]: ${expectedAnswer}`);
+        }
+      }
+    }
+  }
+  return parts.join("\n");
+}
+
+function formatExhibits(exhibits) {
+  if (!Array.isArray(exhibits) || exhibits.length === 0) return "";
+  return exhibits
+    .filter(e => e && (e.label || e.description || e.title))
+    .map((e, i) => {
+      const label = e.label || e.title || `Exhibit ${i + 1}`;
+      const desc = e.description || e.summary || "";
+      return desc ? `- ${label}: ${desc}` : `- ${label}`;
+    })
+    .join("\n");
+}
+
 // ─── Main generator ─────────────────────────────────────
 
-async function generateClosingArgument({ individualNoteId, additionalContext = "", createdBy = null }) {
+async function generateClosingArgument({ individualNoteId, additionalContext = "", createdBy = null, parentId = null }) {
   await initTable();
   const note = await getHearingContext(individualNoteId);
   if (!note) throw new Error(`Individual hearing note #${individualNoteId} not found.`);
@@ -164,23 +245,45 @@ async function generateClosingArgument({ individualNoteId, additionalContext = "
     })
     .join("\n");
 
-  // Build the client facts context
+  // Format the witness testimony (Q&A from all examinations) into a rich block
+  const testimonyBlock = formatExaminations(note.examinations);
+  const exhibitsBlock = formatExhibits(note.exhibits);
+
+  // Determine the version number for this new closing
+  let version = 1;
+  if (parentId) {
+    const p = await db.query(`SELECT version FROM closing_arguments WHERE id = $1`, [parentId]);
+    if (p.rows[0]) version = (p.rows[0].version || 0) + 1;
+  } else {
+    const p = await db.query(
+      `SELECT COALESCE(MAX(version), 0) as max_v FROM closing_arguments WHERE individual_note_id = $1`,
+      [individualNoteId]
+    );
+    version = (p.rows[0]?.max_v || 0) + 1;
+  }
+
+  // Build the client facts context — REAL columns only
   const facts = [
     note.client_name ? `Respondent: ${note.client_name}` : null,
     note.a_number ? `A-Number: ${note.a_number}` : null,
-    note.country_of_origin ? `Country of Origin: ${note.country_of_origin}` : null,
-    note.protected_ground ? `Protected Ground(s): ${note.protected_ground}` : null,
+    note.case_type ? `Relief Sought / Case Type: ${note.case_type}` : null,
     note.court_location ? `Court: ${note.court_location}` : null,
     note.judge_name ? `Immigration Judge: ${note.judge_name}` : null,
-    note.key_facts ? `\n### KEY FACTS\n${note.key_facts}` : null,
-    note.past_persecution_facts ? `\n### PAST PERSECUTION FACTS\n${note.past_persecution_facts}` : null,
-    note.future_fear_facts ? `\n### FUTURE FEAR FACTS\n${note.future_fear_facts}` : null,
-    note.testimony_summary ? `\n### TESTIMONY SUMMARY\n${note.testimony_summary}` : null,
-    note.corroborating_evidence ? `\n### CORROBORATING EVIDENCE\n${note.corroborating_evidence}` : null,
-    note.credibility_notes ? `\n### CREDIBILITY NOTES\n${note.credibility_notes}` : null,
-    note.summary ? `\n### CASE SUMMARY\n${note.summary}` : null,
-    note.notes ? `\n### ATTORNEY NOTES\n${note.notes}` : null,
-    additionalContext ? `\n### ADDITIONAL CONTEXT FROM ATTORNEY\n${additionalContext}` : null,
+    note.dhs_attorney ? `DHS Trial Attorney: ${note.dhs_attorney}` : null,
+    note.hearing_date ? `Hearing Date: ${new Date(note.hearing_date).toLocaleDateString()}` : null,
+
+    note.pre_examination_notes ? `\n### ATTORNEY'S PRE-HEARING NOTES / OUTLINE\n${note.pre_examination_notes}` : null,
+
+    `\n### WITNESS TESTIMONY (Q&A recorded during examination)\n${testimonyBlock}`,
+
+    exhibitsBlock ? `\n### EXHIBITS\n${exhibitsBlock}` : null,
+    note.evidence_objections ? `\n### EVIDENCE / OBJECTIONS\n${note.evidence_objections}` : null,
+
+    note.hearing_summary_raw ? `\n### RAW HEARING NOTES\n${note.hearing_summary_raw}` : null,
+    note.paralegal_summary ? `\n### PARALEGAL SUMMARY\n${note.paralegal_summary}` : null,
+    note.disposition_notes ? `\n### DISPOSITION NOTES\n${note.disposition_notes}` : null,
+
+    additionalContext ? `\n### ADDITIONAL CONTEXT / DIRECTION FROM ATTORNEY\n${additionalContext}` : null,
   ].filter(Boolean).join("\n");
 
   const prompt = `You are drafting a CLOSING ORAL ARGUMENT for an immigration merits hearing at EOIR on behalf of the respondent seeking asylum, withholding of removal, and/or CAT protection.
@@ -189,20 +292,25 @@ async function generateClosingArgument({ individualNoteId, additionalContext = "
 
 **ZERO HALLUCINATION RULE**: You may ONLY cite cases from the "VERIFIED CASE LAW" list below. If you need to make a point that requires a case NOT on the list, write [CITATION NEEDED — <describe what you need>] in the argument. DO NOT invent case names, invent citations, or paraphrase from memory. Every case cite in the output must appear verbatim in the verified list.
 
-**STRUCTURE**: The closing argument must have these five sections (use headings):
+**GROUND EVERY ARGUMENT IN THE ACTUAL TESTIMONY**: The WITNESS TESTIMONY section below contains the actual Q&A from the merits hearing. Every factual claim in your closing MUST be supported by specific testimony. When you argue past persecution, quote or paraphrase the respondent's actual testimony describing what happened. When you argue subjective fear, cite testimony where they expressed that fear. When you argue credibility, point to specific consistent details from the record. Do NOT invent facts.
+
+**USE ATTORNEY'S NOTES**: The ATTORNEY'S PRE-HEARING NOTES and any ADDITIONAL CONTEXT contain the attorney's theory of the case and strategic points to emphasize. Weave these into the argument.
+
+# STRUCTURE (all five sections required, in this order)
+
 1. **REAL ID Act Framework** — INA § 208(b)(1)(B), burden of proof, corroboration standard, credibility standard
-2. **Credibility of the Respondent** — testimony was consistent, plausible, detailed; passes REAL ID credibility factors (demeanor, candor, responsiveness, plausibility, consistency, corroboration)
-3. **Past Persecution** — the harm suffered rises to persecution; explicitly argue that even a SINGLE INCIDENT can suffice for past persecution if severe enough; cite verified cases
+2. **Credibility of the Respondent** — analyze specific consistent details from the testimony; passes REAL ID credibility factors (demeanor, candor, responsiveness, plausibility, consistency, corroboration). Cite specific testimony.
+3. **Past Persecution** — connect the actual harm described in testimony to the persecution standard; explicitly argue that even a SINGLE INCIDENT can suffice for past persecution if severe enough; cite verified cases and quote or reference the specific testimony
 4. **Well-Founded Fear of Future Persecution** — apply the two-prong test:
-   (a) SUBJECTIVE PRONG: respondent genuinely fears returning (evidence from testimony)
-   (b) OBJECTIVE PRONG: fear is objectively reasonable (INS v. Cardoza-Fonseca 10% standard); explicitly argue that even a moderate level of persecution is a sufficient basis
+   (a) SUBJECTIVE PRONG: respondent's own testimony expressing genuine fear (quote/reference)
+   (b) OBJECTIVE PRONG: fear is objectively reasonable (INS v. Cardoza-Fonseca 10% standard); explicitly argue that even a moderate LEVEL OF PERSECUTION is a sufficient basis; support with country conditions from testimony/exhibits
 5. **Conclusion** — the respondent has met their burden; request the court grant asylum (withholding + CAT as alternatives)
 
 # VERIFIED CASE LAW (you may cite ONLY these)
 
 ${citesBlock}
 
-# CLIENT'S CASE FACTS
+# CLIENT'S CASE FACTS AND HEARING RECORD
 
 ${facts}
 
@@ -213,9 +321,10 @@ ${facts}
 - Formal but human — this is a spoken closing, not a brief
 - ~1500-2500 words total
 - Use inline citations formatted like: (Matter of Mogharrabi, 19 I&N Dec. 439 (BIA 1987))
-- Weave the client's specific facts into each legal point — don't leave abstract legal principles disconnected from what happened to them
-- Where the record supports it, quote the respondent's testimony
-- Address weaknesses proactively (e.g., minor inconsistencies → explain them via trauma/translation)
+- **Weave the actual testimony into your legal arguments** — every legal point should reference specific testimony that supports it. Use phrases like "as the respondent testified…", "the record shows…", "when asked about X, our client stated…"
+- Where the record supports it, briefly quote or closely paraphrase the respondent's testimony
+- Address weaknesses proactively (e.g., minor inconsistencies → explain via trauma/translation, referencing specific testimony)
+- If the testimony record is thin on any element, note honestly in the argument rather than fabricating
 
 # BEGIN CLOSING ARGUMENT
 
@@ -254,16 +363,19 @@ Output only the closing argument text, ready to be read aloud. Start with "Your 
     }
   }
 
-  // Save to DB
+  // Save to DB — includes version + parent_id + testimony snapshot for audit
   const inserted = await db.query(
     `INSERT INTO closing_arguments
        (individual_note_id, client_name, a_number, argument_text, cases_cited,
-        model, input_tokens, output_tokens, estimated_cost_usd, created_by, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft')
+        model, input_tokens, output_tokens, estimated_cost_usd, created_by, status,
+        version, parent_id, additional_context, testimony_snapshot)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft', $11, $12, $13, $14::jsonb)
      RETURNING id`,
     [
       individualNoteId, note.client_name, note.a_number, argument, citedCases,
       MODEL, inputTokens, outputTokens, costUsd, createdBy,
+      version, parentId, additionalContext || null,
+      JSON.stringify(note.examinations || []),
     ]
   );
 
@@ -272,6 +384,9 @@ Output only the closing argument text, ready to be read aloud. Start with "Your 
     argument,
     cases_cited: citedCases,
     verified_pool_size: verifiedCases.length,
+    version,
+    parent_id: parentId,
+    testimony_witnesses: (note.examinations || []).length,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     estimated_cost_usd: costUsd,
@@ -290,10 +405,11 @@ async function listForNote(individualNoteId) {
   await initTable();
   const r = await db.query(
     `SELECT id, argument_text, cases_cited, generated_at, model, status,
-            estimated_cost_usd
+            estimated_cost_usd, version, parent_id, additional_context,
+            jsonb_array_length(COALESCE(testimony_snapshot, '[]'::jsonb)) as testimony_witness_count
      FROM closing_arguments
      WHERE individual_note_id = $1
-     ORDER BY generated_at DESC`,
+     ORDER BY version DESC, generated_at DESC`,
     [individualNoteId]
   );
   return r.rows;
