@@ -1495,9 +1495,11 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       // ── Voice dictation with auto-chunking + non-blocking widget ─────
       // Recording shows only as a small floating widget in the corner so the
       // attorney can keep typing in the form fields simultaneously. For long
-      // individual hearings, we auto-rotate the MediaRecorder every 28 min
-      // (Whisper caps at 25 MB = ~30 min per file).
-      const CHUNK_MINUTES = 28;
+      // individual hearings, we auto-rotate the MediaRecorder every 20 min.
+      // At 40 kbps voice bitrate: 20 min × 40 kbps ≈ 6 MB per chunk — well under
+      // the Whisper 25 MB API limit.
+      const CHUNK_MINUTES = 20;
+      const AUDIO_BITRATE = 40000;  // 40 kbps — plenty for legal dictation; Whisper handles low bitrate fine
 
       let dMediaStream = null;
       let dMediaRecorder = null;
@@ -1603,7 +1605,11 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         const chunkIdx = dChunkIndex;
         dChunks = [];
         dChunkStart = Date.now();
-        const opts = dAudioMime ? { mimeType: dAudioMime } : undefined;
+        // Always set audioBitsPerSecond to prevent browsers from defaulting to
+        // 128 kbps, which would push a 20-min chunk near/over Whisper's 25 MB cap.
+        const opts = dAudioMime
+          ? { mimeType: dAudioMime, audioBitsPerSecond: AUDIO_BITRATE }
+          : { audioBitsPerSecond: AUDIO_BITRATE };
         dMediaRecorder = new MediaRecorder(dMediaStream, opts);
         dMediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) dChunks.push(e.data); };
         dMediaRecorder.onstop = () => {
