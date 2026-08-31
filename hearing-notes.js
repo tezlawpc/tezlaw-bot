@@ -1369,6 +1369,26 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
     </div>
 
+    <!-- ── Accounting section ── -->
+    <div class="nav-section" id="section-accounting">
+      <div class="nav-section-header">Accounting</div>
+      <a href="/admin/accounting" class="nav-link ${isActive('accounting')}" data-perm="users.manage">
+        <span class="nav-icon">💼</span><span class="nav-label">Dashboard</span>
+      </a>
+      <a href="/admin/accounting/ledger" class="nav-link ${isActive('accounting-ledger')}" data-perm="users.manage">
+        <span class="nav-icon">📖</span><span class="nav-label">General Ledger</span>
+      </a>
+      <a href="/admin/accounting/trust" class="nav-link ${isActive('accounting-trust')}" data-perm="users.manage">
+        <span class="nav-icon">🔒</span><span class="nav-label">Trust (IOLTA)</span>
+      </a>
+      <a href="/admin/accounting/income-statement" class="nav-link" data-perm="users.manage">
+        <span class="nav-icon">📊</span><span class="nav-label">Income Statement</span>
+      </a>
+      <a href="/admin/accounting/balance-sheet" class="nav-link" data-perm="users.manage">
+        <span class="nav-icon">⚖</span><span class="nav-label">Balance Sheet</span>
+      </a>
+    </div>
+
     <!-- ── Immigration (Hearings + Motions) ── -->
     <div class="nav-section" id="section-immigration">
       <div class="nav-section-header">
