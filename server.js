@@ -630,6 +630,410 @@ app.post("/admin/pi/case/:id/disbursement", async (req, res) => {
   }
 });
 
+// ── PI Demand Letter Generator ────────────────────────
+// Time-limited policy limits demand compliant with CCP §§ 999-999.5.
+// Uses only verified case law from firm's GOAT/MOAT (zero hallucinated cites).
+
+app.get("/admin/pi/case/:id/demand", async (req, res) => {
+  try {
+    const dl = require("./pi-demand-letter");
+    const pi = require("./personal-injury");
+    const hearingNotes = require("./hearing-notes");
+    const caseId = parseInt(req.params.id, 10);
+    const [caseData, letters, verifiedPool] = await Promise.all([
+      pi.getCase(caseId),
+      dl.listForCase(caseId),
+      dl.retrieveVerifiedPICaseLaw(),
+    ]);
+    if (!caseData) return res.status(404).send("Case not found");
+    const c = caseData.case;
+
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const fmt$ = n => "$" + (Number(n || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    // Insurance carrier options for the target dropdown
+    const carrierOpts = caseData.insurance.map(i =>
+      `<option value="${i.id}">${esc(i.carrier_name || "?")} — ${esc(i.role)}${i.policy_limits ? " · " + fmt$(i.policy_limits) : " · limits undisclosed"}</option>`
+    ).join("");
+
+    // Existing letters
+    const statusColors = {
+      draft: "#B79C62", sent: "#0061FF", carrier_responded: "#7c4dff",
+      limits_disclosed: "#00838f", tendered: "#2e7d32", rejected: "#c62828",
+      bad_faith_flagged: "#c62828", superseded: "#999",
+    };
+    const lettersHtml = letters.length ? letters.map(l => {
+      const dt = new Date(l.generated_at).toLocaleString();
+      const preview = (l.letter_text || "").substring(0, 300).replace(/</g, "&lt;");
+      const status = l.status || "draft";
+      const color = statusColors[status] || "#666";
+      const daysToDeadline = l.deadline_date ? Math.ceil((new Date(l.deadline_date) - new Date()) / 86400000) : null;
+      let deadlineLabel = "";
+      if (l.deadline_date && ["sent", "carrier_responded"].includes(status)) {
+        if (daysToDeadline < 0) deadlineLabel = `<span style="color:#c62828; font-weight:600;">⚠ ${Math.abs(daysToDeadline)}d PAST DEADLINE</span>`;
+        else if (daysToDeadline <= 7) deadlineLabel = `<span style="color:#c62828; font-weight:600;">${daysToDeadline}d until deadline</span>`;
+        else deadlineLabel = `<span style="color:#666;">${daysToDeadline}d to deadline</span>`;
+      }
+      return `
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;">
+            <div style="flex:1;">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <strong style="color:#0C1C36; font-size:15px;">Version ${l.version || 1}</strong>
+                <span style="background:${color}; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">${status.toUpperCase().replace(/_/g, " ")}</span>
+                ${l.bad_faith_flagged ? '<span style="background:#c62828; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">🚩 BAD FAITH</span>' : ""}
+                <span style="font-size:11px; color:#888;">#${l.id}</span>
+              </div>
+              <div style="font-size:12px; color:#666; margin-top:4px;">
+                ${dt} · To ${esc(l.target_carrier_name || "?")}${l.target_claim_number ? " (Claim " + esc(l.target_claim_number) + ")" : ""}
+              </div>
+              <div style="font-size:12px; color:#666; margin-top:2px;">
+                Deadline: ${l.deadline_date ? new Date(l.deadline_date).toLocaleDateString() : "—"} (${l.deadline_days || "?"} days per CCP § 999.1)
+                ${deadlineLabel ? " · " + deadlineLabel : ""}
+              </div>
+              <div style="font-size:11px; color:#888; margin-top:2px;">
+                ${(l.cases_cited || []).length} cases cited · $${(l.estimated_cost_usd || 0).toFixed(3)}
+                ${l.policy_limits_disclosed ? " · ✓ Limits disclosed: " + fmt$(l.disclosed_limits_amount) : ""}
+                ${l.carrier_tendered_limits ? " · ✓ TENDERED " + fmt$(l.tendered_amount) : ""}
+              </div>
+            </div>
+            <a href="/admin/pi/case/${caseId}/demand/${l.id}" style="background:#0C1C36; color:white; padding:6px 14px; border-radius:4px; text-decoration:none; font-size:12px; align-self:flex-start;">Open →</a>
+          </div>
+          <div style="font-size:12px; color:#555; padding:10px; background:#fafaf7; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${l.letter_text && l.letter_text.length > 300 ? "…" : ""}</div>
+        </div>`;
+    }).join("") : `<div style="text-align:center; padding:40px; color:#888;">No demand letters generated yet.</div>`;
+
+    const canGenerate = caseData.insurance.length > 0 && verifiedPool.length >= 3;
+    const warnHtml = !canGenerate ? `
+      <div style="background:#fff8e1; padding:14px 16px; border-radius:8px; border-left:4px solid #f57f17; margin-bottom:16px; font-size:13px;">
+        ${caseData.insurance.length === 0 ? "<strong>⚠ Add an insurance carrier first</strong> — go back to the case and add the adverse party's carrier before generating a demand.<br>" : ""}
+        ${verifiedPool.length < 3 ? `<strong>⚠ Only ${verifiedPool.length} verified PI case citations found</strong> — the generator includes 6 foundational bad faith cases automatically, but adding your firm's own demand letters to <a href="/admin/firm-documents" style="color:#f57f17;">/admin/firm-documents</a> improves quality.<br>` : ""}
+      </div>` : "";
+
+    const body = `
+      <div class="page-header">
+        <h1>📝 Demand Letters — ${esc(c.client_name)}</h1>
+        <a href="/admin/pi/case/${caseId}" class="back-link">← Back to case</a>
+      </div>
+
+      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+        <strong>Verified case law pool:</strong> ${verifiedPool.length} cases (${verifiedPool.filter(v => v.source === "foundational").length} foundational + ${verifiedPool.filter(v => v.source !== "foundational" && v.source !== "legal_citations table").length} from firm briefs + ${verifiedPool.filter(v => v.source === "legal_citations table").length} from legal_citations)
+      </div>
+
+      ${warnHtml}
+
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <h2 style="font-size:16px; margin:0 0 12px 0; color:#0C1C36;">✨ Generate New Demand Letter</h2>
+        <p style="font-size:13px; color:#666; margin-bottom:12px;">
+          Time-limited policy limits demand compliant with CCP §§ 999-999.5. Auto-calculates the deadline (33 days if policy limits ≤ $250K, 60 days if > $250K, or 60 days if undisclosed). Uses only verified case law.
+        </p>
+        <div style="display:grid; grid-template-columns:1fr; gap:12px;">
+          <div>
+            <label style="font-size:11px; color:#888; display:block; margin-bottom:4px;">Target insurance carrier</label>
+            <select id="target-insurance" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" ${!canGenerate ? "disabled" : ""}>
+              ${carrierOpts || '<option value="">No carriers on file</option>'}
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px; color:#888; display:block; margin-bottom:4px;">Additional direction for the AI (optional)</label>
+            <textarea id="additional-context" placeholder="e.g., 'stress permanent impairment', 'emphasize clear liability from police report', 'address argument that treatment was excessive'..." style="width:100%; min-height:80px; padding:10px; border:1px solid #ccc; border-radius:6px; font-size:13px; box-sizing:border-box;" ${!canGenerate ? "disabled" : ""}></textarea>
+          </div>
+          <div>
+            <button onclick="generateDemand()" id="gen-btn" ${!canGenerate ? "disabled" : ""} style="background:${canGenerate ? "#B79C62" : "#ccc"}; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:${canGenerate ? "pointer" : "not-allowed"}; font-weight:600; font-size:14px;">
+              📝 Generate Demand Letter
+            </button>
+            <div id="gen-status" style="margin-top:10px; font-size:12px; color:#666;"></div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="margin:20px 0 12px 0; font-size:14px; color:#666; text-transform:uppercase; letter-spacing:0.05em;">Generated Letters (${letters.length})</h3>
+      ${lettersHtml}
+
+      <script>
+        async function generateDemand() {
+          const btn = document.getElementById("gen-btn");
+          const status = document.getElementById("gen-status");
+          const targetId = document.getElementById("target-insurance").value;
+          const ctx = document.getElementById("additional-context").value.trim();
+          if (!targetId) { alert("Select a target insurance carrier"); return; }
+          btn.disabled = true;
+          btn.textContent = "⏳ Drafting (45-90s)…";
+          status.innerHTML = "<div style='color:#0061FF;'>Retrieving case facts, verified case law, and drafting CCP § 999.1-compliant demand…</div>";
+          try {
+            const r = await fetch("/admin/pi/case/${caseId}/generate-demand", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ target_insurance_id: parseInt(targetId, 10), additional_context: ctx }),
+            });
+            const d = await r.json();
+            if (d.ok) {
+              status.innerHTML = "<div style='color:#2e7d32;'>✅ Generated! Redirecting…</div>";
+              setTimeout(() => location.href = "/admin/pi/case/${caseId}/demand/" + d.id, 500);
+            } else {
+              status.innerHTML = "<div style='color:#c62828;'>❌ " + (d.error || "Failed") + "</div>";
+              btn.disabled = false;
+              btn.textContent = "📝 Generate Demand Letter";
+            }
+          } catch (e) {
+            status.innerHTML = "<div style='color:#c62828;'>❌ " + e.message + "</div>";
+            btn.disabled = false;
+            btn.textContent = "📝 Generate Demand Letter";
+          }
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: "PI Demand Letters", body, activeItem: "pi-cases" }));
+  } catch (err) {
+    console.error("[pi demand list]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/admin/pi/case/:id/generate-demand", async (req, res) => {
+  try {
+    const dl = require("./pi-demand-letter");
+    const result = await dl.generateDemandLetter({
+      caseId: parseInt(req.params.id, 10),
+      targetInsuranceId: req.body?.target_insurance_id,
+      additionalContext: req.body?.additional_context || "",
+      parentId: req.body?.parent_id || null,
+      createdBy: req.user?.id || null,
+    });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[pi demand generate]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/pi/case/:caseId/demand/:demandId", async (req, res) => {
+  try {
+    const dl = require("./pi-demand-letter");
+    const hearingNotes = require("./hearing-notes");
+    const letter = await dl.getDemandLetter(parseInt(req.params.demandId, 10));
+    if (!letter) return res.status(404).send("Demand letter not found");
+
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const fmt$ = n => "$" + (Number(n || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const displayText = letter.user_edits || letter.letter_text;
+    const daysToDeadline = letter.deadline_date ? Math.ceil((new Date(letter.deadline_date) - new Date()) / 86400000) : null;
+
+    const statusColors = {
+      draft: "#B79C62", sent: "#0061FF", carrier_responded: "#7c4dff",
+      limits_disclosed: "#00838f", tendered: "#2e7d32", rejected: "#c62828",
+      bad_faith_flagged: "#c62828", superseded: "#999",
+    };
+    const color = statusColors[letter.status] || "#666";
+
+    const body = `
+      <div class="page-header">
+        <h1>📝 Demand Letter — Version ${letter.version || 1}</h1>
+        <a href="/admin/pi/case/${req.params.caseId}/demand" class="back-link">← All demand letters</a>
+      </div>
+
+      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; font-size:12px; color:#555; margin-bottom:16px; display:flex; gap:16px; flex-wrap:wrap;">
+        <div><strong>Target:</strong> ${esc(letter.target_carrier_name || "?")}</div>
+        ${letter.target_claim_number ? `<div><strong>Claim #:</strong> ${esc(letter.target_claim_number)}</div>` : ""}
+        <div><strong>Generated:</strong> ${new Date(letter.generated_at).toLocaleString()}</div>
+        <div><strong>Model:</strong> ${letter.model}</div>
+        <div><strong>Cost:</strong> $${(letter.estimated_cost_usd || 0).toFixed(4)}</div>
+        <div><strong>Cases cited:</strong> ${(letter.cases_cited || []).length}</div>
+        <div><strong>Status:</strong> <span style="background:${color}; color:white; padding:2px 8px; border-radius:8px; font-size:11px; font-weight:600;">${letter.status.toUpperCase().replace(/_/g, " ")}</span></div>
+      </div>
+
+      <!-- Deadline banner -->
+      ${letter.deadline_date ? `
+      <div style="background:${daysToDeadline < 0 ? "#fee" : daysToDeadline <= 7 ? "#fff8e1" : "#e8f5e9"}; padding:14px 20px; border-radius:8px; border-left:4px solid ${daysToDeadline < 0 ? "#c62828" : daysToDeadline <= 7 ? "#f57f17" : "#2e7d32"}; margin-bottom:16px;">
+        <strong style="font-size:14px; color:${daysToDeadline < 0 ? "#c62828" : daysToDeadline <= 7 ? "#f57f17" : "#2e7d32"};">
+          ${daysToDeadline < 0
+            ? `🚨 DEADLINE PASSED ${Math.abs(daysToDeadline)} DAYS AGO (${new Date(letter.deadline_date).toLocaleDateString()})`
+            : daysToDeadline === 0
+              ? `⚠ DEADLINE IS TODAY (${new Date(letter.deadline_date).toLocaleDateString()})`
+              : `📅 Deadline: ${new Date(letter.deadline_date).toLocaleDateString()} — ${daysToDeadline} days remaining`}
+        </strong>
+        <div style="font-size:12px; color:#666; margin-top:4px;">
+          ${letter.deadline_days}-day statutory minimum per CCP § 999.1 (policy limits ${letter.policy_limits_amount ? "= " + fmt$(letter.policy_limits_amount) : "undisclosed"})
+        </div>
+        ${daysToDeadline < 0 && !letter.carrier_tendered_limits && !letter.bad_faith_flagged ? `
+        <div style="margin-top:8px; padding:10px; background:white; border-radius:6px;">
+          <strong style="color:#c62828;">⚠ Bad faith exposure preserved.</strong> The carrier had a valid CCP § 999.1 demand and failed to timely tender. Consider flagging for bad faith documentation.
+          <button onclick="flagBadFaith()" style="margin-left:8px; background:#c62828; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px;">🚩 Flag Bad Faith</button>
+        </div>` : ""}
+      </div>` : ""}
+
+      <!-- Letter body -->
+      <div style="background:white; padding:40px 50px; border-radius:8px; border:1px solid #eee; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:14px; line-height:1.7; color:#0C1C36; white-space:pre-wrap;" id="letter-text">${esc(displayText)}</div>
+
+      <!-- Certificate of Service -->
+      <details style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-top:16px;">
+        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">📋 Certificate of Service (attach to sent letter)</summary>
+        <pre style="margin-top:12px; padding:16px; background:#fafaf7; border-radius:6px; white-space:pre-wrap; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6;">${esc(letter.certificate_of_service || "")}</pre>
+      </details>
+
+      <!-- Action buttons -->
+      <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button onclick="copyText()" style="background:#0C1C36; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy letter</button>
+        <button onclick="printLetter()" style="background:#B79C62; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
+        <button onclick="regenerate()" style="background:#7c4dff; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate</button>
+        <button onclick="markSent()" style="background:#0061FF; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📬 Mark Sent</button>
+        <button onclick="recordResponse()" style="background:#00838f; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📨 Record Response</button>
+      </div>
+
+      ${(letter.cases_cited || []).length > 0 ? `
+      <details style="margin-top:20px; background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
+        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">📚 Cases cited (${letter.cases_cited.length})</summary>
+        <ul style="margin-top:10px; font-size:12px; color:#555; line-height:1.7;">
+          ${letter.cases_cited.map(c => `<li>${esc(c)}</li>`).join("")}
+        </ul>
+      </details>` : ""}
+
+      ${letter.response_summary ? `
+      <details style="margin-top:16px; background:#f5f9ff; padding:16px 20px; border-radius:8px; border-left:3px solid #0061FF;">
+        <summary style="cursor:pointer; font-weight:600;">📨 Carrier Response</summary>
+        <div style="margin-top:10px; font-size:13px; color:#555;">
+          <div><strong>Received:</strong> ${letter.response_received_date ? new Date(letter.response_received_date).toLocaleDateString() : "—"}</div>
+          ${letter.policy_limits_disclosed ? `<div><strong>Policy limits disclosed:</strong> ${fmt$(letter.disclosed_limits_amount)}</div>` : "<div>Limits NOT disclosed</div>"}
+          ${letter.carrier_tendered_limits ? `<div style="color:#2e7d32;"><strong>✓ TENDERED:</strong> ${fmt$(letter.tendered_amount)}</div>` : ""}
+          ${letter.settlement_offered ? `<div><strong>Settlement offered:</strong> ${fmt$(letter.settlement_offered)} (${letter.settlement_offered_date ? new Date(letter.settlement_offered_date).toLocaleDateString() : "no date"})</div>` : ""}
+          <div style="margin-top:8px; white-space:pre-wrap;">${esc(letter.response_summary)}</div>
+        </div>
+      </details>` : ""}
+
+      ${letter.bad_faith_flagged ? `
+      <div style="background:#fee; padding:16px 20px; border-radius:8px; border-left:4px solid #c62828; margin-top:16px;">
+        <strong style="color:#c62828;">🚩 FLAGGED FOR BAD FAITH DOCUMENTATION</strong>
+        <div style="font-size:12px; color:#666; margin-top:6px;">Flagged on: ${letter.bad_faith_flag_date ? new Date(letter.bad_faith_flag_date).toLocaleDateString() : "—"}</div>
+        ${letter.bad_faith_notes ? `<div style="margin-top:8px; font-size:13px; white-space:pre-wrap;">${esc(letter.bad_faith_notes)}</div>` : ""}
+      </div>` : ""}
+
+      <script>
+        const CASE_ID = ${req.params.caseId};
+        const DEMAND_ID = ${letter.id};
+
+        function copyText() {
+          navigator.clipboard.writeText(document.getElementById("letter-text").innerText).then(() => alert("✓ Copied"));
+        }
+        function printLetter() { window.print(); }
+
+        async function regenerate() {
+          const ctx = prompt("What to change / emphasize (optional):", "");
+          if (ctx === null) return;
+          const r = await fetch("/admin/pi/case/" + CASE_ID + "/generate-demand", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              target_insurance_id: ${letter.target_insurance_id},
+              additional_context: ctx,
+              parent_id: DEMAND_ID,
+            }),
+          });
+          const d = await r.json();
+          if (d.ok) {
+            await fetch("/admin/pi/case/" + CASE_ID + "/demand/" + DEMAND_ID + "/supersede", { method: "POST" });
+            location.href = "/admin/pi/case/" + CASE_ID + "/demand/" + d.id;
+          } else alert("Error: " + d.error);
+        }
+
+        async function markSent() {
+          const method = prompt("Sent via (certified_mail / email / fax / courier):", "certified_mail");
+          if (!method) return;
+          const tracking = prompt("Tracking / confirmation number (optional):", "");
+          const insuredAddress = prompt("Insured's service address (for cc to insured):", "");
+          const r = await fetch("/admin/pi/case/" + CASE_ID + "/demand/" + DEMAND_ID + "/sent", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sent_date: new Date().toISOString().split("T")[0],
+              sent_via: method,
+              sent_to_carrier: true,
+              sent_to_insured: !!insuredAddress,
+              tracking_number: tracking,
+              insured_service_address: insuredAddress,
+            }),
+          });
+          if (r.ok) location.reload();
+        }
+
+        async function recordResponse() {
+          const summary = prompt("Carrier response summary:", "");
+          if (summary === null) return;
+          const disclosed = confirm("Did carrier disclose policy limits? OK for yes.");
+          let disclosedAmount = null;
+          if (disclosed) {
+            disclosedAmount = parseFloat(prompt("Disclosed policy limits amount ($):", "0")) || 0;
+          }
+          const tendered = confirm("Did carrier TENDER policy limits? OK for yes.");
+          let tenderedAmount = null;
+          if (tendered) {
+            tenderedAmount = parseFloat(prompt("Tendered amount ($):", disclosedAmount || "0")) || 0;
+          } else {
+            const offered = parseFloat(prompt("Any settlement offer? Enter amount, or 0 if none:", "0")) || 0;
+            if (offered > 0) {
+              window._settlementOffered = offered;
+            }
+          }
+          const r = await fetch("/admin/pi/case/" + CASE_ID + "/demand/" + DEMAND_ID + "/response", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              response_received_date: new Date().toISOString().split("T")[0],
+              response_summary: summary,
+              policy_limits_disclosed: disclosed,
+              disclosed_limits_amount: disclosedAmount,
+              carrier_tendered_limits: tendered,
+              tendered_amount: tenderedAmount,
+              settlement_offered: window._settlementOffered || null,
+              settlement_offered_date: window._settlementOffered ? new Date().toISOString().split("T")[0] : null,
+            }),
+          });
+          if (r.ok) location.reload();
+        }
+
+        async function flagBadFaith() {
+          const notes = prompt("Bad faith documentation notes (what steps carrier failed to take, dates, etc.):");
+          if (!notes) return;
+          const r = await fetch("/admin/pi/case/" + CASE_ID + "/demand/" + DEMAND_ID + "/flag-bad-faith", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ notes }),
+          });
+          if (r.ok) location.reload();
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: `Demand v${letter.version}`, body, activeItem: "pi-cases" }));
+  } catch (err) {
+    console.error("[pi demand view]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Delivery + response tracking endpoints
+app.post("/admin/pi/case/:caseId/demand/:demandId/sent", async (req, res) => {
+  try {
+    const dl = require("./pi-demand-letter");
+    const updated = await dl.updateDeliveryStatus(parseInt(req.params.demandId, 10), req.body || {});
+    res.json({ ok: true, letter: updated });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post("/admin/pi/case/:caseId/demand/:demandId/response", async (req, res) => {
+  try {
+    const dl = require("./pi-demand-letter");
+    const updated = await dl.updateResponseStatus(parseInt(req.params.demandId, 10), req.body || {});
+    res.json({ ok: true, letter: updated });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post("/admin/pi/case/:caseId/demand/:demandId/flag-bad-faith", async (req, res) => {
+  try {
+    const dl = require("./pi-demand-letter");
+    const updated = await dl.flagBadFaith(parseInt(req.params.demandId, 10), req.body?.notes);
+    res.json({ ok: true, letter: updated });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post("/admin/pi/case/:caseId/demand/:demandId/supersede", async (req, res) => {
+  try {
+    const dl = require("./pi-demand-letter");
+    await dl.markSuperseded(parseInt(req.params.demandId, 10));
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // ── AI Audit Trail — malpractice / bar-complaint defense ──
 // Every AI-generated output is logged with immutable original + attorney
 // review + delivery record. This is the compliance backbone for a firm
@@ -1682,6 +2086,11 @@ try {
 try {
   require("./personal-injury").initTables().catch(e => console.warn("[pi] init:", e.message));
 } catch (e) { console.warn("[pi] module load:", e.message); }
+
+// Init PI demand letter table on boot
+try {
+  require("./pi-demand-letter").initTable().catch(e => console.warn("[pi-demand] init:", e.message));
+} catch (e) { console.warn("[pi-demand] module load:", e.message); }
 
 async function setScanStatus(id, updates) {
   const allowed = ["running", "phase", "current_client", "progress_current", "progress_total", "results", "error"];
