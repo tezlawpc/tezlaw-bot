@@ -2064,7 +2064,11 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       for (const t of preferred) { if (MediaRecorder.isTypeSupported(t)) { selectedType = t; break; } }
       dAudioMime = selectedType || "audio/webm";
       dAudioExt = dAudioMime.includes("mp4") ? "mp4" : "webm";
-      dMediaRecorder = new MediaRecorder(dMediaStream, selectedType ? { mimeType: selectedType } : undefined);
+      // Cap bitrate at 40 kbps to keep chunks well under Whisper's 25 MB limit.
+      // Default browser bitrate (~128 kbps) can push long recordings over the cap.
+      const dOpts = { audioBitsPerSecond: 40000 };
+      if (selectedType) dOpts.mimeType = selectedType;
+      dMediaRecorder = new MediaRecorder(dMediaStream, dOpts);
       dChunks = [];
       dIsStopping = false;
       dMediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) dChunks.push(e.data); };
