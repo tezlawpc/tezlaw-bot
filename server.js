@@ -549,44 +549,6 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
           <li>${verifiedPool.length} verified case citations from GOAT/MOAT + legal_citations</li>
         </ul>
       </div>`;
-    const noteRes = await db.query(
-      `SELECT examinations, pre_examination_notes, hearing_summary_raw
-       FROM individual_hearing_notes WHERE id = $1`, [noteId]
-    );
-    const noteRow = noteRes.rows[0] || {};
-    const examCount = Array.isArray(noteRow.examinations) ? noteRow.examinations.length : 0;
-    let qaCount = 0;
-    let witnessSummary = [];
-    for (const ex of noteRow.examinations || []) {
-      const role = ex.witness_role || "Witness";
-      const name = ex.witness_name ? ` (${ex.witness_name})` : "";
-      const type = ex.examination_type || "";
-      let rows = 0;
-      let answered = 0;
-      for (const sec of ex.sections || []) {
-        for (const qa of sec.qa_rows || []) {
-          if (qa.question || qa.expected_answer || qa.judge_notes) rows++;
-          if (qa.judge_notes && qa.judge_notes.trim()) answered++;
-        }
-      }
-      qaCount += rows;
-      witnessSummary.push(`${role}${name} ${type} — ${answered}/${rows} answers recorded`);
-    }
-    const hasPreNotes = (noteRow.pre_examination_notes || "").trim().length > 0;
-    const hasRawNotes = (noteRow.hearing_summary_raw || "").trim().length > 0;
-
-    const sourcesBlock = `
-      <div style="background:#fff8ec; padding:14px 16px; border-radius:8px; border-left:4px solid #B79C62; margin-bottom:16px; font-size:13px;">
-        <strong>Sources that will feed into this closing:</strong>
-        <ul style="margin:8px 0 0 0; padding-left:20px; color:#555;">
-          ${examCount > 0
-            ? `<li>${examCount} witness examination${examCount === 1 ? "" : "s"} with ${qaCount} Q&A rows</li>${witnessSummary.map(w => `<li style="font-size:12px; color:#777; list-style:none; margin-left:-14px;">&nbsp;&nbsp;• ${w}</li>`).join("")}`
-            : `<li style="color:#c62828;">⚠ No witness examinations recorded yet — closing will be light on testimony grounding</li>`}
-          ${hasPreNotes ? `<li>Attorney's pre-hearing notes / outline</li>` : ""}
-          ${hasRawNotes ? `<li>Raw hearing notes / dictation</li>` : ""}
-          <li>${verifiedPool.length} verified case citations from GOAT/MOAT + legal_citations</li>
-        </ul>
-      </div>`;
 
     const argsHtml = args.length ? args.map(a => {
       const dt = new Date(a.generated_at).toLocaleString();
