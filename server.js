@@ -496,6 +496,399 @@ app.get("/version", (req, res) => {
 });
 
 // ── Triage Dashboard ─────────────────────────────────────
+// ── AI Audit Trail — malpractice / bar-complaint defense ──
+// Every AI-generated output is logged with immutable original + attorney
+// review + delivery record. This is the compliance backbone for a firm
+// using AI at scale.
+
+app.get("/admin/audit-trail", async (req, res) => {
+  try {
+    const audit = require("./ai-audit-trail");
+    const hearingNotes = require("./hearing-notes");
+
+    const filters = {
+      feature_type: req.query.feature_type || null,
+      status: req.query.status || null,
+      client_key: req.query.client_key || null,
+      a_number: req.query.a_number || null,
+      flagged_only: req.query.flagged === "1",
+      limit: 50,
+      offset: parseInt(req.query.offset || "0", 10),
+    };
+    const [rows, totalCount, stats] = await Promise.all([
+      audit.list(filters),
+      audit.count(filters),
+      audit.stats(),
+    ]);
+
+    const filterOptions = {
+      feature_type: ["closing_argument", "motion", "notice_scan", "intake_extraction", "voice_dictation", "chat_response"],
+      status: ["unreviewed", "reviewed", "approved", "delivered", "withdrawn", "flagged"],
+    };
+    const featureOptsHtml = filterOptions.feature_type.map(f =>
+      `<option value="${f}" ${filters.feature_type === f ? "selected" : ""}>${f.replace(/_/g, " ")}</option>`
+    ).join("");
+    const statusOptsHtml = filterOptions.status.map(s =>
+      `<option value="${s}" ${filters.status === s ? "selected" : ""}>${s}</option>`
+    ).join("");
+
+    const statusColors = {
+      unreviewed: "#B79C62",
+      reviewed: "#0061FF",
+      approved: "#2e7d32",
+      delivered: "#00695c",
+      withdrawn: "#999",
+      flagged: "#c62828",
+    };
+
+    const rowsHtml = rows.length ? rows.map(r => {
+      const dt = new Date(r.generated_at).toLocaleString();
+      const preview = (r.preview || "").replace(/</g, "&lt;");
+      const client = r.client_name ? `${r.client_name}${r.a_number ? " (" + r.a_number + ")" : ""}` : "(no client link)";
+      const color = statusColors[r.status] || "#666";
+      const flagIcon = (r.bar_complaint_related || r.malpractice_flag) ? '<span title="Flagged for compliance review" style="color:#c62828; font-size:16px;">⚠️</span> ' : "";
+      const editIndicator = r.edit_char_delta ? ` · ${r.edit_char_delta >= 0 ? "+" : ""}${r.edit_char_delta} chars edited` : "";
+      const deliveredIndicator = r.delivered_at ? ` · ✓ delivered via ${r.delivered_via || "?"}` : "";
+      return `
+        <tr>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              ${flagIcon}<strong style="color:#0C1C36;">#${r.id}</strong>
+              <span style="background:${color}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${r.status.toUpperCase()}</span>
+            </div>
+            <div style="font-size:11px; color:#888; margin-top:2px;">${dt}</div>
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+            <div style="font-weight:500; color:#0C1C36;">${r.feature_type.replace(/_/g, " ")}</div>
+            <div style="font-size:11px; color:#888;">${(r.source_module || "").replace(".js", "")}</div>
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:13px;">
+            ${client}
+            <div style="font-size:11px; color:#888;">${r.matter_type || ""}</div>
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:11px; color:#666;">
+            ${r.model_used || "—"}<br>
+            <span style="color:#2e7d32;">$${(r.estimated_cost_usd || 0).toFixed(3)}</span><br>
+            ${r.output_length}ch${editIndicator}${deliveredIndicator}
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px; color:#555; max-width:400px;">
+            <div style="font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${(r.output_length || 0) > 200 ? "…" : ""}</div>
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+            <a href="/admin/audit-trail/${r.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+          </td>
+        </tr>`;
+    }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#888;">No audit records match these filters.</td></tr>`;
+
+    const pageCount = Math.ceil(totalCount / 50);
+    const currentPage = Math.floor(filters.offset / 50) + 1;
+
+    const body = `
+      <div class="page-header">
+        <h1>🛡️ AI Audit Trail</h1>
+        <div style="font-size:12px; color:#666; margin-top:4px;">Immutable log of every AI output — malpractice + bar complaint defense</div>
+      </div>
+
+      <!-- Stats grid -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:20px;">
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Pending review</div>
+          <div style="font-size:24px; font-weight:700; color:${(stats.pending_review || 0) > 0 ? "#B79C62" : "#0C1C36"}; margin-top:4px;">${stats.pending_review || 0}</div>
+        </div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Approved</div>
+          <div style="font-size:24px; font-weight:700; color:#2e7d32; margin-top:4px;">${stats.approved || 0}</div>
+        </div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Delivered</div>
+          <div style="font-size:24px; font-weight:700; color:#00695c; margin-top:4px;">${stats.delivered || 0}</div>
+        </div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Flagged</div>
+          <div style="font-size:24px; font-weight:700; color:${(stats.flagged || 0) > 0 ? "#c62828" : "#0C1C36"}; margin-top:4px;">${stats.flagged || 0}</div>
+        </div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Last 30 days</div>
+          <div style="font-size:24px; font-weight:700; color:#0C1C36; margin-top:4px;">${stats.last_30_days || 0}</div>
+          <div style="font-size:11px; color:#2e7d32; margin-top:2px;">$${(stats.cost_last_30_days || 0)}</div>
+        </div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Total all time</div>
+          <div style="font-size:24px; font-weight:700; color:#0C1C36; margin-top:4px;">${stats.total_all_time || 0}</div>
+          <div style="font-size:11px; color:#2e7d32; margin-top:2px;">$${(stats.total_cost_all_time || 0)}</div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <form method="GET" style="background:white; padding:16px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+        <div>
+          <label style="font-size:11px; color:#888; display:block; margin-bottom:2px;">Feature type</label>
+          <select name="feature_type" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+            <option value="">All types</option>
+            ${featureOptsHtml}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px; color:#888; display:block; margin-bottom:2px;">Status</label>
+          <select name="status" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+            <option value="">All statuses</option>
+            ${statusOptsHtml}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px; color:#888; display:block; margin-bottom:2px;">A-Number</label>
+          <input type="text" name="a_number" value="${(filters.a_number || "").replace(/"/g, "&quot;")}" style="padding:6px; border:1px solid #ccc; border-radius:4px; width:140px;" placeholder="A123456789">
+        </div>
+        <div>
+          <label style="font-size:11px; color:#888; display:block; margin-bottom:2px;">
+            <input type="checkbox" name="flagged" value="1" ${filters.flagged_only ? "checked" : ""}> Flagged only
+          </label>
+        </div>
+        <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Filter</button>
+        <a href="/admin/audit-trail" style="padding:8px 16px; color:#666; text-decoration:none; font-size:13px;">Clear</a>
+      </form>
+
+      <!-- Results table -->
+      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
+        <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee; font-size:12px; color:#666;">
+          Showing ${rows.length} of ${totalCount} records
+        </div>
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead>
+            <tr style="background:#fafaf7;">
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">ID / Status</th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Feature</th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Client</th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Model / Cost</th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Preview</th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;"></th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: "AI Audit Trail", body, activeItem: "audit-trail" }));
+  } catch (err) {
+    console.error("[audit-trail list]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Detail view
+app.get("/admin/audit-trail/:id", async (req, res) => {
+  try {
+    const audit = require("./ai-audit-trail");
+    const hearingNotes = require("./hearing-notes");
+    const row = await audit.get(parseInt(req.params.id, 10));
+    if (!row) return res.status(404).send("Audit record not found");
+    const integrity = await audit.verifyIntegrity(row.id);
+
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const statusColors = {
+      unreviewed: "#B79C62", reviewed: "#0061FF", approved: "#2e7d32",
+      delivered: "#00695c", withdrawn: "#999", flagged: "#c62828",
+    };
+
+    const body = `
+      <div class="page-header">
+        <h1>🛡️ Audit Record #${row.id}</h1>
+        <a href="/admin/audit-trail" class="back-link">← All audit records</a>
+      </div>
+
+      <!-- Metadata block -->
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; font-size:13px;">
+          <div><strong>Feature:</strong> ${esc(row.feature_type)}</div>
+          <div><strong>Status:</strong> <span style="background:${statusColors[row.status]}; color:white; padding:2px 8px; border-radius:8px; font-size:11px; font-weight:600;">${esc(row.status).toUpperCase()}</span></div>
+          <div><strong>Client:</strong> ${esc(row.client_name || "(none)")}</div>
+          ${row.a_number ? `<div><strong>A#:</strong> ${esc(row.a_number)}</div>` : ""}
+          <div><strong>Matter:</strong> ${esc(row.matter_type || "—")}</div>
+          <div><strong>Model:</strong> ${esc(row.model_used || "—")}</div>
+          <div><strong>Cost:</strong> $${(row.estimated_cost_usd || 0).toFixed(4)}</div>
+          <div><strong>Generated:</strong> ${new Date(row.generated_at).toLocaleString()}</div>
+          ${row.generated_by ? `<div><strong>By user:</strong> #${row.generated_by}</div>` : ""}
+          ${row.reviewed_at ? `<div><strong>Reviewed:</strong> ${new Date(row.reviewed_at).toLocaleString()}</div>` : ""}
+          ${row.delivered_at ? `<div><strong>Delivered:</strong> ${new Date(row.delivered_at).toLocaleString()} via ${esc(row.delivered_via)}</div>` : ""}
+        </div>
+      </div>
+
+      <!-- Integrity check -->
+      <div style="background:${integrity.tamper_detected ? "#fee" : "#e8f5e9"}; padding:14px 16px; border-radius:8px; border-left:4px solid ${integrity.tamper_detected ? "#c62828" : "#2e7d32"}; margin-bottom:16px; font-size:12px; font-family:ui-monospace, Menlo, monospace;">
+        <strong>🔒 Integrity check:</strong> ${integrity.tamper_detected ? "❌ TAMPERING DETECTED — hashes do not match" : "✓ PASSED — content matches stored hash"}<br>
+        <span style="color:#888;">Stored hash: ${integrity.stored_hash?.substring(0, 32) || "?"}…</span><br>
+        <span style="color:#888;">Computed:    ${integrity.computed_hash?.substring(0, 32) || "?"}…</span>
+      </div>
+
+      <!-- Original AI output (immutable) -->
+      <details open style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">📄 Original AI Output (${row.original_output ? row.original_output.length : 0} chars) — IMMUTABLE</summary>
+        <pre style="margin-top:14px; padding:16px; background:#fafaf7; border-radius:6px; white-space:pre-wrap; word-wrap:break-word; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6; max-height:600px; overflow-y:auto;">${esc(row.original_output)}</pre>
+      </details>
+
+      ${row.final_version ? `
+      <details style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">✏️ Final Version (after attorney edits)</summary>
+        <pre style="margin-top:14px; padding:16px; background:#fafaf7; border-radius:6px; white-space:pre-wrap; word-wrap:break-word; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6; max-height:600px; overflow-y:auto;">${esc(row.final_version)}</pre>
+        ${row.edit_diff ? `<div style="margin-top:10px; font-size:12px; color:#666;"><strong>Edit summary:</strong> ${esc((JSON.parse(row.edit_diff) || {}).summary || "")}</div>` : ""}
+      </details>` : ""}
+
+      ${row.reviewer_notes ? `
+      <div style="background:#fff8ec; padding:14px 16px; border-radius:8px; border-left:3px solid #B79C62; margin-bottom:16px; font-size:13px;">
+        <strong>📝 Reviewer notes:</strong><br>
+        <div style="white-space:pre-wrap; margin-top:6px;">${esc(row.reviewer_notes)}</div>
+      </div>` : ""}
+
+      ${row.input_context_summary ? `
+      <details style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:3px solid #0061FF; margin-bottom:16px; font-size:12px;">
+        <summary style="cursor:pointer; font-weight:600;">📥 Input context that produced this output</summary>
+        <div style="margin-top:8px; color:#555; white-space:pre-wrap;">${esc(row.input_context_summary)}</div>
+        ${row.input_context_hash ? `<div style="margin-top:6px; font-family:ui-monospace, Menlo, monospace; font-size:10px; color:#888;">Input hash: ${row.input_context_hash.substring(0, 48)}…</div>` : ""}
+      </details>` : ""}
+
+      <!-- Action buttons -->
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
+        <h3 style="margin:0 0 12px 0; font-size:14px; color:#666;">Actions</h3>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          ${row.status === "unreviewed" ? `<button onclick="markReviewed()" style="background:#0061FF; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Mark Reviewed</button>` : ""}
+          ${(row.status === "reviewed" || row.status === "unreviewed") ? `<button onclick="markApproved()" style="background:#2e7d32; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Approve</button>` : ""}
+          ${(row.status === "approved" || row.status === "reviewed") ? `<button onclick="markDelivered()" style="background:#00695c; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📬 Mark Delivered</button>` : ""}
+          <button onclick="flagRecord()" style="background:#c62828; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🚩 Flag</button>
+          <button onclick="withdrawRecord()" style="background:#999; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">↩️ Withdraw</button>
+          ${row.client_key ? `<a href="/admin/audit-trail/export/client/${encodeURIComponent(row.client_key)}" style="background:#0C1C36; color:white; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600; text-decoration:none; margin-left:auto;">📥 Export full client trail</a>` : ""}
+        </div>
+      </div>
+
+      <script>
+        const AUDIT_ID = ${row.id};
+        async function markReviewed() {
+          const notes = prompt("Optional review notes:");
+          if (notes === null) return;
+          const editedVersion = prompt("If you edited the final version, paste it here (or leave blank):");
+          const r = await fetch("/admin/audit-trail/" + AUDIT_ID + "/reviewed", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ notes, editedVersion: editedVersion || null }),
+          });
+          if (r.ok) location.reload(); else alert("Error");
+        }
+        async function markApproved() {
+          if (!confirm("Approve this AI output as final?")) return;
+          const r = await fetch("/admin/audit-trail/" + AUDIT_ID + "/approved", { method: "POST" });
+          if (r.ok) location.reload(); else alert("Error");
+        }
+        async function markDelivered() {
+          const deliveredTo = prompt("Delivered to (e.g., client email, court name):");
+          if (deliveredTo === null) return;
+          const deliveredVia = prompt("Delivered via (email, in-court, mail, portal, sms):", "email");
+          const confirmation = prompt("Confirmation/tracking (optional):");
+          const r = await fetch("/admin/audit-trail/" + AUDIT_ID + "/delivered", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ deliveredTo, deliveredVia, deliveryConfirmation: confirmation }),
+          });
+          if (r.ok) location.reload(); else alert("Error");
+        }
+        async function flagRecord() {
+          const reason = prompt("Reason for flagging:");
+          if (!reason) return;
+          const isMalpractice = confirm("Is this malpractice-related? OK for yes, Cancel for no.");
+          const isBarComplaint = confirm("Is this bar-complaint-related? OK for yes, Cancel for no.");
+          const r = await fetch("/admin/audit-trail/" + AUDIT_ID + "/flag", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason, isMalpractice, isBarComplaint }),
+          });
+          if (r.ok) location.reload(); else alert("Error");
+        }
+        async function withdrawRecord() {
+          const reason = prompt("Reason for withdrawal:");
+          if (!reason) return;
+          const r = await fetch("/admin/audit-trail/" + AUDIT_ID + "/withdraw", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason }),
+          });
+          if (r.ok) location.reload(); else alert("Error");
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: `Audit #${row.id}`, body, activeItem: "audit-trail" }));
+  } catch (err) {
+    console.error("[audit-trail detail]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Action endpoints
+app.post("/admin/audit-trail/:id/reviewed", async (req, res) => {
+  try {
+    const audit = require("./ai-audit-trail");
+    const updated = await audit.markReviewed(parseInt(req.params.id, 10), {
+      userId: req.user?.id,
+      notes: req.body?.notes,
+      editedVersion: req.body?.editedVersion,
+      ip: req.ip,
+    });
+    res.json({ ok: true, record: updated });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post("/admin/audit-trail/:id/approved", async (req, res) => {
+  try {
+    const audit = require("./ai-audit-trail");
+    const updated = await audit.markApproved(parseInt(req.params.id, 10), { userId: req.user?.id, ip: req.ip });
+    res.json({ ok: true, record: updated });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post("/admin/audit-trail/:id/delivered", async (req, res) => {
+  try {
+    const audit = require("./ai-audit-trail");
+    const updated = await audit.markDelivered(parseInt(req.params.id, 10), {
+      deliveredBy: req.user?.id,
+      deliveredTo: req.body?.deliveredTo,
+      deliveredVia: req.body?.deliveredVia,
+      deliveryConfirmation: req.body?.deliveryConfirmation,
+    });
+    res.json({ ok: true, record: updated });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post("/admin/audit-trail/:id/flag", async (req, res) => {
+  try {
+    const audit = require("./ai-audit-trail");
+    const updated = await audit.flag(parseInt(req.params.id, 10), {
+      userId: req.user?.id,
+      reason: req.body?.reason,
+      isMalpractice: !!req.body?.isMalpractice,
+      isBarComplaint: !!req.body?.isBarComplaint,
+    });
+    res.json({ ok: true, record: updated });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post("/admin/audit-trail/:id/withdraw", async (req, res) => {
+  try {
+    const audit = require("./ai-audit-trail");
+    const updated = await audit.markWithdrawn(parseInt(req.params.id, 10), {
+      userId: req.user?.id,
+      reason: req.body?.reason,
+    });
+    res.json({ ok: true, record: updated });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Client-level export for insurance / bar audit
+app.get("/admin/audit-trail/export/client/:clientKey", async (req, res) => {
+  try {
+    const audit = require("./ai-audit-trail");
+    const rows = await audit.exportForClient(req.params.clientKey);
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="ai-audit-${req.params.clientKey}-${new Date().toISOString().split("T")[0]}.json"`);
+    res.send(JSON.stringify({
+      export_generated_at: new Date().toISOString(),
+      client_key: req.params.clientKey,
+      total_records: rows.length,
+      records: rows,
+    }, null, 2));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Closing Oral Argument generator ──────────────────────
 // Drafts the closing argument for an individual (merits) hearing using ONLY
 // case law verified from the firm's GOAT/MOAT documents. Zero hallucination.
@@ -1145,6 +1538,11 @@ async function initScanStatusTable() {
   `);
 }
 initScanStatusTable().catch(e => console.warn("[scan-status] init:", e.message));
+
+// Init AI audit trail table on boot (safe no-op if exists)
+try {
+  require("./ai-audit-trail").initTable().catch(e => console.warn("[audit-trail] init:", e.message));
+} catch (e) { console.warn("[audit-trail] module load:", e.message); }
 
 async function setScanStatus(id, updates) {
   const allowed = ["running", "phase", "current_client", "progress_current", "progress_total", "results", "error"];
