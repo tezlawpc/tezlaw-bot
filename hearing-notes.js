@@ -1448,6 +1448,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/audit-log" class="nav-link" data-perm="users.manage">
         <span class="nav-icon">◉</span><span class="nav-label">Audit Log</span>
       </a>
+      <a href="/admin/audit-trail" class="nav-link ${isActive('audit-trail')}" data-perm="users.manage">
+        <span class="nav-icon">▤</span><span class="nav-label">AI Audit Trail</span>
+      </a>
       <a href="/admin/users" class="nav-link" data-perm="users.manage">
         <span class="nav-icon">◎</span><span class="nav-label">Users</span>
       </a>
