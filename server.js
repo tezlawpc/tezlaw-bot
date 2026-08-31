@@ -510,21 +510,106 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
     const args = await cag.listForNote(noteId);
     const verifiedPool = await cag.retrieveVerifiedCaseLaw();
 
+    // Peek at the hearing note to show attorney what testimony/notes will feed in
+    const noteRes = await db.query(
+      `SELECT examinations, pre_examination_notes, hearing_summary_raw
+       FROM individual_hearing_notes WHERE id = $1`, [noteId]
+    );
+    const noteRow = noteRes.rows[0] || {};
+    const examCount = Array.isArray(noteRow.examinations) ? noteRow.examinations.length : 0;
+    let qaCount = 0;
+    let witnessSummary = [];
+    for (const ex of noteRow.examinations || []) {
+      const role = ex.witness_role || "Witness";
+      const name = ex.witness_name ? ` (${ex.witness_name})` : "";
+      const type = ex.examination_type || "";
+      let rows = 0;
+      let answered = 0;
+      for (const sec of ex.sections || []) {
+        for (const qa of sec.qa_rows || []) {
+          if (qa.question || qa.expected_answer || qa.judge_notes) rows++;
+          if (qa.judge_notes && qa.judge_notes.trim()) answered++;
+        }
+      }
+      qaCount += rows;
+      witnessSummary.push(`${role}${name} ${type} — ${answered}/${rows} answers recorded`);
+    }
+    const hasPreNotes = (noteRow.pre_examination_notes || "").trim().length > 0;
+    const hasRawNotes = (noteRow.hearing_summary_raw || "").trim().length > 0;
+
+    const sourcesBlock = `
+      <div style="background:#fff8ec; padding:14px 16px; border-radius:8px; border-left:4px solid #B79C62; margin-bottom:16px; font-size:13px;">
+        <strong>Sources that will feed into this closing:</strong>
+        <ul style="margin:8px 0 0 0; padding-left:20px; color:#555;">
+          ${examCount > 0
+            ? `<li>${examCount} witness examination${examCount === 1 ? "" : "s"} with ${qaCount} Q&A rows</li>${witnessSummary.map(w => `<li style="font-size:12px; color:#777; list-style:none; margin-left:-14px;">&nbsp;&nbsp;• ${w}</li>`).join("")}`
+            : `<li style="color:#c62828;">⚠ No witness examinations recorded yet — closing will be light on testimony grounding</li>`}
+          ${hasPreNotes ? `<li>Attorney's pre-hearing notes / outline</li>` : ""}
+          ${hasRawNotes ? `<li>Raw hearing notes / dictation</li>` : ""}
+          <li>${verifiedPool.length} verified case citations from GOAT/MOAT + legal_citations</li>
+        </ul>
+      </div>`;
+    const noteRes = await db.query(
+      `SELECT examinations, pre_examination_notes, hearing_summary_raw
+       FROM individual_hearing_notes WHERE id = $1`, [noteId]
+    );
+    const noteRow = noteRes.rows[0] || {};
+    const examCount = Array.isArray(noteRow.examinations) ? noteRow.examinations.length : 0;
+    let qaCount = 0;
+    let witnessSummary = [];
+    for (const ex of noteRow.examinations || []) {
+      const role = ex.witness_role || "Witness";
+      const name = ex.witness_name ? ` (${ex.witness_name})` : "";
+      const type = ex.examination_type || "";
+      let rows = 0;
+      let answered = 0;
+      for (const sec of ex.sections || []) {
+        for (const qa of sec.qa_rows || []) {
+          if (qa.question || qa.expected_answer || qa.judge_notes) rows++;
+          if (qa.judge_notes && qa.judge_notes.trim()) answered++;
+        }
+      }
+      qaCount += rows;
+      witnessSummary.push(`${role}${name} ${type} — ${answered}/${rows} answers recorded`);
+    }
+    const hasPreNotes = (noteRow.pre_examination_notes || "").trim().length > 0;
+    const hasRawNotes = (noteRow.hearing_summary_raw || "").trim().length > 0;
+
+    const sourcesBlock = `
+      <div style="background:#fff8ec; padding:14px 16px; border-radius:8px; border-left:4px solid #B79C62; margin-bottom:16px; font-size:13px;">
+        <strong>Sources that will feed into this closing:</strong>
+        <ul style="margin:8px 0 0 0; padding-left:20px; color:#555;">
+          ${examCount > 0
+            ? `<li>${examCount} witness examination${examCount === 1 ? "" : "s"} with ${qaCount} Q&A rows</li>${witnessSummary.map(w => `<li style="font-size:12px; color:#777; list-style:none; margin-left:-14px;">&nbsp;&nbsp;• ${w}</li>`).join("")}`
+            : `<li style="color:#c62828;">⚠ No witness examinations recorded yet — closing will be light on testimony grounding</li>`}
+          ${hasPreNotes ? `<li>Attorney's pre-hearing notes / outline</li>` : ""}
+          ${hasRawNotes ? `<li>Raw hearing notes / dictation</li>` : ""}
+          <li>${verifiedPool.length} verified case citations from GOAT/MOAT + legal_citations</li>
+        </ul>
+      </div>`;
+
     const argsHtml = args.length ? args.map(a => {
       const dt = new Date(a.generated_at).toLocaleString();
       const preview = (a.argument_text || "").substring(0, 300).replace(/</g, "&lt;");
       const status = a.status || "draft";
-      const statusColor = { draft: "#B79C62", finalized: "#0061FF", delivered: "#2e7d32" }[status] || "#666";
+      const statusColor = { draft: "#B79C62", finalized: "#0061FF", delivered: "#2e7d32", superseded: "#999" }[status] || "#666";
+      const parentLabel = a.parent_id ? ` · regenerated from #${a.parent_id}` : "";
+      const witnessLabel = a.testimony_witness_count ? ` · ${a.testimony_witness_count} witness${a.testimony_witness_count === 1 ? "" : "es"} in record` : "";
+      const ctxLabel = a.additional_context ? ` · custom context` : "";
       return `
         <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;">
-            <div>
-              <strong style="color:#0C1C36;">Closing #${a.id}</strong>
-              <span style="background:${statusColor}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; margin-left:6px;">${status.toUpperCase()}</span>
-              <div style="font-size:11px; color:#888; margin-top:2px;">${dt} · ${a.model} · $${(a.estimated_cost_usd || 0).toFixed(3)}</div>
-              <div style="font-size:11px; color:#666; margin-top:4px;">Cases cited: ${(a.cases_cited || []).length}</div>
+            <div style="flex:1;">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <strong style="color:#0C1C36; font-size:15px;">Version ${a.version || 1}</strong>
+                <span style="background:${statusColor}; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">${status.toUpperCase()}</span>
+                <span style="font-size:11px; color:#888;">#${a.id}</span>
+              </div>
+              <div style="font-size:11px; color:#888; margin-top:4px;">${dt} · ${a.model} · $${(a.estimated_cost_usd || 0).toFixed(3)} · ${(a.cases_cited || []).length} cases${witnessLabel}${parentLabel}${ctxLabel}</div>
             </div>
-            <a href="/admin/hearing/individual/${noteId}/closing/${a.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <a href="/admin/hearing/individual/${noteId}/closing/${a.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+            </div>
           </div>
           <div style="font-size:12px; color:#555; padding:10px; background:#fafaf7; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${a.argument_text && a.argument_text.length > 300 ? "…" : ""}</div>
         </div>`;
@@ -540,6 +625,8 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
         <strong>Verified case law pool:</strong> ${verifiedPool.length} cases available from your firm's GOAT/MOAT + legal_citations.
         ${verifiedPool.length < 5 ? `<span style="color:#c62828; font-weight:600;"> ⚠️ Need at least 5 asylum cases to generate. Add briefs at <a href="/admin/firm-documents" style="color:#c62828;">/admin/firm-documents</a>.</span>` : ""}
       </div>
+
+      ${sourcesBlock}
 
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
         <h2 style="font-size:16px; margin:0 0 12px 0; color:#0C1C36;">✨ Generate New Closing Argument</h2>
@@ -604,6 +691,7 @@ app.post("/admin/hearing/individual/:id/generate-closing", async (req, res) => {
     const result = await cag.generateClosingArgument({
       individualNoteId: noteId,
       additionalContext: (req.body && req.body.additional_context) || "",
+      parentId: (req.body && req.body.parent_id) || null,
       createdBy: req.user?.id || null,
     });
     res.json({ ok: true, ...result });
@@ -625,8 +713,8 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
 
     const body = `
       <div class="page-header">
-        <h1>🏛️ Closing Argument #${closing.id}</h1>
-        <a href="/admin/hearing/individual/${req.params.noteId}/closing" class="back-link">← All closings for this hearing</a>
+        <h1>🏛️ Closing Argument — Version ${closing.version || 1}</h1>
+        <a href="/admin/hearing/individual/${req.params.noteId}/closing" class="back-link">← All versions</a>
       </div>
 
       <div style="background:#f5f9ff; padding:12px 14px; border-radius:8px; font-size:12px; color:#555; margin-bottom:16px; display:flex; gap:16px; flex-wrap:wrap;">
@@ -637,13 +725,21 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
         <div><strong>Cost:</strong> $${(closing.estimated_cost_usd || 0).toFixed(4)}</div>
         <div><strong>Cases cited:</strong> ${(closing.cases_cited || []).length}</div>
         <div><strong>Status:</strong> ${closing.status}</div>
+        ${closing.parent_id ? `<div><strong>Regenerated from:</strong> <a href="/admin/hearing/individual/${req.params.noteId}/closing/${closing.parent_id}" style="color:#0061FF;">Version ${closing.version - 1} (#${closing.parent_id})</a></div>` : ""}
       </div>
+
+      ${closing.additional_context ? `
+      <details style="background:#fff8ec; padding:12px 16px; border-radius:8px; border-left:3px solid #B79C62; margin-bottom:16px; font-size:12px;">
+        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">📝 Attorney's context for this version</summary>
+        <div style="margin-top:8px; color:#555; white-space:pre-wrap;">${String(closing.additional_context).replace(/</g, "&lt;")}</div>
+      </details>` : ""}
 
       <div style="background:white; padding:32px 40px; border-radius:8px; border:1px solid #eee; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:15px; line-height:1.75; color:#0C1C36; white-space:pre-wrap;" id="argument-text">${escaped}</div>
 
       <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
         <button onclick="copyText()" style="background:#0C1C36; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy to clipboard</button>
         <button onclick="printArgument()" style="background:#B79C62; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
+        <button onclick="regenerate()" style="background:#7c4dff; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate (new version)</button>
         <button onclick="markStatus('finalized')" style="background:#0061FF; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Mark finalized</button>
         <button onclick="markStatus('delivered')" style="background:#2e7d32; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Mark delivered</button>
       </div>
@@ -656,12 +752,66 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
         </ul>
       </details>` : ""}
 
+      <!-- Regenerate modal -->
+      <div id="regen-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; padding:20px;">
+        <div style="background:white; padding:24px; border-radius:12px; max-width:520px; width:100%;">
+          <h3 style="margin:0 0 12px 0; color:#0C1C36;">🔄 Regenerate Closing</h3>
+          <p style="font-size:13px; color:#666; margin-bottom:12px;">
+            A new version will be created using the same hearing notes and testimony, plus any additional direction you provide below. The previous version stays saved.
+          </p>
+          <label style="font-size:12px; color:#666; display:block; margin-bottom:4px;">What to change / emphasize (optional)</label>
+          <textarea id="regen-context" placeholder="e.g., 'make it more concise', 'emphasize country conditions', 'add more discussion of PSG', 'address the DHS argument about internal relocation'..." style="width:100%; min-height:100px; padding:10px; border:1px solid #ccc; border-radius:6px; font-family:inherit; font-size:13px; box-sizing:border-box;"></textarea>
+          <div style="margin-top:14px; display:flex; gap:8px; justify-content:flex-end;">
+            <button onclick="closeRegenModal()" style="background:#eee; color:#555; border:none; padding:8px 16px; border-radius:6px; cursor:pointer;">Cancel</button>
+            <button onclick="doRegenerate()" id="regen-btn" style="background:#7c4dff; color:white; border:none; padding:8px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate</button>
+          </div>
+        </div>
+      </div>
+
       <script>
         function copyText() {
           const text = document.getElementById("argument-text").innerText;
           navigator.clipboard.writeText(text).then(() => alert("✓ Copied to clipboard"));
         }
         function printArgument() { window.print(); }
+        function regenerate() {
+          const modal = document.getElementById("regen-modal");
+          modal.style.display = "flex";
+        }
+        function closeRegenModal() {
+          document.getElementById("regen-modal").style.display = "none";
+        }
+        async function doRegenerate() {
+          const btn = document.getElementById("regen-btn");
+          const ctx = document.getElementById("regen-context").value.trim();
+          btn.disabled = true;
+          btn.textContent = "⏳ Drafting (30-90s)…";
+          try {
+            const r = await fetch("/admin/hearing/individual/${req.params.noteId}/generate-closing", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ additional_context: ctx, parent_id: ${closing.id} }),
+            });
+            const d = await r.json();
+            if (d.ok) {
+              // Mark the parent as superseded
+              await fetch("/admin/hearing/individual/${req.params.noteId}/closing/${closing.id}/status", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: "superseded" }),
+              });
+              location.href = "/admin/hearing/individual/${req.params.noteId}/closing/" + d.id;
+            } else {
+              alert("Error: " + (d.error || "unknown"));
+              btn.disabled = false;
+              btn.textContent = "🔄 Regenerate";
+            }
+          } catch (e) {
+            alert("Error: " + e.message);
+            btn.disabled = false;
+            btn.textContent = "🔄 Regenerate";
+          }
+        }
         async function markStatus(status) {
           const r = await fetch("/admin/hearing/individual/${req.params.noteId}/closing/${closing.id}/status", {
             method: "POST",
@@ -685,7 +835,7 @@ app.post("/admin/hearing/individual/:noteId/closing/:closingId/status", async (r
   try {
     const cag = require("./closing-argument-generator");
     const status = req.body && req.body.status;
-    if (!["draft", "finalized", "delivered"].includes(status)) {
+    if (!["draft", "finalized", "delivered", "superseded"].includes(status)) {
       return res.status(400).json({ ok: false, error: "Invalid status" });
     }
     const updated = await cag.updateClosingArgument(parseInt(req.params.closingId, 10), { status });
