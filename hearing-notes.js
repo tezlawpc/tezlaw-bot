@@ -1346,10 +1346,33 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
     </div>
 
-    <!-- ── Hearings ── -->
-    <div class="nav-section" id="section-hearings">
+    <!-- ── Personal Injury section ── -->
+    <div class="nav-section" id="section-pi">
+      <div class="nav-section-header">Personal Injury</div>
+      <a href="/admin/pi" class="nav-link ${isActive('pi-dashboard')}" data-perm="clients.read">
+        <span class="nav-icon">🚑</span><span class="nav-label">PI Dashboard</span>
+      </a>
+      <a href="/admin/pi/cases" class="nav-link ${isActive('pi-cases')}" data-perm="clients.read">
+        <span class="nav-icon">◈</span><span class="nav-label">All PI Cases</span>
+      </a>
+      <a href="/admin/pi/cases?status=intake" class="nav-link" data-perm="clients.read">
+        <span class="nav-icon">◌</span><span class="nav-label">New Intake</span>
+      </a>
+      <a href="/admin/pi/cases?status=treating" class="nav-link" data-perm="clients.read">
+        <span class="nav-icon">◍</span><span class="nav-label">Under Treatment</span>
+      </a>
+      <a href="/admin/pi/cases?status=settled" class="nav-link" data-perm="clients.read">
+        <span class="nav-icon">◎</span><span class="nav-label">Awaiting Disbursement</span>
+      </a>
+      <a href="/admin/pi/cases?sol_soon=1" class="nav-link" data-perm="clients.read">
+        <span class="nav-icon">⚠</span><span class="nav-label">SOL Alerts</span>
+      </a>
+    </div>
+
+    <!-- ── Immigration (Hearings + Motions) ── -->
+    <div class="nav-section" id="section-immigration">
       <div class="nav-section-header">
-        <span>Hearings</span>
+        <span>Immigration</span>
       </div>
       <a href="/admin/hearing/notes" class="nav-link ${isActive('notes')}" data-perm="hearings.read">
         <span class="nav-icon">≡</span><span class="nav-label">Master Notes</span>
