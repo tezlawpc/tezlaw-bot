@@ -692,7 +692,7 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
                 ${deadlineLabel ? " · " + deadlineLabel : ""}
               </div>
               <div style="font-size:11px; color:#888; margin-top:2px;">
-                ${(l.cases_cited || []).length} cases cited · $${(l.estimated_cost_usd || 0).toFixed(3)}
+                ${(l.cases_cited || []).length} cases cited · $${Number(l.estimated_cost_usd || 0).toFixed(3)}
                 ${l.policy_limits_disclosed ? " · ✓ Limits disclosed: " + fmt$(l.disclosed_limits_amount) : ""}
                 ${l.carrier_tendered_limits ? " · ✓ TENDERED " + fmt$(l.tendered_amount) : ""}
               </div>
@@ -836,7 +836,7 @@ app.get("/admin/pi/case/:caseId/demand/:demandId", async (req, res) => {
         ${letter.target_claim_number ? `<div><strong>Claim #:</strong> ${esc(letter.target_claim_number)}</div>` : ""}
         <div><strong>Generated:</strong> ${new Date(letter.generated_at).toLocaleString()}</div>
         <div><strong>Model:</strong> ${letter.model}</div>
-        <div><strong>Cost:</strong> $${(letter.estimated_cost_usd || 0).toFixed(4)}</div>
+        <div><strong>Cost:</strong> $${Number(letter.estimated_cost_usd || 0).toFixed(4)}</div>
         <div><strong>Cases cited:</strong> ${(letter.cases_cited || []).length}</div>
         <div><strong>Status:</strong> <span style="background:${color}; color:white; padding:2px 8px; border-radius:8px; font-size:11px; font-weight:600;">${letter.status.toUpperCase().replace(/_/g, " ")}</span></div>
       </div>
@@ -1106,7 +1106,7 @@ app.get("/admin/audit-trail", async (req, res) => {
           </td>
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:11px; color:#666;">
             ${r.model_used || "—"}<br>
-            <span style="color:#2e7d32;">$${(r.estimated_cost_usd || 0).toFixed(3)}</span><br>
+            <span style="color:#2e7d32;">$${Number(r.estimated_cost_usd || 0).toFixed(3)}</span><br>
             ${r.output_length}ch${editIndicator}${deliveredIndicator}
           </td>
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px; color:#555; max-width:400px;">
@@ -1148,12 +1148,12 @@ app.get("/admin/audit-trail", async (req, res) => {
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Last 30 days</div>
           <div style="font-size:24px; font-weight:700; color:#0C1C36; margin-top:4px;">${stats.last_30_days || 0}</div>
-          <div style="font-size:11px; color:#2e7d32; margin-top:2px;">$${(stats.cost_last_30_days || 0)}</div>
+          <div style="font-size:11px; color:#2e7d32; margin-top:2px;">$${Number(stats.cost_last_30_days || 0).toFixed(2)}</div>
         </div>
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Total all time</div>
           <div style="font-size:24px; font-weight:700; color:#0C1C36; margin-top:4px;">${stats.total_all_time || 0}</div>
-          <div style="font-size:11px; color:#2e7d32; margin-top:2px;">$${(stats.total_cost_all_time || 0)}</div>
+          <div style="font-size:11px; color:#2e7d32; margin-top:2px;">$${Number(stats.total_cost_all_time || 0).toFixed(2)}</div>
         </div>
       </div>
 
@@ -1243,7 +1243,7 @@ app.get("/admin/audit-trail/:id", async (req, res) => {
           ${row.a_number ? `<div><strong>A#:</strong> ${esc(row.a_number)}</div>` : ""}
           <div><strong>Matter:</strong> ${esc(row.matter_type || "—")}</div>
           <div><strong>Model:</strong> ${esc(row.model_used || "—")}</div>
-          <div><strong>Cost:</strong> $${(row.estimated_cost_usd || 0).toFixed(4)}</div>
+          <div><strong>Cost:</strong> $${Number(row.estimated_cost_usd || 0).toFixed(4)}</div>
           <div><strong>Generated:</strong> ${new Date(row.generated_at).toLocaleString()}</div>
           ${row.generated_by ? `<div><strong>By user:</strong> #${row.generated_by}</div>` : ""}
           ${row.reviewed_at ? `<div><strong>Reviewed:</strong> ${new Date(row.reviewed_at).toLocaleString()}</div>` : ""}
@@ -1498,7 +1498,7 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
                 <span style="background:${statusColor}; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">${status.toUpperCase()}</span>
                 <span style="font-size:11px; color:#888;">#${a.id}</span>
               </div>
-              <div style="font-size:11px; color:#888; margin-top:4px;">${dt} · ${a.model} · $${(a.estimated_cost_usd || 0).toFixed(3)} · ${(a.cases_cited || []).length} cases${witnessLabel}${parentLabel}${ctxLabel}</div>
+              <div style="font-size:11px; color:#888; margin-top:4px;">${dt} · ${a.model} · $${Number(a.estimated_cost_usd || 0).toFixed(3)} · ${(a.cases_cited || []).length} cases${witnessLabel}${parentLabel}${ctxLabel}</div>
             </div>
             <div style="display:flex; gap:6px; flex-shrink:0;">
               <a href="/admin/hearing/individual/${noteId}/closing/${a.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
@@ -1638,7 +1638,7 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
         ${closing.a_number ? `<div><strong>A#:</strong> ${closing.a_number.replace(/</g, "&lt;")}</div>` : ""}
         <div><strong>Generated:</strong> ${new Date(closing.generated_at).toLocaleString()}</div>
         <div><strong>Model:</strong> ${closing.model}</div>
-        <div><strong>Cost:</strong> $${(closing.estimated_cost_usd || 0).toFixed(4)}</div>
+        <div><strong>Cost:</strong> $${Number(closing.estimated_cost_usd || 0).toFixed(4)}</div>
         <div><strong>Cases cited:</strong> ${(closing.cases_cited || []).length}</div>
         <div><strong>Status:</strong> ${closing.status}</div>
         ${closing.parent_id ? `<div><strong>Regenerated from:</strong> <a href="/admin/hearing/individual/${req.params.noteId}/closing/${closing.parent_id}" style="color:#0061FF;">Version ${closing.version - 1} (#${closing.parent_id})</a></div>` : ""}
@@ -2266,7 +2266,7 @@ async function runScanAllNoticesAsync(scanId) {
       results.new_notices += newCount;
       results.updated_notices += updatedCount;
       results.total_files_processed += (scan.scanned || 0);
-      results.estimated_cost_usd = +(results.estimated_cost_usd + (scan.estimated_cost_usd || 0)).toFixed(4);
+      results.estimated_cost_usd = +(Number(results.estimated_cost_usd || 0) + Number(scan.estimated_cost_usd || 0)).toFixed(4);
 
       if (newCount > 0 || updatedCount > 0) {
         results.per_client.push({
