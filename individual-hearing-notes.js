@@ -1088,9 +1088,15 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         <h1 style="margin:0;">⚖️ Individual Hearing ${isEdit ? "— Editing #" + noteId : "— New"}</h1>
         <a href="/admin/hearing/history" class="back-link">← All Hearings</a>
       </div>
-      <button type="button" onclick="openDictationModal()" style="background:linear-gradient(135deg, #B79C62, #d4b979); color:white; padding:10px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; box-shadow:0 2px 6px rgba(183,156,98,0.3); display:flex; align-items:center; gap:6px;">
-        🎙️ <span>Voice dictate ${isEdit ? "additional notes" : "this hearing"}</span>
-      </button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${isEdit ? `
+        <a href="/admin/hearing/individual/${noteId}/closing" style="background:linear-gradient(135deg, #0C1C36, #1a2f4f); color:white; padding:10px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; box-shadow:0 2px 6px rgba(12,28,54,0.3); display:flex; align-items:center; gap:6px; text-decoration:none;">
+          🏛️ <span>Closing Argument</span>
+        </a>` : ""}
+        <button type="button" onclick="openDictationModal()" style="background:linear-gradient(135deg, #B79C62, #d4b979); color:white; padding:10px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; box-shadow:0 2px 6px rgba(183,156,98,0.3); display:flex; align-items:center; gap:6px;">
+          🎙️ <span>Voice dictate ${isEdit ? "additional notes" : "this hearing"}</span>
+        </button>
+      </div>
     </div>
 
     <!-- Dictation floating widget — visible ONLY while recording -->
