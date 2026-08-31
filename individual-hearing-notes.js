@@ -1552,7 +1552,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         }
       }
 
-
+      async function openDictationModal() {
         // Immediately request mic + start recording. Show floating widget only.
         try {
           dMediaStream = await navigator.mediaDevices.getUserMedia({
