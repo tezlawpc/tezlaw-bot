@@ -85,6 +85,8 @@ async function initTables() {
     "ADD COLUMN IF NOT EXISTS next_hearing_date TIMESTAMPTZ",
     "ADD COLUMN IF NOT EXISTS next_hearing_type TEXT",
     "ADD COLUMN IF NOT EXISTS client_address TEXT",
+    "ADD COLUMN IF NOT EXISTS continuation_of INTEGER",
+    "ADD COLUMN IF NOT EXISTS continuation_number INTEGER",
   ];
   for (const alter of alters) {
     try { await db.query(`ALTER TABLE individual_hearing_notes ${alter}`); }
@@ -1082,17 +1084,34 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       ✅ Saved. Note ID: #${noteId}
     </div>` : "";
 
+  // Continuation banner — shown when this note is a continuation of a prior merits hearing
+  const continuationBanner = (isEdit && prev.continuation_of) ? `
+    <div style="background:linear-gradient(135deg, #f3e8ff, #e9d5ff); padding:14px 20px; border-left:4px solid #7c4dff; margin:15px 0; border-radius:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div>
+          <strong style="color:#5b2ecc; font-size:14px;">📅 Continuation ${prev.continuation_number ? "#" + prev.continuation_number : ""} of Merits Hearing</strong>
+          <div style="font-size:12px; color:#666; margin-top:2px;">
+            Originally scheduled hearing: <a href="/admin/hearing/individual/${prev.continuation_of}/edit" style="color:#5b2ecc; font-weight:600;">Hearing #${prev.continuation_of}</a>
+          </div>
+        </div>
+        <a href="/admin/hearing/individual/${prev.continuation_of}/edit" style="background:#7c4dff; color:white; padding:6px 14px; border-radius:4px; text-decoration:none; font-size:12px;">Open parent →</a>
+      </div>
+    </div>` : "";
+
   const body = `
     <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
       <div>
-        <h1 style="margin:0;">⚖️ Individual Hearing ${isEdit ? "— Editing #" + noteId : "— New"}</h1>
+        <h1 style="margin:0;">⚖️ Individual Hearing ${isEdit ? "— Editing #" + noteId : "— New"}${(isEdit && prev.continuation_number) ? ` <span style="background:#7c4dff; color:white; padding:2px 8px; border-radius:6px; font-size:12px; vertical-align:middle;">CONTINUATION #${prev.continuation_number}</span>` : ""}</h1>
         <a href="/admin/hearing/history" class="back-link">← All Hearings</a>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         ${isEdit ? `
         <a href="/admin/hearing/individual/${noteId}/closing" style="background:linear-gradient(135deg, #0C1C36, #1a2f4f); color:white; padding:10px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; box-shadow:0 2px 6px rgba(12,28,54,0.3); display:flex; align-items:center; gap:6px; text-decoration:none;">
-          🏛️ <span>Closing Argument</span>
-        </a>` : ""}
+          🏛️ <span>Oral Argument</span>
+        </a>
+        <button type="button" onclick="addContinuation()" style="background:linear-gradient(135deg, #7c4dff, #9c6dff); color:white; padding:10px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; box-shadow:0 2px 6px rgba(124,77,255,0.3); display:flex; align-items:center; gap:6px;">
+          📅 <span>Add Continuation Merits</span>
+        </button>` : ""}
         <button type="button" onclick="openDictationModal()" style="background:linear-gradient(135deg, #B79C62, #d4b979); color:white; padding:10px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; box-shadow:0 2px 6px rgba(183,156,98,0.3); display:flex; align-items:center; gap:6px;">
           🎙️ <span>Voice dictate ${isEdit ? "additional notes" : "this hearing"}</span>
         </button>
@@ -1190,6 +1209,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
 
     ${errorSection}
     ${savedSection}
+    ${continuationBanner}
 
     <form method="POST" action="/admin/hearing/individual${isEdit ? "/" + noteId : ""}" id="ih-form">
       <input type="hidden" name="hearing_summary_raw" id="hearing_summary_raw" value="${escapeAttr(prev.hearing_summary_raw)}">
@@ -1441,7 +1461,44 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       let dTranscript = "";
       let dExtracted = null;
 
-      async function openDictationModal() {
+      // ── Continuation of Merits Hearing ──────────────────────
+      // Creates a new individual_hearing_notes record that clones ALL fields
+      // from the current note (client info, exhibits, examinations, prep notes,
+      // etc.) with only the hearing_date changed to the continuation date.
+      // The new note is linked to this one via continuation_of.
+      async function addContinuation() {
+        const noteId = ${isEdit ? noteId : 'null'};
+        if (!noteId) { alert("Save this hearing note first, then add a continuation."); return; }
+
+        const newDate = prompt("Enter the continuation hearing date (YYYY-MM-DD):");
+        if (!newDate) return;
+        // Basic validation: format check
+        if (!/^\\d{4}-\\d{2}-\\d{2}/.test(newDate)) {
+          alert("Please enter the date in YYYY-MM-DD format (e.g. 2026-11-15).");
+          return;
+        }
+        const newTime = prompt("Hearing time (HH:MM in 24hr, e.g. 09:00), or leave blank:", "09:00") || "";
+        const notes = prompt("Optional note about this continuation (e.g. 'Cross of DHS expert only'):", "");
+
+        try {
+          const r = await fetch("/admin/hearing/individual/" + noteId + "/continuation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ new_hearing_date: newDate, new_hearing_time: newTime, notes: notes || "" }),
+          });
+          const d = await r.json();
+          if (d.ok) {
+            // Redirect to the new note's edit page
+            window.location.href = "/admin/hearing/individual/" + d.new_id + "/edit";
+          } else {
+            alert("Error: " + (d.error || "Failed to create continuation"));
+          }
+        } catch (e) {
+          alert("Error: " + e.message);
+        }
+      }
+
+
         // Immediately request mic + start recording. Show floating widget only.
         try {
           dMediaStream = await navigator.mediaDevices.getUserMedia({
@@ -2710,6 +2767,72 @@ function escapeAttr(s) { return escapeHtml(s); }
 
 // ── Exports ──────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────
+// Clone this note as a continuation merits hearing.
+// Duplicates every field (client info, prep notes, exhibits, examinations,
+// evidence objections, disposition, etc.) so the attorney only has to update
+// what's new for the continuation. The new note gets:
+//   - hearing_date = provided newHearingDate (with optional time)
+//   - continuation_of = original id
+//   - continuation_number = next in sequence for this chain
+//   - a leading note appended to pre_examination_notes explaining lineage
+// Returns { new_id }.
+async function cloneAsContinuation(originalId, { newHearingDate, newHearingTime, notes }) {
+  await initTables();
+
+  const orig = await getIndividualNote(originalId);
+  if (!orig) throw new Error(`Original hearing note #${originalId} not found`);
+
+  // Walk continuation chain: root = the earliest ancestor (continuation_of null)
+  // continuation_number = max in chain + 1
+  const chainRootId = orig.continuation_of || orig.id;
+  const chain = await db.query(
+    `SELECT id, hearing_date, continuation_number
+     FROM individual_hearing_notes
+     WHERE id = $1 OR continuation_of = $1
+     ORDER BY COALESCE(continuation_number, 1) ASC, hearing_date ASC NULLS LAST, id ASC`,
+    [chainRootId]
+  );
+  const nextNumber = (chain.rows.reduce((m, r) => Math.max(m, r.continuation_number || 0), 0) || 1) + 1;
+
+  // Build merged hearing_date TS from newHearingDate (+ optional time)
+  const mergedDate = newHearingTime
+    ? `${newHearingDate} ${newHearingTime}`
+    : `${newHearingDate} 09:00`;
+
+  // Prepend continuation banner note so the attorney sees provenance in-app
+  const banner = `[Continuation #${nextNumber} — cloned from hearing #${originalId} on ${orig.hearing_date ? new Date(orig.hearing_date).toLocaleDateString() : "(no date)"}${notes ? `. Note: ${notes}` : ""}]\n\n`;
+  const clonedPreNotes = banner + (orig.pre_examination_notes || "");
+
+  const r = await db.query(
+    `INSERT INTO individual_hearing_notes
+       (client_name, a_number, hearing_date, hearing_type, courtroom, judge_name,
+        pre_examination_notes, examinations, evidence_objections, exhibits,
+        hearing_summary_raw, disposition_notes, paralegal_summary, client_summary,
+        attorney_appearance, respondent_appearance, next_hearing_date, next_hearing_type,
+        client_address, continuation_of, continuation_number)
+     VALUES ($1, $2, $3::timestamptz, $4, $5, $6,
+             $7, $8::jsonb, $9, $10::jsonb,
+             $11, $12, NULL, NULL,
+             $13, $14, NULL, NULL,
+             $15, $16, $17)
+     RETURNING id`,
+    [
+      orig.client_name, orig.a_number, mergedDate, orig.hearing_type || "individual_merits",
+      orig.courtroom, orig.judge_name,
+      clonedPreNotes,
+      JSON.stringify(orig.examinations || []),
+      orig.evidence_objections,
+      JSON.stringify(orig.exhibits || []),
+      orig.hearing_summary_raw, orig.disposition_notes,
+      orig.attorney_appearance, orig.respondent_appearance,
+      orig.client_address, chainRootId, nextNumber,
+    ]
+  );
+
+  return { new_id: r.rows[0].id, continuation_number: nextNumber, chain_root_id: chainRootId };
+}
+
 module.exports = {
   initTables,
   parseExhibitExcel,
@@ -2726,4 +2849,5 @@ module.exports = {
   sendToTeamGroup,
   renderForm,
   renderHistoryPage,
+  cloneAsContinuation,
 };
