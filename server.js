@@ -1575,6 +1575,29 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
   }
 });
 
+// Clone a merits hearing as a continuation — pre-fills every field from the
+// original (exhibits, examinations, prep notes, etc.) with only the hearing_date
+// changed to the new date attorney provides.
+app.post("/admin/hearing/individual/:id/continuation", async (req, res) => {
+  try {
+    const ihn = require("./individual-hearing-notes");
+    const noteId = parseInt(req.params.id, 10);
+    if (!noteId) return res.status(400).json({ ok: false, error: "Invalid note ID" });
+    const { new_hearing_date, new_hearing_time, notes } = req.body || {};
+    if (!new_hearing_date) return res.status(400).json({ ok: false, error: "new_hearing_date required" });
+
+    const result = await ihn.cloneAsContinuation(noteId, {
+      newHearingDate: new_hearing_date,
+      newHearingTime: new_hearing_time || null,
+      notes: notes || null,
+    });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[continuation]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.post("/admin/hearing/individual/:id/generate-closing", async (req, res) => {
   try {
     const cag = require("./closing-argument-generator");
