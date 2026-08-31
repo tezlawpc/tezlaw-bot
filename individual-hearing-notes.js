@@ -1291,7 +1291,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         <table id="exhibits-table" style="width:100%; margin:8px 0; font-size:13px;">
           <thead>
             <tr>
-              <th style="width:50px; text-align:left;">#</th>
+              <th style="width:72px; text-align:left;">#</th>
               <th style="width:120px; text-align:left;">EOIR Submission</th>
               <th style="text-align:left;">Description</th>
               <th style="width:70px; text-align:center;">Marked</th>
@@ -1708,7 +1708,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         const tr = document.createElement("tr");
         tr.dataset.exhibitIdx = idx;
         tr.innerHTML =
-          '<td><input type="text" name="exhibit_number_' + idx + '" value="' + escapeHTML(data.number || "") + '" style="width:100%;"></td>' +
+          '<td><input type="text" name="exhibit_number_' + idx + '" value="' + escapeHTML(data.number || "") + '" style="width:100%; padding:4px 6px; box-sizing:border-box; text-align:center;"></td>' +
           '<td><input type="text" name="exhibit_eoir_submission_' + idx + '" value="' + escapeHTML(data.eoir_submission || "") + '" style="width:100%;" placeholder="EOIR ref"></td>' +
           '<td><input type="text" name="exhibit_description_' + idx + '" value="' + escapeHTML(data.description || "") + '" style="width:100%;"></td>' +
           '<td style="text-align:center;"><input type="number" name="exhibit_marked_' + idx + '" min="1" max="99" value="' + escapeHTML(markedNum) + '" placeholder="—" style="width:60px; text-align:center; padding:4px;"></td>' +
