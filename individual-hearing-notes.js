@@ -871,7 +871,8 @@ async function getIndividualNotesForClient({ clientName, aNumber }) {
   if (!key && !nameKey) return [];
 
   const r = await db.query(
-    `SELECT id, client_name, a_number, hearing_date, judge_name, disposition, created_at
+    `SELECT id, client_name, a_number, hearing_date, judge_name, disposition,
+            continuation_of, continuation_number, created_at
      FROM individual_hearing_notes`
   );
   const matches = r.rows.filter(row => {
@@ -1084,19 +1085,72 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       ✅ Saved. Note ID: #${noteId}
     </div>` : "";
 
-  // Continuation banner — shown when this note is a continuation of a prior merits hearing
-  const continuationBanner = (isEdit && prev.continuation_of) ? `
-    <div style="background:linear-gradient(135deg, #f3e8ff, #e9d5ff); padding:14px 20px; border-left:4px solid #7c4dff; margin:15px 0; border-radius:8px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-        <div>
-          <strong style="color:#5b2ecc; font-size:14px;">📅 Continuation ${prev.continuation_number ? "#" + prev.continuation_number : ""} of Merits Hearing</strong>
-          <div style="font-size:12px; color:#666; margin-top:2px;">
-            Originally scheduled hearing: <a href="/admin/hearing/individual/${prev.continuation_of}/edit" style="color:#5b2ecc; font-weight:600;">Hearing #${prev.continuation_of}</a>
+  // Continuation chain navigator — shows every hearing in this merits chain
+  // with clickable pills. Appears on:
+  //   - the ROOT hearing if it has any continuations (so you can jump to them)
+  //   - any CONTINUATION so you can jump back to the root or sibling continuations
+  let continuationBanner = "";
+  if (isEdit && prev.id) {
+    // Determine the chain root: if this is a continuation, its continuation_of is the root.
+    // Otherwise, this note IS the root.
+    const chainRootId = prev.continuation_of || prev.id;
+    // Filter siblings down to members of this chain
+    const chain = (siblings || [])
+      .filter(s => s.id === chainRootId || s.continuation_of === chainRootId)
+      .sort((a, b) => {
+        // Root first (continuation_of is null), then by continuation_number
+        if (!a.continuation_of && b.continuation_of) return -1;
+        if (a.continuation_of && !b.continuation_of) return 1;
+        return (a.continuation_number || 0) - (b.continuation_number || 0);
+      });
+
+    if (chain.length > 1) {
+      // Render each chain member as a pill
+      const pillsHtml = chain.map(c => {
+        const isCurrent = c.id === prev.id;
+        const isRoot = !c.continuation_of;
+        const label = isRoot
+          ? `1st Merits`
+          : `Continuation #${c.continuation_number || "?"}`;
+        const dateStr = c.hearing_date
+          ? new Date(c.hearing_date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+          : "no date";
+        const bg = isCurrent ? "#7c4dff" : "white";
+        const color = isCurrent ? "white" : "#5b2ecc";
+        const border = isCurrent ? "#7c4dff" : "#d5c5f5";
+        const cursor = isCurrent ? "default" : "pointer";
+        const inner = `
+          <div style="font-size:12px; font-weight:700; line-height:1.1;">${label}</div>
+          <div style="font-size:11px; opacity:0.9; margin-top:2px;">${dateStr}</div>`;
+        if (isCurrent) {
+          return `<div style="background:${bg}; color:${color}; border:1px solid ${border}; padding:8px 14px; border-radius:8px; cursor:${cursor}; min-width:90px; text-align:center;">${inner}<div style="font-size:9px; margin-top:2px; opacity:0.85;">← YOU ARE HERE</div></div>`;
+        }
+        return `<a href="/admin/hearing/individual/${c.id}/edit" style="background:${bg}; color:${color}; border:1px solid ${border}; padding:8px 14px; border-radius:8px; text-decoration:none; cursor:${cursor}; min-width:90px; text-align:center; transition:all 0.15s; display:block;" onmouseover="this.style.background='#f3e8ff'" onmouseout="this.style.background='white'">${inner}</a>`;
+      }).join("");
+
+      const currentIsRoot = !prev.continuation_of;
+      const chainCount = chain.length;
+      const continuationCount = chainCount - 1;
+      const headerText = currentIsRoot
+        ? `📅 This Merits Hearing has ${continuationCount} Continuation${continuationCount === 1 ? "" : "s"}`
+        : `📅 Continuation #${prev.continuation_number || "?"} of ${chainCount}-Session Merits Hearing`;
+
+      continuationBanner = `
+        <div style="background:linear-gradient(135deg, #f3e8ff, #e9d5ff); padding:16px 20px; border-left:4px solid #7c4dff; margin:15px 0; border-radius:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+            <div>
+              <strong style="color:#5b2ecc; font-size:14px;">${headerText}</strong>
+              <div style="font-size:12px; color:#666; margin-top:2px;">
+                Click any session below to navigate. All sessions share client info and continue exhibits/testimony from the prior hearing.
+              </div>
+            </div>
           </div>
-        </div>
-        <a href="/admin/hearing/individual/${prev.continuation_of}/edit" style="background:#7c4dff; color:white; padding:6px 14px; border-radius:4px; text-decoration:none; font-size:12px;">Open parent →</a>
-      </div>
-    </div>` : "";
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:stretch;">
+            ${pillsHtml}
+          </div>
+        </div>`;
+    }
+  }
 
   const body = `
     <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
