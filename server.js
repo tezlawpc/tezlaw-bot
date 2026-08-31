@@ -5553,8 +5553,15 @@ app.post("/admin/hearing/notes/dictate/extract-only", audioUpload.single("audio"
     }
     const voice = require("./voice-dictation");
     const filename = req.file.originalname || "dictation.webm";
-    console.log(`[dictate-extract-only] Received ${req.file.buffer.length} bytes`);
-    const transcript = await voice.transcribeAudio(req.file.buffer, filename);
+    let buffer = req.file.buffer;
+    console.log(`[dictate-extract-only] Received ${buffer.length} bytes`);
+    // Whisper 25 MB cap — compress if oversized
+    if (buffer.length > 24 * 1024 * 1024) {
+      console.log(`[dictate-extract-only] Compressing with ffmpeg…`);
+      buffer = await compressAudioForWhisper(buffer, filename);
+      console.log(`[dictate-extract-only] Compressed to ${buffer.length} bytes`);
+    }
+    const transcript = await voice.transcribeAudio(buffer, filename);
     console.log(`[dictate-extract-only] Transcript: ${transcript.length} chars`);
     if (!transcript || transcript.trim().length < 5) {
       return res.status(400).json({
@@ -5587,15 +5594,75 @@ app.post("/admin/hearing/notes/dictate/transcribe-chunk", audioUpload.single("au
     const voice = require("./voice-dictation");
     const filename = req.file.originalname || `chunk-${Date.now()}.webm`;
     const chunkIndex = req.body.chunk_index || "?";
-    console.log(`[dictate-chunk] Chunk ${chunkIndex}: ${req.file.buffer.length} bytes`);
-    const transcript = await voice.transcribeAudio(req.file.buffer, filename);
+    let buffer = req.file.buffer;
+    console.log(`[dictate-chunk] Chunk ${chunkIndex}: ${buffer.length} bytes`);
+
+    // Whisper API caps at 25 MB per file. If chunk is close to or over that,
+    // re-encode with ffmpeg to low-bitrate Opus before sending.
+    const WHISPER_LIMIT_BYTES = 24 * 1024 * 1024; // 24 MB safety margin
+    if (buffer.length > WHISPER_LIMIT_BYTES) {
+      console.log(`[dictate-chunk] Chunk ${chunkIndex} is ${(buffer.length / 1024 / 1024).toFixed(1)} MB — compressing with ffmpeg…`);
+      buffer = await compressAudioForWhisper(buffer, filename);
+      console.log(`[dictate-chunk] Chunk ${chunkIndex} compressed to ${(buffer.length / 1024 / 1024).toFixed(1)} MB`);
+    }
+
+    const transcript = await voice.transcribeAudio(buffer, filename);
     console.log(`[dictate-chunk] Chunk ${chunkIndex} transcript: ${transcript.length} chars`);
     res.json({ ok: true, chunk_index: chunkIndex, transcript });
   } catch (err) {
     console.error("[dictate-chunk]:", err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    // Friendly error for 413s
+    const friendlyMsg = /413|Payload Too Large|maximum content|too large/i.test(err.message)
+      ? "Audio chunk exceeded 25 MB Whisper limit and ffmpeg compression failed. Try shorter recording sessions."
+      : err.message;
+    res.status(500).json({ ok: false, error: friendlyMsg });
   }
 });
+
+// Compress audio to low-bitrate Opus that fits comfortably under Whisper's 25MB
+// limit. Uses raw ffmpeg (fluent-ffmpeg is archived). Returns a Buffer of the
+// compressed audio (in .ogg/opus container).
+async function compressAudioForWhisper(inputBuffer, originalFilename) {
+  const { spawn } = require("child_process");
+  const path = require("path");
+  const fs = require("fs");
+  const os = require("os");
+
+  // Write input to temp file
+  const tmpDir = os.tmpdir();
+  const inExt = path.extname(originalFilename || "").toLowerCase() || ".webm";
+  const inPath = path.join(tmpDir, `whisper-in-${Date.now()}-${Math.random().toString(36).slice(2)}${inExt}`);
+  const outPath = path.join(tmpDir, `whisper-out-${Date.now()}-${Math.random().toString(36).slice(2)}.ogg`);
+  fs.writeFileSync(inPath, inputBuffer);
+
+  try {
+    await new Promise((resolve, reject) => {
+      // -i input, -vn no video, -c:a libopus, -b:a 24k (very low bitrate)
+      // -ac 1 mono (voice is fine mono, halves file size)
+      // -ar 16000 downsample to 16kHz (Whisper's native rate)
+      const ff = spawn("ffmpeg", [
+        "-y", "-i", inPath,
+        "-vn",
+        "-c:a", "libopus",
+        "-b:a", "24k",
+        "-ac", "1",
+        "-ar", "16000",
+        outPath,
+      ]);
+      let stderr = "";
+      ff.stderr.on("data", d => { stderr += d.toString(); });
+      ff.on("close", code => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exit ${code}: ${stderr.substring(0, 300)}`));
+      });
+      ff.on("error", reject);
+    });
+    return fs.readFileSync(outPath);
+  } finally {
+    try { fs.unlinkSync(inPath); } catch {}
+    try { fs.unlinkSync(outPath); } catch {}
+  }
+}
 
 // Extract fields from a plain-text transcript (post multi-chunk combine).
 app.post("/admin/hearing/notes/dictate/extract-from-text", async (req, res) => {
