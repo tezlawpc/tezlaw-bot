@@ -1387,6 +1387,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/accounting/balance-sheet" class="nav-link" data-perm="users.manage">
         <span class="nav-icon">⚖</span><span class="nav-label">Balance Sheet</span>
       </a>
+      <a href="/admin/accounting/quickbooks" class="nav-link ${isActive('accounting-qbo')}" data-perm="users.manage">
+        <span class="nav-icon">🔗</span><span class="nav-label">QuickBooks Sync</span>
+      </a>
     </div>
 
     <!-- ── Immigration (Hearings + Motions) ── -->
