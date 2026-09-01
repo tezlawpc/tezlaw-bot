@@ -630,6 +630,413 @@ app.post("/admin/pi/case/:id/disbursement", async (req, res) => {
   }
 });
 
+// ── Task List & Reminders ──────────────────────────────
+// Filing deadlines, motions, habeas corpus, writs of mandamus, appeals,
+// RFE responses, client callbacks. Practice-area-aware categories.
+
+app.get("/admin/tasks", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const hearingNotes = require("./hearing-notes");
+    const q = req.query || {};
+
+    const filters = { limit: 300 };
+    if (q.status) filters.status = q.status;
+    if (q.matter_type) filters.matter_type = q.matter_type;
+    if (q.category) filters.category = q.category;
+    if (q.priority) filters.priority = q.priority;
+    if (q.overdue) filters.overdue_only = true;
+    if (q.due_within_days) filters.due_within_days = parseInt(q.due_within_days, 10);
+    if (q.completed) filters.completed_only = true;
+
+    const [rows, stats] = await Promise.all([
+      tasks.listTasks(filters),
+      tasks.getStats(),
+    ]);
+
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const fmtDate = d => d ? new Date(d).toLocaleDateString() : "—";
+
+    const priorityColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" };
+    const statusColor = { pending: "#B79C62", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" };
+
+    const rowsHtml = rows.length ? rows.map(t => {
+      const days = t.days_until_due;
+      let dueLabel = t.due_date ? fmtDate(t.due_date) : "—";
+      let dueColor = "#666";
+      let dueBold = false;
+      if (t.due_date && days != null && t.status !== "completed" && t.status !== "cancelled") {
+        if (days < 0) { dueColor = "#c62828"; dueLabel = `⚠ ${Math.abs(days)}d OVERDUE — ${fmtDate(t.due_date)}`; dueBold = true; }
+        else if (days === 0) { dueColor = "#c62828"; dueLabel = `📌 TODAY — ${fmtDate(t.due_date)}`; dueBold = true; }
+        else if (days <= 3) { dueColor = "#e65100"; dueLabel = `${days}d — ${fmtDate(t.due_date)}`; }
+        else if (days <= 7) { dueColor = "#f57f17"; dueLabel = `${days}d — ${fmtDate(t.due_date)}`; }
+        else { dueLabel = `${days}d — ${fmtDate(t.due_date)}`; }
+      }
+      const categoryLabel = t.category ? (tasks.CATEGORY_LABELS[t.category] || t.category) : "";
+
+      return `
+        <tr>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+            <input type="checkbox" ${t.status === "completed" ? "checked disabled" : ""} onclick="completeTask(${t.id})" style="width:18px; height:18px; cursor:pointer; margin-top:2px;">
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+            <div style="font-weight:600; color:#0C1C36; ${t.status === "completed" ? "text-decoration:line-through; opacity:0.6;" : ""}">${esc(t.title)}</div>
+            ${categoryLabel ? `<div style="font-size:11px; color:#888; margin-top:2px;">${esc(categoryLabel)}${t.matter_type ? " · " + esc(t.matter_type) : ""}</div>` : (t.matter_type ? `<div style="font-size:11px; color:#888; margin-top:2px;">${esc(t.matter_type)}</div>` : "")}
+            ${t.description ? `<div style="font-size:12px; color:#555; margin-top:4px; white-space:pre-wrap;">${esc(t.description).substring(0, 200)}${t.description.length > 200 ? "…" : ""}</div>` : ""}
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px;">
+            ${t.client_name ? esc(t.client_name) : "—"}
+            ${t.a_number ? `<div style="font-size:11px; color:#888;">${esc(t.a_number)}</div>` : ""}
+            ${t.case_number ? `<div style="font-size:11px; color:#888;">${esc(t.case_number)}</div>` : ""}
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px; color:${dueColor}; font-weight:${dueBold ? "700" : "500"};">
+            ${dueLabel}
+            ${t.due_time ? `<div style="font-size:11px;">${esc(t.due_time)}</div>` : ""}
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+            <span style="background:${priorityColor[t.priority] || "#666"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${t.priority.toUpperCase()}</span>
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+            <a href="/admin/tasks/${t.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+          </td>
+        </tr>`;
+    }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#888;">No tasks match. Click <a href="/admin/tasks/new" style="color:#0061FF;">+ New Task</a> to create one.</td></tr>`;
+
+    // Category options for filter
+    const matterOpts = ["immigration", "pi", "business", "ll_tenant", "estate", "tm", "real_estate", "admin"]
+      .map(m => `<option value="${m}" ${q.matter_type === m ? "selected" : ""}>${m.replace(/_/g, "/")}</option>`).join("");
+
+    const body = `
+      <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h1>📋 Task List</h1>
+          <div style="font-size:12px; color:#666; margin-top:4px;">Filing deadlines, motions, habeas corpus, writs, appeals, and more.</div>
+        </div>
+        <a href="/admin/tasks/new" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Task</a>
+      </div>
+
+      <!-- Stats tiles -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">
+        <a href="/admin/tasks" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">All Open</div>
+          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${stats.open_count || 0}</div>
+        </a>
+        <a href="/admin/tasks?overdue=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Overdue</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.overdue_count > 0 ? "#c62828" : "#0C1C36"};">${stats.overdue_count || 0}</div>
+        </a>
+        <a href="/admin/tasks?due_within_days=0" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Due Today</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.due_today > 0 ? "#e65100" : "#0C1C36"};">${stats.due_today || 0}</div>
+        </a>
+        <a href="/admin/tasks?due_within_days=7" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">This Week</div>
+          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${stats.due_this_week || 0}</div>
+        </a>
+        <a href="/admin/tasks?priority=urgent" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Urgent</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.urgent_count > 0 ? "#c62828" : "#0C1C36"};">${stats.urgent_count || 0}</div>
+        </a>
+        <a href="/admin/tasks?completed=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Done This Week</div>
+          <div style="font-size:22px; font-weight:700; color:#2e7d32;">${stats.completed_this_week || 0}</div>
+        </a>
+      </div>
+
+      <!-- Filters -->
+      <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+        <div><label style="font-size:11px; color:#888; display:block;">Matter</label>
+          <select name="matter_type" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+            <option value="">All matters</option>${matterOpts}
+          </select>
+        </div>
+        <div><label style="font-size:11px; color:#888; display:block;">Priority</label>
+          <select name="priority" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+            <option value="">All</option>
+            <option value="urgent" ${q.priority==="urgent"?"selected":""}>Urgent</option>
+            <option value="high" ${q.priority==="high"?"selected":""}>High</option>
+            <option value="normal" ${q.priority==="normal"?"selected":""}>Normal</option>
+            <option value="low" ${q.priority==="low"?"selected":""}>Low</option>
+          </select>
+        </div>
+        <div><label style="font-size:11px; color:#888; display:block;">Status</label>
+          <select name="status" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+            <option value="">Open</option>
+            <option value="pending" ${q.status==="pending"?"selected":""}>Pending</option>
+            <option value="in_progress" ${q.status==="in_progress"?"selected":""}>In Progress</option>
+          </select>
+        </div>
+        <div><label style="font-size:11px; color:#888; display:block;">
+          <input type="checkbox" name="overdue" value="1" ${q.overdue ? "checked" : ""}> Overdue only
+        </label></div>
+        <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
+        <a href="/admin/tasks" style="padding:8px 16px; color:#666; text-decoration:none;">Clear</a>
+      </form>
+
+      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
+        <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee; font-size:12px; color:#666;">${rows.length} task${rows.length === 1 ? "" : "s"}</div>
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="background:#fafaf7;">
+            <th style="padding:10px 12px; width:40px; border-bottom:1px solid #eee;"></th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Task</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Client</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Due</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Priority</th>
+            <th style="padding:10px 12px; border-bottom:1px solid #eee;"></th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+
+      <script>
+        async function completeTask(id) {
+          const notes = prompt("Optional completion notes:");
+          if (notes === null) return;
+          try {
+            const r = await fetch("/admin/tasks/" + id + "/complete", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ notes }),
+            });
+            const d = await r.json();
+            if (d.ok) location.reload();
+            else alert("Error: " + d.error);
+          } catch (e) { alert("Error: " + e.message); }
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: "Tasks", body, activeItem: "tasks" }));
+  } catch (err) {
+    console.error("[tasks list]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/tasks/new", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const hearingNotes = require("./hearing-notes");
+    const CATS = tasks.CATEGORIES;
+    // Category options grouped by matter type
+    const catGroups = Object.entries(CATS).map(([matter, cats]) => {
+      const opts = cats.map(c => `<option value="${c.key}" data-matter="${matter}">${c.label}</option>`).join("");
+      return `<optgroup label="${matter.replace(/_/g, "/")}">${opts}</optgroup>`;
+    }).join("");
+    const q = req.query || {};
+
+    const body = `
+      <div class="page-header">
+        <h1>+ New Task</h1>
+        <a href="/admin/tasks" class="back-link">← Task list</a>
+      </div>
+
+      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:800px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Task Title (required)</label><input type="text" name="title" required placeholder="e.g. File motion to reopen for Chen Wei" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-size:14px;"></div>
+
+          <div><label style="font-size:11px; color:#888;">Category</label>
+            <select name="category" onchange="onCategoryChange(this)" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <option value="">— pick category —</option>
+              ${catGroups}
+            </select>
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Matter Type</label>
+            <select name="matter_type" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <option value="">—</option>
+              <option value="immigration">Immigration</option>
+              <option value="pi">Personal Injury</option>
+              <option value="business">Business Litigation</option>
+              <option value="ll_tenant">Landlord/Tenant</option>
+              <option value="estate">Estate Planning</option>
+              <option value="tm">Trademarks/Patents</option>
+              <option value="real_estate">Real Estate</option>
+              <option value="admin">Admin/Firm</option>
+            </select>
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Due Date</label><input type="date" name="due_date" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Due Time (optional)</label><input type="time" name="due_time" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+
+          <div><label style="font-size:11px; color:#888;">Priority</label>
+            <select name="priority" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <option value="normal">Normal</option>
+              <option value="urgent">🔴 Urgent</option>
+              <option value="high">🟠 High</option>
+              <option value="low">⚪ Low</option>
+            </select>
+          </div>
+          <div><label style="font-size:11px; color:#888;">Remind Days Before</label><input type="number" name="reminder_days_before" value="3" min="0" max="30" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+
+          <div><label style="font-size:11px; color:#888;">Client Name</label><input type="text" name="client_name" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">A-Number (immigration)</label><input type="text" name="a_number" placeholder="A123456789" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+
+          <div><label style="font-size:11px; color:#888;">Case Number</label><input type="text" name="case_number" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Court</label><input type="text" name="court" placeholder="e.g. LA Immigration Court, LASC, 9th Cir." style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+
+          <div><label style="font-size:11px; color:#888;">Assigned To</label><input type="text" name="assigned_to" placeholder="e.g. JJ, Michael, Chandler" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div>
+            <label style="font-size:11px; color:#888;">Recurring?</label>
+            <select name="recurrence_pattern" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <option value="">One-time</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </div>
+
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Description / Notes</label><textarea name="description" rows="3" placeholder="Specific facts, deadline citation (e.g. 8 CFR 1003.23(b)(1)), procedural context..." style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit;"></textarea></div>
+        </div>
+
+        <div style="margin-top:20px;">
+          <button type="submit" style="background:#0C1C36; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create Task</button>
+          <a href="/admin/tasks" style="margin-left:10px; color:#666; text-decoration:none;">Cancel</a>
+        </div>
+      </form>
+
+      <script>
+        // Auto-fill matter type when category is picked
+        function onCategoryChange(sel) {
+          const matter = sel.options[sel.selectedIndex]?.dataset?.matter;
+          if (matter) {
+            const matterSel = document.querySelector('[name="matter_type"]');
+            if (matterSel && !matterSel.value) matterSel.value = matter;
+          }
+        }
+        // Prefill from query params
+        const params = new URLSearchParams(location.search);
+        for (const [k, v] of params) {
+          const el = document.querySelector('[name="' + k + '"]');
+          if (el) el.value = v;
+        }
+        async function submit(e) {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const data = Object.fromEntries(fd);
+          data.is_recurring = !!data.recurrence_pattern;
+          data.reminder_days_before = parseInt(data.reminder_days_before, 10) || 3;
+          if (data.client_name) data.client_key = data.client_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          try {
+            const r = await fetch("/admin/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+            const d = await r.json();
+            if (d.ok) location.href = "/admin/tasks";
+            else alert("Error: " + d.error);
+          } catch (e) { alert("Error: " + e.message); }
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: "New Task", body, activeItem: "tasks" }));
+  } catch (err) {
+    console.error("[task new]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/admin/tasks", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const task = await tasks.createTask({ ...req.body, created_by: req.user?.id || null });
+    res.json({ ok: true, task });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get("/admin/tasks/:id", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const hearingNotes = require("./hearing-notes");
+    const t = await tasks.getTask(parseInt(req.params.id, 10));
+    if (!t) return res.status(404).send("Task not found");
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const categoryLabel = t.category ? (tasks.CATEGORY_LABELS[t.category] || t.category) : "";
+    const priorityColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" }[t.priority] || "#666";
+
+    const body = `
+      <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h1>${esc(t.title)}</h1>
+          <div style="margin-top:6px;">
+            <span style="background:${priorityColor}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600;">${t.priority.toUpperCase()}</span>
+            <span style="background:${t.status === "completed" ? "#2e7d32" : "#B79C62"}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600; margin-left:6px;">${t.status.replace(/_/g, " ").toUpperCase()}</span>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          ${t.status !== "completed" ? `<button onclick="markDone()" style="background:#2e7d32; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">✓ Mark Complete</button>` : ""}
+          <a href="/admin/tasks" class="back-link" style="padding:10px 16px;">← Task list</a>
+        </div>
+      </div>
+
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; font-size:13px;">
+          ${categoryLabel ? `<div><strong>Category:</strong> ${esc(categoryLabel)}</div>` : ""}
+          ${t.matter_type ? `<div><strong>Matter:</strong> ${esc(t.matter_type)}</div>` : ""}
+          ${t.due_date ? `<div><strong>Due:</strong> ${new Date(t.due_date).toLocaleDateString()}${t.due_time ? " " + t.due_time : ""}</div>` : ""}
+          ${t.client_name ? `<div><strong>Client:</strong> ${esc(t.client_name)}</div>` : ""}
+          ${t.a_number ? `<div><strong>A-Number:</strong> ${esc(t.a_number)}</div>` : ""}
+          ${t.case_number ? `<div><strong>Case #:</strong> ${esc(t.case_number)}</div>` : ""}
+          ${t.court ? `<div><strong>Court:</strong> ${esc(t.court)}</div>` : ""}
+          ${t.assigned_to ? `<div><strong>Assigned:</strong> ${esc(t.assigned_to)}</div>` : ""}
+          ${t.is_recurring ? `<div><strong>Recurs:</strong> ${esc(t.recurrence_pattern)}</div>` : ""}
+        </div>
+        ${t.description ? `<div style="margin-top:14px; padding-top:14px; border-top:1px solid #eee; white-space:pre-wrap; font-size:13px; line-height:1.6;">${esc(t.description)}</div>` : ""}
+      </div>
+
+      ${t.status === "completed" && t.completed_at ? `
+      <div style="background:#e8f5e9; padding:14px 18px; border-radius:8px; border-left:3px solid #2e7d32; margin-bottom:16px; font-size:13px;">
+        <strong>✓ Completed</strong> on ${new Date(t.completed_at).toLocaleString()}
+        ${t.completion_notes ? `<div style="margin-top:6px; white-space:pre-wrap;">${esc(t.completion_notes)}</div>` : ""}
+      </div>` : ""}
+
+      <div style="display:flex; gap:8px;">
+        <a href="/admin/tasks/${t.id}/edit" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">✏️ Edit</a>
+        <button onclick="deleteTask()" style="background:#c62828; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🗑️ Delete</button>
+      </div>
+
+      <script>
+        async function markDone() {
+          const notes = prompt("Optional completion notes:");
+          if (notes === null) return;
+          const r = await fetch("/admin/tasks/${t.id}/complete", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({notes})});
+          if (r.ok) location.reload();
+        }
+        async function deleteTask() {
+          if (!confirm("Delete this task? This cannot be undone.")) return;
+          const r = await fetch("/admin/tasks/${t.id}", { method: "DELETE" });
+          if (r.ok) location.href = "/admin/tasks";
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: t.title, body, activeItem: "tasks" }));
+  } catch (err) {
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/admin/tasks/:id/complete", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const t = await tasks.completeTask(parseInt(req.params.id, 10), {
+      userId: req.user?.id || null, notes: req.body?.notes,
+    });
+    res.json({ ok: true, task: t });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.delete("/admin/tasks/:id", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    await tasks.deleteTask(parseInt(req.params.id, 10));
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/tasks/send-reminders-now", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const result = await tasks.sendDailyReminders();
+    res.json({ ok: true, result });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // ── QuickBooks Online Live Sync ─────────────────────
 app.get("/admin/accounting/quickbooks", async (req, res) => {
   try {
@@ -3038,6 +3445,31 @@ try {
 try {
   require("./accounting").initTables().catch(e => console.warn("[accounting] init:", e.message));
 } catch (e) { console.warn("[accounting] module load:", e.message); }
+
+// Init Tasks table on boot
+try {
+  require("./tasks").initTable().catch(e => console.warn("[tasks] init:", e.message));
+} catch (e) { console.warn("[tasks] module load:", e.message); }
+
+// Daily 8 AM Pacific: send task reminders via Telegram
+(async () => {
+  try {
+    const { default: cron } = await import("node-cron").catch(() => ({ default: require("node-cron") }));
+    cron.schedule("0 8 * * *", async () => {
+      console.log("📋 [tasks-reminder] Running daily 8 AM task reminder…");
+      try {
+        const tasks = require("./tasks");
+        const result = await tasks.sendDailyReminders();
+        console.log("[tasks-reminder] Result:", JSON.stringify(result));
+      } catch (e) {
+        console.error("[tasks-reminder] error:", e.message);
+      }
+    }, { timezone: "America/Los_Angeles" });
+    console.log("✅ Daily task reminders scheduled (8 AM Pacific)");
+  } catch (e) {
+    console.warn("[tasks-reminder] cron setup failed:", e.message);
+  }
+})();
 
 // Start QBO scheduled sync worker (checks every 5 min, syncs based on user config)
 try {
