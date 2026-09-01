@@ -552,7 +552,11 @@ app.get("/admin/pi/case/:id/disbursement", async (req, res) => {
 app.post("/admin/pi/discover", async (req, res) => {
   try {
     const pi = require("./personal-injury");
-    const results = await pi.discoverPICasesFromDropbox();
+    // Accept optional path via query param (from preview page) or body
+    const overridePath = (req.query.path || req.body?.path || "").trim();
+    const results = await pi.discoverPICasesFromDropbox(
+      overridePath ? { paths: [overridePath] } : {}
+    );
     res.json({ ok: true, results });
   } catch (err) {
     console.error("[pi discover]:", err.message);
@@ -563,12 +567,59 @@ app.post("/admin/pi/discover", async (req, res) => {
 // Preview / dry-run — shows every folder considered, whether it matched,
 // what client name would be extracted, and where the folder lives.
 // Useful for JJ to verify matching before actually importing.
+//
+// Query params:
+//   ?path=/Some/Path  → scan ONLY this path (overrides branch roots)
+//   ?browse=/parent   → also list every subfolder at this path for navigation
 app.get("/admin/pi/discover/preview", async (req, res) => {
   try {
     const pi = require("./personal-injury");
+    const dbx = require("./dropbox-integration");
     const hearingNotes = require("./hearing-notes");
-    const results = await pi.discoverPICasesFromDropbox({ dryRun: true });
-    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    const customPath = (req.query.path || "").trim();
+    const browsePath = (req.query.browse !== undefined ? req.query.browse : (customPath || "")).trim();
+
+    // ── If custom path is set, override branch roots and scan JUST that path ──
+    let results;
+    if (customPath) {
+      results = { found: 0, created: 0, updated: 0, considered: [], errors: [], branches_scanned: [] };
+      try {
+        const entries = await dbx.listFolder(customPath);
+        if (!entries) {
+          results.errors.push(`Path not found: ${customPath}`);
+          results.branches_scanned.push({ root: customPath, ok: false, count: 0 });
+        } else {
+          results.branches_scanned.push({ root: customPath, ok: true, count: entries.length });
+          for (const e of entries) {
+            if (e[".tag"] !== "folder") continue;
+            const name = String(e.name || "").trim();
+            const matched = pi.PI_MATCHER.test(name);
+            results.considered.push({ path: e.path_display, name, matched, root: customPath });
+          }
+          results.found = results.considered.filter(c => c.matched).length;
+        }
+      } catch (err) {
+        results.errors.push(`Scan failed: ${err.message}`);
+      }
+    } else {
+      results = await pi.discoverPICasesFromDropbox({ dryRun: true });
+    }
+
+    // ── Folder browser at browsePath (helps JJ navigate to the right path) ──
+    let browserEntries = null;
+    let browserError = null;
+    if (browsePath !== null && browsePath !== undefined) {
+      try {
+        const raw = await dbx.listFolder(browsePath);
+        if (raw) {
+          browserEntries = raw
+            .filter(e => e[".tag"] === "folder")
+            .sort((a, b) => a.name.localeCompare(b.name));
+        }
+      } catch (err) { browserError = err.message; }
+    }
 
     const branchRows = results.branches_scanned.map(b => `
       <tr>
@@ -596,6 +647,49 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
         <td style="padding:6px 12px; border-bottom:1px solid #f0f0f0; font-size:11px; color:#888; font-family:ui-monospace, Menlo, monospace;">${esc(c.path)}</td>
       </tr>`).join("");
 
+    // ── Folder browser HTML (with drill-down links) ──
+    let browserHtml = "";
+    if (browserEntries || browserError) {
+      const parent = browsePath ? browsePath.split("/").slice(0, -1).join("/") : null;
+      const browserRows = browserError
+        ? `<tr><td colspan="2" style="padding:14px; color:#c62828;">${esc(browserError)}</td></tr>`
+        : (browserEntries.length ? browserEntries.map(e => {
+            const matchesPI = pi.PI_MATCHER.test(e.name);
+            return `
+              <tr>
+                <td style="padding:6px 12px; border-bottom:1px solid #f0f0f0; font-size:13px;">
+                  📁 <a href="/admin/pi/discover/preview?browse=${encodeURIComponent(e.path_display)}" style="color:${matchesPI ? "#2e7d32" : "#0061FF"}; text-decoration:none; ${matchesPI ? "font-weight:600;" : ""}">${esc(e.name)}</a>
+                  ${matchesPI ? '<span style="background:#2e7d32; color:white; padding:1px 6px; border-radius:8px; font-size:10px; margin-left:6px;">PI</span>' : ""}
+                </td>
+                <td style="padding:6px 12px; border-bottom:1px solid #f0f0f0; font-size:11px; color:#666; text-align:right;">
+                  <a href="/admin/pi/discover/preview?path=${encodeURIComponent(e.path_display)}" style="color:#B79C62; text-decoration:none;">Scan here →</a>
+                </td>
+              </tr>`;
+          }).join("") : `<tr><td colspan="2" style="padding:14px; color:#888;">(no subfolders)</td></tr>`);
+
+      const crumbs = browsePath
+        ? browsePath.split("/").filter(Boolean).map((seg, i, arr) => {
+            const cumulative = "/" + arr.slice(0, i + 1).join("/");
+            return `<a href="/admin/pi/discover/preview?browse=${encodeURIComponent(cumulative)}" style="color:#0061FF; text-decoration:none;">${esc(seg)}</a>`;
+          }).join(" / ")
+        : "";
+
+      browserHtml = `
+        <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden; margin-bottom:16px;">
+          <div style="padding:12px 16px; background:#fff8e1; border-bottom:1px solid #eee;">
+            <strong style="color:#0C1C36;">📂 Folder Browser</strong>
+            <div style="font-size:12px; color:#666; margin-top:4px;">
+              <a href="/admin/pi/discover/preview?browse=" style="color:#0061FF; text-decoration:none;">🏠 Dropbox root</a>
+              ${crumbs ? " / " + crumbs : ""}
+            </div>
+          </div>
+          <table style="width:100%; border-collapse:collapse;">${browserRows}</table>
+          <div style="padding:8px 16px; background:#fafaf7; font-size:11px; color:#666;">
+            <strong>Green folders</strong> match the PI pattern. Click a folder to drill in, or "Scan here" to run the PI matcher against everything inside that folder.
+          </div>
+        </div>`;
+    }
+
     const body = `
       <div class="page-header">
         <h1>🔍 PI Discovery Preview</h1>
@@ -603,8 +697,23 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
       </div>
 
       <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
-        Preview of what <strong>🔄 Sync from Dropbox</strong> would import. Any folder with "PI" as a whole word or "Personal Injury" phrase counts. Nothing has been saved yet.
+        <strong>How to find your PI folders:</strong> Use the folder browser below to navigate to where your PI cases live. When you find the parent folder, click <strong>"Scan here →"</strong> to run the PI matcher against everything inside.
       </div>
+
+      <!-- Custom path scanner -->
+      <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <form method="GET" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+          <div style="flex:1; min-width:300px;">
+            <label style="font-size:11px; color:#888; display:block;">Scan a specific path (leave empty to use default branches)</label>
+            <input type="text" name="path" value="${esc(customPath)}" placeholder="/Path/To/PI/Cases" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:ui-monospace, Menlo, monospace;">
+          </div>
+          <input type="hidden" name="browse" value="${esc(browsePath)}">
+          <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">🔍 Scan This Path</button>
+          ${customPath ? `<a href="/admin/pi/discover/preview" style="padding:8px 16px; color:#666; text-decoration:none;">Clear</a>` : ""}
+        </form>
+      </div>
+
+      ${browserHtml}
 
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:16px;">
         <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
@@ -619,17 +728,13 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
           <div style="font-size:10px; color:#888; text-transform:uppercase;">Skipped</div>
           <div style="font-size:22px; font-weight:700; color:#666;">${notMatched.length}</div>
         </div>
-        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Branches</div>
-          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${results.branches_scanned.filter(b => b.ok).length}</div>
-        </div>
       </div>
 
       ${results.errors.length ? `<div style="background:#fee; padding:12px 16px; border-radius:8px; border-left:4px solid #c62828; margin-bottom:16px; font-size:13px;"><strong>Errors:</strong><ul style="margin:6px 0 0 20px;">${results.errors.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
 
       <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden; margin-bottom:16px;">
         <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee;">
-          <strong style="color:#0C1C36;">Branches Scanned</strong>
+          <strong style="color:#0C1C36;">${customPath ? "Path Scanned" : "Branches Scanned"}</strong>
         </div>
         <table style="width:100%; border-collapse:collapse;">
           <thead><tr style="background:#fafaf7;">
@@ -637,14 +742,14 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
             <th style="padding:8px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase;">Folders</th>
             <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Status</th>
           </tr></thead>
-          <tbody>${branchRows || `<tr><td colspan="3" style="padding:20px; text-align:center; color:#888;">No branches configured. Set DROPBOX_BRANCH_ROOTS env var.</td></tr>`}</tbody>
+          <tbody>${branchRows || `<tr><td colspan="3" style="padding:20px; text-align:center; color:#888;">Use the browser above or type a path to scan.</td></tr>`}</tbody>
         </table>
       </div>
 
       <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden; margin-bottom:16px;">
         <div style="padding:12px 16px; background:#e8f5e9; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
           <strong style="color:#2e7d32;">✓ Will Import (${matched.length})</strong>
-          <button onclick="runSync()" ${matched.length === 0 ? "disabled" : ""} style="background:#2e7d32; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:12px;">Import All →</button>
+          <button onclick="runSync(${customPath ? `'${esc(customPath).replace(/'/g, "\\'")}'` : "null"})" ${matched.length === 0 ? "disabled" : ""} style="background:#2e7d32; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:12px;">Import All →</button>
         </div>
         <table style="width:100%; border-collapse:collapse;">
           <thead><tr style="background:#fafaf7;">
@@ -656,6 +761,7 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
         </table>
       </div>
 
+      ${notMatched.length ? `
       <details style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
         <summary style="padding:12px 16px; background:#fafaf7; cursor:pointer; user-select:none;">
           <strong style="color:#666;">— Not matched (${notMatched.length}) — click to expand</strong>
@@ -665,17 +771,21 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
         </table>
         ${notMatched.length > 50 ? `<div style="padding:10px; text-align:center; color:#888; font-size:12px;">Showing first 50 of ${notMatched.length}</div>` : ""}
         <div style="padding:10px 16px; background:#fff8e1; font-size:12px; color:#666;">
-          If you see a folder here that <em>should</em> match, its name doesn't contain "PI" as a whole word. Rename it (e.g., "Chen Wei" → "Chen Wei PI") or contact support to loosen the pattern further.
+          If you see a folder here that <em>should</em> match, its name doesn't contain "PI" as a whole word. Either rename it (e.g., "Chen Wei" → "Chen Wei PI") or use "Scan here" on a parent folder that does contain PI folders.
         </div>
-      </details>
+      </details>` : ""}
 
       <script>
-        async function runSync() {
-          if (!confirm("Import all matched PI folders into pi_cases now?")) return;
+        async function runSync(customPath) {
+          const msg = customPath
+            ? "Import all matched PI folders from " + customPath + " now?"
+            : "Import all matched PI folders now?";
+          if (!confirm(msg)) return;
           const btn = event.target;
           btn.disabled = true; btn.textContent = "⏳ Importing…";
           try {
-            const r = await fetch("/admin/pi/discover", { method: "POST" });
+            const url = customPath ? "/admin/pi/discover?path=" + encodeURIComponent(customPath) : "/admin/pi/discover";
+            const r = await fetch(url, { method: "POST" });
             const d = await r.json();
             if (d.ok) {
               alert("✓ Import complete\\n\\nFound: " + d.results.found + "\\nCreated: " + d.results.created + "\\nUpdated: " + d.results.updated + (d.results.errors.length ? "\\nErrors: " + d.results.errors.length : ""));
