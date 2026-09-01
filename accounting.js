@@ -409,16 +409,47 @@ async function recordFeeRevenue({
   };
   const revenueAcct = feeAccounts[matter_type] || "4900";
 
-  const debitAcct = from_trust ? "2010" : "1010"; // trust liability or operating cash
+  if (from_trust) {
+    // Fee earned FROM a retainer sitting in trust — 2 entries:
+    //   1. Recognize revenue: DR Client Trust Liability, CR Revenue
+    //   2. Move cash: DR Operating Cash, CR IOLTA Trust
+    const entry1 = await postJournalEntry({
+      entry_date: date,
+      description: description || `Legal fees earned from retainer — ${matter_type}`,
+      reference,
+      source_module: "manual_fee",
+      client_key, client_name, matter_type,
+      lines: [
+        { account_number: "2010", debit: amount, memo: "Reduce trust liability" },
+        { account_number: revenueAcct, credit: amount, memo: description },
+      ],
+      created_by,
+    });
+    const entry2 = await postJournalEntry({
+      entry_date: date,
+      description: `Transfer earned fees trust → operating — ${client_name || matter_type}`,
+      reference,
+      source_module: "manual_fee",
+      client_key, client_name, matter_type,
+      lines: [
+        { account_number: "1010", debit: amount, memo: "Deposit to operating" },
+        { account_number: "1020", credit: amount, memo: "Move from IOLTA" },
+      ],
+      created_by,
+    });
+    return { primary: entry1, transfer: entry2 };
+  }
+
+  // Fee paid directly (client wrote check to operating, no retainer involved)
   return postJournalEntry({
     entry_date: date,
     description: description || `Legal fees — ${matter_type}`,
     reference,
-    source_module: "manual",
+    source_module: "manual_fee",
     client_key, client_name, matter_type,
     lines: [
-      { account_number: debitAcct, debit: amount },
-      { account_number: revenueAcct, credit: amount },
+      { account_number: "1010", debit: amount, memo: description },
+      { account_number: revenueAcct, credit: amount, memo: description },
     ],
     created_by,
   });
