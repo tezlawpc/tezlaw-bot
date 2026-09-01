@@ -110,6 +110,39 @@ async function aggregateClients() {
   for (const row of masterRes.rows) ingest(row, "master");
   for (const row of indivRes.rows) ingest(row, "individual");
 
+  // Pull EVERY client's Dropbox path (not just bulk-imported ones) so we can
+  // extract broker/referral from the folder structure. Structure convention:
+  //   /Branch/Broker/Client   → broker is second-to-last segment
+  //   /Branch/Client          → no broker (direct intake)
+  // Where "Branch" is anything matching DROPBOX_BRANCH_ROOTS (or its first segment).
+  let branchPrefixes = [];
+  try {
+    const dbx = require("./dropbox-integration");
+    const branches = (typeof dbx.getBranchRoots === "function") ? dbx.getBranchRoots() : [];
+    branchPrefixes = branches.map(b => (b.startsWith("/") ? b : "/" + b).toLowerCase().replace(/\/+$/, ""));
+  } catch {}
+
+  const extractBrokerFromPath = (path) => {
+    if (!path) return null;
+    let rel = path;
+    const lower = path.toLowerCase();
+    // Strip any known branch prefix
+    for (const prefix of branchPrefixes) {
+      if (lower.startsWith(prefix + "/") || lower === prefix) {
+        rel = path.substring(prefix.length);
+        break;
+      }
+    }
+    const segments = rel.split("/").filter(Boolean);
+    // segments = [broker, client] means 2 → broker is segments[0]
+    // segments = [client] means 1 → no broker
+    // segments = [broker, sub, client] means 3+ → broker is second-to-last
+    if (segments.length >= 2) {
+      return segments[segments.length - 2];
+    }
+    return null;
+  };
+
   // Also include clients that exist in client_dropbox_mapping but have no
   // hearing notes yet — these were bulk-imported from Dropbox.
   try {
@@ -136,10 +169,30 @@ async function aggregateClients() {
         sent_count: 0,
         dropbox_only: true,
         dropbox_path: row.dropbox_path,
+        broker: extractBrokerFromPath(row.dropbox_path),
       };
     }
   } catch (e) {
     console.warn("[client-profiles] Dropbox-only client aggregation failed:", e.message);
+  }
+
+  // Enrich every client (including hearing-based ones) with dropbox_path + broker
+  try {
+    const allPaths = await db.query(
+      `SELECT client_key, dropbox_path FROM client_dropbox_mapping WHERE dropbox_path IS NOT NULL`
+    );
+    const pathByKey = new Map(allPaths.rows.map(r => [r.client_key, r.dropbox_path]));
+    for (const k of Object.keys(clients)) {
+      const p = pathByKey.get(k);
+      if (p) {
+        clients[k].dropbox_path = p;
+        clients[k].broker = extractBrokerFromPath(p);
+      } else if (!clients[k].broker) {
+        clients[k].broker = null;
+      }
+    }
+  } catch (e) {
+    console.warn("[client-profiles] Broker enrichment failed:", e.message);
   }
 
   // Convert to array, materialize sets, compute summary metrics
@@ -201,6 +254,9 @@ function renderClientList(clients) {
     const sourceTag = c.dropbox_only
       ? `<span style="background:#0061FF; color:white; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;" title="Imported from Dropbox — no hearings recorded yet">📦 Dropbox</span>`
       : "";
+    const brokerCell = c.broker
+      ? `<span style="color:#B79C62; font-weight:600; font-size:12px;">🤝 ${escapeHtml(c.broker)}</span>`
+      : `<span style="color:#ccc;">—</span>`;
     return `
     <tr class="c-row"
         data-name="${escapeAttr((c.client_name || "").toLowerCase())}"
@@ -209,6 +265,7 @@ function renderClientList(clients) {
         data-lang="${escapeAttr(c.client_language || "")}"
         data-hasupcoming="${c.upcoming.length ? "yes" : "no"}"
         data-casetypes="${escapeAttr(c.case_types.join(" | ").toLowerCase())}"
+        data-broker="${escapeAttr((c.broker || "").toLowerCase())}"
         data-source="${c.dropbox_only ? "dropbox" : "hearings"}">
       <td><a href="/admin/clients/${c.key}" style="color:#B79C62; font-weight:600;">${escapeHtml(c.client_name || "(unnamed)")}</a>${sourceTag}</td>
       <td>${escapeHtml(c.a_number || "")}</td>
@@ -217,9 +274,10 @@ function renderClientList(clients) {
       <td>${c.most_recent_date ? new Date(c.most_recent_date).toLocaleDateString() : "-"}</td>
       <td>${languageLabel(c.client_language)}</td>
       <td>${nextUp}</td>
+      <td>${brokerCell}</td>
       <td><a href="/admin/clients/${c.key}" style="color:#0C1C36;">view →</a></td>
     </tr>`;
-  }).join("") : `<tr><td colspan="8" style="text-align:center; color:#888;">No clients yet. Create a hearing note or bulk import from Dropbox to populate this list.</td></tr>`;
+  }).join("") : `<tr><td colspan="9" style="text-align:center; color:#888;">No clients yet. Create a hearing note or bulk import from Dropbox to populate this list.</td></tr>`;
 
   const totalUpcoming = clients.filter(c => c.upcoming.length).length;
   const totalDropboxOnly = clients.filter(c => c.dropbox_only).length;
@@ -270,7 +328,7 @@ function renderClientList(clients) {
       <thead>
         <tr>
           <th>Client</th><th>A#</th><th>Case Type</th><th>Hearings</th>
-          <th>Last Activity</th><th>Language</th><th>Status</th><th></th>
+          <th>Last Activity</th><th>Language</th><th>Status</th><th>Broker</th><th></th>
         </tr>
       </thead>
       <tbody id="rows-body">${rows}</tbody>
