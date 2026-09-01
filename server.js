@@ -560,6 +560,137 @@ app.post("/admin/pi/discover", async (req, res) => {
   }
 });
 
+// Preview / dry-run — shows every folder considered, whether it matched,
+// what client name would be extracted, and where the folder lives.
+// Useful for JJ to verify matching before actually importing.
+app.get("/admin/pi/discover/preview", async (req, res) => {
+  try {
+    const pi = require("./personal-injury");
+    const hearingNotes = require("./hearing-notes");
+    const results = await pi.discoverPICasesFromDropbox({ dryRun: true });
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const branchRows = results.branches_scanned.map(b => `
+      <tr>
+        <td style="padding:8px 12px; border-bottom:1px solid #eee; font-family:ui-monospace, Menlo, monospace; font-size:12px;">${esc(b.root)}</td>
+        <td style="padding:8px 12px; border-bottom:1px solid #eee; text-align:right; font-size:12px;">${b.count}</td>
+        <td style="padding:8px 12px; border-bottom:1px solid #eee; color:${b.ok ? "#2e7d32" : "#c62828"}; font-size:12px;">${b.ok ? "✓ OK" : "✗ Failed"}</td>
+      </tr>`).join("");
+
+    const matched = results.considered.filter(c => c.matched);
+    const notMatched = results.considered.filter(c => !c.matched);
+
+    const matchedRows = matched.length ? matched.map(c => {
+      const clientName = pi.extractClientNameFromPIFolder(c.name);
+      return `
+        <tr>
+          <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:13px;">${esc(c.name)}</td>
+          <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:13px; color:#2e7d32; font-weight:600;">${esc(clientName)}</td>
+          <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:11px; color:#666; font-family:ui-monospace, Menlo, monospace;">${esc(c.path)}</td>
+        </tr>`;
+    }).join("") : `<tr><td colspan="3" style="padding:20px; text-align:center; color:#888;">No PI folders matched.</td></tr>`;
+
+    const notMatchedRows = notMatched.slice(0, 50).map(c => `
+      <tr>
+        <td style="padding:6px 12px; border-bottom:1px solid #f0f0f0; font-size:12px; color:#666;">${esc(c.name)}</td>
+        <td style="padding:6px 12px; border-bottom:1px solid #f0f0f0; font-size:11px; color:#888; font-family:ui-monospace, Menlo, monospace;">${esc(c.path)}</td>
+      </tr>`).join("");
+
+    const body = `
+      <div class="page-header">
+        <h1>🔍 PI Discovery Preview</h1>
+        <a href="/admin/pi/cases" class="back-link">← PI Cases</a>
+      </div>
+
+      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+        Preview of what <strong>🔄 Sync from Dropbox</strong> would import. Any folder with "PI" as a whole word or "Personal Injury" phrase counts. Nothing has been saved yet.
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:16px;">
+        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Folders Scanned</div>
+          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${results.considered.length}</div>
+        </div>
+        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Would Import</div>
+          <div style="font-size:22px; font-weight:700; color:#2e7d32;">${matched.length}</div>
+        </div>
+        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Skipped</div>
+          <div style="font-size:22px; font-weight:700; color:#666;">${notMatched.length}</div>
+        </div>
+        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Branches</div>
+          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${results.branches_scanned.filter(b => b.ok).length}</div>
+        </div>
+      </div>
+
+      ${results.errors.length ? `<div style="background:#fee; padding:12px 16px; border-radius:8px; border-left:4px solid #c62828; margin-bottom:16px; font-size:13px;"><strong>Errors:</strong><ul style="margin:6px 0 0 20px;">${results.errors.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
+
+      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden; margin-bottom:16px;">
+        <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee;">
+          <strong style="color:#0C1C36;">Branches Scanned</strong>
+        </div>
+        <table style="width:100%; border-collapse:collapse;">
+          <thead><tr style="background:#fafaf7;">
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Path</th>
+            <th style="padding:8px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase;">Folders</th>
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Status</th>
+          </tr></thead>
+          <tbody>${branchRows || `<tr><td colspan="3" style="padding:20px; text-align:center; color:#888;">No branches configured. Set DROPBOX_BRANCH_ROOTS env var.</td></tr>`}</tbody>
+        </table>
+      </div>
+
+      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden; margin-bottom:16px;">
+        <div style="padding:12px 16px; background:#e8f5e9; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+          <strong style="color:#2e7d32;">✓ Will Import (${matched.length})</strong>
+          <button onclick="runSync()" ${matched.length === 0 ? "disabled" : ""} style="background:#2e7d32; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:12px;">Import All →</button>
+        </div>
+        <table style="width:100%; border-collapse:collapse;">
+          <thead><tr style="background:#fafaf7;">
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Folder Name</th>
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Extracted Client</th>
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Full Path</th>
+          </tr></thead>
+          <tbody>${matchedRows}</tbody>
+        </table>
+      </div>
+
+      <details style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
+        <summary style="padding:12px 16px; background:#fafaf7; cursor:pointer; user-select:none;">
+          <strong style="color:#666;">— Not matched (${notMatched.length}) — click to expand</strong>
+        </summary>
+        <table style="width:100%; border-collapse:collapse;">
+          <tbody>${notMatchedRows}</tbody>
+        </table>
+        ${notMatched.length > 50 ? `<div style="padding:10px; text-align:center; color:#888; font-size:12px;">Showing first 50 of ${notMatched.length}</div>` : ""}
+        <div style="padding:10px 16px; background:#fff8e1; font-size:12px; color:#666;">
+          If you see a folder here that <em>should</em> match, its name doesn't contain "PI" as a whole word. Rename it (e.g., "Chen Wei" → "Chen Wei PI") or contact support to loosen the pattern further.
+        </div>
+      </details>
+
+      <script>
+        async function runSync() {
+          if (!confirm("Import all matched PI folders into pi_cases now?")) return;
+          const btn = event.target;
+          btn.disabled = true; btn.textContent = "⏳ Importing…";
+          try {
+            const r = await fetch("/admin/pi/discover", { method: "POST" });
+            const d = await r.json();
+            if (d.ok) {
+              alert("✓ Import complete\\n\\nFound: " + d.results.found + "\\nCreated: " + d.results.created + "\\nUpdated: " + d.results.updated + (d.results.errors.length ? "\\nErrors: " + d.results.errors.length : ""));
+              location.href = "/admin/pi/cases";
+            } else alert("Error: " + d.error);
+          } catch (e) { alert("Error: " + e.message); btn.disabled = false; btn.textContent = "Import All →"; }
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "PI Discovery Preview", body, activeItem: "pi-cases" }));
+  } catch (err) {
+    console.error("[pi preview]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 app.post("/admin/pi/case/:id", async (req, res) => {
   try {
     const pi = require("./personal-injury");
