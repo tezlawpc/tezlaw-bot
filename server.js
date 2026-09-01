@@ -1180,6 +1180,235 @@ app.get("/admin/accounting/new-entry", async (req, res) => {
   }
 });
 
+// ── Quick-entry forms for all practice areas ────────────
+
+app.get("/admin/accounting/record-fee", async (req, res) => {
+  try {
+    const hearingNotes = require("./hearing-notes");
+    const body = `
+      <div class="page-header">
+        <h1>💰 Record Legal Fee</h1>
+        <a href="/admin/accounting" class="back-link">← Accounting</a>
+      </div>
+      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+        Record fee revenue for ANY practice area — immigration, PI, business litigation, LL/T, estate, TM, real estate. Auto-posts to your ledger + pushes to QuickBooks (if enabled).
+      </div>
+      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Client Name (required)</label><input type="text" name="client_name" required placeholder="e.g. Chen Wei" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Matter Type</label>
+            <select name="matter_type" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <option value="immigration">Immigration</option>
+              <option value="pi">Personal Injury</option>
+              <option value="business">Business Litigation</option>
+              <option value="ll_tenant">Landlord/Tenant</option>
+              <option value="estate">Estate Planning</option>
+              <option value="tm">Trademarks/Patents</option>
+              <option value="real_estate">Real Estate</option>
+            </select>
+          </div>
+          <div><label style="font-size:11px; color:#888;">Amount ($)</label><input type="number" step="0.01" min="0.01" name="amount" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Date</label><input type="date" name="date" value="${new Date().toISOString().split("T")[0]}" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Reference (invoice / receipt #)</label><input type="text" name="reference" placeholder="INV-2026-001" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div style="grid-column:1/-1;">
+            <label style="font-size:11px; color:#888;">Payment Source</label>
+            <div style="display:flex; gap:14px; margin-top:4px;">
+              <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                <input type="radio" name="from_trust" value="0" checked>
+                <span>Client paid directly (Operating)</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                <input type="radio" name="from_trust" value="1">
+                <span>Earned from retainer (Trust → Operating)</span>
+              </label>
+            </div>
+            <div style="font-size:11px; color:#666; margin-top:4px;">If "earned from retainer": we'll create 2 entries — one to recognize revenue from trust liability, one to move actual cash trust → operating.</div>
+          </div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Description / Notes</label><input type="text" name="description" placeholder="Immigration consultation, motion to reopen, etc" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+        </div>
+        <div style="margin-top:20px;">
+          <button type="submit" style="background:#2e7d32; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Record Fee</button>
+        </div>
+      </form>
+      <script>
+        async function submit(e) {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const data = Object.fromEntries(fd);
+          data.from_trust = data.from_trust === "1";
+          data.amount = parseFloat(data.amount);
+          try {
+            const r = await fetch("/admin/accounting/record-fee", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+            const d = await r.json();
+            if (d.ok) location.href = "/admin/accounting";
+            else alert("Error: " + d.error);
+          } catch (e) { alert("Error: " + e.message); }
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "Record Fee", body, activeItem: "accounting" }));
+  } catch (err) { res.status(500).send("Error: " + err.message); }
+});
+
+app.post("/admin/accounting/record-fee", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const result = await accounting.recordFeeRevenue({
+      date: req.body.date,
+      amount: Number(req.body.amount),
+      matter_type: req.body.matter_type,
+      client_name: req.body.client_name,
+      client_key: (req.body.client_name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+      from_trust: !!req.body.from_trust,
+      description: req.body.description || null,
+      reference: req.body.reference || null,
+      created_by: req.user?.id || null,
+    });
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error("[record-fee]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/accounting/record-retainer", async (req, res) => {
+  try {
+    const hearingNotes = require("./hearing-notes");
+    const body = `
+      <div class="page-header">
+        <h1>🏦 Record Retainer / Trust Deposit</h1>
+        <a href="/admin/accounting" class="back-link">← Accounting</a>
+      </div>
+      <div style="background:#fff8e1; padding:14px 16px; border-radius:8px; border-left:4px solid #f57f17; margin-bottom:16px; font-size:13px;">
+        <strong>CA Bar RRC 1.15:</strong> Any money paid by a client that is NOT yet earned as fees must go into your IOLTA trust account. Record retainers here — the system tracks per-client balance and reconciles against bank.
+      </div>
+      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Client Name (required)</label><input type="text" name="client_name" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Matter Type</label>
+            <select name="matter_type" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <option value="immigration">Immigration</option>
+              <option value="pi">Personal Injury</option>
+              <option value="business">Business Litigation</option>
+              <option value="ll_tenant">Landlord/Tenant</option>
+              <option value="estate">Estate Planning</option>
+              <option value="tm">Trademarks/Patents</option>
+              <option value="real_estate">Real Estate</option>
+            </select>
+          </div>
+          <div><label style="font-size:11px; color:#888;">Amount ($)</label><input type="number" step="0.01" min="0.01" name="amount" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Date</label><input type="date" name="date" value="${new Date().toISOString().split("T")[0]}" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Reference (check # / receipt)</label><input type="text" name="reference" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Description / Notes</label><input type="text" name="description" placeholder="Initial retainer, replenishment, etc" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+        </div>
+        <div style="margin-top:20px;">
+          <button type="submit" style="background:#B79C62; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Deposit to Trust</button>
+        </div>
+      </form>
+      <script>
+        async function submit(e) {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const data = Object.fromEntries(fd);
+          data.amount = parseFloat(data.amount);
+          try {
+            const r = await fetch("/admin/accounting/record-retainer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+            const d = await r.json();
+            if (d.ok) location.href = "/admin/accounting/trust";
+            else alert("Error: " + d.error);
+          } catch (e) { alert("Error: " + e.message); }
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "Record Retainer", body, activeItem: "accounting" }));
+  } catch (err) { res.status(500).send("Error: " + err.message); }
+});
+
+app.post("/admin/accounting/record-retainer", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const result = await accounting.recordTrustDeposit({
+      date: req.body.date,
+      amount: Number(req.body.amount),
+      client_name: req.body.client_name,
+      client_key: (req.body.client_name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+      matter_type: req.body.matter_type,
+      description: req.body.description || null,
+      reference: req.body.reference || null,
+      created_by: req.user?.id || null,
+    });
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error("[record-retainer]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/admin/accounting/record-expense", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const hearingNotes = require("./hearing-notes");
+    const accounts = await accounting.listAccounts();
+    const expenseAccounts = accounts.filter(a => a.type === "expense");
+    const opts = expenseAccounts.map(a => `<option value="${a.account_number}">${a.account_number} — ${a.name.replace(/</g, "&lt;")}</option>`).join("");
+    const body = `
+      <div class="page-header">
+        <h1>💸 Record Expense</h1>
+        <a href="/admin/accounting" class="back-link">← Accounting</a>
+      </div>
+      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+        Record any firm expense — rent, salaries, subscriptions, marketing, etc. Auto-posts to ledger + QuickBooks.
+      </div>
+      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div><label style="font-size:11px; color:#888;">Amount ($)</label><input type="number" step="0.01" min="0.01" name="amount" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Date</label><input type="date" name="date" value="${new Date().toISOString().split("T")[0]}" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Category</label>
+            <select name="account_number" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">${opts}</select>
+          </div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Vendor / Payee</label><input type="text" name="vendor" placeholder="e.g. WeWork, Verizon, etc" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Reference (check # / receipt)</label><input type="text" name="reference" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Description</label><input type="text" name="description" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+        </div>
+        <div style="margin-top:20px;">
+          <button type="submit" style="background:#c62828; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Record Expense</button>
+        </div>
+      </form>
+      <script>
+        async function submit(e) {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const data = Object.fromEntries(fd);
+          data.amount = parseFloat(data.amount);
+          try {
+            const r = await fetch("/admin/accounting/record-expense", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+            const d = await r.json();
+            if (d.ok) location.href = "/admin/accounting/ledger";
+            else alert("Error: " + d.error);
+          } catch (e) { alert("Error: " + e.message); }
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "Record Expense", body, activeItem: "accounting" }));
+  } catch (err) { res.status(500).send("Error: " + err.message); }
+});
+
+app.post("/admin/accounting/record-expense", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const result = await accounting.recordExpense({
+      date: req.body.date,
+      amount: Number(req.body.amount),
+      account_number: req.body.account_number,
+      vendor: req.body.vendor || null,
+      description: req.body.description || req.body.vendor,
+      reference: req.body.reference || null,
+      created_by: req.user?.id || null,
+    });
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error("[record-expense]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/admin/accounting/entry/:id", async (req, res) => {
   try {
     const accounting = require("./accounting");
