@@ -114,6 +114,7 @@ async function renderDashboard() {
       </div>
       <div style="display:flex; gap:8px;">
         <a href="/admin/pi/cases" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">All Cases →</a>
+        <a href="/admin/pi/discover/preview" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">🔍 Preview Match</a>
         <button onclick="discoverFromDropbox()" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🔄 Sync from Dropbox</button>
       </div>
     </div>
@@ -133,7 +134,7 @@ async function renderDashboard() {
 
     <script>
       async function discoverFromDropbox() {
-        if (!confirm("Scan Dropbox for folders ending in '-PI' and sync them into PI cases?")) return;
+        if (!confirm("Scan Dropbox for folders containing 'PI' as a whole word (or 'Personal Injury') and sync them into PI cases?\\n\\nMatches: 'Chen Wei -PI', 'Chen Wei PI', 'PI - Chen Wei', 'Chen Wei (PI)', etc.\\n\\nTip: click 'Preview Match' first to see exactly what would be imported.")) return;
         const btn = event.target;
         btn.disabled = true; btn.textContent = "⏳ Scanning…";
         try {
