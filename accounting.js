@@ -340,6 +340,23 @@ async function postJournalEntry({
     );
   }
 
+  // ── Auto-push to QuickBooks Online (non-blocking) ──
+  // Fires in the background AFTER the local transaction is safely saved.
+  // Failure never affects the local save — QBO can be down, misconfigured, or
+  // the entry can have unmapped accounts, and the ledger entry is still valid.
+  setImmediate(async () => {
+    try {
+      const qbo = require("./qbo-sync");
+      if (!(await qbo.isAutoPushEnabled())) return;
+      if (!(await qbo.isConnected())) return;
+      await qbo.pushJournalEntry(entryId);
+      console.log(`[auto-push] Entry #${entryId} → QBO ✓`);
+    } catch (e) {
+      // Log but don't throw — the local entry is still valid, will get picked up by scheduled sync
+      console.warn(`[auto-push] Entry #${entryId} skipped: ${e.message}`);
+    }
+  });
+
   return { id: entryId, is_trust: isTrust };
 }
 
