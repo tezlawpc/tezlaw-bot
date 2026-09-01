@@ -1338,6 +1338,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/deadlines" class="nav-link ${isActive('deadlines')}" data-perm="hearings.read">
         <span class="nav-icon">◔</span><span class="nav-label">Deadlines</span>
       </a>
+      <a href="/admin/tasks" class="nav-link ${isActive('tasks')}" data-perm="clients.read">
+        <span class="nav-icon">▤</span><span class="nav-label">Task List</span>
+      </a>
       <a href="/admin/panel/analytics" class="nav-link" data-perm="analytics.read">
         <span class="nav-icon">◵</span><span class="nav-label">Analytics</span>
       </a>
