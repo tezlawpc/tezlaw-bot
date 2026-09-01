@@ -243,45 +243,117 @@ async function initTables() {
 }
 
 // ─── Dropbox auto-discovery ─────────────────────────────
-// Every PI client's Dropbox folder ends with "-PI" per firm convention.
-// This scans the top-level Dropbox structure, finds all "-PI" folders,
-// and creates/updates a matching pi_cases record.
+// Scans configured Dropbox branch roots (from DROPBOX_BRANCH_ROOTS env var)
+// AND the Dropbox root, finds any folder that looks like a PI case, and
+// creates/updates a matching pi_cases record.
+//
+// Matching is lenient — a folder counts as PI if its name contains "PI" as
+// a whole word, or "Personal Injury" as a phrase. Position doesn't matter:
+//   "Chen Wei -PI"            ✓
+//   "Chen Wei PI"             ✓
+//   "Chen Wei - PI"           ✓
+//   "PI - Chen Wei"           ✓
+//   "Chen Wei (PI)"           ✓
+//   "Chen Wei PI Case"        ✓
+//   "Personal Injury - Chen"  ✓
+//   "SPIN class 2025"         ✗ (PI is inside another word)
+//   "APIS documentation"      ✗
+//
+// The client name is extracted by stripping all PI markers wherever they
+// appear, then cleaning up leftover punctuation.
 
-async function discoverPICasesFromDropbox() {
+// Whole-word PI or "Personal Injury" anywhere in the folder name (case-insensitive).
+const PI_MATCHER = /\bPI\b|\bPersonal\s+Injury\b/i;
+
+// Strips PI markers + surrounding punctuation from a folder name so we can
+// use whatever's left as the client name.
+function extractClientNameFromPIFolder(folderName) {
+  return String(folderName)
+    // Remove "Personal Injury" first (longer match), then "PI"
+    .replace(/[\s\-_(\[]*\bPersonal\s+Injury\b[\s\-_)\]]*/gi, " ")
+    .replace(/[\s\-_(\[]*\bPI\s+Case\b[\s\-_)\]]*/gi, " ")
+    .replace(/[\s\-_(\[]*\bPI\b[\s\-_)\]]*/gi, " ")
+    // Collapse leftover whitespace/punctuation
+    .replace(/\s+/g, " ")
+    .replace(/^[\s\-_,()\[\]]+|[\s\-_,()\[\]]+$/g, "")
+    .trim();
+}
+
+async function discoverPICasesFromDropbox({ dryRun = false } = {}) {
   await initTables();
   const dbx = require("./dropbox-integration");
-  const results = { found: 0, created: 0, updated: 0, errors: [] };
+  const results = {
+    found: 0, created: 0, updated: 0,
+    considered: [],  // { path, name, matched, client_name, action }
+    errors: [],
+    branches_scanned: [],
+  };
 
-  // List root Dropbox contents (or a configured PI parent folder)
-  const entries = await dbx.listFolder("").catch(() => null);
-  if (!entries) {
-    results.errors.push("Could not list Dropbox root folder");
-    return results;
+  // Figure out where to scan:
+  //   - Every configured branch root (e.g. "/Law ICAN Immigration", "/PI Cases")
+  //   - Plus Dropbox root itself as a fallback (some folders live at top level)
+  const branchRoots = (typeof dbx.getBranchRoots === "function")
+    ? dbx.getBranchRoots()
+    : (process.env.DROPBOX_BRANCH_ROOTS || "").split(",").map(s => s.trim()).filter(Boolean);
+  const rootsToScan = [""];  // Dropbox root
+  for (const branch of branchRoots) {
+    const path = branch.startsWith("/") ? branch : `/${branch}`;
+    if (!rootsToScan.includes(path)) rootsToScan.push(path);
   }
 
-  // Find folders matching *-PI (case-insensitive, allowing variations like -pi, -Pi)
-  const piFolders = entries.filter(e =>
-    e[".tag"] === "folder" && /-PI\s*$/i.test(e.name.trim())
-  );
+  const piFolders = [];  // { name, path_display, root }
+
+  for (const root of rootsToScan) {
+    try {
+      const entries = await dbx.listFolder(root);
+      if (!entries) {
+        results.errors.push(`Could not list Dropbox folder: ${root || "(root)"}`);
+        results.branches_scanned.push({ root: root || "(root)", ok: false, count: 0 });
+        continue;
+      }
+      results.branches_scanned.push({ root: root || "(root)", ok: true, count: entries.length });
+
+      for (const e of entries) {
+        if (e[".tag"] !== "folder") continue;
+        const name = String(e.name || "").trim();
+        const matched = PI_MATCHER.test(name);
+        results.considered.push({
+          path: e.path_display,
+          name,
+          matched,
+          root: root || "(root)",
+        });
+        if (matched) {
+          piFolders.push({ name, path_display: e.path_display, root });
+        }
+      }
+    } catch (err) {
+      results.errors.push(`Scan failed for ${root || "(root)"}: ${err.message}`);
+    }
+  }
 
   results.found = piFolders.length;
 
+  if (dryRun) return results;
+
   for (const folder of piFolders) {
     try {
-      // Extract client name: "Chen Wei -PI" → "Chen Wei"
-      const clientName = folder.name.replace(/\s*-PI\s*$/i, "").trim();
-      if (!clientName) continue;
+      const clientName = extractClientNameFromPIFolder(folder.name);
+      if (!clientName) {
+        results.errors.push(`Could not extract client name from: ${folder.name}`);
+        continue;
+      }
 
       const clientKey = clientName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-      // Check if case already exists
+      // Check if case already exists (by key OR by folder path — either indicates a match)
       const existing = await db.query(
         `SELECT id FROM pi_cases WHERE client_key = $1 OR dropbox_folder_path = $2`,
         [clientKey, folder.path_display]
       );
 
       if (existing.rows.length > 0) {
-        // Update path if changed
+        // Update path if the folder location moved or changed
         await db.query(
           `UPDATE pi_cases SET dropbox_folder_path = $1, updated_at = NOW() WHERE id = $2`,
           [folder.path_display, existing.rows[0].id]
@@ -665,6 +737,8 @@ async function getStats() {
 module.exports = {
   initTables,
   discoverPICasesFromDropbox,
+  extractClientNameFromPIFolder,
+  PI_MATCHER,
   listCases,
   getCase,
   updateCase,
