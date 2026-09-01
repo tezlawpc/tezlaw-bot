@@ -279,7 +279,7 @@ function extractClientNameFromPIFolder(folderName) {
     .trim();
 }
 
-async function discoverPICasesFromDropbox({ dryRun = false } = {}) {
+async function discoverPICasesFromDropbox({ dryRun = false, paths = null } = {}) {
   await initTables();
   const dbx = require("./dropbox-integration");
   const results = {
@@ -289,16 +289,28 @@ async function discoverPICasesFromDropbox({ dryRun = false } = {}) {
     branches_scanned: [],
   };
 
-  // Figure out where to scan:
-  //   - Every configured branch root (e.g. "/Law ICAN Immigration", "/PI Cases")
-  //   - Plus Dropbox root itself as a fallback (some folders live at top level)
-  const branchRoots = (typeof dbx.getBranchRoots === "function")
-    ? dbx.getBranchRoots()
-    : (process.env.DROPBOX_BRANCH_ROOTS || "").split(",").map(s => s.trim()).filter(Boolean);
-  const rootsToScan = [""];  // Dropbox root
-  for (const branch of branchRoots) {
-    const path = branch.startsWith("/") ? branch : `/${branch}`;
-    if (!rootsToScan.includes(path)) rootsToScan.push(path);
+  // Figure out where to scan. Priority order:
+  //   1. Explicit paths passed in (from preview page "Scan here" button)
+  //   2. PI_DROPBOX_ROOTS env var (comma-separated, dedicated to PI folders)
+  //   3. DROPBOX_BRANCH_ROOTS env var (general branches used elsewhere)
+  //   4. Dropbox root as last resort
+  let rootsToScan;
+  if (paths && paths.length) {
+    rootsToScan = paths.map(p => (p.startsWith("/") || p === "" ? p : `/${p}`));
+  } else {
+    const piRoots = (process.env.PI_DROPBOX_ROOTS || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (piRoots.length) {
+      rootsToScan = piRoots.map(p => (p.startsWith("/") ? p : `/${p}`));
+    } else {
+      const branchRoots = (typeof dbx.getBranchRoots === "function")
+        ? dbx.getBranchRoots()
+        : (process.env.DROPBOX_BRANCH_ROOTS || "").split(",").map(s => s.trim()).filter(Boolean);
+      rootsToScan = [""];  // Dropbox root
+      for (const branch of branchRoots) {
+        const path = branch.startsWith("/") ? branch : `/${branch}`;
+        if (!rootsToScan.includes(path)) rootsToScan.push(path);
+      }
+    }
   }
 
   const piFolders = [];  // { name, path_display, root }
