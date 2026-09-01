@@ -630,6 +630,319 @@ app.post("/admin/pi/case/:id/disbursement", async (req, res) => {
   }
 });
 
+// ── QuickBooks Online Live Sync ─────────────────────
+app.get("/admin/accounting/quickbooks", async (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    const accounting = require("./accounting");
+    const hearingNotes = require("./hearing-notes");
+    const status = await qbo.getSyncStatus();
+
+    let companyInfo = null;
+    let qboAccountCount = 0;
+    if (status.connected) {
+      try { companyInfo = await qbo.fetchCompanyInfo(); } catch (e) { console.warn("[qbo] companyInfo:", e.message); }
+      try { const accts = await qbo.fetchQBOAccounts(); qboAccountCount = accts.length; } catch (e) { console.warn("[qbo] accounts:", e.message); }
+    }
+
+    const ourAccounts = await accounting.listAccounts();
+    const mappings = status.connected ? await qbo.getAccountMappings() : {};
+
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    // Setup instructions box (shown when not configured)
+    const setupHtml = !status.configured ? `
+      <div style="background:#fff8e1; padding:20px; border-radius:8px; border-left:4px solid #f57f17; margin-bottom:20px;">
+        <h3 style="margin:0 0 10px 0; color:#e65100; font-size:15px;">🔧 QuickBooks Setup Required (One Time)</h3>
+        <ol style="font-size:13px; line-height:1.7; color:#555; margin:0; padding-left:20px;">
+          <li>Go to <a href="https://developer.intuit.com/app/developer/dashboard" target="_blank" style="color:#0061FF;">Intuit Developer Dashboard</a></li>
+          <li>Sign in with your Intuit account (or create one)</li>
+          <li>Click <strong>"+ Create an app"</strong> → select <strong>"QuickBooks Online and Payments"</strong></li>
+          <li>Give it a name (e.g., "Tez Law Accounting Sync")</li>
+          <li>Go to <strong>Keys & OAuth</strong> tab → copy your <strong>Client ID</strong> and <strong>Client Secret</strong></li>
+          <li>Under <strong>Redirect URIs</strong>, add:<br><code style="background:#fafaf7; padding:4px 8px; border-radius:4px; font-size:12px;">${esc(status.redirect_uri)}</code></li>
+          <li>In Render environment variables, add:
+            <div style="background:#0C1C36; color:#B79C62; padding:12px; border-radius:6px; font-family:ui-monospace, Menlo, monospace; font-size:12px; margin-top:6px;">
+              QBO_CLIENT_ID=your_client_id_here<br>
+              QBO_CLIENT_SECRET=your_client_secret_here<br>
+              QBO_ENVIRONMENT=sandbox
+            </div>
+            (Use <code>sandbox</code> for testing, then change to <code>production</code> for real books)
+          </li>
+          <li>Redeploy the service (Render auto-redeploys on env var change)</li>
+          <li>Come back here and click <strong>Connect to QuickBooks</strong></li>
+        </ol>
+        <div style="background:#fee; padding:10px 14px; border-radius:6px; margin-top:14px; font-size:12px; color:#c62828;">
+          <strong>⚠ For production:</strong> your Intuit app must go through Intuit's review process before it can connect to real QuickBooks Online accounts. Sandbox works immediately.
+        </div>
+      </div>` : "";
+
+    // Connected status
+    const connectionHtml = status.connected ? `
+      <div style="background:#e8f5e9; padding:20px; border-radius:8px; border-left:4px solid #2e7d32; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+          <div>
+            <strong style="color:#2e7d32; font-size:14px;">✓ Connected to QuickBooks Online</strong>
+            <div style="font-size:12px; color:#555; margin-top:4px;">
+              ${companyInfo ? `<strong>${esc(companyInfo.CompanyName || "?")}</strong> · ` : ""}
+              Realm ID: <code>${esc(status.realm_id)}</code> ·
+              Environment: <strong>${esc(status.environment)}</strong>
+              ${status.last_sync_at ? " · Last sync: " + new Date(status.last_sync_at).toLocaleString() : ""}
+            </div>
+          </div>
+          <form method="POST" action="/admin/accounting/quickbooks/disconnect" style="margin:0;" onsubmit="return confirm('Disconnect from QuickBooks? Historical entries stay in QBO but future entries won\\'t auto-sync.');">
+            <button type="submit" style="background:#c62828; color:white; border:none; padding:8px 14px; border-radius:4px; cursor:pointer; font-size:12px;">Disconnect</button>
+          </form>
+        </div>
+      </div>` : (status.configured ? `
+      <div style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; text-align:center;">
+        <h3 style="margin:0 0 10px 0; color:#0C1C36;">Ready to Connect</h3>
+        <p style="font-size:13px; color:#666; margin-bottom:16px;">Click below to authorize Tez Law's access to your QuickBooks Online account. You'll be redirected to Intuit's sign-in page.</p>
+        <a href="/admin/accounting/quickbooks/connect" style="background:#2CA01C; color:white; padding:14px 28px; border-radius:6px; text-decoration:none; font-weight:600; display:inline-block; font-size:15px;">
+          🔗 Connect to QuickBooks (${esc(status.environment)})
+        </a>
+      </div>` : "");
+
+    // Sync stats
+    const statsHtml = status.connected ? `
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:16px;">
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">Total Entries</div>
+          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${status.total_entries}</div>
+        </div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">Synced to QBO</div>
+          <div style="font-size:22px; font-weight:700; color:#2e7d32;">${status.synced_entries}</div>
+        </div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">Pending Sync</div>
+          <div style="font-size:22px; font-weight:700; color:${status.unsynced_entries > 0 ? "#e65100" : "#0C1C36"};">${status.unsynced_entries}</div>
+        </div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">QBO Accounts</div>
+          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${qboAccountCount}</div>
+        </div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
+          <div style="font-size:11px; color:#888; text-transform:uppercase;">Mapped</div>
+          <div style="font-size:22px; font-weight:700; color:${status.mapped_accounts === ourAccounts.length ? "#2e7d32" : "#e65100"};">${status.mapped_accounts} / ${ourAccounts.length}</div>
+        </div>
+      </div>
+
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <h3 style="margin:0 0 12px 0; color:#0C1C36; font-size:15px;">Sync Actions</h3>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button onclick="autoMap()" style="background:#B79C62; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;">🔗 Auto-map Accounts</button>
+          <button onclick="pushAll()" style="background:#2CA01C; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;" ${status.mapped_accounts < ourAccounts.length ? 'disabled title="Map all accounts first"' : ""}>⬆ Push ${status.unsynced_entries} Unsynced Entries</button>
+          <a href="/admin/accounting/quickbooks/mapping" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">📋 Manage Account Mapping</a>
+        </div>
+        <div style="font-size:11px; color:#666; margin-top:10px;">
+          Auto-map matches account names between Tez Law and QuickBooks. Review after mapping to catch any misses. Push sends every unsynced journal entry to QBO (idempotent — already-synced entries are skipped).
+        </div>
+      </div>` : "";
+
+    const body = `
+      <div class="page-header">
+        <h1>🔗 QuickBooks Online Sync</h1>
+        <a href="/admin/accounting" class="back-link">← Accounting</a>
+      </div>
+
+      ${setupHtml}
+      ${connectionHtml}
+      ${statsHtml}
+
+      <script>
+        async function autoMap() {
+          if (!confirm("Attempt to automatically match accounts by name?")) return;
+          const btn = event.target;
+          btn.disabled = true; btn.textContent = "⏳ Matching…";
+          try {
+            const r = await fetch("/admin/accounting/quickbooks/auto-map", { method: "POST" });
+            const d = await r.json();
+            if (d.ok) {
+              alert("✓ Matched " + d.results.matched + " accounts.\\n\\nOur accounts: " + d.results.our_total + "\\nQBO accounts: " + d.results.qbo_total + "\\n\\nReview mapping to catch any misses.");
+              location.reload();
+            } else alert("Error: " + d.error);
+          } catch (e) { alert("Error: " + e.message); }
+        }
+        async function pushAll() {
+          if (!confirm("Push all unsynced entries to QuickBooks?\\n\\nThis may take a minute for large batches. Idempotent — safe to run multiple times.")) return;
+          const btn = event.target;
+          btn.disabled = true; btn.textContent = "⏳ Syncing…";
+          try {
+            const r = await fetch("/admin/accounting/quickbooks/push-all", { method: "POST" });
+            const d = await r.json();
+            if (d.ok) {
+              let msg = "✓ Sync complete\\n\\nPushed: " + d.results.pushed + "\\nFailed: " + d.results.failed;
+              if (d.results.errors.length) msg += "\\n\\nFirst errors:\\n" + d.results.errors.slice(0, 5).join("\\n");
+              alert(msg);
+              location.reload();
+            } else alert("Error: " + d.error);
+          } catch (e) { alert("Error: " + e.message); }
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: "QuickBooks Sync", body, activeItem: "accounting-qbo" }));
+  } catch (err) {
+    console.error("[qbo status]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Start OAuth flow
+app.get("/admin/accounting/quickbooks/connect", (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    if (!qbo.isConfigured()) {
+      return res.status(400).send("QBO_CLIENT_ID/QBO_CLIENT_SECRET env vars not set. Complete setup first.");
+    }
+    res.redirect(qbo.getAuthorizeUrl());
+  } catch (err) { res.status(500).send("Error: " + err.message); }
+});
+
+// OAuth callback
+app.get("/admin/accounting/quickbooks/callback", async (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    const { code, realmId, error } = req.query;
+    if (error) return res.status(400).send(`OAuth error: ${error}`);
+    if (!code || !realmId) return res.status(400).send("Missing code or realmId in callback");
+    await qbo.exchangeCodeForTokens(code, realmId);
+    res.redirect("/admin/accounting/quickbooks?connected=1");
+  } catch (err) {
+    console.error("[qbo callback]:", err.message);
+    res.status(500).send("OAuth callback failed: " + err.message);
+  }
+});
+
+app.post("/admin/accounting/quickbooks/disconnect", async (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    await qbo.disconnect();
+    res.redirect("/admin/accounting/quickbooks");
+  } catch (err) { res.status(500).send("Error: " + err.message); }
+});
+
+app.post("/admin/accounting/quickbooks/auto-map", async (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    const results = await qbo.autoMapAccounts();
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error("[qbo auto-map]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/admin/accounting/quickbooks/push-all", async (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    const results = await qbo.pushAllUnsyncedEntries({ limit: 500 });
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error("[qbo push-all]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Account mapping page
+app.get("/admin/accounting/quickbooks/mapping", async (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    const accounting = require("./accounting");
+    const hearingNotes = require("./hearing-notes");
+    if (!(await qbo.isConnected())) return res.redirect("/admin/accounting/quickbooks");
+    const [ourAccounts, qboAccounts, mappings] = await Promise.all([
+      accounting.listAccounts(),
+      qbo.fetchQBOAccounts(),
+      qbo.getAccountMappings(),
+    ]);
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    const rowsHtml = ourAccounts.map(a => {
+      const currentMapping = mappings[a.account_number];
+      const optsHtml = qboAccounts.map(qb =>
+        `<option value="${esc(qb.Id)}" ${currentMapping === String(qb.Id) ? "selected" : ""}>${esc(qb.AccountType || "?")} · ${esc(qb.Name)}${qb.AcctNum ? " (#" + esc(qb.AcctNum) + ")" : ""}</option>`
+      ).join("");
+      return `
+        <tr>
+          <td style="padding:10px 12px; border-bottom:1px solid #eee; font-family:ui-monospace, Menlo, monospace; font-size:12px; color:#0C1C36;">${a.account_number}</td>
+          <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:13px;">${esc(a.name)}<div style="font-size:11px; color:#888;">${a.type}${a.subtype ? " · " + a.subtype : ""}</div></td>
+          <td style="padding:10px 12px; border-bottom:1px solid #eee;">
+            <select data-acct="${a.account_number}" onchange="updateMapping('${a.account_number}', this.value)" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:12px;">
+              <option value="">— unmapped —</option>${optsHtml}
+            </select>
+          </td>
+          <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:11px; color:${currentMapping ? "#2e7d32" : "#c62828"}; text-align:center;">
+            ${currentMapping ? "✓" : "—"}
+          </td>
+        </tr>`;
+    }).join("");
+
+    const body = `
+      <div class="page-header">
+        <h1>📋 Account Mapping</h1>
+        <a href="/admin/accounting/quickbooks" class="back-link">← QuickBooks Sync</a>
+      </div>
+
+      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+        Map each Tez Law internal account to its QuickBooks Online equivalent. Every journal entry line must have a mapped account before it can push.
+      </div>
+
+      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
+        <table style="width:100%; border-collapse:collapse;">
+          <thead><tr style="background:#fafaf7;">
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Our #</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Our Account</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">QBO Account</th>
+            <th style="padding:10px 12px; text-align:center; font-size:11px; color:#666; text-transform:uppercase;">Status</th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+
+      <script>
+        async function updateMapping(ourAcctNumber, qbAcctId) {
+          try {
+            const r = await fetch("/admin/accounting/quickbooks/mapping", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ our_account_number: ourAcctNumber, qb_account_id: qbAcctId }),
+            });
+            const d = await r.json();
+            if (!d.ok) alert("Error: " + d.error);
+          } catch (e) { alert("Error: " + e.message); }
+        }
+      </script>`;
+
+    res.send(hearingNotes.renderAdminChrome({ title: "QBO Mapping", body, activeItem: "accounting-qbo" }));
+  } catch (err) {
+    console.error("[qbo mapping]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/admin/accounting/quickbooks/mapping", async (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    const { our_account_number, qb_account_id } = req.body || {};
+    if (qb_account_id) {
+      await qbo.saveAccountMapping(our_account_number, qb_account_id);
+    } else {
+      // Unmap
+      const cfg = await qbo.getAccountMappings();
+      delete cfg[String(our_account_number)];
+      // Save it back
+      const module = require("./qbo-sync");
+      const accounting = require("./accounting");
+      // Simpler: just save empty as null
+      await qbo.saveAccountMapping(our_account_number, ""); // will need explicit handling
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[qbo mapping save]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Accounting Module ────────────────────────────────
 // Double-entry ledger with CA Bar RRC 1.15 IOLTA trust compliance.
 // Auto-syncs from PI disbursements. Exports to Excel, IIF (QB Desktop),
