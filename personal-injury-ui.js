@@ -161,6 +161,7 @@ async function renderCaseList(query) {
   const filters = {};
   if (query.status) filters.status = query.status;
   if (query.sol_soon) filters.sol_approaching_days = 60;
+  if (query.broker) filters.broker = query.broker;
 
   const cases = await pi.listCases(filters);
 
@@ -188,6 +189,7 @@ async function renderCaseList(query) {
           <a href="/admin/pi/case/${c.id}" style="color:#0C1C36; font-weight:600; text-decoration:none;">${esc(c.client_name)}</a>
           ${c.incident_type ? `<div style="font-size:11px; color:#888;">${esc(INCIDENT_TYPES.find(i => i.key === c.incident_type)?.label || c.incident_type)}</div>` : ""}
           <div style="font-size:11px; color:#888;">${c.incident_date ? "Incident: " + fmtDate(c.incident_date) : "No incident date"}</div>
+          ${c.referral_source ? `<div style="font-size:11px; color:#B79C62; margin-top:2px;">🤝 ${esc(c.referral_source)}</div>` : ""}
         </td>
         <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
           <span style="background:${status.color}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600;">${status.label}</span>
@@ -215,6 +217,7 @@ async function renderCaseList(query) {
       <a href="/admin/pi" class="back-link">← Dashboard</a>
     </div>
 
+    ${query.broker ? `<div style="background:#fff8e1; padding:12px 16px; border-radius:8px; border-left:4px solid #B79C62; margin-bottom:16px; font-size:13px;">🤝 Filtered by broker: <strong>${esc(query.broker)}</strong> · <a href="/admin/pi/cases" style="color:#0061FF; text-decoration:none;">Show all</a> · <a href="/admin/pi/brokers" style="color:#0061FF; text-decoration:none;">All brokers →</a></div>` : ""}
     <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
       <div>
         <label style="font-size:11px; color:#888; display:block; margin-bottom:2px;">Status</label>
