@@ -3455,17 +3455,33 @@ try {
 (async () => {
   try {
     const { default: cron } = await import("node-cron").catch(() => ({ default: require("node-cron") }));
+
+    // Daily 8 AM summary (grouped list of overdue + due today + due soon)
     cron.schedule("0 8 * * *", async () => {
-      console.log("📋 [tasks-reminder] Running daily 8 AM task reminder…");
+      console.log("📋 [tasks-reminder] Running daily 8 AM task summary…");
       try {
         const tasks = require("./tasks");
         const result = await tasks.sendDailyReminders();
-        console.log("[tasks-reminder] Result:", JSON.stringify(result));
+        console.log("[tasks-reminder] Daily summary result:", JSON.stringify(result));
       } catch (e) {
         console.error("[tasks-reminder] error:", e.message);
       }
     }, { timezone: "America/Los_Angeles" });
-    console.log("✅ Daily task reminders scheduled (8 AM Pacific)");
+
+    // Hourly per-task reminders (during business hours only: 8am-9pm Pacific)
+    // Sends individual reminders with inline Done/Snooze buttons for tasks
+    // entering their reminder window. Deduped: won't re-send within 20 hours.
+    cron.schedule("0 8-21 * * *", async () => {
+      try {
+        const tasks = require("./tasks");
+        const result = await tasks.sendPerTaskReminders();
+        if (result.sent > 0) console.log(`📋 [tasks-hourly] Sent ${result.sent} task reminders`);
+      } catch (e) {
+        console.error("[tasks-hourly] error:", e.message);
+      }
+    }, { timezone: "America/Los_Angeles" });
+
+    console.log("✅ Task reminders scheduled: daily 8 AM summary + hourly per-task pings (8am-9pm PT)");
   } catch (e) {
     console.warn("[tasks-reminder] cron setup failed:", e.message);
   }
@@ -5491,6 +5507,22 @@ app.post("/telegram", async (req, res) => {
       }
       return;
     }
+
+    // ── Task inline button callbacks (task_done_ID, task_snooze_ID_DAYS) ──
+    if (cb.data?.startsWith("task_")) {
+      try {
+        const tasks = require("./tasks");
+        const cbChatId = String(cb.message?.chat?.id || cb.from?.id || "");
+        const result = await tasks.handleTelegramCallback(cb.data, cbChatId, cb.id);
+        if (result) {
+          axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
+            callback_query_id: cb.id,
+            text: result.answer,
+          }).catch(() => {});
+        }
+      } catch (e) { console.warn("[telegram] task callback:", e.message); }
+      return;
+    }
   }
 
   if (!update.message) return;
@@ -5514,6 +5546,19 @@ app.post("/telegram", async (req, res) => {
         `\n_Copy the Chat ID above to use in env vars like_ \`HEARING_NOTES_TELEGRAM_GROUP_ID\`.`;
       await tgSend(chatId, info);
       return;
+    }
+
+    // ── Task management commands (/tasks, /done, /snooze, /newtask) ──
+    if (/^\/(tasks|done|snooze|newtask)(@\w+)?(\s|$)/i.test(textForCmd)) {
+      try {
+        const tasks = require("./tasks");
+        const handled = await tasks.handleTelegramCommand(textForCmd, chatId);
+        if (handled) return;
+      } catch (e) {
+        console.warn("[telegram] task command:", e.message);
+        await tgSend(chatId, `⚠️ Task command failed: ${e.message}`);
+        return;
+      }
     }
     if (msg.photo) {
       await axios.post(`${TELEGRAM_API}/sendChatAction`, { chat_id: chatId, action: "typing" });
