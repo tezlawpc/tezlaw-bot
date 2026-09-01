@@ -210,7 +210,14 @@ async function createTask(data) {
       !!data.is_recurring, data.recurrence_pattern || null, data.recurrence_until || null, data.parent_task_id || null,
     ]
   );
-  return r.rows[0];
+  const task = r.rows[0];
+
+  // Fire creation reminder (non-blocking) if due soon or urgent
+  setImmediate(() => {
+    sendCreationReminder(task).catch(e => console.warn("[tasks] creation reminder:", e.message));
+  });
+
+  return task;
 }
 
 async function updateTask(id, fields) {
@@ -409,8 +416,8 @@ async function sendDailyReminders() {
   if (overdue.length) {
     lines.push(`🚨 <b>${overdue.length} OVERDUE</b>`);
     for (const t of overdue.slice(0, 10)) {
-      const dt = new Date(t.due_date).toLocaleDateString();
-      lines.push(`• [${Math.abs((new Date(t.due_date) - new Date()) / 86400000).toFixed(0)}d late] ${escapeTelegram(t.title)}${t.client_name ? " — " + escapeTelegram(t.client_name) : ""}`);
+      const daysLate = Math.abs(Math.floor((new Date(t.due_date) - new Date()) / 86400000));
+      lines.push(`• #${t.id} [${daysLate}d late] ${escapeTelegram(t.title)}${t.client_name ? " — " + escapeTelegram(t.client_name) : ""}`);
     }
     if (overdue.length > 10) lines.push(`... and ${overdue.length - 10} more`);
     lines.push("");
@@ -420,7 +427,7 @@ async function sendDailyReminders() {
     lines.push(`⚠️ <b>Due TODAY (${dueTodayRows.length})</b>`);
     for (const t of dueTodayRows.slice(0, 10)) {
       const priorityIcon = t.priority === "urgent" ? "🔴" : t.priority === "high" ? "🟠" : "🔵";
-      lines.push(`${priorityIcon} ${escapeTelegram(t.title)}${t.client_name ? " — " + escapeTelegram(t.client_name) : ""}`);
+      lines.push(`${priorityIcon} #${t.id} ${escapeTelegram(t.title)}${t.client_name ? " — " + escapeTelegram(t.client_name) : ""}`);
     }
     lines.push("");
   }
@@ -429,41 +436,295 @@ async function sendDailyReminders() {
     lines.push(`📅 <b>Coming up (${dueSoonRows.length})</b>`);
     for (const t of dueSoonRows.slice(0, 10)) {
       const dt = new Date(t.due_date).toLocaleDateString();
-      lines.push(`• ${dt} — ${escapeTelegram(t.title)}${t.client_name ? " (" + escapeTelegram(t.client_name) + ")" : ""}`);
+      lines.push(`• #${t.id} ${dt} — ${escapeTelegram(t.title)}${t.client_name ? " (" + escapeTelegram(t.client_name) + ")" : ""}`);
     }
     lines.push("");
   }
 
+  lines.push("<i>Commands: /tasks (list) · /done ID · /snooze ID days</i>");
   const tezBase = process.env.RENDER_EXTERNAL_URL || "https://tezlawfirm.com";
   lines.push(`<a href="${tezBase}/admin/tasks">Open task list →</a>`);
   const message = lines.join("\n");
 
-  // Send to Telegram
-  const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.JJ_TELEGRAM_ID;
-  if (!token || !chatId) return { sent: false, reason: "no_telegram_config" };
+  const result = await sendTelegramMessage(chatId, message);
+  if (!result.ok) return result;
 
+  // Mark reminders sent
+  const allTaskIds = [...overdue, ...dueTodayRows, ...dueSoonRows].map(t => t.id);
+  if (allTaskIds.length) {
+    await db.query(
+      `UPDATE tasks SET last_reminder_sent = NOW(), reminders_sent = reminders_sent + 1 WHERE id = ANY($1)`,
+      [allTaskIds]
+    );
+  }
+  return { sent: true, tasks_notified: allTaskIds.length };
+}
+
+// ─── Per-task reminders with inline buttons ─────────────
+// Called hourly. Sends individual reminders for tasks that just entered
+// their reminder window OR are overdue. Skips tasks already reminded in
+// the last 20 hours to avoid spam.
+
+async function sendPerTaskReminders() {
+  await initTable();
+  const chatId = process.env.JJ_TELEGRAM_ID;
+  if (!chatId) return { sent: 0, reason: "no_chat_id" };
+
+  // Find tasks that need a per-task ping right now:
+  // - Due within their reminder_days_before window
+  // - Not reminded in the last 20 hours
+  // - Not completed/cancelled
+  const candidates = await db.query(`
+    SELECT * FROM tasks
+    WHERE status NOT IN ('completed', 'cancelled')
+      AND due_date IS NOT NULL
+      AND (
+        due_date < CURRENT_DATE
+        OR due_date <= CURRENT_DATE + (COALESCE(reminder_days_before, 3) || ' days')::interval
+      )
+      AND (
+        last_reminder_sent IS NULL
+        OR last_reminder_sent < NOW() - INTERVAL '20 hours'
+      )
+    ORDER BY
+      CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 WHEN 'low' THEN 4 ELSE 5 END,
+      due_date ASC
+    LIMIT 20
+  `);
+
+  let sent = 0;
+  const errors = [];
+  for (const t of candidates.rows) {
+    try {
+      await sendSingleTaskReminder(t, chatId);
+      await db.query(
+        `UPDATE tasks SET last_reminder_sent = NOW(), reminders_sent = reminders_sent + 1 WHERE id = $1`,
+        [t.id]
+      );
+      sent++;
+      await new Promise(r => setTimeout(r, 400));  // pace at 2.5/sec, well under Telegram limits
+    } catch (e) {
+      errors.push(`#${t.id}: ${e.message}`);
+    }
+  }
+  return { sent, considered: candidates.rows.length, errors };
+}
+
+// Sends one individual task reminder with inline action buttons
+async function sendSingleTaskReminder(task, chatId) {
+  const daysUntil = Math.floor((new Date(task.due_date) - new Date()) / 86400000);
+  let header;
+  if (daysUntil < 0) header = `🚨 <b>OVERDUE ${Math.abs(daysUntil)} day${Math.abs(daysUntil) === 1 ? "" : "s"}</b>`;
+  else if (daysUntil === 0) header = `⚠️ <b>DUE TODAY</b>`;
+  else header = `📅 <b>Due in ${daysUntil} day${daysUntil === 1 ? "" : "s"}</b>`;
+
+  const priorityEmoji = { urgent: "🔴", high: "🟠", normal: "🔵", low: "⚪" }[task.priority] || "🔵";
+  const categoryLabel = task.category ? (CATEGORY_LABELS[task.category] || task.category) : "";
+
+  const parts = [
+    `${header} — <b>${escapeTelegram(task.title)}</b>`,
+    "",
+    `${priorityEmoji} Priority: ${task.priority}`,
+  ];
+  if (categoryLabel) parts.push(`📂 ${escapeTelegram(categoryLabel)}`);
+  if (task.client_name) parts.push(`👤 ${escapeTelegram(task.client_name)}`);
+  if (task.a_number) parts.push(`🆔 ${escapeTelegram(task.a_number)}`);
+  if (task.case_number) parts.push(`📁 Case: ${escapeTelegram(task.case_number)}`);
+  if (task.court) parts.push(`⚖️ ${escapeTelegram(task.court)}`);
+  if (task.assigned_to) parts.push(`👥 Assigned: ${escapeTelegram(task.assigned_to)}`);
+  parts.push(`📆 Due: ${new Date(task.due_date).toLocaleDateString()}${task.due_time ? " " + task.due_time : ""}`);
+  if (task.description) {
+    const desc = task.description.length > 200 ? task.description.substring(0, 200) + "…" : task.description;
+    parts.push("");
+    parts.push(escapeTelegram(desc));
+  }
+
+  const text = parts.join("\n");
+
+  const buttons = {
+    inline_keyboard: [
+      [
+        { text: "✓ Done", callback_data: `task_done_${task.id}` },
+        { text: "⏰ +1d", callback_data: `task_snooze_${task.id}_1` },
+        { text: "⏰ +7d", callback_data: `task_snooze_${task.id}_7` },
+      ],
+      [
+        { text: "🔗 Open", url: `${process.env.RENDER_EXTERNAL_URL || "https://tezlawfirm.com"}/admin/tasks/${task.id}` },
+      ],
+    ],
+  };
+
+  return sendTelegramMessage(chatId, text, buttons);
+}
+
+// Immediate reminder when a task is created that's due soon
+async function sendCreationReminder(task) {
+  if (!task || !task.due_date) return;
+  const chatId = process.env.JJ_TELEGRAM_ID;
+  if (!chatId) return;
+  const daysUntil = Math.floor((new Date(task.due_date) - new Date()) / 86400000);
+  const window = task.reminder_days_before || 3;
+  // Only send immediate if due within reminder window OR is urgent
+  if (daysUntil > window && task.priority !== "urgent") return;
+  try {
+    await sendSingleTaskReminder(task, chatId);
+    await db.query(
+      `UPDATE tasks SET last_reminder_sent = NOW(), reminders_sent = reminders_sent + 1 WHERE id = $1`,
+      [task.id]
+    );
+  } catch (e) { console.warn("[tasks] creation reminder failed:", e.message); }
+}
+
+// Snooze a task by pushing its due date forward N days
+async function snoozeTask(id, days) {
+  await initTable();
+  const r = await db.query(
+    `UPDATE tasks SET
+       due_date = COALESCE(due_date, CURRENT_DATE) + ($2 || ' days')::interval,
+       last_reminder_sent = NULL,
+       updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, days]
+  );
+  return r.rows[0];
+}
+
+// ─── Telegram helpers ───────────────────────────────────
+
+async function sendTelegramMessage(chatId, text, replyMarkup = null) {
+  const token = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN;
+  if (!token || !chatId) return { ok: false, reason: "no_telegram_config" };
   try {
     const axios = require("axios");
+    const payload = {
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    };
+    if (replyMarkup) payload.reply_markup = replyMarkup;
     await axios.post(
       `https://api.telegram.org/bot${token}/sendMessage`,
-      { chat_id: chatId, text: message, parse_mode: "HTML", disable_web_page_preview: true },
+      payload,
       { timeout: 15000 }
     );
-
-    // Mark reminders sent
-    const allTaskIds = [...overdue, ...dueTodayRows, ...dueSoonRows].map(t => t.id);
-    if (allTaskIds.length) {
-      await db.query(
-        `UPDATE tasks SET last_reminder_sent = NOW(), reminders_sent = reminders_sent + 1 WHERE id = ANY($1)`,
-        [allTaskIds]
-      );
-    }
-    return { sent: true, tasks_notified: allTaskIds.length };
+    return { ok: true };
   } catch (e) {
     console.warn("[tasks] Telegram send failed:", e.message);
-    return { sent: false, reason: e.message };
+    return { ok: false, reason: e.message };
   }
+}
+
+// ─── Telegram command router (called from server.js webhook) ────
+// Returns true if the message was handled (so server.js knows not to
+// pass it to Claude).
+
+async function handleTelegramCommand(text, chatId) {
+  const trimmed = (text || "").trim();
+
+  // /tasks — list open tasks
+  if (/^\/tasks(@\w+)?\s*$/i.test(trimmed)) {
+    const rows = await listTasks({ limit: 20 });
+    if (!rows.length) {
+      await sendTelegramMessage(chatId, "📋 No open tasks. 🎉");
+      return true;
+    }
+    const lines = [`📋 <b>Open tasks (${rows.length})</b>`, ""];
+    for (const t of rows) {
+      const days = t.days_until_due;
+      let dueTag = "";
+      if (days == null) dueTag = "";
+      else if (days < 0) dueTag = ` 🚨 ${Math.abs(days)}d late`;
+      else if (days === 0) dueTag = " ⚠️ TODAY";
+      else if (days <= 3) dueTag = ` 🟠 ${days}d`;
+      else dueTag = ` (${days}d)`;
+      const pIcon = { urgent: "🔴", high: "🟠", normal: "🔵", low: "⚪" }[t.priority] || "🔵";
+      lines.push(`${pIcon} #${t.id} ${escapeTelegram(t.title)}${dueTag}${t.client_name ? " — " + escapeTelegram(t.client_name) : ""}`);
+    }
+    lines.push("");
+    lines.push("<i>/done ID · /snooze ID days</i>");
+    await sendTelegramMessage(chatId, lines.join("\n"));
+    return true;
+  }
+
+  // /done <id> — mark task complete
+  const doneMatch = trimmed.match(/^\/done(@\w+)?\s+#?(\d+)/i);
+  if (doneMatch) {
+    const id = parseInt(doneMatch[2], 10);
+    const t = await getTask(id);
+    if (!t) {
+      await sendTelegramMessage(chatId, `❌ Task #${id} not found`);
+      return true;
+    }
+    if (t.status === "completed") {
+      await sendTelegramMessage(chatId, `✅ Task #${id} was already completed`);
+      return true;
+    }
+    await completeTask(id, { userId: null, notes: "Marked done via Telegram" });
+    await sendTelegramMessage(chatId, `✓ Completed #${id}: <b>${escapeTelegram(t.title)}</b>`);
+    return true;
+  }
+
+  // /snooze <id> <days> — push due date forward
+  const snoozeMatch = trimmed.match(/^\/snooze(@\w+)?\s+#?(\d+)\s+(\d+)/i);
+  if (snoozeMatch) {
+    const id = parseInt(snoozeMatch[2], 10);
+    const days = parseInt(snoozeMatch[3], 10);
+    if (days < 1 || days > 365) {
+      await sendTelegramMessage(chatId, "❌ Snooze days must be 1-365");
+      return true;
+    }
+    const updated = await snoozeTask(id, days);
+    if (!updated) {
+      await sendTelegramMessage(chatId, `❌ Task #${id} not found`);
+      return true;
+    }
+    const newDue = new Date(updated.due_date).toLocaleDateString();
+    await sendTelegramMessage(chatId, `⏰ Snoozed #${id} to <b>${newDue}</b>: ${escapeTelegram(updated.title)}`);
+    return true;
+  }
+
+  // /newtask <title> — quick add
+  const newTaskMatch = trimmed.match(/^\/newtask(@\w+)?\s+(.+)/is);
+  if (newTaskMatch) {
+    const title = newTaskMatch[2].trim();
+    const t = await createTask({ title, priority: "normal" });
+    await sendTelegramMessage(chatId, `✓ Created task #${t.id}: <b>${escapeTelegram(title)}</b>\n\nOpen to add due date, category, client: ${process.env.RENDER_EXTERNAL_URL || "https://tezlawfirm.com"}/admin/tasks/${t.id}`);
+    return true;
+  }
+
+  return false;
+}
+
+// Handle inline button callbacks (task_done_ID, task_snooze_ID_DAYS)
+async function handleTelegramCallback(callbackData, chatId, callbackQueryId) {
+  const token = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN;
+
+  const doneMatch = callbackData.match(/^task_done_(\d+)$/);
+  if (doneMatch) {
+    const id = parseInt(doneMatch[1], 10);
+    const t = await getTask(id);
+    if (!t) return { answer: `Task #${id} not found` };
+    if (t.status === "completed") return { answer: `Already completed` };
+    await completeTask(id, { userId: null, notes: "Done via Telegram" });
+    await sendTelegramMessage(chatId, `✓ Completed #${id}: <b>${escapeTelegram(t.title)}</b>`);
+    return { answer: `✓ Marked done` };
+  }
+
+  const snoozeMatch = callbackData.match(/^task_snooze_(\d+)_(\d+)$/);
+  if (snoozeMatch) {
+    const id = parseInt(snoozeMatch[1], 10);
+    const days = parseInt(snoozeMatch[2], 10);
+    const updated = await snoozeTask(id, days);
+    if (!updated) return { answer: `Task #${id} not found` };
+    const newDue = new Date(updated.due_date).toLocaleDateString();
+    await sendTelegramMessage(chatId, `⏰ Snoozed #${id} to <b>${newDue}</b>: ${escapeTelegram(updated.title)}`);
+    return { answer: `⏰ Snoozed ${days}d → ${newDue}` };
+  }
+
+  return null;
 }
 
 function escapeTelegram(s) {
@@ -474,5 +735,7 @@ module.exports = {
   initTable,
   CATEGORIES, CATEGORY_LABELS, PRIORITIES, PRIORITY_COLORS,
   createTask, updateTask, completeTask, deleteTask, getTask, listTasks,
-  getStats, sendDailyReminders,
+  getStats, snoozeTask,
+  sendDailyReminders, sendPerTaskReminders, sendCreationReminder, sendSingleTaskReminder,
+  handleTelegramCommand, handleTelegramCallback,
 };
