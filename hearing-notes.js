@@ -1370,6 +1370,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/pi/cases?sol_soon=1" class="nav-link" data-perm="clients.read">
         <span class="nav-icon">⚠</span><span class="nav-label">SOL Alerts</span>
       </a>
+      <a href="/admin/pi/brokers" class="nav-link ${isActive('pi-brokers')}" data-perm="clients.read">
+        <span class="nav-icon">◈</span><span class="nav-label">Brokers</span>
+      </a>
     </div>
 
     <!-- ── Accounting section ── -->
