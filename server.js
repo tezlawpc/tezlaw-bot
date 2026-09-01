@@ -728,15 +728,75 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
         </div>
       </div>
 
+      <!-- Automation toggles -->
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-        <h3 style="margin:0 0 12px 0; color:#0C1C36; font-size:15px;">Sync Actions</h3>
+        <h3 style="margin:0 0 12px 0; color:#0C1C36; font-size:15px;">⚡ Automation</h3>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+
+          <!-- Auto-Push -->
+          <div style="border:1px solid ${status.auto_push_enabled ? "#2e7d32" : "#eee"}; padding:16px; border-radius:6px; background:${status.auto_push_enabled ? "#e8f5e9" : "white"};">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+              <div>
+                <strong style="color:#0C1C36;">Auto-Push</strong>
+                <span style="background:${status.auto_push_enabled ? "#2e7d32" : "#999"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; margin-left:6px;">${status.auto_push_enabled ? "ON" : "OFF"}</span>
+              </div>
+              <label class="toggle" style="display:inline-block; position:relative; width:44px; height:24px; cursor:pointer;">
+                <input type="checkbox" ${status.auto_push_enabled ? "checked" : ""} onchange="toggleAutoPush(this.checked)" style="opacity:0; width:0; height:0;">
+                <span style="position:absolute; inset:0; background:${status.auto_push_enabled ? "#2e7d32" : "#ccc"}; border-radius:24px; transition:0.2s;">
+                  <span style="position:absolute; top:2px; left:${status.auto_push_enabled ? "22px" : "2px"}; width:20px; height:20px; background:white; border-radius:50%; transition:0.2s;"></span>
+                </span>
+              </label>
+            </div>
+            <div style="font-size:12px; color:#555; margin-top:8px;">
+              When ON, every journal entry pushes to QBO the moment it's created. Fires in the background — if push fails (unmapped account, QBO down), the entry stays in the pending queue for the next scheduled sync.
+            </div>
+          </div>
+
+          <!-- Scheduled Sync -->
+          <div style="border:1px solid ${status.scheduled_sync_enabled ? "#2e7d32" : "#eee"}; padding:16px; border-radius:6px; background:${status.scheduled_sync_enabled ? "#e8f5e9" : "white"};">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+              <div>
+                <strong style="color:#0C1C36;">Scheduled Sync</strong>
+                <span style="background:${status.scheduled_sync_enabled ? "#2e7d32" : "#999"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; margin-left:6px;">${status.scheduled_sync_enabled ? "ON" : "OFF"}</span>
+              </div>
+              <label class="toggle" style="display:inline-block; position:relative; width:44px; height:24px; cursor:pointer;">
+                <input type="checkbox" ${status.scheduled_sync_enabled ? "checked" : ""} onchange="toggleScheduledSync(this.checked)" style="opacity:0; width:0; height:0;">
+                <span style="position:absolute; inset:0; background:${status.scheduled_sync_enabled ? "#2e7d32" : "#ccc"}; border-radius:24px; transition:0.2s;">
+                  <span style="position:absolute; top:2px; left:${status.scheduled_sync_enabled ? "22px" : "2px"}; width:20px; height:20px; background:white; border-radius:50%; transition:0.2s;"></span>
+                </span>
+              </label>
+            </div>
+            <div style="font-size:12px; color:#555; margin-top:8px;">
+              Runs a full batch sync every
+              <select onchange="setInterval(this.value)" style="padding:2px 6px; border:1px solid #ccc; border-radius:4px; font-size:12px;">
+                <option value="15" ${status.sync_interval_minutes === 15 ? "selected" : ""}>15 minutes</option>
+                <option value="30" ${status.sync_interval_minutes === 30 ? "selected" : ""}>30 minutes</option>
+                <option value="60" ${status.sync_interval_minutes === 60 ? "selected" : ""}>hour</option>
+                <option value="120" ${status.sync_interval_minutes === 120 ? "selected" : ""}>2 hours</option>
+                <option value="240" ${status.sync_interval_minutes === 240 ? "selected" : ""}>4 hours</option>
+                <option value="1440" ${status.sync_interval_minutes === 1440 ? "selected" : ""}>day</option>
+              </select>.
+              Safety net that catches anything Auto-Push missed.
+            </div>
+            ${status.last_scheduled_sync_at ? `
+            <div style="font-size:11px; color:#666; margin-top:6px; padding-top:6px; border-top:1px solid ${status.scheduled_sync_enabled ? "#c8e6c9" : "#eee"};">
+              Last: ${new Date(status.last_scheduled_sync_at).toLocaleString()} — ✓ ${status.last_sync_pushed} pushed${status.last_sync_failed > 0 ? ", ⚠ " + status.last_sync_failed + " failed" : ""}
+              ${status.last_sync_errors ? `<details style="margin-top:4px;"><summary style="cursor:pointer; color:#c62828;">Show errors</summary><div style="margin-top:4px; font-family:ui-monospace, Menlo, monospace; font-size:10px; color:#c62828;">${esc(status.last_sync_errors)}</div></details>` : ""}
+            </div>` : ""}
+          </div>
+        </div>
+
+        <div style="background:#f5f9ff; padding:10px 14px; border-radius:6px; margin-top:12px; font-size:11px; color:#555;">
+          💡 <strong>Recommended setup:</strong> Turn ON both. Auto-Push handles instant sync of new entries; Scheduled Sync (every hour) catches anything Auto-Push missed (unmapped accounts, temporary QBO outages, retries).
+        </div>
+      </div>
+
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <h3 style="margin:0 0 12px 0; color:#0C1C36; font-size:15px;">Manual Actions</h3>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button onclick="autoMap()" style="background:#B79C62; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;">🔗 Auto-map Accounts</button>
-          <button onclick="pushAll()" style="background:#2CA01C; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;" ${status.mapped_accounts < ourAccounts.length ? 'disabled title="Map all accounts first"' : ""}>⬆ Push ${status.unsynced_entries} Unsynced Entries</button>
-          <a href="/admin/accounting/quickbooks/mapping" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">📋 Manage Account Mapping</a>
-        </div>
-        <div style="font-size:11px; color:#666; margin-top:10px;">
-          Auto-map matches account names between Tez Law and QuickBooks. Review after mapping to catch any misses. Push sends every unsynced journal entry to QBO (idempotent — already-synced entries are skipped).
+          <button onclick="pushAll()" style="background:#2CA01C; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;" ${status.mapped_accounts < ourAccounts.length ? 'disabled title="Map all accounts first"' : ""}>⬆ Push ${status.unsynced_entries} Unsynced Now</button>
+          <a href="/admin/accounting/quickbooks/mapping" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">📋 Account Mapping</a>
         </div>
       </div>` : "";
 
@@ -751,6 +811,39 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
       ${statsHtml}
 
       <script>
+        async function toggleAutoPush(enabled) {
+          try {
+            const r = await fetch("/admin/accounting/quickbooks/auto-push", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ enabled }),
+            });
+            const d = await r.json();
+            if (d.ok) location.reload();
+            else { alert("Error: " + d.error); location.reload(); }
+          } catch (e) { alert("Error: " + e.message); location.reload(); }
+        }
+        async function toggleScheduledSync(enabled) {
+          try {
+            const r = await fetch("/admin/accounting/quickbooks/scheduled-sync", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ enabled }),
+            });
+            const d = await r.json();
+            if (d.ok) location.reload();
+            else { alert("Error: " + d.error); location.reload(); }
+          } catch (e) { alert("Error: " + e.message); location.reload(); }
+        }
+        async function setInterval(minutes) {
+          try {
+            const r = await fetch("/admin/accounting/quickbooks/scheduled-sync", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ enabled: true, interval_minutes: parseInt(minutes, 10) }),
+            });
+            const d = await r.json();
+            if (d.ok) location.reload();
+            else { alert("Error: " + d.error); }
+          } catch (e) { alert("Error: " + e.message); }
+        }
         async function autoMap() {
           if (!confirm("Attempt to automatically match accounts by name?")) return;
           const btn = event.target;
@@ -840,6 +933,49 @@ app.post("/admin/accounting/quickbooks/push-all", async (req, res) => {
     res.json({ ok: true, results });
   } catch (err) {
     console.error("[qbo push-all]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Toggle auto-push (every new entry immediately pushes to QBO)
+app.post("/admin/accounting/quickbooks/auto-push", async (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    await qbo.setAutoPush(!!req.body?.enabled);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[qbo auto-push toggle]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Toggle scheduled sync (periodic full batch sync as safety net)
+app.post("/admin/accounting/quickbooks/scheduled-sync", async (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    const enabled = !!req.body?.enabled;
+    const interval = req.body?.interval_minutes ? parseInt(req.body.interval_minutes, 10) : null;
+    await qbo.setScheduledSync(enabled, interval);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[qbo scheduled-sync toggle]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Manually trigger the scheduled sync check (useful for testing)
+app.post("/admin/accounting/quickbooks/run-scheduled-now", async (req, res) => {
+  try {
+    const qbo = require("./qbo-sync");
+    const cfg = await qbo.getConfig();
+    if (cfg) {
+      // Force a run by clearing the last_scheduled_sync_at
+      const db = require("./db");
+      await db.query(`UPDATE accounting_qb_config SET last_scheduled_sync_at = NULL`);
+    }
+    const result = await qbo.runScheduledSyncIfDue();
+    res.json({ ok: true, result });
+  } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -2673,6 +2809,13 @@ try {
 try {
   require("./accounting").initTables().catch(e => console.warn("[accounting] init:", e.message));
 } catch (e) { console.warn("[accounting] module load:", e.message); }
+
+// Start QBO scheduled sync worker (checks every 5 min, syncs based on user config)
+try {
+  const qbo = require("./qbo-sync");
+  qbo.ensureConfigColumns().then(() => qbo.startScheduler())
+    .catch(e => console.warn("[qbo-scheduler] start:", e.message));
+} catch (e) { console.warn("[qbo-scheduler] module load:", e.message); }
 
 async function setScanStatus(id, updates) {
   const allowed = ["running", "phase", "current_client", "progress_current", "progress_total", "results", "error"];
