@@ -297,19 +297,22 @@ function mapLanguageNameToCode(name) {
 async function generateParalegalSummary(data) {
   const structured = buildStructuredNotes(data);
 
-  const prompt = `You are cleaning up immigration court hearing notes for a paralegal at Tez Law Firm.
+  const prompt = `You are producing a CONCISE paralegal summary for a master calendar hearing at Tez Law Firm. The paralegal needs to update the case file in under a minute — so keep it short and scannable.
 
-The attorney of record took these notes during the hearing. Your job is to produce a clean, professional summary the team (paralegals, associates) can use to update the case file and take follow-up action.
+Include ONLY these four sections, in this exact order:
+
+1. **Client** — Name, A#, and language preference on one line. Add phone/email only if listed.
+2. **Next Hearing** — Date, time, type, and judge on one line. Nothing else.
+3. **Deadlines** — Bulleted list of any filing deadlines set by the judge, with the exact date for each. If none, write "None set."
+4. **Special Notes** — Only what is genuinely unusual, urgent, or requires attention (e.g. detained status, expedited timeline, new counsel of record needed, unusual judge instructions, respondent behavioral issues). If nothing unusual, write "None."
 
 Rules:
-- Complete and detailed — include ALL information provided
-- Structured with clear headings
-- Professional attorney-to-paralegal tone (efficient, factual)
-- Preserve ALL specific dates, deadlines, allegation numbers, and case details exactly
-- Do NOT invent or embellish — only use what's in the notes
-- Do NOT add "Please note" or "Kindly" language — direct and efficient
-- Use bullet points where appropriate for scannability
-- End with an "Action Items" section listing what the team needs to do
+- BE SHORT. Every line must earn its place. Total output should be ~10-15 lines.
+- Do NOT restate procedural history, allegations, respondent testimony, or the attorney's arguments — the paralegal doesn't need that here.
+- Do NOT add an Action Items section — the deadlines section already covers that.
+- Do NOT add preamble, header, or sign-off.
+- Preserve exact dates and deadlines.
+- Never invent details.
 
 Structured hearing data:
 ${structured}
@@ -317,14 +320,14 @@ ${structured}
 Attorney's raw notes:
 ${data.raw_notes || "(no additional notes)"}
 
-Produce the paralegal summary now. Start directly with the summary — no preamble.`;
+Produce the concise summary now.`;
 
   try {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
         model: ANTHROPIC_MODEL,
-        max_tokens: 2000,
+        max_tokens: 600,
         messages: [{ role: "user", content: prompt }],
       },
       {
