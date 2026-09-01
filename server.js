@@ -564,13 +564,81 @@ app.post("/admin/pi/discover", async (req, res) => {
   }
 });
 
+// Broker/Referral overview — groups PI cases by referral_source (broker),
+// showing volume + revenue + status counts per broker.
+app.get("/admin/pi/brokers", async (req, res) => {
+  try {
+    const hearingNotes = require("./hearing-notes");
+    const db = require("./db");
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const fmt$ = n => "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const r = await db.query(`
+      SELECT
+        COALESCE(NULLIF(referral_source, ''), '(no broker)') as broker,
+        COUNT(*)::int as case_count,
+        COUNT(*) FILTER (WHERE status = 'settled')::int as settled_count,
+        COUNT(*) FILTER (WHERE status IN ('intake', 'treating', 'demand', 'negotiating', 'litigation'))::int as active_count,
+        COALESCE(SUM(final_settlement) FILTER (WHERE status = 'settled'), 0) as total_settled,
+        COALESCE(AVG(final_settlement) FILTER (WHERE status = 'settled'), 0) as avg_settlement,
+        MAX(created_at) as last_intake
+      FROM pi_cases
+      GROUP BY COALESCE(NULLIF(referral_source, ''), '(no broker)')
+      ORDER BY case_count DESC, broker ASC
+    `);
+    const brokers = r.rows;
+    const totalCases = brokers.reduce((s, b) => s + b.case_count, 0);
+
+    const rowsHtml = brokers.length ? brokers.map(b => {
+      const pct = totalCases > 0 ? Math.round(b.case_count / totalCases * 100) : 0;
+      const brokerLink = b.broker === "(no broker)"
+        ? `<span style="color:#999; font-style:italic;">${esc(b.broker)}</span>`
+        : `<a href="/admin/pi/cases?broker=${encodeURIComponent(b.broker)}" style="color:#0C1C36; font-weight:600; text-decoration:none;">🤝 ${esc(b.broker)}</a>`;
+      return `
+        <tr>
+          <td style="padding:12px; border-bottom:1px solid #eee;">${brokerLink}</td>
+          <td style="padding:12px; border-bottom:1px solid #eee; text-align:right; font-weight:600;">${b.case_count} <span style="font-weight:400; color:#888; font-size:11px;">(${pct}%)</span></td>
+          <td style="padding:12px; border-bottom:1px solid #eee; text-align:right; color:#0061FF;">${b.active_count}</td>
+          <td style="padding:12px; border-bottom:1px solid #eee; text-align:right; color:#2e7d32;">${b.settled_count}</td>
+          <td style="padding:12px; border-bottom:1px solid #eee; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(b.total_settled)}</td>
+          <td style="padding:12px; border-bottom:1px solid #eee; text-align:right; font-family:ui-monospace, Menlo, monospace; color:#666;">${fmt$(b.avg_settlement)}</td>
+        </tr>`;
+    }).join("") : `<tr><td colspan="6" style="padding:40px; text-align:center; color:#888;">No PI cases yet.</td></tr>`;
+
+    const body = `
+      <div class="page-header">
+        <h1>🤝 Brokers / Referral Sources</h1>
+        <a href="/admin/pi/cases" class="back-link">← PI Cases</a>
+      </div>
+
+      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+        Every PI case's <strong>referral source</strong> comes from the Dropbox folder one level above the client folder. Structure: <code>/Asylum_EOIR/[BROKER]/[CLIENT PI]</code>.
+      </div>
+
+      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
+        <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee; font-size:12px; color:#666;">
+          ${brokers.length} broker${brokers.length === 1 ? "" : "s"} · ${totalCases} total case${totalCases === 1 ? "" : "s"}
+        </div>
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="background:#fafaf7;">
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Broker</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Total Cases</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Active</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Settled</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Total Settled $</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Avg Settlement</th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "Brokers", body, activeItem: "pi-brokers" }));
+  } catch (err) {
+    console.error("[pi brokers]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 // Preview / dry-run — shows every folder considered, whether it matched,
-// what client name would be extracted, and where the folder lives.
-// Useful for JJ to verify matching before actually importing.
-//
-// Query params:
-//   ?path=/Some/Path  → scan ONLY this path (overrides branch roots)
-//   ?browse=/parent   → also list every subfolder at this path for navigation
 app.get("/admin/pi/discover/preview", async (req, res) => {
   try {
     const pi = require("./personal-injury");
@@ -637,9 +705,10 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
         <tr>
           <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:13px;">${esc(c.name)}</td>
           <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:13px; color:#2e7d32; font-weight:600;">${esc(clientName)}</td>
+          <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:12px; color:#B79C62; font-weight:600;">${c.broker ? esc(c.broker) : '<span style="color:#999; font-weight:400;">—</span>'}</td>
           <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:11px; color:#666; font-family:ui-monospace, Menlo, monospace;">${esc(c.path)}</td>
         </tr>`;
-    }).join("") : `<tr><td colspan="3" style="padding:20px; text-align:center; color:#888;">No PI folders matched.</td></tr>`;
+    }).join("") : `<tr><td colspan="4" style="padding:20px; text-align:center; color:#888;">No PI folders matched.</td></tr>`;
 
     const notMatchedRows = notMatched.slice(0, 50).map(c => `
       <tr>
@@ -755,6 +824,7 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
           <thead><tr style="background:#fafaf7;">
             <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Folder Name</th>
             <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Extracted Client</th>
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Broker / Referral</th>
             <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Full Path</th>
           </tr></thead>
           <tbody>${matchedRows}</tbody>
