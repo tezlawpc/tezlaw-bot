@@ -60,7 +60,23 @@ function isConfigured() {
 
 // ─── Config storage ─────────────────────────────────────
 
+async function ensureConfigColumns() {
+  const alters = [
+    "ADD COLUMN IF NOT EXISTS auto_push_enabled BOOLEAN DEFAULT FALSE",
+    "ADD COLUMN IF NOT EXISTS scheduled_sync_enabled BOOLEAN DEFAULT FALSE",
+    "ADD COLUMN IF NOT EXISTS sync_interval_minutes INTEGER DEFAULT 60",
+    "ADD COLUMN IF NOT EXISTS last_scheduled_sync_at TIMESTAMPTZ",
+    "ADD COLUMN IF NOT EXISTS last_sync_pushed INTEGER DEFAULT 0",
+    "ADD COLUMN IF NOT EXISTS last_sync_failed INTEGER DEFAULT 0",
+    "ADD COLUMN IF NOT EXISTS last_sync_errors TEXT",
+  ];
+  for (const alter of alters) {
+    try { await db.query(`ALTER TABLE accounting_qb_config ${alter}`); } catch {}
+  }
+}
+
 async function getConfig() {
+  await ensureConfigColumns();
   const r = await db.query(`SELECT * FROM accounting_qb_config ORDER BY id DESC LIMIT 1`);
   return r.rows[0] || null;
 }
@@ -464,7 +480,101 @@ async function getSyncStatus() {
     unsynced_entries: Number(unsynced.rows[0].n),
     mapped_accounts: mappedCount,
     redirect_uri: getRedirectUri(),
+    // Auto-push + scheduled sync
+    auto_push_enabled: !!cfg.auto_push_enabled,
+    scheduled_sync_enabled: !!cfg.scheduled_sync_enabled,
+    sync_interval_minutes: cfg.sync_interval_minutes || 60,
+    last_scheduled_sync_at: cfg.last_scheduled_sync_at,
+    last_sync_pushed: cfg.last_sync_pushed || 0,
+    last_sync_failed: cfg.last_sync_failed || 0,
+    last_sync_errors: cfg.last_sync_errors || null,
   };
+}
+
+// ─── Auto-push settings ─────────────────────────────────
+
+async function isAutoPushEnabled() {
+  const cfg = await getConfig();
+  return !!(cfg && cfg.auto_push_enabled);
+}
+
+async function isScheduledSyncEnabled() {
+  const cfg = await getConfig();
+  return !!(cfg && cfg.scheduled_sync_enabled);
+}
+
+async function setAutoPush(enabled) {
+  await ensureConfigColumns();
+  await saveConfig({ auto_push_enabled: !!enabled });
+}
+
+async function setScheduledSync(enabled, intervalMinutes = null) {
+  await ensureConfigColumns();
+  const patch = { scheduled_sync_enabled: !!enabled };
+  if (intervalMinutes && intervalMinutes >= 5 && intervalMinutes <= 1440) {
+    patch.sync_interval_minutes = intervalMinutes;
+  }
+  await saveConfig(patch);
+}
+
+// ─── Scheduled sync worker ──────────────────────────────
+// Called every 5 min by server.js interval. Checks if it's time to run a full
+// batch sync based on user's configured interval. Idempotent, non-blocking.
+
+let syncInProgress = false;
+
+async function runScheduledSyncIfDue() {
+  if (syncInProgress) {
+    console.log("[qbo-scheduler] Previous sync still running — skipping");
+    return { skipped: true, reason: "in_progress" };
+  }
+
+  const cfg = await getConfig();
+  if (!cfg || !cfg.scheduled_sync_enabled) return { skipped: true, reason: "disabled" };
+  if (!cfg.access_token) return { skipped: true, reason: "not_connected" };
+
+  // Is it time to sync?
+  const intervalMs = (cfg.sync_interval_minutes || 60) * 60 * 1000;
+  const lastSync = cfg.last_scheduled_sync_at ? new Date(cfg.last_scheduled_sync_at).getTime() : 0;
+  const nowMs = Date.now();
+  if (nowMs - lastSync < intervalMs) {
+    const minsLeft = Math.ceil((intervalMs - (nowMs - lastSync)) / 60000);
+    return { skipped: true, reason: "not_due", minutes_until_next: minsLeft };
+  }
+
+  syncInProgress = true;
+  console.log("[qbo-scheduler] Starting scheduled sync…");
+  try {
+    const results = await pushAllUnsyncedEntries({ limit: 200 });
+    await saveConfig({
+      last_scheduled_sync_at: new Date(),
+      last_sync_pushed: results.pushed,
+      last_sync_failed: results.failed,
+      last_sync_errors: results.errors.slice(0, 10).join(" | ").substring(0, 2000) || null,
+    });
+    console.log(`[qbo-scheduler] Complete: ${results.pushed} pushed, ${results.failed} failed`);
+    return { skipped: false, results };
+  } catch (e) {
+    console.error("[qbo-scheduler] Failed:", e.message);
+    await saveConfig({
+      last_scheduled_sync_at: new Date(),
+      last_sync_errors: `Sync failed: ${e.message}`.substring(0, 2000),
+    });
+    return { skipped: false, error: e.message };
+  } finally {
+    syncInProgress = false;
+  }
+}
+
+// Start the interval-based worker on module load (server.js requires this module on boot)
+function startScheduler() {
+  // Check every 5 minutes — the actual sync only runs when the user's configured
+  // interval has elapsed since last_scheduled_sync_at
+  const CHECK_INTERVAL_MS = 5 * 60 * 1000;
+  setInterval(() => {
+    runScheduledSyncIfDue().catch(e => console.warn("[qbo-scheduler] tick error:", e.message));
+  }, CHECK_INTERVAL_MS);
+  console.log("[qbo-scheduler] Started (checks every 5 min)");
 }
 
 module.exports = {
@@ -473,6 +583,10 @@ module.exports = {
   qboRequest, fetchQBOAccounts, fetchCompanyInfo,
   getAccountMappings, saveAccountMapping, autoMapAccounts,
   pushJournalEntry, pushAllUnsyncedEntries,
-  getSyncStatus,
+  getSyncStatus, getConfig, ensureConfigColumns,
   getRedirectUri,
+  // Auto-push + scheduled sync
+  isAutoPushEnabled, isScheduledSyncEnabled,
+  setAutoPush, setScheduledSync,
+  runScheduledSyncIfDue, startScheduler,
 };
