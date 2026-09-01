@@ -21,6 +21,35 @@ async function renderDashboard() {
   const recent = await accounting.getLedger({ limit: 10 });
   const trust = await accounting.getTrustReconciliation();
 
+  // Also fetch QBO status for prominent card
+  let qboStatus = null;
+  try { qboStatus = await require("./qbo-sync").getSyncStatus(); } catch {}
+  const qboConnected = qboStatus?.connected;
+  const qboConfigured = qboStatus?.configured;
+  const qboAutoOn = qboStatus?.auto_push_enabled;
+
+  // Prominent QuickBooks card at top
+  const qboCard = `
+    <div style="background:${qboConnected ? "linear-gradient(135deg, #e8f5e9, #c8e6c9)" : "linear-gradient(135deg, #fff8e1, #ffe082)"}; padding:20px 24px; border-radius:8px; border-left:4px solid ${qboConnected ? "#2e7d32" : "#f57f17"}; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <div style="font-size:15px; font-weight:700; color:#0C1C36;">
+            🔗 QuickBooks Online ${qboConnected ? `<span style="color:#2e7d32;">✓ Connected</span>` : `<span style="color:#f57f17;">— Not connected</span>`}
+          </div>
+          <div style="font-size:12px; color:#555; margin-top:4px;">
+            ${qboConnected
+              ? `Auto-push: <strong>${qboAutoOn ? "ON — every entry pushes to QBO instantly" : "OFF — turn on for real-time sync"}</strong>${qboStatus?.unsynced_entries > 0 ? " · " + qboStatus.unsynced_entries + " pending" : ""}`
+              : (qboConfigured
+                  ? "Click Connect below to authorize Tez Law's access to your QuickBooks Online account"
+                  : "Setup takes ~10 minutes — get your Client ID from Intuit Developer Portal")}
+          </div>
+        </div>
+        <a href="/admin/accounting/quickbooks" style="background:${qboConnected ? "#0C1C36" : "#2CA01C"}; color:white; padding:12px 24px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px; white-space:nowrap;">
+          ${qboConnected ? "⚙ Manage Sync" : "🔗 Connect QuickBooks →"}
+        </a>
+      </div>
+    </div>`;
+
   // Recent entries preview
   const recentRows = recent.length ? recent.map(e => `
     <tr>
@@ -31,7 +60,7 @@ async function renderDashboard() {
       <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:12px; text-align:right;">${fmt$((e.lines || []).reduce((s, l) => s + Number(l.debit || 0), 0))}</td>
       <td style="padding:8px 12px; border-bottom:1px solid #eee;"><a href="/admin/accounting/entry/${e.id}" style="color:#0061FF; font-size:12px; text-decoration:none;">Open →</a></td>
     </tr>
-  `).join("") : `<tr><td colspan="6" style="padding:40px; text-align:center; color:#888;">No entries yet. Click <strong>Sync from PI</strong> below to import.</td></tr>`;
+  `).join("") : `<tr><td colspan="6" style="padding:40px; text-align:center; color:#888;">No entries yet. Use the quick actions below to record fees, retainers, or expenses for any practice area.</td></tr>`;
 
   const trustBanner = !trust.is_reconciled && trust.bank_balance > 0 ? `
     <div style="background:#fee; padding:14px 18px; border-radius:8px; border-left:4px solid #c62828; margin-bottom:16px; font-size:13px;">
@@ -43,14 +72,11 @@ async function renderDashboard() {
     <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
       <div>
         <h1>💼 Accounting</h1>
-        <div style="font-size:12px; color:#666; margin-top:4px;">Double-entry ledger with IOLTA trust compliance. Auto-syncs from PI disbursements.</div>
-      </div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button onclick="syncFromPI()" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🔄 Sync from PI</button>
-        <a href="/admin/accounting/new-entry" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Entry</a>
+        <div style="font-size:12px; color:#666; margin-top:4px;">Double-entry ledger for ALL practice areas with IOLTA trust compliance.</div>
       </div>
     </div>
 
+    ${qboCard}
     ${trustBanner}
 
     <!-- Money stat tiles -->
@@ -83,7 +109,35 @@ async function renderDashboard() {
       </div>
     </div>
 
-    <!-- Quick actions -->
+    <!-- Quick entry actions (all practice areas) -->
+    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <h3 style="margin:0 0 12px 0; font-size:14px; color:#0C1C36;">⚡ Quick Entry (Any Practice Area)</h3>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px;">
+        <a href="/admin/accounting/record-fee" style="background:#2e7d32; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
+          💰 Record Legal Fee
+          <div style="font-size:11px; font-weight:400; opacity:0.9; margin-top:3px;">Immigration, PI, Business, LL/T, Estate, TM, Real Estate</div>
+        </a>
+        <a href="/admin/accounting/record-retainer" style="background:#B79C62; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
+          🏦 Record Retainer
+          <div style="font-size:11px; font-weight:400; opacity:0.9; margin-top:3px;">Money into IOLTA trust from client</div>
+        </a>
+        <a href="/admin/accounting/record-expense" style="background:#c62828; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
+          💸 Record Expense
+          <div style="font-size:11px; font-weight:400; opacity:0.9; margin-top:3px;">Rent, salaries, subscriptions, etc</div>
+        </a>
+        <a href="/admin/accounting/new-entry" style="background:#0C1C36; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
+          📝 Advanced Entry
+          <div style="font-size:11px; font-weight:400; opacity:0.9; margin-top:3px;">Custom multi-line journal entry</div>
+        </a>
+      </div>
+      <div style="font-size:11px; color:#666; margin-top:12px; padding-top:10px; border-top:1px solid #f0f0f0;">
+        <strong>Auto-imports:</strong>
+        <a href="#" onclick="syncFromPI(); return false;" style="color:#0061FF; text-decoration:none;">🔄 Sync from PI</a>
+        pulls every finalized PI disbursement + case cost into the ledger.
+      </div>
+    </div>
+
+    <!-- Reports & Exports -->
     <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
       <h3 style="margin:0 0 12px 0; font-size:14px; color:#0C1C36;">Reports & Exports</h3>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -93,15 +147,11 @@ async function renderDashboard() {
         <a href="/admin/accounting/trust" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">🔒 Trust Reconciliation</a>
         <a href="/admin/accounting/chart" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📋 Chart of Accounts</a>
       </div>
-      <h4 style="margin:16px 0 8px 0; font-size:12px; color:#666; text-transform:uppercase; letter-spacing:0.05em;">Exports</h4>
+      <h4 style="margin:16px 0 8px 0; font-size:12px; color:#666; text-transform:uppercase; letter-spacing:0.05em;">One-time Exports</h4>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <a href="/admin/accounting/export/excel" style="background:#217346; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">📗 Download Excel (.xlsx)</a>
-        <a href="/admin/accounting/export/iif" style="background:#2CA01C; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">📥 QuickBooks Desktop (.iif)</a>
-        <a href="/admin/accounting/export/csv" style="background:#2CA01C; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">📥 QuickBooks Online (.csv)</a>
-      </div>
-      <div style="font-size:11px; color:#888; margin-top:8px;">
-        <strong>Desktop (IIF):</strong> File → Utilities → Import → IIF Files &nbsp;·&nbsp;
-        <strong>Online (CSV):</strong> Banking → Upload transactions
+        <a href="/admin/accounting/export/excel" style="background:#217346; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">📗 Excel (.xlsx)</a>
+        <a href="/admin/accounting/export/iif" style="background:#2CA01C; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">📥 QB Desktop (.iif)</a>
+        <a href="/admin/accounting/export/csv" style="background:#2CA01C; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">📥 QBO (.csv)</a>
       </div>
     </div>
 
@@ -129,22 +179,14 @@ async function renderDashboard() {
     <script>
       async function syncFromPI() {
         if (!confirm("Sync all finalized PI disbursements and case costs into the accounting ledger?\\n\\nThis is safe to run multiple times — entries already imported are skipped.")) return;
-        const btn = event.target;
-        btn.disabled = true; btn.textContent = "⏳ Syncing…";
         try {
           const r = await fetch("/admin/accounting/sync-pi", { method: "POST" });
           const d = await r.json();
           if (d.ok) {
             alert("✓ Sync complete\\n\\nDisbursements imported: " + d.results.disbursements + "\\nCase costs imported: " + d.results.costs + (d.results.errors.length ? "\\nErrors: " + d.results.errors.length : ""));
             location.reload();
-          } else {
-            alert("Error: " + d.error);
-            btn.disabled = false; btn.textContent = "🔄 Sync from PI";
-          }
-        } catch (e) {
-          alert("Error: " + e.message);
-          btn.disabled = false; btn.textContent = "🔄 Sync from PI";
-        }
+          } else alert("Error: " + d.error);
+        } catch (e) { alert("Error: " + e.message); }
       }
     </script>`;
 }
