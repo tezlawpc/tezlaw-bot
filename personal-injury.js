@@ -279,12 +279,12 @@ function extractClientNameFromPIFolder(folderName) {
     .trim();
 }
 
-async function discoverPICasesFromDropbox({ dryRun = false, paths = null } = {}) {
+async function discoverPICasesFromDropbox({ dryRun = false, paths = null, maxDepth = 3 } = {}) {
   await initTables();
   const dbx = require("./dropbox-integration");
   const results = {
     found: 0, created: 0, updated: 0,
-    considered: [],  // { path, name, matched, client_name, action }
+    considered: [],  // { path, name, matched, broker, client_name, action }
     errors: [],
     branches_scanned: [],
   };
@@ -313,35 +313,73 @@ async function discoverPICasesFromDropbox({ dryRun = false, paths = null } = {})
     }
   }
 
-  const piFolders = [];  // { name, path_display, root }
+  const piFolders = [];  // { name, path_display, broker, root }
 
-  for (const root of rootsToScan) {
+  // Recursive scan — folder structure is typically:
+  //   /Asylum_EOIR/[BROKER]/[CLIENT PI folder]
+  // So the immediate parent of a PI folder is the broker/referral source.
+  //
+  // parentBroker = the folder name one level up (null at scan root, since the
+  // scan root is the ORGANIZATIONAL parent — e.g. "Asylum_EOIR" isn't a broker).
+  async function scan(path, depth, parentBroker) {
+    if (depth > maxDepth) return;
+    let entries;
     try {
-      const entries = await dbx.listFolder(root);
-      if (!entries) {
-        results.errors.push(`Could not list Dropbox folder: ${root || "(root)"}`);
-        results.branches_scanned.push({ root: root || "(root)", ok: false, count: 0 });
-        continue;
-      }
-      results.branches_scanned.push({ root: root || "(root)", ok: true, count: entries.length });
+      entries = await dbx.listFolder(path);
+    } catch (err) {
+      results.errors.push(`Scan failed for ${path || "(root)"}: ${err.message}`);
+      return;
+    }
+    if (!entries) {
+      results.errors.push(`Could not list Dropbox folder: ${path || "(root)"}`);
+      results.branches_scanned.push({ root: path || "(root)", ok: false, count: 0 });
+      return;
+    }
+    // Only record the top-level scan root in branches_scanned
+    if (depth === 1) {
+      results.branches_scanned.push({ root: path || "(root)", ok: true, count: entries.length });
+    }
 
-      for (const e of entries) {
-        if (e[".tag"] !== "folder") continue;
-        const name = String(e.name || "").trim();
-        const matched = PI_MATCHER.test(name);
+    for (const e of entries) {
+      if (e[".tag"] !== "folder") continue;
+      const name = String(e.name || "").trim();
+      const matched = PI_MATCHER.test(name);
+
+      if (matched) {
         results.considered.push({
           path: e.path_display,
           name,
-          matched,
-          root: root || "(root)",
+          matched: true,
+          broker: parentBroker,
+          root: path || "(root)",
         });
-        if (matched) {
-          piFolders.push({ name, path_display: e.path_display, root });
-        }
+        piFolders.push({ name, path_display: e.path_display, broker: parentBroker, root: path });
+      } else if (depth < maxDepth) {
+        // Not a PI folder at this level — recurse assuming this is a broker/organizational folder
+        results.considered.push({
+          path: e.path_display,
+          name,
+          matched: false,
+          broker: parentBroker,
+          root: path || "(root)",
+        });
+        // Pass this folder's name as the broker for anything discovered inside
+        await scan(e.path_display, depth + 1, name);
+      } else {
+        // Max depth reached, non-matching leaf
+        results.considered.push({
+          path: e.path_display,
+          name,
+          matched: false,
+          broker: parentBroker,
+          root: path || "(root)",
+        });
       }
-    } catch (err) {
-      results.errors.push(`Scan failed for ${root || "(root)"}: ${err.message}`);
     }
+  }
+
+  for (const root of rootsToScan) {
+    await scan(root, 1, null);
   }
 
   results.found = piFolders.length;
@@ -360,23 +398,28 @@ async function discoverPICasesFromDropbox({ dryRun = false, paths = null } = {})
 
       // Check if case already exists (by key OR by folder path — either indicates a match)
       const existing = await db.query(
-        `SELECT id FROM pi_cases WHERE client_key = $1 OR dropbox_folder_path = $2`,
+        `SELECT id, referral_source FROM pi_cases WHERE client_key = $1 OR dropbox_folder_path = $2`,
         [clientKey, folder.path_display]
       );
 
       if (existing.rows.length > 0) {
-        // Update path if the folder location moved or changed
+        // Update path + broker (only fill broker if not already set — don't overwrite a manual edit)
+        const preserveBroker = existing.rows[0].referral_source;
         await db.query(
-          `UPDATE pi_cases SET dropbox_folder_path = $1, updated_at = NOW() WHERE id = $2`,
-          [folder.path_display, existing.rows[0].id]
+          `UPDATE pi_cases
+             SET dropbox_folder_path = $1,
+                 referral_source = COALESCE(NULLIF(referral_source, ''), $2),
+                 updated_at = NOW()
+           WHERE id = $3`,
+          [folder.path_display, folder.broker || null, existing.rows[0].id]
         );
         results.updated++;
       } else {
         // Create new case with minimal info (attorney fills in details later)
         await db.query(
-          `INSERT INTO pi_cases (client_key, client_name, dropbox_folder_path, status, intake_date)
-           VALUES ($1, $2, $3, 'intake', CURRENT_DATE)`,
-          [clientKey, clientName, folder.path_display]
+          `INSERT INTO pi_cases (client_key, client_name, dropbox_folder_path, referral_source, status, intake_date)
+           VALUES ($1, $2, $3, $4, 'intake', CURRENT_DATE)`,
+          [clientKey, clientName, folder.path_display, folder.broker || null]
         );
         results.created++;
       }
@@ -398,6 +441,10 @@ async function listCases(filters = {}) {
   if (filters.status) { conds.push(`status = $${i++}`); params.push(filters.status); }
   if (filters.assigned_attorney) { conds.push(`assigned_attorney = $${i++}`); params.push(filters.assigned_attorney); }
   if (filters.incident_type) { conds.push(`incident_type = $${i++}`); params.push(filters.incident_type); }
+  if (filters.broker || filters.referral_source) {
+    conds.push(`referral_source = $${i++}`);
+    params.push(filters.broker || filters.referral_source);
+  }
   if (filters.sol_approaching_days) {
     conds.push(`sol_date IS NOT NULL AND sol_date <= CURRENT_DATE + ($${i++} || ' days')::interval`);
     params.push(filters.sol_approaching_days);
