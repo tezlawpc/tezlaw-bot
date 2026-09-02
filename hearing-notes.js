@@ -1323,7 +1323,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     </div>
   </div>
 
-  <nav>
+  <nav style="visibility:hidden;">
     <!-- ── Overview ── -->
     <div class="nav-section" id="section-work">
       <div class="nav-section-header">
@@ -1341,7 +1341,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/deadlines" class="nav-link ${isActive('deadlines')}" data-perm="hearings.read">
         <span class="nav-icon">◔</span><span class="nav-label">Deadlines</span>
       </a>
-      <a href="/admin/tasks" class="nav-link ${isActive('tasks')}" data-perm="clients.read">
+      <a href="/admin/tasks" class="nav-link ${isActive('tasks')}" data-perm="tasks.read">
         <span class="nav-icon">▤</span><span class="nav-label">Task List</span>
       </a>
       <a href="/admin/panel/analytics" class="nav-link" data-perm="analytics.read">
@@ -1381,16 +1381,16 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     <!-- ── Federal & Trademarks section ── -->
     <div class="nav-section" id="section-federal">
       <div class="nav-section-header">Federal & TM</div>
-      <a href="/admin/federal" class="nav-link ${isActive('federal')}" data-perm="clients.read">
+      <a href="/admin/federal" class="nav-link ${isActive('federal')}" data-perm="federal.read">
         <span class="nav-icon">⚖</span><span class="nav-label">All Matters</span>
       </a>
-      <a href="/admin/federal?group=trademarks" class="nav-link" data-perm="clients.read">
+      <a href="/admin/federal?group=trademarks" class="nav-link" data-perm="federal.read">
         <span class="nav-icon">™</span><span class="nav-label">Trademarks</span>
       </a>
-      <a href="/admin/federal?group=federal_court" class="nav-link" data-perm="clients.read">
+      <a href="/admin/federal?group=federal_court" class="nav-link" data-perm="federal.read">
         <span class="nav-icon">🏛</span><span class="nav-label">Federal Court</span>
       </a>
-      <a href="/admin/federal?overdue=1" class="nav-link" data-perm="clients.read">
+      <a href="/admin/federal?overdue=1" class="nav-link" data-perm="federal.read">
         <span class="nav-icon">⚠</span><span class="nav-label">Overdue Deadlines</span>
       </a>
     </div>
@@ -1398,22 +1398,22 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     <!-- ── Accounting section ── -->
     <div class="nav-section" id="section-accounting">
       <div class="nav-section-header">Accounting</div>
-      <a href="/admin/accounting" class="nav-link ${isActive('accounting')}" data-perm="users.manage">
+      <a href="/admin/accounting" class="nav-link ${isActive('accounting')}" data-perm="accounting.read">
         <span class="nav-icon">💼</span><span class="nav-label">Dashboard</span>
       </a>
-      <a href="/admin/accounting/ledger" class="nav-link ${isActive('accounting-ledger')}" data-perm="users.manage">
+      <a href="/admin/accounting/ledger" class="nav-link ${isActive('accounting-ledger')}" data-perm="accounting.read">
         <span class="nav-icon">📖</span><span class="nav-label">General Ledger</span>
       </a>
-      <a href="/admin/accounting/trust" class="nav-link ${isActive('accounting-trust')}" data-perm="users.manage">
+      <a href="/admin/accounting/trust" class="nav-link ${isActive('accounting-trust')}" data-perm="accounting.read">
         <span class="nav-icon">🔒</span><span class="nav-label">Trust (IOLTA)</span>
       </a>
-      <a href="/admin/accounting/income-statement" class="nav-link" data-perm="users.manage">
+      <a href="/admin/accounting/income-statement" class="nav-link" data-perm="accounting.read">
         <span class="nav-icon">📊</span><span class="nav-label">Income Statement</span>
       </a>
-      <a href="/admin/accounting/balance-sheet" class="nav-link" data-perm="users.manage">
+      <a href="/admin/accounting/balance-sheet" class="nav-link" data-perm="accounting.read">
         <span class="nav-icon">⚖</span><span class="nav-label">Balance Sheet</span>
       </a>
-      <a href="/admin/accounting/quickbooks" class="nav-link ${isActive('accounting-qbo')}" data-perm="users.manage">
+      <a href="/admin/accounting/quickbooks" class="nav-link ${isActive('accounting-qbo')}" data-perm="accounting.read">
         <span class="nav-icon">🔗</span><span class="nav-label">QuickBooks Sync</span>
       </a>
     </div>
@@ -1423,16 +1423,16 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <div class="nav-section-header">
         <span>Immigration</span>
       </div>
-      <a href="/admin/hearing/notes" class="nav-link ${isActive('notes')}" data-perm="hearings.read">
+      <a href="/admin/hearing/notes" class="nav-link ${isActive('notes')}" data-perm="notes.list">
         <span class="nav-icon">≡</span><span class="nav-label">Master Notes</span>
       </a>
-      <a href="/admin/hearing/individual" class="nav-link ${isActive('individual')}" data-perm="hearings.read">
+      <a href="/admin/hearing/individual" class="nav-link ${isActive('individual')}" data-perm="notes.list">
         <span class="nav-icon">◈</span><span class="nav-label">Individual Notes</span>
       </a>
       <a href="/admin/motions" class="nav-link ${isActive('motions')}" data-perm="motions.read">
         <span class="nav-icon">§</span><span class="nav-label">Court Motions</span>
       </a>
-      <a href="/admin/hearing/history" class="nav-link ${isActive('history')}" data-perm="hearings.read">
+      <a href="/admin/hearing/history" class="nav-link ${isActive('history')}" data-perm="notes.list">
         <span class="nav-icon">⌘</span><span class="nav-label">Hearing History</span>
       </a>
     </div>
@@ -1577,7 +1577,14 @@ function renderAdminChrome({ title, body, activeItem = null }) {
         const visibleLinks = Array.from(links).filter(l => l.style.display !== "none");
         if (visibleLinks.length === 0) section.style.display = "none";
       });
-    }).catch(() => {});
+      // Reveal the nav now that filtering is done (prevents flash-of-forbidden-items)
+      const nav = document.querySelector("aside nav");
+      if (nav) nav.style.visibility = "visible";
+    }).catch(() => {
+      // If whoami fails, still reveal the nav — users need to see something
+      const nav = document.querySelector("aside nav");
+      if (nav) nav.style.visibility = "visible";
+    });
 
     // Register PWA service worker for iOS/Android home screen install
     if ('serviceWorker' in navigator) {
