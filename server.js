@@ -1140,7 +1140,41 @@ app.get("/admin/tasks/new", async (req, res) => {
         <a href="/admin/tasks" class="back-link">← Task list</a>
       </div>
 
-      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:800px;">
+      <!-- ── AI Assist: upload doc or type a brief summary ─────────────── -->
+      <div style="background:linear-gradient(135deg, #fff8e1, #fef3c7); padding:20px 24px; border-radius:8px; border-left:4px solid #B79C62; margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+          <span style="font-size:20px;">✨</span>
+          <strong style="color:#0C1C36; font-size:15px;">AI Quick Create</strong>
+          <span style="font-size:11px; color:#666; margin-left:auto;">Upload a doc OR type a brief summary — Claude fills in the rest</span>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+          <!-- Text summary mode -->
+          <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
+            <div style="font-size:12px; color:#666; margin-bottom:6px;"><strong>📝 Type a brief summary</strong></div>
+            <textarea id="ai-text" rows="4" placeholder="Examples:&#10;• File I-589 for Chen Wei by Friday, detained in Adelanto&#10;• Response to RFE from USCIS for Rodriguez family — 87 days from today&#10;• Rent payment due 1st of every month" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit; font-size:13px;"></textarea>
+            <button type="button" onclick="analyzeText()" id="ai-text-btn" style="margin-top:8px; background:#B79C62; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:13px;">✨ Extract Task(s) →</button>
+          </div>
+
+          <!-- Doc upload mode -->
+          <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
+            <div style="font-size:12px; color:#666; margin-bottom:6px;"><strong>📎 Or upload a document</strong></div>
+            <div style="font-size:11px; color:#888; margin-bottom:8px;">NTA, hearing notice, RFE, NOID, IJ decision, court order, PDF or image (PNG/JPG). Claude reads it and creates tasks with dates.</div>
+            <input type="file" id="ai-file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.doc,.docx" style="width:100%; font-size:13px;">
+            <button type="button" onclick="analyzeDoc()" id="ai-file-btn" style="margin-top:8px; background:#0C1C36; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:13px;">✨ Analyze & Create →</button>
+          </div>
+        </div>
+
+        <div id="ai-status" style="margin-top:12px; font-size:12px; color:#666; display:none;"></div>
+      </div>
+
+      <!-- ── Extracted tasks preview (populated by AI, before user confirms) ── -->
+      <div id="ai-preview" style="display:none; margin-bottom:16px;"></div>
+
+      <!-- ── Manual entry form (fallback / for direct control) ─────────── -->
+      <details style="background:white; padding:0; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <summary style="padding:14px 20px; cursor:pointer; font-weight:600; color:#0C1C36;">✏️ Or enter task manually</summary>
+      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; max-width:800px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
           <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Task Title (required)</label><input type="text" name="title" required placeholder="e.g. File motion to reopen for Chen Wei" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-size:14px;"></div>
 
@@ -1204,6 +1238,7 @@ app.get("/admin/tasks/new", async (req, res) => {
           <a href="/admin/tasks" style="margin-left:10px; color:#666; text-decoration:none;">Cancel</a>
         </div>
       </form>
+      </details>
 
       <script>
         // Auto-fill matter type when category is picked
@@ -1234,12 +1269,170 @@ app.get("/admin/tasks/new", async (req, res) => {
             else alert("Error: " + d.error);
           } catch (e) { alert("Error: " + e.message); }
         }
+
+        // ── AI Assist handlers ─────────────────────────────────────
+        function setBusy(mode, msg) {
+          const status = document.getElementById("ai-status");
+          status.style.display = "block";
+          status.innerHTML = msg;
+          document.getElementById("ai-text-btn").disabled = !!mode;
+          document.getElementById("ai-file-btn").disabled = !!mode;
+        }
+        function clearBusy() {
+          document.getElementById("ai-status").style.display = "none";
+          document.getElementById("ai-text-btn").disabled = false;
+          document.getElementById("ai-file-btn").disabled = false;
+        }
+        function escHtml(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+        async function analyzeText() {
+          const text = document.getElementById("ai-text").value.trim();
+          if (!text) return alert("Type a brief summary first.");
+          setBusy(true, "⏳ Claude reading your notes…");
+          try {
+            const r = await fetch("/admin/tasks/analyze", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text }),
+            });
+            const d = await r.json();
+            clearBusy();
+            if (!d.ok) return alert("Error: " + d.error);
+            renderExtractedTasks(d.tasks);
+          } catch (e) { clearBusy(); alert("Error: " + e.message); }
+        }
+        async function analyzeDoc() {
+          const fileInput = document.getElementById("ai-file");
+          if (!fileInput.files.length) return alert("Pick a file first.");
+          const file = fileInput.files[0];
+          if (file.size > 20 * 1024 * 1024) return alert("File too large (max 20 MB).");
+          setBusy(true, "⏳ Claude analyzing " + file.name + " (~10-30s)…");
+          try {
+            const fd = new FormData();
+            fd.append("document", file);
+            const r = await fetch("/admin/tasks/analyze", { method: "POST", body: fd });
+            const d = await r.json();
+            clearBusy();
+            if (!d.ok) return alert("Error: " + d.error);
+            renderExtractedTasks(d.tasks);
+          } catch (e) { clearBusy(); alert("Error: " + e.message); }
+        }
+
+        function renderExtractedTasks(tasks) {
+          const div = document.getElementById("ai-preview");
+          if (!tasks || !tasks.length) {
+            div.style.display = "block";
+            div.innerHTML = '<div style="background:#fff8e1; padding:14px 18px; border-radius:8px; border-left:4px solid #f57f17; font-size:13px;"><strong>No actionable tasks found.</strong> Try being more specific, or use the manual form below.</div>';
+            return;
+          }
+          const priColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" };
+          const rows = tasks.map((t, i) => \`
+            <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee; margin-bottom:8px;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                <div style="flex:1;">
+                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                    <input type="checkbox" id="task-\${i}" checked style="width:16px; height:16px;">
+                    <strong style="color:#0C1C36;">\${escHtml(t.title)}</strong>
+                    <span style="background:\${priColor[t.priority] || '#666'}; color:white; padding:1px 8px; border-radius:8px; font-size:10px;">\${t.priority.toUpperCase()}</span>
+                  </div>
+                  <div style="font-size:11px; color:#666; margin-left:24px;">
+                    \${t.category ? escHtml(t.category.replace(/_/g, ' ')) : ''} \${t.matter_type ? '· ' + escHtml(t.matter_type) : ''}
+                    \${t.due_date ? ' · 📆 <strong>' + escHtml(t.due_date) + '</strong>' : ''}
+                    \${t.client_name ? ' · 👤 ' + escHtml(t.client_name) : ''}
+                    \${t.a_number ? ' · 🆔 ' + escHtml(t.a_number) : ''}
+                    \${t.court ? ' · ⚖️ ' + escHtml(t.court) : ''}
+                  </div>
+                  \${t.description ? '<div style="font-size:12px; color:#555; margin-top:6px; margin-left:24px; white-space:pre-wrap;">' + escHtml(t.description) + '</div>' : ''}
+                </div>
+              </div>
+            </div>
+          \`).join("");
+          div.style.display = "block";
+          div.innerHTML = \`
+            <div style="background:#e8f5e9; padding:14px 18px; border-radius:8px; border-left:4px solid #2e7d32; margin-bottom:10px;">
+              <strong style="color:#2e7d32;">✓ Claude extracted \${tasks.length} task\${tasks.length === 1 ? '' : 's'}.</strong> Uncheck any you don't want, then click Create All.
+            </div>
+            \${rows}
+            <div style="margin-top:12px; display:flex; gap:10px;">
+              <button type="button" onclick='createExtractedTasks(\${JSON.stringify(tasks).replace(/'/g, "&apos;")})' style="background:#2e7d32; color:white; padding:10px 20px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">✓ Create Selected Tasks</button>
+              <button type="button" onclick="document.getElementById('ai-preview').style.display='none'" style="background:none; color:#666; padding:10px 20px; border:1px solid #ccc; border-radius:6px; cursor:pointer;">Cancel</button>
+            </div>
+          \`;
+        }
+
+        async function createExtractedTasks(tasks) {
+          const selected = tasks.filter((_, i) => document.getElementById('task-' + i).checked);
+          if (!selected.length) return alert("Select at least one task.");
+          const btn = event.target;
+          btn.disabled = true; btn.textContent = "⏳ Creating…";
+          try {
+            const r = await fetch("/admin/tasks/bulk-create", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ tasks: selected }),
+            });
+            const d = await r.json();
+            if (d.ok) location.href = "/admin/tasks";
+            else { alert("Error: " + d.error); btn.disabled = false; btn.textContent = "✓ Create Selected Tasks"; }
+          } catch (e) { alert("Error: " + e.message); btn.disabled = false; btn.textContent = "✓ Create Selected Tasks"; }
+        }
       </script>`;
 
     res.send(hearingNotes.renderAdminChrome({ title: "New Task", body, activeItem: "tasks" }));
   } catch (err) {
     console.error("[task new]:", err.message);
     res.status(500).send("Error: " + err.message);
+  }
+});
+
+// AI analyze endpoint — accepts either JSON { text: "..." } or multipart with "document" file
+app.post("/admin/tasks/analyze", docUpload.single("document"), async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    let extracted;
+    if (req.file && req.file.buffer) {
+      extracted = await tasks.extractTasksFromContent({
+        pdfBuffer: req.file.buffer,
+        mimeType: req.file.mimetype,
+        filename: req.file.originalname,
+      });
+    } else if (req.body?.text) {
+      extracted = await tasks.extractTasksFromContent({ textContent: req.body.text });
+    } else {
+      return res.status(400).json({ ok: false, error: "Provide either a document file or text content" });
+    }
+    res.json({ ok: true, tasks: extracted });
+  } catch (err) {
+    console.error("[tasks analyze]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Bulk create endpoint — accepts { tasks: [...] } array
+app.post("/admin/tasks/bulk-create", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const payload = req.body?.tasks;
+    if (!Array.isArray(payload) || !payload.length) {
+      return res.status(400).json({ ok: false, error: "Provide a non-empty tasks array" });
+    }
+    const created = [];
+    const errors = [];
+    for (const t of payload) {
+      try {
+        const clientKey = t.client_name
+          ? String(t.client_name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+          : null;
+        const task = await tasks.createTask({
+          ...t,
+          client_key: clientKey,
+          created_by: req.user?.id || null,
+        });
+        created.push(task);
+      } catch (e) { errors.push({ title: t.title, error: e.message }); }
+    }
+    res.json({ ok: true, created_count: created.length, error_count: errors.length, errors });
+  } catch (err) {
+    console.error("[tasks bulk-create]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
