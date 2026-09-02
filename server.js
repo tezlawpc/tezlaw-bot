@@ -941,6 +941,345 @@ app.post("/admin/pi/case/:id/disbursement", async (req, res) => {
   }
 });
 
+// ── Federal Matters & Trademarks ───────────────────────
+// Unified tracking for trademarks (USPTO/TTAB) + federal court cases
+// (district court, circuit appeals, habeas, mandamus).
+
+app.get("/admin/federal", async (req, res) => {
+  try {
+    const fm = require("./federal-matters");
+    const hearingNotes = require("./hearing-notes");
+    const q = req.query || {};
+
+    const filters = { limit: 300 };
+    if (q.group) filters.group = q.group;
+    if (q.matter_type) filters.matter_type = q.matter_type;
+    if (q.status) filters.status = q.status;
+    if (q.overdue) filters.overdue_only = true;
+    if (q.deadline_within_days) filters.deadline_within_days = parseInt(q.deadline_within_days, 10);
+
+    const [rows, stats] = await Promise.all([fm.listMatters(filters), fm.getStats()]);
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const fmtDate = d => d ? new Date(d).toLocaleDateString() : "—";
+
+    const rowsHtml = rows.length ? rows.map(m => {
+      const days = m.days_until_deadline;
+      let dueLabel = m.next_deadline_date ? fmtDate(m.next_deadline_date) : "—";
+      let dueColor = "#666"; let dueBold = false;
+      if (m.next_deadline_date && days != null && !["closed","abandoned","granted","denied","settled"].includes(m.status)) {
+        if (days < 0) { dueColor = "#c62828"; dueLabel = `⚠ ${Math.abs(days)}d OVERDUE`; dueBold = true; }
+        else if (days === 0) { dueColor = "#c62828"; dueLabel = `📌 TODAY`; dueBold = true; }
+        else if (days <= 7) { dueColor = "#e65100"; dueLabel = `${days}d — ${fmtDate(m.next_deadline_date)}`; }
+        else if (days <= 30) { dueColor = "#f57f17"; dueLabel = `${days}d — ${fmtDate(m.next_deadline_date)}`; }
+        else { dueLabel = `${days}d — ${fmtDate(m.next_deadline_date)}`; }
+      }
+      const typeLabel = fm.TYPE_LABELS[m.matter_type] || m.matter_type;
+      const typeGroup = fm.TYPE_GROUPS[m.matter_type];
+      const isTM = typeGroup === "trademarks";
+      const statusColor = fm.STATUS_COLORS[m.status] || "#666";
+
+      return `
+        <tr>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="background:${isTM ? "#7c4dff" : "#0061FF"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${isTM ? "™ TM" : "⚖ FED"}</span>
+              <a href="/admin/federal/${m.id}" style="color:#0C1C36; font-weight:600; text-decoration:none;">${esc(m.client_name)}</a>
+            </div>
+            <div style="font-size:11px; color:#666; margin-top:3px;">${esc(typeLabel)}</div>
+            ${m.tm_mark ? `<div style="font-size:11px; color:#7c4dff; margin-top:2px;">✦ ${esc(m.tm_mark)}</div>` : ""}
+            ${m.opposing_party ? `<div style="font-size:11px; color:#666; margin-top:2px;">v. ${esc(m.opposing_party)}</div>` : ""}
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px;">
+            ${m.matter_number ? esc(m.matter_number) : "—"}
+            ${m.agency ? `<div style="font-size:11px; color:#888;">${esc(m.agency)}</div>` : ""}
+            ${m.a_number ? `<div style="font-size:11px; color:#888;">${esc(m.a_number)}</div>` : ""}
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px; color:${dueColor}; font-weight:${dueBold ? "700" : "500"};">
+            ${dueLabel}
+            ${m.next_deadline_desc ? `<div style="font-size:11px; color:#666; font-weight:400; margin-top:2px;">${esc(m.next_deadline_desc)}</div>` : ""}
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+            <span style="background:${statusColor}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${m.status.replace(/_/g, " ").toUpperCase()}</span>
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px;">
+            ${m.assigned_attorney ? esc(m.assigned_attorney) : "—"}
+          </td>
+          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+            <a href="/admin/federal/${m.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+          </td>
+        </tr>`;
+    }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#888;">No matters yet. Click <a href="/admin/federal/new" style="color:#0061FF;">+ New Matter</a> to add one.</td></tr>`;
+
+    // Type filter dropdown grouped by category
+    const typeOpts = Object.entries(fm.MATTER_TYPES).map(([grp, types]) => {
+      const opts = types.map(t => `<option value="${t.key}" ${q.matter_type === t.key ? "selected" : ""}>${t.label}</option>`).join("");
+      return `<optgroup label="${grp.replace(/_/g, " ")}">${opts}</optgroup>`;
+    }).join("");
+
+    const body = `
+      <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h1>⚖ Federal Matters & Trademarks</h1>
+          <div style="font-size:12px; color:#666; margin-top:4px;">Unified tracking for USPTO/TTAB filings and federal court cases (District Court, Circuit Appeals, Habeas, Mandamus).</div>
+        </div>
+        <a href="/admin/federal/new" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Matter</a>
+      </div>
+
+      <!-- Stats tiles -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">
+        <a href="/admin/federal" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Active</div>
+          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${stats.active || 0}</div>
+          <div style="font-size:10px; color:#666;">${stats.total || 0} total</div>
+        </a>
+        <a href="/admin/federal?group=trademarks" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#7c4dff; text-transform:uppercase;">™ Trademarks</div>
+          <div style="font-size:22px; font-weight:700; color:#7c4dff;">${stats.tm_count || 0}</div>
+        </a>
+        <a href="/admin/federal?group=federal_court" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#0061FF; text-transform:uppercase;">⚖ Federal Court</div>
+          <div style="font-size:22px; font-weight:700; color:#0061FF;">${stats.federal_count || 0}</div>
+        </a>
+        <a href="/admin/federal?overdue=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Overdue</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.overdue > 0 ? "#c62828" : "#0C1C36"};">${stats.overdue || 0}</div>
+        </a>
+        <a href="/admin/federal?deadline_within_days=30" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
+          <div style="font-size:10px; color:#888; text-transform:uppercase;">Due in 30d</div>
+          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${stats.due_this_month || 0}</div>
+        </a>
+      </div>
+
+      <!-- Group tabs -->
+      <div style="display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;">
+        <a href="/admin/federal" style="background:${!q.group ? "#0C1C36" : "#f5f2ea"}; color:${!q.group ? "white" : "#0C1C36"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">All Matters</a>
+        <a href="/admin/federal?group=trademarks" style="background:${q.group === "trademarks" ? "#7c4dff" : "#f5f2ea"}; color:${q.group === "trademarks" ? "white" : "#7c4dff"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">™ Trademarks Only</a>
+        <a href="/admin/federal?group=federal_court" style="background:${q.group === "federal_court" ? "#0061FF" : "#f5f2ea"}; color:${q.group === "federal_court" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">⚖ Federal Court</a>
+        <a href="/admin/federal?group=federal_appeal" style="background:${q.group === "federal_appeal" ? "#0061FF" : "#f5f2ea"}; color:${q.group === "federal_appeal" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Appeals</a>
+        <a href="/admin/federal?group=federal_writ" style="background:${q.group === "federal_writ" ? "#0061FF" : "#f5f2ea"}; color:${q.group === "federal_writ" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Writs (Habeas/Mandamus)</a>
+      </div>
+
+      <!-- Filters -->
+      <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+        ${q.group ? `<input type="hidden" name="group" value="${esc(q.group)}">` : ""}
+        <div><label style="font-size:11px; color:#888; display:block;">Type</label>
+          <select name="matter_type" style="padding:6px; border:1px solid #ccc; border-radius:4px; min-width:220px;">
+            <option value="">All types</option>${typeOpts}
+          </select>
+        </div>
+        <div><label style="font-size:11px; color:#888; display:block;">Status</label>
+          <select name="status" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+            <option value="">All</option>
+            ${fm.STATUSES.map(s => `<option value="${s.key}" ${q.status === s.key ? "selected" : ""}>${s.label}</option>`).join("")}
+          </select>
+        </div>
+        <div><label style="font-size:11px; color:#888; display:block;">
+          <input type="checkbox" name="overdue" value="1" ${q.overdue ? "checked" : ""}> Overdue only
+        </label></div>
+        <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
+        <a href="/admin/federal${q.group ? "?group=" + q.group : ""}" style="padding:8px 16px; color:#666; text-decoration:none;">Clear</a>
+      </form>
+
+      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
+        <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee; font-size:12px; color:#666;">${rows.length} matter${rows.length === 1 ? "" : "s"}</div>
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="background:#fafaf7;">
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Matter</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Serial / Case #</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Next Deadline</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Status</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Attorney</th>
+            <th style="padding:10px 12px; border-bottom:1px solid #eee;"></th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "Federal Matters", body, activeItem: "federal" }));
+  } catch (err) {
+    console.error("[federal list]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/federal/new", async (req, res) => {
+  try {
+    const fm = require("./federal-matters");
+    const hearingNotes = require("./hearing-notes");
+    const typeGroups = Object.entries(fm.MATTER_TYPES).map(([grp, types]) => {
+      const opts = types.map(t => `<option value="${t.key}" data-agency="${t.agency || ""}" data-group="${grp}">${t.label}</option>`).join("");
+      return `<optgroup label="${grp.replace(/_/g, " ")}">${opts}</optgroup>`;
+    }).join("");
+
+    const body = `
+      <div class="page-header">
+        <h1>+ New Federal Matter / Trademark</h1>
+        <a href="/admin/federal" class="back-link">← All matters</a>
+      </div>
+
+      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:800px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div style="grid-column:1/-1;">
+            <label style="font-size:11px; color:#888;">Matter Type (required)</label>
+            <select name="matter_type" required onchange="onTypeChange(this)" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <option value="">— pick type —</option>${typeGroups}
+            </select>
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Client Name (required)</label><input type="text" name="client_name" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Matter Number (serial/case #)</label><input type="text" name="matter_number" placeholder="e.g. 97/123456 or 2:26-cv-00123" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+
+          <div><label style="font-size:11px; color:#888;">Agency / Court</label><input type="text" name="agency" placeholder="USPTO, TTAB, Central Dist CA, 9th Cir" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">A-Number (if immigration-related)</label><input type="text" name="a_number" placeholder="A123456789" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+
+          <!-- Trademark-specific -->
+          <div class="tm-fields" style="grid-column:1/-1; padding:12px; background:#f5f0ff; border-radius:6px; display:none;">
+            <div style="font-size:11px; color:#7c4dff; font-weight:600; margin-bottom:8px;">✦ TRADEMARK FIELDS</div>
+            <div style="display:grid; grid-template-columns:2fr 1fr; gap:12px;">
+              <div><label style="font-size:11px; color:#888;">Trademark (word mark or brief description)</label><input type="text" name="tm_mark" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+              <div><label style="font-size:11px; color:#888;">International Class(es)</label><input type="text" name="tm_class" placeholder="e.g. 9, 42" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+              <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Owner of Mark (if differs from client)</label><input type="text" name="tm_owner" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+            </div>
+          </div>
+
+          <!-- Federal court-specific -->
+          <div class="fed-fields" style="grid-column:1/-1; padding:12px; background:#f0f5ff; border-radius:6px; display:none;">
+            <div style="font-size:11px; color:#0061FF; font-weight:600; margin-bottom:8px;">⚖ FEDERAL COURT FIELDS</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+              <div><label style="font-size:11px; color:#888;">Opposing Party</label><input type="text" name="opposing_party" placeholder="e.g. USCIS, DHS, Merck & Co." style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+              <div><label style="font-size:11px; color:#888;">Cause of Action / Basis</label><input type="text" name="cause_of_action" placeholder="e.g. 5 USC §555(b), 28 USC §1361" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+            </div>
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Filing Date</label><input type="date" name="filing_date" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Status</label>
+            <select name="status" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              ${fm.STATUSES.map(s => `<option value="${s.key}">${s.label}</option>`).join("")}
+            </select>
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Next Deadline Date</label><input type="date" name="next_deadline_date" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Next Deadline Description</label><input type="text" name="next_deadline_desc" placeholder="e.g. Office action response, opposition brief" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+
+          <div><label style="font-size:11px; color:#888;">Assigned Attorney</label><input type="text" name="assigned_attorney" placeholder="e.g. JJ, Chandler" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Referral Source</label><input type="text" name="referral_source" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Notes</label><textarea name="notes" rows="3" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit;"></textarea></div>
+        </div>
+
+        <div style="margin-top:20px;">
+          <button type="submit" style="background:#0C1C36; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create Matter</button>
+          <a href="/admin/federal" style="margin-left:10px; color:#666; text-decoration:none;">Cancel</a>
+        </div>
+      </form>
+
+      <script>
+        function onTypeChange(sel) {
+          const opt = sel.options[sel.selectedIndex];
+          const group = opt?.dataset?.group;
+          const agency = opt?.dataset?.agency;
+          // Show TM fields for trademarks, Federal fields for everything else
+          document.querySelector(".tm-fields").style.display = group === "trademarks" ? "block" : "none";
+          document.querySelector(".fed-fields").style.display = group && group !== "trademarks" ? "block" : "none";
+          // Auto-fill agency if empty
+          const agencyInput = document.querySelector('[name="agency"]');
+          if (agency && agencyInput && !agencyInput.value) agencyInput.value = agency;
+        }
+        async function submit(e) {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const data = Object.fromEntries(fd);
+          if (data.client_name) data.client_key = data.client_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          try {
+            const r = await fetch("/admin/federal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+            const d = await r.json();
+            if (d.ok) location.href = "/admin/federal/" + d.matter.id;
+            else alert("Error: " + d.error);
+          } catch (e) { alert("Error: " + e.message); }
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "New Federal Matter", body, activeItem: "federal" }));
+  } catch (err) { res.status(500).send("Error: " + err.message); }
+});
+
+app.post("/admin/federal", async (req, res) => {
+  try {
+    const fm = require("./federal-matters");
+    const matter = await fm.createMatter({ ...req.body, created_by: req.user?.id || null });
+    res.json({ ok: true, matter });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get("/admin/federal/:id", async (req, res) => {
+  try {
+    const fm = require("./federal-matters");
+    const hearingNotes = require("./hearing-notes");
+    const m = await fm.getMatter(parseInt(req.params.id, 10));
+    if (!m) return res.status(404).send("Matter not found");
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const typeLabel = fm.TYPE_LABELS[m.matter_type] || m.matter_type;
+    const isTM = fm.TYPE_GROUPS[m.matter_type] === "trademarks";
+    const statusColor = fm.STATUS_COLORS[m.status] || "#666";
+
+    const body = `
+      <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+        <div>
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+            <span style="background:${isTM ? "#7c4dff" : "#0061FF"}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600;">${isTM ? "™ TRADEMARK" : "⚖ FEDERAL"}</span>
+            <span style="background:${statusColor}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600;">${m.status.replace(/_/g, " ").toUpperCase()}</span>
+          </div>
+          <h1>${esc(m.client_name)}</h1>
+          <div style="font-size:14px; color:#666; margin-top:4px;">${esc(typeLabel)}${m.matter_number ? " · " + esc(m.matter_number) : ""}</div>
+        </div>
+        <a href="/admin/federal" class="back-link">← All matters</a>
+      </div>
+
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; font-size:13px;">
+          ${m.agency ? `<div><strong>Agency/Court:</strong> ${esc(m.agency)}</div>` : ""}
+          ${m.a_number ? `<div><strong>A-Number:</strong> ${esc(m.a_number)}</div>` : ""}
+          ${m.tm_mark ? `<div><strong>Mark:</strong> ${esc(m.tm_mark)}</div>` : ""}
+          ${m.tm_class ? `<div><strong>Class:</strong> ${esc(m.tm_class)}</div>` : ""}
+          ${m.tm_owner ? `<div><strong>Owner:</strong> ${esc(m.tm_owner)}</div>` : ""}
+          ${m.opposing_party ? `<div><strong>Opposing Party:</strong> ${esc(m.opposing_party)}</div>` : ""}
+          ${m.cause_of_action ? `<div><strong>Cause of Action:</strong> ${esc(m.cause_of_action)}</div>` : ""}
+          ${m.filing_date ? `<div><strong>Filed:</strong> ${new Date(m.filing_date).toLocaleDateString()}</div>` : ""}
+          ${m.assigned_attorney ? `<div><strong>Attorney:</strong> ${esc(m.assigned_attorney)}</div>` : ""}
+          ${m.referral_source ? `<div><strong>Referral:</strong> 🤝 ${esc(m.referral_source)}</div>` : ""}
+        </div>
+      </div>
+
+      ${m.next_deadline_date ? `
+      <div style="background:${new Date(m.next_deadline_date) < new Date() ? "#fee" : "#fff8e1"}; padding:16px 20px; border-radius:8px; border-left:4px solid ${new Date(m.next_deadline_date) < new Date() ? "#c62828" : "#f57f17"}; margin-bottom:16px;">
+        <div style="font-size:11px; text-transform:uppercase; color:#666;">Next Deadline</div>
+        <div style="font-size:20px; font-weight:700; color:#0C1C36; margin-top:4px;">${new Date(m.next_deadline_date).toLocaleDateString()}${m.next_deadline_desc ? " — " + esc(m.next_deadline_desc) : ""}</div>
+      </div>` : ""}
+
+      ${m.notes ? `<div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; white-space:pre-wrap; font-size:13px; line-height:1.6;">${esc(m.notes)}</div>` : ""}
+
+      <div style="display:flex; gap:8px;">
+        <a href="/admin/tasks/new?client_name=${encodeURIComponent(m.client_name)}&matter_type=${encodeURIComponent(fm.TYPE_GROUPS[m.matter_type] === 'trademarks' ? 'tm' : 'immigration')}${m.a_number ? '&a_number=' + encodeURIComponent(m.a_number) : ''}${m.matter_number ? '&case_number=' + encodeURIComponent(m.matter_number) : ''}${m.agency ? '&court=' + encodeURIComponent(m.agency) : ''}" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ Add Task</a>
+        <button onclick="deleteMatter()" style="background:#c62828; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🗑️ Delete</button>
+      </div>
+
+      <script>
+        async function deleteMatter() {
+          if (!confirm("Delete this matter? This cannot be undone.")) return;
+          const r = await fetch("/admin/federal/${m.id}", { method: "DELETE" });
+          if (r.ok) location.href = "/admin/federal";
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: m.client_name, body, activeItem: "federal" }));
+  } catch (err) { res.status(500).send("Error: " + err.message); }
+});
+
+app.delete("/admin/federal/:id", async (req, res) => {
+  try {
+    const fm = require("./federal-matters");
+    await fm.deleteMatter(parseInt(req.params.id, 10));
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // ── Task List & Reminders ──────────────────────────────
 // Filing deadlines, motions, habeas corpus, writs of mandamus, appeals,
 // RFE responses, client callbacks. Practice-area-aware categories.
@@ -3954,6 +4293,11 @@ try {
 try {
   require("./tasks").initTable().catch(e => console.warn("[tasks] init:", e.message));
 } catch (e) { console.warn("[tasks] module load:", e.message); }
+
+// Init Federal Matters table on boot
+try {
+  require("./federal-matters").initTable().catch(e => console.warn("[federal-matters] init:", e.message));
+} catch (e) { console.warn("[federal-matters] module load:", e.message); }
 
 // Daily 8 AM Pacific: send task reminders via Telegram
 (async () => {
