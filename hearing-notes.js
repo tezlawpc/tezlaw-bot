@@ -1378,6 +1378,23 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
     </div>
 
+    <!-- ── Federal & Trademarks section ── -->
+    <div class="nav-section" id="section-federal">
+      <div class="nav-section-header">Federal & TM</div>
+      <a href="/admin/federal" class="nav-link ${isActive('federal')}" data-perm="clients.read">
+        <span class="nav-icon">⚖</span><span class="nav-label">All Matters</span>
+      </a>
+      <a href="/admin/federal?group=trademarks" class="nav-link" data-perm="clients.read">
+        <span class="nav-icon">™</span><span class="nav-label">Trademarks</span>
+      </a>
+      <a href="/admin/federal?group=federal_court" class="nav-link" data-perm="clients.read">
+        <span class="nav-icon">🏛</span><span class="nav-label">Federal Court</span>
+      </a>
+      <a href="/admin/federal?overdue=1" class="nav-link" data-perm="clients.read">
+        <span class="nav-icon">⚠</span><span class="nav-label">Overdue Deadlines</span>
+      </a>
+    </div>
+
     <!-- ── Accounting section ── -->
     <div class="nav-section" id="section-accounting">
       <div class="nav-section-header">Accounting</div>
