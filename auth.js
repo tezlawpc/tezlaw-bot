@@ -80,6 +80,10 @@ const PERMISSIONS = {
   // Hearing notes — attorneys write, paralegals + viewers can read
   "hearings.write":       ["admin", "attorney"],
   "hearings.read":        ["admin", "attorney", "paralegal", "viewer"],
+  // Firm-wide notes list (all clients' notes) — admin + paralegal only.
+  // Attorneys interact with hearing notes through the dashboard (their assigned
+  // work) and by creating new notes, not by browsing the firm-wide list.
+  "notes.list":           ["admin", "paralegal"],
 
   // Client-facing tools — all roles, viewers read only
   "clients.write":        ["admin", "attorney", "paralegal"],
@@ -109,6 +113,17 @@ const PERMISSIONS = {
 
   // Analytics / reports — admin only (may include revenue, cost data)
   "analytics.read":       ["admin"],
+
+  // Accounting — admin + paralegal (case manager handles bookkeeping).
+  // Attorneys and viewers don't see accounting at all.
+  "accounting.read":      ["admin", "paralegal"],
+  "accounting.write":     ["admin", "paralegal"],
+  // Federal Matters & Trademarks — same rules as regular clients
+  "federal.read":         ["admin", "attorney", "paralegal", "viewer"],
+  "federal.write":        ["admin", "attorney", "paralegal"],
+  // Task list — everyone can see and interact with tasks
+  "tasks.read":           ["admin", "attorney", "paralegal", "viewer"],
+  "tasks.write":          ["admin", "attorney", "paralegal"],
 
   // Mobile PWA search — same as clients.read
   "mobile.search":        ["admin", "attorney", "paralegal", "viewer"],
