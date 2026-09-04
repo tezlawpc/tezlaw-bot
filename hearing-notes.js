@@ -1352,6 +1352,42 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
     </div>
 
+    <!-- ── Immigration (Hearings + Motions) ── -->
+    <div class="nav-section" id="section-immigration">
+      <div class="nav-section-header">
+        <span>Immigration</span>
+      </div>
+      <a href="/admin/hearing/notes" class="nav-link ${isActive('notes')}" data-perm="notes.list">
+        <span class="nav-icon">≡</span><span class="nav-label">Master Notes</span>
+      </a>
+      <a href="/admin/hearing/individual" class="nav-link ${isActive('individual')}" data-perm="notes.list">
+        <span class="nav-icon">◈</span><span class="nav-label">Individual Notes</span>
+      </a>
+      <a href="/admin/motions" class="nav-link ${isActive('motions')}" data-perm="motions.read">
+        <span class="nav-icon">§</span><span class="nav-label">Court Motions</span>
+      </a>
+      <a href="/admin/hearing/history" class="nav-link ${isActive('history')}" data-perm="notes.list">
+        <span class="nav-icon">⌘</span><span class="nav-label">Hearing History</span>
+      </a>
+    </div>
+
+    <!-- ── Federal & Trademarks section ── -->
+    <div class="nav-section" id="section-federal">
+      <div class="nav-section-header">Federal & TM</div>
+      <a href="/admin/federal" class="nav-link ${isActive('federal')}" data-perm="federal.read">
+        <span class="nav-icon">⚖</span><span class="nav-label">All Matters</span>
+      </a>
+      <a href="/admin/federal?group=trademarks" class="nav-link" data-perm="federal.read">
+        <span class="nav-icon">™</span><span class="nav-label">Trademarks</span>
+      </a>
+      <a href="/admin/federal?group=federal_court" class="nav-link" data-perm="federal.read">
+        <span class="nav-icon">🏛</span><span class="nav-label">Federal Court</span>
+      </a>
+      <a href="/admin/federal?overdue=1" class="nav-link" data-perm="federal.read">
+        <span class="nav-icon">⚠</span><span class="nav-label">Overdue Deadlines</span>
+      </a>
+    </div>
+
     <!-- ── Personal Injury section ── -->
     <div class="nav-section" id="section-pi">
       <div class="nav-section-header">Personal Injury</div>
@@ -1378,23 +1414,6 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
     </div>
 
-    <!-- ── Federal & Trademarks section ── -->
-    <div class="nav-section" id="section-federal">
-      <div class="nav-section-header">Federal & TM</div>
-      <a href="/admin/federal" class="nav-link ${isActive('federal')}" data-perm="federal.read">
-        <span class="nav-icon">⚖</span><span class="nav-label">All Matters</span>
-      </a>
-      <a href="/admin/federal?group=trademarks" class="nav-link" data-perm="federal.read">
-        <span class="nav-icon">™</span><span class="nav-label">Trademarks</span>
-      </a>
-      <a href="/admin/federal?group=federal_court" class="nav-link" data-perm="federal.read">
-        <span class="nav-icon">🏛</span><span class="nav-label">Federal Court</span>
-      </a>
-      <a href="/admin/federal?overdue=1" class="nav-link" data-perm="federal.read">
-        <span class="nav-icon">⚠</span><span class="nav-label">Overdue Deadlines</span>
-      </a>
-    </div>
-
     <!-- ── Accounting section ── -->
     <div class="nav-section" id="section-accounting">
       <div class="nav-section-header">Accounting</div>
@@ -1415,25 +1434,6 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
       <a href="/admin/accounting/quickbooks" class="nav-link ${isActive('accounting-qbo')}" data-perm="accounting.read">
         <span class="nav-icon">🔗</span><span class="nav-label">QuickBooks Sync</span>
-      </a>
-    </div>
-
-    <!-- ── Immigration (Hearings + Motions) ── -->
-    <div class="nav-section" id="section-immigration">
-      <div class="nav-section-header">
-        <span>Immigration</span>
-      </div>
-      <a href="/admin/hearing/notes" class="nav-link ${isActive('notes')}" data-perm="notes.list">
-        <span class="nav-icon">≡</span><span class="nav-label">Master Notes</span>
-      </a>
-      <a href="/admin/hearing/individual" class="nav-link ${isActive('individual')}" data-perm="notes.list">
-        <span class="nav-icon">◈</span><span class="nav-label">Individual Notes</span>
-      </a>
-      <a href="/admin/motions" class="nav-link ${isActive('motions')}" data-perm="motions.read">
-        <span class="nav-icon">§</span><span class="nav-label">Court Motions</span>
-      </a>
-      <a href="/admin/hearing/history" class="nav-link ${isActive('history')}" data-perm="notes.list">
-        <span class="nav-icon">⌘</span><span class="nav-label">Hearing History</span>
       </a>
     </div>
 
