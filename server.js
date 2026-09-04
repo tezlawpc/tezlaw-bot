@@ -7471,11 +7471,15 @@ app.get("/admin/hearing/master/:id", (req, res) => res.redirect(`/admin/hearing/
 // Gate: Master + Individual notes pages + firm-wide history are for admin +
 // paralegal only. Attorneys write notes through the dashboard (their assigned
 // work); the firm-wide notes list isn't their view. Silently redirect anyone
-// else to /admin/dashboard rather than throwing a 403.
-function gateNotesList(req, res, next) {
-  if (!req.user) return next();  // let downstream auth handle it
+// else to /admin/dashboard rather than throwing a 403. Uses hasPermissionAsync
+// so per-user overrides from /admin/users/:id/permissions apply here too.
+async function gateNotesList(req, res, next) {
+  if (!req.user) return next();
   const auth = require("./auth");
-  if (typeof auth.hasPermission === "function" && auth.hasPermission(req.user, "notes.list")) return next();
+  const ok = typeof auth.hasPermissionAsync === "function"
+    ? await auth.hasPermissionAsync(req.user, "notes.list")
+    : (typeof auth.hasPermission === "function" && auth.hasPermission(req.user, "notes.list"));
+  if (ok) return next();
   return res.redirect("/admin/dashboard");
 }
 
