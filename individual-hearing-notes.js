@@ -1476,6 +1476,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         <div style="margin-top:12px;">
           <button type="button" onclick="copyEl('paralegal-content')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Paralegal Summary</button>
           <button type="button" onclick="sendToTeam(${noteId})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 ${prev.sent_to_paralegal_at ? "Re-send" : "Send"} to team group</button>
+          <button type="button" onclick="generateTasksFromNote('individual', ${noteId}, this)" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">🤖 Create Tasks</button>
           <span id="send-status" style="margin-left:12px; font-weight:bold;"></span>
         </div>
       </div>
