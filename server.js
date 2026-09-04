@@ -1741,6 +1741,57 @@ app.get("/admin/tasks/new", async (req, res) => {
   }
 });
 
+// Extract tasks from an existing saved hearing note (master or individual).
+// Pulls the note's raw notes + paralegal summary and feeds it to Claude with
+// client/court/A# context so the tasks come back with those fields pre-filled.
+app.post("/admin/tasks/from-note", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const db = require("./db");
+    const noteType = String(req.body?.note_type || "").toLowerCase();
+    const noteId = parseInt(req.body?.note_id, 10);
+    if (!noteId || !["master", "individual"].includes(noteType)) {
+      return res.status(400).json({ ok: false, error: "note_type (master|individual) and note_id required" });
+    }
+    const table = noteType === "master" ? "hearing_notes" : "individual_hearing_notes";
+    const r = await db.query(`SELECT * FROM ${table} WHERE id = $1`, [noteId]);
+    if (!r.rows.length) return res.status(404).json({ ok: false, error: "Note not found" });
+    const note = r.rows[0];
+
+    // Compose a text blob with all the case context Claude needs to produce
+    // well-filled tasks (client_name, a_number, court, etc. get auto-populated).
+    const parts = [];
+    parts.push(`This is a ${noteType === "master" ? "MASTER CALENDAR" : "INDIVIDUAL MERITS"} hearing note.`);
+    parts.push("");
+    parts.push("=== CASE CONTEXT ===");
+    if (note.client_name) parts.push(`Client: ${note.client_name}`);
+    if (note.a_number) parts.push(`A-Number: ${note.a_number}`);
+    if (note.client_language) parts.push(`Language: ${note.client_language}`);
+    if (note.judge_name) parts.push(`Judge: ${note.judge_name}`);
+    if (note.court || note.hearing_location) parts.push(`Court: ${note.court || note.hearing_location}`);
+    if (note.hearing_date) parts.push(`Hearing Date: ${note.hearing_date}`);
+    if (note.next_hearing_date) parts.push(`Next Hearing: ${note.next_hearing_date}${note.next_hearing_time ? " at " + note.next_hearing_time : ""}${note.next_hearing_type ? " (" + note.next_hearing_type + ")" : ""}`);
+    if (note.case_type) parts.push(`Case Type: ${note.case_type}`);
+    parts.push("");
+    if (note.paralegal_summary) {
+      parts.push("=== PARALEGAL SUMMARY ===");
+      parts.push(note.paralegal_summary);
+      parts.push("");
+    }
+    if (note.raw_notes) {
+      parts.push("=== ATTORNEY'S RAW NOTES ===");
+      parts.push(note.raw_notes);
+    }
+    const blob = parts.join("\n");
+
+    const extracted = await tasks.extractTasksFromContent({ textContent: blob });
+    res.json({ ok: true, tasks: extracted, source: { note_type: noteType, note_id: noteId, client_name: note.client_name } });
+  } catch (err) {
+    console.error("[tasks from-note]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // AI analyze endpoint — accepts either JSON { text: "..." } or multipart with "document" file
 app.post("/admin/tasks/analyze", docUpload.single("document"), async (req, res) => {
   try {
