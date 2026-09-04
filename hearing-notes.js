@@ -1593,6 +1593,110 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       });
     }
 
+    // ── Global helper: generate tasks from a saved hearing note ─────
+    // Shown as a button on master + individual note pages. Fetches Claude's
+    // task suggestions from /admin/tasks/from-note, then shows a modal with
+    // checkboxes for user to pick which to actually create.
+    window.generateTasksFromNote = async function(noteType, noteId, btnEl) {
+      const btn = btnEl || (event && event.target) || null;
+      const originalText = btn ? btn.textContent : "";
+      if (btn) { btn.disabled = true; btn.textContent = "⏳ Claude analyzing note…"; }
+      try {
+        const r = await fetch("/admin/tasks/from-note", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note_type: noteType, note_id: noteId }),
+        });
+        const d = await r.json();
+        if (!d.ok) { alert("Error: " + (d.error || "unknown")); return; }
+        showTaskPreviewModal(d.tasks || [], d.source);
+      } catch (e) {
+        alert("Network error: " + e.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = originalText; }
+      }
+    };
+
+    function showTaskPreviewModal(tasks, source) {
+      const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      // Remove any existing modal
+      const old = document.getElementById("task-preview-modal");
+      if (old) old.remove();
+
+      if (!tasks.length) {
+        alert("Claude didn't find any actionable tasks in this note.\\n\\nIf you expected deadlines or filings to be identified, try adding more detail to the raw notes and regenerating summaries first.");
+        return;
+      }
+
+      const priColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" };
+      const rowsHtml = tasks.map((t, i) => \`
+        <div style="background:white; padding:12px 14px; border-radius:6px; border:1px solid #eee; margin-bottom:8px;">
+          <div style="display:flex; align-items:flex-start; gap:10px;">
+            <input type="checkbox" id="tpm-task-\${i}" checked style="width:16px; height:16px; margin-top:3px; flex-shrink:0;">
+            <div style="flex:1;">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <strong style="color:#0C1C36;">\${esc(t.title)}</strong>
+                <span style="background:\${priColor[t.priority] || '#666'}; color:white; padding:1px 8px; border-radius:8px; font-size:10px;">\${(t.priority || 'normal').toUpperCase()}</span>
+              </div>
+              <div style="font-size:11px; color:#666; margin-top:4px;">
+                \${t.category ? esc(t.category.replace(/_/g, ' ')) : ''}\${t.matter_type ? ' · ' + esc(t.matter_type) : ''}\${t.due_date ? ' · 📆 <strong>' + esc(t.due_date) + '</strong>' : ''}\${t.client_name ? ' · 👤 ' + esc(t.client_name) : ''}\${t.a_number ? ' · 🆔 ' + esc(t.a_number) : ''}\${t.court ? ' · ⚖️ ' + esc(t.court) : ''}
+              </div>
+              \${t.description ? '<div style="font-size:12px; color:#555; margin-top:6px; white-space:pre-wrap;">' + esc(t.description) + '</div>' : ''}
+            </div>
+          </div>
+        </div>
+      \`).join("");
+
+      const modal = document.createElement("div");
+      modal.id = "task-preview-modal";
+      modal.style.cssText = "position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; display:flex; align-items:flex-start; justify-content:center; padding:40px 20px; overflow-y:auto;";
+      modal.innerHTML = \`
+        <div style="background:white; border-radius:8px; max-width:720px; width:100%; max-height:calc(100vh - 80px); display:flex; flex-direction:column;">
+          <div style="padding:16px 20px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <h2 style="margin:0; font-size:18px; color:#0C1C36;">🤖 Suggested Tasks from Note</h2>
+              <div style="font-size:12px; color:#666; margin-top:2px;">\${source && source.client_name ? esc(source.client_name) + ' · ' : ''}Uncheck any you don't want, then Create.</div>
+            </div>
+            <button type="button" onclick="document.getElementById('task-preview-modal').remove()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#666;">✕</button>
+          </div>
+          <div style="padding:16px 20px; overflow-y:auto; flex:1; background:#fafaf7;">
+            <div style="background:#e8f5e9; padding:10px 14px; border-radius:6px; border-left:4px solid #2e7d32; margin-bottom:12px; font-size:12px;">
+              <strong style="color:#2e7d32;">Claude extracted \${tasks.length} task\${tasks.length === 1 ? '' : 's'}.</strong> Each will be added to your Task List and fire Telegram reminders if urgent or approaching its due date.
+            </div>
+            \${rowsHtml}
+          </div>
+          <div style="padding:14px 20px; border-top:1px solid #eee; display:flex; gap:10px; justify-content:flex-end;">
+            <button type="button" onclick="document.getElementById('task-preview-modal').remove()" style="background:none; color:#666; padding:10px 20px; border:1px solid #ccc; border-radius:6px; cursor:pointer;">Cancel</button>
+            <button type="button" id="tpm-create-btn" onclick='window._createExtractedTasks(\${JSON.stringify(tasks).replace(/</g, "\\\\u003c").replace(/'/g, "&apos;")})' style="background:#2e7d32; color:white; padding:10px 20px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✓ Create Selected</button>
+          </div>
+        </div>
+      \`;
+      document.body.appendChild(modal);
+    }
+
+    window._createExtractedTasks = async function(tasks) {
+      const selected = tasks.filter((_, i) => document.getElementById('tpm-task-' + i)?.checked);
+      if (!selected.length) return alert("Select at least one task.");
+      const btn = document.getElementById("tpm-create-btn");
+      if (btn) { btn.disabled = true; btn.textContent = "⏳ Creating…"; }
+      try {
+        const r = await fetch("/admin/tasks/bulk-create", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tasks: selected }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          const modal = document.getElementById("task-preview-modal");
+          if (modal) modal.innerHTML = '<div style="background:white; border-radius:8px; padding:40px; text-align:center; max-width:400px;"><h2 style="color:#2e7d32;">✓ Created ' + d.created_count + ' task' + (d.created_count === 1 ? '' : 's') + '</h2><p><a href="/admin/tasks" style="color:#0061FF;">View task list →</a></p><button onclick="this.closest(\\'#task-preview-modal\\').remove()" style="margin-top:10px; background:#0C1C36; color:white; padding:8px 20px; border:none; border-radius:6px; cursor:pointer;">Close</button></div>';
+        } else {
+          alert("Error: " + d.error);
+          if (btn) { btn.disabled = false; btn.textContent = "✓ Create Selected"; }
+        }
+      } catch (e) {
+        alert("Network error: " + e.message);
+        if (btn) { btn.disabled = false; btn.textContent = "✓ Create Selected"; }
+      }
+    };
+
     // Collapsible section headers (click to toggle)
     document.querySelectorAll(".nav-section-header").forEach(header => {
       header.style.cursor = "pointer";
@@ -1706,6 +1810,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         <button type="button" onclick="copyContent('paralegal-content')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Paralegal Summary</button>
         ${generated.id ? `
         <button type="button" onclick="sendParalegal(${generated.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 Send to team group</button>
+        <button type="button" onclick="generateTasksFromNote('master', ${generated.id}, this)" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">🤖 Create Tasks</button>
         <span id="send-status" style="margin-left:12px; font-weight:bold;"></span>
         ` : ""}
       </div>
@@ -2776,6 +2881,7 @@ function renderDetailPage(note) {
     <div style="margin-bottom:8px;">
       <button type="button" onclick="copyEl('paralegal-detail')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy</button>
       <button type="button" onclick="sendParalegalDetail(${note.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 ${note.sent_to_paralegal_at ? "Re-send" : "Send"} to team group</button>
+      <button type="button" onclick="generateTasksFromNote('master', ${note.id}, this)" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">🤖 Create Tasks</button>
       <span id="send-detail-status" style="margin-left:12px; font-weight:bold;"></span>
     </div>
     <pre id="paralegal-detail" style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.paralegal_summary || "(none)")}</pre>
