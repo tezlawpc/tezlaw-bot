@@ -731,6 +731,132 @@ function escapeTelegram(s) {
   return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// ─── AI extraction — parse tasks from a description or document ─────────
+// Sends the input (plain text OR PDF bytes) to Claude and asks it to
+// return a JSON array of tasks. Each task is validated against our schema
+// before being returned to the caller (which typically presents them for
+// preview before actually creating them).
+
+async function extractTasksFromContent({ textContent = null, pdfBuffer = null, mimeType = null, filename = null } = {}) {
+  const axios = require("axios");
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
+
+  // Build the list of legal categories for the prompt so Claude knows what to tag
+  const catList = [];
+  for (const [matter, cats] of Object.entries(CATEGORIES)) {
+    catList.push(`  ${matter}: ${cats.map(c => c.key).join(", ")}`);
+  }
+
+  const today = new Date().toISOString().split("T")[0];
+
+  const systemPrompt = `You are a legal task extractor for Tez Law P.C.
+
+Your job: read the input (which may be a natural-language description from an attorney, OR text from a legal document like a court notice, RFE, NOID, motion, or hearing transcript) and extract a JSON array of one or more tasks the firm needs to complete.
+
+Today's date is ${today}.
+
+For EACH task, output an object with these fields:
+{
+  "title": string (required, imperative, ~5-10 words e.g. "File motion to reopen for Chen Wei")
+  "description": string (optional, 1-3 sentences with the specific context — deadline citation, procedural stage, key facts)
+  "category": string from this list of valid category keys:
+${catList.join("\n")}
+  "matter_type": one of: immigration, pi, business, ll_tenant, estate, tm, real_estate, admin
+  "priority": one of: urgent (real deadline within 7 days, detained client, or imminent harm), high (deadline within 30 days), normal (default), low
+  "due_date": ISO date string YYYY-MM-DD if a specific date is mentioned or clearly implied. Compute relative dates like "in 30 days" from today. Leave null if truly unknown — DO NOT invent dates.
+  "reminder_days_before": integer, default 3. Set higher (7-14) for filings requiring prep, lower (1-2) for simple reminders.
+  "client_name": string if a client is named or clearly implied
+  "a_number": string in format "A###-###-###" if an A-Number appears
+  "case_number": string if a court/case number appears
+  "court": string if a specific court is mentioned (e.g. "LA Immigration Court", "9th Circuit", "LASC")
+  "assigned_to": string only if a specific staff member is named (JJ, Michael, Chandler, Jue, Lin)
+}
+
+Rules:
+- Extract MULTIPLE tasks when the input clearly describes multiple actions (e.g. an RFE requiring 3 different responses = 3 tasks).
+- Prefer FEWER, better tasks over splitting hairs. Combine sub-steps into one task's description.
+- NEVER invent facts, deadlines, A-numbers, or case numbers. If unclear, leave the field null.
+- For deadline calculations, use exact statutory / rule-based dates when quoted in the document (e.g. "30 days from RFE issuance" — count from the issuance date in the doc).
+- If the document is a court notice with a hearing date, create a "prep task" with due_date = hearing_date minus 7 days, and category = individual_hearing_prep or master_calendar_prep.
+- Return ONLY a JSON array. No preamble, no markdown fences, no commentary.
+- If the input describes zero actionable tasks, return an empty array [].`;
+
+  const userContent = [];
+  if (pdfBuffer) {
+    userContent.push({
+      type: "document",
+      source: {
+        type: "base64",
+        media_type: mimeType || "application/pdf",
+        data: pdfBuffer.toString("base64"),
+      },
+    });
+    userContent.push({
+      type: "text",
+      text: `Extract tasks from this document${filename ? ` (${filename})` : ""}. Return JSON array only.`,
+    });
+  } else if (textContent) {
+    userContent.push({
+      type: "text",
+      text: `Extract tasks from this input. Return JSON array only.\n\n---\n${textContent}\n---`,
+    });
+  } else {
+    throw new Error("Either textContent or pdfBuffer required");
+  }
+
+  const resp = await axios.post(
+    "https://api.anthropic.com/v1/messages",
+    {
+      model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929",
+      max_tokens: 2000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userContent }],
+    },
+    {
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      timeout: 60000,
+    }
+  );
+
+  const raw = resp.data.content?.[0]?.text?.trim() || "[]";
+  // Strip any accidental markdown fences
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  let arr;
+  try {
+    arr = JSON.parse(cleaned);
+  } catch (e) {
+    throw new Error(`Claude returned invalid JSON: ${cleaned.substring(0, 200)}…`);
+  }
+  if (!Array.isArray(arr)) throw new Error("Expected a JSON array of tasks");
+
+  // Validate + sanitize each extracted task against known enums
+  const validMatters = ["immigration", "pi", "business", "ll_tenant", "estate", "tm", "real_estate", "admin"];
+  const validPriorities = ["low", "normal", "high", "urgent"];
+  const validCategoryKeys = new Set();
+  for (const cats of Object.values(CATEGORIES)) for (const c of cats) validCategoryKeys.add(c.key);
+
+  return arr.map(t => ({
+    title: String(t.title || "").trim() || "Untitled task",
+    description: t.description ? String(t.description).trim() : null,
+    category: t.category && validCategoryKeys.has(t.category) ? t.category : null,
+    matter_type: validMatters.includes(t.matter_type) ? t.matter_type : null,
+    priority: validPriorities.includes(t.priority) ? t.priority : "normal",
+    due_date: t.due_date && /^\d{4}-\d{2}-\d{2}$/.test(t.due_date) ? t.due_date : null,
+    reminder_days_before: Number.isInteger(t.reminder_days_before) && t.reminder_days_before >= 0 && t.reminder_days_before <= 30
+      ? t.reminder_days_before : 3,
+    client_name: t.client_name ? String(t.client_name).trim() : null,
+    a_number: t.a_number ? String(t.a_number).trim() : null,
+    case_number: t.case_number ? String(t.case_number).trim() : null,
+    court: t.court ? String(t.court).trim() : null,
+    assigned_to: t.assigned_to ? String(t.assigned_to).trim() : null,
+  }));
+}
+
 module.exports = {
   initTable,
   CATEGORIES, CATEGORY_LABELS, PRIORITIES, PRIORITY_COLORS,
@@ -738,4 +864,5 @@ module.exports = {
   getStats, snoozeTask,
   sendDailyReminders, sendPerTaskReminders, sendCreationReminder, sendSingleTaskReminder,
   handleTelegramCommand, handleTelegramCallback,
+  extractTasksFromContent,
 };
