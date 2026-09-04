@@ -1116,7 +1116,7 @@ app.get("/admin/federal/new", async (req, res) => {
         <a href="/admin/federal" class="back-link">← All matters</a>
       </div>
 
-      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:800px;">
+      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:800px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
           <div style="grid-column:1/-1;">
             <label style="font-size:11px; color:#888;">Matter Type (required)</label>
@@ -1184,7 +1184,7 @@ app.get("/admin/federal/new", async (req, res) => {
           const agencyInput = document.querySelector('[name="agency"]');
           if (agency && agencyInput && !agencyInput.value) agencyInput.value = agency;
         }
-        async function submit(e) {
+        async function submitForm(e) {
           e.preventDefault();
           const fd = new FormData(e.target);
           const data = Object.fromEntries(fd);
@@ -1513,7 +1513,7 @@ app.get("/admin/tasks/new", async (req, res) => {
       <!-- ── Manual entry form (fallback / for direct control) ─────────── -->
       <details style="background:white; padding:0; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
         <summary style="padding:14px 20px; cursor:pointer; font-weight:600; color:#0C1C36;">✏️ Or enter task manually</summary>
-      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; max-width:800px;">
+      <form onsubmit="createTaskManual(event)" style="background:white; padding:24px; border-radius:8px; max-width:800px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
           <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Task Title (required)</label><input type="text" name="title" required placeholder="e.g. File motion to reopen for Chen Wei" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-size:14px;"></div>
 
@@ -1594,19 +1594,38 @@ app.get("/admin/tasks/new", async (req, res) => {
           const el = document.querySelector('[name="' + k + '"]');
           if (el) el.value = v;
         }
-        async function submit(e) {
+        async function createTaskManual(e) {
           e.preventDefault();
+          const btn = e.target.querySelector('button[type="submit"]');
+          if (btn) { btn.disabled = true; btn.textContent = "⏳ Creating…"; }
           const fd = new FormData(e.target);
-          const data = Object.fromEntries(fd);
+          const data = {};
+          // Only include non-empty fields (avoid sending empty strings that pg will reject)
+          for (const [k, v] of fd.entries()) {
+            if (v !== "" && v != null) data[k] = v;
+          }
           data.is_recurring = !!data.recurrence_pattern;
           data.reminder_days_before = parseInt(data.reminder_days_before, 10) || 3;
           if (data.client_name) data.client_key = data.client_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          if (!data.title || !data.title.trim()) {
+            alert("Task title is required.");
+            if (btn) { btn.disabled = false; btn.textContent = "Create Task"; }
+            return false;
+          }
           try {
             const r = await fetch("/admin/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
             const d = await r.json();
-            if (d.ok) location.href = "/admin/tasks";
-            else alert("Error: " + d.error);
-          } catch (e) { alert("Error: " + e.message); }
+            if (d.ok) {
+              location.href = "/admin/tasks";
+            } else {
+              alert("Error creating task: " + (d.error || "Unknown"));
+              if (btn) { btn.disabled = false; btn.textContent = "Create Task"; }
+            }
+          } catch (err) {
+            alert("Network error: " + err.message);
+            if (btn) { btn.disabled = false; btn.textContent = "Create Task"; }
+          }
+          return false;
         }
 
         // ── AI Assist handlers ─────────────────────────────────────
@@ -2443,7 +2462,7 @@ app.get("/admin/accounting/record-fee", async (req, res) => {
       <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
         Record fee revenue for ANY practice area — immigration, PI, business litigation, LL/T, estate, TM, real estate. Auto-posts to your ledger + pushes to QuickBooks (if enabled).
       </div>
-      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
+      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
           <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Client Name (required)</label><input type="text" name="client_name" required placeholder="e.g. Chen Wei" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
           <div><label style="font-size:11px; color:#888;">Matter Type</label>
@@ -2481,7 +2500,7 @@ app.get("/admin/accounting/record-fee", async (req, res) => {
         </div>
       </form>
       <script>
-        async function submit(e) {
+        async function submitForm(e) {
           e.preventDefault();
           const fd = new FormData(e.target);
           const data = Object.fromEntries(fd);
@@ -2531,7 +2550,7 @@ app.get("/admin/accounting/record-retainer", async (req, res) => {
       <div style="background:#fff8e1; padding:14px 16px; border-radius:8px; border-left:4px solid #f57f17; margin-bottom:16px; font-size:13px;">
         <strong>CA Bar RRC 1.15:</strong> Any money paid by a client that is NOT yet earned as fees must go into your IOLTA trust account. Record retainers here — the system tracks per-client balance and reconciles against bank.
       </div>
-      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
+      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
           <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Client Name (required)</label><input type="text" name="client_name" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
           <div><label style="font-size:11px; color:#888;">Matter Type</label>
@@ -2555,7 +2574,7 @@ app.get("/admin/accounting/record-retainer", async (req, res) => {
         </div>
       </form>
       <script>
-        async function submit(e) {
+        async function submitForm(e) {
           e.preventDefault();
           const fd = new FormData(e.target);
           const data = Object.fromEntries(fd);
@@ -2607,7 +2626,7 @@ app.get("/admin/accounting/record-expense", async (req, res) => {
       <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
         Record any firm expense — rent, salaries, subscriptions, marketing, etc. Auto-posts to ledger + QuickBooks.
       </div>
-      <form onsubmit="submit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
+      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
           <div><label style="font-size:11px; color:#888;">Amount ($)</label><input type="number" step="0.01" min="0.01" name="amount" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
           <div><label style="font-size:11px; color:#888;">Date</label><input type="date" name="date" value="${new Date().toISOString().split("T")[0]}" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
@@ -2623,7 +2642,7 @@ app.get("/admin/accounting/record-expense", async (req, res) => {
         </div>
       </form>
       <script>
-        async function submit(e) {
+        async function submitForm(e) {
           e.preventDefault();
           const fd = new FormData(e.target);
           const data = Object.fromEntries(fd);
