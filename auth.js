@@ -131,8 +131,114 @@ const PERMISSIONS = {
 
 function hasPermission(user, permKey) {
   if (!user || !user.r) return false;
+  // Note: this is the SYNCHRONOUS check based on role only — used by middleware
+  // that runs on every request. Per-user overrides are applied to the effective
+  // permissions map returned by /admin/whoami and used by the sidebar filter.
+  // For gated routes, we call hasPermissionAsync() below which also applies overrides.
   const roles = PERMISSIONS[permKey] || [];
   return roles.includes(user.r);
+}
+
+// Async permission check that ALSO applies per-user overrides from the
+// user_permission_overrides table. This is what routes and the sidebar filter
+// use to determine the actual, effective permission for a user.
+async function hasPermissionAsync(user, permKey) {
+  if (!user) return false;
+  const override = await getUserOverride(user.uid || user.id, permKey);
+  if (override !== null) return override;  // explicit override wins
+  return hasPermission(user, permKey);
+}
+
+// Return the full effective permission map for a user (role defaults with
+// per-user overrides layered on top). Called by /admin/whoami so the sidebar
+// filter knows exactly which links to show.
+async function getEffectivePermissions(user) {
+  const perms = {};
+  const overrides = await getUserOverridesMap(user.uid || user.id);
+  for (const key of Object.keys(PERMISSIONS)) {
+    if (overrides[key] !== undefined) perms[key] = overrides[key];
+    else perms[key] = hasPermission(user, key);
+  }
+  return perms;
+}
+
+// Fetch a single override (returns null if none set).
+async function getUserOverride(userId, permKey) {
+  if (!userId) return null;
+  try {
+    await ensureOverrideTable();
+    const r = await db.query(
+      `SELECT granted FROM user_permission_overrides WHERE user_id = $1 AND permission_key = $2`,
+      [userId, permKey]
+    );
+    if (!r.rows.length) return null;
+    return r.rows[0].granted;
+  } catch { return null; }
+}
+
+// Fetch all overrides for a user as { key: bool } (or empty object).
+async function getUserOverridesMap(userId) {
+  if (!userId) return {};
+  try {
+    await ensureOverrideTable();
+    const r = await db.query(
+      `SELECT permission_key, granted FROM user_permission_overrides WHERE user_id = $1`,
+      [userId]
+    );
+    return Object.fromEntries(r.rows.map(row => [row.permission_key, row.granted]));
+  } catch { return {}; }
+}
+
+// Set (or clear) an override for a user.
+async function setUserOverride(userId, permKey, granted) {
+  await ensureOverrideTable();
+  if (granted === null) {
+    // Clear the override — fall back to role default
+    await db.query(
+      `DELETE FROM user_permission_overrides WHERE user_id = $1 AND permission_key = $2`,
+      [userId, permKey]
+    );
+  } else {
+    await db.query(
+      `INSERT INTO user_permission_overrides (user_id, permission_key, granted)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, permission_key)
+       DO UPDATE SET granted = EXCLUDED.granted, updated_at = NOW()`,
+      [userId, permKey, granted]
+    );
+  }
+}
+
+// Set many overrides at once. `perms` is { key: bool } — anything present is
+// stored as an explicit override; anything absent (or matching role default)
+// stays as the role default (nothing stored). Clears prior overrides first.
+async function setUserOverridesBulk(userId, perms) {
+  await ensureOverrideTable();
+  await db.query(`DELETE FROM user_permission_overrides WHERE user_id = $1`, [userId]);
+  const entries = Object.entries(perms || {});
+  for (const [key, val] of entries) {
+    if (typeof val !== "boolean") continue;
+    if (!PERMISSIONS[key]) continue;  // ignore unknown keys
+    await db.query(
+      `INSERT INTO user_permission_overrides (user_id, permission_key, granted) VALUES ($1, $2, $3)`,
+      [userId, key, val]
+    );
+  }
+}
+
+let _overrideTableReady = false;
+async function ensureOverrideTable() {
+  if (_overrideTableReady) return;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS user_permission_overrides (
+      user_id        INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+      permission_key TEXT NOT NULL,
+      granted        BOOLEAN NOT NULL,
+      updated_at     TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (user_id, permission_key)
+    )
+  `);
+  _overrideTableReady = true;
 }
 
 // Middleware factory: requires the user to have a specific permission.
@@ -644,11 +750,8 @@ function mount(app) {
     const cookies = parseCookies(req);
     const payload = await verifyToken(cookies[COOKIE_NAME]);
     if (!payload || !payload.uid) return res.json({ ok: false, authenticated: false });
-    // Compute which permissions this user has (used by client-side to hide nav items)
-    const perms = {};
-    for (const p of Object.keys(PERMISSIONS)) {
-      if ((PERMISSIONS[p] || []).includes(payload.r)) perms[p] = true;
-    }
+    // Compute effective permissions: role defaults + per-user overrides
+    const perms = await getEffectivePermissions({ uid: payload.uid, r: payload.r });
     res.json({
       ok: true,
       authenticated: true,
@@ -681,9 +784,10 @@ function mount(app) {
           <td>
             ${req.user && req.user.uid !== u.id
               ? `<button type="button" onclick="editUser(${u.id}, '${escapeHtml(u.username)}', '${escapeHtml(u.role)}')" style="background:#eee; color:#333; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Edit role</button>
+                 <a href="/admin/users/${u.id}/permissions" style="background:#0C1C36; color:white; text-decoration:none; padding:5px 10px; border-radius:3px; font-size:11px; margin-right:4px; display:inline-block;">🔐 Permissions</a>
                  <button type="button" onclick="resetUserPassword(${u.id}, '${escapeHtml(u.username)}')" style="background:#B79C62; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Reset password</button>
                  <form method="POST" action="/admin/users/${u.id}/delete" style="display:inline;" onsubmit="return confirm('Delete user ${escapeHtml(u.username)}? This cannot be undone.');"><button type="submit" style="background:#c00; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Delete</button></form>`
-              : `<span style="color:#888; font-size:11px;">(you)</span>`}
+              : `<a href="/admin/users/${u.id}/permissions" style="background:#0C1C36; color:white; text-decoration:none; padding:5px 10px; border-radius:3px; font-size:11px; display:inline-block;">🔐 My permissions</a>`}
           </td>
         </tr>`;
       }).join("");
@@ -923,6 +1027,240 @@ function mount(app) {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
+
+  // ── Per-user permission overrides ────────────────────────────────
+  // Checkbox UI lets JJ toggle exactly what each user can see, on top of
+  // (and overriding) their role defaults.
+
+  // Human-friendly grouping of permission keys → what JJ sees in the UI.
+  // The order defines the UI section order. Groups without matching keys are
+  // omitted automatically. Any permission key not listed here will be shown
+  // under "Other" so nothing silently disappears.
+  const PERMISSION_GROUPS = [
+    { label: "Overview & Clients", keys: [
+      "clients.read", "clients.write", "matters.access",
+      "calendar.read", "deadlines.read", "mobile.search",
+    ]},
+    { label: "Immigration", keys: [
+      "notes.list", "hearings.read", "hearings.write", "motions.read", "motions.write",
+    ]},
+    { label: "Federal & Trademarks", keys: [
+      "federal.read", "federal.write",
+    ]},
+    { label: "Personal Injury", keys: [
+      "pi.read", "pi.write",
+    ]},
+    { label: "Tasks", keys: [
+      "tasks.read", "tasks.write",
+    ]},
+    { label: "Accounting", keys: [
+      "accounting.read", "accounting.write",
+    ]},
+    { label: "Intake, Pipeline & Content", keys: [
+      "intake.access", "pipeline.access", "drip.access",
+      "content.read", "content.write",
+    ]},
+    { label: "Firm & Admin", keys: [
+      "dropbox.read", "dropbox.write", "notices.read", "notices.write",
+      "analytics.read", "users.manage",
+    ]},
+  ];
+
+  // Human-friendly label for each permission key (falls back to the key itself)
+  const PERMISSION_LABELS = {
+    "clients.read": "View clients",
+    "clients.write": "Edit clients",
+    "matters.access": "View matters / cases",
+    "calendar.read": "View calendar",
+    "deadlines.read": "View deadlines",
+    "mobile.search": "Mobile search app",
+    "notes.list": "See firm-wide hearing notes list",
+    "hearings.read": "View hearing notes",
+    "hearings.write": "Create/edit hearing notes",
+    "motions.read": "View motions",
+    "motions.write": "Create/edit motions",
+    "federal.read": "View federal & TM matters",
+    "federal.write": "Create/edit federal & TM matters",
+    "pi.read": "View PI cases",
+    "pi.write": "Create/edit PI cases",
+    "tasks.read": "View tasks",
+    "tasks.write": "Create/edit tasks",
+    "accounting.read": "View accounting (ledger, IOLTA, IS/BS, QBO)",
+    "accounting.write": "Create accounting entries",
+    "intake.access": "Intake console",
+    "pipeline.access": "Sales pipeline",
+    "drip.access": "Drip campaigns",
+    "content.read": "View blog / content",
+    "content.write": "Edit blog / content",
+    "dropbox.read": "View Dropbox files",
+    "dropbox.write": "Upload to Dropbox",
+    "notices.read": "View hearing notices",
+    "notices.write": "Process hearing notices",
+    "analytics.read": "View analytics / reports",
+    "users.manage": "Manage users & permissions",
+  };
+
+  app.get("/admin/users/:id/permissions", requireRole("admin"), async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id, 10);
+      const r = await db.query(`SELECT id, username, full_name, role FROM admin_users WHERE id = $1`, [userId]);
+      if (!r.rows.length) return res.status(404).send("User not found");
+      const user = r.rows[0];
+      const roleInfo = ROLES[user.role] || { label: user.role, color: "#666" };
+      const overrides = await getUserOverridesMap(userId);
+
+      // Build all groups; capture keys not covered so we can render an "Other" bucket
+      const usedKeys = new Set();
+      const groupBlocks = PERMISSION_GROUPS.map(g => {
+        const keys = g.keys.filter(k => PERMISSIONS[k]);
+        keys.forEach(k => usedKeys.add(k));
+        if (!keys.length) return "";
+        return renderPermGroup(g.label, keys, user.role, overrides);
+      }).join("");
+      const otherKeys = Object.keys(PERMISSIONS).filter(k => !usedKeys.has(k));
+      const otherBlock = otherKeys.length ? renderPermGroup("Other", otherKeys, user.role, overrides) : "";
+
+      // Prefer the admin chrome (with sidebar) so nav is consistent
+      let hearingNotes;
+      try { hearingNotes = require("./hearing-notes"); } catch { hearingNotes = null; }
+
+      const body = `
+        <div class="page-header">
+          <h1>🔐 Permissions — ${escapeHtml(user.full_name || user.username)}</h1>
+          <a href="/admin/users" class="back-link">← Users</a>
+        </div>
+
+        <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+          <strong>Role default:</strong> <span style="background:${roleInfo.color}; color:white; padding:2px 8px; border-radius:8px; font-size:11px; font-weight:600;">${escapeHtml(roleInfo.label)}</span>
+          &nbsp;·&nbsp; Checkboxes below override the role default per-permission. <strong>Green rows</strong> = matches role default. <strong>Yellow rows</strong> = you've overridden. Unchecking a green box denies it; checking a red box grants it.
+        </div>
+
+        <form id="permForm">
+          ${groupBlocks}${otherBlock}
+
+          <div style="margin-top:20px; display:flex; gap:10px; align-items:center;">
+            <button type="button" onclick="savePerms()" id="saveBtn" style="background:#0C1C36; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💾 Save Permissions</button>
+            <button type="button" onclick="resetToRoleDefaults()" style="background:#f5f2ea; color:#0C1C36; padding:12px 24px; border:1px solid #B79C62; border-radius:6px; cursor:pointer;">↺ Reset to Role Defaults</button>
+            <span id="permStatus" style="color:#666; font-size:12px; margin-left:10px;"></span>
+          </div>
+        </form>
+
+        <script>
+          async function savePerms() {
+            const btn = document.getElementById("saveBtn");
+            btn.disabled = true; btn.textContent = "⏳ Saving…";
+            const perms = {};
+            document.querySelectorAll('input[type=checkbox][data-perm-key]').forEach(cb => {
+              perms[cb.dataset.permKey] = cb.checked;
+            });
+            try {
+              const r = await fetch("/admin/users/${userId}/permissions", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ permissions: perms }),
+              });
+              const d = await r.json();
+              if (d.ok) {
+                document.getElementById("permStatus").textContent = "✓ Saved";
+                document.getElementById("permStatus").style.color = "#2e7d32";
+                setTimeout(() => location.reload(), 700);
+              } else {
+                alert("Error: " + d.error);
+                btn.disabled = false; btn.textContent = "💾 Save Permissions";
+              }
+            } catch (e) {
+              alert("Network error: " + e.message);
+              btn.disabled = false; btn.textContent = "💾 Save Permissions";
+            }
+          }
+          async function resetToRoleDefaults() {
+            if (!confirm("Clear all per-user overrides and reset to role defaults?")) return;
+            const r = await fetch("/admin/users/${userId}/permissions/reset", { method: "POST" });
+            if (r.ok) location.reload();
+          }
+        </script>`;
+
+      if (hearingNotes && hearingNotes.renderAdminChrome) {
+        res.send(hearingNotes.renderAdminChrome({ title: "User Permissions", body, activeItem: "users" }));
+      } else {
+        res.send(`<html><head><title>Permissions</title><style>body{font-family:system-ui;padding:20px;max-width:960px;margin:auto;background:#faf9f5;} .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;} .back-link{color:#666;text-decoration:none;}</style></head><body>${body}</body></html>`);
+      }
+    } catch (err) {
+      console.error("[permissions page]:", err.message);
+      res.status(500).send("Error: " + err.message);
+    }
+  });
+
+  // Render one collapsible permission group as a table of checkboxes
+  function renderPermGroup(label, keys, userRole, overrides) {
+    const rows = keys.map(k => {
+      const roleGranted = (PERMISSIONS[k] || []).includes(userRole);
+      const hasOverride = overrides[k] !== undefined;
+      const effective = hasOverride ? overrides[k] : roleGranted;
+      const bg = hasOverride ? "#fff8e1" : (effective ? "#e8f5e9" : "#fafaf7");
+      const explainer = hasOverride
+        ? (effective ? "✎ Overridden ON" : "✎ Overridden OFF")
+        : (effective ? "Role default: ON" : "Role default: OFF");
+      const explainerColor = hasOverride ? "#e65100" : (effective ? "#2e7d32" : "#999");
+      return `
+        <tr style="background:${bg};">
+          <td style="padding:10px 14px; border-bottom:1px solid #eee;">
+            <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+              <input type="checkbox" data-perm-key="${escapeHtml(k)}" ${effective ? "checked" : ""} style="width:18px; height:18px; cursor:pointer;">
+              <div>
+                <div style="font-size:13px; color:#0C1C36;">${escapeHtml(PERMISSION_LABELS[k] || k)}</div>
+                <div style="font-size:10px; color:#888; font-family:ui-monospace, Menlo, monospace; margin-top:2px;">${escapeHtml(k)}</div>
+              </div>
+            </label>
+          </td>
+          <td style="padding:10px 14px; border-bottom:1px solid #eee; text-align:right; font-size:11px; color:${explainerColor}; font-weight:${hasOverride ? "600" : "400"};">
+            ${explainer}
+          </td>
+        </tr>`;
+    }).join("");
+    return `
+      <div style="background:white; border-radius:8px; border:1px solid #eee; margin-bottom:12px; overflow:hidden;">
+        <div style="padding:10px 16px; background:#0C1C36; color:white; font-weight:600; font-size:13px;">${escapeHtml(label)}</div>
+        <table style="width:100%; border-collapse:collapse;">
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  app.post("/admin/users/:id/permissions", requireRole("admin"), async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id, 10);
+      const r = await db.query(`SELECT role FROM admin_users WHERE id = $1`, [userId]);
+      if (!r.rows.length) return res.status(404).json({ ok: false, error: "User not found" });
+      const userRole = r.rows[0].role;
+
+      // Only store checkboxes that DIFFER from the role default.
+      // If a checkbox matches the role default, we don't need to store an override
+      // (that way changing the role in the future picks up new defaults automatically).
+      const submitted = req.body?.permissions || {};
+      const toStore = {};
+      for (const [key, val] of Object.entries(submitted)) {
+        if (typeof val !== "boolean") continue;
+        if (!PERMISSIONS[key]) continue;
+        const roleDefault = (PERMISSIONS[key] || []).includes(userRole);
+        if (val !== roleDefault) toStore[key] = val;  // only store deviations
+      }
+      await setUserOverridesBulk(userId, toStore);
+      res.json({ ok: true, overrides_stored: Object.keys(toStore).length });
+    } catch (err) {
+      console.error("[permissions save]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.post("/admin/users/:id/permissions/reset", requireRole("admin"), async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id, 10);
+      await setUserOverridesBulk(userId, {});
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
 }
 
 function escapeHtml(s) {
@@ -937,6 +1275,13 @@ module.exports = {
   requireRole,
   requirePermission,
   hasPermission,
+  hasPermissionAsync,
+  getEffectivePermissions,
+  getUserOverride,
+  getUserOverridesMap,
+  setUserOverride,
+  setUserOverridesBulk,
+  ensureOverrideTable,
   mount,
   createUser,
   findUserByUsername,
