@@ -346,6 +346,109 @@ Produce the concise summary now.`;
   }
 }
 
+async function generateBothSummaries(data) {
+  // ONE Claude call producing BOTH the paralegal summary and the client
+  // summary — cuts input token cost roughly in half vs the previous approach
+  // (two parallel calls, each re-sending the full case data). We use clear
+  // section markers so we can split the response reliably.
+  const lang = data.client_language || "en";
+  const langNames = {
+    en: "English",
+    zh: "Simplified Chinese (中文)",
+    es: "Spanish (Español)",
+    hi: "Hindi (हिन्दी)",
+    pa: "Punjabi (ਪੰਜਾਬੀ)",
+  };
+  const languageName = langNames[lang] || "English";
+  const structured = buildStructuredNotes(data);
+
+  const prompt = `You are producing TWO summaries of a master calendar hearing at Tez Law Firm from the same source notes. Produce both in one response, separated by the exact markers shown.
+
+=== SECTION 1: PARALEGAL SUMMARY (English, concise) ===
+The paralegal needs to update the case file in under a minute — so keep it short and scannable. Include ONLY these four sections, in this exact order:
+1. **Client** — Name, A#, and language preference on one line. Add phone/email only if listed.
+2. **Next Hearing** — Date, time, type, and judge on one line. Nothing else.
+3. **Deadlines** — Bulleted list of any filing deadlines set by the judge, with the exact date for each. If none, write "None set."
+4. **Special Notes** — Only what is genuinely unusual, urgent, or requires attention (e.g. detained status, expedited timeline, new counsel of record needed, unusual judge instructions, respondent behavioral issues). If nothing unusual, write "None."
+
+Rules for the paralegal summary:
+- BE SHORT. Every line must earn its place. Total ~10-15 lines.
+- Do NOT restate procedural history, allegations, respondent testimony, or the attorney's arguments.
+- Do NOT add an Action Items section — the deadlines section already covers that.
+- Preserve exact dates and deadlines. Never invent details.
+
+=== SECTION 2: CLIENT SUMMARY (in ${languageName}) ===
+The client attended their immigration court hearing today with their attorney from Tez Law Firm. Write a warm but professional summary explaining what happened and what they need to do next.
+
+Rules for the client summary:
+- Write ENTIRELY in ${languageName}
+- Plain language — no legalese
+- Warm and reassuring but professional
+- Focus on: what happened, what deadlines the client needs to remember, what they need to do next
+- Include specific dates and deadlines with clear context
+- Do NOT invent information — only what's in the notes
+- End with firm contact info: "If you have questions, please contact us at 626-678-8677 or info@tezlawfirm.com" (translate this line to ${languageName})
+- If interpreter was used, mention this positively
+- Address the client directly ("You" / "您" / "Usted" / "आप" / "ਤੁਸੀਂ")
+- Sign off with "Sincerely, TEZ LAW FIRM" (translate "Sincerely"; keep "TEZ LAW FIRM" — for Chinese use "TEZ律师事务所")
+- Do NOT use any personal attorney name
+
+===== SHARED SOURCE DATA =====
+
+Client's name: ${data.client_name}
+
+Structured hearing data:
+${structured}
+
+Attorney's raw notes:
+${data.raw_notes || "(no additional notes)"}
+
+===== OUTPUT FORMAT =====
+
+Return EXACTLY this format, using the delimiters verbatim so I can parse:
+
+<<<PARALEGAL>>>
+[the concise paralegal summary here]
+<<<CLIENT>>>
+[the client summary in ${languageName} here]
+<<<END>>>
+
+No preamble, no explanations, no markdown fences around the whole thing. Start directly with the <<<PARALEGAL>>> marker.`;
+
+  try {
+    const resp = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      {
+        model: ANTHROPIC_MODEL,
+        max_tokens: 2600,  // enough for both: ~600 paralegal + ~2000 client
+        messages: [{ role: "user", content: prompt }],
+      },
+      {
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        timeout: 45000,
+      }
+    );
+    const raw = resp.data.content?.[0]?.text?.trim() || "";
+    // Parse the two sections out of the delimited response
+    const paralegalMatch = raw.match(/<<<PARALEGAL>>>\s*([\s\S]*?)\s*<<<CLIENT>>>/);
+    const clientMatch = raw.match(/<<<CLIENT>>>\s*([\s\S]*?)\s*<<<END>>>/);
+    return {
+      paralegal_summary: paralegalMatch ? paralegalMatch[1].trim() : "(paralegal summary parse failed)",
+      client_summary: clientMatch ? clientMatch[1].trim() : "(client summary parse failed)",
+    };
+  } catch (e) {
+    console.error("[hearing-notes] Combined summary error:", e.message);
+    return {
+      paralegal_summary: "(AI summary unavailable — please write manually)",
+      client_summary: "(AI summary unavailable — please write manually)",
+    };
+  }
+}
+
 async function generateClientSummary(data) {
   const lang = data.client_language || "en";
   const langNames = {
@@ -546,13 +649,21 @@ async function saveNote(data, { generateSummaries = true, allowDuplicate = false
   let client_summary = null;
 
   if (generateSummaries) {
-    // Generate both in parallel to save time
-    const [pSum, cSum] = await Promise.all([
-      generateParalegalSummary(data),
-      generateClientSummary(data),
-    ]);
-    paralegal_summary = pSum;
-    client_summary = cSum;
+    // ONE Claude call for BOTH summaries — cuts the input pass in half vs
+    // running paralegal + client in parallel. Set VERBOSE_SUMMARY_MODE=true
+    // in env to opt back into the old dual-call behavior if quality suffers.
+    if (process.env.VERBOSE_SUMMARY_MODE === "true") {
+      const [pSum, cSum] = await Promise.all([
+        generateParalegalSummary(data),
+        generateClientSummary(data),
+      ]);
+      paralegal_summary = pSum;
+      client_summary = cSum;
+    } else {
+      const both = await generateBothSummaries(data);
+      paralegal_summary = both.paralegal_summary;
+      client_summary = both.client_summary;
+    }
   }
 
   const r = await db.query(
@@ -731,10 +842,18 @@ async function updateNote(id, data, { user = null, skipRevision = false } = {}) 
 async function generateAndSaveSummariesForMaster(id) {
   const note = await getNote(id);
   if (!note) throw new Error(`Note ${id} not found`);
-  const [p, c] = await Promise.all([
-    generateParalegalSummary(note),
-    generateClientSummary(note),
-  ]);
+  let p, c;
+  if (process.env.VERBOSE_SUMMARY_MODE === "true") {
+    [p, c] = await Promise.all([
+      generateParalegalSummary(note),
+      generateClientSummary(note),
+    ]);
+  } else {
+    // Single-call combined mode — halves input cost vs the dual call above.
+    const both = await generateBothSummaries(note);
+    p = both.paralegal_summary;
+    c = both.client_summary;
+  }
   await db.query(
     `UPDATE hearing_notes SET paralegal_summary=$1, client_summary=$2 WHERE id=$3`,
     [p, c, id]
@@ -3483,6 +3602,7 @@ module.exports = {
   sendToParalegal,
   generateParalegalSummary,
   generateClientSummary,
+  generateBothSummaries,
   extractDocumentFields,
   extractI589FieldsFromPdf,
   renderNoteForm,
