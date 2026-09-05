@@ -4959,6 +4959,11 @@ try {
   require("./task-milestones").initTable().catch(e => console.warn("[milestones] init:", e.message));
 } catch (e) { console.warn("[milestones] module load:", e.message); }
 
+// Register the mobile app JSON API
+try {
+  require("./app-api").registerAppApi(app);
+} catch (e) { console.warn("[app-api] load failed:", e.message); }
+
 // Daily 8 AM Pacific: send task reminders via Telegram
 (async () => {
   try {
