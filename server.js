@@ -7767,11 +7767,76 @@ app.get("/legal/cache-stats", async (req, res) => {
 // ── Mobile PWA ────────────────────────────────────────────
 // Optimized for iPhone/Android home-screen install.
 // Universal client search + tap-to-call detail views.
-app.get("/admin/mobile", (req, res) => {
-  const mobile = require("./mobile-app");
-  res.send(mobile.renderMobileSearchPage());
+// ── Mobile PWA ─────────────────────────────────────────
+// All /admin/mobile/* routes render inside the same PWA scope so
+// installed home-screen app users stay in-app. Bottom tab bar
+// navigates between Home / Tasks / Calendar / Clients / More.
+
+app.get("/admin/mobile", async (req, res) => {
+  try {
+    const mobile = require("./mobile-app");
+    const body = await mobile.renderMobileHome(req.user || {});
+    res.send(mobile.renderMobileChrome({ title: "Tez Law", body, activeTab: "home", user: req.user }));
+  } catch (err) {
+    console.error("[mobile home]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
 });
 
+app.get("/admin/mobile/tasks", async (req, res) => {
+  try {
+    const mobile = require("./mobile-app");
+    const body = await mobile.renderMobileTasks(req.query || {});
+    res.send(mobile.renderMobileChrome({ title: "Tasks", body, activeTab: "tasks", user: req.user }));
+  } catch (err) {
+    console.error("[mobile tasks]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/mobile/tasks/new", (req, res) => {
+  const mobile = require("./mobile-app");
+  const body = mobile.renderMobileNewTask();
+  res.send(mobile.renderMobileChrome({ title: "New Task", body, activeTab: "tasks", user: req.user }));
+});
+
+app.get("/admin/mobile/task/:id", async (req, res) => {
+  try {
+    const mobile = require("./mobile-app");
+    const body = await mobile.renderMobileTaskDetail(parseInt(req.params.id, 10));
+    res.send(mobile.renderMobileChrome({ title: "Task", body, activeTab: "tasks", user: req.user }));
+  } catch (err) {
+    console.error("[mobile task]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/mobile/calendar", async (req, res) => {
+  try {
+    const mobile = require("./mobile-app");
+    const body = await mobile.renderMobileCalendar(req.query || {});
+    res.send(mobile.renderMobileChrome({ title: "Calendar", body, activeTab: "calendar", user: req.user }));
+  } catch (err) {
+    console.error("[mobile calendar]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/mobile/clients", (req, res) => {
+  const mobile = require("./mobile-app");
+  const body = mobile.renderMobileClients();
+  res.send(mobile.renderMobileChrome({ title: "Clients", body, activeTab: "clients", user: req.user }));
+});
+
+app.get("/admin/mobile/more", (req, res) => {
+  const mobile = require("./mobile-app");
+  const body = mobile.renderMobileMore(req.user || {});
+  res.send(mobile.renderMobileChrome({ title: "More", body, activeTab: "more", user: req.user }));
+});
+
+// Client detail — mobile-optimized page with hearings, deadlines, notices.
+// Kept the existing fullscreen renderer since the layout is already great;
+// it just needs to work as-is inside the PWA scope.
 app.get("/admin/mobile/client/:key", async (req, res) => {
   try {
     const mobile = require("./mobile-app");
@@ -7821,7 +7886,10 @@ app.get("/manifest.json", (req, res) => {
     short_name: "Zara",
     description: "Legal case management for Tez Law P.C.",
     start_url: "/admin/mobile",
-    scope: "/admin/",
+    // Scope limited to /admin/mobile — any link outside this scope opens
+    // the system browser instead of the installed PWA. Keeps navigation
+    // within the app for tabs Home / Tasks / Calendar / Clients / More.
+    scope: "/admin/mobile",
     display: "standalone",
     orientation: "portrait-primary",
     background_color: "#0C1C36",
@@ -7841,10 +7909,10 @@ app.get("/manifest.json", (req, res) => {
       }
     ],
     shortcuts: [
-      { name: "Search Client",  url: "/admin/mobile" },
-      { name: "Dashboard",      url: "/admin/dashboard" },
-      { name: "Calendar",       url: "/admin/calendar" },
-      { name: "Master Notes",   url: "/admin/hearing/notes" }
+      { name: "Home",           url: "/admin/mobile" },
+      { name: "Tasks",          url: "/admin/mobile/tasks" },
+      { name: "Calendar",       url: "/admin/mobile/calendar" },
+      { name: "Clients",        url: "/admin/mobile/clients" }
     ]
   });
 });
