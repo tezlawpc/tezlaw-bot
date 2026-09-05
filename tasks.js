@@ -175,6 +175,12 @@ async function initTable() {
     "ADD COLUMN IF NOT EXISTS last_reminder_sent TIMESTAMPTZ",
     "ADD COLUMN IF NOT EXISTS reminders_sent INTEGER DEFAULT 0",
     "ADD COLUMN IF NOT EXISTS completion_notes TEXT",
+    // Consultant portal support:
+    //   submitted_by_user_id = admin_users.id of the consultant who created
+    //   this task via /consultant portal. NULL = firm-internal task.
+    //   submitter_visible = firm can hide internal notes from the submitter.
+    "ADD COLUMN IF NOT EXISTS submitted_by_user_id INTEGER",
+    "ADD COLUMN IF NOT EXISTS submitter_visible BOOLEAN DEFAULT TRUE",
   ];
   for (const alter of alters) {
     try { await db.query(`ALTER TABLE tasks ${alter}`); } catch {}
@@ -185,6 +191,26 @@ async function initTable() {
   await db.query(`CREATE INDEX IF NOT EXISTS idx_tasks_client ON tasks (client_key)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_tasks_matter ON tasks (matter_type)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks (assigned_to)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_tasks_submitted_by ON tasks (submitted_by_user_id) WHERE submitted_by_user_id IS NOT NULL`);
+
+  // Activity log for consultants to follow along + firm audit trail.
+  // Every status change / note / assignment writes a row here.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS task_activity (
+      id            SERIAL PRIMARY KEY,
+      task_id       INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      actor_id      INTEGER,             -- admin_users.id of whoever acted
+      actor_name    TEXT,                -- cached display name
+      actor_role    TEXT,                -- role at time of action (audit)
+      action        TEXT NOT NULL,       -- created | status_changed | assigned | note_added | completed | reopened | edited
+      old_value     TEXT,
+      new_value     TEXT,
+      note          TEXT,                -- free-form comment attached
+      visible_to_submitter BOOLEAN DEFAULT TRUE,  -- firm-internal comments = false
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_task_activity_task ON task_activity (task_id, created_at DESC)`);
 }
 
 // ─── CRUD ───────────────────────────────────────────────
@@ -197,8 +223,9 @@ async function createTask(data) {
         due_date, due_time, reminder_days_before,
         client_name, client_key, a_number, case_id, case_number, court,
         assigned_to, created_by,
+        submitted_by_user_id, submitter_visible,
         is_recurring, recurrence_pattern, recurrence_until, parent_task_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
      RETURNING *`,
     [
       data.title, data.description || null, data.category || null, data.matter_type || null,
@@ -207,10 +234,22 @@ async function createTask(data) {
       data.client_name || null, data.client_key || null, data.a_number || null,
       data.case_id || null, data.case_number || null, data.court || null,
       data.assigned_to || null, data.created_by || null,
+      data.submitted_by_user_id || null,
+      data.submitter_visible === false ? false : true,
       !!data.is_recurring, data.recurrence_pattern || null, data.recurrence_until || null, data.parent_task_id || null,
     ]
   );
   const task = r.rows[0];
+
+  // Log creation to activity timeline
+  await logActivity(task.id, {
+    actor_id: data.created_by || data.submitted_by_user_id,
+    actor_name: data.actor_name || null,
+    actor_role: data.actor_role || null,
+    action: "created",
+    new_value: task.status,
+    note: data.submitted_by_user_id ? "Work order submitted by consultant" : null,
+  });
 
   // Fire creation reminder (non-blocking) if due soon or urgent
   setImmediate(() => {
@@ -218,6 +257,37 @@ async function createTask(data) {
   });
 
   return task;
+}
+
+// Log a task activity entry (status change, note, assignment, etc.)
+// visible_to_submitter=false hides the entry from the consultant who
+// submitted the task — used for firm-internal notes.
+async function logActivity(taskId, {
+  actor_id = null, actor_name = null, actor_role = null,
+  action, old_value = null, new_value = null, note = null,
+  visible_to_submitter = true,
+} = {}) {
+  try {
+    await db.query(
+      `INSERT INTO task_activity (task_id, actor_id, actor_name, actor_role, action, old_value, new_value, note, visible_to_submitter)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [taskId, actor_id, actor_name, actor_role, action, old_value, new_value, note, visible_to_submitter]
+    );
+  } catch (e) {
+    console.warn("[tasks] activity log failed:", e.message);
+  }
+}
+
+// Get activity timeline for a task. filterVisibleOnly=true hides
+// firm-internal entries (used when rendering the consultant portal).
+async function listActivity(taskId, { filterVisibleOnly = false } = {}) {
+  await initTable();
+  const where = filterVisibleOnly ? "AND visible_to_submitter = TRUE" : "";
+  const r = await db.query(
+    `SELECT * FROM task_activity WHERE task_id = $1 ${where} ORDER BY created_at ASC`,
+    [taskId]
+  );
+  return r.rows;
 }
 
 async function updateTask(id, fields) {
@@ -229,6 +299,10 @@ async function updateTask(id, fields) {
     "assigned_to", "completion_notes",
     "is_recurring", "recurrence_pattern", "recurrence_until",
   ];
+  // Snapshot old values for any field being changed so we can log deltas.
+  const oldRow = await db.query(`SELECT * FROM tasks WHERE id = $1`, [id]);
+  const before = oldRow.rows[0] || {};
+
   const sets = [];
   const values = [];
   let i = 1;
@@ -245,10 +319,28 @@ async function updateTask(id, fields) {
     `UPDATE tasks SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
     values
   );
-  return r.rows[0];
+  const updated = r.rows[0];
+
+  // Write meaningful activity entries so consultants can follow along.
+  // Status changes and assignment changes are shown to the submitter;
+  // other edits (typos, minor field tweaks) get a single generic entry.
+  const actor = { actor_id: fields._actor_id, actor_name: fields._actor_name, actor_role: fields._actor_role };
+  if (fields.status && fields.status !== before.status) {
+    await logActivity(id, { ...actor, action: "status_changed", old_value: before.status, new_value: fields.status });
+  }
+  if (fields.assigned_to !== undefined && fields.assigned_to !== before.assigned_to) {
+    await logActivity(id, { ...actor, action: "assigned", old_value: before.assigned_to, new_value: fields.assigned_to });
+  }
+  if (fields.priority && fields.priority !== before.priority) {
+    await logActivity(id, { ...actor, action: "edited", old_value: `priority=${before.priority}`, new_value: `priority=${fields.priority}` });
+  }
+  if (fields.due_date !== undefined && String(fields.due_date) !== String(before.due_date)) {
+    await logActivity(id, { ...actor, action: "edited", old_value: `due=${before.due_date}`, new_value: `due=${fields.due_date}` });
+  }
+  return updated;
 }
 
-async function completeTask(id, { userId, notes = null } = {}) {
+async function completeTask(id, { userId, notes = null, actorName = null, actorRole = null } = {}) {
   await initTable();
   const r = await db.query(
     `UPDATE tasks SET
@@ -262,13 +354,28 @@ async function completeTask(id, { userId, notes = null } = {}) {
     [userId, notes, id]
   );
   const task = r.rows[0];
-
+  if (task) {
+    await logActivity(id, {
+      actor_id: userId, actor_name: actorName, actor_role: actorRole,
+      action: "completed", new_value: "completed", note: notes,
+    });
+  }
   // If recurring, spawn the next instance
   if (task && task.is_recurring && task.recurrence_pattern && task.due_date) {
     await spawnNextRecurrence(task);
   }
-
   return task;
+}
+
+// Add a free-form comment/note to a task's activity timeline. Firm uses
+// this to post status updates for the consultant, or internal notes.
+async function addTaskComment(taskId, {
+  actor_id, actor_name, actor_role, note, visible_to_submitter = true,
+} = {}) {
+  await logActivity(taskId, {
+    actor_id, actor_name, actor_role,
+    action: "note_added", note, visible_to_submitter,
+  });
 }
 
 async function spawnNextRecurrence(parent) {
@@ -325,7 +432,8 @@ async function getTask(id) {
 async function listTasks({
   status = null, matter_type = null, category = null, priority = null,
   client_key = null, assigned_to = null,
-  due_within_days = null,       // e.g., 7 = due within next 7 days
+  submitted_by_user_id = null,   // filter to tasks submitted by a specific consultant
+  due_within_days = null,
   overdue_only = false,
   completed_only = false,
   from_date = null, to_date = null,
@@ -347,6 +455,7 @@ async function listTasks({
   if (priority) { conds.push(`priority = $${i++}`); params.push(priority); }
   if (client_key) { conds.push(`client_key = $${i++}`); params.push(client_key); }
   if (assigned_to) { conds.push(`assigned_to = $${i++}`); params.push(assigned_to); }
+  if (submitted_by_user_id) { conds.push(`submitted_by_user_id = $${i++}`); params.push(submitted_by_user_id); }
   if (due_within_days != null) {
     conds.push(`due_date IS NOT NULL AND due_date <= CURRENT_DATE + ($${i++} || ' days')::interval`);
     params.push(due_within_days);
@@ -871,4 +980,5 @@ module.exports = {
   sendDailyReminders, sendPerTaskReminders, sendCreationReminder, sendSingleTaskReminder,
   handleTelegramCommand, handleTelegramCallback,
   extractTasksFromContent,
+  logActivity, listActivity, addTaskComment,
 };
