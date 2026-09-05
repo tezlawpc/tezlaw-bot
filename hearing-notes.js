@@ -1448,16 +1448,16 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <div class="nav-section-header">
         <span>Overview</span>
       </div>
-      <a href="/admin/dashboard" class="nav-link ${isActive('dashboard')}" data-perm="hearings.read">
+      <a href="/admin/dashboard" class="nav-link ${isActive('dashboard')}" data-perm="dashboard.access">
         <span class="nav-icon">◱</span><span class="nav-label">Dashboard</span>
       </a>
       <a href="/admin/clients" class="nav-link ${isActive('clients')}" data-perm="clients.read">
         <span class="nav-icon">◐</span><span class="nav-label">Clients</span>
       </a>
-      <a href="/admin/calendar" class="nav-link ${isActive('calendar')}" data-perm="hearings.read">
+      <a href="/admin/calendar" class="nav-link ${isActive('calendar')}" data-perm="calendar.read">
         <span class="nav-icon">▦</span><span class="nav-label">Calendar</span>
       </a>
-      <a href="/admin/deadlines" class="nav-link ${isActive('deadlines')}" data-perm="hearings.read">
+      <a href="/admin/deadlines" class="nav-link ${isActive('deadlines')}" data-perm="deadlines.read">
         <span class="nav-icon">◔</span><span class="nav-label">Deadlines</span>
       </a>
       <a href="/admin/tasks" class="nav-link ${isActive('tasks')}" data-perm="tasks.read">
@@ -1476,16 +1476,16 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <div class="nav-section-header">
         <span>Immigration</span>
       </div>
-      <a href="/admin/hearing/notes" class="nav-link ${isActive('notes')}" data-perm="notes.list">
+      <a href="/admin/hearing/notes" class="nav-link ${isActive('notes')}" data-perm="notes.master">
         <span class="nav-icon">≡</span><span class="nav-label">Master Notes</span>
       </a>
-      <a href="/admin/hearing/individual" class="nav-link ${isActive('individual')}" data-perm="notes.list">
+      <a href="/admin/hearing/individual" class="nav-link ${isActive('individual')}" data-perm="notes.individual">
         <span class="nav-icon">◈</span><span class="nav-label">Individual Notes</span>
       </a>
       <a href="/admin/motions" class="nav-link ${isActive('motions')}" data-perm="motions.read">
         <span class="nav-icon">§</span><span class="nav-label">Court Motions</span>
       </a>
-      <a href="/admin/hearing/history" class="nav-link ${isActive('history')}" data-perm="notes.list">
+      <a href="/admin/hearing/history" class="nav-link ${isActive('history')}" data-perm="notes.history">
         <span class="nav-icon">⌘</span><span class="nav-label">Hearing History</span>
       </a>
     </div>
@@ -1510,25 +1510,25 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     <!-- ── Personal Injury section ── -->
     <div class="nav-section" id="section-pi">
       <div class="nav-section-header">Personal Injury</div>
-      <a href="/admin/pi" class="nav-link ${isActive('pi-dashboard')}" data-perm="clients.read">
+      <a href="/admin/pi" class="nav-link ${isActive('pi-dashboard')}" data-perm="pi.read">
         <span class="nav-icon">🚑</span><span class="nav-label">PI Dashboard</span>
       </a>
-      <a href="/admin/pi/cases" class="nav-link ${isActive('pi-cases')}" data-perm="clients.read">
+      <a href="/admin/pi/cases" class="nav-link ${isActive('pi-cases')}" data-perm="pi.read">
         <span class="nav-icon">◈</span><span class="nav-label">All PI Cases</span>
       </a>
-      <a href="/admin/pi/cases?status=intake" class="nav-link" data-perm="clients.read">
+      <a href="/admin/pi/cases?status=intake" class="nav-link" data-perm="pi.read">
         <span class="nav-icon">◌</span><span class="nav-label">New Intake</span>
       </a>
-      <a href="/admin/pi/cases?status=treating" class="nav-link" data-perm="clients.read">
+      <a href="/admin/pi/cases?status=treating" class="nav-link" data-perm="pi.read">
         <span class="nav-icon">◍</span><span class="nav-label">Under Treatment</span>
       </a>
-      <a href="/admin/pi/cases?status=settled" class="nav-link" data-perm="clients.read">
+      <a href="/admin/pi/cases?status=settled" class="nav-link" data-perm="pi.read">
         <span class="nav-icon">◎</span><span class="nav-label">Awaiting Disbursement</span>
       </a>
-      <a href="/admin/pi/cases?sol_soon=1" class="nav-link" data-perm="clients.read">
+      <a href="/admin/pi/cases?sol_soon=1" class="nav-link" data-perm="pi.read">
         <span class="nav-icon">⚠</span><span class="nav-label">SOL Alerts</span>
       </a>
-      <a href="/admin/pi/brokers" class="nav-link ${isActive('pi-brokers')}" data-perm="clients.read">
+      <a href="/admin/pi/brokers" class="nav-link ${isActive('pi-brokers')}" data-perm="pi.read">
         <span class="nav-icon">◈</span><span class="nav-label">Brokers</span>
       </a>
     </div>
