@@ -251,6 +251,27 @@ async function createTask(data) {
     note: data.submitted_by_user_id ? "Work order submitted by consultant" : null,
   });
 
+  // Auto-seed milestones from category template if one exists (habeas corpus,
+  // motion to reopen, RFE response, TM application, etc.). Non-blocking — a
+  // failure here should never block task creation.
+  try {
+    const milestones = require("./task-milestones");
+    if (task.category && milestones.hasTemplate(task.category)) {
+      const created = await milestones.seedFromTemplate(task.id, task.category);
+      if (created.length) {
+        await logActivity(task.id, {
+          actor_id: data.created_by || data.submitted_by_user_id,
+          actor_name: data.actor_name || null,
+          action: "edited",
+          note: `Auto-added ${created.length} milestones from template (${task.category})`,
+          visible_to_submitter: true,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[tasks] milestone seed failed:", e.message);
+  }
+
   // Fire creation reminder (non-blocking) if due soon or urgent
   setImmediate(() => {
     sendCreationReminder(task).catch(e => console.warn("[tasks] creation reminder:", e.message));
