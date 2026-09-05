@@ -810,7 +810,13 @@ Rules:
     {
       model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929",
       max_tokens: 2000,
-      system: systemPrompt,
+      // System prompt is ~3KB of static category list + rules. Ephemeral cache
+      // gives ~90% discount on this block for any call within 5 min of the last
+      // one. Big win when JJ processes several docs back-to-back (e.g. batch
+      // task creation from hearing notes).
+      system: [
+        { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+      ],
       messages: [{ role: "user", content: userContent }],
     },
     {
