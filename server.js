@@ -1070,16 +1070,19 @@ app.post("/consultant/tasks", requireConsultant, async (req, res) => {
 app.get("/consultant/task/:id", requireConsultant, async (req, res) => {
   try {
     const tasks = require("./tasks");
+    const milestones = require("./task-milestones");
     const portal = require("./consultant-portal");
     const userId = req.user.uid || req.user.id;
     const task = await tasks.getTask(parseInt(req.params.id, 10));
-    // Ownership check — consultant can ONLY view their own submissions
     if (!task || task.submitted_by_user_id !== userId) {
       return res.status(404).send("Work order not found");
     }
-    // Filter activity — hide firm-internal entries from the submitter
-    const activity = await tasks.listActivity(task.id, { filterVisibleOnly: true });
-    const body = portal.renderTaskDetail({ task, activity, user: req.user });
+    const [activity, mList, mProgress] = await Promise.all([
+      tasks.listActivity(task.id, { filterVisibleOnly: true }),
+      milestones.listMilestones(task.id),
+      milestones.getProgress(task.id),
+    ]);
+    const body = portal.renderTaskDetail({ task, activity, milestones: mList, progress: mProgress, user: req.user });
     res.send(portal.renderChrome({ title: task.title, body, activeTab: "dashboard", user: req.user }));
   } catch (err) {
     console.error("[consultant task view]:", err.message);
@@ -1108,6 +1111,239 @@ app.post("/consultant/task/:id/comment", requireConsultant, async (req, res) => 
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Task Milestones API ────────────────────────────────
+// Every task can have an ordered checklist of milestones. Legal workflows
+// with pre-built templates (habeas, motion to reopen, RFE, TM, PI, etc.)
+// auto-populate on task creation. Milestones can be reordered, custom
+// entries added, and each has its own status + due date.
+
+app.get("/admin/tasks/:id/milestones", async (req, res) => {
+  try {
+    const milestones = require("./task-milestones");
+    const list = await milestones.listMilestones(parseInt(req.params.id, 10));
+    const progress = await milestones.getProgress(parseInt(req.params.id, 10));
+    res.json({ ok: true, milestones: list, progress });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/tasks/:id/milestones", async (req, res) => {
+  try {
+    const milestones = require("./task-milestones");
+    const tasks = require("./tasks");
+    const taskId = parseInt(req.params.id, 10);
+    const m = await milestones.createMilestone(taskId, {
+      title: String(req.body?.title || "").trim(),
+      description: req.body?.description || null,
+      due_date: req.body?.due_date || null,
+    });
+    if (!m) return res.status(400).json({ ok: false, error: "Failed to create" });
+    await tasks.logActivity(taskId, {
+      actor_id: req.user?.uid || null,
+      actor_name: req.user?.name || req.user?.username || null,
+      actor_role: req.user?.r || null,
+      action: "edited",
+      note: `Added milestone: ${m.title}`,
+    });
+    res.json({ ok: true, milestone: m });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/tasks/milestones/:id/update", async (req, res) => {
+  try {
+    const milestones = require("./task-milestones");
+    const tasks = require("./tasks");
+    const mId = parseInt(req.params.id, 10);
+    const before = await milestones.getMilestone(mId);
+    if (!before) return res.status(404).json({ ok: false, error: "Not found" });
+    const fields = { ...req.body };
+    if (fields.status === "completed") fields.completed_by = req.user?.uid || null;
+    const updated = await milestones.updateMilestone(mId, fields);
+    if (updated && fields.status && fields.status !== before.status) {
+      await tasks.logActivity(before.task_id, {
+        actor_id: req.user?.uid || null,
+        actor_name: req.user?.name || req.user?.username || null,
+        actor_role: req.user?.r || null,
+        action: "status_changed",
+        old_value: `milestone "${before.title}" was ${before.status}`,
+        new_value: `now ${updated.status}`,
+      });
+    }
+    res.json({ ok: true, milestone: updated });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.delete("/admin/tasks/milestones/:id", async (req, res) => {
+  try {
+    const milestones = require("./task-milestones");
+    const tasks = require("./tasks");
+    const mId = parseInt(req.params.id, 10);
+    const removed = await milestones.deleteMilestone(mId);
+    if (removed) {
+      await tasks.logActivity(removed.task_id, {
+        actor_id: req.user?.uid || null,
+        actor_name: req.user?.name || req.user?.username || null,
+        action: "edited",
+        note: "Milestone removed",
+      });
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Firm-side task detail page — shows task info + milestones checklist +
+// activity timeline. Firm staff toggle milestone status here; consultant
+// sees the milestone progress on their own portal task page.
+app.get("/admin/tasks/:id", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const milestones = require("./task-milestones");
+    const hearingNotes = require("./hearing-notes");
+    const db = require("./db");
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const id = parseInt(req.params.id, 10);
+    const task = await tasks.getTask(id);
+    if (!task) return res.status(404).send("Task not found");
+    const [mList, mProgress, activity] = await Promise.all([
+      milestones.listMilestones(id),
+      milestones.getProgress(id),
+      tasks.listActivity(id),
+    ]);
+
+    // Show consultant badge if task was submitted by referral partner
+    let submitterInfo = null;
+    if (task.submitted_by_user_id) {
+      const r = await db.query(`SELECT full_name, username FROM admin_users WHERE id = $1`, [task.submitted_by_user_id]);
+      if (r.rows.length) submitterInfo = r.rows[0].full_name || r.rows[0].username;
+    }
+
+    const priColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" };
+    const statusColor = { pending: "#B79C62", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" }[task.status] || "#666";
+
+    const mHtml = mList.length ? mList.map(m => {
+      const isDone = m.status === "completed";
+      const isSkipped = m.status === "skipped";
+      const isActive = m.status === "in_progress";
+      const bg = isDone ? "#e8f5e9" : isActive ? "#e3f2fd" : isSkipped ? "#f5f5f5" : "white";
+      const strike = isDone || isSkipped ? "text-decoration:line-through; color:#888;" : "";
+      return `
+        <div style="background:${bg}; padding:12px 14px; border-radius:6px; border:1px solid #eee; margin-bottom:6px; display:flex; align-items:center; gap:12px;">
+          <div style="width:26px; height:26px; border-radius:13px; background:${isDone ? "#2e7d32" : isActive ? "#0061FF" : "#ddd"}; color:white; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0;">${isDone ? "✓" : isSkipped ? "⊘" : m.order_num}</div>
+          <div style="flex:1;">
+            <div style="font-size:14px; color:#0C1C36; ${strike}">${esc(m.title)}</div>
+            ${m.due_date ? `<div style="font-size:11px; color:#666; margin-top:2px;">Due: ${new Date(m.due_date).toLocaleDateString()}</div>` : ""}
+            ${m.completed_at ? `<div style="font-size:11px; color:#2e7d32; margin-top:2px;">Completed ${new Date(m.completed_at).toLocaleDateString()}</div>` : ""}
+          </div>
+          <select onchange="updateMilestone(${m.id}, this.value)" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px;">
+            <option value="pending" ${m.status === "pending" ? "selected" : ""}>Pending</option>
+            <option value="in_progress" ${m.status === "in_progress" ? "selected" : ""}>In Progress</option>
+            <option value="completed" ${m.status === "completed" ? "selected" : ""}>Completed</option>
+            <option value="skipped" ${m.status === "skipped" ? "selected" : ""}>Skipped</option>
+          </select>
+          <button onclick="deleteMilestone(${m.id})" style="background:none; border:none; color:#c62828; cursor:pointer; font-size:16px;" title="Delete milestone">×</button>
+        </div>`;
+    }).join("") : `<div style="padding:24px; text-align:center; color:#888;">No milestones yet. Add one below, or the task's category may have a template that auto-populated on creation.</div>`;
+
+    const timelineHtml = activity.length ? activity.map(a => {
+      const iconMap = { created: "＋", status_changed: "↻", assigned: "👤", note_added: "💬", completed: "✓", reopened: "↺", edited: "✎" };
+      const icon = iconMap[a.action] || "•";
+      let text = a.action.replace(/_/g, " ");
+      if (a.action === "status_changed") text = `Status: ${esc(a.old_value || "?")} → <strong>${esc(a.new_value || "?")}</strong>`;
+      else if (a.action === "assigned") text = a.new_value ? `Assigned to <strong>${esc(a.new_value)}</strong>` : "Unassigned";
+      else if (a.action === "note_added") text = "Note added";
+      else if (a.action === "created") text = "Task created";
+      return `
+        <div style="display:flex; gap:10px; padding:10px 0; border-bottom:1px solid #f0f0f0;">
+          <div style="width:24px; height:24px; border-radius:12px; background:#f5f2ea; display:flex; align-items:center; justify-content:center; font-size:11px; color:#B79C62; flex-shrink:0;">${icon}</div>
+          <div style="flex:1; font-size:12px;">
+            <div style="color:#0C1C36;">${text}${a.actor_name ? ` — <span style="color:#666;">by ${esc(a.actor_name)}</span>` : ""}${!a.visible_to_submitter ? ' <span style="background:#666; color:white; padding:0 6px; border-radius:8px; font-size:9px;">INTERNAL</span>' : ""}</div>
+            ${a.note ? `<div style="background:#fafaf7; padding:6px 8px; border-radius:4px; margin-top:4px; color:#333; white-space:pre-wrap;">${esc(a.note)}</div>` : ""}
+            <div style="color:#999; font-size:10px; margin-top:2px;">${new Date(a.created_at).toLocaleString()}</div>
+          </div>
+        </div>`;
+    }).join("") : `<div style="color:#888; padding:16px; text-align:center; font-size:13px;">No activity yet.</div>`;
+
+    const body = `
+      <div class="page-header">
+        <a href="/admin/tasks" style="color:#666; text-decoration:none; font-size:13px;">← Task list</a>
+        <h1 style="margin-top:8px;">${esc(task.title)}</h1>
+        <div style="margin-top:6px;">
+          <span style="background:${statusColor}; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">${task.status.replace(/_/g, " ").toUpperCase()}</span>
+          <span style="background:${priColor[task.priority] || '#666'}; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:6px;">${(task.priority || "normal").toUpperCase()}</span>
+          ${submitterInfo ? `<span style="background:#7c4dff; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:6px;">🤝 CONSULTANT: ${esc(submitterInfo)}</span>` : ""}
+        </div>
+      </div>
+
+      <div style="background:white; border-radius:8px; border:1px solid #eee; padding:20px; margin-bottom:16px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px; font-size:13px;">
+          ${task.client_name ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Client</div><div style="font-weight:600;">${esc(task.client_name)}</div></div>` : ""}
+          ${task.matter_type ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Matter</div><div>${esc(task.matter_type.replace(/_/g, " "))}</div></div>` : ""}
+          ${task.category ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Category</div><div>${esc(task.category.replace(/_/g, " "))}</div></div>` : ""}
+          ${task.due_date ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Due</div><div>${new Date(task.due_date).toLocaleDateString()}</div></div>` : ""}
+          ${task.a_number ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">A-Number</div><div>${esc(task.a_number)}</div></div>` : ""}
+          ${task.court ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Court</div><div>${esc(task.court)}</div></div>` : ""}
+          ${task.assigned_to ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Assigned</div><div>${esc(task.assigned_to)}</div></div>` : ""}
+        </div>
+        ${task.description ? `<div style="margin-top:14px; padding-top:14px; border-top:1px solid #eee;"><div style="font-size:10px; color:#888; text-transform:uppercase; margin-bottom:6px;">Description</div><div style="white-space:pre-wrap; font-size:13px; color:#333;">${esc(task.description)}</div></div>` : ""}
+      </div>
+
+      <div style="background:white; border-radius:8px; border:1px solid #eee; padding:20px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0; font-size:16px; color:#0C1C36;">✅ Milestones (${mProgress.completed + mProgress.skipped}/${mProgress.total} — ${mProgress.percent}%)</h3>
+        </div>
+        <div style="background:#eee; border-radius:4px; height:8px; margin-bottom:14px; overflow:hidden;">
+          <div style="background:linear-gradient(90deg, #B79C62, #2e7d32); height:100%; width:${mProgress.percent}%; transition:width 0.3s;"></div>
+        </div>
+        <div id="milestone-list">${mHtml}</div>
+        <div style="margin-top:14px; padding-top:14px; border-top:1px solid #eee; display:flex; gap:8px; flex-wrap:wrap;">
+          <input type="text" id="new-milestone" placeholder="Add custom milestone…" style="flex:1; min-width:200px; padding:8px 10px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+          <input type="date" id="new-milestone-due" style="padding:8px; border:1px solid #ccc; border-radius:4px;">
+          <button onclick="addMilestone()" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">+ Add</button>
+        </div>
+      </div>
+
+      <div style="background:white; border-radius:8px; border:1px solid #eee; padding:20px; margin-bottom:16px;">
+        <h3 style="margin:0 0 10px; font-size:16px; color:#0C1C36;">📋 Activity Timeline</h3>
+        ${timelineHtml}
+      </div>
+
+      <script>
+        const TASK_ID = ${id};
+        async function updateMilestone(id, status) {
+          try {
+            const r = await fetch("/admin/tasks/milestones/" + id + "/update", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status }),
+            });
+            if ((await r.json()).ok) location.reload();
+          } catch (e) { alert("Error: " + e.message); }
+        }
+        async function deleteMilestone(id) {
+          if (!confirm("Delete this milestone?")) return;
+          try {
+            const r = await fetch("/admin/tasks/milestones/" + id, { method: "DELETE" });
+            if ((await r.json()).ok) location.reload();
+          } catch (e) { alert("Error: " + e.message); }
+        }
+        async function addMilestone() {
+          const title = document.getElementById("new-milestone").value.trim();
+          const due = document.getElementById("new-milestone-due").value || null;
+          if (!title) return alert("Enter a milestone title");
+          try {
+            const r = await fetch("/admin/tasks/" + TASK_ID + "/milestones", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title, due_date: due }),
+            });
+            if ((await r.json()).ok) location.reload();
+          } catch (e) { alert("Error: " + e.message); }
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: task.title, body, activeItem: "tasks" }));
+  } catch (err) {
+    console.error("[task detail]:", err.message);
+    res.status(500).send("Error: " + err.message);
   }
 });
 
@@ -1500,7 +1736,7 @@ app.get("/admin/tasks", async (req, res) => {
             <input type="checkbox" ${t.status === "completed" ? "checked disabled" : ""} onclick="completeTask(${t.id})" style="width:18px; height:18px; cursor:pointer; margin-top:2px;">
           </td>
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
-            <div style="font-weight:600; color:#0C1C36; ${t.status === "completed" ? "text-decoration:line-through; opacity:0.6;" : ""}">${esc(t.title)}</div>
+            <div style="font-weight:600; ${t.status === "completed" ? "text-decoration:line-through; opacity:0.6;" : ""}"><a href="/admin/tasks/${t.id}" style="color:#0C1C36; text-decoration:none;">${esc(t.title)}</a></div>
             ${categoryLabel ? `<div style="font-size:11px; color:#888; margin-top:2px;">${esc(categoryLabel)}${t.matter_type ? " · " + esc(t.matter_type) : ""}</div>` : (t.matter_type ? `<div style="font-size:11px; color:#888; margin-top:2px;">${esc(t.matter_type)}</div>` : "")}
             ${t.description ? `<div style="font-size:12px; color:#555; margin-top:4px; white-space:pre-wrap;">${esc(t.description).substring(0, 200)}${t.description.length > 200 ? "…" : ""}</div>` : ""}
           </td>
@@ -4538,6 +4774,11 @@ try {
 try {
   require("./federal-matters").initTable().catch(e => console.warn("[federal-matters] init:", e.message));
 } catch (e) { console.warn("[federal-matters] module load:", e.message); }
+
+// Init Milestones table on boot
+try {
+  require("./task-milestones").initTable().catch(e => console.warn("[milestones] init:", e.message));
+} catch (e) { console.warn("[milestones] module load:", e.message); }
 
 // Daily 8 AM Pacific: send task reminders via Telegram
 (async () => {
