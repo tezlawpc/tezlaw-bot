@@ -1963,7 +1963,14 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
           {
             model: "claude-sonnet-4-6",
             max_tokens: 8192,
-            system: jjSystemPrompt,
+            // Cache the system prompt. It's very long (JJ's practice details,
+            // active matters, tool definitions, private-mode rules — several KB)
+            // and stays the same across every message in a session. When JJ
+            // sends 3-10 messages in a burst (planning, drafting, research),
+            // messages 2-N reuse the cached prefix at 10% of normal input cost.
+            system: [
+              { type: "text", text: jjSystemPrompt, cache_control: { type: "ephemeral" } },
+            ],
             tools: allTools,
             messages: loopMessages,
           },
