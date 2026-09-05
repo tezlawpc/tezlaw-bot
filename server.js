@@ -941,6 +941,176 @@ app.post("/admin/pi/case/:id/disbursement", async (req, res) => {
   }
 });
 
+// ── Consultant Portal ──────────────────────────────────
+// Referral partners (role=consultant) get their own limited portal at
+// /consultant/*. They see ONLY their own submissions, add new ones,
+// and follow the timeline. Firm-side users don't come here.
+
+function requireConsultant(req, res, next) {
+  const auth = require("./auth");
+  const cookies = auth.parseCookies(req);
+  const token = cookies[auth.COOKIE_NAME];
+  // We need to verify the token — auth.js exports verifyToken indirectly via
+  // requireAdminAuth, but not directly. Simplest: re-read the cookie ourselves.
+  (async () => {
+    try {
+      // Reuse the same verify function auth uses. Since it's not exported,
+      // we call requireAdminAuth as a probe — but that redirects on failure.
+      // Instead, decode the JWT-like token manually using a lightweight verify.
+      if (!token) {
+        return res.redirect("/admin/login?next=" + encodeURIComponent(req.originalUrl));
+      }
+      // Import verifyToken via a small helper we'll add to auth.js exports
+      const verify = auth.verifyToken || (async () => null);
+      const payload = await verify(token);
+      if (!payload || !payload.uid) {
+        return res.redirect("/admin/login?next=" + encodeURIComponent(req.originalUrl));
+      }
+      req.user = payload;
+      // Now check consultant permission
+      if (typeof auth.hasPermission === "function" && auth.hasPermission(req.user, "consultant.portal")) {
+        return next();
+      }
+      // Non-consultants who somehow land here go back to the firm dashboard.
+      return res.redirect("/admin/dashboard");
+    } catch (err) {
+      console.error("[requireConsultant]:", err.message);
+      return res.redirect("/admin/login");
+    }
+  })();
+}
+
+// Consultant dashboard — their submitted work orders + stats
+app.get("/consultant", requireConsultant, async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const portal = require("./consultant-portal");
+    const userId = req.user.uid || req.user.id;
+    const [openTasks, allForStats] = await Promise.all([
+      tasks.listTasks({ submitted_by_user_id: userId, limit: 100 }),
+      tasks.listTasks({ submitted_by_user_id: userId, completed_only: false, limit: 500 }),
+    ]);
+    // Compute stats from ALL (including completed via a second query)
+    const db = require("./db");
+    const statsRes = await db.query(
+      `SELECT status, COUNT(*)::int AS n FROM tasks WHERE submitted_by_user_id = $1 GROUP BY status`,
+      [userId]
+    );
+    const stats = { total: 0, pending: 0, in_progress: 0, completed: 0, cancelled: 0 };
+    for (const row of statsRes.rows) {
+      stats[row.status] = row.n;
+      stats.total += row.n;
+    }
+    const body = portal.renderDashboard({ user: req.user, tasks: openTasks, stats });
+    res.send(portal.renderChrome({ title: "My Work Orders", body, activeTab: "dashboard", user: req.user }));
+  } catch (err) {
+    console.error("[consultant dashboard]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// New work order form
+app.get("/consultant/new", requireConsultant, async (req, res) => {
+  const portal = require("./consultant-portal");
+  const body = portal.renderNewForm();
+  res.send(portal.renderChrome({ title: "New Work Order", body, activeTab: "new", user: req.user }));
+});
+
+// Submit new work order
+app.post("/consultant/tasks", requireConsultant, async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const userId = req.user.uid || req.user.id;
+    const data = { ...req.body };
+    // Force ownership + hygiene: consultant CANNOT set arbitrary fields
+    // that a firm-side user might (assigned_to, category, etc.). Strip them.
+    const cleaned = {
+      title: String(data.title || "").trim(),
+      description: data.description ? String(data.description).substring(0, 8000) : null,
+      matter_type: data.matter_type || "admin",
+      priority: ["urgent", "high", "normal", "low"].includes(data.priority) ? data.priority : "normal",
+      due_date: data.due_date && /^\d{4}-\d{2}-\d{2}$/.test(data.due_date) ? data.due_date : null,
+      client_name: data.client_name ? String(data.client_name).substring(0, 200) : null,
+      status: "pending",
+      submitted_by_user_id: userId,
+      submitter_visible: true,
+      created_by: userId,
+      actor_name: req.user.name || req.user.username,
+      actor_role: req.user.r || "consultant",
+    };
+    if (!cleaned.title) return res.status(400).json({ ok: false, error: "Title is required" });
+
+    // Client key derived from name (best-effort)
+    if (cleaned.client_name) {
+      cleaned.client_key = cleaned.client_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    }
+
+    const task = await tasks.createTask(cleaned);
+
+    // Ping the firm's Telegram group so someone reviews the new submission
+    try {
+      const telegramGroup = process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID;
+      if (telegramGroup && process.env.TELEGRAM_BOT_TOKEN) {
+        const axios = require("axios");
+        const msg = `🆕 *New consultant work order*\nFrom: ${req.user.name || req.user.username}\n\n*${cleaned.title}*\n${cleaned.client_name ? `Client: ${cleaned.client_name}\n` : ""}Priority: ${cleaned.priority}${cleaned.due_date ? `\nDue: ${cleaned.due_date}` : ""}\n\nView: ${process.env.RENDER_EXTERNAL_URL || ""}/admin/tasks`;
+        await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          chat_id: telegramGroup, text: msg, parse_mode: "Markdown",
+        }).catch(() => {});
+      }
+    } catch {}
+
+    res.json({ ok: true, task });
+  } catch (err) {
+    console.error("[consultant submit]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// View a single work order + activity timeline
+app.get("/consultant/task/:id", requireConsultant, async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const portal = require("./consultant-portal");
+    const userId = req.user.uid || req.user.id;
+    const task = await tasks.getTask(parseInt(req.params.id, 10));
+    // Ownership check — consultant can ONLY view their own submissions
+    if (!task || task.submitted_by_user_id !== userId) {
+      return res.status(404).send("Work order not found");
+    }
+    // Filter activity — hide firm-internal entries from the submitter
+    const activity = await tasks.listActivity(task.id, { filterVisibleOnly: true });
+    const body = portal.renderTaskDetail({ task, activity, user: req.user });
+    res.send(portal.renderChrome({ title: task.title, body, activeTab: "dashboard", user: req.user }));
+  } catch (err) {
+    console.error("[consultant task view]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Add a follow-up comment to a work order
+app.post("/consultant/task/:id/comment", requireConsultant, async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const userId = req.user.uid || req.user.id;
+    const task = await tasks.getTask(parseInt(req.params.id, 10));
+    if (!task || task.submitted_by_user_id !== userId) {
+      return res.status(404).json({ ok: false, error: "Not found" });
+    }
+    const note = String(req.body?.note || "").trim().substring(0, 2000);
+    if (!note) return res.status(400).json({ ok: false, error: "Note required" });
+    await tasks.addTaskComment(task.id, {
+      actor_id: userId,
+      actor_name: req.user.name || req.user.username,
+      actor_role: req.user.r || "consultant",
+      note,
+      visible_to_submitter: true,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Federal Matters & Trademarks ───────────────────────
 // Unified tracking for trademarks (USPTO/TTAB) + federal court cases
 // (district court, circuit appeals, habeas, mandamus).
