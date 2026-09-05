@@ -400,9 +400,17 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
         const resp = await axios.post(
           "https://api.anthropic.com/v1/messages",
           {
-            model:      "claude-sonnet-4-20250514",
+            // Upgrade from the deprecated claude-sonnet-4-20250514 to the
+            // current 4.6 (JJ chose not to downgrade to Haiku for quality reasons).
+            model:      "claude-sonnet-4-6",
             max_tokens: 1024,
-            system:     personalizedSystem,
+            // Cache the system prompt: it's the ~2-3KB Zara personality + firm
+            // context and is identical across every message from every user.
+            // Ephemeral cache = 90% discount on repeated prefixes within 5 min.
+            // A busy hour with 10-30 messages saves substantially.
+            system: [
+              { type: "text", text: personalizedSystem, cache_control: { type: "ephemeral" } },
+            ],
             tools:      allTools,
             messages:   loopMessages,
           },
