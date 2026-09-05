@@ -7767,76 +7767,23 @@ app.get("/legal/cache-stats", async (req, res) => {
 // ── Mobile PWA ────────────────────────────────────────────
 // Optimized for iPhone/Android home-screen install.
 // Universal client search + tap-to-call detail views.
-// ── Mobile PWA ─────────────────────────────────────────
-// All /admin/mobile/* routes render inside the same PWA scope so
-// installed home-screen app users stay in-app. Bottom tab bar
-// navigates between Home / Tasks / Calendar / Clients / More.
+// ── Mobile PWA — unified with desktop ──────────────────
+// One dashboard for the whole firm. /admin/mobile just redirects
+// there so old bookmarks + home-screen icons still work. Every admin
+// page is mobile-responsive (see hearing-notes.js renderAdminChrome
+// media queries for the hamburger sidebar + mobile layout).
 
-app.get("/admin/mobile", async (req, res) => {
-  try {
-    const mobile = require("./mobile-app");
-    const body = await mobile.renderMobileHome(req.user || {});
-    res.send(mobile.renderMobileChrome({ title: "Tez Law", body, activeTab: "home", user: req.user }));
-  } catch (err) {
-    console.error("[mobile home]:", err.message);
-    res.status(500).send("Error: " + err.message);
-  }
-});
+app.get("/admin/mobile", (req, res) => res.redirect("/admin/dashboard"));
+app.get("/admin/mobile/tasks", (req, res) => res.redirect("/admin/tasks"));
+app.get("/admin/mobile/tasks/new", (req, res) => res.redirect("/admin/tasks/new"));
+app.get("/admin/mobile/task/:id", (req, res) => res.redirect(`/admin/tasks/${req.params.id}`));
+app.get("/admin/mobile/calendar", (req, res) => res.redirect("/admin/calendar"));
+app.get("/admin/mobile/clients", (req, res) => res.redirect("/admin/clients"));
+app.get("/admin/mobile/more", (req, res) => res.redirect("/admin/dashboard"));
 
-app.get("/admin/mobile/tasks", async (req, res) => {
-  try {
-    const mobile = require("./mobile-app");
-    const body = await mobile.renderMobileTasks(req.query || {});
-    res.send(mobile.renderMobileChrome({ title: "Tasks", body, activeTab: "tasks", user: req.user }));
-  } catch (err) {
-    console.error("[mobile tasks]:", err.message);
-    res.status(500).send("Error: " + err.message);
-  }
-});
-
-app.get("/admin/mobile/tasks/new", (req, res) => {
-  const mobile = require("./mobile-app");
-  const body = mobile.renderMobileNewTask();
-  res.send(mobile.renderMobileChrome({ title: "New Task", body, activeTab: "tasks", user: req.user }));
-});
-
-app.get("/admin/mobile/task/:id", async (req, res) => {
-  try {
-    const mobile = require("./mobile-app");
-    const body = await mobile.renderMobileTaskDetail(parseInt(req.params.id, 10));
-    res.send(mobile.renderMobileChrome({ title: "Task", body, activeTab: "tasks", user: req.user }));
-  } catch (err) {
-    console.error("[mobile task]:", err.message);
-    res.status(500).send("Error: " + err.message);
-  }
-});
-
-app.get("/admin/mobile/calendar", async (req, res) => {
-  try {
-    const mobile = require("./mobile-app");
-    const body = await mobile.renderMobileCalendar(req.query || {});
-    res.send(mobile.renderMobileChrome({ title: "Calendar", body, activeTab: "calendar", user: req.user }));
-  } catch (err) {
-    console.error("[mobile calendar]:", err.message);
-    res.status(500).send("Error: " + err.message);
-  }
-});
-
-app.get("/admin/mobile/clients", (req, res) => {
-  const mobile = require("./mobile-app");
-  const body = mobile.renderMobileClients();
-  res.send(mobile.renderMobileChrome({ title: "Clients", body, activeTab: "clients", user: req.user }));
-});
-
-app.get("/admin/mobile/more", (req, res) => {
-  const mobile = require("./mobile-app");
-  const body = mobile.renderMobileMore(req.user || {});
-  res.send(mobile.renderMobileChrome({ title: "More", body, activeTab: "more", user: req.user }));
-});
-
-// Client detail — mobile-optimized page with hearings, deadlines, notices.
-// Kept the existing fullscreen renderer since the layout is already great;
-// it just needs to work as-is inside the PWA scope.
+// Client detail page IS still a dedicated mobile-optimized view — the
+// fullscreen card layout works better than the desktop client page on
+// a phone. Same URL, no duplication.
 app.get("/admin/mobile/client/:key", async (req, res) => {
   try {
     const mobile = require("./mobile-app");
@@ -7882,14 +7829,13 @@ app.get("/", (req, res) => res.send("Tez Law P.C. — Zara running on all channe
 app.get("/manifest.json", (req, res) => {
   res.setHeader("Cache-Control", "public, max-age=3600");
   res.json({
-    name: "Zara Admin — Tez Law P.C.",
+    name: "Zara — Tez Law P.C.",
     short_name: "Zara",
     description: "Legal case management for Tez Law P.C.",
-    start_url: "/admin/mobile",
-    // Scope limited to /admin/mobile — any link outside this scope opens
-    // the system browser instead of the installed PWA. Keeps navigation
-    // within the app for tabs Home / Tasks / Calendar / Clients / More.
-    scope: "/admin/mobile",
+    // Dashboard is the single canonical landing page. Scope is the whole
+    // admin panel so every route stays inside the installed PWA.
+    start_url: "/admin/dashboard",
+    scope: "/admin/",
     display: "standalone",
     orientation: "portrait-primary",
     background_color: "#0C1C36",
@@ -7909,10 +7855,10 @@ app.get("/manifest.json", (req, res) => {
       }
     ],
     shortcuts: [
-      { name: "Home",           url: "/admin/mobile" },
-      { name: "Tasks",          url: "/admin/mobile/tasks" },
-      { name: "Calendar",       url: "/admin/mobile/calendar" },
-      { name: "Clients",        url: "/admin/mobile/clients" }
+      { name: "Dashboard",  url: "/admin/dashboard" },
+      { name: "Tasks",      url: "/admin/tasks" },
+      { name: "Calendar",   url: "/admin/calendar" },
+      { name: "Clients",    url: "/admin/clients" }
     ]
   });
 });
