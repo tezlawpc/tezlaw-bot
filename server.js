@@ -7519,22 +7519,25 @@ app.get("/admin/hearing/master/:id", (req, res) => res.redirect(`/admin/hearing/
 //   GET  /admin/hearing/notes/:id                → one hearing detail
 //   POST /admin/hearing/notes/:id/send-paralegal → send to Jue via Telegram
 //
-// Gate: Master + Individual notes pages + firm-wide history are for admin +
-// paralegal only. Attorneys write notes through the dashboard (their assigned
-// work); the firm-wide notes list isn't their view. Silently redirect anyone
-// else to /admin/dashboard rather than throwing a 403. Uses hasPermissionAsync
-// so per-user overrides from /admin/users/:id/permissions apply here too.
-async function gateNotesList(req, res, next) {
-  if (!req.user) return next();
-  const auth = require("./auth");
-  const ok = typeof auth.hasPermissionAsync === "function"
-    ? await auth.hasPermissionAsync(req.user, "notes.list")
-    : (typeof auth.hasPermission === "function" && auth.hasPermission(req.user, "notes.list"));
-  if (ok) return next();
-  return res.redirect("/admin/dashboard");
+// Gate: Master / Individual / History pages each have their own permission
+// so JJ can grant them independently in the per-user checkbox UI. If the user
+// doesn't have the specific permission, silently redirect to /admin/dashboard.
+function gateByPerm(permKey) {
+  return async (req, res, next) => {
+    if (!req.user) return next();
+    const auth = require("./auth");
+    const ok = typeof auth.hasPermissionAsync === "function"
+      ? await auth.hasPermissionAsync(req.user, permKey)
+      : (typeof auth.hasPermission === "function" && auth.hasPermission(req.user, permKey));
+    if (ok) return next();
+    return res.redirect("/admin/dashboard");
+  };
 }
 
-app.get("/admin/hearing/notes", gateNotesList, async (req, res) => {
+// Backward-compat alias — old code called it gateNotesList
+const gateNotesList = gateByPerm("notes.list");
+
+app.get("/admin/hearing/notes", gateByPerm("notes.master"), async (req, res) => {
   try {
     const hn = require("./hearing-notes");
     await hn.initHearingNotesTables();
@@ -8040,7 +8043,7 @@ app.delete("/admin/hearing/notes/:id", async (req, res) => {
 // upload, PDF/text hearing summary upload with Claude extraction, and
 // pre-fill from prior master hearing.
 //
-app.get("/admin/hearing/individual", gateNotesList, async (req, res) => {
+app.get("/admin/hearing/individual", gateByPerm("notes.individual"), async (req, res) => {
   try {
     const ih = require("./individual-hearing-notes");
     await ih.initTables();
@@ -8960,7 +8963,7 @@ app.delete("/admin/clients/:key/documents/:id", async (req, res) => {
 // ── Unified Hearing History ──────────────────────────────
 // Combines master + individual hearing notes into one searchable/filterable
 // list. Every row has an "edit" link that goes to the appropriate editor.
-app.get("/admin/hearing/history", gateNotesList, async (req, res) => {
+app.get("/admin/hearing/history", gateByPerm("notes.history"), async (req, res) => {
   try {
     const hn = require("./hearing-notes");
     const ih = require("./individual-hearing-notes");
