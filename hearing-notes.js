@@ -1352,48 +1352,102 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   .back-link:hover { background: rgba(183,156,98,.1); }
 
   /* ── Mobile ────────────────────────────────── */
+  /* ── Mobile hamburger drawer (< 768px) ─────────
+     Below 768px the sidebar becomes a full-height overlay drawer
+     that slides in from the left when the hamburger is tapped.
+     Content becomes full-width. All admin pages are usable on
+     phone this way — no separate mobile app needed. */
+  .mobile-topbar { display: none; }
+  .drawer-backdrop { display: none; }
+
   @media (max-width: 768px) {
+    /* Sticky mobile top bar with hamburger + page title */
+    .mobile-topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 90;
+      background: var(--brand-navy);
+      color: white;
+      padding: 12px 14px;
+      padding-top: calc(12px + env(safe-area-inset-top));
+      box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+    }
+    .mobile-topbar .hamburger {
+      background: none; border: none; color: white; font-size: 22px;
+      cursor: pointer; padding: 4px 8px; line-height: 1;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .mobile-topbar .mt-title {
+      flex: 1; font-size: 15px; font-weight: 600;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .mobile-topbar .mt-brand-gold { color: var(--brand-gold); font-weight: 700; }
+
+    /* Sidebar: hidden off-screen, slides in when .open toggled */
     .sidebar {
-      width: var(--sidebar-width-mobile);
-      padding: 4px 4px 0;
+      width: 280px;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease-out;
+      box-shadow: 0 0 24px rgba(0,0,0,0.4);
+      padding: 8px 12px 0;
     }
-    .sidebar-brand {
-      justify-content: center;
-      padding: 10px 4px 12px;
-      gap: 0;
-    }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-brand { padding: 14px 8px 16px; justify-content: flex-start; gap: 10px; }
     .sidebar-brand img { width: 34px; }
-    .brand-text { display: none; }
-    .nav-section-header {
-      display: none;
+    .brand-text { display: block; }
+    .nav-section-header { display: block; }
+    .nav-link { justify-content: flex-start; padding: 12px 14px; gap: 12px; }
+    .nav-label, .nav-badge { display: inline; }
+
+    /* Dark backdrop shown while drawer is open — tap to close */
+    .drawer-backdrop {
+      display: block;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 95;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
     }
-    .nav-section {
-      border-top: 1px solid var(--divider);
-      padding-top: 6px;
-      margin-top: 4px;
-    }
-    .nav-section:first-of-type { border-top: none; margin-top: 0; }
-    .nav-link {
-      justify-content: center;
-      padding: 11px 0;
-    }
-    .nav-label, .nav-badge { display: none; }
-    .nav-icon { font-size: 18px; width: auto; }
-    .nav-link.active::before { display: none; }
+    .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+
+    /* Content: full-width on mobile */
     .main {
-      margin-left: var(--sidebar-width-mobile);
-      padding: 16px 12px 24px;
+      margin-left: 0;
+      padding: 14px 12px 24px;
     }
     .page-header h1 { font-size: 20px; }
 
-    /* Mobile: user footer collapses to just avatar */
-    .sidebar-user {
-      padding: 8px 4px;
-      justify-content: center;
-      gap: 0;
+    /* Sidebar user footer visible in drawer */
+    .sidebar-user { padding: 12px 14px; justify-content: flex-start; gap: 10px; }
+    .user-info, .user-logout { display: block; }
+    .user-avatar { width: 34px; height: 34px; font-size: 13px; }
+
+    /* Wrap wide tables so they scroll horizontally */
+    table { min-width: 100%; }
+    .table-wrap, .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* Stack multi-column form grids to single column */
+    .form-grid, [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
+
+    /* Tap-friendly inputs — 16px prevents iOS auto-zoom */
+    input, textarea, select {
+      font-size: 16px !important;
+      min-height: 44px;
     }
-    .user-info, .user-logout { display: none; }
-    .user-avatar { width: 30px; height: 30px; font-size: 12px; }
+    button {
+      min-height: 44px;
+      -webkit-tap-highlight-color: transparent;
+    }
+  }
+
+  @media (max-width: 768px) {
+    /* Legacy rules removed — the new hamburger-drawer block above
+       already handles everything for mobile. Kept the media query
+       open here in case a page-specific override is needed later. */
   }
 
   /* Form/table shared styles (kept from original) */
@@ -1661,8 +1715,37 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   </div>
 </aside>
 
+<!-- Mobile-only slide-in drawer backdrop (tap to close) -->
+<div class="drawer-backdrop" id="drawer-backdrop" onclick="toggleDrawer(false)"></div>
+
+<!-- Mobile-only sticky top bar with hamburger + page title.
+     Hidden by CSS on screens > 768px. -->
+<div class="mobile-topbar">
+  <button class="hamburger" onclick="toggleDrawer(true)" aria-label="Open menu">☰</button>
+  <div class="mt-title"><span class="mt-brand-gold">TEZ</span> · ${escapeHtml(title)}</div>
+</div>
+
 <div class="main">
   <script>
+    // Hamburger drawer for mobile — slides sidebar in from the left,
+    // dims background, closes on backdrop tap or ESC.
+    function toggleDrawer(open) {
+      const sb = document.querySelector('.sidebar');
+      const bk = document.getElementById('drawer-backdrop');
+      if (!sb || !bk) return;
+      if (open === undefined) open = !sb.classList.contains('open');
+      sb.classList.toggle('open', open);
+      bk.classList.toggle('open', open);
+      document.body.style.overflow = open ? 'hidden' : '';
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleDrawer(false); });
+    // Auto-close drawer when a nav link is tapped (so mobile users
+    // don't have to close it manually before the new page loads).
+    document.addEventListener('click', e => {
+      const a = e.target.closest('.sidebar a');
+      if (a && window.innerWidth <= 768) toggleDrawer(false);
+    });
+
     fetch("/admin/whoami").then(r => r.json()).then(d => {
       if (!d.authenticated) return;
       const footer = document.getElementById("sidebar-user");
