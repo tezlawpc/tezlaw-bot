@@ -58,6 +58,11 @@ const ROLES = {
     description: "View-only access to clients, hearings, and Dropbox files",
     color: "#666",
   },
+  consultant: {
+    label: "Consultant / Referral Partner",
+    description: "Referral partners who submit new leads + work orders. Sees ONLY their own submissions and progress. No access to firm-wide clients or matters.",
+    color: "#7c4dff",
+  },
 };
 
 // Which roles are allowed to reach each feature area.
@@ -139,6 +144,15 @@ const PERMISSIONS = {
 
   // Mobile PWA search — same as clients.read
   "mobile.search":        ["admin", "attorney", "paralegal", "viewer"],
+
+  // ── Consultant portal (referral partners) ──────────────
+  // Consultants are external referral partners who bring leads/matters to
+  // the firm. They log in to a *separate* portal with a limited view:
+  // they can submit work orders (tasks) and track progress on the ones
+  // they submitted — nothing else. They cannot see firm-wide data.
+  "consultant.portal":    ["admin", "consultant"],   // access the /consultant portal
+  "consultant.submit":    ["admin", "consultant"],   // submit new work orders / leads
+  "consultant.track":     ["admin", "consultant"],   // track their own submissions
 };
 
 function hasPermission(user, permKey) {
@@ -708,7 +722,14 @@ function mount(app) {
       });
       setSessionCookie(res, token, ttl);
       await updateLastLogin(user.id);
-      const safeNext = (nextUrl.startsWith("/admin/") || nextUrl === "/admin") ? nextUrl : "/admin/hearing/notes";
+      // Consultants have their own portal — bounce them there instead of
+      // the firm admin panel (which they can't see anyway).
+      let safeNext;
+      if (user.role === "consultant") {
+        safeNext = nextUrl.startsWith("/consultant") ? nextUrl : "/consultant";
+      } else {
+        safeNext = (nextUrl.startsWith("/admin/") || nextUrl === "/admin") ? nextUrl : "/admin/hearing/notes";
+      }
       res.redirect(safeNext);
     } catch (err) {
       console.error("[login]:", err.message);
@@ -724,6 +745,9 @@ function mount(app) {
     clearSessionCookie(res);
     res.redirect("/admin/login");
   });
+  // Aliases used by the consultant portal chrome (no /admin/ prefix)
+  app.post("/logout", (req, res) => { clearSessionCookie(res); res.redirect("/admin/login"); });
+  app.get("/logout", (req, res) => { clearSessionCookie(res); res.redirect("/admin/login"); });
 
   // Setup — only accessible while no admin users exist
   app.get("/admin/setup", async (req, res) => {
@@ -1076,6 +1100,9 @@ function mount(app) {
       "content.read", "content.write",
       "intake.access", "pipeline.access", "drip.access",
     ]},
+    { label: "Consultant Portal (Referral Partners)", keys: [
+      "consultant.portal", "consultant.submit", "consultant.track",
+    ]},
     { label: "Firm & Admin Configuration", keys: [
       "users.manage", "admin_panel.access",
       "dropbox.setup", "email.setup", "outlook.setup",
@@ -1126,6 +1153,9 @@ function mount(app) {
     "email.setup": "Configure email integration",
     "outlook.setup": "Configure Outlook integration",
     "system.settings": "System settings",
+    "consultant.portal": "Access consultant portal (external referral partners)",
+    "consultant.submit": "Submit new work orders / leads to the firm",
+    "consultant.track": "Track own submitted work orders",
   };
 
   app.get("/admin/users/:id/permissions", requireRole("admin"), async (req, res) => {
@@ -1316,6 +1346,7 @@ module.exports = {
   countUsers,
   hashPassword,
   verifyPasswordHash,
+  verifyToken,
   parseCookies,
   ROLES,
   PERMISSIONS,
