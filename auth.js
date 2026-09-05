@@ -80,10 +80,18 @@ const PERMISSIONS = {
   // Hearing notes — attorneys write, paralegals + viewers can read
   "hearings.write":       ["admin", "attorney"],
   "hearings.read":        ["admin", "attorney", "paralegal", "viewer"],
-  // Firm-wide notes list (all clients' notes) — admin + paralegal only.
-  // Attorneys interact with hearing notes through the dashboard (their assigned
-  // work) and by creating new notes, not by browsing the firm-wide list.
+
+  // Firm-wide hearing note lists — separate keys per menu item so JJ can
+  // grant/deny each individually in the per-user checkbox UI. Defaults keep
+  // attorneys out (they interact with their own notes via dashboard).
+  "notes.master":         ["admin", "paralegal"],  // "Master Notes" sidebar link
+  "notes.individual":     ["admin", "paralegal"],  // "Individual Notes" sidebar link
+  "notes.history":        ["admin", "paralegal"],  // "Hearing History" sidebar link
+  // Backward-compat alias — any old code still checking notes.list keeps working
   "notes.list":           ["admin", "paralegal"],
+
+  // Dashboard — everyone gets a landing page. Kept broad on purpose.
+  "dashboard.access":     ["admin", "attorney", "paralegal", "viewer"],
 
   // Client-facing tools — all roles, viewers read only
   "clients.write":        ["admin", "attorney", "paralegal"],
@@ -118,6 +126,10 @@ const PERMISSIONS = {
   // Attorneys and viewers don't see accounting at all.
   "accounting.read":      ["admin", "paralegal"],
   "accounting.write":     ["admin", "paralegal"],
+  // Personal Injury — everyone reads, staff writes. Separate from clients
+  // so JJ can grant PI access without giving all clients access, or vice versa.
+  "pi.read":              ["admin", "attorney", "paralegal", "viewer"],
+  "pi.write":             ["admin", "attorney", "paralegal"],
   // Federal Matters & Trademarks — same rules as regular clients
   "federal.read":         ["admin", "attorney", "paralegal", "viewer"],
   "federal.write":        ["admin", "attorney", "paralegal"],
@@ -1037,12 +1049,16 @@ function mount(app) {
   // omitted automatically. Any permission key not listed here will be shown
   // under "Other" so nothing silently disappears.
   const PERMISSION_GROUPS = [
-    { label: "Overview & Clients", keys: [
-      "clients.read", "clients.write", "matters.access",
-      "calendar.read", "deadlines.read", "mobile.search",
+    { label: "Overview & Landing", keys: [
+      "dashboard.access", "clients.read", "clients.write",
+      "calendar.read", "deadlines.read", "deadlines.write",
+      "tasks.read", "tasks.write",
+      "analytics.read", "mobile.search",
     ]},
-    { label: "Immigration", keys: [
-      "notes.list", "hearings.read", "hearings.write", "motions.read", "motions.write",
+    { label: "Immigration Hearings & Motions", keys: [
+      "notes.master", "notes.individual", "notes.history",
+      "hearings.read", "hearings.write",
+      "motions.read", "motions.write",
     ]},
     { label: "Federal & Trademarks", keys: [
       "federal.read", "federal.write",
@@ -1050,54 +1066,66 @@ function mount(app) {
     { label: "Personal Injury", keys: [
       "pi.read", "pi.write",
     ]},
-    { label: "Tasks", keys: [
-      "tasks.read", "tasks.write",
-    ]},
     { label: "Accounting", keys: [
       "accounting.read", "accounting.write",
     ]},
-    { label: "Intake, Pipeline & Content", keys: [
-      "intake.access", "pipeline.access", "drip.access",
+    { label: "Notices, Dropbox, Matters, Content", keys: [
+      "notices.read", "notices.write", "notices.send",
+      "dropbox.files.read", "dropbox.files.write",
+      "matters.access",
       "content.read", "content.write",
+      "intake.access", "pipeline.access", "drip.access",
     ]},
-    { label: "Firm & Admin", keys: [
-      "dropbox.read", "dropbox.write", "notices.read", "notices.write",
-      "analytics.read", "users.manage",
+    { label: "Firm & Admin Configuration", keys: [
+      "users.manage", "admin_panel.access",
+      "dropbox.setup", "email.setup", "outlook.setup",
+      "system.settings",
     ]},
   ];
 
   // Human-friendly label for each permission key (falls back to the key itself)
   const PERMISSION_LABELS = {
-    "clients.read": "View clients",
-    "clients.write": "Edit clients",
-    "matters.access": "View matters / cases",
+    "dashboard.access": "Access dashboard (landing page)",
+    "clients.read": "View clients page",
+    "clients.write": "Create/edit clients",
     "calendar.read": "View calendar",
-    "deadlines.read": "View deadlines",
-    "mobile.search": "Mobile search app",
-    "notes.list": "See firm-wide hearing notes list",
-    "hearings.read": "View hearing notes",
-    "hearings.write": "Create/edit hearing notes",
-    "motions.read": "View motions",
-    "motions.write": "Create/edit motions",
-    "federal.read": "View federal & TM matters",
-    "federal.write": "Create/edit federal & TM matters",
-    "pi.read": "View PI cases",
-    "pi.write": "Create/edit PI cases",
-    "tasks.read": "View tasks",
+    "deadlines.read": "View deadlines page",
+    "deadlines.write": "Create/edit deadlines",
+    "tasks.read": "View task list",
     "tasks.write": "Create/edit tasks",
-    "accounting.read": "View accounting (ledger, IOLTA, IS/BS, QBO)",
-    "accounting.write": "Create accounting entries",
+    "analytics.read": "View analytics / reports",
+    "mobile.search": "Mobile search app",
+    "notes.master": "Master Notes (sidebar link)",
+    "notes.individual": "Individual Notes (sidebar link)",
+    "notes.history": "Hearing History (sidebar link)",
+    "notes.list": "[legacy alias — use master/individual/history above]",
+    "hearings.read": "Read hearing notes (individual notes)",
+    "hearings.write": "Create/edit hearing notes",
+    "motions.read": "View court motions",
+    "motions.write": "Create/edit motions",
+    "federal.read": "View Federal & TM matters (all sidebar links)",
+    "federal.write": "Create/edit Federal & TM matters",
+    "pi.read": "View PI (all sidebar links + brokers)",
+    "pi.write": "Create/edit PI cases",
+    "accounting.read": "View accounting (Ledger, IOLTA, IS/BS, QBO — all links)",
+    "accounting.write": "Create accounting entries + QBO push",
+    "notices.read": "View hearing notices",
+    "notices.write": "Edit hearing notices",
+    "notices.send": "Send hearing notices to clients",
+    "dropbox.files.read": "View / download Dropbox files",
+    "dropbox.files.write": "Upload / delete Dropbox files",
+    "matters.access": "Intake, Pipeline, Drip, Conflicts, SOL, Research (all Matters Manager links)",
+    "content.read": "View blog / website content",
+    "content.write": "Edit blog / website content",
     "intake.access": "Intake console",
     "pipeline.access": "Sales pipeline",
     "drip.access": "Drip campaigns",
-    "content.read": "View blog / content",
-    "content.write": "Edit blog / content",
-    "dropbox.read": "View Dropbox files",
-    "dropbox.write": "Upload to Dropbox",
-    "notices.read": "View hearing notices",
-    "notices.write": "Process hearing notices",
-    "analytics.read": "View analytics / reports",
     "users.manage": "Manage users & permissions",
+    "admin_panel.access": "Admin panel entry",
+    "dropbox.setup": "Configure Dropbox integration",
+    "email.setup": "Configure email integration",
+    "outlook.setup": "Configure Outlook integration",
+    "system.settings": "System settings",
   };
 
   app.get("/admin/users/:id/permissions", requireRole("admin"), async (req, res) => {
