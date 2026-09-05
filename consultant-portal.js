@@ -282,9 +282,40 @@ function renderNewForm() {
 }
 
 // ── Task detail with activity timeline ─────────────────────
-function renderTaskDetail({ task, activity, user }) {
+function renderTaskDetail({ task, activity, milestones = [], progress = null, user }) {
   const status = STATUS_COLORS[task.status] || "#666";
   const statusLabel = STATUS_LABELS[task.status] || task.status;
+
+  // Milestone progress display — read-only for consultants. They see the
+  // steps the firm is working through so they know exactly where things
+  // stand without asking for updates.
+  const milestonesHtml = milestones.length ? `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0; font-size:16px; color:var(--navy);">✅ Progress (${progress ? progress.percent : 0}%)</h3>
+        <div style="font-size:12px; color:#666;">${progress ? (progress.completed + progress.skipped) : 0} of ${progress ? progress.total : 0} steps done</div>
+      </div>
+      <div style="background:#eee; border-radius:4px; height:8px; margin-bottom:16px; overflow:hidden;">
+        <div style="background:linear-gradient(90deg, var(--gold), #2e7d32); height:100%; width:${progress ? progress.percent : 0}%;"></div>
+      </div>
+      ${milestones.map(m => {
+        const isDone = m.status === "completed";
+        const isSkipped = m.status === "skipped";
+        const isActive = m.status === "in_progress";
+        const bg = isDone ? "#e8f5e9" : isActive ? "#e3f2fd" : isSkipped ? "#f5f5f5" : "white";
+        const strike = isDone || isSkipped ? "text-decoration:line-through; color:#888;" : "";
+        return `
+          <div style="background:${bg}; padding:12px 14px; border-radius:6px; border:1px solid #eee; margin-bottom:6px; display:flex; align-items:center; gap:12px;">
+            <div style="width:26px; height:26px; border-radius:13px; background:${isDone ? "#2e7d32" : isActive ? "#0061FF" : "#ddd"}; color:white; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0;">${isDone ? "✓" : isSkipped ? "⊘" : m.order_num}</div>
+            <div style="flex:1;">
+              <div style="font-size:14px; color:var(--navy); ${strike}">${esc(m.title)}</div>
+              ${m.completed_at ? `<div style="font-size:11px; color:#2e7d32; margin-top:2px;">Completed ${new Date(m.completed_at).toLocaleDateString()}</div>` : ""}
+              ${m.due_date && !isDone ? `<div style="font-size:11px; color:#666; margin-top:2px;">Target: ${new Date(m.due_date).toLocaleDateString()}</div>` : ""}
+            </div>
+            ${isActive ? '<span style="background:#0061FF; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">IN PROGRESS</span>' : ""}
+          </div>`;
+      }).join("")}
+    </div>` : "";
 
   const ACTION_ICONS = {
     created: "＋",
@@ -341,6 +372,8 @@ function renderTaskDetail({ task, activity, user }) {
       </div>
       ${task.description ? `<div style="margin-top:16px; padding-top:16px; border-top:1px solid #eee;"><div style="font-size:10px; color:#888; text-transform:uppercase; margin-bottom:6px;">Original Submission</div><div style="white-space:pre-wrap; font-size:13px; color:#333;">${esc(task.description)}</div></div>` : ""}
     </div>
+
+    ${milestonesHtml}
 
     <div class="card">
       <h3 style="margin-top:0; font-size:16px; color:var(--navy);">📋 Activity Timeline</h3>
