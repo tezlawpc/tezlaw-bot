@@ -1114,6 +1114,224 @@ app.post("/consultant/task/:id/comment", requireConsultant, async (req, res) => 
   }
 });
 
+// Edit an existing task — pre-filled form
+app.get("/admin/tasks/:id/edit", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const hearingNotes = require("./hearing-notes");
+    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const id = parseInt(req.params.id, 10);
+    const task = await tasks.getTask(id);
+    if (!task) return res.status(404).send("Task not found");
+
+    const catGroups = Object.entries(tasks.CATEGORIES).map(([matter, cats]) => {
+      const opts = cats.map(c => `<option value="${c.key}" data-matter="${matter}" ${task.category === c.key ? "selected" : ""}>${c.label}</option>`).join("");
+      return `<optgroup label="${matter.replace(/_/g, "/")}">${opts}</optgroup>`;
+    }).join("");
+
+    const matterOpts = ["immigration", "pi", "business", "ll_tenant", "estate", "tm", "real_estate", "admin"].map(m =>
+      `<option value="${m}" ${task.matter_type === m ? "selected" : ""}>${m.replace(/_/g, "/")}</option>`
+    ).join("");
+
+    const priorityOpts = [
+      ["normal", "Normal"], ["urgent", "🔴 Urgent"], ["high", "🟠 High"], ["low", "⚪ Low"],
+    ].map(([k, l]) => `<option value="${k}" ${task.priority === k ? "selected" : ""}>${l}</option>`).join("");
+
+    const statusOpts = [
+      ["pending", "Pending"], ["in_progress", "In Progress"], ["completed", "Completed"], ["cancelled", "Cancelled"],
+    ].map(([k, l]) => `<option value="${k}" ${task.status === k ? "selected" : ""}>${l}</option>`).join("");
+
+    const recurrenceOpts = [
+      ["", "One-time"], ["weekly", "Weekly"], ["monthly", "Monthly"], ["quarterly", "Quarterly"], ["yearly", "Yearly"],
+    ].map(([k, l]) => `<option value="${k}" ${task.recurrence_pattern === k ? "selected" : ""}>${l}</option>`).join("");
+
+    // Format date for input type=date (needs YYYY-MM-DD)
+    const dueDate = task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "";
+    const dueTime = task.due_time ? String(task.due_time).substring(0, 5) : "";
+
+    const body = `
+      <div class="page-header">
+        <h1>✎ Edit Task</h1>
+        <a href="/admin/tasks/${id}" class="back-link">← Back to task</a>
+      </div>
+
+      <form onsubmit="saveTaskEdit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:800px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Task Title (required)</label>
+            <input type="text" name="title" required value="${esc(task.title)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-size:14px;">
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Category</label>
+            <select name="category" onchange="onCategoryChange(this)" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <option value="">— pick category —</option>${catGroups}
+            </select>
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Matter Type</label>
+            <select name="matter_type" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <option value="">—</option>${matterOpts}
+            </select>
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Status</label>
+            <select name="status" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">${statusOpts}</select>
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Priority</label>
+            <select name="priority" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">${priorityOpts}</select>
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Due Date</label>
+            <input type="date" name="due_date" value="${esc(dueDate)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          </div>
+          <div><label style="font-size:11px; color:#888;">Due Time (optional)</label>
+            <input type="time" name="due_time" value="${esc(dueTime)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Remind Days Before</label>
+            <input type="number" name="reminder_days_before" value="${task.reminder_days_before || 3}" min="0" max="30" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          </div>
+          <div><label style="font-size:11px; color:#888;">Assigned To</label>
+            <input type="text" name="assigned_to" value="${esc(task.assigned_to)}" placeholder="e.g. JJ, Michael, Chandler" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Client Name</label>
+            <input type="text" name="client_name" value="${esc(task.client_name)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          </div>
+          <div><label style="font-size:11px; color:#888;">A-Number (immigration)</label>
+            <input type="text" name="a_number" value="${esc(task.a_number)}" placeholder="A123456789" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Case Number</label>
+            <input type="text" name="case_number" value="${esc(task.case_number)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          </div>
+          <div><label style="font-size:11px; color:#888;">Court</label>
+            <input type="text" name="court" value="${esc(task.court)}" placeholder="e.g. LA Immigration Court, LASC, 9th Cir." style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          </div>
+
+          <div><label style="font-size:11px; color:#888;">Recurring?</label>
+            <select name="recurrence_pattern" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">${recurrenceOpts}</select>
+          </div>
+
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Description / Notes</label>
+            <textarea name="description" rows="4" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit;">${esc(task.description)}</textarea>
+          </div>
+
+          ${task.status === "completed" ? `
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Completion Notes</label>
+            <textarea name="completion_notes" rows="2" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit;">${esc(task.completion_notes)}</textarea>
+          </div>` : ""}
+        </div>
+
+        <div style="margin-top:20px; display:flex; gap:10px; align-items:center;">
+          <button type="submit" id="save-btn" style="background:#0C1C36; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💾 Save Changes</button>
+          <a href="/admin/tasks/${id}" style="color:#666; text-decoration:none;">Cancel</a>
+          <button type="button" onclick="deleteTaskConfirm()" style="background:#c62828; color:white; padding:10px 20px; border:none; border-radius:6px; cursor:pointer; margin-left:auto;">🗑️ Delete Task</button>
+        </div>
+      </form>
+
+      <script>
+        function onCategoryChange(sel) {
+          const matter = sel.options[sel.selectedIndex]?.dataset?.matter;
+          if (matter) {
+            const matterSel = document.querySelector('[name="matter_type"]');
+            if (matterSel && !matterSel.value) matterSel.value = matter;
+          }
+        }
+        async function saveTaskEdit(e) {
+          e.preventDefault();
+          const btn = document.getElementById("save-btn");
+          btn.disabled = true; btn.textContent = "⏳ Saving…";
+          const fd = new FormData(e.target);
+          const data = {};
+          for (const [k, v] of fd.entries()) data[k] = v === "" ? null : v;
+          data.reminder_days_before = parseInt(data.reminder_days_before, 10) || 3;
+          data.is_recurring = !!data.recurrence_pattern;
+          if (data.client_name) data.client_key = data.client_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          try {
+            const r = await fetch("/admin/tasks/${id}/update", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(data),
+            });
+            const d = await r.json();
+            if (d.ok) location.href = "/admin/tasks/${id}";
+            else { alert("Error: " + (d.error || "Unknown")); btn.disabled = false; btn.textContent = "💾 Save Changes"; }
+          } catch (err) {
+            alert("Network error: " + err.message);
+            btn.disabled = false; btn.textContent = "💾 Save Changes";
+          }
+        }
+        async function deleteTaskConfirm() {
+          if (!confirm("Delete this task? This cannot be undone.")) return;
+          try {
+            const r = await fetch("/admin/tasks/${id}", { method: "DELETE" });
+            const d = await r.json();
+            if (d.ok) location.href = "/admin/tasks";
+            else alert("Error: " + d.error);
+          } catch (err) { alert("Network error: " + err.message); }
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "Edit Task", body, activeItem: "tasks" }));
+  } catch (err) {
+    console.error("[task edit]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Update task — save edits from the edit form
+app.post("/admin/tasks/:id/update", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const id = parseInt(req.params.id, 10);
+    // Pass actor info so activity log captures who made the change
+    const fields = {
+      ...req.body,
+      _actor_id: req.user?.uid || null,
+      _actor_name: req.user?.name || req.user?.username || null,
+      _actor_role: req.user?.r || null,
+    };
+    const updated = await tasks.updateTask(id, fields);
+    if (!updated) return res.status(404).json({ ok: false, error: "Task not found" });
+
+    // If category changed to one with a template + no milestones exist yet, auto-seed
+    try {
+      const milestones = require("./task-milestones");
+      if (updated.category && milestones.hasTemplate(updated.category)) {
+        const existing = await milestones.listMilestones(id);
+        if (!existing.length) {
+          const created = await milestones.seedFromTemplate(id, updated.category);
+          if (created.length) {
+            await tasks.logActivity(id, {
+              actor_id: req.user?.uid || null,
+              actor_name: req.user?.name || req.user?.username || null,
+              action: "edited",
+              note: `Auto-added ${created.length} milestones from template (${updated.category})`,
+            });
+          }
+        }
+      }
+    } catch (e) { console.warn("[task update] milestone seed:", e.message); }
+
+    res.json({ ok: true, task: updated });
+  } catch (err) {
+    console.error("[task update]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Delete task
+app.delete("/admin/tasks/:id", async (req, res) => {
+  try {
+    const tasks = require("./tasks");
+    const id = parseInt(req.params.id, 10);
+    await tasks.deleteTask(id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[task delete]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Task Milestones API ────────────────────────────────
 // Every task can have an ordered checklist of milestones. Legal workflows
 // with pre-built templates (habeas, motion to reopen, RFE, TM, PI, etc.)
@@ -1266,13 +1484,19 @@ app.get("/admin/tasks/:id", async (req, res) => {
     }).join("") : `<div style="color:#888; padding:16px; text-align:center; font-size:13px;">No activity yet.</div>`;
 
     const body = `
-      <div class="page-header">
-        <a href="/admin/tasks" style="color:#666; text-decoration:none; font-size:13px;">← Task list</a>
-        <h1 style="margin-top:8px;">${esc(task.title)}</h1>
-        <div style="margin-top:6px;">
-          <span style="background:${statusColor}; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">${task.status.replace(/_/g, " ").toUpperCase()}</span>
-          <span style="background:${priColor[task.priority] || '#666'}; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:6px;">${(task.priority || "normal").toUpperCase()}</span>
-          ${submitterInfo ? `<span style="background:#7c4dff; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:6px;">🤝 CONSULTANT: ${esc(submitterInfo)}</span>` : ""}
+      <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap;">
+        <div style="flex:1;">
+          <a href="/admin/tasks" style="color:#666; text-decoration:none; font-size:13px;">← Task list</a>
+          <h1 style="margin-top:8px;">${esc(task.title)}</h1>
+          <div style="margin-top:6px;">
+            <span style="background:${statusColor}; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">${task.status.replace(/_/g, " ").toUpperCase()}</span>
+            <span style="background:${priColor[task.priority] || '#666'}; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:6px;">${(task.priority || "normal").toUpperCase()}</span>
+            ${submitterInfo ? `<span style="background:#7c4dff; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:6px;">🤝 CONSULTANT: ${esc(submitterInfo)}</span>` : ""}
+          </div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <a href="/admin/tasks/${id}/edit" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600; font-size:13px;">✎ Edit</a>
+          ${task.status !== "completed" ? `<button onclick="markComplete()" style="background:#2e7d32; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600; font-size:13px;">✓ Mark Complete</button>` : ""}
         </div>
       </div>
 
@@ -1311,6 +1535,19 @@ app.get("/admin/tasks/:id", async (req, res) => {
 
       <script>
         const TASK_ID = ${id};
+        async function markComplete() {
+          const notes = prompt("Completion notes (optional):");
+          if (notes === null) return;  // user cancelled
+          try {
+            const r = await fetch("/admin/tasks/" + TASK_ID + "/complete", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ completion_notes: notes || null }),
+            });
+            const d = await r.json();
+            if (d.ok) location.reload();
+            else alert("Error: " + d.error);
+          } catch (e) { alert("Network error: " + e.message); }
+        }
         async function updateMilestone(id, status) {
           try {
             const r = await fetch("/admin/tasks/milestones/" + id + "/update", {
