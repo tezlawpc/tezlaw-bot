@@ -1115,12 +1115,14 @@ app.post("/consultant/task/:id/comment", requireConsultant, async (req, res) => 
 });
 
 // Edit an existing task — pre-filled form
-app.get("/admin/tasks/:id/edit", async (req, res) => {
+app.get("/admin/tasks/:id/edit", async (req, res, next) => {
+  // Guard against /admin/tasks/new/edit and similar non-numeric IDs
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return next();
   try {
     const tasks = require("./tasks");
     const hearingNotes = require("./hearing-notes");
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    const id = parseInt(req.params.id, 10);
     const task = await tasks.getTask(id);
     if (!task) return res.status(404).send("Task not found");
 
@@ -1279,10 +1281,11 @@ app.get("/admin/tasks/:id/edit", async (req, res) => {
 });
 
 // Update task — save edits from the edit form
-app.post("/admin/tasks/:id/update", async (req, res) => {
+app.post("/admin/tasks/:id/update", async (req, res, next) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return next();
   try {
     const tasks = require("./tasks");
-    const id = parseInt(req.params.id, 10);
     // Pass actor info so activity log captures who made the change
     const fields = {
       ...req.body,
@@ -1320,10 +1323,11 @@ app.post("/admin/tasks/:id/update", async (req, res) => {
 });
 
 // Delete task
-app.delete("/admin/tasks/:id", async (req, res) => {
+app.delete("/admin/tasks/:id", async (req, res, next) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return next();
   try {
     const tasks = require("./tasks");
-    const id = parseInt(req.params.id, 10);
     await tasks.deleteTask(id);
     res.json({ ok: true });
   } catch (err) {
@@ -1338,20 +1342,23 @@ app.delete("/admin/tasks/:id", async (req, res) => {
 // auto-populate on task creation. Milestones can be reordered, custom
 // entries added, and each has its own status + due date.
 
-app.get("/admin/tasks/:id/milestones", async (req, res) => {
+app.get("/admin/tasks/:id/milestones", async (req, res, next) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return next();
   try {
     const milestones = require("./task-milestones");
-    const list = await milestones.listMilestones(parseInt(req.params.id, 10));
-    const progress = await milestones.getProgress(parseInt(req.params.id, 10));
+    const list = await milestones.listMilestones(id);
+    const progress = await milestones.getProgress(id);
     res.json({ ok: true, milestones: list, progress });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.post("/admin/tasks/:id/milestones", async (req, res) => {
+app.post("/admin/tasks/:id/milestones", async (req, res, next) => {
+  const taskId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(taskId) || taskId <= 0) return next();
   try {
     const milestones = require("./task-milestones");
     const tasks = require("./tasks");
-    const taskId = parseInt(req.params.id, 10);
     const m = await milestones.createMilestone(taskId, {
       title: String(req.body?.title || "").trim(),
       description: req.body?.description || null,
@@ -1414,14 +1421,19 @@ app.delete("/admin/tasks/milestones/:id", async (req, res) => {
 // Firm-side task detail page — shows task info + milestones checklist +
 // activity timeline. Firm staff toggle milestone status here; consultant
 // sees the milestone progress on their own portal task page.
-app.get("/admin/tasks/:id", async (req, res) => {
+app.get("/admin/tasks/:id", async (req, res, next) => {
+  // Guard: route params like "new" or "milestones" would otherwise match
+  // this handler because /admin/tasks/:id is registered earlier in the
+  // file than /admin/tasks/new. If :id isn't a plain integer, defer to
+  // the next matching route (e.g. /admin/tasks/new, /admin/tasks/analyze).
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return next();
   try {
     const tasks = require("./tasks");
     const milestones = require("./task-milestones");
     const hearingNotes = require("./hearing-notes");
     const db = require("./db");
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    const id = parseInt(req.params.id, 10);
     const task = await tasks.getTask(id);
     if (!task) return res.status(404).send("Task not found");
     const [mList, mProgress, activity] = await Promise.all([
@@ -2491,97 +2503,27 @@ app.post("/admin/tasks/bulk-create", async (req, res) => {
 app.post("/admin/tasks", async (req, res) => {
   try {
     const tasks = require("./tasks");
-    const task = await tasks.createTask({ ...req.body, created_by: req.user?.id || null });
+    const task = await tasks.createTask({ ...req.body, created_by: req.user?.uid || null });
     res.json({ ok: true, task });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get("/admin/tasks/:id", async (req, res) => {
+// Note: /admin/tasks/:id (detail render), /admin/tasks/:id/edit (edit form),
+// POST /admin/tasks/:id/update, and DELETE /admin/tasks/:id all live earlier
+// in this file (near the milestones section) with proper NaN guards.
+
+app.post("/admin/tasks/:id/complete", async (req, res, next) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return next();
   try {
     const tasks = require("./tasks");
-    const hearingNotes = require("./hearing-notes");
-    const t = await tasks.getTask(parseInt(req.params.id, 10));
-    if (!t) return res.status(404).send("Task not found");
-    const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    const categoryLabel = t.category ? (tasks.CATEGORY_LABELS[t.category] || t.category) : "";
-    const priorityColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" }[t.priority] || "#666";
-
-    const body = `
-      <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
-        <div>
-          <h1>${esc(t.title)}</h1>
-          <div style="margin-top:6px;">
-            <span style="background:${priorityColor}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600;">${t.priority.toUpperCase()}</span>
-            <span style="background:${t.status === "completed" ? "#2e7d32" : "#B79C62"}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600; margin-left:6px;">${t.status.replace(/_/g, " ").toUpperCase()}</span>
-          </div>
-        </div>
-        <div style="display:flex; gap:8px;">
-          ${t.status !== "completed" ? `<button onclick="markDone()" style="background:#2e7d32; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">✓ Mark Complete</button>` : ""}
-          <a href="/admin/tasks" class="back-link" style="padding:10px 16px;">← Task list</a>
-        </div>
-      </div>
-
-      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; font-size:13px;">
-          ${categoryLabel ? `<div><strong>Category:</strong> ${esc(categoryLabel)}</div>` : ""}
-          ${t.matter_type ? `<div><strong>Matter:</strong> ${esc(t.matter_type)}</div>` : ""}
-          ${t.due_date ? `<div><strong>Due:</strong> ${new Date(t.due_date).toLocaleDateString()}${t.due_time ? " " + t.due_time : ""}</div>` : ""}
-          ${t.client_name ? `<div><strong>Client:</strong> ${esc(t.client_name)}</div>` : ""}
-          ${t.a_number ? `<div><strong>A-Number:</strong> ${esc(t.a_number)}</div>` : ""}
-          ${t.case_number ? `<div><strong>Case #:</strong> ${esc(t.case_number)}</div>` : ""}
-          ${t.court ? `<div><strong>Court:</strong> ${esc(t.court)}</div>` : ""}
-          ${t.assigned_to ? `<div><strong>Assigned:</strong> ${esc(t.assigned_to)}</div>` : ""}
-          ${t.is_recurring ? `<div><strong>Recurs:</strong> ${esc(t.recurrence_pattern)}</div>` : ""}
-        </div>
-        ${t.description ? `<div style="margin-top:14px; padding-top:14px; border-top:1px solid #eee; white-space:pre-wrap; font-size:13px; line-height:1.6;">${esc(t.description)}</div>` : ""}
-      </div>
-
-      ${t.status === "completed" && t.completed_at ? `
-      <div style="background:#e8f5e9; padding:14px 18px; border-radius:8px; border-left:3px solid #2e7d32; margin-bottom:16px; font-size:13px;">
-        <strong>✓ Completed</strong> on ${new Date(t.completed_at).toLocaleString()}
-        ${t.completion_notes ? `<div style="margin-top:6px; white-space:pre-wrap;">${esc(t.completion_notes)}</div>` : ""}
-      </div>` : ""}
-
-      <div style="display:flex; gap:8px;">
-        <a href="/admin/tasks/${t.id}/edit" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">✏️ Edit</a>
-        <button onclick="deleteTask()" style="background:#c62828; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🗑️ Delete</button>
-      </div>
-
-      <script>
-        async function markDone() {
-          const notes = prompt("Optional completion notes:");
-          if (notes === null) return;
-          const r = await fetch("/admin/tasks/${t.id}/complete", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({notes})});
-          if (r.ok) location.reload();
-        }
-        async function deleteTask() {
-          if (!confirm("Delete this task? This cannot be undone.")) return;
-          const r = await fetch("/admin/tasks/${t.id}", { method: "DELETE" });
-          if (r.ok) location.href = "/admin/tasks";
-        }
-      </script>`;
-
-    res.send(hearingNotes.renderAdminChrome({ title: t.title, body, activeItem: "tasks" }));
-  } catch (err) {
-    res.status(500).send("Error: " + err.message);
-  }
-});
-
-app.post("/admin/tasks/:id/complete", async (req, res) => {
-  try {
-    const tasks = require("./tasks");
-    const t = await tasks.completeTask(parseInt(req.params.id, 10), {
-      userId: req.user?.id || null, notes: req.body?.notes,
+    const t = await tasks.completeTask(id, {
+      userId: req.user?.uid || null,
+      notes: req.body?.completion_notes || req.body?.notes,
+      actorName: req.user?.name || req.user?.username || null,
+      actorRole: req.user?.r || null,
     });
     res.json({ ok: true, task: t });
-  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
-});
-
-app.delete("/admin/tasks/:id", async (req, res) => {
-  try {
-    const tasks = require("./tasks");
-    await tasks.deleteTask(parseInt(req.params.id, 10));
-    res.json({ ok: true });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
