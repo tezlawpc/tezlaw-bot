@@ -457,6 +457,105 @@ Produce the recap now. Start directly — no preamble.`;
   }
 }
 
+// ONE Claude call producing BOTH the paralegal recap AND the client summary
+// for an individual (merits) hearing. Cuts input token cost roughly in half
+// vs the previous two-parallel-calls approach — the full structured hearing
+// data (witness testimony, closing arg, exhibits, etc.) was being sent twice.
+async function generateBothSummaries(data) {
+  const lang = data.client_language || "en";
+  const langNames = {
+    en: "English",
+    zh: "Simplified Chinese (中文)",
+    es: "Spanish (Español)",
+    hi: "Hindi (हिन्दी)",
+    pa: "Punjabi (ਪੰਜਾਬੀ)",
+  };
+  const languageName = langNames[lang] || "English";
+  const structured = buildStructuredForAISummary(data);
+
+  const prompt = `You are producing TWO outputs from the same individual (merits) hearing at Tez Law Firm — a paralegal recap and a client summary. Produce both in one response, separated by the exact markers shown at the bottom.
+
+=== SECTION 1: PARALEGAL RECAP (English, short) ===
+Keep it MINIMAL. Case-file update — the paralegal has access to the full note with all witness testimony and closing argument, so DO NOT reproduce those.
+
+Include ONLY these sections (skip any with no info):
+1. **Case info** — one line each: client name, A#, case type, hearing date, judge, court, appearance method
+2. **Exhibits** — brief count + any NOT admitted (specify which and why)
+3. **Pre-hearing notes** (if any — quote briefly)
+4. **Disposition** + disposition notes
+5. **Next hearing** (date + type) if scheduled
+6. **Action items** — short bullet list of follow-up tasks
+
+Rules for the recap:
+- Under 300 words. Punchy, scannable, no filler.
+- No witness testimony summaries. No closing argument content.
+- Preserve specific dates, exhibit numbers, and deadlines exactly.
+- Never invent info. Skip empty sections.
+
+=== SECTION 2: CLIENT SUMMARY (in ${languageName}) ===
+The client attended their individual/merits hearing today. Write a warm but professional summary explaining what happened.
+
+Rules for the client summary:
+- Write ENTIRELY in ${languageName}
+- Plain language — no legalese
+- Warm and reassuring but professional
+- Cover: what happened, what the judge decided (or when they will decide), what the client needs to do next
+- Include specific dates and deadlines with clear context
+- Never invent information
+- End with firm contact info: "If you have questions, please contact us at 626-678-8677 or info@tezlawfirm.com" (translate this line)
+- If interpreter was used, mention this positively
+- Address the client directly ("You" / "您" / "Usted" / "आप" / "ਤੁਸੀਂ")
+- Sign off with "Sincerely, TEZ LAW FIRM" (translate "Sincerely"; keep "TEZ LAW FIRM" — for Chinese use "TEZ律师事务所")
+- Do NOT use any personal attorney name
+
+===== SHARED SOURCE DATA =====
+
+Client's name: ${data.client_name}
+
+Hearing data:
+${structured}
+
+===== OUTPUT FORMAT =====
+
+Return EXACTLY this format, using the delimiters verbatim so I can parse:
+
+<<<PARALEGAL>>>
+[the paralegal recap here]
+<<<CLIENT>>>
+[the client summary in ${languageName} here]
+<<<END>>>
+
+No preamble, no markdown fences. Start directly with <<<PARALEGAL>>>.`;
+
+  try {
+    const resp = await axios.post(
+      "https://api.anthropic.com/v1/messages",
+      { model: ANTHROPIC_MODEL, max_tokens: 3500, messages: [{ role: "user", content: prompt }] },
+      {
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        timeout: 60000,
+      }
+    );
+    const raw = resp.data.content?.[0]?.text?.trim() || "";
+    const paralegalMatch = raw.match(/<<<PARALEGAL>>>\s*([\s\S]*?)\s*<<<CLIENT>>>/);
+    const clientMatch = raw.match(/<<<CLIENT>>>\s*([\s\S]*?)\s*<<<END>>>/);
+    return {
+      paralegal_summary: paralegalMatch ? paralegalMatch[1].trim() : "(paralegal summary parse failed)",
+      client_summary: clientMatch ? clientMatch[1].trim() : "(client summary parse failed)",
+    };
+  } catch (e) {
+    console.error("[individual-hearing] Combined summary error:", e.message);
+    return {
+      paralegal_summary: "(AI summary unavailable — please write manually)",
+      client_summary: "(AI summary unavailable — please write manually)",
+    };
+  }
+}
+
 async function generateClientSummary(data) {
   const lang = data.client_language || "en";
   const langNames = {
@@ -667,10 +766,19 @@ async function saveSummaries(id, paralegal_summary, client_summary) {
 async function generateAndSaveSummaries(id) {
   const note = await getIndividualNote(id);
   if (!note) throw new Error(`Note ${id} not found`);
-  const [p, c] = await Promise.all([
-    generateParalegalSummary(note),
-    generateClientSummary(note),
-  ]);
+  let p, c;
+  if (process.env.VERBOSE_SUMMARY_MODE === "true") {
+    // Legacy dual-call mode — opt in via env if you want the old behavior.
+    [p, c] = await Promise.all([
+      generateParalegalSummary(note),
+      generateClientSummary(note),
+    ]);
+  } else {
+    // Single-call combined mode — halves input cost by sending case data once.
+    const both = await generateBothSummaries(note);
+    p = both.paralegal_summary;
+    c = both.client_summary;
+  }
   await saveSummaries(id, p, c);
   return { paralegal_summary: p, client_summary: c };
 }
@@ -2906,6 +3014,7 @@ module.exports = {
   parseFormSubmission,
   generateParalegalSummary,
   generateClientSummary,
+  generateBothSummaries,
   generateAndSaveSummaries,
   sendToTeamGroup,
   renderForm,
