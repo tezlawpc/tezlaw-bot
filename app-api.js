@@ -956,6 +956,170 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // ═══════════════════════════════════════════════════════
+  //  ADMIN: CLIENT ACCOUNT LINKING (admin role only)
+  //  ─────────────────────────────────────────────────────
+  //  When a client signs in via SMS OTP for the first time, the backend
+  //  tries to auto-link their phone to an existing case (via matching
+  //  phone_number in client_hearing_notices). If no match, the account is
+  //  created but unlinked — the client sees "account being set up" until
+  //  admin links them here.
+  // ═══════════════════════════════════════════════════════
+
+  function requireAdmin(req, res, next) {
+    if (!req.user || req.user.r !== "admin") {
+      return res.status(403).json({ ok: false, error: "Admin only" });
+    }
+    next();
+  }
+
+  // List all client accounts (paginated by created date)
+  app.get("/api/staff/admin/client-accounts", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit || "200", 10), 500);
+      const filter = req.query.filter;  // 'linked' | 'unlinked' | undefined
+      let whereClause = "";
+      if (filter === "linked") whereClause = "WHERE client_key IS NOT NULL AND client_key != ''";
+      else if (filter === "unlinked") whereClause = "WHERE client_key IS NULL OR client_key = ''";
+      const r = await db.query(
+        `SELECT id, phone, client_key, full_name, email, preferred_lang, last_login_at, created_at
+         FROM client_accounts ${whereClause}
+         ORDER BY (client_key IS NULL OR client_key = '') DESC, last_login_at DESC NULLS LAST, created_at DESC
+         LIMIT $1`,
+        [limit]
+      );
+      // Also compute quick stats
+      const statsR = await db.query(
+        `SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE client_key IS NOT NULL AND client_key != '')::int AS linked,
+           COUNT(*) FILTER (WHERE client_key IS NULL OR client_key = '')::int AS unlinked
+         FROM client_accounts`
+      );
+      res.json({
+        ok: true,
+        accounts: r.rows,
+        stats: statsR.rows[0] || { total: 0, linked: 0, unlinked: 0 },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Search for a client to link to. Returns candidates from the aggregated
+  // client roster (client_profiles / hearing_notices union).
+  app.get("/api/staff/admin/client-search", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      const limit = Math.min(parseInt(req.query.limit || "30", 10), 100);
+      if (q.length < 2) return res.json({ ok: true, clients: [] });
+      const mobile = require("./mobile-app");
+      const results = await mobile.searchClients(q, limit);
+      res.json({ ok: true, clients: results });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Link a client account to a case (by client_key + client_name)
+  app.post("/api/staff/admin/client-accounts/:id/link", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+      const clientKey = String(req.body?.client_key || "").trim();
+      const clientName = String(req.body?.client_name || "").trim();
+      if (!clientKey) return res.status(400).json({ ok: false, error: "client_key required" });
+      const r = await db.query(
+        `UPDATE client_accounts SET client_key = $2, full_name = COALESCE(NULLIF($3, ''), full_name) WHERE id = $1 RETURNING *`,
+        [id, clientKey, clientName]
+      );
+      if (!r.rows.length) return res.status(404).json({ ok: false, error: "Account not found" });
+      res.json({ ok: true, account: r.rows[0] });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Unlink an account (client_key -> null)
+  app.post("/api/staff/admin/client-accounts/:id/unlink", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+      const r = await db.query(
+        `UPDATE client_accounts SET client_key = NULL WHERE id = $1 RETURNING *`,
+        [id]
+      );
+      if (!r.rows.length) return res.status(404).json({ ok: false, error: "Account not found" });
+      res.json({ ok: true, account: r.rows[0] });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Update account details (name, email, lang)
+  app.patch("/api/staff/admin/client-accounts/:id", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+      const { full_name, email, preferred_lang } = req.body || {};
+      const fields = [];
+      const vals = [id];
+      let idx = 2;
+      if (full_name !== undefined) { fields.push(`full_name = $${idx++}`); vals.push(full_name); }
+      if (email !== undefined) { fields.push(`email = $${idx++}`); vals.push(email); }
+      if (preferred_lang !== undefined) { fields.push(`preferred_lang = $${idx++}`); vals.push(preferred_lang); }
+      if (!fields.length) return res.status(400).json({ ok: false, error: "No fields to update" });
+      const r = await db.query(
+        `UPDATE client_accounts SET ${fields.join(", ")} WHERE id = $1 RETURNING *`,
+        vals
+      );
+      if (!r.rows.length) return res.status(404).json({ ok: false, error: "Account not found" });
+      res.json({ ok: true, account: r.rows[0] });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Preemptively create a client account (link a phone to a case BEFORE
+  // the client signs in). Client can then sign in via SMS and immediately
+  // see their case.
+  app.post("/api/staff/admin/client-accounts", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const phone = normalizePhone(req.body?.phone);
+      if (!phone) return res.status(400).json({ ok: false, error: "Valid phone required" });
+      const clientKey = req.body?.client_key ? String(req.body.client_key).trim() : null;
+      const fullName = req.body?.full_name ? String(req.body.full_name).trim() : null;
+      const preferredLang = ["en", "zh-TW", "es"].includes(req.body?.preferred_lang)
+        ? req.body.preferred_lang : "en";
+      // Upsert on phone
+      const r = await db.query(
+        `INSERT INTO client_accounts (phone, client_key, full_name, preferred_lang)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (phone) DO UPDATE
+           SET client_key = COALESCE(EXCLUDED.client_key, client_accounts.client_key),
+               full_name = COALESCE(EXCLUDED.full_name, client_accounts.full_name),
+               preferred_lang = EXCLUDED.preferred_lang
+         RETURNING *`,
+        [phone, clientKey, fullName, preferredLang]
+      );
+      res.json({ ok: true, account: r.rows[0] });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Delete an account entirely (rare — mostly for cleanup)
+  app.delete("/api/staff/admin/client-accounts/:id", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+      await db.query(`DELETE FROM client_accounts WHERE id = $1`, [id]);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // Firm-side: view messages with a client — 403 unless user can access
   app.get("/api/staff/clients/:key/messages", requireBearer, requireFirmUser, async (req, res) => {
     try {
