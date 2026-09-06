@@ -103,6 +103,17 @@ function userAssignmentTerms(user) {
 function canUserSeeTask(user, task) {
   if (!task) return false;
   if (isAdmin(user)) return true;
+
+  // Pending-approval tasks (from consultants) are hidden from firm assignees
+  // until the admin approves. The consultant who submitted still sees their
+  // own via the /api/consultant/* endpoints (this function is for firm side).
+  if (task.status === "pending_approval") {
+    // Only the person who created it (a consultant, but firm creators too) sees it
+    if (task.created_by && String(task.created_by) === String(user.uid)) return true;
+    if (task.submitted_by_user_id && String(task.submitted_by_user_id) === String(user.uid)) return true;
+    return false;
+  }
+
   if (task.created_by && String(task.created_by) === String(user.uid)) return true;
   if (task.submitted_by_user_id && String(task.submitted_by_user_id) === String(user.uid)) return true;
   const assigned = String(task.assigned_to || "").toLowerCase().trim();
@@ -1218,6 +1229,140 @@ function registerAppApi(app) {
   });
 
   // ═══════════════════════════════════════════════════════
+  //  ADMIN: CONSULTANT WORK ORDER APPROVAL
+  //  ─────────────────────────────────────────────────────
+  //  Consultants submit tasks with status='pending_approval'. Those tasks
+  //  are hidden from the auto-assigned firm member until JJ approves.
+  //  Admin can approve as-is, modify fields before approving, or reject
+  //  with a reason.
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/admin/tasks/pending", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT t.*,
+                cu.name AS submitter_name, cu.email AS submitter_email
+         FROM tasks t
+         LEFT JOIN consultant_users cu ON cu.id = t.submitted_by_user_id
+         WHERE t.status = 'pending_approval'
+         ORDER BY t.created_at DESC
+         LIMIT 200`
+      );
+      // Enrich with default assignee info so admin sees "will go to X"
+      const rows = r.rows.map(row => ({
+        ...row,
+        proposed_assignee: row.assigned_to,
+      }));
+      res.json({ ok: true, tasks: rows, count: rows.length });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Approve a pending task. Body may include field overrides (assigned_to,
+  // priority, due_date, matter_type). Task becomes status='open' and enters
+  // the assignee's queue.
+  app.post("/api/staff/admin/tasks/:id/approve", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+
+      // Load existing to ensure it's actually pending
+      const existing = await db.query(`SELECT * FROM tasks WHERE id = $1`, [id]);
+      if (!existing.rows.length) return res.status(404).json({ ok: false, error: "Task not found" });
+      const t = existing.rows[0];
+      if (t.status !== "pending_approval") {
+        return res.status(400).json({ ok: false, error: `Task is not pending (current: ${t.status})` });
+      }
+
+      // Apply any admin overrides
+      const overrides = req.body || {};
+      const fields = ["status = 'open'"];
+      const vals = [id];
+      let idx = 2;
+      if (overrides.assigned_to !== undefined) { fields.push(`assigned_to = $${idx++}`); vals.push(overrides.assigned_to); }
+      if (overrides.priority && ["urgent","high","normal","low"].includes(overrides.priority)) {
+        fields.push(`priority = $${idx++}`); vals.push(overrides.priority);
+      }
+      if (overrides.due_date && /^\d{4}-\d{2}-\d{2}$/.test(overrides.due_date)) {
+        fields.push(`due_date = $${idx++}`); vals.push(overrides.due_date);
+      }
+      if (overrides.matter_type) { fields.push(`matter_type = $${idx++}`); vals.push(overrides.matter_type); }
+
+      const r = await db.query(
+        `UPDATE tasks SET ${fields.join(", ")} WHERE id = $1 RETURNING *`,
+        vals
+      );
+      // Log activity
+      try {
+        const tasks = require("./tasks");
+        if (typeof tasks.recordActivity === "function") {
+          await tasks.recordActivity(id, {
+            kind: "approved",
+            actor_id: req.user.uid,
+            actor_name: req.user.n || req.user.u,
+            actor_role: req.user.r,
+            note: overrides.note || "Approved",
+            visible_to_submitter: true,
+          });
+        }
+      } catch (e) { /* activity log optional */ }
+      res.json({ ok: true, task: r.rows[0] });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Reject a pending task with a reason. Consultant sees the reason.
+  app.post("/api/staff/admin/tasks/:id/reject", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+      const reason = String(req.body?.reason || "").trim();
+      if (!reason) return res.status(400).json({ ok: false, error: "Rejection reason required" });
+
+      const existing = await db.query(`SELECT * FROM tasks WHERE id = $1`, [id]);
+      if (!existing.rows.length) return res.status(404).json({ ok: false, error: "Task not found" });
+      const t = existing.rows[0];
+      if (t.status !== "pending_approval") {
+        return res.status(400).json({ ok: false, error: `Task is not pending (current: ${t.status})` });
+      }
+
+      const r = await db.query(
+        `UPDATE tasks SET status = 'rejected' WHERE id = $1 RETURNING *`,
+        [id]
+      );
+      // Log rejection reason as activity
+      try {
+        const tasks = require("./tasks");
+        if (typeof tasks.recordActivity === "function") {
+          await tasks.recordActivity(id, {
+            kind: "rejected",
+            actor_id: req.user.uid,
+            actor_name: req.user.n || req.user.u,
+            actor_role: req.user.r,
+            note: reason,
+            visible_to_submitter: true,
+          });
+        }
+      } catch (e) { /* activity log optional */ }
+      res.json({ ok: true, task: r.rows[0] });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Pending count — for badges on home dashboard
+  app.get("/api/staff/admin/tasks/pending-count", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const r = await db.query(`SELECT COUNT(*)::int AS n FROM tasks WHERE status = 'pending_approval'`);
+      res.json({ ok: true, count: r.rows[0]?.n || 0 });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════
   //  ADMIN: MATTER TYPE → DEFAULT ASSIGNEE
   //  Editable table that determines who a new task is assigned to when
   //  no explicit assignee is set. Applies to admin-created tasks and to
@@ -1312,7 +1457,7 @@ function registerAppApi(app) {
       const data = req.body || {};
       const matterType = data.matter_type || "admin";
       // Route consultant-submitted work orders to the right firm member so it
-      // lands in that person's task queue immediately.
+      // lands in that person's task queue after admin approval.
       const autoAssignee = await getDefaultAssignee(matterType);
       const cleaned = {
         title: String(data.title || "").trim(),
@@ -1321,8 +1466,8 @@ function registerAppApi(app) {
         priority: ["urgent", "high", "normal", "low"].includes(data.priority) ? data.priority : "normal",
         due_date: data.due_date && /^\d{4}-\d{2}-\d{2}$/.test(data.due_date) ? data.due_date : null,
         client_name: data.client_name ? String(data.client_name).substring(0, 200) : null,
-        assigned_to: autoAssignee,   // may be null if no default configured for this matter
-        status: "pending",
+        assigned_to: autoAssignee,           // proposed assignee — takes effect after admin approves
+        status: "pending_approval",          // needs admin approval before it enters the firm's task queue
         submitted_by_user_id: userId,
         submitter_visible: true,
         created_by: userId,
