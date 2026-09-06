@@ -1347,6 +1347,8 @@ module.exports = {
   hashPassword,
   verifyPasswordHash,
   verifyToken,
+  makeToken,
+  updateLastLogin,
   parseCookies,
   ROLES,
   PERMISSIONS,
