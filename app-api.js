@@ -1433,42 +1433,6 @@ function registerAppApi(app) {
     }
   });
 
-  // ═══════════════════════════════════════════════════════
-  //  ADMIN: MATTER TYPE → DEFAULT ASSIGNEE
-  //  Editable table that determines who a new task is assigned to when
-  //  no explicit assignee is set. Applies to admin-created tasks and to
-  //  consultant-submitted work orders (so they land in the right queue).
-  // ═══════════════════════════════════════════════════════
-
-  app.get("/api/staff/admin/matter-defaults", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
-    try {
-      const r = await db.query(`SELECT matter_type, assigned_to, updated_at FROM matter_defaults ORDER BY matter_type`);
-      res.json({ ok: true, defaults: r.rows });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  app.patch("/api/staff/admin/matter-defaults/:matter_type", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
-    try {
-      const matterType = String(req.params.matter_type || "").trim();
-      const assignee = String(req.body?.assigned_to || "").trim();
-      if (!matterType) return res.status(400).json({ ok: false, error: "matter_type required" });
-      if (!assignee) return res.status(400).json({ ok: false, error: "assigned_to required" });
-      const r = await db.query(
-        `INSERT INTO matter_defaults (matter_type, assigned_to, updated_at)
-         VALUES ($1, $2, NOW())
-         ON CONFLICT (matter_type) DO UPDATE SET assigned_to = EXCLUDED.assigned_to, updated_at = NOW()
-         RETURNING *`,
-        [matterType, assignee]
-      );
-      invalidateMatterDefaultsCache();  // next task creation will re-read
-      res.json({ ok: true, default: r.rows[0] });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
   // Firm-side: view messages with a client — 403 unless user can access
   app.get("/api/staff/clients/:key/messages", requireBearer, requireFirmUser, async (req, res) => {
     try {
