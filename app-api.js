@@ -1295,9 +1295,9 @@ function registerAppApi(app) {
     try {
       const r = await db.query(
         `SELECT t.*,
-                cu.name AS submitter_name, cu.email AS submitter_email
+                au.name AS submitter_name, au.email AS submitter_email
          FROM tasks t
-         LEFT JOIN consultant_users cu ON cu.id = t.submitted_by_user_id
+         LEFT JOIN admin_users au ON au.id = t.submitted_by_user_id
          WHERE t.status = 'pending_approval'
          ORDER BY t.created_at DESC
          LIMIT 200`
