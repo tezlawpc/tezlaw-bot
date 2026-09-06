@@ -290,15 +290,43 @@ function registerAppApi(app) {
       if (recent.rows[0].n >= 3) {
         return res.status(429).json({ ok: false, error: "Too many attempts, please try again in 15 minutes" });
       }
+      const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+      const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+      const verifyServiceSid = process.env.TWILIO_VERIFY_SID;
+      const twilioFrom = process.env.TWILIO_SMS_FROM || process.env.TWILIO_PHONE_NUMBER;
+
+      // Path A (preferred): Twilio Verify service — uses A2P-registered shared pool,
+      // generates+delivers+stores the code itself. No local hashing.
+      if (twilioSid && twilioToken && verifyServiceSid) {
+        try {
+          const axios = require("axios");
+          await axios.post(
+            `https://verify.twilio.com/v2/Services/${verifyServiceSid}/Verifications`,
+            new URLSearchParams({ To: phone, Channel: "sms" }).toString(),
+            { auth: { username: twilioSid, password: twilioToken },
+              headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+          );
+          // Insert a marker row so the verify endpoint knows to use Verify (not local hash).
+          // The code_hash "verify" is a sentinel — never a real hash.
+          await db.query(
+            `INSERT INTO client_otp (phone, code_hash, expires_at) VALUES ($1, 'verify', NOW() + INTERVAL '10 minutes')`,
+            [phone]
+          );
+          return res.json({ ok: true, message: "Verification code sent" });
+        } catch (twErr) {
+          console.error("[client OTP verify]:", twErr.response?.data || twErr.message);
+          return res.status(500).json({ ok: false, error: "Failed to send code" });
+        }
+      }
+
+      // Path B (fallback): raw SMS from a specific number. Requires A2P 10DLC registration
+      // on that number, or delivery fails with error 30034.
       const code = String(crypto.randomInt(100000, 999999));
       const codeHash = hashCode(code);
       await db.query(
         `INSERT INTO client_otp (phone, code_hash, expires_at) VALUES ($1, $2, NOW() + INTERVAL '10 minutes')`,
         [phone, codeHash]
       );
-      const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-      const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-      const twilioFrom = process.env.TWILIO_SMS_FROM || process.env.TWILIO_PHONE_NUMBER;
       if (twilioSid && twilioToken && twilioFrom) {
         try {
           const axios = require("axios");
@@ -340,8 +368,36 @@ function registerAppApi(app) {
       if (otp.attempts >= 5) {
         return res.status(429).json({ ok: false, error: "Too many attempts. Request a new code." });
       }
-      const codeHash = hashCode(code);
-      if (codeHash !== otp.code_hash) {
+
+      // If marked "verify" the code was delivered by Twilio Verify — check with them.
+      // Otherwise it was our local hash flow (dev/fallback).
+      let codeValid = false;
+      if (otp.code_hash === "verify") {
+        const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+        const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+        const verifyServiceSid = process.env.TWILIO_VERIFY_SID;
+        if (!twilioSid || !twilioToken || !verifyServiceSid) {
+          return res.status(500).json({ ok: false, error: "Verify not configured" });
+        }
+        try {
+          const axios = require("axios");
+          const vRes = await axios.post(
+            `https://verify.twilio.com/v2/Services/${verifyServiceSid}/VerificationCheck`,
+            new URLSearchParams({ To: phone, Code: code }).toString(),
+            { auth: { username: twilioSid, password: twilioToken },
+              headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+          );
+          codeValid = vRes.data?.status === "approved";
+        } catch (twErr) {
+          console.error("[verify check]:", twErr.response?.data || twErr.message);
+          await db.query(`UPDATE client_otp SET attempts = attempts + 1 WHERE id = $1`, [otp.id]);
+          return res.status(401).json({ ok: false, error: "Incorrect code" });
+        }
+      } else {
+        codeValid = hashCode(code) === otp.code_hash;
+      }
+
+      if (!codeValid) {
         await db.query(`UPDATE client_otp SET attempts = attempts + 1 WHERE id = $1`, [otp.id]);
         return res.status(401).json({ ok: false, error: "Incorrect code" });
       }
