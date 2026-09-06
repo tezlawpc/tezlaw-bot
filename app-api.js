@@ -251,7 +251,8 @@ function registerAppApi(app) {
       if (!username || !password) return res.status(400).json({ ok: false, error: "username and password required" });
       const user = await auth.findUserByUsername(String(username).toLowerCase().trim());
       if (!user) return res.status(401).json({ ok: false, error: "Invalid credentials" });
-      if (!user.active) return res.status(403).json({ ok: false, error: "Account disabled" });
+      // Schema uses `disabled` (boolean) — legacy code checked `active` which doesn't exist
+      if (user.disabled === true) return res.status(403).json({ ok: false, error: "Account disabled" });
       const ok = await auth.verifyPasswordHash(password, user.password_hash);
       if (!ok) return res.status(401).json({ ok: false, error: "Invalid credentials" });
       const token = await auth.makeToken({
