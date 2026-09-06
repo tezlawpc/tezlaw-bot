@@ -1356,7 +1356,7 @@ function registerAppApi(app) {
     }
   });
 
-  console.log("[app-api] registered — mobile app endpoints live at /api/* (with role-based visibility)");
+  console.log("[app-api] registered — mobile app endpoints live at /api/* (with role-based visibility + admin client linking)");
 }
 
 module.exports = { registerAppApi };
