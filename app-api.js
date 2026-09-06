@@ -1295,7 +1295,8 @@ function registerAppApi(app) {
     try {
       const r = await db.query(
         `SELECT t.*,
-                au.name AS submitter_name, au.email AS submitter_email
+                au.full_name AS submitter_name,
+                au.username  AS submitter_username
          FROM tasks t
          LEFT JOIN admin_users au ON au.id = t.submitted_by_user_id
          WHERE t.status = 'pending_approval'
