@@ -209,7 +209,53 @@ async function initClientAuthTables() {
     )
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_client_messages_key ON client_messages (client_key, created_at DESC)`);
+
+  // Matter-type default assignment table — determines auto-assignee when
+  // a task is created without an explicit assignee.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS matter_defaults (
+      matter_type   TEXT PRIMARY KEY,
+      assigned_to   TEXT NOT NULL,
+      updated_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  // Seed defaults ONLY if the row doesn't already exist — never overwrite admin edits
+  const seeds = [
+    ['immigration', 'Michael Liu'],
+    ['pi',          'Lin Mei'],
+    ['business',    'Chandler Jin'],
+    ['tm',          'Chandler Jin'],
+    ['ll_tenant',   'JJ Zhang'],
+    ['estate',      'JJ Zhang'],
+    ['real_estate', 'JJ Zhang'],
+    ['admin',       'JJ Zhang'],
+  ];
+  for (const [matter, assignee] of seeds) {
+    await db.query(
+      `INSERT INTO matter_defaults (matter_type, assigned_to) VALUES ($1, $2)
+       ON CONFLICT (matter_type) DO NOTHING`,
+      [matter, assignee]
+    );
+  }
 }
+
+// In-memory cache of matter defaults. Reloaded on any admin update.
+let _matterDefaultsCache = null;
+async function getDefaultAssignee(matterType) {
+  if (!matterType) return null;
+  if (!_matterDefaultsCache) {
+    try {
+      const r = await db.query(`SELECT matter_type, assigned_to FROM matter_defaults`);
+      _matterDefaultsCache = {};
+      for (const row of r.rows) _matterDefaultsCache[row.matter_type] = row.assigned_to;
+    } catch (e) {
+      console.warn("[matter defaults] cache load:", e.message);
+      _matterDefaultsCache = {};
+    }
+  }
+  return _matterDefaultsCache[matterType] || null;
+}
+function invalidateMatterDefaultsCache() { _matterDefaultsCache = null; }
 
 function normalizePhone(raw) {
   if (!raw) return null;
@@ -616,10 +662,19 @@ function registerAppApi(app) {
     try {
       const tasks = require("./tasks");
       const body = { ...req.body };
-      // If non-admin creator didn't set an assignee, default to themselves
-      if (!isAdmin(req.user) && (!body.assigned_to || !String(body.assigned_to).trim())) {
-        body.assigned_to = req.user.n || req.user.u;
+      const hasExplicitAssignee = body.assigned_to && String(body.assigned_to).trim();
+
+      if (!hasExplicitAssignee) {
+        if (isAdmin(req.user)) {
+          // Admin without an explicit pick → try matter default, else leave blank
+          const auto = await getDefaultAssignee(body.matter_type);
+          if (auto) body.assigned_to = auto;
+        } else {
+          // Non-admin creator: self-assign so they retain visibility
+          body.assigned_to = req.user.n || req.user.u;
+        }
       }
+
       const task = await tasks.createTask({
         ...body,
         created_by: req.user.uid,
@@ -1120,6 +1175,42 @@ function registerAppApi(app) {
     }
   });
 
+  // ═══════════════════════════════════════════════════════
+  //  ADMIN: MATTER TYPE → DEFAULT ASSIGNEE
+  //  Editable table that determines who a new task is assigned to when
+  //  no explicit assignee is set. Applies to admin-created tasks and to
+  //  consultant-submitted work orders (so they land in the right queue).
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/admin/matter-defaults", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const r = await db.query(`SELECT matter_type, assigned_to, updated_at FROM matter_defaults ORDER BY matter_type`);
+      res.json({ ok: true, defaults: r.rows });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.patch("/api/staff/admin/matter-defaults/:matter_type", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const matterType = String(req.params.matter_type || "").trim();
+      const assignee = String(req.body?.assigned_to || "").trim();
+      if (!matterType) return res.status(400).json({ ok: false, error: "matter_type required" });
+      if (!assignee) return res.status(400).json({ ok: false, error: "assigned_to required" });
+      const r = await db.query(
+        `INSERT INTO matter_defaults (matter_type, assigned_to, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (matter_type) DO UPDATE SET assigned_to = EXCLUDED.assigned_to, updated_at = NOW()
+         RETURNING *`,
+        [matterType, assignee]
+      );
+      invalidateMatterDefaultsCache();  // next task creation will re-read
+      res.json({ ok: true, default: r.rows[0] });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // Firm-side: view messages with a client — 403 unless user can access
   app.get("/api/staff/clients/:key/messages", requireBearer, requireFirmUser, async (req, res) => {
     try {
@@ -1177,13 +1268,18 @@ function registerAppApi(app) {
       const tasks = require("./tasks");
       const userId = req.user.uid;
       const data = req.body || {};
+      const matterType = data.matter_type || "admin";
+      // Route consultant-submitted work orders to the right firm member so it
+      // lands in that person's task queue immediately.
+      const autoAssignee = await getDefaultAssignee(matterType);
       const cleaned = {
         title: String(data.title || "").trim(),
         description: data.description ? String(data.description).substring(0, 8000) : null,
-        matter_type: data.matter_type || "admin",
+        matter_type: matterType,
         priority: ["urgent", "high", "normal", "low"].includes(data.priority) ? data.priority : "normal",
         due_date: data.due_date && /^\d{4}-\d{2}-\d{2}$/.test(data.due_date) ? data.due_date : null,
         client_name: data.client_name ? String(data.client_name).substring(0, 200) : null,
+        assigned_to: autoAssignee,   // may be null if no default configured for this matter
         status: "pending",
         submitted_by_user_id: userId,
         submitter_visible: true,
