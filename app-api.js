@@ -23,6 +23,7 @@
 
 const crypto = require("crypto");
 const db = require("./db");
+const push = require("./push-notifications");
 const auth = require("./auth");
 
 // ── Utilities ─────────────────────────────────────────────
@@ -692,6 +693,14 @@ function registerAppApi(app) {
         actor_name: req.user.n || req.user.u,
         actor_role: req.user.r,
       });
+      // Push to the assignee if it's not the same person creating
+      if (task.assigned_to && task.assigned_to !== (req.user.n || req.user.u)) {
+        push.sendToFirmByName(task.assigned_to, {
+          title: `New task: ${task.title}`,
+          body: `Assigned by ${req.user.n || req.user.u}${task.client_name ? ` · ${task.client_name}` : ""}`,
+          data: { screen: "task", taskId: task.id },
+        }).catch(() => {});
+      }
       res.json({ ok: true, task });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
@@ -1013,6 +1022,51 @@ function registerAppApi(app) {
     }
   });
 
+  // ═══════════════════════════════════════════════════════
+  //  PUSH TOKEN REGISTRATION
+  //  ─────────────────────────────────────────────────────
+  //  Called by the app on first launch after login (any role) to record
+  //  their Expo push token. Called again on token refresh.
+  // ═══════════════════════════════════════════════════════
+
+  app.post("/api/push/register", requireBearer, async (req, res) => {
+    try {
+      const token = String(req.body?.expo_token || "").trim();
+      const platform = String(req.body?.platform || "").trim();
+      if (!token || !token.startsWith("ExponentPushToken")) {
+        return res.status(400).json({ ok: false, error: "Invalid expo_token" });
+      }
+      const user = req.user;
+      // Determine user kind + ref from JWT
+      let userKind = "firm", userRef = String(user.uid || "");
+      if (user.k === "consultant") userKind = "consultant";
+      else if (user.k === "client") { userKind = "client"; userRef = user.phone || String(user.uid || ""); }
+
+      await db.query(`
+        INSERT INTO push_tokens (user_kind, user_ref, expo_token, platform, updated_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (expo_token) DO UPDATE
+          SET user_kind = EXCLUDED.user_kind,
+              user_ref = EXCLUDED.user_ref,
+              platform = EXCLUDED.platform,
+              updated_at = NOW()
+      `, [userKind, userRef, token, platform || null]);
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[push register]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.post("/api/push/unregister", requireBearer, async (req, res) => {
+    try {
+      const token = String(req.body?.expo_token || "").trim();
+      if (token) await db.query(`DELETE FROM push_tokens WHERE expo_token = $1`, [token]);
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
   // USCIS receipt lookup — available to all firm users (public government data)
   app.get("/api/staff/uscis/:receipt", requireBearer, requireFirmUser, async (req, res) => {
     try {
@@ -1293,6 +1347,23 @@ function registerAppApi(app) {
         `UPDATE tasks SET ${fields.join(", ")} WHERE id = $1 RETURNING *`,
         vals
       );
+      const approvedTask = r.rows[0];
+      // Notify the assignee that they have a new task
+      if (approvedTask.assigned_to) {
+        push.sendToFirmByName(approvedTask.assigned_to, {
+          title: `Approved: ${approvedTask.title}`,
+          body: `New task in your queue${approvedTask.client_name ? ` · ${approvedTask.client_name}` : ""}`,
+          data: { screen: "task", taskId: approvedTask.id },
+        }).catch(() => {});
+      }
+      // Notify the consultant that their submission was approved
+      if (approvedTask.submitted_by_user_id) {
+        push.sendToUser("consultant", approvedTask.submitted_by_user_id, {
+          title: "✓ Work order approved",
+          body: `Your submission "${approvedTask.title}" has been approved.`,
+          data: { screen: "consultant-task", taskId: approvedTask.id },
+        }).catch(() => {});
+      }
       // Log activity
       try {
         const tasks = require("./tasks");
@@ -1307,7 +1378,7 @@ function registerAppApi(app) {
           });
         }
       } catch (e) { /* activity log optional */ }
-      res.json({ ok: true, task: r.rows[0] });
+      res.json({ ok: true, task: approvedTask });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -1424,6 +1495,21 @@ function registerAppApi(app) {
          VALUES ($1, 'firm', $2, $3, $4) RETURNING *`,
         [clientKey, req.user.n || req.user.u, req.user.uid, body]
       );
+      // Push notify the client — look up their phone from client_accounts
+      try {
+        const phoneR = await db.query(
+          `SELECT phone FROM client_accounts WHERE client_key = $1 LIMIT 1`,
+          [clientKey]
+        );
+        const phone = phoneR.rows[0]?.phone;
+        if (phone) {
+          push.sendToUser("client", phone, {
+            title: `Tez Law: ${req.user.n || req.user.u}`,
+            body: body.substring(0, 100),
+            data: { screen: "client-messages" },
+          }).catch(() => {});
+        }
+      } catch {}
       res.json({ ok: true, message: r.rows[0] });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
@@ -1479,6 +1565,12 @@ function registerAppApi(app) {
         cleaned.client_key = cleaned.client_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       }
       const task = await tasks.createTask(cleaned);
+      // Notify all admins that a consultant work order needs approval
+      push.sendToAdmins({
+        title: "⏳ Work order needs approval",
+        body: `${req.user.n || "A consultant"} submitted: ${task.title}`,
+        data: { screen: "pending-approvals", taskId: task.id },
+      }).catch(() => {});
       res.json({ ok: true, task });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
@@ -1601,6 +1693,12 @@ function registerAppApi(app) {
          VALUES ($1, 'client', $2, $3, $4) RETURNING *`,
         [clientKey, req.user.n, parseInt(String(req.user.uid).replace(/\D/g, ""), 10) || null, body]
       );
+      // Push notify all admins about new client message
+      push.sendToAdmins({
+        title: `💬 New message from ${req.user.n || "client"}`,
+        body: body.substring(0, 100),
+        data: { screen: "client-message", clientKey },
+      }).catch(() => {});
       try {
         if (process.env.TELEGRAM_BOT_TOKEN && (process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID)) {
           const axios = require("axios");
