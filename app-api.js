@@ -300,9 +300,15 @@ function registerAppApi(app) {
       if (twilioSid && twilioToken && verifyServiceSid) {
         try {
           const axios = require("axios");
+          // Twilio locale codes for the SMS body: en, es, zh (Simplified), zh-HK (Traditional)
+          const langRaw = String(req.body?.lang || "en").toLowerCase();
+          let locale = "en";
+          if (langRaw === "es" || langRaw.startsWith("es-")) locale = "es";
+          else if (langRaw === "zh-tw" || langRaw === "zh-hk" || langRaw === "zh-hant") locale = "zh-HK";
+          else if (langRaw === "zh" || langRaw === "zh-cn" || langRaw === "zh-hans") locale = "zh";
           await axios.post(
             `https://verify.twilio.com/v2/Services/${verifyServiceSid}/Verifications`,
-            new URLSearchParams({ To: phone, Channel: "sms" }).toString(),
+            new URLSearchParams({ To: phone, Channel: "sms", Locale: locale }).toString(),
             { auth: { username: twilioSid, password: twilioToken },
               headers: { "Content-Type": "application/x-www-form-urlencoded" } }
           );
