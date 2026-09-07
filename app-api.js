@@ -84,6 +84,10 @@ function isAdmin(user) {
   return !!user && user.r === "admin";
 }
 
+function isManager(user) {
+  return !!user && (user.r === "manager" || user.r === "admin");
+}
+
 // Terms to match against tasks.assigned_to (which is free text —
 // could be username, full name, first name, or email).
 function userAssignmentTerms(user) {
@@ -103,7 +107,7 @@ function userAssignmentTerms(user) {
 // True if this firm user is authorized to see this task.
 function canUserSeeTask(user, task) {
   if (!task) return false;
-  if (isAdmin(user)) return true;
+  if (isManager(user)) return true;
 
   // Pending-approval tasks (from consultants) are hidden from firm assignees
   // until the admin approves. The consultant who submitted still sees their
@@ -126,7 +130,7 @@ function canUserSeeTask(user, task) {
 // Returns Set<string> of client_keys the user can access,
 // or null for admin (meaning: no filtering — see all).
 async function getVisibleClientKeys(user) {
-  if (isAdmin(user)) return null;
+  if (isManager(user)) return null;  // admin + manager see all
   const terms = userAssignmentTerms(user);
   const params = [String(user.uid)];
   let nameClause = "";
@@ -151,7 +155,7 @@ async function getVisibleClientKeys(user) {
 
 // True if the user can access rows for this client_key.
 async function canUserAccessClient(user, clientKey) {
-  if (isAdmin(user)) return true;
+  if (isManager(user)) return true;  // admin + manager see all clients
   if (!clientKey) return false;
   const keys = await getVisibleClientKeys(user);
   return keys.has(clientKey);
@@ -1247,6 +1251,86 @@ function registerAppApi(app) {
     next();
   }
 
+  function requireManagerOrAdmin(req, res, next) {
+    if (!req.user || (req.user.r !== "admin" && req.user.r !== "manager")) {
+      return res.status(403).json({ ok: false, error: "Manager or admin only" });
+    }
+    next();
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  TEAM MANAGEMENT (admin only — list users, change roles)
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/admin/users", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT id, username, full_name, role, email, disabled, created_at
+         FROM admin_users
+         ORDER BY (role = 'admin') DESC, (role = 'manager') DESC, full_name ASC`
+      );
+      res.json({ ok: true, users: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/admin/users/:id/role", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const role = String(req.body?.role || "").trim();
+      const validRoles = ["admin", "manager", "attorney", "paralegal", "viewer", "consultant"];
+      if (!validRoles.includes(role)) {
+        return res.status(400).json({ ok: false, error: `role must be one of ${validRoles.join(", ")}` });
+      }
+      // Safety: don't let JJ demote himself accidentally
+      if (id === req.user.uid && role !== "admin") {
+        return res.status(400).json({ ok: false, error: "Cannot change your own role from admin. Have another admin do it." });
+      }
+      const r = await db.query(
+        `UPDATE admin_users SET role = $1 WHERE id = $2 RETURNING id, username, full_name, role`,
+        [role, id]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "user not found" });
+      res.json({ ok: true, user: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/admin/users/:id/disabled", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      if (id === req.user.uid) {
+        return res.status(400).json({ ok: false, error: "Cannot disable yourself" });
+      }
+      const disabled = !!req.body?.disabled;
+      const r = await db.query(
+        `UPDATE admin_users SET disabled = $1 WHERE id = $2 RETURNING id, username, full_name, role, disabled`,
+        [disabled, id]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "user not found" });
+      res.json({ ok: true, user: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  TASK REASSIGNMENT (admin + manager)
+  // ═══════════════════════════════════════════════════════
+
+  app.patch("/api/staff/tasks/:id/reassign", requireBearer, requireFirmUser, requireManagerOrAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const assigned_to = String(req.body?.assigned_to || "").trim();
+      if (!assigned_to) return res.status(400).json({ ok: false, error: "assigned_to required" });
+      const r = await db.query(
+        `UPDATE tasks SET assigned_to = $1, updated_at = NOW() WHERE id = $2 RETURNING id, description, assigned_to`,
+        [assigned_to, id]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "task not found" });
+      res.json({ ok: true, task: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
   // List all client accounts (paginated by created date)
   app.get("/api/staff/admin/client-accounts", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
     try {
@@ -1838,7 +1922,7 @@ function registerAppApi(app) {
   // ADMIN: create an invoice
   app.post("/api/staff/admin/invoices", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
     try {
-      const { client_key, description, amount_cents, due_date, notes, credit_card_link } = req.body || {};
+      const { client_key, description, amount_cents, due_date, notes, credit_card_link, time_entry_ids } = req.body || {};
       if (!client_key || !description || !amount_cents) {
         return res.status(400).json({ ok: false, error: "client_key, description, amount_cents required" });
       }
@@ -1857,6 +1941,18 @@ function registerAppApi(app) {
          credit_card_link ? String(credit_card_link).substring(0, 500) : null,
          req.user.uid]
       );
+      // Link any provided time entries to this invoice (marks them as billed)
+      const invoiceId = r.rows[0].id;
+      if (Array.isArray(time_entry_ids) && time_entry_ids.length) {
+        const ids = time_entry_ids.map(x => parseInt(x, 10)).filter(Number.isFinite);
+        if (ids.length) {
+          await db.query(
+            `UPDATE time_entries SET invoice_id = $1, updated_at = NOW()
+             WHERE id = ANY($2::int[]) AND client_key = $3 AND invoice_id IS NULL`,
+            [invoiceId, ids, String(client_key)]
+          );
+        }
+      }
       // Push notification to the client account(s) linked to this key
       try {
         const push = require("./push-notifications");
@@ -2227,6 +2323,79 @@ function registerAppApi(app) {
       const r = await db.query(q, p);
       if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found or not yours" });
       res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ADMIN: outstanding invoices summary (for dashboard card)
+  app.get("/api/staff/admin/invoices/summary", requireBearer, requireFirmUser, requireManagerOrAdmin, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT
+           COUNT(*)::int AS count,
+           COALESCE(SUM(amount_cents), 0)::bigint AS total_cents,
+           COALESCE(SUM(CASE WHEN due_date IS NOT NULL AND due_date < CURRENT_DATE THEN amount_cents ELSE 0 END), 0)::bigint AS overdue_cents,
+           COUNT(CASE WHEN due_date IS NOT NULL AND due_date < CURRENT_DATE THEN 1 END)::int AS overdue_count,
+           MIN(created_at) AS oldest_created_at
+         FROM client_invoices WHERE status = 'sent'`
+      );
+      const row = r.rows[0];
+      const oldestAge = row.oldest_created_at
+        ? Math.floor((Date.now() - new Date(row.oldest_created_at).getTime()) / (24 * 60 * 60 * 1000))
+        : 0;
+      res.json({
+        ok: true,
+        summary: {
+          count: row.count,
+          total_cents: Number(row.total_cents),
+          overdue_count: row.overdue_count,
+          overdue_cents: Number(row.overdue_cents),
+          oldest_days: oldestAge,
+        },
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ADMIN: list all outstanding invoices with client names (for the summary drill-down)
+  app.get("/api/staff/admin/invoices/outstanding", requireBearer, requireFirmUser, requireManagerOrAdmin, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT i.*,
+                (SELECT client_name FROM tasks t WHERE t.client_key = i.client_key LIMIT 1) AS client_name
+         FROM client_invoices i
+         WHERE i.status = 'sent'
+         ORDER BY (i.due_date IS NOT NULL AND i.due_date < CURRENT_DATE) DESC, i.created_at ASC
+         LIMIT 200`
+      );
+      res.json({ ok: true, invoices: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ADMIN: unbilled time entries for a client (to add to an invoice)
+  app.get("/api/staff/clients/:key/time-entries/unbilled", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const r = await db.query(
+        `SELECT t.*, a.full_name AS staff_name
+         FROM time_entries t
+         LEFT JOIN admin_users a ON a.id = t.staff_id
+         WHERE t.client_key = $1
+           AND t.billable = true
+           AND t.invoice_id IS NULL
+           AND t.ended_at IS NOT NULL  -- exclude running timers
+         ORDER BY t.entry_date DESC`,
+        [req.params.key]
+      );
+      const totalCents = r.rows.reduce(
+        (s, x) => s + Math.round(((x.minutes || 0) / 60) * (x.hourly_rate_cents || 0)),
+        0
+      );
+      res.json({
+        ok: true,
+        entries: r.rows,
+        total_cents: totalCents,
+        total_minutes: r.rows.reduce((s, x) => s + (x.minutes || 0), 0),
+      });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
