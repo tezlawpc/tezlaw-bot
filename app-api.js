@@ -2824,6 +2824,329 @@ function registerAppApi(app) {
   });
 
   // ═══════════════════════════════════════════════════════
+  //  ATTORNEY SUITE
+  //  ─────────────────────────────────────────────────────
+  //  Document generator (templates + variable substitution),
+  //  CLE credit tracker (CA requirements), and court-date
+  //  prep checklists (attach items to a court task).
+  // ═══════════════════════════════════════════════════════
+
+  // Document templates — list all
+  app.get("/api/staff/document-templates", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT id, slug, name, category, description, variables, created_at
+         FROM document_templates
+         ORDER BY category, name`
+      );
+      res.json({ ok: true, templates: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Get single template with body
+  app.get("/api/staff/document-templates/:slug", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT * FROM document_templates WHERE slug = $1`,
+        [String(req.params.slug)]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "template not found" });
+      res.json({ ok: true, template: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Generate a document by filling in variables
+  app.post("/api/staff/documents/generate", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const { template_slug, variables, client_key, title, save_to_client_documents } = req.body || {};
+      if (!template_slug || !variables || typeof variables !== 'object') {
+        return res.status(400).json({ ok: false, error: "template_slug and variables required" });
+      }
+      const tR = await db.query(`SELECT * FROM document_templates WHERE slug = $1`, [String(template_slug)]);
+      const tpl = tR.rows[0];
+      if (!tpl) return res.status(404).json({ ok: false, error: "template not found" });
+
+      // Substitute {variable_name} placeholders in body
+      const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      const allVars = { ...variables, today_date: today };
+      let body = tpl.body;
+      for (const [key, value] of Object.entries(allVars)) {
+        const safe = String(value ?? '').replace(/\$/g, '$$$$'); // escape $ for replace
+        body = body.replace(new RegExp(`\\{${key}\\}`, 'g'), safe);
+      }
+
+      const finalTitle = String(title || `${tpl.name} — ${variables.client_name || 'Untitled'}`).substring(0, 300);
+      const saved = await db.query(
+        `INSERT INTO generated_documents
+           (client_key, template_slug, template_name, title, body, variables, generated_by)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7) RETURNING *`,
+        [client_key || null, template_slug, tpl.name, finalTitle, body, JSON.stringify(allVars), req.user.uid]
+      );
+
+      // Optionally save a copy to client_documents (searchable by client)
+      if (save_to_client_documents && client_key) {
+        try {
+          await db.query(
+            `INSERT INTO client_documents
+               (client_key, filename, mime_type, size_bytes, category, note, content, uploaded_by)
+             VALUES ($1, $2, 'text/plain', $3, 'legal_document', $4, $5, 'firm')`,
+            [
+              String(client_key),
+              `${finalTitle}.txt`,
+              Buffer.byteLength(body, 'utf8'),
+              `Generated from template: ${tpl.name}`,
+              Buffer.from(body, 'utf8'),
+            ]
+          );
+        } catch (e) { console.warn("[doc gen] save to client_documents failed:", e.message); }
+      }
+
+      res.json({ ok: true, document: saved.rows[0] });
+    } catch (err) {
+      console.error("[doc generate]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // List generated documents (mine, or all for admin)
+  app.get("/api/staff/documents/generated", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const scope = String(req.query.scope || "mine");
+      const isAdmin = req.user.r === "admin";
+      const clientKey = req.query.client_key;
+      const params = [];
+      let where = "1=1";
+      if ((scope === "mine" || !isAdmin) && !clientKey) {
+        params.push(req.user.uid);
+        where += ` AND generated_by = $${params.length}`;
+      }
+      if (clientKey) {
+        const ok = await canUserAccessClient(req.user, String(clientKey));
+        if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+        params.push(String(clientKey));
+        where += ` AND client_key = $${params.length}`;
+      }
+      const r = await db.query(
+        `SELECT g.id, g.client_key, g.template_slug, g.template_name, g.title,
+                g.generated_by, g.created_at,
+                a.full_name AS generated_by_name
+         FROM generated_documents g
+         LEFT JOIN admin_users a ON a.id = g.generated_by
+         WHERE ${where}
+         ORDER BY g.created_at DESC
+         LIMIT 100`,
+        params
+      );
+      res.json({ ok: true, documents: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Get single generated document (with body)
+  app.get("/api/staff/documents/generated/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(`SELECT * FROM generated_documents WHERE id = $1`, [id]);
+      const doc = r.rows[0];
+      if (!doc) return res.status(404).json({ ok: false, error: "not found" });
+      // Access check: creator, admin, or has access to client
+      const canAccess = doc.generated_by === req.user.uid
+        || req.user.r === "admin"
+        || (doc.client_key && await canUserAccessClient(req.user, doc.client_key));
+      if (!canAccess) return res.status(403).json({ ok: false, error: "no access" });
+      res.json({ ok: true, document: doc });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── CLE Credits ─────────────────────────────────────
+  // California requirements (25 hrs / 3 yrs, 4 ethics, 1 competence, 1 elimination-of-bias, 1 tech)
+
+  app.get("/api/staff/cle-credits", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT * FROM cle_credits WHERE attorney_id = $1 ORDER BY credit_date DESC`,
+        [req.user.uid]
+      );
+      // Compute summary for current 3-year period
+      const now = new Date();
+      const threeYearsAgo = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate());
+      const inWindow = r.rows.filter(x => new Date(x.credit_date) >= threeYearsAgo);
+      const sum = (field) => inWindow.reduce((s, x) => s + Number(x[field] || 0), 0);
+      res.json({
+        ok: true,
+        credits: r.rows,
+        summary: {
+          window_start: threeYearsAgo.toISOString().substring(0, 10),
+          window_end: now.toISOString().substring(0, 10),
+          total_hours: sum("hours"),
+          ethics_hours: sum("ethics_hours"),
+          competence_hours: sum("competence_hours"),
+          bias_hours: sum("bias_hours"),
+          tech_hours: sum("tech_hours"),
+          ca_requirements: {
+            total_needed: 25,
+            ethics_needed: 4,
+            competence_needed: 1,
+            bias_needed: 1,
+            tech_needed: 1,
+          },
+        },
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/cle-credits", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const { provider, subject, hours, ethics_hours, competence_hours, bias_hours, tech_hours,
+              credit_date, compliance_period, notes, certificate_url } = req.body || {};
+      if (!provider || !subject || !hours || !credit_date) {
+        return res.status(400).json({ ok: false, error: "provider, subject, hours, credit_date required" });
+      }
+      const hrs = parseFloat(hours);
+      if (!Number.isFinite(hrs) || hrs <= 0) {
+        return res.status(400).json({ ok: false, error: "hours must be a positive number" });
+      }
+      const r = await db.query(
+        `INSERT INTO cle_credits
+           (attorney_id, provider, subject, hours, ethics_hours, competence_hours, bias_hours, tech_hours,
+            credit_date, compliance_period, notes, certificate_url)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+        [
+          req.user.uid,
+          String(provider).substring(0, 200),
+          String(subject).substring(0, 300),
+          hrs,
+          parseFloat(ethics_hours) || 0,
+          parseFloat(competence_hours) || 0,
+          parseFloat(bias_hours) || 0,
+          parseFloat(tech_hours) || 0,
+          credit_date,
+          compliance_period ? String(compliance_period).substring(0, 40) : null,
+          notes ? String(notes).substring(0, 1000) : null,
+          certificate_url ? String(certificate_url).substring(0, 500) : null,
+        ]
+      );
+      res.json({ ok: true, credit: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/cle-credits/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const fields = [];
+      const params = [];
+      let i = 1;
+      for (const k of ["provider", "subject", "hours", "ethics_hours", "competence_hours",
+                       "bias_hours", "tech_hours", "credit_date", "compliance_period",
+                       "notes", "certificate_url"]) {
+        if (req.body && req.body[k] !== undefined) {
+          fields.push(`${k} = $${i++}`);
+          params.push(req.body[k]);
+        }
+      }
+      if (!fields.length) return res.status(400).json({ ok: false, error: "nothing to update" });
+      params.push(id, req.user.uid);
+      const r = await db.query(
+        `UPDATE cle_credits SET ${fields.join(", ")}
+         WHERE id = $${i++} AND attorney_id = $${i++} RETURNING *`,
+        params
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      res.json({ ok: true, credit: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/cle-credits/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(
+        `DELETE FROM cle_credits WHERE id = $1 AND attorney_id = $2 RETURNING id`,
+        [id, req.user.uid]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Court Prep Checklists ───────────────────────────
+
+  app.get("/api/staff/tasks/:id/prep-items", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(
+        `SELECT * FROM court_prep_items WHERE task_id = $1 ORDER BY position ASC, id ASC`,
+        [id]
+      );
+      res.json({ ok: true, items: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/tasks/:id/prep-items", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const taskId = parseInt(req.params.id, 10);
+      if (!Number.isFinite(taskId)) return res.status(400).json({ ok: false, error: "bad task id" });
+      const items = Array.isArray(req.body?.items) ? req.body.items : [req.body];
+      const results = [];
+      for (const item of items) {
+        if (!item?.item_text || typeof item.item_text !== "string") continue;
+        const posR = await db.query(
+          `SELECT COALESCE(MAX(position), 0) + 1 AS next FROM court_prep_items WHERE task_id = $1`,
+          [taskId]
+        );
+        const r = await db.query(
+          `INSERT INTO court_prep_items (task_id, item_text, position) VALUES ($1, $2, $3) RETURNING *`,
+          [taskId, String(item.item_text).substring(0, 500), posR.rows[0].next]
+        );
+        results.push(r.rows[0]);
+      }
+      res.json({ ok: true, items: results });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/prep-items/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const fields = [];
+      const params = [];
+      let i = 1;
+      if (typeof req.body?.completed === "boolean") {
+        fields.push(`completed = $${i++}`);
+        params.push(req.body.completed);
+      }
+      if (typeof req.body?.item_text === "string") {
+        fields.push(`item_text = $${i++}`);
+        params.push(String(req.body.item_text).substring(0, 500));
+      }
+      if (Number.isFinite(parseInt(req.body?.position, 10))) {
+        fields.push(`position = $${i++}`);
+        params.push(parseInt(req.body.position, 10));
+      }
+      if (!fields.length) return res.status(400).json({ ok: false, error: "nothing to update" });
+      fields.push("updated_at = NOW()");
+      params.push(id);
+      const r = await db.query(
+        `UPDATE court_prep_items SET ${fields.join(", ")} WHERE id = $${i++} RETURNING *`,
+        params
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      res.json({ ok: true, item: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/prep-items/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      await db.query(`DELETE FROM court_prep_items WHERE id = $1`, [id]);
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
   //  GLOBAL SEARCH
   //  ─────────────────────────────────────────────────────
   //  Search across clients, tasks, invoices, and notes in one query.
