@@ -153,6 +153,25 @@ const STAFF_TOOLS = [
       },
     },
   },
+  {
+    name: "get_client_trust_balance",
+    description: "Get the IOLTA trust account balance for a specific client, including recent transactions. Use for 'how much trust money is left for the Chen case' or 'when did we last withdraw from Miguel's trust'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        client_name: { type: "string", description: "Client name (partial match)." },
+      },
+      required: ["client_name"],
+    },
+  },
+  {
+    name: "get_firm_trust_summary",
+    description: "Admin-only: get firm-wide IOLTA trust total and per-client breakdown. Use for reconciliation ('what's our total trust balance right now?') or spotting anomalies.",
+    input_schema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 // Tool executors — each returns a plain object; caller stringifies for tool_result content.
@@ -446,6 +465,67 @@ async function executeTool(db, user, name, args) {
       };
     }
 
+    if (name === "get_client_trust_balance") {
+      const q = String(args.client_name || "").trim();
+      if (!q) return { error: "client_name required" };
+      const clientR = await db.query(
+        `SELECT DISTINCT client_key, client_name FROM tasks WHERE client_name ILIKE $1 LIMIT 3`,
+        [`%${q}%`]
+      );
+      if (!clientR.rows.length) return { matches: [] };
+      const results = [];
+      for (const c of clientR.rows) {
+        const txnR = await db.query(
+          `SELECT running_balance_cents, transaction_date FROM trust_transactions
+           WHERE client_key = $1 ORDER BY id DESC LIMIT 1`,
+          [c.client_key]
+        );
+        const recentR = await db.query(
+          `SELECT txn_type, category, amount_cents, description, transaction_date
+           FROM trust_transactions WHERE client_key = $1
+           ORDER BY id DESC LIMIT 10`,
+          [c.client_key]
+        );
+        const bal = txnR.rows[0]?.running_balance_cents || 0;
+        results.push({
+          client_name: c.client_name,
+          current_balance_display: `$${(bal / 100).toFixed(2)}`,
+          current_balance_cents: bal,
+          last_activity: txnR.rows[0]?.transaction_date || null,
+          recent_transactions: recentR.rows.map(r => ({
+            ...r,
+            amount_display: `$${(r.amount_cents / 100).toFixed(2)}`,
+          })),
+        });
+      }
+      return { clients: results };
+    }
+
+    if (name === "get_firm_trust_summary") {
+      if (!isAdmin) return { error: "admin only" };
+      const r = await db.query(`
+        WITH latest AS (
+          SELECT DISTINCT ON (client_key) client_key, running_balance_cents
+          FROM trust_transactions ORDER BY client_key, id DESC
+        )
+        SELECT l.client_key,
+               l.running_balance_cents,
+               (SELECT client_name FROM tasks t WHERE t.client_key = l.client_key LIMIT 1) AS client_name
+        FROM latest l WHERE l.running_balance_cents > 0
+        ORDER BY l.running_balance_cents DESC
+      `);
+      const total = r.rows.reduce((s, x) => s + (x.running_balance_cents || 0), 0);
+      return {
+        firm_total_display: `$${(total / 100).toFixed(2)}`,
+        firm_total_cents: total,
+        client_count: r.rows.length,
+        top_balances: r.rows.slice(0, 20).map(row => ({
+          client_name: row.client_name || row.client_key,
+          balance_display: `$${((row.running_balance_cents || 0) / 100).toFixed(2)}`,
+        })),
+      };
+    }
+
     return { error: `Unknown tool: ${name}` };
   } catch (err) {
     return { error: err.message };
@@ -558,6 +638,8 @@ You have TOOLS to look up real firm data — USE THEM whenever the user asks abo
 - Time and value on a specific client's case → get_client_time_summary
 - Staff notes about a client (case strategy, context) → get_client_notes
 - Firm-wide performance metrics: revenue, hours, cases → get_practice_insights (admin only)
+- Client trust (IOLTA) balances and recent transactions → get_client_trust_balance
+- Firm-wide trust total for reconciliation → get_firm_trust_summary (admin only)
 
 Answer legal questions substantively and professionally, drawing on:
 - Immigration law (USCIS, immigration court, BIA, 9th Circuit)
