@@ -3972,6 +3972,287 @@ function registerAppApi(app) {
   });
 
   // ═══════════════════════════════════════════════════════
+  //  PRACTICE INSIGHTS (admin only)
+  //  ─────────────────────────────────────────────────────
+  //  Aggregates key firm metrics for a date range: revenue,
+  //  hours logged (with per-staff breakdown), outstanding invoices,
+  //  new + completed cases, upcoming hearings. Also compares to
+  //  the previous period of the same length.
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/admin/insights", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const period = String(req.query.period || "month");
+      const now = new Date();
+      let from; let to = new Date(now);
+      let prevFrom; let prevTo;
+
+      if (period === "week") {
+        from = new Date(now); from.setDate(from.getDate() - 7);
+        prevFrom = new Date(from); prevFrom.setDate(prevFrom.getDate() - 7);
+        prevTo = new Date(from);
+      } else if (period === "month") {
+        from = new Date(now); from.setDate(from.getDate() - 30);
+        prevFrom = new Date(from); prevFrom.setDate(prevFrom.getDate() - 30);
+        prevTo = new Date(from);
+      } else if (period === "quarter") {
+        from = new Date(now); from.setDate(from.getDate() - 90);
+        prevFrom = new Date(from); prevFrom.setDate(prevFrom.getDate() - 90);
+        prevTo = new Date(from);
+      } else if (period === "year") {
+        from = new Date(now); from.setDate(from.getDate() - 365);
+        prevFrom = new Date(from); prevFrom.setDate(prevFrom.getDate() - 365);
+        prevTo = new Date(from);
+      } else {
+        // custom: use from + to query params
+        from = req.query.from ? new Date(String(req.query.from)) : new Date(now.getTime() - 30 * 86400e3);
+        to = req.query.to ? new Date(String(req.query.to)) : new Date(now);
+        const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400e3));
+        prevFrom = new Date(from); prevFrom.setDate(prevFrom.getDate() - days);
+        prevTo = new Date(from);
+      }
+
+      const fromStr = from.toISOString();
+      const toStr = to.toISOString();
+      const prevFromStr = prevFrom.toISOString();
+      const prevToStr = prevTo.toISOString();
+
+      const [
+        revenueR, prevRevenueR, outstandingR,
+        hoursR, prevHoursR, hoursByStaffR,
+        newTasksR, completedTasksR, newClientsR,
+        hearingsR,
+      ] = await Promise.all([
+        // Revenue: paid invoices in period
+        db.query(
+          `SELECT COALESCE(SUM(amount_cents), 0)::int AS total, COUNT(*)::int AS count
+           FROM client_invoices WHERE status = 'paid' AND paid_at >= $1 AND paid_at <= $2`,
+          [fromStr, toStr]
+        ),
+        db.query(
+          `SELECT COALESCE(SUM(amount_cents), 0)::int AS total, COUNT(*)::int AS count
+           FROM client_invoices WHERE status = 'paid' AND paid_at >= $1 AND paid_at <= $2`,
+          [prevFromStr, prevToStr]
+        ),
+        // Outstanding (all-time, not just period)
+        db.query(
+          `SELECT COALESCE(SUM(amount_cents), 0)::int AS total, COUNT(*)::int AS count
+           FROM client_invoices WHERE status = 'sent'`
+        ),
+        // Hours logged in period
+        db.query(
+          `SELECT COALESCE(SUM(minutes), 0)::int AS total_minutes,
+                  COALESCE(SUM(CASE WHEN billable THEN minutes ELSE 0 END), 0)::int AS billable_minutes,
+                  COALESCE(SUM(ROUND((minutes::numeric / 60) * COALESCE(hourly_rate_cents, 0))), 0)::int AS billable_cents,
+                  COUNT(*)::int AS count
+           FROM time_entries WHERE created_at >= $1 AND created_at <= $2`,
+          [fromStr, toStr]
+        ),
+        db.query(
+          `SELECT COALESCE(SUM(minutes), 0)::int AS total_minutes
+           FROM time_entries WHERE created_at >= $1 AND created_at <= $2`,
+          [prevFromStr, prevToStr]
+        ),
+        // Hours by staff (this period)
+        db.query(
+          `SELECT a.id, a.full_name, a.role,
+                  COALESCE(SUM(t.minutes), 0)::int AS minutes,
+                  COALESCE(SUM(CASE WHEN t.billable THEN t.minutes ELSE 0 END), 0)::int AS billable_minutes,
+                  COALESCE(SUM(ROUND((t.minutes::numeric / 60) * COALESCE(t.hourly_rate_cents, 0))), 0)::int AS billable_cents
+           FROM admin_users a
+           LEFT JOIN time_entries t ON t.staff_id = a.id AND t.created_at >= $1 AND t.created_at <= $2
+           WHERE a.disabled = false AND a.role != 'consultant'
+           GROUP BY a.id, a.full_name, a.role
+           HAVING COALESCE(SUM(t.minutes), 0) > 0
+           ORDER BY minutes DESC`,
+          [fromStr, toStr]
+        ),
+        // Tasks created in period
+        db.query(
+          `SELECT COUNT(*)::int AS n FROM tasks WHERE created_at >= $1 AND created_at <= $2`,
+          [fromStr, toStr]
+        ),
+        // Tasks completed in period
+        db.query(
+          `SELECT COUNT(*)::int AS n FROM tasks WHERE completed = true AND updated_at >= $1 AND updated_at <= $2`,
+          [fromStr, toStr]
+        ),
+        // New distinct clients in period (first appearance)
+        db.query(
+          `SELECT COUNT(DISTINCT client_key)::int AS n FROM tasks
+           WHERE client_key IS NOT NULL AND created_at >= $1 AND created_at <= $2
+             AND client_key NOT IN (SELECT DISTINCT client_key FROM tasks WHERE client_key IS NOT NULL AND created_at < $1)`,
+          [fromStr, toStr]
+        ),
+        // Upcoming hearings (next 7 days from now, not the period)
+        db.query(
+          `SELECT COUNT(*)::int AS n FROM tasks
+           WHERE due_date IS NOT NULL AND due_date >= CURRENT_DATE AND due_date <= CURRENT_DATE + 7
+             AND (completed = false OR completed IS NULL)
+             AND (LOWER(description) LIKE '%hearing%' OR LOWER(description) LIKE '%court%'
+                  OR LOWER(description) LIKE '%interview%' OR LOWER(description) LIKE '%deposition%')`
+        ),
+      ]);
+
+      const pct = (curr, prev) => {
+        if (prev === 0) return curr > 0 ? 100 : null;
+        return Math.round(((curr - prev) / prev) * 100);
+      };
+
+      const revenue = revenueR.rows[0].total;
+      const prevRevenue = prevRevenueR.rows[0].total;
+      const hours = hoursR.rows[0].total_minutes;
+      const prevHours = prevHoursR.rows[0].total_minutes;
+
+      res.json({
+        ok: true,
+        period,
+        from: fromStr,
+        to: toStr,
+        prev_from: prevFromStr,
+        prev_to: prevToStr,
+        revenue: {
+          cents: revenue,
+          display: `$${(revenue / 100).toFixed(2)}`,
+          count: revenueR.rows[0].count,
+          prev_cents: prevRevenue,
+          change_pct: pct(revenue, prevRevenue),
+        },
+        outstanding: {
+          cents: outstandingR.rows[0].total,
+          display: `$${(outstandingR.rows[0].total / 100).toFixed(2)}`,
+          count: outstandingR.rows[0].count,
+        },
+        hours: {
+          total_minutes: hours,
+          total_hours: Math.round((hours / 60) * 10) / 10,
+          billable_minutes: hoursR.rows[0].billable_minutes,
+          billable_hours: Math.round((hoursR.rows[0].billable_minutes / 60) * 10) / 10,
+          billable_value_cents: hoursR.rows[0].billable_cents,
+          billable_value_display: `$${(hoursR.rows[0].billable_cents / 100).toFixed(2)}`,
+          entry_count: hoursR.rows[0].count,
+          prev_minutes: prevHours,
+          change_pct: pct(hours, prevHours),
+        },
+        hours_by_staff: hoursByStaffR.rows.map((r) => ({
+          id: r.id,
+          name: r.full_name,
+          role: r.role,
+          minutes: r.minutes,
+          hours: Math.round((r.minutes / 60) * 10) / 10,
+          billable_hours: Math.round((r.billable_minutes / 60) * 10) / 10,
+          billable_value_cents: r.billable_cents,
+          billable_value_display: `$${(r.billable_cents / 100).toFixed(2)}`,
+        })),
+        cases: {
+          new: newTasksR.rows[0].n,
+          completed: completedTasksR.rows[0].n,
+          new_clients: newClientsR.rows[0].n,
+        },
+        upcoming_hearings_next_7d: hearingsR.rows[0].n,
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  DATA EXPORT (admin only)
+  //  ─────────────────────────────────────────────────────
+  //  CSV exports of key firm data for tax season, quarterly
+  //  reporting, or backup. Returns Content-Type: text/csv.
+  // ═══════════════════════════════════════════════════════
+
+  function csvEscape(v) {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  }
+
+  app.get("/api/staff/admin/export/clients.csv", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT DISTINCT client_key, client_name, client_phone, client_email, matter_type,
+                MIN(created_at) AS first_seen, MAX(created_at) AS last_activity,
+                COUNT(*) AS task_count
+         FROM tasks WHERE client_key IS NOT NULL
+         GROUP BY client_key, client_name, client_phone, client_email, matter_type
+         ORDER BY client_name`
+      );
+      const lines = ["client_key,client_name,client_phone,client_email,matter_type,first_seen,last_activity,task_count"];
+      for (const row of r.rows) {
+        lines.push([row.client_key, row.client_name, row.client_phone, row.client_email, row.matter_type,
+          row.first_seen ? new Date(row.first_seen).toISOString() : "",
+          row.last_activity ? new Date(row.last_activity).toISOString() : "",
+          row.task_count].map(csvEscape).join(","));
+      }
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="tezlaw-clients-${new Date().toISOString().substring(0, 10)}.csv"`);
+      res.send(lines.join("\r\n"));
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.get("/api/staff/admin/export/invoices.csv", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT i.id, i.client_key,
+                (SELECT client_name FROM tasks t WHERE t.client_key = i.client_key LIMIT 1) AS client_name,
+                i.description, i.amount_cents, i.status, i.due_date, i.paid_at, i.paid_method,
+                i.client_claim_paid_at, i.created_at
+         FROM client_invoices i ORDER BY i.created_at DESC`
+      );
+      const lines = ["id,client_key,client_name,description,amount_usd,status,due_date,paid_at,paid_method,client_claim_paid_at,created_at"];
+      for (const row of r.rows) {
+        lines.push([
+          row.id, row.client_key, row.client_name, row.description,
+          ((row.amount_cents || 0) / 100).toFixed(2),
+          row.status, row.due_date || "",
+          row.paid_at ? new Date(row.paid_at).toISOString() : "",
+          row.paid_method || "",
+          row.client_claim_paid_at ? new Date(row.client_claim_paid_at).toISOString() : "",
+          new Date(row.created_at).toISOString(),
+        ].map(csvEscape).join(","));
+      }
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="tezlaw-invoices-${new Date().toISOString().substring(0, 10)}.csv"`);
+      res.send(lines.join("\r\n"));
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.get("/api/staff/admin/export/time-entries.csv", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const from = req.query.from ? String(req.query.from) : null;
+      const to = req.query.to ? String(req.query.to) : null;
+      const params = [];
+      let where = "1=1";
+      if (from) { params.push(from); where += ` AND t.entry_date >= $${params.length}::date`; }
+      if (to) { params.push(to); where += ` AND t.entry_date <= $${params.length}::date`; }
+      const r = await db.query(
+        `SELECT t.id, t.entry_date, a.full_name AS staff, t.client_key,
+                (SELECT client_name FROM tasks tk WHERE tk.client_key = t.client_key LIMIT 1) AS client_name,
+                t.description, t.minutes, t.hourly_rate_cents, t.billable, t.invoice_id
+         FROM time_entries t LEFT JOIN admin_users a ON a.id = t.staff_id
+         WHERE ${where}
+         ORDER BY t.entry_date DESC, t.id DESC`,
+        params
+      );
+      const lines = ["id,entry_date,staff,client_key,client_name,description,minutes,hours,rate_usd,billable,amount_usd,invoice_id"];
+      for (const row of r.rows) {
+        const hours = ((row.minutes || 0) / 60).toFixed(2);
+        const rateUsd = ((row.hourly_rate_cents || 0) / 100).toFixed(2);
+        const amountUsd = (((row.minutes || 0) / 60) * ((row.hourly_rate_cents || 0) / 100)).toFixed(2);
+        lines.push([
+          row.id, row.entry_date, row.staff, row.client_key, row.client_name,
+          row.description, row.minutes, hours, rateUsd,
+          row.billable ? "yes" : "no", amountUsd, row.invoice_id || "",
+        ].map(csvEscape).join(","));
+      }
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="tezlaw-time-${new Date().toISOString().substring(0, 10)}.csv"`);
+      res.send(lines.join("\r\n"));
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
   //  CONSULTANT PORTAL API
   //  (naturally scoped to their own submissions + assigned clients)
   // ═══════════════════════════════════════════════════════
