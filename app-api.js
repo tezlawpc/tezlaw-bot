@@ -5477,13 +5477,46 @@ ${groups.map(g => `
         const byANumber = c.a_number && !mapping
           ? mappingsR.rows.find(m => m.mapping_a_number && m.mapping_a_number.replace(/\D/g, '') === (c.a_number || '').replace(/\D/g, ''))
           : null;
+        const effectivePath = mapping?.dropbox_path || byANumber?.dropbox_path || null;
+
+        // Detect wrong-match: client name has NO word overlap with folder path
+        // Also check A-number mismatch if both are present
+        let isWrongMatch = false;
+        let wrongReason = null;
+        if (effectivePath && c.client_name) {
+          // Extract words from client name (length >= 3 to skip initials/short particles)
+          const nameWords = String(c.client_name)
+            .toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            .split(/[^a-z]+/)
+            .filter(w => w.length >= 3);
+          const pathLower = effectivePath.toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          // If NONE of the client name words appear in the path, it's likely wrong
+          const anyOverlap = nameWords.some(w => pathLower.includes(w));
+          if (nameWords.length > 0 && !anyOverlap) {
+            isWrongMatch = true;
+            wrongReason = 'name-vs-folder mismatch';
+          }
+          // Check A-number mismatch if both present in mapping
+          if (mapping?.mapping_a_number && c.a_number) {
+            const mA = mapping.mapping_a_number.replace(/\D/g, '');
+            const cA = c.a_number.replace(/\D/g, '');
+            if (mA && cA && mA !== cA) {
+              isWrongMatch = true;
+              wrongReason = wrongReason ? wrongReason + ' + A# mismatch' : 'A# mismatch';
+            }
+          }
+        }
+
         return {
           ...c,
-          dropbox_path: mapping?.dropbox_path || byANumber?.dropbox_path || null,
+          dropbox_path: effectivePath,
           mapping_resolved_at: mapping?.resolved_at || null,
           mapping_resolved_by: mapping?.resolved_by || null,
           matched_by_anumber: !!byANumber,
-          status: mapping ? 'linked' : (byANumber ? 'linked_by_anumber' : 'unlinked'),
+          status: isWrongMatch ? 'wrong_match' : (mapping ? 'linked' : (byANumber ? 'linked_by_anumber' : 'unlinked')),
+          wrong_reason: wrongReason,
         };
       });
 
@@ -5492,6 +5525,7 @@ ${groups.map(g => `
         linked: enriched.filter(c => c.status === 'linked').length,
         linked_by_anumber: enriched.filter(c => c.status === 'linked_by_anumber').length,
         unlinked: enriched.filter(c => c.status === 'unlinked').length,
+        wrong_match: enriched.filter(c => c.status === 'wrong_match').length,
         orphan_mappings: orphanMappings.length,
       };
 
@@ -5554,6 +5588,28 @@ ${groups.map(g => `
       const dbx = require("./dropbox-integration");
       await dbx.clearClientFolderMapping(req.params.key);
       res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Bulk-clear all mappings the sweep flagged as wrong-match
+  app.post("/api/staff/admin/dropbox/clear-wrong-matches", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const { client_keys } = req.body || {};
+      if (!Array.isArray(client_keys) || !client_keys.length) {
+        return res.status(400).json({ ok: false, error: "client_keys array required" });
+      }
+      const dbx = require("./dropbox-integration");
+      let cleared = 0;
+      const errors = [];
+      for (const key of client_keys) {
+        try {
+          await dbx.clearClientFolderMapping(String(key));
+          cleared++;
+        } catch (e) {
+          errors.push({ key, error: e.message });
+        }
+      }
+      res.json({ ok: true, cleared, errors });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
