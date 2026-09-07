@@ -172,6 +172,16 @@ const STAFF_TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "list_matter_templates",
+    description: "List all available case templates (predefined workflows for common matter types like I-130, I-485, N-400, personal injury, LLC formation). Use when the user wants to start a new case or asks 'what templates do we have?'",
+    input_schema: {
+      type: "object",
+      properties: {
+        matter_type: { type: "string", description: "Optional matter type filter." },
+      },
+    },
+  },
 ];
 
 // Tool executors — each returns a plain object; caller stringifies for tool_result content.
@@ -526,6 +536,22 @@ async function executeTool(db, user, name, args) {
       };
     }
 
+    if (name === "list_matter_templates") {
+      const params = [];
+      let where = "active = true";
+      if (args.matter_type) {
+        params.push(args.matter_type);
+        where += ` AND matter_type = $${params.length}`;
+      }
+      const r = await db.query(
+        `SELECT id, matter_type, name, description,
+                (SELECT COUNT(*)::int FROM matter_template_tasks WHERE template_id = matter_templates.id) AS task_count
+         FROM matter_templates WHERE ${where} ORDER BY matter_type, name`,
+        params
+      );
+      return { templates: r.rows };
+    }
+
     return { error: `Unknown tool: ${name}` };
   } catch (err) {
     return { error: err.message };
@@ -640,6 +666,7 @@ You have TOOLS to look up real firm data — USE THEM whenever the user asks abo
 - Firm-wide performance metrics: revenue, hours, cases → get_practice_insights (admin only)
 - Client trust (IOLTA) balances and recent transactions → get_client_trust_balance
 - Firm-wide trust total for reconciliation → get_firm_trust_summary (admin only)
+- Case templates / standard workflows → list_matter_templates
 
 Answer legal questions substantively and professionally, drawing on:
 - Immigration law (USCIS, immigration court, BIA, 9th Circuit)
