@@ -1727,8 +1727,56 @@ function registerAppApi(app) {
       if (!zaraChat || typeof zaraChat.chat !== "function") {
         return res.status(501).json({ ok: false, error: "Chat not available" });
       }
+
+      // Look up this client's real case context so Zara can personalize responses.
+      // Never fails the chat if lookup errors — falls back to basic prompt.
+      let caseContext = null;
+      try {
+        // req.user.uid is the client_accounts.id; fetch phone + client_key
+        const acctR = await db.query(
+          `SELECT full_name, email, phone, client_key, language
+           FROM client_accounts WHERE id = $1 LIMIT 1`,
+          [req.user.uid]
+        );
+        const acct = acctR.rows[0];
+        if (acct && acct.client_key) {
+          const cp = require("./client-profiles");
+          const profile = await cp.getClientByKey(acct.client_key);
+          if (profile) {
+            const now = Date.now();
+            const upcoming = (profile.hearings || [])
+              .filter(h => h.hearing_date && new Date(h.hearing_date).getTime() >= now)
+              .sort((a, b) => new Date(a.hearing_date) - new Date(b.hearing_date))
+              .slice(0, 2)
+              .map(h => `${new Date(h.hearing_date).toDateString()}${h.type_label ? ` (${h.type_label})` : ""}${h.court_name ? ` at ${h.court_name}` : ""}`);
+            const openDeadlines = (profile.deadlines || [])
+              .filter(d => !d.completed_at)
+              .slice(0, 3)
+              .map(d => `${d.description}${d.due_date ? ` (due ${new Date(d.due_date).toDateString()})` : ""}`);
+            caseContext = {
+              name: profile.client_name || acct.full_name,
+              a_number: profile.a_number || null,
+              case_types: Array.from(profile.case_types || []),
+              upcoming_hearings: upcoming,
+              open_deadlines: openDeadlines,
+              language: acct.language || req.user.lang || "en",
+            };
+          } else {
+            caseContext = { name: acct.full_name, language: acct.language || "en" };
+          }
+        } else if (acct) {
+          caseContext = { name: acct.full_name, language: acct.language || "en" };
+        }
+      } catch (e) {
+        console.warn("[client chat context lookup]:", e.message);
+      }
+
       const answer = await zaraChat.chat({
-        systemPrompt: zaraChat.CLIENT_SYSTEM_PROMPT(req.user.n, req.user.lang || "en"),
+        systemPrompt: zaraChat.CLIENT_SYSTEM_PROMPT(
+          req.user.n,
+          req.user.lang || "en",
+          caseContext
+        ),
         message: String(message),
         history: history || [],
       });
