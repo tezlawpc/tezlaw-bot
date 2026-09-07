@@ -864,6 +864,44 @@ function registerAppApi(app) {
           total_hearings: (c.hearings || []).length,
         }));
       }
+
+      // Merge in any linked client_accounts that aren't already in the roster.
+      // Ensures phones the admin has manually linked show up in the Clients tab
+      // even when the client has no hearings/tasks/deadlines yet.
+      try {
+        const existingKeys = new Set(results.map(r => r.key).filter(Boolean));
+        const acctQ = q && q.length >= 2
+          ? `SELECT DISTINCT client_key, full_name, email, phone
+             FROM client_accounts
+             WHERE client_key IS NOT NULL AND client_key != ''
+               AND (LOWER(full_name) LIKE $1 OR client_key LIKE $1 OR phone LIKE $1)`
+          : `SELECT DISTINCT client_key, full_name, email, phone
+             FROM client_accounts
+             WHERE client_key IS NOT NULL AND client_key != ''`;
+        const acctParams = q && q.length >= 2 ? [`%${q.toLowerCase()}%`] : [];
+        const acctR = await db.query(acctQ, acctParams);
+        for (const row of acctR.rows) {
+          if (!existingKeys.has(row.client_key)) {
+            results.push({
+              key: row.client_key,
+              client_name: row.full_name || row.client_key,
+              client_phone: row.phone,
+              client_email: row.email,
+              case_types: [],
+              total_hearings: 0,
+              app_linked: true,   // signal to UI: this client has app access
+            });
+            existingKeys.add(row.client_key);
+          } else {
+            // Existing roster entry — annotate as app-linked
+            const idx = results.findIndex(r => r.key === row.client_key);
+            if (idx >= 0) results[idx].app_linked = true;
+          }
+        }
+      } catch (e) {
+        console.warn("[clients merge accounts]:", e.message);
+      }
+
       // Filter to visible clients
       const filtered = filterByClientKeys(results, visibleKeys, "key");
       res.json({
