@@ -7,6 +7,9 @@
  *
  * Uses Claude Sonnet for higher-quality legal answers. Uses ephemeral
  * cache_control on the system prompt so repeated turns hit prompt cache.
+ *
+ * STAFF MODE also has tool_use support for querying firm data
+ * (case counts, task lists, upcoming hearings, client lookup).
  */
 
 const axios = require("axios");
@@ -15,6 +18,262 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-4-5-20250929";  // current Sonnet — high-quality legal reasoning
 const MAX_TOKENS = 1500;
 
+// ═══════════════════════════════════════════════════════
+//  FIRM-DATA TOOLS (staff mode only)
+// ═══════════════════════════════════════════════════════
+
+const STAFF_TOOLS = [
+  {
+    name: "count_active_cases",
+    description: "Count how many currently open/active cases (tasks) the firm has, optionally grouped by matter type. Returns totals broken down by matter type (Immigration, Personal Injury, etc.).",
+    input_schema: {
+      type: "object",
+      properties: {
+        matter_type: {
+          type: "string",
+          description: "Optional. Filter to a specific matter type (e.g., 'Immigration', 'Personal Injury'). Omit to get counts across all matter types.",
+        },
+      },
+    },
+  },
+  {
+    name: "list_recent_clients",
+    description: "List the firm's most recently added clients with their name, matter type, contact info, and case status. Use when the user asks about their clients or wants to look up a specific one.",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "How many clients to return (max 30, default 15)." },
+        matter_type: { type: "string", description: "Optional. Filter to a specific matter type." },
+      },
+    },
+  },
+  {
+    name: "search_client_by_name",
+    description: "Find a specific client by name (partial match). Returns client details including matter type, contact info, and case status.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Full or partial client name to search for." },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "list_upcoming_hearings",
+    description: "List upcoming immigration court hearings, USCIS interviews, or other scheduled court dates in the next N days. Includes client name, court type, date/time, and location.",
+    input_schema: {
+      type: "object",
+      properties: {
+        days: { type: "number", description: "How many days ahead to look (default 30, max 365)." },
+      },
+    },
+  },
+  {
+    name: "list_my_tasks",
+    description: "List tasks currently assigned to the authenticated staff member (or all firm tasks if they're admin). Returns task title, matter type, client, due date, and status.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          description: "Optional status filter: 'open', 'overdue', 'due_today', 'due_this_week', 'completed'.",
+        },
+        limit: { type: "number", description: "Max results (default 20)." },
+      },
+    },
+  },
+  {
+    name: "list_recent_client_documents",
+    description: "List documents recently uploaded by clients. Useful when the user asks 'what documents came in this week' or wants to check what a specific client has sent.",
+    input_schema: {
+      type: "object",
+      properties: {
+        days: { type: "number", description: "How many days back to look (default 7)." },
+        client_name: { type: "string", description: "Optional: filter to documents from a specific client." },
+      },
+    },
+  },
+  {
+    name: "list_outstanding_invoices",
+    description: "List invoices that have been sent but not yet paid, including which clients owe what amounts and how long they've been outstanding.",
+    input_schema: {
+      type: "object",
+      properties: {
+        days_outstanding: {
+          type: "number",
+          description: "Optional: only show invoices outstanding for at least this many days.",
+        },
+      },
+    },
+  },
+];
+
+// Tool executors — each returns a plain object; caller stringifies for tool_result content.
+async function executeTool(db, user, name, args) {
+  const isAdmin = user.role === "admin";
+  const userId = user.uid;
+
+  try {
+    if (name === "count_active_cases") {
+      const params = [];
+      let where = "1=1";
+      if (args.matter_type) {
+        where += " AND matter_type ILIKE $1";
+        params.push(`%${args.matter_type}%`);
+      }
+      // Task counts grouped by matter type; only counts uncompleted tasks
+      const r = await db.query(
+        `SELECT COALESCE(matter_type, 'Uncategorized') AS matter_type, COUNT(*)::int AS n
+         FROM tasks
+         WHERE ${where} AND (completed = false OR completed IS NULL)
+         GROUP BY matter_type
+         ORDER BY n DESC`,
+        params
+      );
+      const total = r.rows.reduce((s, row) => s + row.n, 0);
+      return { total_open: total, by_matter_type: r.rows };
+    }
+
+    if (name === "list_recent_clients") {
+      const limit = Math.min(30, Math.max(1, parseInt(args.limit, 10) || 15));
+      const params = [limit];
+      let where = "1=1";
+      if (args.matter_type) {
+        where += " AND matter_type ILIKE $2";
+        params.push(`%${args.matter_type}%`);
+      }
+      const r = await db.query(
+        `SELECT client_key, client_name, client_phone, client_email, matter_type, created_at
+         FROM tasks
+         WHERE ${where}
+         GROUP BY client_key, client_name, client_phone, client_email, matter_type, created_at
+         ORDER BY MAX(created_at) DESC
+         LIMIT $1`,
+        params
+      );
+      return { clients: r.rows };
+    }
+
+    if (name === "search_client_by_name") {
+      const q = String(args.name || "").trim();
+      if (!q) return { error: "name required" };
+      const r = await db.query(
+        `SELECT DISTINCT client_key, client_name, client_phone, client_email, matter_type
+         FROM tasks
+         WHERE client_name ILIKE $1
+         LIMIT 20`,
+        [`%${q}%`]
+      );
+      return { matches: r.rows };
+    }
+
+    if (name === "list_upcoming_hearings") {
+      const days = Math.min(365, Math.max(1, parseInt(args.days, 10) || 30));
+      const r = await db.query(
+        `SELECT t.client_name, t.matter_type, t.description, t.due_date, t.assigned_to
+         FROM tasks t
+         WHERE t.due_date IS NOT NULL
+           AND t.due_date >= CURRENT_DATE
+           AND t.due_date <= CURRENT_DATE + $1::int
+           AND (t.completed = false OR t.completed IS NULL)
+           AND (
+             LOWER(t.description) LIKE '%hearing%'
+             OR LOWER(t.description) LIKE '%court%'
+             OR LOWER(t.description) LIKE '%interview%'
+             OR LOWER(t.description) LIKE '%deposition%'
+             OR LOWER(t.description) LIKE '%uscis%'
+           )
+         ORDER BY t.due_date ASC
+         LIMIT 30`,
+        [days]
+      );
+      return { hearings: r.rows, days_ahead: days };
+    }
+
+    if (name === "list_my_tasks") {
+      const limit = Math.min(50, Math.max(1, parseInt(args.limit, 10) || 20));
+      let where = isAdmin ? "1=1" : "(assigned_to_user_id = $1 OR created_by_user_id = $1)";
+      let params = isAdmin ? [] : [userId];
+      let statusFilter = "";
+      if (args.status === "overdue") {
+        statusFilter = " AND due_date < CURRENT_DATE AND (completed = false OR completed IS NULL)";
+      } else if (args.status === "due_today") {
+        statusFilter = " AND due_date = CURRENT_DATE AND (completed = false OR completed IS NULL)";
+      } else if (args.status === "due_this_week") {
+        statusFilter = " AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7 AND (completed = false OR completed IS NULL)";
+      } else if (args.status === "completed") {
+        statusFilter = " AND completed = true";
+      } else if (args.status === "open") {
+        statusFilter = " AND (completed = false OR completed IS NULL)";
+      }
+      params.push(limit);
+      const limitParam = `$${params.length}`;
+      const r = await db.query(
+        `SELECT id, description, matter_type, client_name, due_date, assigned_to, completed
+         FROM tasks WHERE ${where}${statusFilter}
+         ORDER BY (completed IS NULL OR completed = false) DESC, due_date ASC NULLS LAST
+         LIMIT ${limitParam}`,
+        params
+      );
+      return { tasks: r.rows, scope: isAdmin ? "all_firm_tasks" : "assigned_to_me" };
+    }
+
+    if (name === "list_recent_client_documents") {
+      const days = Math.min(90, Math.max(1, parseInt(args.days, 10) || 7));
+      const params = [days];
+      let where = `uploaded_at >= NOW() - $1::int * INTERVAL '1 day'`;
+      if (args.client_name) {
+        params.push(`%${args.client_name}%`);
+        where += ` AND client_key IN (SELECT DISTINCT client_key FROM tasks WHERE client_name ILIKE $${params.length})`;
+      }
+      const r = await db.query(
+        `SELECT d.id, d.filename, d.mime_type, d.size_bytes, d.category, d.uploaded_at,
+                (SELECT client_name FROM tasks t WHERE t.client_key = d.client_key LIMIT 1) AS client_name
+         FROM client_documents d
+         WHERE ${where}
+         ORDER BY d.uploaded_at DESC
+         LIMIT 30`,
+        params
+      );
+      return { documents: r.rows, days_back: days };
+    }
+
+    if (name === "list_outstanding_invoices") {
+      const params = [];
+      let where = "status = 'sent'";
+      if (args.days_outstanding) {
+        const d = parseInt(args.days_outstanding, 10);
+        if (Number.isFinite(d) && d > 0) {
+          params.push(d);
+          where += ` AND created_at <= NOW() - $${params.length}::int * INTERVAL '1 day'`;
+        }
+      }
+      const r = await db.query(
+        `SELECT i.id, i.description, i.amount_cents, i.created_at, i.due_date, i.client_claim_paid_at,
+                (SELECT client_name FROM tasks t WHERE t.client_key = i.client_key LIMIT 1) AS client_name
+         FROM client_invoices i
+         WHERE ${where}
+         ORDER BY i.created_at ASC
+         LIMIT 50`,
+        params
+      );
+      const totalCents = r.rows.reduce((s, row) => s + (row.amount_cents || 0), 0);
+      return {
+        invoices: r.rows.map(x => ({
+          ...x,
+          amount_display: `$${((x.amount_cents || 0) / 100).toFixed(2)}`,
+        })),
+        outstanding_total_display: `$${(totalCents / 100).toFixed(2)}`,
+        count: r.rows.length,
+      };
+    }
+
+    return { error: `Unknown tool: ${name}` };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 /**
  * Ask Zara a legal question with optional conversation history.
  *
@@ -22,14 +281,18 @@ const MAX_TOKENS = 1500;
  * @param {string} opts.systemPrompt   Full system prompt (should describe role + user context)
  * @param {string} opts.message        The user's current message
  * @param {Array}  opts.history        Prior turns [{ role: 'user'|'assistant', content: string }, ...]
+ * @param {object} [opts.db]           Optional pg pool for tool_use (staff mode only)
+ * @param {object} [opts.user]         Optional user object { uid, role } for tool_use (staff only)
  * @returns {Promise<string>}          Zara's reply as plain text
  */
-async function chat({ systemPrompt, message, history = [] }) {
+async function chat({ systemPrompt, message, history = [], db, user }) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
 
+  // Only enable tools when we have both db + a staff/admin user
+  const useTools = !!(db && user && user.role && user.role !== "client");
+
   // Build message list: prior history + current turn
-  // Keep only recent turns to stay under token limits (last 8 turns = 4 back-and-forth pairs)
   const trimmedHistory = (history || [])
     .filter(t => t && t.role && t.content)
     .slice(-8)
@@ -43,37 +306,61 @@ async function chat({ systemPrompt, message, history = [] }) {
     { role: "user", content: String(message).substring(0, 8000) },
   ];
 
-  const body = {
+  const baseBody = {
     model: MODEL,
     max_tokens: MAX_TOKENS,
     system: [
-      {
-        type: "text",
-        text: systemPrompt,
-        cache_control: { type: "ephemeral" },   // per JJ's preference: cache system prompts
-      },
+      { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
     ],
-    messages,
+  };
+  if (useTools) baseBody.tools = STAFF_TOOLS;
+
+  const headers = {
+    "content-type": "application/json",
+    "x-api-key": apiKey,
+    "anthropic-version": "2023-06-01",
   };
 
-  const res = await axios.post(ANTHROPIC_API_URL, body, {
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    timeout: 60000,
-  });
+  // Tool-use loop (max 6 rounds)
+  let currentMessages = messages;
+  for (let round = 0; round < 6; round++) {
+    const res = await axios.post(
+      ANTHROPIC_API_URL,
+      { ...baseBody, messages: currentMessages },
+      { headers, timeout: 60000 }
+    );
 
-  // Extract text from the content blocks
-  const blocks = res.data?.content || [];
-  const text = blocks
-    .filter(b => b.type === "text")
-    .map(b => b.text)
-    .join("\n")
-    .trim();
+    const stopReason = res.data?.stop_reason;
+    const blocks = res.data?.content || [];
 
-  return text || "(no response)";
+    if (stopReason === "tool_use") {
+      // Collect tool_use blocks + execute each
+      const toolUses = blocks.filter(b => b.type === "tool_use");
+      if (!toolUses.length) break;
+      const toolResults = [];
+      for (const t of toolUses) {
+        const result = await executeTool(db, user, t.name, t.input || {});
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: t.id,
+          content: JSON.stringify(result).substring(0, 30000),
+        });
+      }
+      // Append assistant turn + tool_result user turn, continue loop
+      currentMessages = [
+        ...currentMessages,
+        { role: "assistant", content: blocks },
+        { role: "user", content: toolResults },
+      ];
+      continue;
+    }
+
+    // Normal text response — extract and return
+    const text = blocks.filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+    return text || "(no response)";
+  }
+
+  return "(tool-use loop exceeded)";
 }
 
 // System prompts — kept here for consistency
@@ -82,13 +369,21 @@ const STAFF_SYSTEM_PROMPT = `You are Zara, Tez Law P.C.'s AI legal assistant. Yo
 
 The user is authenticated. Do NOT collect their name, phone number, or matter type — you already know they are firm staff. Do NOT act like an intake bot. Do NOT say "someone from our office will reach out."
 
+You have TOOLS to look up real firm data — USE THEM whenever the user asks about anything firm-specific:
+- Counts of open cases → count_active_cases
+- Recent clients or client lookup → list_recent_clients / search_client_by_name
+- Court dates, hearings, USCIS interviews → list_upcoming_hearings
+- Tasks and to-do items → list_my_tasks
+- Recently uploaded client documents → list_recent_client_documents
+- Outstanding / unpaid invoices → list_outstanding_invoices
+
 Answer legal questions substantively and professionally, drawing on:
 - Immigration law (USCIS, immigration court, BIA, 9th Circuit)
 - Personal injury (California)
 - Business litigation and trademarks (USPTO)
 - Estate planning, real estate, landlord/tenant
 
-Give concise but substantive answers. Cite relevant statutes, case law, or agency guidance when helpful. If a question requires facts specific to a client case, ask a clarifying question — but ask ONE question, not a full intake.
+Give concise but substantive answers. Cite relevant statutes, case law, or agency guidance when helpful. For firm-specific questions, use tools first, then answer with the actual data. Never say "I don't have access to your case management system" — you DO have access via the tools above.
 
 Format: use short paragraphs, bullet points for lists, and bold for key terms. No excessive markdown.
 
