@@ -1076,10 +1076,28 @@ function registerAppApi(app) {
     }
   });
 
+  // Apple App Store review demo account bypass.
+  // Apple reviewers cannot receive real SMS during review, so we pin a
+  // known phone number + fixed OTP code that always works. The phone is
+  // NOT a real number — it will never send SMS, only accept the demo code.
+  const APPLE_REVIEW_DEMO_PHONE = "+16265550100";
+  const APPLE_REVIEW_DEMO_CODE = "123456";
+
   app.post("/api/auth/client/request-otp", async (req, res) => {
     try {
       const phone = normalizePhone(req.body?.phone);
       if (!phone) return res.status(400).json({ ok: false, error: "Valid phone required" });
+
+      // Demo bypass — always succeed silently, no rate limit, no SMS
+      if (phone === APPLE_REVIEW_DEMO_PHONE) {
+        // Insert a marker so verify-otp knows this is a demo request
+        await db.query(
+          `INSERT INTO client_otp (phone, code_hash, expires_at) VALUES ($1, 'demo', NOW() + INTERVAL '30 minutes')`,
+          [phone]
+        );
+        return res.json({ ok: true, message: "Demo mode — use code 123456" });
+      }
+
       const recent = await db.query(
         `SELECT COUNT(*)::int AS n FROM client_otp WHERE phone = $1 AND created_at > NOW() - INTERVAL '15 minutes'`,
         [phone]
@@ -1160,6 +1178,38 @@ function registerAppApi(app) {
       const phone = normalizePhone(req.body?.phone);
       const code = String(req.body?.code || "").trim();
       if (!phone || !code) return res.status(400).json({ ok: false, error: "Phone and code required" });
+
+      // Apple review demo bypass — fixed code
+      if (phone === APPLE_REVIEW_DEMO_PHONE && code === APPLE_REVIEW_DEMO_CODE) {
+        // Mark any demo rows used
+        await db.query(`UPDATE client_otp SET used = TRUE WHERE phone = $1 AND used = FALSE`, [phone]);
+        // Get or create the demo account
+        let acctR = await db.query(`SELECT * FROM client_accounts WHERE phone = $1`, [phone]);
+        let account = acctR.rows[0];
+        if (!account) {
+          const ins = await db.query(
+            `INSERT INTO client_accounts (phone, full_name, email, preferred_lang)
+             VALUES ($1, 'Apple Review Demo', 'demo@tezlawfirm.com', 'en') RETURNING *`,
+            [phone]
+          );
+          account = ins.rows[0];
+        }
+        await db.query(`UPDATE client_accounts SET last_login_at = NOW() WHERE id = $1`, [account.id]);
+        const token = await issueClientToken(account);
+        return res.json({
+          ok: true,
+          token,
+          user: {
+            id: `c${account.id}`,
+            phone: account.phone,
+            name: account.full_name || 'Apple Review Demo',
+            role: "client",
+            client_key: account.client_key,
+            linked_to_case: !!account.client_key,
+          },
+        });
+      }
+
       const r = await db.query(
         `SELECT * FROM client_otp
          WHERE phone = $1 AND used = FALSE AND expires_at > NOW()
