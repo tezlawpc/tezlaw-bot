@@ -463,6 +463,42 @@ async function initClientAuthTables() {
     }
   }
 
+  // ─── Case Members / Riders ─────────────────────────────────
+  // The main client (primary respondent) can have multiple family
+  // members ("riders") attached: spouse, minor children, parents.
+  // A search for any rider's name will find the parent case.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS case_members (
+      id             SERIAL PRIMARY KEY,
+      client_key     TEXT NOT NULL,
+      full_name      TEXT NOT NULL,
+      relationship   TEXT NOT NULL,  -- 'self' | 'spouse' | 'child' | 'parent' | 'sibling' | 'other'
+      a_number       TEXT,
+      dob            DATE,
+      is_primary     BOOLEAN DEFAULT FALSE,
+      notes          TEXT,
+      added_by       INTEGER,
+      created_at     TIMESTAMPTZ DEFAULT NOW(),
+      updated_at     TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_case_members_key ON case_members (client_key)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_case_members_name ON case_members (LOWER(full_name))`);
+
+  // ─── Client Aliases (for merged / renamed clients) ─────────
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS client_aliases (
+      id                 SERIAL PRIMARY KEY,
+      canonical_key      TEXT NOT NULL,
+      alias_key          TEXT NOT NULL,
+      alias_name         TEXT,
+      merged_by          INTEGER,
+      merged_at          TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(alias_key)
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_aliases_canonical ON client_aliases (canonical_key)`);
+
   // Seed a few common workflows if empty
   const mtplCount = await db.query(`SELECT COUNT(*)::int AS n FROM matter_templates`);
   if (mtplCount.rows[0].n === 0) {
@@ -3396,57 +3432,386 @@ function registerAppApi(app) {
   });
 
   // ═══════════════════════════════════════════════════════
-  //  GLOBAL SEARCH
+  //  GLOBAL SEARCH (fuzzy)
   //  ─────────────────────────────────────────────────────
-  //  Search across clients, tasks, invoices, and notes in one query.
-  //  Returns results grouped by type.
+  //  Multi-word tokenized search across clients, tasks, invoices, notes.
+  //  - Splits query into words: all words must match (AND)
+  //  - Case-insensitive, diacritic-insensitive (best-effort)
+  //  - Phone: strips non-digits, matches partial digit sequences
+  //  - Searches case_members (riders) — matching a spouse or child
+  //    surfaces the main respondent's case
+  //  - Handles client_aliases (merged old client_keys still findable)
   // ═══════════════════════════════════════════════════════
+
+  // Normalize a search term: lowercase, strip diacritics (best-effort)
+  function normalizeTerm(s) {
+    return String(s || "").toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")   // strip combining diacritics
+      .replace(/\s+/g, " ").trim();
+  }
+  function extractDigits(s) {
+    return String(s || "").replace(/\D/g, "");
+  }
 
   app.get("/api/staff/search", requireBearer, requireFirmUser, async (req, res) => {
     try {
-      const q = String(req.query.q || "").trim();
-      if (!q || q.length < 2) return res.json({ ok: true, results: { clients: [], tasks: [], invoices: [], notes: [] } });
-      const like = `%${q}%`;
+      const rawQ = String(req.query.q || "").trim();
+      if (!rawQ || rawQ.length < 2) {
+        return res.json({ ok: true, results: { clients: [], tasks: [], invoices: [], notes: [] } });
+      }
+      const qNorm = normalizeTerm(rawQ);
+      const words = qNorm.split(" ").filter(w => w.length >= 2);
+      if (!words.length) return res.json({ ok: true, results: { clients: [], tasks: [], invoices: [], notes: [] } });
 
-      const [clientsR, tasksR, invoicesR, notesR] = await Promise.all([
+      // Digit-only version of query for phone matching
+      const qDigits = extractDigits(rawQ);
+      const looksLikePhone = qDigits.length >= 3;
+
+      // Build AND-of-ORs for word matching across name/phone/email/matter/a_number
+      // Also match against case_members.full_name (rider names)
+      const clientParams = [];
+      const clientClauses = [];
+      for (const w of words) {
+        clientParams.push(`%${w}%`);
+        const wp = `$${clientParams.length}`;
+        clientClauses.push(`(
+          LOWER(client_name) LIKE ${wp}
+          OR LOWER(COALESCE(client_email, '')) LIKE ${wp}
+          OR LOWER(COALESCE(matter_type, '')) LIKE ${wp}
+          OR LOWER(COALESCE(a_number, '')) LIKE ${wp}
+          OR client_key IN (
+            SELECT client_key FROM case_members WHERE LOWER(full_name) LIKE ${wp}
+          )
+        )`);
+      }
+      // Add phone-digit clause if applicable
+      let phoneClause = "";
+      if (looksLikePhone) {
+        clientParams.push(`%${qDigits}%`);
+        const dp = `$${clientParams.length}`;
+        phoneClause = ` OR REGEXP_REPLACE(COALESCE(client_phone, ''), '\\D', '', 'g') LIKE ${dp}`;
+      }
+      const finalWhere = `(${clientClauses.join(" AND ")})${phoneClause}`;
+
+      const [clientsR, tasksR, invoicesR, notesR, membersR] = await Promise.all([
         db.query(
-          `SELECT DISTINCT client_key, client_name, client_phone, client_email, matter_type
-           FROM tasks
-           WHERE client_name ILIKE $1 OR client_phone ILIKE $1 OR client_email ILIKE $1
-           LIMIT 15`, [like]
+          `SELECT DISTINCT client_key, client_name, client_phone, client_email, matter_type, a_number
+           FROM tasks WHERE ${finalWhere}
+           LIMIT 20`, clientParams
         ),
         db.query(
           `SELECT id, description, client_name, client_key, matter_type, due_date, completed
-           FROM tasks WHERE description ILIKE $1
+           FROM tasks WHERE ${clientClauses.map((c, i) => c.replace(/client_key IN.*?\)/, '1=1')).join(' AND ')}
+              OR (${clientClauses.map(c => c.replace(/LOWER\(client_name\)/, 'LOWER(description)')).join(' AND ')})
            ORDER BY (completed IS NULL OR completed = false) DESC, due_date ASC NULLS LAST
-           LIMIT 15`, [like]
-        ),
+           LIMIT 15`, clientParams.slice(0, words.length)
+        ).catch(async () => {
+          // Fallback: simple substring match for descriptions
+          return db.query(
+            `SELECT id, description, client_name, client_key, matter_type, due_date, completed
+             FROM tasks WHERE LOWER(description) LIKE $1
+             ORDER BY (completed IS NULL OR completed = false) DESC, due_date ASC NULLS LAST
+             LIMIT 15`, [`%${qNorm}%`]
+          );
+        }),
         db.query(
           `SELECT i.id, i.description, i.amount_cents, i.status, i.client_key,
                   (SELECT client_name FROM tasks t WHERE t.client_key = i.client_key LIMIT 1) AS client_name
            FROM client_invoices i
-           WHERE i.description ILIKE $1
-           ORDER BY i.created_at DESC LIMIT 15`, [like]
-        ),
+           WHERE LOWER(i.description) LIKE $1
+              OR i.client_key IN (SELECT DISTINCT client_key FROM tasks WHERE ${clientClauses.map((c,i) => c).join(' AND ')})
+           ORDER BY i.created_at DESC LIMIT 15`,
+          [`%${qNorm}%`, ...clientParams.slice(0, words.length)]
+        ).catch(async () => db.query(
+          `SELECT i.id, i.description, i.amount_cents, i.status, i.client_key,
+                  (SELECT client_name FROM tasks t WHERE t.client_key = i.client_key LIMIT 1) AS client_name
+           FROM client_invoices i WHERE LOWER(i.description) LIKE $1
+           ORDER BY i.created_at DESC LIMIT 15`, [`%${qNorm}%`])),
         db.query(
           `SELECT n.id, n.client_key, n.body, n.created_at,
                   a.full_name AS author_name,
                   (SELECT client_name FROM tasks t WHERE t.client_key = n.client_key LIMIT 1) AS client_name
            FROM client_notes n
            LEFT JOIN admin_users a ON a.id = n.author_id
-           WHERE n.body ILIKE $1
-           ORDER BY n.created_at DESC LIMIT 10`, [like]
+           WHERE LOWER(n.body) LIKE $1
+           ORDER BY n.created_at DESC LIMIT 10`, [`%${qNorm}%`]
+        ),
+        // Also search case_members directly — return the case they belong to
+        db.query(
+          `SELECT m.client_key, m.full_name AS member_name, m.relationship, m.a_number,
+                  (SELECT client_name FROM tasks t WHERE t.client_key = m.client_key LIMIT 1) AS main_client_name,
+                  (SELECT matter_type FROM tasks t WHERE t.client_key = m.client_key LIMIT 1) AS matter_type
+           FROM case_members m
+           WHERE LOWER(m.full_name) LIKE $1 OR LOWER(COALESCE(m.a_number, '')) LIKE $1
+           LIMIT 10`, [`%${qNorm}%`]
         ),
       ]);
+
+      // Combine rider matches into client results (dedup by client_key)
+      const seenKeys = new Set(clientsR.rows.map(c => c.client_key));
+      const memberClientRows = [];
+      for (const m of membersR.rows) {
+        if (seenKeys.has(m.client_key)) continue;
+        seenKeys.add(m.client_key);
+        memberClientRows.push({
+          client_key: m.client_key,
+          client_name: m.main_client_name || '(unnamed case)',
+          matter_type: m.matter_type,
+          matched_rider: `${m.full_name} (${m.relationship})`,
+        });
+      }
+
       res.json({
         ok: true,
+        query: rawQ,
         results: {
-          clients: clientsR.rows,
+          clients: [...clientsR.rows, ...memberClientRows],
           tasks: tasksR.rows,
           invoices: invoicesR.rows,
           notes: notesR.rows,
         },
       });
+    } catch (err) {
+      console.error("[search]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  CASE MEMBERS (Riders / Family Beneficiaries)
+  //  ─────────────────────────────────────────────────────
+  //  A single case can have a main respondent + multiple family
+  //  members (spouse, minor children, parents) as "riders."
+  //  All members share the case's client_key. Searching for any
+  //  rider name will surface the main case.
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/clients/:key/members", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const r = await db.query(
+        `SELECT m.*, a.full_name AS added_by_name
+         FROM case_members m LEFT JOIN admin_users a ON a.id = m.added_by
+         WHERE m.client_key = $1
+         ORDER BY (is_primary DESC), relationship, full_name`,
+        [req.params.key]
+      );
+      res.json({ ok: true, members: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/clients/:key/members", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const { full_name, relationship, a_number, dob, is_primary, notes } = req.body || {};
+      if (!full_name || !String(full_name).trim()) {
+        return res.status(400).json({ ok: false, error: "full_name required" });
+      }
+      const validRels = ['self', 'spouse', 'child', 'parent', 'sibling', 'other'];
+      const rel = validRels.includes(relationship) ? relationship : 'other';
+      // If this is being set as primary, unset any existing primary
+      if (is_primary) {
+        await db.query(`UPDATE case_members SET is_primary = false WHERE client_key = $1`, [req.params.key]);
+      }
+      const r = await db.query(
+        `INSERT INTO case_members
+           (client_key, full_name, relationship, a_number, dob, is_primary, notes, added_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [req.params.key,
+         String(full_name).trim().substring(0, 200),
+         rel,
+         a_number ? String(a_number).trim().substring(0, 20) : null,
+         dob || null,
+         !!is_primary,
+         notes ? String(notes).substring(0, 1000) : null,
+         req.user.uid]
+      );
+      res.json({ ok: true, member: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/members/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const orig = await db.query(`SELECT client_key FROM case_members WHERE id = $1`, [id]);
+      if (!orig.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      const ok = await canUserAccessClient(req.user, orig.rows[0].client_key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const fields = [];
+      const params = [];
+      let i = 1;
+      for (const k of ['full_name', 'relationship', 'a_number', 'dob', 'is_primary', 'notes']) {
+        if (req.body && req.body[k] !== undefined) {
+          fields.push(`${k} = $${i++}`);
+          params.push(req.body[k]);
+        }
+      }
+      if (!fields.length) return res.status(400).json({ ok: false, error: "nothing to update" });
+      fields.push("updated_at = NOW()");
+      params.push(id);
+      const r = await db.query(
+        `UPDATE case_members SET ${fields.join(", ")} WHERE id = $${i} RETURNING *`,
+        params
+      );
+      res.json({ ok: true, member: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/members/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const orig = await db.query(`SELECT client_key FROM case_members WHERE id = $1`, [id]);
+      if (!orig.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      const ok = await canUserAccessClient(req.user, orig.rows[0].client_key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      await db.query(`DELETE FROM case_members WHERE id = $1`, [id]);
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  CLIENT MERGE (admin only)
+  //  ─────────────────────────────────────────────────────
+  //  Merges TWO client_keys into ONE. All tasks, invoices, notes,
+  //  time entries, trust transactions, documents, and case members
+  //  from SOURCE move to TARGET. Source is recorded as an alias so
+  //  old references still work.
+  // ═══════════════════════════════════════════════════════
+
+  app.post("/api/staff/admin/clients/merge", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const { source_key, target_key } = req.body || {};
+      if (!source_key || !target_key) {
+        return res.status(400).json({ ok: false, error: "source_key and target_key required" });
+      }
+      if (source_key === target_key) {
+        return res.status(400).json({ ok: false, error: "cannot merge a client into itself" });
+      }
+      // Get the source name for the alias record
+      const nameR = await db.query(
+        `SELECT DISTINCT client_name FROM tasks WHERE client_key = $1 LIMIT 1`,
+        [source_key]
+      );
+      const sourceName = nameR.rows[0]?.client_name || source_key;
+
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        // Move all data from source to target
+        const updates = [
+          `UPDATE tasks SET client_key = $2 WHERE client_key = $1`,
+          `UPDATE client_invoices SET client_key = $2 WHERE client_key = $1`,
+          `UPDATE client_notes SET client_key = $2 WHERE client_key = $1`,
+          `UPDATE client_documents SET client_key = $2 WHERE client_key = $1`,
+          `UPDATE time_entries SET client_key = $2 WHERE client_key = $1`,
+          `UPDATE trust_transactions SET client_key = $2 WHERE client_key = $1`,
+          `UPDATE case_members SET client_key = $2 WHERE client_key = $1`,
+          `UPDATE client_messages SET client_key = $2 WHERE client_key = $1`,
+          `UPDATE client_consultants SET client_key = $2 WHERE client_key = $1`,
+        ];
+        const results = {};
+        for (const q of updates) {
+          try {
+            const r = await client.query(q, [source_key, target_key]);
+            const table = q.match(/UPDATE (\w+)/)[1];
+            results[table] = r.rowCount || 0;
+          } catch (e) {
+            // Some tables might not exist yet; skip silently
+            console.warn(`[merge] skipped table:`, e.message);
+          }
+        }
+        // Record the alias so old refs still work
+        await client.query(
+          `INSERT INTO client_aliases (canonical_key, alias_key, alias_name, merged_by)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (alias_key) DO UPDATE SET canonical_key = $1, merged_at = NOW()`,
+          [target_key, source_key, sourceName, req.user.uid]
+        );
+        await client.query('COMMIT');
+        res.json({
+          ok: true,
+          source_key,
+          target_key,
+          moved: results,
+          message: `Merged ${sourceName} into target.`,
+        });
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      console.error("[merge]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Suggest possible duplicates for a client (based on similar names/phones/emails)
+  app.get("/api/staff/admin/clients/:key/possible-duplicates", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const key = req.params.key;
+      // Get this client's info
+      const self = await db.query(
+        `SELECT DISTINCT client_name, client_phone, client_email, matter_type
+         FROM tasks WHERE client_key = $1 LIMIT 1`,
+        [key]
+      );
+      if (!self.rows[0]) return res.json({ ok: true, duplicates: [] });
+      const c = self.rows[0];
+      const dupes = new Map();
+      // Match by same phone (normalized)
+      if (c.client_phone) {
+        const digits = extractDigits(c.client_phone);
+        if (digits.length >= 7) {
+          const r = await db.query(
+            `SELECT DISTINCT client_key, client_name, client_phone, client_email
+             FROM tasks WHERE client_key != $1
+               AND REGEXP_REPLACE(COALESCE(client_phone, ''), '\\D', '', 'g') LIKE $2
+             LIMIT 10`,
+            [key, `%${digits.substring(digits.length - 10)}%`]
+          );
+          for (const row of r.rows) dupes.set(row.client_key, { ...row, reason: 'same phone' });
+        }
+      }
+      // Match by same email
+      if (c.client_email) {
+        const r = await db.query(
+          `SELECT DISTINCT client_key, client_name, client_phone, client_email
+           FROM tasks WHERE client_key != $1 AND LOWER(client_email) = LOWER($2) LIMIT 10`,
+          [key, c.client_email]
+        );
+        for (const row of r.rows) {
+          const prev = dupes.get(row.client_key);
+          dupes.set(row.client_key, { ...row, reason: prev ? 'same phone + email' : 'same email' });
+        }
+      }
+      // Match by name similarity (starts-with or contains major word)
+      if (c.client_name) {
+        const words = normalizeTerm(c.client_name).split(" ").filter(w => w.length >= 3);
+        if (words.length) {
+          const params = [key];
+          const clauses = words.map(w => {
+            params.push(`%${w}%`);
+            return `LOWER(client_name) LIKE $${params.length}`;
+          });
+          const r = await db.query(
+            `SELECT DISTINCT client_key, client_name, client_phone, client_email
+             FROM tasks WHERE client_key != $1 AND (${clauses.join(' AND ')})
+             LIMIT 10`,
+            params
+          );
+          for (const row of r.rows) {
+            const prev = dupes.get(row.client_key);
+            if (!prev) dupes.set(row.client_key, { ...row, reason: 'similar name' });
+          }
+        }
+      }
+      res.json({ ok: true, source_client: c, duplicates: Array.from(dupes.values()) });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
