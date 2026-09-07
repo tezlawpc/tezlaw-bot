@@ -249,6 +249,41 @@ async function initClientAuthTables() {
       [matter, assignee]
     );
   }
+
+  // Quick-reply templates for firm messaging
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS quick_reply_templates (
+      id           SERIAL PRIMARY KEY,
+      name         TEXT NOT NULL,
+      body         TEXT NOT NULL,
+      category     TEXT DEFAULT 'general',
+      created_by   INTEGER,
+      created_at   TIMESTAMPTZ DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  // Seed common Tez Law templates only if the table is empty
+  const tplCount = await db.query(`SELECT COUNT(*)::int AS n FROM quick_reply_templates`);
+  if (tplCount.rows[0].n === 0) {
+    const templates = [
+      ['Received', "Thanks for your message. We've received it and will get back to you within 1 business day.", 'general'],
+      ['Consultation booked', 'Your consultation is booked. Please arrive 10 minutes early with a photo ID. Our office is at 1050 Lakes Dr Ste 225, West Covina, CA 91790.', 'scheduling'],
+      ['Docs needed', 'To move your case forward, please send us: (1) passport bio page, (2) any prior USCIS notices, (3) proof of current status. You can upload directly in the app or email jj@tezlawfirm.com.', 'immigration'],
+      ['Hearing reminder', 'Reminder: your hearing is coming up. Please plan to arrive at the courthouse 30 minutes early with your ID and any documents we discussed. Business attire required.', 'immigration'],
+      ['USCIS receipt', 'Your USCIS receipt number is on file. You can check status anytime via the app or at egov.uscis.gov/casestatus.', 'immigration'],
+      ['Settlement update', 'We have an update on your settlement negotiation. Please schedule a call so we can walk through the details together.', 'pi'],
+      ['Medical records', 'We need your medical records from [provider name] for your PI case. We can send a records request on your behalf — please confirm the provider name and dates of treatment.', 'pi'],
+      ['Retainer signed', 'Thanks for signing the retainer. Your case is now officially open. Your case manager is [name] and will be your primary point of contact.', 'general'],
+      ['Payment received', 'Payment received. Thank you. A receipt has been emailed to you.', 'billing'],
+      ['Case closed', 'Your case is now closed. Thank you for trusting Tez Law. If you need us again in the future, please reach out anytime.', 'general'],
+    ];
+    for (const [name, body, category] of templates) {
+      await db.query(
+        `INSERT INTO quick_reply_templates (name, body, category) VALUES ($1, $2, $3)`,
+        [name, body, category]
+      );
+    }
+  }
 }
 
 // In-memory cache of matter defaults. Reloaded on any admin update.
@@ -1513,6 +1548,77 @@ function registerAppApi(app) {
         }
       } catch {}
       res.json({ ok: true, message: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  QUICK-REPLY TEMPLATES (firm messaging productivity)
+  //  ─────────────────────────────────────────────────────
+  //  All firm staff can list & use templates.
+  //  Only admins can create, edit, or delete.
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/templates", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const category = req.query.category;
+      const params = [];
+      let sql = `SELECT id, name, body, category, created_at FROM quick_reply_templates`;
+      if (category) {
+        sql += ` WHERE category = $1`;
+        params.push(String(category));
+      }
+      sql += ` ORDER BY category, name`;
+      const r = await db.query(sql, params);
+      res.json({ ok: true, templates: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/admin/templates", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const name = String(req.body?.name || "").trim();
+      const body = String(req.body?.body || "").trim();
+      const category = String(req.body?.category || "general").trim();
+      if (!name || !body) return res.status(400).json({ ok: false, error: "name and body required" });
+      const r = await db.query(
+        `INSERT INTO quick_reply_templates (name, body, category, created_by)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [name, body, category, req.user.uid]
+      );
+      res.json({ ok: true, template: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/admin/templates/:id", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const fields = [];
+      const params = [];
+      let i = 1;
+      for (const key of ['name', 'body', 'category']) {
+        if (typeof req.body?.[key] === 'string') {
+          fields.push(`${key} = $${i++}`);
+          params.push(req.body[key]);
+        }
+      }
+      if (!fields.length) return res.status(400).json({ ok: false, error: "nothing to update" });
+      fields.push(`updated_at = NOW()`);
+      params.push(id);
+      const r = await db.query(
+        `UPDATE quick_reply_templates SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`,
+        params
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      res.json({ ok: true, template: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/admin/templates/:id", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      await db.query(`DELETE FROM quick_reply_templates WHERE id = $1`, [id]);
+      res.json({ ok: true });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
