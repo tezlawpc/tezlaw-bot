@@ -51,7 +51,7 @@ async function requireBearer(req, res, next) {
 function requireFirmUser(req, res, next) {
   if (!req.user) return res.status(401).json({ ok: false, error: "Auth required" });
   const r = req.user.r;
-  if (!["admin", "attorney", "paralegal", "viewer"].includes(r)) {
+  if (!["admin", "manager", "attorney", "paralegal", "viewer"].includes(r)) {
     return res.status(403).json({ ok: false, error: "Firm role required" });
   }
   next();
@@ -5059,6 +5059,54 @@ function registerAppApi(app) {
       ]);
       res.json({ ok: true, task, milestones: mList, progress: mProgress, activity });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ─── Consultant Ask Zara (limited scope) ───────────────────
+  // Consultants get AI legal help but with limited scope — they
+  // only see their own submissions + assigned clients. Uses a
+  // separate system prompt that says "you're speaking with a
+  // referral consultant, not a licensed attorney."
+  app.post("/api/consultant/chat", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const { message, history } = req.body || {};
+      if (!message) return res.status(400).json({ ok: false, error: "message required" });
+      let zaraChat;
+      try { zaraChat = require("./zara-app-chat"); } catch { zaraChat = null; }
+      if (!zaraChat || typeof zaraChat.chat !== "function") {
+        return res.status(501).json({ ok: false, error: "Chat not available" });
+      }
+      // Custom system prompt for consultants — limited scope, less firm-data-specific
+      const consultantPrompt = `You are Zara, Tez Law P.C.'s AI legal assistant. You are speaking with a REFERRAL CONSULTANT — not a firm attorney. The consultant submits leads and work orders to Tez Law and manages client relationships they've brought in.
+
+Do NOT:
+- Give advice that requires practicing law (that's what Tez Law's attorneys do)
+- Reveal firm-wide financial data, other consultants' submissions, or clients not assigned to this consultant
+- Speculate on case outcomes — for those questions, redirect to the assigned attorney
+
+Do help with:
+- Explaining USCIS forms and processes so the consultant can help their clients gather documents
+- Answering general legal-process questions (e.g., "what's the typical H-1B timeline?")
+- Helping draft messages to their clients or to Tez Law staff
+- Interpreting notices or receipts the consultant received
+- Guidance on when to escalate matters to the assigned attorney
+
+If asked something outside your scope, redirect politely: "That's something for the assigned attorney — I recommend messaging Tez Law directly through the app."
+
+Format: clear paragraphs, plain language. No excessive markdown.
+
+Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
+
+      const answer = await zaraChat.chat({
+        systemPrompt: consultantPrompt,
+        message: String(message),
+        history: history || [],
+        // No db/user — consultant chat doesn't get firm-data tools
+      });
+      res.json({ ok: true, reply: { answer } });
+    } catch (err) {
+      console.error("[api chat consultant]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
   });
 
   app.post("/api/consultant/tasks/:id/comment", requireBearer, requireConsultantRole, async (req, res) => {
