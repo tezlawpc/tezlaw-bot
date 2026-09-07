@@ -175,6 +175,11 @@ function filterByClientKeys(items, keys, keyField = "client_key") {
 // ── Client SMS-OTP auth (separate from staff) ────────────────
 
 async function initClientAuthTables() {
+  // ─── Ensure tasks has client_phone + client_email (used by mobile app) ──
+  // These may be missing on installations that only ran tasks.js's initTable.
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS client_phone TEXT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS client_email TEXT`); } catch {}
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS client_otp (
       id           SERIAL PRIMARY KEY,
