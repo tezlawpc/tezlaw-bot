@@ -1128,6 +1128,8 @@ function registerAppApi(app) {
         systemPrompt: zaraChat.STAFF_SYSTEM_PROMPT,
         message: String(message),
         history: history || [],
+        db,
+        user: req.user,
       });
       res.json({ ok: true, reply: { answer } });
     } catch (err) {
