@@ -139,6 +139,20 @@ const STAFF_TOOLS = [
       required: ["client_name"],
     },
   },
+  {
+    name: "get_practice_insights",
+    description: "Admin-only: get overall firm performance metrics for a period — revenue, hours, outstanding invoices, new/completed cases, per-staff hours. Perfect for 'how's business this month' or 'am I ahead of last quarter?'",
+    input_schema: {
+      type: "object",
+      properties: {
+        period: {
+          type: "string",
+          enum: ["week", "month", "quarter", "year"],
+          description: "Time window: week (7 days), month (30 days), quarter (90 days), year (365 days). Defaults to month.",
+        },
+      },
+    },
+  },
 ];
 
 // Tool executors — each returns a plain object; caller stringifies for tool_result content.
@@ -390,6 +404,48 @@ async function executeTool(db, user, name, args) {
       return { clients: results };
     }
 
+    if (name === "get_practice_insights") {
+      if (!isAdmin) return { error: "Admin access required." };
+      const period = args.period || "month";
+      const days = period === "week" ? 7 : period === "month" ? 30 : period === "quarter" ? 90 : 365;
+      const fromStr = new Date(Date.now() - days * 86400e3).toISOString();
+      const [rev, out, hrs, byStaff, newT, doneT] = await Promise.all([
+        db.query(`SELECT COALESCE(SUM(amount_cents), 0)::int AS total, COUNT(*)::int AS count
+                  FROM client_invoices WHERE status='paid' AND paid_at >= $1`, [fromStr]),
+        db.query(`SELECT COALESCE(SUM(amount_cents), 0)::int AS total, COUNT(*)::int AS count
+                  FROM client_invoices WHERE status='sent'`),
+        db.query(`SELECT COALESCE(SUM(minutes), 0)::int AS m,
+                  COALESCE(SUM(CASE WHEN billable THEN minutes ELSE 0 END), 0)::int AS bm,
+                  COALESCE(SUM(ROUND((minutes::numeric / 60) * COALESCE(hourly_rate_cents, 0))), 0)::int AS bc
+                  FROM time_entries WHERE created_at >= $1`, [fromStr]),
+        db.query(`SELECT a.full_name, SUM(t.minutes)::int AS mins,
+                  ROUND(SUM(CASE WHEN t.billable THEN (t.minutes::numeric / 60) * COALESCE(t.hourly_rate_cents, 0) ELSE 0 END)) AS cents
+                  FROM admin_users a
+                  JOIN time_entries t ON t.staff_id = a.id
+                  WHERE t.created_at >= $1
+                  GROUP BY a.full_name ORDER BY mins DESC LIMIT 10`, [fromStr]),
+        db.query(`SELECT COUNT(*)::int AS n FROM tasks WHERE created_at >= $1`, [fromStr]),
+        db.query(`SELECT COUNT(*)::int AS n FROM tasks WHERE completed=true AND updated_at >= $1`, [fromStr]),
+      ]);
+      return {
+        period,
+        days,
+        revenue: { display: `$${(rev.rows[0].total / 100).toFixed(2)}`, paid_invoice_count: rev.rows[0].count },
+        outstanding: { display: `$${(out.rows[0].total / 100).toFixed(2)}`, unpaid_invoice_count: out.rows[0].count },
+        hours: {
+          total: Math.round((hrs.rows[0].m / 60) * 10) / 10,
+          billable: Math.round((hrs.rows[0].bm / 60) * 10) / 10,
+          billable_value_display: `$${(hrs.rows[0].bc / 100).toFixed(2)}`,
+        },
+        by_staff: byStaff.rows.map(r => ({
+          name: r.full_name,
+          hours: Math.round((r.mins / 60) * 10) / 10,
+          billable_display: `$${((r.cents || 0) / 100).toFixed(2)}`,
+        })),
+        cases: { new: newT.rows[0].n, completed: doneT.rows[0].n },
+      };
+    }
+
     return { error: `Unknown tool: ${name}` };
   } catch (err) {
     return { error: err.message };
@@ -501,6 +557,7 @@ You have TOOLS to look up real firm data — USE THEM whenever the user asks abo
 - My own time / hours logged → get_my_time_summary
 - Time and value on a specific client's case → get_client_time_summary
 - Staff notes about a client (case strategy, context) → get_client_notes
+- Firm-wide performance metrics: revenue, hours, cases → get_practice_insights (admin only)
 
 Answer legal questions substantively and professionally, drawing on:
 - Immigration law (USCIS, immigration court, BIA, 9th Circuit)
