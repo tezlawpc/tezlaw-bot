@@ -106,6 +106,39 @@ const STAFF_TOOLS = [
       },
     },
   },
+  {
+    name: "get_my_time_summary",
+    description: "Get a summary of hours the current user has logged in a date range: total minutes, billable minutes, and total dollar value.",
+    input_schema: {
+      type: "object",
+      properties: {
+        from_date: { type: "string", description: "ISO date (YYYY-MM-DD) start of range. Defaults to 7 days ago." },
+        to_date: { type: "string", description: "ISO date (YYYY-MM-DD) end of range. Defaults to today." },
+      },
+    },
+  },
+  {
+    name: "get_client_time_summary",
+    description: "Get total time logged for a specific client, broken down by staff member. Useful for 'how many hours have we put into the Chen case?'",
+    input_schema: {
+      type: "object",
+      properties: {
+        client_name: { type: "string", description: "Client name (partial match)." },
+      },
+      required: ["client_name"],
+    },
+  },
+  {
+    name: "get_client_notes",
+    description: "Get staff notes for a specific client. Useful when preparing for a call or meeting — 'what should I know about the Chen case before I call them?'",
+    input_schema: {
+      type: "object",
+      properties: {
+        client_name: { type: "string", description: "Client name (partial match)." },
+      },
+      required: ["client_name"],
+    },
+  },
 ];
 
 // Tool executors — each returns a plain object; caller stringifies for tool_result content.
@@ -268,6 +301,95 @@ async function executeTool(db, user, name, args) {
       };
     }
 
+    if (name === "get_my_time_summary") {
+      const fromDate = args.from_date || null;
+      const toDate = args.to_date || null;
+      const params = [userId];
+      let where = "staff_id = $1";
+      if (fromDate) { params.push(fromDate); where += ` AND entry_date >= $${params.length}::date`; }
+      else { where += " AND entry_date >= CURRENT_DATE - 7"; }
+      if (toDate) { params.push(toDate); where += ` AND entry_date <= $${params.length}::date`; }
+      const r = await db.query(
+        `SELECT COUNT(*)::int AS entry_count,
+                COALESCE(SUM(minutes), 0)::int AS total_minutes,
+                COALESCE(SUM(CASE WHEN billable THEN minutes ELSE 0 END), 0)::int AS billable_minutes,
+                COALESCE(SUM(ROUND((minutes::numeric / 60) * COALESCE(hourly_rate_cents, 0))), 0)::int AS total_cents
+         FROM time_entries WHERE ${where}`,
+        params
+      );
+      const s = r.rows[0];
+      return {
+        from_date: fromDate || "7 days ago",
+        to_date: toDate || "today",
+        entry_count: s.entry_count,
+        total_hours: Math.round((s.total_minutes / 60) * 10) / 10,
+        billable_hours: Math.round((s.billable_minutes / 60) * 10) / 10,
+        total_amount_display: `$${(s.total_cents / 100).toFixed(2)}`,
+      };
+    }
+
+    if (name === "get_client_time_summary") {
+      const q = String(args.client_name || "").trim();
+      if (!q) return { error: "client_name required" };
+      // Find the client_key(s) matching this name
+      const clientR = await db.query(
+        `SELECT DISTINCT client_key, client_name FROM tasks WHERE client_name ILIKE $1 LIMIT 5`,
+        [`%${q}%`]
+      );
+      if (!clientR.rows.length) return { matches: [] };
+      const results = [];
+      for (const c of clientR.rows) {
+        const tR = await db.query(
+          `SELECT COUNT(*)::int AS entry_count,
+                  COALESCE(SUM(minutes), 0)::int AS total_minutes,
+                  COALESCE(SUM(CASE WHEN billable THEN minutes ELSE 0 END), 0)::int AS billable_minutes,
+                  COALESCE(SUM(ROUND((minutes::numeric / 60) * COALESCE(hourly_rate_cents, 0))), 0)::int AS total_cents
+           FROM time_entries WHERE client_key = $1`,
+          [c.client_key]
+        );
+        const byStaffR = await db.query(
+          `SELECT a.full_name AS staff, SUM(t.minutes)::int AS minutes
+           FROM time_entries t LEFT JOIN admin_users a ON a.id = t.staff_id
+           WHERE t.client_key = $1 GROUP BY a.full_name ORDER BY minutes DESC`,
+          [c.client_key]
+        );
+        const s = tR.rows[0];
+        results.push({
+          client_name: c.client_name,
+          total_hours: Math.round((s.total_minutes / 60) * 10) / 10,
+          billable_hours: Math.round((s.billable_minutes / 60) * 10) / 10,
+          total_amount_display: `$${(s.total_cents / 100).toFixed(2)}`,
+          by_staff: byStaffR.rows,
+        });
+      }
+      return { clients: results };
+    }
+
+    if (name === "get_client_notes") {
+      const q = String(args.client_name || "").trim();
+      if (!q) return { error: "client_name required" };
+      const clientR = await db.query(
+        `SELECT DISTINCT client_key, client_name FROM tasks WHERE client_name ILIKE $1 LIMIT 3`,
+        [`%${q}%`]
+      );
+      if (!clientR.rows.length) return { matches: [] };
+      const results = [];
+      for (const c of clientR.rows) {
+        const notesR = await db.query(
+          `SELECT n.body, n.pinned, n.created_at, a.full_name AS author
+           FROM client_notes n LEFT JOIN admin_users a ON a.id = n.author_id
+           WHERE n.client_key = $1 ORDER BY n.pinned DESC, n.created_at DESC LIMIT 20`,
+          [c.client_key]
+        );
+        results.push({
+          client_name: c.client_name,
+          note_count: notesR.rows.length,
+          notes: notesR.rows,
+        });
+      }
+      return { clients: results };
+    }
+
     return { error: `Unknown tool: ${name}` };
   } catch (err) {
     return { error: err.message };
@@ -376,6 +498,9 @@ You have TOOLS to look up real firm data — USE THEM whenever the user asks abo
 - Tasks and to-do items → list_my_tasks
 - Recently uploaded client documents → list_recent_client_documents
 - Outstanding / unpaid invoices → list_outstanding_invoices
+- My own time / hours logged → get_my_time_summary
+- Time and value on a specific client's case → get_client_time_summary
+- Staff notes about a client (case strategy, context) → get_client_notes
 
 Answer legal questions substantively and professionally, drawing on:
 - Immigration law (USCIS, immigration court, BIA, 9th Circuit)
