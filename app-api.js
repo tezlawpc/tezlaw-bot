@@ -326,6 +326,44 @@ async function initClientAuthTables() {
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_client_invoices_key ON client_invoices (client_key)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_client_invoices_status ON client_invoices (status)`);
+
+  // Time tracking — billable and non-billable time entries
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS time_entries (
+      id                SERIAL PRIMARY KEY,
+      client_key        TEXT,
+      task_id           INTEGER,
+      staff_id          INTEGER NOT NULL,
+      description       TEXT NOT NULL,
+      minutes           INTEGER,
+      hourly_rate_cents INTEGER,
+      entry_date        DATE NOT NULL DEFAULT CURRENT_DATE,
+      billable          BOOLEAN DEFAULT TRUE,
+      invoice_id        INTEGER,
+      started_at        TIMESTAMPTZ,
+      ended_at          TIMESTAMPTZ,
+      created_at        TIMESTAMPTZ DEFAULT NOW(),
+      updated_at        TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_time_entries_client ON time_entries (client_key)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_time_entries_staff ON time_entries (staff_id)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_time_entries_date ON time_entries (entry_date)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_time_entries_active ON time_entries (staff_id, ended_at) WHERE ended_at IS NULL`);
+
+  // Client notes — private staff notes about clients (case strategy, personal context)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS client_notes (
+      id           SERIAL PRIMARY KEY,
+      client_key   TEXT NOT NULL,
+      author_id    INTEGER NOT NULL,
+      body         TEXT NOT NULL,
+      pinned       BOOLEAN DEFAULT FALSE,
+      created_at   TIMESTAMPTZ DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_notes_client ON client_notes (client_key)`);
 }
 
 // In-memory cache of matter defaults. Reloaded on any admin update.
@@ -1964,6 +2002,461 @@ function registerAppApi(app) {
         });
       } catch {}
       res.json({ ok: true, invoice: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  TIME TRACKING
+  //  ─────────────────────────────────────────────────────
+  //  Staff track billable + non-billable time against clients and
+  //  optionally against specific tasks. Timer entries (start_at set,
+  //  ended_at null) can be paused/stopped. Manual entries capture
+  //  minutes worked directly.
+  // ═══════════════════════════════════════════════════════
+
+  // Get the current active (running) timer for this staff member
+  app.get("/api/staff/time-entries/active", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT id, client_key, task_id, description, started_at, hourly_rate_cents, billable
+         FROM time_entries
+         WHERE staff_id = $1 AND ended_at IS NULL AND started_at IS NOT NULL
+         ORDER BY started_at DESC LIMIT 1`,
+        [req.user.uid]
+      );
+      res.json({ ok: true, active: r.rows[0] || null });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Start a new timer
+  app.post("/api/staff/time-entries/start", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const { client_key, task_id, description, hourly_rate_cents, billable } = req.body || {};
+      if (!description) return res.status(400).json({ ok: false, error: "description required" });
+      // First stop any existing active timer for this user
+      await db.query(
+        `UPDATE time_entries
+         SET ended_at = NOW(),
+             minutes = COALESCE(minutes, GREATEST(1, EXTRACT(EPOCH FROM (NOW() - started_at))/60)::int),
+             updated_at = NOW()
+         WHERE staff_id = $1 AND ended_at IS NULL AND started_at IS NOT NULL`,
+        [req.user.uid]
+      );
+      const r = await db.query(
+        `INSERT INTO time_entries
+           (staff_id, client_key, task_id, description, hourly_rate_cents, billable, started_at, entry_date)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), CURRENT_DATE) RETURNING *`,
+        [req.user.uid,
+         client_key || null,
+         task_id ? parseInt(task_id, 10) : null,
+         String(description).substring(0, 500),
+         hourly_rate_cents ? parseInt(hourly_rate_cents, 10) : null,
+         billable !== false]
+      );
+      res.json({ ok: true, entry: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Stop the active timer
+  app.post("/api/staff/time-entries/:id/stop", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(
+        `UPDATE time_entries
+         SET ended_at = NOW(),
+             minutes = GREATEST(1, EXTRACT(EPOCH FROM (NOW() - started_at))/60)::int,
+             updated_at = NOW()
+         WHERE id = $1 AND staff_id = $2 AND ended_at IS NULL RETURNING *`,
+        [id, req.user.uid]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found or already stopped" });
+      res.json({ ok: true, entry: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Manual entry (already-completed time)
+  app.post("/api/staff/time-entries", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const { client_key, task_id, description, minutes, hourly_rate_cents, billable, entry_date } = req.body || {};
+      if (!description) return res.status(400).json({ ok: false, error: "description required" });
+      const mins = parseInt(minutes, 10);
+      if (!Number.isFinite(mins) || mins <= 0) {
+        return res.status(400).json({ ok: false, error: "minutes must be a positive integer" });
+      }
+      const r = await db.query(
+        `INSERT INTO time_entries
+           (staff_id, client_key, task_id, description, minutes, hourly_rate_cents, billable, entry_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::date, CURRENT_DATE)) RETURNING *`,
+        [req.user.uid,
+         client_key || null,
+         task_id ? parseInt(task_id, 10) : null,
+         String(description).substring(0, 500),
+         mins,
+         hourly_rate_cents ? parseInt(hourly_rate_cents, 10) : null,
+         billable !== false,
+         entry_date || null]
+      );
+      res.json({ ok: true, entry: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // List time entries — mine by default, all if admin
+  app.get("/api/staff/time-entries", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const scope = String(req.query.scope || "mine");
+      const isAdmin = req.user.role === "admin";
+      const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+      const params = [limit];
+      let where = "1=1";
+      if (scope === "mine" || !isAdmin) {
+        params.push(req.user.uid);
+        where += ` AND staff_id = $${params.length}`;
+      }
+      if (req.query.client_key) {
+        params.push(String(req.query.client_key));
+        where += ` AND client_key = $${params.length}`;
+      }
+      if (req.query.from) {
+        params.push(String(req.query.from));
+        where += ` AND entry_date >= $${params.length}::date`;
+      }
+      if (req.query.to) {
+        params.push(String(req.query.to));
+        where += ` AND entry_date <= $${params.length}::date`;
+      }
+      const r = await db.query(
+        `SELECT t.*, a.full_name AS staff_name
+         FROM time_entries t
+         LEFT JOIN admin_users a ON a.id = t.staff_id
+         WHERE ${where}
+         ORDER BY t.entry_date DESC, t.started_at DESC NULLS LAST, t.id DESC
+         LIMIT $1`,
+        params
+      );
+      // Also return aggregate stats
+      const totalMinutes = r.rows.reduce((s, x) => s + (x.minutes || 0), 0);
+      const billableMinutes = r.rows.filter(x => x.billable).reduce((s, x) => s + (x.minutes || 0), 0);
+      const totalCents = r.rows.reduce(
+        (s, x) => s + Math.round(((x.minutes || 0) / 60) * (x.hourly_rate_cents || 0)),
+        0
+      );
+      res.json({
+        ok: true, entries: r.rows,
+        summary: {
+          total_minutes: totalMinutes,
+          billable_minutes: billableMinutes,
+          total_amount_cents: totalCents,
+          entry_count: r.rows.length,
+        },
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Time entries for a specific client
+  app.get("/api/staff/clients/:key/time-entries", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const r = await db.query(
+        `SELECT t.*, a.full_name AS staff_name
+         FROM time_entries t
+         LEFT JOIN admin_users a ON a.id = t.staff_id
+         WHERE t.client_key = $1
+         ORDER BY t.entry_date DESC, t.created_at DESC LIMIT 200`,
+        [req.params.key]
+      );
+      const totalMinutes = r.rows.reduce((s, x) => s + (x.minutes || 0), 0);
+      const billableMinutes = r.rows.filter(x => x.billable).reduce((s, x) => s + (x.minutes || 0), 0);
+      const totalCents = r.rows.reduce(
+        (s, x) => s + Math.round(((x.minutes || 0) / 60) * (x.hourly_rate_cents || 0)),
+        0
+      );
+      res.json({
+        ok: true, entries: r.rows,
+        summary: {
+          total_minutes: totalMinutes,
+          billable_minutes: billableMinutes,
+          total_amount_cents: totalCents,
+          entry_count: r.rows.length,
+        },
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Update a time entry
+  app.patch("/api/staff/time-entries/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const fields = [];
+      const params = [];
+      let i = 1;
+      for (const k of ["description", "minutes", "hourly_rate_cents", "billable", "entry_date", "client_key", "task_id"]) {
+        if (req.body && req.body[k] !== undefined) {
+          fields.push(`${k} = $${i++}`);
+          params.push(req.body[k]);
+        }
+      }
+      if (!fields.length) return res.status(400).json({ ok: false, error: "nothing to update" });
+      fields.push("updated_at = NOW()");
+      params.push(id, req.user.uid);
+      const isAdmin = req.user.role === "admin";
+      const where = isAdmin ? `id = $${i++}` : `id = $${i++} AND staff_id = $${i++}`;
+      if (!isAdmin) { /* params already has user id at end */ }
+      else params.pop();  // remove user id if admin
+      const r = await db.query(
+        `UPDATE time_entries SET ${fields.join(", ")} WHERE ${where} RETURNING *`,
+        params
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found or not yours" });
+      res.json({ ok: true, entry: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Delete a time entry
+  app.delete("/api/staff/time-entries/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const isAdmin = req.user.role === "admin";
+      const q = isAdmin
+        ? `DELETE FROM time_entries WHERE id = $1 RETURNING id`
+        : `DELETE FROM time_entries WHERE id = $1 AND staff_id = $2 RETURNING id`;
+      const p = isAdmin ? [id] : [id, req.user.uid];
+      const r = await db.query(q, p);
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found or not yours" });
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  CLIENT NOTES
+  //  ─────────────────────────────────────────────────────
+  //  Staff-only notes on clients (case strategy, personal context).
+  //  All firm staff can view; only author or admin can edit/delete.
+  //  Not visible to the client.
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/clients/:key/notes", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const r = await db.query(
+        `SELECT n.*, a.full_name AS author_name
+         FROM client_notes n
+         LEFT JOIN admin_users a ON a.id = n.author_id
+         WHERE n.client_key = $1
+         ORDER BY n.pinned DESC, n.created_at DESC`,
+        [req.params.key]
+      );
+      res.json({ ok: true, notes: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/clients/:key/notes", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const body = String(req.body?.body || "").trim();
+      if (!body) return res.status(400).json({ ok: false, error: "body required" });
+      const r = await db.query(
+        `INSERT INTO client_notes (client_key, author_id, body, pinned)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [req.params.key, req.user.uid, body.substring(0, 5000), !!req.body?.pinned]
+      );
+      const authorR = await db.query(`SELECT full_name FROM admin_users WHERE id = $1`, [req.user.uid]);
+      res.json({ ok: true, note: { ...r.rows[0], author_name: authorR.rows[0]?.full_name } });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/notes/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const isAdmin = req.user.role === "admin";
+      const fields = [];
+      const params = [];
+      let i = 1;
+      if (typeof req.body?.body === "string") {
+        fields.push(`body = $${i++}`);
+        params.push(String(req.body.body).substring(0, 5000));
+      }
+      if (typeof req.body?.pinned === "boolean") {
+        fields.push(`pinned = $${i++}`);
+        params.push(req.body.pinned);
+      }
+      if (!fields.length) return res.status(400).json({ ok: false, error: "nothing to update" });
+      fields.push("updated_at = NOW()");
+      params.push(id);
+      let where = `id = $${i++}`;
+      if (!isAdmin) {
+        params.push(req.user.uid);
+        where += ` AND author_id = $${i++}`;
+      }
+      const r = await db.query(
+        `UPDATE client_notes SET ${fields.join(", ")} WHERE ${where} RETURNING *`,
+        params
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found or not yours" });
+      res.json({ ok: true, note: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/notes/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const isAdmin = req.user.role === "admin";
+      const q = isAdmin
+        ? `DELETE FROM client_notes WHERE id = $1 RETURNING id`
+        : `DELETE FROM client_notes WHERE id = $1 AND author_id = $2 RETURNING id`;
+      const p = isAdmin ? [id] : [id, req.user.uid];
+      const r = await db.query(q, p);
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found or not yours" });
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  GLOBAL SEARCH
+  //  ─────────────────────────────────────────────────────
+  //  Search across clients, tasks, invoices, and notes in one query.
+  //  Returns results grouped by type.
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/search", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      if (!q || q.length < 2) return res.json({ ok: true, results: { clients: [], tasks: [], invoices: [], notes: [] } });
+      const like = `%${q}%`;
+
+      const [clientsR, tasksR, invoicesR, notesR] = await Promise.all([
+        db.query(
+          `SELECT DISTINCT client_key, client_name, client_phone, client_email, matter_type
+           FROM tasks
+           WHERE client_name ILIKE $1 OR client_phone ILIKE $1 OR client_email ILIKE $1
+           LIMIT 15`, [like]
+        ),
+        db.query(
+          `SELECT id, description, client_name, client_key, matter_type, due_date, completed
+           FROM tasks WHERE description ILIKE $1
+           ORDER BY (completed IS NULL OR completed = false) DESC, due_date ASC NULLS LAST
+           LIMIT 15`, [like]
+        ),
+        db.query(
+          `SELECT i.id, i.description, i.amount_cents, i.status, i.client_key,
+                  (SELECT client_name FROM tasks t WHERE t.client_key = i.client_key LIMIT 1) AS client_name
+           FROM client_invoices i
+           WHERE i.description ILIKE $1
+           ORDER BY i.created_at DESC LIMIT 15`, [like]
+        ),
+        db.query(
+          `SELECT n.id, n.client_key, n.body, n.created_at,
+                  a.full_name AS author_name,
+                  (SELECT client_name FROM tasks t WHERE t.client_key = n.client_key LIMIT 1) AS client_name
+           FROM client_notes n
+           LEFT JOIN admin_users a ON a.id = n.author_id
+           WHERE n.body ILIKE $1
+           ORDER BY n.created_at DESC LIMIT 10`, [like]
+        ),
+      ]);
+      res.json({
+        ok: true,
+        results: {
+          clients: clientsR.rows,
+          tasks: tasksR.rows,
+          invoices: invoicesR.rows,
+          notes: notesR.rows,
+        },
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  CASE TIMELINE (aggregated activity for a client)
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/clients/:key/timeline", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const key = req.params.key;
+      const [messages, docs, invoices, notes, timeEntries, tasks] = await Promise.all([
+        db.query(
+          `SELECT id, body, from_who, created_at
+           FROM client_messages WHERE client_key = $1 ORDER BY created_at DESC LIMIT 50`, [key]
+        ).catch(() => ({ rows: [] })),
+        db.query(
+          `SELECT id, filename, category, uploaded_at, uploaded_by
+           FROM client_documents WHERE client_key = $1 ORDER BY uploaded_at DESC LIMIT 50`, [key]
+        ).catch(() => ({ rows: [] })),
+        db.query(
+          `SELECT id, description, amount_cents, status, paid_at, created_at
+           FROM client_invoices WHERE client_key = $1 ORDER BY created_at DESC LIMIT 50`, [key]
+        ).catch(() => ({ rows: [] })),
+        db.query(
+          `SELECT n.id, n.body, n.pinned, n.created_at, a.full_name AS author_name
+           FROM client_notes n LEFT JOIN admin_users a ON a.id = n.author_id
+           WHERE n.client_key = $1 ORDER BY n.created_at DESC LIMIT 50`, [key]
+        ).catch(() => ({ rows: [] })),
+        db.query(
+          `SELECT t.id, t.description, t.minutes, t.billable, t.entry_date, a.full_name AS staff_name
+           FROM time_entries t LEFT JOIN admin_users a ON a.id = t.staff_id
+           WHERE t.client_key = $1 ORDER BY t.entry_date DESC LIMIT 50`, [key]
+        ).catch(() => ({ rows: [] })),
+        db.query(
+          `SELECT id, description, due_date, completed, created_at, updated_at
+           FROM tasks WHERE client_key = $1 ORDER BY created_at DESC LIMIT 50`, [key]
+        ).catch(() => ({ rows: [] })),
+      ]);
+      // Build a chronologically merged event feed
+      const events = [];
+      for (const m of messages.rows) {
+        events.push({
+          type: "message", id: `msg-${m.id}`,
+          at: m.created_at,
+          summary: `${m.from_who === "firm" ? "Firm" : "Client"}: ${String(m.body || "").substring(0, 100)}`,
+          data: m,
+        });
+      }
+      for (const d of docs.rows) {
+        events.push({
+          type: "document", id: `doc-${d.id}`, at: d.uploaded_at,
+          summary: `${d.uploaded_by === "client" ? "Client" : "Firm"} uploaded ${d.filename} (${d.category})`,
+          data: d,
+        });
+      }
+      for (const i of invoices.rows) {
+        events.push({
+          type: "invoice", id: `inv-${i.id}`, at: i.created_at,
+          summary: `Invoice #${i.id}: $${(i.amount_cents / 100).toFixed(2)} — ${i.description}${i.status === "paid" ? " (PAID)" : ""}`,
+          data: i,
+        });
+      }
+      for (const n of notes.rows) {
+        events.push({
+          type: "note", id: `note-${n.id}`, at: n.created_at,
+          summary: `${n.author_name || "Staff"} noted: ${String(n.body).substring(0, 100)}`,
+          data: n,
+        });
+      }
+      for (const t of timeEntries.rows) {
+        events.push({
+          type: "time", id: `time-${t.id}`, at: t.entry_date,
+          summary: `${t.staff_name || "Staff"} logged ${t.minutes || 0} min: ${t.description}`,
+          data: t,
+        });
+      }
+      for (const t of tasks.rows) {
+        events.push({
+          type: "task", id: `task-${t.id}`, at: t.created_at,
+          summary: `Task: ${t.description}${t.completed ? " (done)" : ""}`,
+          data: t,
+        });
+      }
+      events.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      res.json({ ok: true, events: events.slice(0, 100) });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
