@@ -302,6 +302,30 @@ async function initClientAuthTables() {
     )
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_client_documents_key ON client_documents (client_key)`);
+
+  // Client invoices — for the multi-method billing flow (Zelle, check, credit card link)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS client_invoices (
+      id                   SERIAL PRIMARY KEY,
+      client_key           TEXT NOT NULL,
+      description          TEXT NOT NULL,
+      amount_cents         INTEGER NOT NULL,
+      due_date             DATE,
+      notes                TEXT,
+      credit_card_link     TEXT,
+      status               TEXT NOT NULL DEFAULT 'sent',
+      paid_at              TIMESTAMPTZ,
+      paid_method          TEXT,
+      paid_note            TEXT,
+      client_claim_paid_at TIMESTAMPTZ,
+      client_claim_note    TEXT,
+      created_by           INTEGER,
+      created_at           TIMESTAMPTZ DEFAULT NOW(),
+      updated_at           TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_invoices_key ON client_invoices (client_key)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_invoices_status ON client_invoices (status)`);
 }
 
 // In-memory cache of matter defaults. Reloaded on any admin update.
@@ -1759,6 +1783,185 @@ function registerAppApi(app) {
       res.setHeader('Content-Type', doc.mime_type || 'application/octet-stream');
       res.setHeader('Content-Disposition', `inline; filename="${doc.filename.replace(/"/g, '')}"`);
       res.send(doc.content);
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  CLIENT INVOICES
+  //  ─────────────────────────────────────────────────────
+  //  Admin creates an invoice for a client (amount + description +
+  //  optional credit-card link). Client sees it with payment options
+  //  (Zelle, check, credit card link if provided) and can flag it as
+  //  paid. Admin manually confirms payment received.
+  // ═══════════════════════════════════════════════════════
+
+  // ADMIN: create an invoice
+  app.post("/api/staff/admin/invoices", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const { client_key, description, amount_cents, due_date, notes, credit_card_link } = req.body || {};
+      if (!client_key || !description || !amount_cents) {
+        return res.status(400).json({ ok: false, error: "client_key, description, amount_cents required" });
+      }
+      const amt = parseInt(amount_cents, 10);
+      if (!Number.isFinite(amt) || amt <= 0) {
+        return res.status(400).json({ ok: false, error: "amount_cents must be a positive integer" });
+      }
+      const r = await db.query(
+        `INSERT INTO client_invoices
+           (client_key, description, amount_cents, due_date, notes, credit_card_link, status, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, 'sent', $7)
+         RETURNING *`,
+        [String(client_key), String(description).substring(0, 500), amt,
+         due_date || null,
+         notes ? String(notes).substring(0, 1000) : null,
+         credit_card_link ? String(credit_card_link).substring(0, 500) : null,
+         req.user.uid]
+      );
+      // Push notification to the client account(s) linked to this key
+      try {
+        const push = require("./push-notifications");
+        const acctR = await db.query(
+          `SELECT id FROM client_accounts WHERE client_key = $1`,
+          [String(client_key)]
+        );
+        for (const row of acctR.rows) {
+          await push.sendToUser("client", row.id, {
+            title: "💰 New invoice from Tez Law",
+            body: `${description} · $${(amt / 100).toFixed(2)}`,
+            data: { type: "invoice", invoice_id: r.rows[0].id },
+          });
+        }
+      } catch (e) { console.warn("[invoice push]:", e.message); }
+      res.json({ ok: true, invoice: r.rows[0] });
+    } catch (err) {
+      console.error("[create invoice]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // FIRM: list invoices for a client
+  app.get("/api/staff/clients/:key/invoices", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access to this client" });
+      const r = await db.query(
+        `SELECT * FROM client_invoices WHERE client_key = $1 ORDER BY created_at DESC`,
+        [req.params.key]
+      );
+      res.json({ ok: true, invoices: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ADMIN: mark invoice paid
+  app.patch("/api/staff/admin/invoices/:id/mark-paid", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const paid_method = String(req.body?.paid_method || "other").substring(0, 40);
+      const paid_note = req.body?.paid_note ? String(req.body.paid_note).substring(0, 500) : null;
+      const r = await db.query(
+        `UPDATE client_invoices
+         SET status = 'paid', paid_at = NOW(), paid_method = $1, paid_note = $2, updated_at = NOW()
+         WHERE id = $3 RETURNING *`,
+        [paid_method, paid_note, id]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      // Notify client of confirmation
+      try {
+        const push = require("./push-notifications");
+        const inv = r.rows[0];
+        const acctR = await db.query(
+          `SELECT id FROM client_accounts WHERE client_key = $1`,
+          [inv.client_key]
+        );
+        for (const row of acctR.rows) {
+          await push.sendToUser("client", row.id, {
+            title: "✓ Payment confirmed",
+            body: `${inv.description} · $${(inv.amount_cents / 100).toFixed(2)} · marked paid`,
+            data: { type: "invoice_paid", invoice_id: inv.id },
+          });
+        }
+      } catch {}
+      res.json({ ok: true, invoice: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ADMIN: void invoice
+  app.patch("/api/staff/admin/invoices/:id/void", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(
+        `UPDATE client_invoices
+         SET status = 'void', updated_at = NOW()
+         WHERE id = $1 RETURNING *`,
+        [id]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      res.json({ ok: true, invoice: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ADMIN: delete invoice (hard delete — only for corrections)
+  app.delete("/api/staff/admin/invoices/:id", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      await db.query(`DELETE FROM client_invoices WHERE id = $1`, [id]);
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // CLIENT: list own invoices
+  app.get("/api/client/invoices", requireBearer, requireClient, async (req, res) => {
+    try {
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const clientKey = acctR.rows[0]?.client_key;
+      if (!clientKey) return res.json({ ok: true, invoices: [] });
+      const r = await db.query(
+        `SELECT id, description, amount_cents, due_date, notes, credit_card_link,
+                status, paid_at, paid_method, client_claim_paid_at, created_at
+         FROM client_invoices WHERE client_key = $1 ORDER BY created_at DESC`,
+        [clientKey]
+      );
+      res.json({ ok: true, invoices: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // CLIENT: flag as paid (informational — admin still confirms)
+  app.patch("/api/client/invoices/:id/claim-paid", requireBearer, requireClient, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const note = req.body?.note ? String(req.body.note).substring(0, 500) : null;
+      // Verify this invoice belongs to this client
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const clientKey = acctR.rows[0]?.client_key;
+      if (!clientKey) return res.status(403).json({ ok: false, error: "no linked case" });
+      const r = await db.query(
+        `UPDATE client_invoices
+         SET client_claim_paid_at = NOW(), client_claim_note = $1, updated_at = NOW()
+         WHERE id = $2 AND client_key = $3 RETURNING *`,
+        [note, id, clientKey]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found or not yours" });
+      // Notify admins
+      try {
+        const push = require("./push-notifications");
+        const inv = r.rows[0];
+        await push.sendToAdmins({
+          title: "💵 Client flagged invoice as paid",
+          body: `$${(inv.amount_cents / 100).toFixed(2)} · ${inv.description}${note ? ` · "${note.substring(0, 50)}"` : ''}`,
+          data: { type: "invoice_claim_paid", invoice_id: inv.id, client_key: inv.client_key },
+        });
+      } catch {}
+      res.json({ ok: true, invoice: r.rows[0] });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
