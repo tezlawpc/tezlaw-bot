@@ -1044,16 +1044,18 @@ function registerAppApi(app) {
       if (!message) return res.status(400).json({ ok: false, error: "message required" });
       let askClaude;
       try { askClaude = require("./askClaude-memory"); } catch { askClaude = null; }
-      if (!askClaude || typeof askClaude.answerQuestion !== "function") {
+      if (!askClaude || typeof askClaude.askClaudeWithMemory !== "function") {
         return res.status(501).json({ ok: false, error: "Chat not available on backend" });
       }
-      const reply = await askClaude.answerQuestion({
-        userId: `staff-${req.user.uid}`,
-        question: message,
-        history: history || [],
-        actor: { role: req.user.r, name: req.user.n || req.user.u },
-      });
-      res.json({ ok: true, reply });
+      // askClaudeWithMemory(platform, platformId, userMessage, systemPrompt, options)
+      const reply = await askClaude.askClaudeWithMemory(
+        "app",
+        `staff-${req.user.uid}`,
+        String(message),
+        `You are Zara, Tez Law P.C.'s AI legal assistant. The current user is a firm staff member (${req.user.n || req.user.u}, role: ${req.user.r}). Answer their legal questions concisely and professionally.`,
+        { history: history || [] }
+      );
+      res.json({ ok: true, reply: { answer: typeof reply === "string" ? reply : (reply?.answer || reply?.text || JSON.stringify(reply)) } });
     } catch (err) {
       console.error("[api chat]:", err.message);
       res.status(500).json({ ok: false, error: err.message });
@@ -1725,16 +1727,21 @@ function registerAppApi(app) {
       if (!message) return res.status(400).json({ ok: false, error: "message required" });
       let askClaude;
       try { askClaude = require("./askClaude-memory"); } catch { askClaude = null; }
-      if (!askClaude || typeof askClaude.answerQuestion !== "function") {
+      if (!askClaude || typeof askClaude.askClaudeWithMemory !== "function") {
         return res.status(501).json({ ok: false, error: "Chat not available" });
       }
-      const reply = await askClaude.answerQuestion({
-        userId: `client-${req.user.uid}`,
-        question: message,
-        history: history || [],
-        actor: { role: "client", name: req.user.n },
-      });
-      res.json({ ok: true, reply });
+      const lang = req.user.lang || "en";
+      const langInstr = lang === "zh-TW" ? "Respond in Traditional Chinese (繁體中文)."
+                      : lang === "es"    ? "Responde en español."
+                      : "Respond in English.";
+      const reply = await askClaude.askClaudeWithMemory(
+        "app",
+        `client-${req.user.uid}`,
+        String(message),
+        `You are Zara, Tez Law P.C.'s AI legal assistant, helping a client (${req.user.n || "the client"}). Answer general legal questions clearly. For case-specific questions, remind them to use the Messages tab to contact their legal team. ${langInstr}`,
+        { history: history || [] }
+      );
+      res.json({ ok: true, reply: { answer: typeof reply === "string" ? reply : (reply?.answer || reply?.text || JSON.stringify(reply)) } });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
