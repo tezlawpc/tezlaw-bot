@@ -5436,6 +5436,128 @@ ${groups.map(g => `
   });
 
   // ═══════════════════════════════════════════════════════
+  //  DROPBOX MAPPINGS SWEEP (admin only)
+  //  ─────────────────────────────────────────────────────
+  //  For fixing wrong Dropbox-to-client links. Lists current mappings,
+  //  suggests folder matches for unlinked clients, allows manual link.
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/admin/dropbox/mappings", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      // Get all clients from tasks (canonical, excluding aliases)
+      const clientsR = await db.query(
+        `SELECT DISTINCT t.client_key, t.client_name, t.client_phone, t.client_email,
+                t.matter_type, t.a_number,
+                MAX(t.created_at) AS last_activity
+         FROM tasks t
+         WHERE t.client_key IS NOT NULL
+           AND t.client_key NOT IN (SELECT alias_key FROM client_aliases)
+         GROUP BY t.client_key, t.client_name, t.client_phone, t.client_email, t.matter_type, t.a_number
+         ORDER BY t.client_name`
+      );
+
+      // Get all current dropbox mappings
+      const mappingsR = await db.query(
+        `SELECT client_key, dropbox_path, a_number AS mapping_a_number, client_name AS mapping_name, resolved_at, resolved_by
+         FROM client_dropbox_mapping`
+      ).catch(() => ({ rows: [] }));  // Handle if table doesn't exist yet
+
+      const mappingByKey = new Map();
+      for (const m of mappingsR.rows) {
+        mappingByKey.set(m.client_key, m);
+      }
+
+      // Also find orphan mappings (dropbox mapping exists but no matching client)
+      const clientKeys = new Set(clientsR.rows.map(c => c.client_key));
+      const orphanMappings = mappingsR.rows.filter(m => !clientKeys.has(m.client_key));
+
+      const enriched = clientsR.rows.map(c => {
+        const mapping = mappingByKey.get(c.client_key);
+        // Also try to find mapping by a_number match
+        const byANumber = c.a_number && !mapping
+          ? mappingsR.rows.find(m => m.mapping_a_number && m.mapping_a_number.replace(/\D/g, '') === (c.a_number || '').replace(/\D/g, ''))
+          : null;
+        return {
+          ...c,
+          dropbox_path: mapping?.dropbox_path || byANumber?.dropbox_path || null,
+          mapping_resolved_at: mapping?.resolved_at || null,
+          mapping_resolved_by: mapping?.resolved_by || null,
+          matched_by_anumber: !!byANumber,
+          status: mapping ? 'linked' : (byANumber ? 'linked_by_anumber' : 'unlinked'),
+        };
+      });
+
+      const stats = {
+        total_clients: enriched.length,
+        linked: enriched.filter(c => c.status === 'linked').length,
+        linked_by_anumber: enriched.filter(c => c.status === 'linked_by_anumber').length,
+        unlinked: enriched.filter(c => c.status === 'unlinked').length,
+        orphan_mappings: orphanMappings.length,
+      };
+
+      res.json({
+        ok: true,
+        stats,
+        clients: enriched,
+        orphan_mappings: orphanMappings,
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.get("/api/staff/admin/dropbox/suggest", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const clientKey = String(req.query.client_key || "").trim();
+      if (!clientKey) return res.status(400).json({ ok: false, error: "client_key required" });
+      const c = await db.query(
+        `SELECT client_name, a_number FROM tasks WHERE client_key = $1 LIMIT 1`,
+        [clientKey]
+      );
+      if (!c.rows[0]) return res.status(404).json({ ok: false, error: "client not found" });
+      const dbx = require("./dropbox-integration");
+      const suggestions = await dbx.suggestClientFolders({
+        clientName: c.rows[0].client_name,
+        aNumber: c.rows[0].a_number,
+        minScore: 15,
+        limit: 15,
+      });
+      res.json({
+        ok: true,
+        client: c.rows[0],
+        suggestions: suggestions || [],
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/admin/dropbox/mappings", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const { client_key, dropbox_path } = req.body || {};
+      if (!client_key || !dropbox_path) {
+        return res.status(400).json({ ok: false, error: "client_key and dropbox_path required" });
+      }
+      const c = await db.query(
+        `SELECT client_name, a_number FROM tasks WHERE client_key = $1 LIMIT 1`,
+        [client_key]
+      );
+      const dbx = require("./dropbox-integration");
+      await dbx.setClientFolderMapping({
+        clientKey: client_key,
+        aNumber: c.rows[0]?.a_number || null,
+        clientName: c.rows[0]?.client_name || null,
+        dropboxPath: dropbox_path,
+      });
+      res.json({ ok: true, client_key, dropbox_path });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/admin/dropbox/mappings/:key", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const dbx = require("./dropbox-integration");
+      await dbx.clearClientFolderMapping(req.params.key);
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
   //  CONSULTANT PORTAL API
   //  (naturally scoped to their own submissions + assigned clients)
   // ═══════════════════════════════════════════════════════
