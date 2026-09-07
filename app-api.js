@@ -219,11 +219,14 @@ async function initClientAuthTables() {
       sender_kind   TEXT NOT NULL,
       sender_name   TEXT,
       sender_id     INTEGER,
+      sender_role   TEXT,
       body          TEXT NOT NULL,
       read_at       TIMESTAMPTZ,
       created_at    TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // Backfill for existing tables missing sender_role
+  await db.query(`ALTER TABLE client_messages ADD COLUMN IF NOT EXISTS sender_role TEXT`).catch(() => {});
   await db.query(`CREATE INDEX IF NOT EXISTS idx_client_messages_key ON client_messages (client_key, created_at DESC)`);
 
   // Matter-type default assignment table — determines auto-assignee when
@@ -704,6 +707,54 @@ Tel: (626) 678-8677`,
     )
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_court_prep_task ON court_prep_items (task_id)`);
+
+  // ── Consultant Assignments ─────────────────────────
+  // Admins assign consultants to specific clients. Consultants only see
+  // clients they're actively assigned to. Removing an assignment cuts off
+  // their access immediately (soft delete — firm retains all data).
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS client_consultants (
+      id                  SERIAL PRIMARY KEY,
+      client_key          TEXT NOT NULL,
+      consultant_id       INTEGER NOT NULL,
+      role_description    TEXT,
+      assigned_by         INTEGER,
+      assigned_at         TIMESTAMPTZ DEFAULT NOW(),
+      removed_at          TIMESTAMPTZ,
+      removed_by          INTEGER,
+      removal_reason      TEXT,
+      notes               TEXT
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_consultants_client ON client_consultants (client_key)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_consultants_consultant ON client_consultants (consultant_id)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_consultants_active ON client_consultants (consultant_id, removed_at) WHERE removed_at IS NULL`);
+
+  // ── Document E-Signatures ──────────────────────────
+  // For documents generated from templates and sent to clients to sign
+  // (via SMS or email). Public sign URL is /sign/:token
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS document_signatures (
+      id                    SERIAL PRIMARY KEY,
+      generated_document_id INTEGER NOT NULL,
+      sign_token            TEXT UNIQUE NOT NULL,
+      recipient_email       TEXT,
+      recipient_phone       TEXT,
+      recipient_name        TEXT,
+      sent_by               INTEGER NOT NULL,
+      sent_via              TEXT,
+      sent_at               TIMESTAMPTZ DEFAULT NOW(),
+      expires_at            TIMESTAMPTZ,
+      signed_at             TIMESTAMPTZ,
+      signed_by_name        TEXT,
+      signature_data        TEXT,
+      signer_ip             TEXT,
+      signer_user_agent     TEXT,
+      created_at            TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_document_signatures_token ON document_signatures (sign_token)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_document_signatures_doc ON document_signatures (generated_document_id)`);
 }
 
 // In-memory cache of matter defaults. Reloaded on any admin update.
@@ -1644,6 +1695,12 @@ function registerAppApi(app) {
         [disabled, id]
       );
       if (!r.rows[0]) return res.status(404).json({ ok: false, error: "user not found" });
+      // If disabling a consultant, sever all their client assignments
+      if (disabled && r.rows[0].role === "consultant" && typeof app.locals.cleanupConsultantAssignments === "function") {
+        try {
+          await app.locals.cleanupConsultantAssignments(id, req.user.uid, "User disabled by admin");
+        } catch (e) { console.warn("[cleanup consultant]:", e.message); }
+      }
       res.json({ ok: true, user: r.rows[0] });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
@@ -3623,9 +3680,591 @@ function registerAppApi(app) {
   });
 
   // ═══════════════════════════════════════════════════════
-  //  CONSULTANT PORTAL API
-  //  (naturally scoped to their own submissions)
+  //  CONSULTANT ASSIGNMENTS (admin + manager control which
+  //  consultants have access to which clients)
   // ═══════════════════════════════════════════════════════
+
+  // List all consultant users (for admin to pick from)
+  app.get("/api/staff/admin/consultants", requireBearer, requireFirmUser, requireManagerOrAdmin, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT id, username, full_name, email, disabled
+         FROM admin_users
+         WHERE role = 'consultant' AND COALESCE(disabled, false) = false
+         ORDER BY full_name ASC`
+      );
+      res.json({ ok: true, consultants: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // List consultants assigned to a specific client
+  app.get("/api/staff/clients/:key/consultants", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      // Return both active and historical (removed) assignments — history matters
+      const r = await db.query(
+        `SELECT cc.*,
+                cu.full_name AS consultant_name, cu.username AS consultant_username, cu.email AS consultant_email,
+                bu.full_name AS assigned_by_name,
+                ru.full_name AS removed_by_name
+         FROM client_consultants cc
+         LEFT JOIN admin_users cu ON cu.id = cc.consultant_id
+         LEFT JOIN admin_users bu ON bu.id = cc.assigned_by
+         LEFT JOIN admin_users ru ON ru.id = cc.removed_by
+         WHERE cc.client_key = $1
+         ORDER BY (cc.removed_at IS NULL) DESC, cc.assigned_at DESC`,
+        [req.params.key]
+      );
+      res.json({ ok: true, assignments: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Assign a consultant to a client
+  app.post("/api/staff/clients/:key/consultants", requireBearer, requireFirmUser, requireManagerOrAdmin, async (req, res) => {
+    try {
+      const clientKey = req.params.key;
+      const consultantId = parseInt(req.body?.consultant_id, 10);
+      if (!Number.isFinite(consultantId)) {
+        return res.status(400).json({ ok: false, error: "consultant_id required" });
+      }
+      // Verify the user is actually a consultant
+      const uR = await db.query(
+        `SELECT id, role, full_name FROM admin_users WHERE id = $1 AND COALESCE(disabled, false) = false`,
+        [consultantId]
+      );
+      if (!uR.rows[0]) return res.status(404).json({ ok: false, error: "consultant not found or disabled" });
+      if (uR.rows[0].role !== "consultant") {
+        return res.status(400).json({ ok: false, error: "That user is not a consultant" });
+      }
+      // Prevent duplicate active assignment
+      const existing = await db.query(
+        `SELECT id FROM client_consultants
+         WHERE client_key = $1 AND consultant_id = $2 AND removed_at IS NULL LIMIT 1`,
+        [clientKey, consultantId]
+      );
+      if (existing.rows.length) {
+        return res.status(400).json({ ok: false, error: `${uR.rows[0].full_name} is already assigned to this client.` });
+      }
+      const r = await db.query(
+        `INSERT INTO client_consultants (client_key, consultant_id, role_description, assigned_by, notes)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [
+          clientKey, consultantId,
+          req.body?.role_description ? String(req.body.role_description).substring(0, 300) : null,
+          req.user.uid,
+          req.body?.notes ? String(req.body.notes).substring(0, 1000) : null,
+        ]
+      );
+      // Notify the consultant they now have access
+      try {
+        const push = require("./push-notifications");
+        await push.sendToUser("consultant", consultantId, {
+          title: "📁 New client assigned",
+          body: `You've been assigned access to a client case.`,
+          data: { type: "consultant_client_assigned", client_key: clientKey },
+        });
+      } catch (e) { console.warn("[consultant assign push]:", e.message); }
+      res.json({ ok: true, assignment: r.rows[0] });
+    } catch (err) {
+      console.error("[assign consultant]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Remove a consultant's access to a client (soft delete — firm keeps history)
+  app.delete("/api/staff/clients/:key/consultants/:id", requireBearer, requireFirmUser, requireManagerOrAdmin, async (req, res) => {
+    try {
+      const assignmentId = parseInt(req.params.id, 10);
+      if (!Number.isFinite(assignmentId)) return res.status(400).json({ ok: false, error: "bad id" });
+      const reason = req.body?.reason ? String(req.body.reason).substring(0, 500) : null;
+      const r = await db.query(
+        `UPDATE client_consultants
+         SET removed_at = NOW(), removed_by = $1, removal_reason = $2
+         WHERE id = $3 AND client_key = $4 AND removed_at IS NULL
+         RETURNING *`,
+        [req.user.uid, reason, assignmentId, req.params.key]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "assignment not found or already removed" });
+      res.json({ ok: true, assignment: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Helper: get set of client_keys this consultant is currently assigned to
+  async function getConsultantClientKeys(consultantId) {
+    const r = await db.query(
+      `SELECT DISTINCT client_key FROM client_consultants
+       WHERE consultant_id = $1 AND removed_at IS NULL AND client_key IS NOT NULL`,
+      [consultantId]
+    );
+    return new Set(r.rows.map(x => x.client_key));
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  E-SIGNATURE (public route + admin-side send)
+  // ═══════════════════════════════════════════════════════
+
+  // Send a generated document for e-signature (attorney/admin/manager/consultant)
+  app.post("/api/staff/documents/:id/send-for-signature", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const docId = parseInt(req.params.id, 10);
+      if (!Number.isFinite(docId)) return res.status(400).json({ ok: false, error: "bad id" });
+      const { recipient_email, recipient_phone, recipient_name, send_via, expires_days } = req.body || {};
+      if (!recipient_email && !recipient_phone) {
+        return res.status(400).json({ ok: false, error: "recipient_email or recipient_phone required" });
+      }
+      const via = String(send_via || (recipient_email ? "email" : "sms")).toLowerCase();
+      // Load document + verify caller can access
+      const dR = await db.query(`SELECT * FROM generated_documents WHERE id = $1`, [docId]);
+      const doc = dR.rows[0];
+      if (!doc) return res.status(404).json({ ok: false, error: "document not found" });
+      const canAccess = doc.generated_by === req.user.uid
+        || req.user.r === "admin" || req.user.r === "manager"
+        || (doc.client_key && await canUserAccessClient(req.user, doc.client_key));
+      if (!canAccess) return res.status(403).json({ ok: false, error: "no access" });
+      // Generate unique signing token
+      const crypto = require("crypto");
+      const token = crypto.randomBytes(24).toString("base64url");
+      const expires = new Date(Date.now() + (parseInt(expires_days, 10) || 14) * 24 * 60 * 60 * 1000);
+      const r = await db.query(
+        `INSERT INTO document_signatures
+           (generated_document_id, sign_token, recipient_email, recipient_phone,
+            recipient_name, sent_by, sent_via, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [
+          docId, token,
+          recipient_email ? String(recipient_email).trim().substring(0, 200) : null,
+          recipient_phone ? String(recipient_phone).trim().substring(0, 40) : null,
+          recipient_name ? String(recipient_name).trim().substring(0, 200) : null,
+          req.user.uid, via, expires,
+        ]
+      );
+      const signUrl = `${process.env.RENDER_EXTERNAL_URL || 'https://tezlaw-bot.onrender.com'}/sign/${token}`;
+      // Send via email or SMS
+      let deliveryStatus = "not_sent";
+      let deliveryError = null;
+      const message = `Tez Law P.C. — please sign the document "${doc.title}". Open this secure link to review + sign: ${signUrl}\n\nThis link expires in ${parseInt(expires_days, 10) || 14} days.`;
+      if (via === "sms" && recipient_phone) {
+        try {
+          const twilio = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+          await twilio.messages.create({
+            body: message,
+            from: process.env.TWILIO_PHONE_NUMBER,
+            to: recipient_phone,
+          });
+          deliveryStatus = "sms_sent";
+        } catch (e) { deliveryError = e.message; deliveryStatus = "sms_failed"; console.warn("[sign sms]:", e.message); }
+      }
+      if (via === "email" && recipient_email) {
+        try {
+          const emailMod = require("./email-sender");  // if exists
+          if (emailMod && typeof emailMod.sendEmail === "function") {
+            await emailMod.sendEmail({
+              to: recipient_email,
+              subject: `Please sign: ${doc.title}`,
+              text: message,
+              html: `<p>Hello${recipient_name ? ' ' + recipient_name : ''},</p>
+<p>Tez Law P.C. has sent you a document to review and sign:</p>
+<p><strong>${doc.title}</strong></p>
+<p><a href="${signUrl}" style="display:inline-block;padding:12px 24px;background:#B79C62;color:#0C1C36;text-decoration:none;border-radius:4px;font-weight:bold;">Review + Sign Document</a></p>
+<p>Or copy this link: ${signUrl}</p>
+<p>This link expires in ${parseInt(expires_days, 10) || 14} days.</p>
+<p>Contact Tez Law at 626-678-8677 with any questions.</p>`,
+            });
+            deliveryStatus = "email_sent";
+          } else {
+            deliveryError = "Email sender not configured";
+          }
+        } catch (e) { deliveryError = e.message; deliveryStatus = "email_failed"; console.warn("[sign email]:", e.message); }
+      }
+      res.json({ ok: true, signature_request: r.rows[0], sign_url: signUrl, delivery_status: deliveryStatus, delivery_error: deliveryError });
+    } catch (err) {
+      console.error("[send for signature]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Public: fetch document for signing (via token)
+  app.get("/api/public/sign/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token || "");
+      if (!token) return res.status(400).json({ ok: false, error: "bad token" });
+      const r = await db.query(
+        `SELECT s.*, g.title, g.body, g.template_name
+         FROM document_signatures s
+         LEFT JOIN generated_documents g ON g.id = s.generated_document_id
+         WHERE s.sign_token = $1`,
+        [token]
+      );
+      const sig = r.rows[0];
+      if (!sig) return res.status(404).json({ ok: false, error: "signature link not found" });
+      if (sig.expires_at && new Date(sig.expires_at) < new Date()) {
+        return res.status(410).json({ ok: false, error: "signature link expired" });
+      }
+      res.json({
+        ok: true,
+        signed: !!sig.signed_at,
+        document: {
+          title: sig.title,
+          body: sig.body,
+          template_name: sig.template_name,
+        },
+        recipient: {
+          name: sig.recipient_name,
+        },
+        signed_at: sig.signed_at,
+        signed_by_name: sig.signed_by_name,
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Public: submit signature
+  app.post("/api/public/sign/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token || "");
+      const { signed_by_name, signature_data } = req.body || {};
+      if (!signed_by_name || !signature_data) {
+        return res.status(400).json({ ok: false, error: "signed_by_name and signature_data required" });
+      }
+      const r = await db.query(
+        `UPDATE document_signatures
+         SET signed_at = NOW(), signed_by_name = $1, signature_data = $2,
+             signer_ip = $3, signer_user_agent = $4
+         WHERE sign_token = $5 AND signed_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())
+         RETURNING *`,
+        [
+          String(signed_by_name).substring(0, 200),
+          String(signature_data).substring(0, 500000),
+          req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null,
+          req.headers['user-agent']?.substring(0, 500) || null,
+          token,
+        ]
+      );
+      if (!r.rows[0]) return res.status(410).json({ ok: false, error: "already signed or expired" });
+      // Notify the sender + admins
+      try {
+        const push = require("./push-notifications");
+        await push.sendToUser(null, r.rows[0].sent_by, {
+          title: "✅ Document signed",
+          body: `${signed_by_name} signed a document you sent.`,
+          data: { type: "document_signed", signature_id: r.rows[0].id },
+        });
+      } catch {}
+      res.json({ ok: true, signature: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Get signature status for a document (staff)
+  app.get("/api/staff/documents/:id/signatures", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const docId = parseInt(req.params.id, 10);
+      if (!Number.isFinite(docId)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(
+        `SELECT s.*, u.full_name AS sent_by_name
+         FROM document_signatures s
+         LEFT JOIN admin_users u ON u.id = s.sent_by
+         WHERE s.generated_document_id = $1
+         ORDER BY s.sent_at DESC`,
+        [docId]
+      );
+      res.json({ ok: true, signatures: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  CONSULTANT PORTAL API
+  //  (naturally scoped to their own submissions + assigned clients)
+  // ═══════════════════════════════════════════════════════
+
+  // ── Consultant client access (assigned clients only) ────
+
+  // List clients this consultant is currently assigned to
+  app.get("/api/consultant/clients", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT cc.id AS assignment_id, cc.client_key, cc.role_description, cc.assigned_at,
+                cc.notes AS assignment_notes,
+                MAX(t.client_name) AS client_name,
+                MAX(t.client_phone) AS client_phone,
+                MAX(t.client_email) AS client_email,
+                MAX(t.matter_type) AS matter_type,
+                COUNT(DISTINCT t.id) FILTER (WHERE t.completed = false OR t.completed IS NULL) AS open_task_count
+         FROM client_consultants cc
+         LEFT JOIN tasks t ON t.client_key = cc.client_key
+         WHERE cc.consultant_id = $1 AND cc.removed_at IS NULL
+         GROUP BY cc.id, cc.client_key, cc.role_description, cc.assigned_at, cc.notes
+         ORDER BY MAX(t.updated_at) DESC NULLS LAST`,
+        [req.user.uid]
+      );
+      res.json({ ok: true, clients: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Get client detail (consultant view — same shape as staff, but access-checked)
+  app.get("/api/consultant/clients/:key", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const keys = await getConsultantClientKeys(req.user.uid);
+      if (!keys.has(req.params.key) && req.user.r !== "admin") {
+        return res.status(403).json({ ok: false, error: "You're not assigned to this client" });
+      }
+      // Get client info via first task
+      const cR = await db.query(
+        `SELECT DISTINCT ON (client_key)
+           client_key, client_name, client_phone, client_email, matter_type
+         FROM tasks WHERE client_key = $1 LIMIT 1`,
+        [req.params.key]
+      );
+      if (!cR.rows[0]) return res.status(404).json({ ok: false, error: "client not found" });
+      // Get assignment info
+      const aR = await db.query(
+        `SELECT role_description, assigned_at, notes
+         FROM client_consultants
+         WHERE client_key = $1 AND consultant_id = $2 AND removed_at IS NULL LIMIT 1`,
+        [req.params.key, req.user.uid]
+      );
+      res.json({
+        ok: true,
+        client: cR.rows[0],
+        assignment: aR.rows[0] || null,
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // List tasks for a client (consultant view — filtered to their scope)
+  app.get("/api/consultant/clients/:key/tasks", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const keys = await getConsultantClientKeys(req.user.uid);
+      if (!keys.has(req.params.key) && req.user.r !== "admin") {
+        return res.status(403).json({ ok: false, error: "not assigned" });
+      }
+      const r = await db.query(
+        `SELECT id, description, matter_type, due_date, completed, priority, created_at,
+                assigned_to, submitted_by_user_id, status
+         FROM tasks WHERE client_key = $1
+         ORDER BY (completed IS NULL OR completed = false) DESC,
+                  due_date ASC NULLS LAST, created_at DESC
+         LIMIT 100`,
+        [req.params.key]
+      );
+      res.json({ ok: true, tasks: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Consultant messaging ────────────────────────────
+  // List messages for a client (consultant view)
+  app.get("/api/consultant/clients/:key/messages", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const keys = await getConsultantClientKeys(req.user.uid);
+      if (!keys.has(req.params.key) && req.user.r !== "admin") {
+        return res.status(403).json({ ok: false, error: "not assigned" });
+      }
+      // Reuse the client_messages table
+      const r = await db.query(
+        `SELECT * FROM client_messages WHERE client_key = $1 ORDER BY created_at ASC LIMIT 500`,
+        [req.params.key]
+      ).catch(() => ({ rows: [] }));
+      res.json({ ok: true, messages: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Send a message to a client (consultant → client)
+  app.post("/api/consultant/clients/:key/messages", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const keys = await getConsultantClientKeys(req.user.uid);
+      if (!keys.has(req.params.key) && req.user.r !== "admin") {
+        return res.status(403).json({ ok: false, error: "not assigned" });
+      }
+      const body = String(req.body?.body || "").trim();
+      if (!body) return res.status(400).json({ ok: false, error: "body required" });
+      const r = await db.query(
+        `INSERT INTO client_messages (client_key, sender_kind, sender_name, sender_id, sender_role, body)
+         VALUES ($1, 'firm', $2, $3, 'consultant', $4) RETURNING *`,
+        [req.params.key, req.user.n || 'Consultant', req.user.uid, body.substring(0, 4000)]
+      );
+      // Push to any linked client accounts
+      try {
+        const push = require("./push-notifications");
+        const acctR = await db.query(`SELECT id FROM client_accounts WHERE client_key = $1`, [req.params.key]);
+        for (const row of acctR.rows) {
+          await push.sendToUser("client", row.id, {
+            title: "💬 New message from Tez Law",
+            body: body.substring(0, 100),
+            data: { type: "message" },
+          });
+        }
+      } catch {}
+      res.json({ ok: true, message: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Consultant document generation ──────────────────
+  // Consultants can generate documents (retainers etc) on behalf of the firm.
+  // The document is marked as consultant-drafted; attorney reviews via
+  // firm-side "generated documents" list.
+
+  app.get("/api/consultant/document-templates", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      // Consultants get access to retainer + engagement templates by default
+      const r = await db.query(
+        `SELECT id, slug, name, category, description, variables
+         FROM document_templates
+         WHERE category IN ('retainer', 'engagement', 'letter')
+         ORDER BY category, name`
+      );
+      res.json({ ok: true, templates: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/consultant/clients/:key/documents/generate", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const keys = await getConsultantClientKeys(req.user.uid);
+      if (!keys.has(req.params.key) && req.user.r !== "admin") {
+        return res.status(403).json({ ok: false, error: "not assigned" });
+      }
+      const { template_slug, variables, title } = req.body || {};
+      if (!template_slug || !variables) return res.status(400).json({ ok: false, error: "template_slug + variables required" });
+      const tR = await db.query(`SELECT * FROM document_templates WHERE slug = $1`, [String(template_slug)]);
+      const tpl = tR.rows[0];
+      if (!tpl) return res.status(404).json({ ok: false, error: "template not found" });
+      const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      const allVars = { ...variables, today_date: today };
+      let body = tpl.body;
+      for (const [key, value] of Object.entries(allVars)) {
+        const safe = String(value ?? '').replace(/\$/g, '$$$$');
+        body = body.replace(new RegExp(`\\{${key}\\}`, 'g'), safe);
+      }
+      const finalTitle = String(title || `${tpl.name} — ${variables.client_name || 'Untitled'}`).substring(0, 300);
+      const saved = await db.query(
+        `INSERT INTO generated_documents
+           (client_key, template_slug, template_name, title, body, variables, generated_by)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7) RETURNING *`,
+        [req.params.key, template_slug, tpl.name, finalTitle, body, JSON.stringify(allVars), req.user.uid]
+      );
+      // Notify admins that consultant drafted a document
+      try {
+        const push = require("./push-notifications");
+        await push.sendToAdmins({
+          title: "📝 Consultant drafted a document",
+          body: `${req.user.n || 'A consultant'} drafted "${finalTitle}"`,
+          data: { type: "consultant_doc_drafted", document_id: saved.rows[0].id },
+        });
+      } catch {}
+      res.json({ ok: true, document: saved.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // List generated documents for consultant's assigned clients
+  app.get("/api/consultant/documents/generated", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const keys = await getConsultantClientKeys(req.user.uid);
+      if (!keys.size) return res.json({ ok: true, documents: [] });
+      const r = await db.query(
+        `SELECT g.id, g.client_key, g.template_name, g.title, g.generated_by, g.created_at,
+                a.full_name AS generated_by_name
+         FROM generated_documents g
+         LEFT JOIN admin_users a ON a.id = g.generated_by
+         WHERE (g.generated_by = $1 OR g.client_key = ANY($2::text[]))
+         ORDER BY g.created_at DESC LIMIT 100`,
+        [req.user.uid, Array.from(keys)]
+      );
+      res.json({ ok: true, documents: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.get("/api/consultant/documents/generated/:id", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(`SELECT * FROM generated_documents WHERE id = $1`, [id]);
+      const doc = r.rows[0];
+      if (!doc) return res.status(404).json({ ok: false, error: "not found" });
+      const keys = await getConsultantClientKeys(req.user.uid);
+      const canAccess = doc.generated_by === req.user.uid
+        || (doc.client_key && keys.has(doc.client_key));
+      if (!canAccess) return res.status(403).json({ ok: false, error: "no access" });
+      res.json({ ok: true, document: doc });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/consultant/documents/:id/send-for-signature", requireBearer, requireConsultantRole, async (req, res) => {
+    // Delegate to the staff endpoint by wrapping req (same access check applies)
+    try {
+      const docId = parseInt(req.params.id, 10);
+      if (!Number.isFinite(docId)) return res.status(400).json({ ok: false, error: "bad id" });
+      const dR = await db.query(`SELECT * FROM generated_documents WHERE id = $1`, [docId]);
+      const doc = dR.rows[0];
+      if (!doc) return res.status(404).json({ ok: false, error: "document not found" });
+      const keys = await getConsultantClientKeys(req.user.uid);
+      const canAccess = doc.generated_by === req.user.uid
+        || (doc.client_key && keys.has(doc.client_key));
+      if (!canAccess) return res.status(403).json({ ok: false, error: "no access" });
+
+      const { recipient_email, recipient_phone, recipient_name, send_via, expires_days } = req.body || {};
+      if (!recipient_email && !recipient_phone) {
+        return res.status(400).json({ ok: false, error: "recipient_email or recipient_phone required" });
+      }
+      const via = String(send_via || (recipient_email ? "email" : "sms")).toLowerCase();
+      const crypto = require("crypto");
+      const token = crypto.randomBytes(24).toString("base64url");
+      const expires = new Date(Date.now() + (parseInt(expires_days, 10) || 14) * 24 * 60 * 60 * 1000);
+      const r = await db.query(
+        `INSERT INTO document_signatures
+           (generated_document_id, sign_token, recipient_email, recipient_phone, recipient_name, sent_by, sent_via, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [
+          docId, token,
+          recipient_email ? String(recipient_email).trim().substring(0, 200) : null,
+          recipient_phone ? String(recipient_phone).trim().substring(0, 40) : null,
+          recipient_name ? String(recipient_name).trim().substring(0, 200) : null,
+          req.user.uid, via, expires,
+        ]
+      );
+      const signUrl = `${process.env.RENDER_EXTERNAL_URL || 'https://tezlaw-bot.onrender.com'}/sign/${token}`;
+      const message = `Tez Law P.C. — please sign the document "${doc.title}". Open this secure link to review + sign: ${signUrl}\n\nThis link expires in ${parseInt(expires_days, 10) || 14} days.`;
+      let deliveryStatus = "not_sent", deliveryError = null;
+      if (via === "sms" && recipient_phone) {
+        try {
+          const twilio = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+          await twilio.messages.create({ body: message, from: process.env.TWILIO_PHONE_NUMBER, to: recipient_phone });
+          deliveryStatus = "sms_sent";
+        } catch (e) { deliveryError = e.message; deliveryStatus = "sms_failed"; }
+      }
+      if (via === "email" && recipient_email) {
+        try {
+          const emailMod = require("./email-sender");
+          if (emailMod?.sendEmail) {
+            await emailMod.sendEmail({
+              to: recipient_email,
+              subject: `Please sign: ${doc.title}`,
+              text: message,
+              html: `<p>Hello${recipient_name ? ' ' + recipient_name : ''},</p><p>Tez Law P.C. has sent you "${doc.title}" for signature.</p><p><a href="${signUrl}" style="display:inline-block;padding:12px 24px;background:#B79C62;color:#0C1C36;text-decoration:none;border-radius:4px;font-weight:bold;">Review + Sign</a></p><p>Link: ${signUrl}</p>`,
+            });
+            deliveryStatus = "email_sent";
+          } else { deliveryError = "Email sender not configured"; }
+        } catch (e) { deliveryError = e.message; deliveryStatus = "email_failed"; }
+      }
+      res.json({ ok: true, signature_request: r.rows[0], sign_url: signUrl, delivery_status: deliveryStatus, delivery_error: deliveryError });
+    } catch (err) {
+      console.error("[consultant send for sig]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── Consultant self-termination cleanup ────────────
+  // When a consultant is disabled via admin, mark all their assignments as removed.
+  // (Called from the admin user disable endpoint via a wrapper below.)
+  async function cleanupConsultantAssignments(consultantId, actorUserId, reason) {
+    await db.query(
+      `UPDATE client_consultants
+       SET removed_at = NOW(), removed_by = $1, removal_reason = $2
+       WHERE consultant_id = $3 AND removed_at IS NULL`,
+      [actorUserId, reason || "Consultant disabled", consultantId]
+    );
+  }
+  // Attach helper to `app` so the disable-user endpoint can call it
+  app.locals.cleanupConsultantAssignments = cleanupConsultantAssignments;
+
+  // ── Existing consultant endpoints below ────────────
 
   app.get("/api/consultant/dashboard", requireBearer, requireConsultantRole, async (req, res) => {
     try {
