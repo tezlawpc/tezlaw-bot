@@ -426,8 +426,8 @@ async function initClientAuthTables() {
   await db.query(`CREATE INDEX IF NOT EXISTS idx_mtt_template ON matter_template_tasks (template_id)`);
 
   // Seed a few common workflows if empty
-  const tplCount = await db.query(`SELECT COUNT(*)::int AS n FROM matter_templates`);
-  if (tplCount.rows[0].n === 0) {
+  const mtplCount = await db.query(`SELECT COUNT(*)::int AS n FROM matter_templates`);
+  if (mtplCount.rows[0].n === 0) {
     const seed = async (matter, name, description, tasks) => {
       const t = await db.query(
         `INSERT INTO matter_templates (matter_type, name, description) VALUES ($1, $2, $3) RETURNING id`,
