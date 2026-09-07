@@ -362,11 +362,22 @@ function scoreFolderMatch(folderName, clientTokens, aDigits) {
   const folderTokens = nameTokens(folderName);
   if (!folderTokens.length && !aDigits) return { score: 0, reason: null };
 
-  // A# match wins if present in either — very high signal.
-  if (aDigits) {
+  // A# match wins if present — but be strict:
+  //   - Client A# must have at least 7 significant digits
+  //   - Folder digits must contain the client's A# (not vice versa)
+  //   - Folder must have a meaningful number (at least 7 digits) to count as A#
+  //   Prior bug: `aDigits.includes(folderDigits)` matched EVERY client whose A#
+  //   contained any short digit sequence found in the folder name (e.g. "SB1"
+  //   in "LIAO, JIEMING-SB1" matched all A#s that had a "1" in them).
+  if (aDigits && aDigits.length >= 7) {
     const folderDigits = String(folderName).replace(/[^\d]/g, "");
-    if (folderDigits && (folderDigits.includes(aDigits) || aDigits.includes(folderDigits))) {
-      return { score: 100, reason: `A# match (${aDigits.slice(-4)})` };
+    if (folderDigits.length >= 7) {
+      // Compare last 8 digits (drop the leading "0" padding sometimes seen)
+      const aTail = aDigits.slice(-8);
+      const fTail = folderDigits.slice(-8);
+      if (folderDigits.includes(aTail) || fTail === aTail) {
+        return { score: 100, reason: `A# match (${aDigits.slice(-4)})` };
+      }
     }
   }
 
