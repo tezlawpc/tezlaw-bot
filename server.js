@@ -495,6 +495,148 @@ app.get("/version", (req, res) => {
   });
 });
 
+// ── Public E-Signature Page ──────────────────────────────
+// Served for clients to review + sign documents. Backed by
+// /api/public/sign/:token (defined in app-api.js).
+app.get("/sign/:token", (req, res) => {
+  const token = String(req.params.token || "").replace(/[^A-Za-z0-9_-]/g, "");
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Sign Document — Tez Law P.C.</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f0; color: #0C1C36; line-height: 1.5; }
+  .header { background: #0C1C36; color: #fff; padding: 16px 20px; border-bottom: 4px solid #B79C62; }
+  .header h1 { margin: 0; font-size: 18px; }
+  .header p { margin: 4px 0 0; font-size: 13px; color: #B79C62; opacity: 0.9; }
+  main { max-width: 720px; margin: 20px auto; padding: 0 16px; }
+  .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .doc-title { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
+  .doc-meta { font-size: 13px; color: #666; margin: 0 0 16px; }
+  .doc-body { background: #fafaf7; padding: 20px; border-radius: 6px; white-space: pre-wrap; word-wrap: break-word; font-family: ui-serif, Georgia, serif; font-size: 14px; line-height: 1.6; max-height: 60vh; overflow-y: auto; border: 1px solid #eee; }
+  h2 { font-size: 16px; margin: 0 0 12px; color: #0C1C36; }
+  label { display: block; font-size: 13px; font-weight: 600; color: #666; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  input[type=text] { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd; border-radius: 6px; }
+  .sig-canvas-wrap { border: 2px dashed #B79C62; border-radius: 6px; background: #fff; height: 200px; position: relative; touch-action: none; }
+  .sig-canvas-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .sig-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #B79C62; font-style: italic; pointer-events: none; opacity: 0.7; }
+  .sig-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .sig-actions button { flex: 1; padding: 10px; border: 1px solid #ddd; background: #fff; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  .primary { background: #B79C62 !important; color: #0C1C36 !important; border: none !important; font-weight: 700 !important; padding: 16px !important; font-size: 16px !important; }
+  .primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .success { background: #d4edda; color: #155724; padding: 20px; border-radius: 8px; text-align: center; }
+  .success h2 { color: #155724; margin: 0 0 8px; }
+  .error { background: #f8d7da; color: #721c24; padding: 16px; border-radius: 6px; margin-bottom: 16px; }
+  .footer { text-align: center; padding: 20px; font-size: 12px; color: #999; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Tez Law P.C.</h1>
+  <p>Secure Document Signing</p>
+</div>
+<main id="app">
+  <div class="card"><p style="text-align:center; color:#666;">Loading document…</p></div>
+</main>
+<div class="footer">
+  <p>Tez Law P.C. · 626-678-8677 · jj@tezlawfirm.com</p>
+  <p>By signing you agree the electronic signature is legally binding under the ESIGN Act &amp; UETA.</p>
+</div>
+<script>
+(async () => {
+  const token = ${JSON.stringify(token)};
+  const app = document.getElementById('app');
+  function h(html) { app.innerHTML = html; }
+  try {
+    const res = await fetch('/api/public/sign/' + token);
+    const data = await res.json();
+    if (!data.ok) {
+      h('<div class="card error"><strong>Cannot open signing link</strong><p>' + (data.error || 'Unknown error') + '</p></div>');
+      return;
+    }
+    if (data.signed) {
+      h('<div class="card success"><h2>✓ Signed</h2><p>You signed "' + data.document.title + '" as <strong>' + (data.signed_by_name || 'Unknown') + '</strong> on ' + new Date(data.signed_at).toLocaleString() + '.</p><p style="margin-top:16px;color:#155724">A copy has been saved on file with Tez Law.</p></div>');
+      return;
+    }
+    render(data);
+  } catch (err) {
+    h('<div class="card error"><strong>Network error</strong><p>' + err.message + '</p></div>');
+  }
+
+  function render(data) {
+    h('<div class="card"><h2 class="doc-title">' + data.document.title + '</h2><p class="doc-meta">' + (data.document.template_name || 'Document') + (data.recipient?.name ? ' · For ' + data.recipient.name : '') + '</p><div class="doc-body" id="body"></div></div><div class="card" id="sign-card"><h2>Sign this document</h2><label>Full legal name</label><input id="name" type="text" placeholder="Type your full name" value="' + (data.recipient?.name || '').replace(/"/g,'&quot;') + '"><label>Signature</label><div class="sig-canvas-wrap"><canvas id="pad"></canvas><div class="sig-hint" id="hint">Sign with your finger or stylus</div></div><div class="sig-actions"><button type="button" id="clear">Clear</button></div><button type="button" class="primary" id="submit" style="width:100%;margin-top:16px;">Sign &amp; Submit</button><p style="font-size:11px;color:#999;margin-top:12px;line-height:1.5">By tapping "Sign &amp; Submit" you agree that this electronic signature has the same legal effect as a handwritten signature (ESIGN Act &amp; UETA).</p></div>');
+    document.getElementById('body').textContent = data.document.body;
+    initPad();
+  }
+
+  function initPad() {
+    const canvas = document.getElementById('pad');
+    const hint = document.getElementById('hint');
+    const ctx = canvas.getContext('2d');
+    function resize() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.scale(dpr, dpr);
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#0C1C36';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+    }
+    resize();
+    window.addEventListener('resize', resize);
+    let drawing = false, hasInk = false;
+    function pos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const t = e.touches ? e.touches[0] : e;
+      return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+    }
+    function start(e) { e.preventDefault(); drawing = true; hint.style.display = 'none'; hasInk = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+    function move(e) { if (!drawing) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }
+    function end() { drawing = false; }
+    canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', move); canvas.addEventListener('mouseup', end); canvas.addEventListener('mouseleave', end);
+    canvas.addEventListener('touchstart', start, { passive: false }); canvas.addEventListener('touchmove', move, { passive: false }); canvas.addEventListener('touchend', end);
+    document.getElementById('clear').onclick = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      hint.style.display = 'flex'; hasInk = false;
+    };
+    document.getElementById('submit').onclick = async () => {
+      const name = document.getElementById('name').value.trim();
+      if (!name) { alert('Please type your full legal name.'); return; }
+      if (!hasInk) { alert('Please draw your signature.'); return; }
+      const sigData = canvas.toDataURL('image/png');
+      const btn = document.getElementById('submit');
+      btn.disabled = true; btn.textContent = 'Submitting…';
+      try {
+        const res = await fetch('/api/public/sign/' + token, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signed_by_name: name, signature_data: sigData }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          alert('Failed: ' + (data.error || 'Unknown'));
+          btn.disabled = false; btn.textContent = 'Sign & Submit';
+          return;
+        }
+        h('<div class="card success"><h2>✓ Signed</h2><p>Thank you, <strong>' + name + '</strong>.</p><p>Your signature has been recorded and Tez Law has been notified. A copy has been saved on file.</p><p style="margin-top:16px;font-size:13px;color:#155724">You may close this window.</p></div>');
+      } catch (err) {
+        alert('Network error: ' + err.message);
+        btn.disabled = false; btn.textContent = 'Sign & Submit';
+      }
+    };
+  }
+})();
+</script>
+</body>
+</html>`);
+});
+
 // ── Triage Dashboard ─────────────────────────────────────
 // ── Personal Injury Case Management ───────────────────────
 // CA-specific PI workflow: intake → treatment → demand → settlement → disbursement
