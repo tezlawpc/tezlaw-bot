@@ -2425,6 +2425,70 @@ function registerAppApi(app) {
 
   const MAX_DOC_BYTES = 8 * 1024 * 1024;
 
+  // CLIENT: Delete their own account (Apple App Store compliance — required
+  // for apps with account creation). This wipes the client_accounts row,
+  // push tokens, OTP records, and messages. It does NOT delete case data
+  // (documents, invoices, notes, tasks) — the firm retains those for legal
+  // records. The client is signed out immediately after.
+  app.post("/api/client/delete-account", requireBearer, requireClient, async (req, res) => {
+    try {
+      const uid = req.user.uid;
+      // Fetch account info for the response + audit log
+      const acctR = await db.query(
+        `SELECT id, phone, full_name, email, client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [uid]
+      );
+      const acct = acctR.rows[0];
+      if (!acct) {
+        return res.status(404).json({ ok: false, error: "Account not found" });
+      }
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        // Delete push tokens for this user
+        await client.query(
+          `DELETE FROM push_tokens WHERE user_kind = 'client' AND user_ref = $1`,
+          [String(uid)]
+        );
+        // Delete OTP records for this phone
+        await client.query(`DELETE FROM client_otp WHERE phone = $1`, [acct.phone]);
+        // Delete their chat messages
+        await client.query(
+          `DELETE FROM client_messages WHERE from_user_id = $1 OR to_user_id = $1`,
+          [uid]
+        ).catch(() => {});
+        // Delete the account itself
+        await client.query(`DELETE FROM client_accounts WHERE id = $1`, [uid]);
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+      // Notify firm (optional — for audit trail)
+      try {
+        const { sendToPrivate } = require("./telegram-jj-private");
+        await sendToPrivate(
+          "⚠️ *Client account deleted*\n" +
+          "Name: " + (acct.full_name || '(no name)') + "\n" +
+          "Phone: " + acct.phone + "\n" +
+          "Client key: " + (acct.client_key || 'none') + "\n" +
+          "Deleted at: " + new Date().toISOString() + "\n\n" +
+          "Case documents/invoices/notes retained per legal record-keeping requirements."
+        );
+      } catch {}
+      res.json({
+        ok: true,
+        deleted: true,
+        message: "Your Zara account has been deleted. Case records retained by the firm for legal purposes.",
+      });
+    } catch (err) {
+      console.error("[delete-account]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // CLIENT: upload a document to their own case
   app.post("/api/client/documents", requireBearer, requireClient, async (req, res) => {
     try {
