@@ -5449,15 +5449,16 @@ ${groups.map(g => `
 
   app.get("/api/staff/admin/dropbox/mappings", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
     try {
-      // Get all clients from tasks (canonical, excluding aliases)
+      // Get all clients from tasks. Fetch phone/email from client_accounts if linked.
       const clientsR = await db.query(
-        `SELECT DISTINCT t.client_key, t.client_name, t.client_phone, t.client_email,
-                t.matter_type, t.a_number,
+        `SELECT DISTINCT t.client_key, t.client_name, t.matter_type, t.a_number,
+                (SELECT phone FROM client_accounts ca WHERE ca.client_key = t.client_key LIMIT 1) AS client_phone,
+                (SELECT email FROM client_accounts ca WHERE ca.client_key = t.client_key LIMIT 1) AS client_email,
                 MAX(t.created_at) AS last_activity
          FROM tasks t
          WHERE t.client_key IS NOT NULL
            AND t.client_key NOT IN (SELECT alias_key FROM client_aliases)
-         GROUP BY t.client_key, t.client_name, t.client_phone, t.client_email, t.matter_type, t.a_number
+         GROUP BY t.client_key, t.client_name, t.matter_type, t.a_number
          ORDER BY t.client_name`
       );
 
