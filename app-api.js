@@ -5449,8 +5449,16 @@ ${groups.map(g => `
 
   app.get("/api/staff/admin/dropbox/mappings", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
     try {
-      // Get all clients from tasks. Fetch phone/email from client_accounts if linked.
-      const clientsR = await db.query(
+      // Get ALL Dropbox mappings (this is the primary source — 1,000s of client folders)
+      const mappingsR = await db.query(
+        `SELECT client_key, dropbox_path, a_number AS mapping_a_number, client_name AS mapping_name,
+                resolved_at, resolved_by
+         FROM client_dropbox_mapping
+         ORDER BY client_name`
+      ).catch(() => ({ rows: [] }));
+
+      // Also get all task-based clients (may or may not have mappings)
+      const taskClientsR = await db.query(
         `SELECT DISTINCT t.client_key, t.client_name, t.matter_type, t.a_number,
                 (SELECT phone FROM client_accounts ca WHERE ca.client_key = t.client_key LIMIT 1) AS client_phone,
                 (SELECT email FROM client_accounts ca WHERE ca.client_key = t.client_key LIMIT 1) AS client_email,
@@ -5460,71 +5468,85 @@ ${groups.map(g => `
            AND t.client_key NOT IN (SELECT alias_key FROM client_aliases)
          GROUP BY t.client_key, t.client_name, t.matter_type, t.a_number
          ORDER BY t.client_name`
-      );
+      ).catch(() => ({ rows: [] }));
 
-      // Get all current dropbox mappings
-      const mappingsR = await db.query(
-        `SELECT client_key, dropbox_path, a_number AS mapping_a_number, client_name AS mapping_name, resolved_at, resolved_by
-         FROM client_dropbox_mapping`
-      ).catch(() => ({ rows: [] }));  // Handle if table doesn't exist yet
+      const taskByKey = new Map();
+      for (const t of taskClientsR.rows) taskByKey.set(t.client_key, t);
 
-      const mappingByKey = new Map();
-      for (const m of mappingsR.rows) {
-        mappingByKey.set(m.client_key, m);
-      }
-
-      // Also find orphan mappings (dropbox mapping exists but no matching client)
-      const clientKeys = new Set(clientsR.rows.map(c => c.client_key));
-      const orphanMappings = mappingsR.rows.filter(m => !clientKeys.has(m.client_key));
-
-      const enriched = clientsR.rows.map(c => {
-        const mapping = mappingByKey.get(c.client_key);
-        // Also try to find mapping by a_number match
-        const byANumber = c.a_number && !mapping
-          ? mappingsR.rows.find(m => m.mapping_a_number && m.mapping_a_number.replace(/\D/g, '') === (c.a_number || '').replace(/\D/g, ''))
-          : null;
-        const effectivePath = mapping?.dropbox_path || byANumber?.dropbox_path || null;
-
-        // Detect wrong-match: client name has NO word overlap with folder path
-        // Also check A-number mismatch if both are present
-        let isWrongMatch = false;
-        let wrongReason = null;
-        if (effectivePath && c.client_name) {
-          // Extract words from client name (length >= 3 to skip initials/short particles)
-          const nameWords = String(c.client_name)
-            .toLowerCase()
-            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-            .split(/[^a-z]+/)
-            .filter(w => w.length >= 3);
-          const pathLower = effectivePath.toLowerCase()
+      // Detect wrong-match logic (used both for mapping-based and task-based clients)
+      function detectWrongMatch(clientName, dropboxPath, mappingANumber, clientANumber) {
+        if (!dropboxPath) return { isWrong: false, reason: null };
+        let reason = null;
+        // Name overlap check
+        if (clientName) {
+          const nameWords = String(clientName)
+            .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            .split(/[^a-z]+/).filter(w => w.length >= 3);
+          const pathLower = dropboxPath.toLowerCase()
             .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-          // If NONE of the client name words appear in the path, it's likely wrong
-          const anyOverlap = nameWords.some(w => pathLower.includes(w));
-          if (nameWords.length > 0 && !anyOverlap) {
-            isWrongMatch = true;
-            wrongReason = 'name-vs-folder mismatch';
-          }
-          // Check A-number mismatch if both present in mapping
-          if (mapping?.mapping_a_number && c.a_number) {
-            const mA = mapping.mapping_a_number.replace(/\D/g, '');
-            const cA = c.a_number.replace(/\D/g, '');
-            if (mA && cA && mA !== cA) {
-              isWrongMatch = true;
-              wrongReason = wrongReason ? wrongReason + ' + A# mismatch' : 'A# mismatch';
-            }
+          if (nameWords.length > 0 && !nameWords.some(w => pathLower.includes(w))) {
+            reason = 'name-vs-folder mismatch';
           }
         }
+        // A# mismatch check
+        if (mappingANumber && clientANumber) {
+          const mA = mappingANumber.replace(/\D/g, '');
+          const cA = clientANumber.replace(/\D/g, '');
+          if (mA && cA && mA !== cA) {
+            reason = reason ? reason + ' + A# mismatch' : 'A# mismatch';
+          }
+        }
+        return { isWrong: !!reason, reason };
+      }
 
-        return {
-          ...c,
-          dropbox_path: effectivePath,
-          mapping_resolved_at: mapping?.resolved_at || null,
-          mapping_resolved_by: mapping?.resolved_by || null,
+      // Build unified client list — start from mappings, enrich with task data
+      const enriched = [];
+      const seenKeys = new Set();
+
+      // First: process all Dropbox-mapped clients
+      for (const m of mappingsR.rows) {
+        seenKeys.add(m.client_key);
+        const task = taskByKey.get(m.client_key);
+        // Prefer task's client_name (more likely to be up-to-date), fall back to mapping
+        const clientName = task?.client_name || m.mapping_name;
+        const aNumber = task?.a_number || m.mapping_a_number;
+        const wm = detectWrongMatch(clientName, m.dropbox_path, m.mapping_a_number, task?.a_number);
+        enriched.push({
+          client_key: m.client_key,
+          client_name: clientName,
+          client_phone: task?.client_phone || null,
+          client_email: task?.client_email || null,
+          matter_type: task?.matter_type || null,
+          a_number: aNumber,
+          last_activity: task?.last_activity || m.resolved_at,
+          dropbox_path: m.dropbox_path,
+          mapping_resolved_at: m.resolved_at,
+          mapping_resolved_by: m.resolved_by,
+          matched_by_anumber: false,
+          status: wm.isWrong ? 'wrong_match' : 'linked',
+          wrong_reason: wm.reason,
+          source: 'dropbox_mapping',
+        });
+      }
+
+      // Then: add task clients that DON'T have a mapping yet
+      for (const t of taskClientsR.rows) {
+        if (seenKeys.has(t.client_key)) continue;
+        // Try to find a mapping by A-number
+        const byANumber = t.a_number
+          ? mappingsR.rows.find(m => m.mapping_a_number && m.mapping_a_number.replace(/\D/g, '') === (t.a_number || '').replace(/\D/g, ''))
+          : null;
+        enriched.push({
+          ...t,
+          dropbox_path: byANumber?.dropbox_path || null,
+          mapping_resolved_at: null,
+          mapping_resolved_by: null,
           matched_by_anumber: !!byANumber,
-          status: isWrongMatch ? 'wrong_match' : (mapping ? 'linked' : (byANumber ? 'linked_by_anumber' : 'unlinked')),
-          wrong_reason: wrongReason,
-        };
-      });
+          status: byANumber ? 'linked_by_anumber' : 'unlinked',
+          wrong_reason: null,
+          source: 'task',
+        });
+      }
 
       const stats = {
         total_clients: enriched.length,
@@ -5532,26 +5554,37 @@ ${groups.map(g => `
         linked_by_anumber: enriched.filter(c => c.status === 'linked_by_anumber').length,
         unlinked: enriched.filter(c => c.status === 'unlinked').length,
         wrong_match: enriched.filter(c => c.status === 'wrong_match').length,
-        orphan_mappings: orphanMappings.length,
+        // "orphan_mappings" no longer meaningful now that we're mapping-first
+        orphan_mappings: 0,
       };
 
       res.json({
         ok: true,
         stats,
         clients: enriched,
-        orphan_mappings: orphanMappings,
+        orphan_mappings: [],
       });
-    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+    } catch (err) {
+      console.error("[dropbox mappings]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
   });
 
   app.get("/api/staff/admin/dropbox/suggest", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
     try {
       const clientKey = String(req.query.client_key || "").trim();
       if (!clientKey) return res.status(400).json({ ok: false, error: "client_key required" });
-      const c = await db.query(
+      // Try tasks first, fall back to client_dropbox_mapping
+      let c = await db.query(
         `SELECT client_name, a_number FROM tasks WHERE client_key = $1 LIMIT 1`,
         [clientKey]
       );
+      if (!c.rows[0]) {
+        c = await db.query(
+          `SELECT client_name, a_number FROM client_dropbox_mapping WHERE client_key = $1 LIMIT 1`,
+          [clientKey]
+        );
+      }
       if (!c.rows[0]) return res.status(404).json({ ok: false, error: "client not found" });
       const dbx = require("./dropbox-integration");
       const suggestions = await dbx.suggestClientFolders({
