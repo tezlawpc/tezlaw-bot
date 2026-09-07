@@ -395,6 +395,137 @@ async function initClientAuthTables() {
   await db.query(`CREATE INDEX IF NOT EXISTS idx_trust_txn_client ON trust_transactions (client_key)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_trust_txn_date ON trust_transactions (transaction_date DESC)`);
 
+  // ─── Matter Templates / Case Workflows ─────────────────────
+  // A predefined workflow attached to a matter type. When JJ (or staff)
+  // starts a new case, they pick a template and it creates all standard
+  // tasks with proper due dates, priorities, and assignees.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS matter_templates (
+      id            SERIAL PRIMARY KEY,
+      matter_type   TEXT NOT NULL,
+      name          TEXT NOT NULL,
+      description   TEXT,
+      active        BOOLEAN DEFAULT TRUE,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS matter_template_tasks (
+      id                       SERIAL PRIMARY KEY,
+      template_id              INTEGER NOT NULL REFERENCES matter_templates(id) ON DELETE CASCADE,
+      sort_order               INTEGER DEFAULT 0,
+      description              TEXT NOT NULL,
+      priority                 TEXT DEFAULT 'normal',
+      due_offset_days          INTEGER,
+      assign_via_matter_default BOOLEAN DEFAULT TRUE,
+      assigned_to              TEXT,
+      category                 TEXT,
+      notes                    TEXT
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_mtt_template ON matter_template_tasks (template_id)`);
+
+  // Seed a few common workflows if empty
+  const tplCount = await db.query(`SELECT COUNT(*)::int AS n FROM matter_templates`);
+  if (tplCount.rows[0].n === 0) {
+    const seed = async (matter, name, description, tasks) => {
+      const t = await db.query(
+        `INSERT INTO matter_templates (matter_type, name, description) VALUES ($1, $2, $3) RETURNING id`,
+        [matter, name, description]
+      );
+      const tid = t.rows[0].id;
+      for (let i = 0; i < tasks.length; i++) {
+        const task = tasks[i];
+        await db.query(
+          `INSERT INTO matter_template_tasks
+             (template_id, sort_order, description, priority, due_offset_days, category, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [tid, i, task.desc, task.priority || 'normal',
+           task.offset ?? null, task.category || null, task.notes || null]
+        );
+      }
+    };
+
+    // Family-based immigration
+    await seed('immigration', 'I-130 Family Petition',
+      'Standard workflow for I-130 petition for immediate relative or preference category.',
+      [
+        { desc: 'Initial client intake — gather bio data, relationship evidence', offset: 3, priority: 'high', category: 'Intake' },
+        { desc: 'Draft I-130 form + G-28', offset: 10, category: 'Preparation' },
+        { desc: 'Client review + signatures', offset: 14, category: 'Preparation' },
+        { desc: 'Compile evidence package (birth certs, marriage cert, photos, etc.)', offset: 21, category: 'Evidence' },
+        { desc: 'File I-130 with USCIS + track receipt number', offset: 28, priority: 'high', category: 'Filing' },
+        { desc: 'Follow up on receipt notice (~2-4 weeks after filing)', offset: 60, category: 'Follow-up' },
+        { desc: 'Monitor case status monthly', offset: 90, category: 'Follow-up' },
+        { desc: 'Prepare for RFE if issued', priority: 'high', category: 'Contingency', notes: 'Only activate if RFE arrives' },
+      ]
+    );
+
+    // I-485 AOS
+    await seed('immigration', 'I-485 Adjustment of Status',
+      'Standard AOS workflow — often filed concurrently with I-130 or I-140.',
+      [
+        { desc: 'Confirm eligibility (visa bulletin current, no bars)', offset: 3, priority: 'high', category: 'Intake' },
+        { desc: 'Gather biographic + medical + police clearance', offset: 14, category: 'Evidence' },
+        { desc: 'Draft I-485, I-864 Affidavit of Support, I-765 (EAD), I-131 (AP)', offset: 21, category: 'Preparation' },
+        { desc: 'Client review + signatures', offset: 28, category: 'Preparation' },
+        { desc: 'File AOS packet with USCIS', offset: 35, priority: 'high', category: 'Filing' },
+        { desc: 'Track biometrics appointment (~4-8 wks)', offset: 60, category: 'Follow-up' },
+        { desc: 'Prep interview binder + client interview prep', offset: 180, priority: 'high', category: 'Interview' },
+        { desc: 'Attend interview with client', offset: 240, priority: 'urgent', category: 'Interview' },
+      ]
+    );
+
+    // N-400 Naturalization
+    await seed('immigration', 'N-400 Naturalization',
+      'Standard N-400 workflow through the oath ceremony.',
+      [
+        { desc: 'Confirm eligibility (5 yrs LPR, physical presence, good moral character)', offset: 3, priority: 'high', category: 'Intake' },
+        { desc: 'Prepare N-400 application', offset: 14, category: 'Preparation' },
+        { desc: 'Client civics + English study materials', offset: 21, category: 'Preparation' },
+        { desc: 'File N-400 + track receipt', offset: 28, priority: 'high', category: 'Filing' },
+        { desc: 'Biometrics appointment (~4 wks)', offset: 60, category: 'Follow-up' },
+        { desc: 'Interview prep with client', offset: 120, priority: 'high', category: 'Interview' },
+        { desc: 'Naturalization interview', offset: 150, priority: 'urgent', category: 'Interview' },
+        { desc: 'Oath ceremony coordination', offset: 180, category: 'Ceremony' },
+      ]
+    );
+
+    // Personal Injury
+    await seed('pi', 'Personal Injury — Auto Accident',
+      'Pre-litigation workflow through demand.',
+      [
+        { desc: 'Client intake — accident details, injuries, insurance info', offset: 1, priority: 'urgent', category: 'Intake' },
+        { desc: 'Send LOR (Letter of Representation) to insurance carriers', offset: 3, priority: 'high', category: 'Notice' },
+        { desc: 'Request police report, obtain medical records', offset: 14, category: 'Evidence' },
+        { desc: 'Client medical treatment tracking (monthly)', offset: 30, category: 'Medical' },
+        { desc: 'Photo documentation of injuries + vehicle damage', offset: 30, category: 'Evidence' },
+        { desc: 'Follow up on medical records requests', offset: 60, category: 'Evidence' },
+        { desc: 'Confirm max medical improvement (MMI) reached', offset: 180, category: 'Medical' },
+        { desc: 'Compile damages summary + medical costs', offset: 200, category: 'Damages' },
+        { desc: 'Draft + send demand letter', offset: 210, priority: 'high', category: 'Demand' },
+        { desc: 'Follow up on demand (30 days)', offset: 240, category: 'Follow-up' },
+        { desc: 'Evaluate settlement vs. filing suit', offset: 270, priority: 'high', category: 'Decision' },
+      ]
+    );
+
+    // Business formation
+    await seed('business', 'California LLC Formation',
+      'Standard workflow for forming a new California LLC.',
+      [
+        { desc: 'Client intake — business name, member info, purpose', offset: 1, priority: 'high', category: 'Intake' },
+        { desc: 'Name availability search + reservation', offset: 3, category: 'Preparation' },
+        { desc: 'Draft Articles of Organization', offset: 7, category: 'Preparation' },
+        { desc: 'File Articles with CA Secretary of State', offset: 10, priority: 'high', category: 'Filing' },
+        { desc: 'Obtain EIN from IRS', offset: 14, category: 'Filing' },
+        { desc: 'Draft Operating Agreement', offset: 21, category: 'Preparation' },
+        { desc: 'Client execution of Operating Agreement', offset: 28, category: 'Execution' },
+        { desc: 'File Statement of Information (within 90 days)', offset: 60, priority: 'high', category: 'Filing' },
+        { desc: 'Reminder: annual $800 franchise tax due', offset: 365, category: 'Compliance', notes: 'Recurring annual obligation' },
+      ]
+    );
+  }
+
   // ── Attorney Suite ─────────────────────────────────────────
   // Document templates (retainer, engagement letter, common motions)
   await db.query(`
@@ -4450,6 +4581,112 @@ function registerAppApi(app) {
           ...row,
           balance_display: `$${((row.running_balance_cents || 0) / 100).toFixed(2)}`,
         })),
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  MATTER TEMPLATES / CASE WORKFLOWS
+  //  ─────────────────────────────────────────────────────
+  //  Predefined task lists for common case types. When JJ or
+  //  staff starts a new matter, they pick a template and it
+  //  creates all standard tasks with proper due dates and
+  //  assignments (via matter_defaults or specified per-task).
+  // ═══════════════════════════════════════════════════════
+
+  // List all active templates (optionally filtered by matter_type)
+  app.get("/api/staff/matter-templates", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const params = [];
+      let where = "active = true";
+      if (req.query.matter_type) {
+        params.push(String(req.query.matter_type));
+        where += ` AND matter_type = $${params.length}`;
+      }
+      const r = await db.query(
+        `SELECT id, matter_type, name, description,
+                (SELECT COUNT(*)::int FROM matter_template_tasks WHERE template_id = matter_templates.id) AS task_count
+         FROM matter_templates WHERE ${where}
+         ORDER BY matter_type, name`,
+        params
+      );
+      res.json({ ok: true, templates: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Get a template's full task list
+  app.get("/api/staff/matter-templates/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const t = await db.query(`SELECT * FROM matter_templates WHERE id = $1`, [id]);
+      if (!t.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      const tasks = await db.query(
+        `SELECT * FROM matter_template_tasks WHERE template_id = $1 ORDER BY sort_order ASC, id ASC`,
+        [id]
+      );
+      res.json({ ok: true, template: t.rows[0], tasks: tasks.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Instantiate a template for a client — creates all tasks
+  app.post("/api/staff/matter-templates/:id/instantiate", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const {
+        client_key, client_name, client_phone, client_email,
+        matter_type, start_date, a_number
+      } = req.body || {};
+      if (!client_name) return res.status(400).json({ ok: false, error: "client_name required" });
+
+      const t = await db.query(`SELECT * FROM matter_templates WHERE id = $1`, [id]);
+      if (!t.rows[0]) return res.status(404).json({ ok: false, error: "template not found" });
+      const template = t.rows[0];
+      const effectiveMatter = matter_type || template.matter_type;
+      const start = start_date ? new Date(start_date) : new Date();
+      const effectiveKey = client_key || `client-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+
+      // Load matter default assignee (if any)
+      const defR = await db.query(`SELECT assigned_to FROM matter_defaults WHERE matter_type = $1`, [effectiveMatter]);
+      const defaultAssignee = defR.rows[0]?.assigned_to || null;
+
+      // Load all template tasks
+      const taskR = await db.query(
+        `SELECT * FROM matter_template_tasks WHERE template_id = $1 ORDER BY sort_order ASC, id ASC`,
+        [id]
+      );
+
+      const createdTasks = [];
+      for (const tt of taskR.rows) {
+        let dueDate = null;
+        if (tt.due_offset_days != null) {
+          const d = new Date(start);
+          d.setDate(d.getDate() + tt.due_offset_days);
+          dueDate = d.toISOString().substring(0, 10);
+        }
+        const assignee = tt.assigned_to || (tt.assign_via_matter_default ? defaultAssignee : null);
+        const r = await db.query(
+          `INSERT INTO tasks
+             (description, priority, matter_type, client_key, client_name, client_phone, client_email,
+              a_number, due_date, assigned_to, created_by, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open')
+           RETURNING id, description, due_date, assigned_to`,
+          [tt.description, tt.priority || 'normal', effectiveMatter,
+           effectiveKey, client_name, client_phone || null, client_email || null,
+           a_number || null, dueDate, assignee, req.user.uid]
+        );
+        createdTasks.push(r.rows[0]);
+      }
+
+      res.json({
+        ok: true,
+        client_key: effectiveKey,
+        client_name,
+        matter_type: effectiveMatter,
+        template_used: template.name,
+        tasks_created: createdTasks.length,
+        tasks: createdTasks,
       });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
