@@ -5652,6 +5652,36 @@ ${groups.map(g => `
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // Clear ALL fuzzy-matched (auto-created) mappings — leaves only bulk-import
+  // mappings intact. Use when auto-matching went wrong across the board and
+  // you want to start clean and re-link manually.
+  app.post("/api/staff/admin/dropbox/clear-all-auto", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const countR = await db.query(
+        `SELECT COUNT(*)::int AS n FROM client_dropbox_mapping WHERE resolved_by = 'auto'`
+      );
+      const r = await db.query(
+        `DELETE FROM client_dropbox_mapping WHERE resolved_by = 'auto' RETURNING client_key, dropbox_path`
+      );
+      res.json({
+        ok: true,
+        deleted: r.rows.length,
+        remaining_bulk_import: (await db.query(`SELECT COUNT(*)::int AS n FROM client_dropbox_mapping`)).rows[0].n,
+        cleared_keys: r.rows.map(x => x.client_key),
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Return the count of auto-created mappings so the UI can show it
+  app.get("/api/staff/admin/dropbox/auto-mapping-count", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT COUNT(*)::int AS n FROM client_dropbox_mapping WHERE resolved_by = 'auto'`
+      );
+      res.json({ ok: true, auto_count: r.rows[0].n });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
   // ═══════════════════════════════════════════════════════
   //  CONSULTANT PORTAL API
   //  (naturally scoped to their own submissions + assigned clients)
