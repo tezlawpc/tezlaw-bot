@@ -284,6 +284,24 @@ async function initClientAuthTables() {
       );
     }
   }
+
+  // Client-uploaded documents
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS client_documents (
+      id            SERIAL PRIMARY KEY,
+      client_key    TEXT NOT NULL,
+      client_id     INTEGER,
+      filename      TEXT NOT NULL,
+      mime_type     TEXT,
+      size_bytes    INTEGER,
+      category      TEXT DEFAULT 'other',
+      note          TEXT,
+      content       BYTEA NOT NULL,
+      uploaded_by   TEXT DEFAULT 'client',
+      uploaded_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_documents_key ON client_documents (client_key)`);
 }
 
 // In-memory cache of matter defaults. Reloaded on any admin update.
@@ -1619,6 +1637,128 @@ function registerAppApi(app) {
       if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
       await db.query(`DELETE FROM quick_reply_templates WHERE id = $1`, [id]);
       res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  CLIENT DOCUMENTS
+  //  ─────────────────────────────────────────────────────
+  //  Client can upload photos/PDFs of ID, contracts, notices, etc.
+  //  Firm can list & download for a given client key.
+  //  Storage: PostgreSQL BYTEA (OK for MVP; migrate to S3/B2 later if volume grows).
+  //  Max size enforced at 8 MB per file to keep DB size manageable.
+  // ═══════════════════════════════════════════════════════
+
+  const MAX_DOC_BYTES = 8 * 1024 * 1024;
+
+  // CLIENT: upload a document to their own case
+  app.post("/api/client/documents", requireBearer, requireClient, async (req, res) => {
+    try {
+      const { filename, mime_type, category, note, content_base64 } = req.body || {};
+      if (!filename || !content_base64) {
+        return res.status(400).json({ ok: false, error: "filename and content_base64 required" });
+      }
+      // Look up client_key from their account
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const clientKey = acctR.rows[0]?.client_key;
+      if (!clientKey) {
+        return res.status(400).json({ ok: false, error: "Your account isn't linked to a case yet. Please contact your legal team." });
+      }
+      // Decode + validate size
+      const buf = Buffer.from(String(content_base64), 'base64');
+      if (buf.length === 0) return res.status(400).json({ ok: false, error: "empty file" });
+      if (buf.length > MAX_DOC_BYTES) {
+        return res.status(413).json({ ok: false, error: `File too large. Max ${Math.round(MAX_DOC_BYTES / 1024 / 1024)} MB.` });
+      }
+      const r = await db.query(
+        `INSERT INTO client_documents
+           (client_key, client_id, filename, mime_type, size_bytes, category, note, content, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'client')
+         RETURNING id, filename, mime_type, size_bytes, category, note, uploaded_at`,
+        [clientKey, req.user.uid, String(filename).substring(0, 200),
+         String(mime_type || 'application/octet-stream').substring(0, 100),
+         buf.length, String(category || 'other').substring(0, 50),
+         note ? String(note).substring(0, 500) : null,
+         buf]
+      );
+      // Notify firm admins that a new client document arrived
+      try {
+        const push = require("./push-notifications");
+        await push.sendToAdmins({
+          title: `📄 New document from client`,
+          body: `${filename} · ${Math.round(buf.length / 1024)} KB`,
+          data: { type: 'client_document', client_key: clientKey },
+        });
+      } catch {}
+      res.json({ ok: true, document: r.rows[0] });
+    } catch (err) {
+      console.error("[client doc upload]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // CLIENT: list their own uploaded documents
+  app.get("/api/client/documents", requireBearer, requireClient, async (req, res) => {
+    try {
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const clientKey = acctR.rows[0]?.client_key;
+      if (!clientKey) return res.json({ ok: true, documents: [] });
+      const r = await db.query(
+        `SELECT id, filename, mime_type, size_bytes, category, note, uploaded_by, uploaded_at
+         FROM client_documents WHERE client_key = $1 ORDER BY uploaded_at DESC`,
+        [clientKey]
+      );
+      res.json({ ok: true, documents: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // FIRM: list documents for a specific client
+  app.get("/api/staff/clients/:key/documents", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "You don't have access to this client" });
+      const r = await db.query(
+        `SELECT id, filename, mime_type, size_bytes, category, note, uploaded_by, uploaded_at
+         FROM client_documents WHERE client_key = $1 ORDER BY uploaded_at DESC`,
+        [req.params.key]
+      );
+      res.json({ ok: true, documents: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Download a specific document (both client + firm — auth handled by joining on client_key)
+  app.get("/api/documents/:id", requireBearer, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(
+        `SELECT filename, mime_type, content, client_key FROM client_documents WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      const doc = r.rows[0];
+      // Auth: client can only download docs from their own case; firm can if they have client access
+      if (req.user.k === 'client') {
+        const acctR = await db.query(
+          `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+          [req.user.uid]
+        );
+        if (acctR.rows[0]?.client_key !== doc.client_key) {
+          return res.status(403).json({ ok: false, error: "not your document" });
+        }
+      } else {
+        const ok = await canUserAccessClient(req.user, doc.client_key);
+        if (!ok) return res.status(403).json({ ok: false, error: "no access to this client" });
+      }
+      res.setHeader('Content-Type', doc.mime_type || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${doc.filename.replace(/"/g, '')}"`);
+      res.send(doc.content);
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
