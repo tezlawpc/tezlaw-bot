@@ -425,6 +425,44 @@ async function initClientAuthTables() {
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_mtt_template ON matter_template_tasks (template_id)`);
 
+  // ─── Branches / Office Locations ─────────────────────────────
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS branches (
+      id           SERIAL PRIMARY KEY,
+      code         TEXT UNIQUE NOT NULL,
+      name         TEXT NOT NULL,
+      address      TEXT,
+      phone        TEXT,
+      active       BOOLEAN DEFAULT TRUE,
+      created_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  // Add branch_id to admin_users if it doesn't exist
+  await db.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_name = 'admin_users' AND column_name = 'branch_id') THEN
+        ALTER TABLE admin_users ADD COLUMN branch_id INTEGER;
+      END IF;
+    END $$;
+  `);
+  // Seed 4 branches if empty
+  const branchCount = await db.query(`SELECT COUNT(*)::int AS n FROM branches`);
+  if (branchCount.rows[0].n === 0) {
+    const branches = [
+      { code: 'WC', name: 'West Covina', address: '4141 S Nogales St C102, West Covina, CA 91792', phone: '626-678-8677' },
+      { code: 'RH', name: 'Rowland Heights', address: 'Rowland Heights, CA', phone: '626-678-8677' },
+      { code: 'NY', name: 'Flushing NY', address: 'Flushing, Queens, NY', phone: '626-678-8677' },
+      { code: 'GI', name: 'Global Ican', address: 'Nationwide / Virtual', phone: '626-678-8677' },
+    ];
+    for (const b of branches) {
+      await db.query(
+        `INSERT INTO branches (code, name, address, phone) VALUES ($1, $2, $3, $4)`,
+        [b.code, b.name, b.address, b.phone]
+      );
+    }
+  }
+
   // Seed a few common workflows if empty
   const mtplCount = await db.query(`SELECT COUNT(*)::int AS n FROM matter_templates`);
   if (mtplCount.rows[0].n === 0) {
@@ -4688,6 +4726,245 @@ function registerAppApi(app) {
         tasks_created: createdTasks.length,
         tasks: createdTasks,
       });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  BRANCHES (offices)
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/staff/branches", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const r = await db.query(`SELECT id, code, name, address, phone, active FROM branches WHERE active = true ORDER BY name`);
+      res.json({ ok: true, branches: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/admin/users/:id/branch", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const branchId = req.body?.branch_id ? parseInt(req.body.branch_id, 10) : null;
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(
+        `UPDATE admin_users SET branch_id = $1 WHERE id = $2 RETURNING id, username, full_name, branch_id`,
+        [branchId, id]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "user not found" });
+      res.json({ ok: true, user: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  REPORTS — RECEIVABLES
+  //  ─────────────────────────────────────────────────────
+  //  Aggregated outstanding invoices, groupable by:
+  //  - branch: creator's branch (via admin_users.branch_id)
+  //  - attorney: creator's user id (if role attorney or admin)
+  //  - consultant: the active consultant assigned to that client
+  //  - matter_type: derived from the matching task
+  //
+  //  Filterable by date range (invoice created_at). Available to
+  //  admin + manager.
+  // ═══════════════════════════════════════════════════════
+
+  async function fetchReceivablesData(fromStr, toStr) {
+    // Base query: all outstanding invoices in the date range with joined metadata
+    const params = [];
+    let where = "i.status = 'sent'";
+    if (fromStr) { params.push(fromStr); where += ` AND i.created_at >= $${params.length}::date`; }
+    if (toStr)   { params.push(toStr);   where += ` AND i.created_at <= $${params.length}::date + INTERVAL '1 day'`; }
+    const r = await db.query(
+      `SELECT
+         i.id, i.client_key, i.description, i.amount_cents, i.due_date, i.created_at,
+         i.created_by,
+         a.full_name       AS creator_name,
+         a.role            AS creator_role,
+         a.branch_id       AS branch_id,
+         b.name            AS branch_name,
+         (SELECT client_name FROM tasks t WHERE t.client_key = i.client_key LIMIT 1)  AS client_name,
+         (SELECT matter_type FROM tasks t WHERE t.client_key = i.client_key LIMIT 1) AS matter_type,
+         (SELECT cc.consultant_id FROM client_consultants cc
+          WHERE cc.client_key = i.client_key AND cc.removed_at IS NULL
+          ORDER BY cc.assigned_at DESC LIMIT 1)                                       AS consultant_id,
+         (SELECT ac.full_name FROM client_consultants cc
+          LEFT JOIN admin_users ac ON ac.id = cc.consultant_id
+          WHERE cc.client_key = i.client_key AND cc.removed_at IS NULL
+          ORDER BY cc.assigned_at DESC LIMIT 1)                                       AS consultant_name
+       FROM client_invoices i
+       LEFT JOIN admin_users a  ON a.id = i.created_by
+       LEFT JOIN branches    b  ON b.id = a.branch_id
+       WHERE ${where}
+       ORDER BY i.created_at DESC`,
+      params
+    );
+    return r.rows;
+  }
+
+  function groupReceivables(rows, groupBy) {
+    const groups = new Map();
+    for (const row of rows) {
+      let key, label;
+      if (groupBy === 'branch') {
+        key = row.branch_id ? `b${row.branch_id}` : 'unassigned';
+        label = row.branch_name || 'No branch assigned';
+      } else if (groupBy === 'attorney') {
+        key = row.created_by ? `a${row.created_by}` : 'unassigned';
+        label = row.creator_name || 'Unknown';
+      } else if (groupBy === 'consultant') {
+        key = row.consultant_id ? `c${row.consultant_id}` : 'none';
+        label = row.consultant_name || 'No consultant';
+      } else if (groupBy === 'matter_type') {
+        key = row.matter_type || 'other';
+        label = row.matter_type || 'Uncategorized';
+      } else {
+        key = 'total';
+        label = 'All Invoices';
+      }
+      if (!groups.has(key)) {
+        groups.set(key, { key, label, total_cents: 0, count: 0, invoices: [] });
+      }
+      const g = groups.get(key);
+      g.total_cents += row.amount_cents || 0;
+      g.count += 1;
+      g.invoices.push({
+        id: row.id,
+        client_key: row.client_key,
+        client_name: row.client_name,
+        description: row.description,
+        amount_cents: row.amount_cents,
+        amount_display: `$${((row.amount_cents || 0) / 100).toFixed(2)}`,
+        matter_type: row.matter_type,
+        created_at: row.created_at,
+        due_date: row.due_date,
+        days_outstanding: Math.floor((Date.now() - new Date(row.created_at).getTime()) / 86400e3),
+        creator: row.creator_name,
+        branch: row.branch_name,
+        consultant: row.consultant_name,
+      });
+    }
+    return Array.from(groups.values())
+      .map(g => ({ ...g, total_display: `$${(g.total_cents / 100).toFixed(2)}` }))
+      .sort((a, b) => b.total_cents - a.total_cents);
+  }
+
+  app.get("/api/staff/reports/receivables", requireBearer, requireFirmUser, requireManagerOrAdmin, async (req, res) => {
+    try {
+      const groupBy = String(req.query.group_by || 'branch');
+      const fromStr = req.query.from ? String(req.query.from) : null;
+      const toStr = req.query.to ? String(req.query.to) : null;
+      const rows = await fetchReceivablesData(fromStr, toStr);
+      const groups = groupReceivables(rows, groupBy);
+      const grandTotal = rows.reduce((s, r) => s + (r.amount_cents || 0), 0);
+      res.json({
+        ok: true,
+        report: 'receivables',
+        group_by: groupBy,
+        from: fromStr,
+        to: toStr,
+        grand_total_cents: grandTotal,
+        grand_total_display: `$${(grandTotal / 100).toFixed(2)}`,
+        invoice_count: rows.length,
+        groups,
+      });
+    } catch (err) {
+      console.error("[receivables]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  function csvEscapeReport(v) {
+    if (v === null || v === undefined) return "";
+    const s = String(v);
+    if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  }
+
+  app.get("/api/staff/reports/receivables.csv", requireBearer, requireFirmUser, requireManagerOrAdmin, async (req, res) => {
+    try {
+      const fromStr = req.query.from ? String(req.query.from) : null;
+      const toStr = req.query.to ? String(req.query.to) : null;
+      const rows = await fetchReceivablesData(fromStr, toStr);
+      const lines = ["invoice_id,client_key,client_name,description,amount_usd,matter_type,branch,attorney,consultant,created_at,due_date,days_outstanding"];
+      for (const r of rows) {
+        const days = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400e3);
+        lines.push([
+          r.id, r.client_key, r.client_name || '', r.description,
+          ((r.amount_cents || 0) / 100).toFixed(2),
+          r.matter_type || '', r.branch_name || '',
+          r.creator_name || '', r.consultant_name || '',
+          new Date(r.created_at).toISOString().substring(0, 10),
+          r.due_date || '', days,
+        ].map(csvEscapeReport).join(","));
+      }
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="tezlaw-receivables-${new Date().toISOString().substring(0, 10)}.csv"`);
+      res.send(lines.join("\r\n"));
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Printable HTML for PDF export via iOS Print → Save as PDF
+  app.get("/api/staff/reports/receivables/print", requireBearer, requireFirmUser, requireManagerOrAdmin, async (req, res) => {
+    try {
+      const groupBy = String(req.query.group_by || 'branch');
+      const fromStr = req.query.from ? String(req.query.from) : null;
+      const toStr = req.query.to ? String(req.query.to) : null;
+      const rows = await fetchReceivablesData(fromStr, toStr);
+      const groups = groupReceivables(rows, groupBy);
+      const grandTotal = rows.reduce((s, r) => s + (r.amount_cents || 0), 0);
+      const groupLabel = { branch: 'Branch', attorney: 'Attorney', consultant: 'Consultant', matter_type: 'Matter Type' }[groupBy] || groupBy;
+      const escape = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+      const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Tez Law — Receivables Report</title>
+<style>
+  @page { size: letter; margin: 0.5in; }
+  body { font: 12px -apple-system, BlinkMacSystemFont, sans-serif; color: #0C1C36; margin: 0; padding: 20px; }
+  h1 { font-size: 20px; margin: 0 0 4px; color: #0C1C36; }
+  .subtitle { color: #555; font-size: 12px; margin-bottom: 24px; }
+  .summary { background: #0C1C36; color: white; padding: 16px; border-radius: 6px; margin-bottom: 24px; }
+  .summary .total { font-size: 28px; font-weight: 700; color: #B79C62; }
+  .summary .label { text-transform: uppercase; font-size: 11px; letter-spacing: 2px; color: #B79C62; }
+  .summary .sub { font-size: 12px; opacity: 0.8; margin-top: 4px; }
+  h2 { font-size: 15px; margin: 20px 0 6px; padding: 6px 10px; background: #f0f0f0; border-left: 4px solid #B79C62; }
+  h2 .amt { float: right; color: #0C1C36; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #eee; font-size: 11px; }
+  th { background: #fafafa; font-weight: 700; color: #555; }
+  .amt-col { text-align: right; font-variant-numeric: tabular-nums; }
+  .days-hot { color: #c00; font-weight: 700; }
+  .footer { margin-top: 40px; padding-top: 10px; border-top: 1px solid #ddd; color: #888; font-size: 10px; text-align: center; }
+  @media print { body { padding: 0; } .print-btn { display: none; } }
+  .print-btn { position: fixed; top: 20px; right: 20px; background: #B79C62; color: #0C1C36; padding: 12px 20px; border-radius: 6px; text-decoration: none; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+</style></head><body>
+<a href="javascript:window.print()" class="print-btn">Print / Save as PDF</a>
+<h1>Tez Law P.C. — Receivables Report</h1>
+<div class="subtitle">Grouped by ${groupLabel}${fromStr ? ` · From ${fromStr}` : ''}${toStr ? ` · To ${toStr}` : ''} · Generated ${new Date().toLocaleString()}</div>
+<div class="summary">
+  <div class="label">Total Outstanding</div>
+  <div class="total">$${(grandTotal / 100).toFixed(2)}</div>
+  <div class="sub">${rows.length} unpaid invoice${rows.length === 1 ? '' : 's'} · Across ${groups.length} ${groupLabel.toLowerCase()}${groups.length === 1 ? '' : 's'}</div>
+</div>
+${groups.map(g => `
+  <h2>${escape(g.label)} <span class="amt">${g.total_display} (${g.count})</span></h2>
+  <table>
+    <thead><tr><th>Client</th><th>Description</th><th>Matter</th><th>Days</th><th class="amt-col">Amount</th></tr></thead>
+    <tbody>
+      ${g.invoices.map(inv => `
+        <tr>
+          <td>${escape(inv.client_name || '—')}</td>
+          <td>${escape(inv.description)}</td>
+          <td>${escape(inv.matter_type || '')}</td>
+          <td class="${inv.days_outstanding > 60 ? 'days-hot' : ''}">${inv.days_outstanding}d</td>
+          <td class="amt-col">${inv.amount_display}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+`).join('')}
+<div class="footer">Tez Law P.C. · 626-678-8677 · jj@tezlawfirm.com · This report is confidential and privileged.</div>
+</body></html>`;
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(html);
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
