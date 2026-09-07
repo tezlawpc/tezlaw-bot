@@ -368,6 +368,342 @@ async function initClientAuthTables() {
     )
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_client_notes_client ON client_notes (client_key)`);
+
+  // ── Attorney Suite ─────────────────────────────────────────
+  // Document templates (retainer, engagement letter, common motions)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS document_templates (
+      id            SERIAL PRIMARY KEY,
+      slug          TEXT UNIQUE NOT NULL,
+      name          TEXT NOT NULL,
+      category      TEXT DEFAULT 'general',
+      description   TEXT,
+      body          TEXT NOT NULL,
+      variables     JSONB DEFAULT '[]'::jsonb,
+      created_by    INTEGER,
+      created_at    TIMESTAMPTZ DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_document_templates_category ON document_templates (category)`);
+  // Seed with common templates if empty
+  const tCount = await db.query(`SELECT COUNT(*)::int AS n FROM document_templates`);
+  if (tCount.rows[0].n === 0) {
+    const seedTemplates = [
+      {
+        slug: 'retainer-immigration',
+        name: 'Retainer Agreement — Immigration',
+        category: 'retainer',
+        description: 'Standard retainer for immigration matters (petitions, applications, court)',
+        body: `RETAINER AGREEMENT
+
+This agreement is entered into on {today_date} between Tez Law P.C., a professional corporation ("Attorney"), and {client_name} ("Client").
+
+1. SCOPE OF REPRESENTATION
+Attorney agrees to represent Client in connection with the following matter:
+{matter_description}
+
+2. FEES
+Client agrees to pay Attorney a fixed fee of \${fee_amount} for the scope of work described above. Payment is due as follows: {payment_schedule}.
+
+Additional services outside the scope of this agreement (e.g., appeals, motions to reopen, or unrelated legal matters) will be billed separately at Attorney's standard hourly rate of \${hourly_rate}/hour.
+
+3. COSTS AND EXPENSES
+Client is responsible for all filing fees, biometrics fees, translation costs, medical exam fees, and other out-of-pocket costs. USCIS filing fees are payable directly to USCIS.
+
+4. CLIENT'S OBLIGATIONS
+Client agrees to:
+(a) Provide truthful and complete information;
+(b) Timely provide all requested documents;
+(c) Notify Attorney promptly of any change in address, employment, marital status, or immigration status;
+(d) Cooperate fully in the preparation and prosecution of the matter.
+
+5. NO GUARANTEE
+Attorney makes no guarantee regarding the outcome. USCIS, the Immigration Court, and other agencies make discretionary decisions that Attorney cannot control.
+
+6. TERMINATION
+Either party may terminate this agreement upon written notice. If Client terminates, earned fees are non-refundable.
+
+Managing Attorney: JJ Zhang, California Bar #326666
+Tez Law P.C. · 626-678-8677 · jj@tezlawfirm.com
+
+Client signature: ______________________________  Date: _______________
+
+Attorney signature: ______________________________  Date: _______________`,
+        variables: [
+          { key: 'client_name', label: 'Client Name', required: true },
+          { key: 'matter_description', label: 'Matter Description', required: true, multiline: true, placeholder: 'e.g. Preparation and filing of Form I-130 Petition for Alien Relative for beneficiary [name]' },
+          { key: 'fee_amount', label: 'Flat Fee (USD)', required: true, placeholder: '2500' },
+          { key: 'payment_schedule', label: 'Payment Schedule', required: true, placeholder: '50% upon signing, 50% upon filing' },
+          { key: 'hourly_rate', label: 'Hourly Rate (USD)', required: true, placeholder: '350' },
+        ],
+      },
+      {
+        slug: 'retainer-pi',
+        name: 'Retainer Agreement — Personal Injury',
+        category: 'retainer',
+        description: 'Contingency-fee retainer for personal injury matters',
+        body: `PERSONAL INJURY RETAINER AGREEMENT
+
+This agreement is entered into on {today_date} between Tez Law P.C., a professional corporation ("Attorney"), and {client_name} ("Client").
+
+1. SCOPE OF REPRESENTATION
+Attorney agrees to represent Client in the personal injury claim arising from the incident that occurred on {incident_date} at {incident_location}.
+
+2. CONTINGENCY FEE
+Attorney's fee is contingent upon recovery. If no recovery, Client owes no attorney fee.
+If recovery is obtained, Attorney shall receive:
+- {pre_lit_pct}% of gross recovery obtained BEFORE filing a lawsuit
+- {post_lit_pct}% of gross recovery obtained AFTER filing a lawsuit
+
+3. COSTS AND EXPENSES
+Attorney will advance case costs (records, filing fees, expert witnesses, etc.). Costs will be reimbursed from the recovery. If no recovery, Client is not responsible for advanced costs.
+
+4. LIEN AUTHORIZATION
+Client authorizes Attorney to satisfy medical bills, health insurance liens, and other liens from the recovery, and to pay Client the net balance.
+
+5. CLIENT COOPERATION
+Client agrees to attend all medical appointments, provide truthful and complete information, and cooperate in the prosecution of the claim.
+
+6. NO GUARANTEE
+Attorney makes no guarantee regarding recovery amount or timing.
+
+Managing Attorney: JJ Zhang, California Bar #326666
+Tez Law P.C. · 626-678-8677 · jj@tezlawfirm.com
+
+Client signature: ______________________________  Date: _______________
+
+Attorney signature: ______________________________  Date: _______________`,
+        variables: [
+          { key: 'client_name', label: 'Client Name', required: true },
+          { key: 'incident_date', label: 'Date of Incident', required: true, placeholder: 'e.g. March 15, 2026' },
+          { key: 'incident_location', label: 'Location of Incident', required: true, placeholder: 'e.g. Intersection of Grand Ave and Baseline Rd, Pomona CA' },
+          { key: 'pre_lit_pct', label: 'Pre-litigation Fee %', required: true, placeholder: '33.33' },
+          { key: 'post_lit_pct', label: 'Post-litigation Fee %', required: true, placeholder: '40' },
+        ],
+      },
+      {
+        slug: 'engagement-letter',
+        name: 'Engagement Letter (Non-Retainer)',
+        category: 'engagement',
+        description: 'Short-form engagement letter confirming legal representation',
+        body: `Date: {today_date}
+
+Re: Engagement of Legal Services
+
+Dear {client_name},
+
+This letter confirms that Tez Law P.C. has been engaged to represent you in the following matter:
+{matter_description}
+
+Our fees for this matter are described in the retainer agreement executed on {retainer_date}. This engagement is limited to the scope described above; any additional services will require a separate engagement.
+
+We appreciate the opportunity to serve you and look forward to a successful outcome. Please contact us at 626-678-8677 or jj@tezlawfirm.com with any questions.
+
+Sincerely,
+
+JJ Zhang
+Managing Attorney
+Tez Law P.C.
+California Bar #326666`,
+        variables: [
+          { key: 'client_name', label: 'Client Name', required: true },
+          { key: 'matter_description', label: 'Matter Description', required: true, multiline: true },
+          { key: 'retainer_date', label: 'Retainer Date', required: true, placeholder: 'e.g. September 7, 2026' },
+        ],
+      },
+      {
+        slug: 'motion-continuance',
+        name: 'Motion for Continuance — Immigration Court',
+        category: 'motion',
+        description: 'Motion to continue a scheduled hearing before the Immigration Court',
+        body: `UNITED STATES DEPARTMENT OF JUSTICE
+EXECUTIVE OFFICE FOR IMMIGRATION REVIEW
+IMMIGRATION COURT
+{court_location}
+
+In the Matter of:                          )
+                                           )
+{client_name}                              )   File No.: {a_number}
+                                           )
+     Respondent.                           )   Next Hearing: {hearing_date}
+                                           )
+
+MOTION TO CONTINUE
+
+Respondent, {client_name}, through undersigned counsel, respectfully moves this Honorable Court to continue the {hearing_type} currently scheduled for {hearing_date}, and states as follows:
+
+1. Respondent is scheduled for a {hearing_type} on {hearing_date} at {hearing_time}.
+
+2. A continuance is requested because: {reason_for_continuance}
+
+3. Undersigned counsel has conferred with opposing counsel {opposing_counsel_position}.
+
+4. This is Respondent's {continuance_number} request for continuance in this matter.
+
+5. Good cause exists for this continuance because {good_cause_statement}
+
+WHEREFORE, Respondent respectfully requests that the Court continue the {hearing_type} to a mutually convenient date.
+
+Respectfully submitted this {today_date}.
+
+_______________________________
+JJ Zhang, Esq.
+California Bar No. 326666
+Tez Law P.C.
+1050 Lakes Dr., Suite 225
+West Covina, CA 91790
+Tel: (626) 678-8677
+Email: jj@tezlawfirm.com
+Counsel for Respondent`,
+        variables: [
+          { key: 'court_location', label: 'Court Location', required: true, placeholder: 'e.g. LOS ANGELES, CALIFORNIA' },
+          { key: 'client_name', label: 'Respondent Name', required: true },
+          { key: 'a_number', label: 'A-Number', required: true, placeholder: 'A000-000-000' },
+          { key: 'hearing_date', label: 'Current Hearing Date', required: true },
+          { key: 'hearing_time', label: 'Hearing Time', required: true, placeholder: '9:00 AM' },
+          { key: 'hearing_type', label: 'Hearing Type', required: true, placeholder: 'Individual Hearing / Master Calendar Hearing' },
+          { key: 'reason_for_continuance', label: 'Reason for Continuance', required: true, multiline: true },
+          { key: 'opposing_counsel_position', label: 'DHS Position', required: true, placeholder: 'and DHS does not oppose / and DHS opposes' },
+          { key: 'continuance_number', label: 'Which continuance is this? (1st, 2nd, etc)', required: true, placeholder: 'first' },
+          { key: 'good_cause_statement', label: 'Good Cause Statement', required: true, multiline: true },
+        ],
+      },
+      {
+        slug: 'demand-letter-pi',
+        name: 'PI Demand Letter to Insurance',
+        category: 'letter',
+        description: 'Demand letter to insurance carrier for personal injury settlement',
+        body: `{today_date}
+
+VIA CERTIFIED MAIL — RETURN RECEIPT REQUESTED
+
+{carrier_name}
+Claims Department
+{carrier_address}
+
+Re:   Our Client:        {client_name}
+      Date of Loss:      {incident_date}
+      Your Insured:      {insured_name}
+      Claim No.:         {claim_number}
+
+Dear Claims Representative,
+
+This firm represents {client_name} in connection with injuries sustained on {incident_date} as a result of the negligence of your insured, {insured_name}.
+
+LIABILITY
+{liability_summary}
+
+INJURIES
+As a direct and proximate result of your insured's negligence, our client suffered the following injuries:
+{injuries_summary}
+
+MEDICAL EXPENSES
+To date, our client has incurred the following medical expenses:
+{medical_expenses_summary}
+
+Total Medical Specials: \${total_medicals}
+
+LOST WAGES
+{lost_wages_summary}
+
+Total Lost Wages: \${total_lost_wages}
+
+PAIN AND SUFFERING
+{pain_suffering_summary}
+
+DEMAND
+Based on the foregoing, we hereby demand \${demand_amount} in full and final settlement of this claim. This demand will remain open for {demand_days} days from the date of this letter, after which we will file suit.
+
+We look forward to your prompt response.
+
+Sincerely,
+
+JJ Zhang
+Attorney at Law
+California Bar No. 326666
+Tez Law P.C.
+Tel: (626) 678-8677`,
+        variables: [
+          { key: 'carrier_name', label: 'Insurance Carrier Name', required: true },
+          { key: 'carrier_address', label: 'Carrier Address', required: true, multiline: true },
+          { key: 'client_name', label: 'Client Name', required: true },
+          { key: 'incident_date', label: 'Date of Loss', required: true },
+          { key: 'insured_name', label: 'Insured (Defendant) Name', required: true },
+          { key: 'claim_number', label: 'Claim Number', required: true },
+          { key: 'liability_summary', label: 'Liability Summary', required: true, multiline: true },
+          { key: 'injuries_summary', label: 'Injuries Summary', required: true, multiline: true },
+          { key: 'medical_expenses_summary', label: 'Medical Expenses Detail', required: true, multiline: true },
+          { key: 'total_medicals', label: 'Total Medical Bills (USD)', required: true, placeholder: '15000.00' },
+          { key: 'lost_wages_summary', label: 'Lost Wages Summary', required: true, multiline: true },
+          { key: 'total_lost_wages', label: 'Total Lost Wages (USD)', required: true, placeholder: '5000.00' },
+          { key: 'pain_suffering_summary', label: 'Pain & Suffering Summary', required: true, multiline: true },
+          { key: 'demand_amount', label: 'Demand Amount (USD)', required: true, placeholder: '75000.00' },
+          { key: 'demand_days', label: 'Days for Response', required: true, placeholder: '30' },
+        ],
+      },
+    ];
+    for (const t of seedTemplates) {
+      await db.query(
+        `INSERT INTO document_templates (slug, name, category, description, body, variables)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [t.slug, t.name, t.category, t.description, t.body, JSON.stringify(t.variables)]
+      );
+    }
+  }
+
+  // Generated documents (finalized instances of templates)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS generated_documents (
+      id            SERIAL PRIMARY KEY,
+      client_key    TEXT,
+      template_slug TEXT,
+      template_name TEXT,
+      title         TEXT NOT NULL,
+      body          TEXT NOT NULL,
+      variables     JSONB DEFAULT '{}'::jsonb,
+      generated_by  INTEGER NOT NULL,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_generated_documents_client ON generated_documents (client_key)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_generated_documents_author ON generated_documents (generated_by)`);
+
+  // CLE credits (per-attorney)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS cle_credits (
+      id                SERIAL PRIMARY KEY,
+      attorney_id       INTEGER NOT NULL,
+      provider          TEXT NOT NULL,
+      subject           TEXT NOT NULL,
+      hours             NUMERIC(5,2) NOT NULL,
+      ethics_hours      NUMERIC(5,2) DEFAULT 0,
+      competence_hours  NUMERIC(5,2) DEFAULT 0,
+      bias_hours        NUMERIC(5,2) DEFAULT 0,
+      tech_hours        NUMERIC(5,2) DEFAULT 0,
+      credit_date       DATE NOT NULL,
+      compliance_period TEXT,
+      notes             TEXT,
+      certificate_url   TEXT,
+      created_at        TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_cle_credits_attorney ON cle_credits (attorney_id)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_cle_credits_date ON cle_credits (credit_date)`);
+
+  // Court prep checklists (one per task, task must be a court date)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS court_prep_items (
+      id          SERIAL PRIMARY KEY,
+      task_id     INTEGER NOT NULL,
+      item_text   TEXT NOT NULL,
+      completed   BOOLEAN DEFAULT FALSE,
+      position    INTEGER DEFAULT 0,
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_court_prep_task ON court_prep_items (task_id)`);
 }
 
 // In-memory cache of matter defaults. Reloaded on any admin update.
@@ -2626,6 +2962,340 @@ function registerAppApi(app) {
       }
       events.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
       res.json({ ok: true, events: events.slice(0, 100) });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  ATTORNEY SUITE
+  //  ─────────────────────────────────────────────────────
+  //  Document Generator, CLE Tracker, Court Prep Checklists.
+  //  Available to admin + attorney roles (paralegals can view CLE only).
+  // ═══════════════════════════════════════════════════════
+
+  // ── Document Templates ──────────────────────────────────
+
+  // List all templates (all firm users)
+  app.get("/api/staff/document-templates", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT id, slug, name, category, description, variables, updated_at
+         FROM document_templates ORDER BY category, name`
+      );
+      res.json({ ok: true, templates: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Get single template with body
+  app.get("/api/staff/document-templates/:slug", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT * FROM document_templates WHERE slug = $1`,
+        [String(req.params.slug)]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      res.json({ ok: true, template: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Generate a document from a template — fills in variables and saves
+  app.post("/api/staff/documents/generate", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const { template_slug, variables, client_key, title, attach_to_client } = req.body || {};
+      if (!template_slug) return res.status(400).json({ ok: false, error: "template_slug required" });
+      const tR = await db.query(`SELECT * FROM document_templates WHERE slug = $1`, [String(template_slug)]);
+      const tmpl = tR.rows[0];
+      if (!tmpl) return res.status(404).json({ ok: false, error: "template not found" });
+      const vars = variables || {};
+      // Always inject today_date
+      vars.today_date = vars.today_date || new Date().toLocaleDateString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric',
+      });
+      // Substitute {var_name} in template body
+      let body = String(tmpl.body);
+      body = body.replace(/\{([a-z_][a-z0-9_]*)\}/gi, (m, key) => {
+        return vars[key] !== undefined && vars[key] !== null ? String(vars[key]) : m;
+      });
+      const finalTitle = String(title || tmpl.name).substring(0, 200);
+      const gR = await db.query(
+        `INSERT INTO generated_documents
+           (client_key, template_slug, template_name, title, body, variables, generated_by)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7) RETURNING *`,
+        [client_key || null, tmpl.slug, tmpl.name, finalTitle, body, JSON.stringify(vars), req.user.uid]
+      );
+      // Optionally attach as a client document (as text/plain)
+      if (attach_to_client && client_key) {
+        try {
+          const buf = Buffer.from(body, 'utf-8');
+          await db.query(
+            `INSERT INTO client_documents (client_key, filename, mime_type, size_bytes, category, note, content, uploaded_by)
+             VALUES ($1, $2, 'text/plain', $3, 'legal_document', $4, $5, $6)`,
+            [String(client_key), `${finalTitle}.txt`, buf.length, `Generated from ${tmpl.name}`, buf, `staff:${req.user.uid}`]
+          );
+        } catch (e) { console.warn("[doc attach]:", e.message); }
+      }
+      res.json({ ok: true, document: gR.rows[0] });
+    } catch (err) {
+      console.error("[document generate]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // List generated documents (mine, or by client, or all if admin)
+  app.get("/api/staff/documents/generated", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const isAdminUser = req.user.r === "admin";
+      const params = [];
+      let where = "1=1";
+      const scope = String(req.query.scope || "mine");
+      if (scope === "mine" || !isAdminUser) {
+        params.push(req.user.uid);
+        where += ` AND generated_by = $${params.length}`;
+      }
+      if (req.query.client_key) {
+        params.push(String(req.query.client_key));
+        where += ` AND client_key = $${params.length}`;
+      }
+      const r = await db.query(
+        `SELECT g.id, g.client_key, g.template_slug, g.template_name, g.title, g.created_at,
+                a.full_name AS generated_by_name,
+                (SELECT client_name FROM tasks t WHERE t.client_key = g.client_key LIMIT 1) AS client_name
+         FROM generated_documents g
+         LEFT JOIN admin_users a ON a.id = g.generated_by
+         WHERE ${where}
+         ORDER BY g.created_at DESC LIMIT 100`,
+        params
+      );
+      res.json({ ok: true, documents: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Get a generated document's full body
+  app.get("/api/staff/documents/generated/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(`SELECT * FROM generated_documents WHERE id = $1`, [id]);
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      // Access check via client
+      if (r.rows[0].client_key) {
+        const ok = await canUserAccessClient(req.user, r.rows[0].client_key);
+        if (!ok && r.rows[0].generated_by !== req.user.uid) {
+          return res.status(403).json({ ok: false, error: "no access" });
+        }
+      }
+      res.json({ ok: true, document: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Delete a generated document (author or admin)
+  app.delete("/api/staff/documents/generated/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const isAdminUser = req.user.r === "admin";
+      const q = isAdminUser
+        ? `DELETE FROM generated_documents WHERE id = $1 RETURNING id`
+        : `DELETE FROM generated_documents WHERE id = $1 AND generated_by = $2 RETURNING id`;
+      const p = isAdminUser ? [id] : [id, req.user.uid];
+      const r = await db.query(q, p);
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found or not yours" });
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── CLE Credits ──────────────────────────────────────────
+
+  app.get("/api/staff/cle-credits", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const r = await db.query(
+        `SELECT * FROM cle_credits WHERE attorney_id = $1 ORDER BY credit_date DESC`,
+        [req.user.uid]
+      );
+      res.json({ ok: true, credits: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/cle-credits", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const { provider, subject, hours, ethics_hours, competence_hours, bias_hours, tech_hours,
+              credit_date, compliance_period, notes, certificate_url } = req.body || {};
+      if (!provider || !subject || !hours || !credit_date) {
+        return res.status(400).json({ ok: false, error: "provider, subject, hours, credit_date required" });
+      }
+      const r = await db.query(
+        `INSERT INTO cle_credits
+           (attorney_id, provider, subject, hours, ethics_hours, competence_hours, bias_hours, tech_hours,
+            credit_date, compliance_period, notes, certificate_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING *`,
+        [req.user.uid, String(provider).substring(0, 200), String(subject).substring(0, 300),
+         Number(hours) || 0, Number(ethics_hours) || 0, Number(competence_hours) || 0,
+         Number(bias_hours) || 0, Number(tech_hours) || 0,
+         credit_date, compliance_period ? String(compliance_period).substring(0, 40) : null,
+         notes ? String(notes).substring(0, 1000) : null,
+         certificate_url ? String(certificate_url).substring(0, 500) : null]
+      );
+      res.json({ ok: true, credit: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/cle-credits/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const fields = [];
+      const params = [];
+      let i = 1;
+      for (const k of ["provider", "subject", "hours", "ethics_hours", "competence_hours", "bias_hours",
+                       "tech_hours", "credit_date", "compliance_period", "notes", "certificate_url"]) {
+        if (req.body && req.body[k] !== undefined) {
+          fields.push(`${k} = $${i++}`);
+          params.push(req.body[k]);
+        }
+      }
+      if (!fields.length) return res.status(400).json({ ok: false, error: "nothing to update" });
+      params.push(id, req.user.uid);
+      const r = await db.query(
+        `UPDATE cle_credits SET ${fields.join(", ")} WHERE id = $${i++} AND attorney_id = $${i++} RETURNING *`,
+        params
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found or not yours" });
+      res.json({ ok: true, credit: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/cle-credits/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(
+        `DELETE FROM cle_credits WHERE id = $1 AND attorney_id = $2 RETURNING id`,
+        [id, req.user.uid]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found or not yours" });
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // CLE compliance summary (California — 25 hrs/3yrs, 4 ethics, 1 competence, 1 bias/elimination, 1 technology)
+  app.get("/api/staff/cle-credits/summary", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      // Look at last 3 years by default (CA compliance period)
+      const from = new Date();
+      from.setFullYear(from.getFullYear() - 3);
+      const r = await db.query(
+        `SELECT COALESCE(SUM(hours), 0)::float AS total_hours,
+                COALESCE(SUM(ethics_hours), 0)::float AS ethics_hours,
+                COALESCE(SUM(competence_hours), 0)::float AS competence_hours,
+                COALESCE(SUM(bias_hours), 0)::float AS bias_hours,
+                COALESCE(SUM(tech_hours), 0)::float AS tech_hours,
+                COUNT(*)::int AS credit_count
+         FROM cle_credits WHERE attorney_id = $1 AND credit_date >= $2`,
+        [req.user.uid, from.toISOString().substring(0, 10)]
+      );
+      const s = r.rows[0];
+      // California requirements
+      const REQ = { total: 25, ethics: 4, competence: 1, bias: 1, tech: 1 };
+      res.json({
+        ok: true,
+        summary: {
+          period_start: from.toISOString().substring(0, 10),
+          period_end: new Date().toISOString().substring(0, 10),
+          total_hours: s.total_hours,
+          ethics_hours: s.ethics_hours,
+          competence_hours: s.competence_hours,
+          bias_hours: s.bias_hours,
+          tech_hours: s.tech_hours,
+          credit_count: s.credit_count,
+          requirements: REQ,
+          on_track: {
+            total: s.total_hours >= REQ.total,
+            ethics: s.ethics_hours >= REQ.ethics,
+            competence: s.competence_hours >= REQ.competence,
+            bias: s.bias_hours >= REQ.bias,
+            tech: s.tech_hours >= REQ.tech,
+          },
+        },
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Court Prep Checklists ────────────────────────────────
+
+  app.get("/api/staff/tasks/:id/prep-items", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(
+        `SELECT * FROM court_prep_items WHERE task_id = $1 ORDER BY position, id`,
+        [id]
+      );
+      res.json({ ok: true, items: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/tasks/:id/prep-items", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const items = Array.isArray(req.body?.items) ? req.body.items : [req.body?.item_text].filter(Boolean);
+      if (!items.length) return res.status(400).json({ ok: false, error: "item_text or items[] required" });
+      // Get current max position
+      const maxR = await db.query(
+        `SELECT COALESCE(MAX(position), 0)::int AS m FROM court_prep_items WHERE task_id = $1`,
+        [id]
+      );
+      let pos = maxR.rows[0].m;
+      const inserted = [];
+      for (const text of items) {
+        pos += 1;
+        const r = await db.query(
+          `INSERT INTO court_prep_items (task_id, item_text, position) VALUES ($1, $2, $3) RETURNING *`,
+          [id, String(text).substring(0, 300), pos]
+        );
+        inserted.push(r.rows[0]);
+      }
+      res.json({ ok: true, items: inserted });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/prep-items/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const fields = [];
+      const params = [];
+      let i = 1;
+      if (typeof req.body?.completed === "boolean") {
+        fields.push(`completed = $${i++}`);
+        params.push(req.body.completed);
+      }
+      if (typeof req.body?.item_text === "string") {
+        fields.push(`item_text = $${i++}`);
+        params.push(String(req.body.item_text).substring(0, 300));
+      }
+      if (typeof req.body?.position === "number") {
+        fields.push(`position = $${i++}`);
+        params.push(req.body.position);
+      }
+      if (!fields.length) return res.status(400).json({ ok: false, error: "nothing to update" });
+      fields.push("updated_at = NOW()");
+      params.push(id);
+      const r = await db.query(
+        `UPDATE court_prep_items SET ${fields.join(", ")} WHERE id = $${i++} RETURNING *`,
+        params
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      res.json({ ok: true, item: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/prep-items/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      await db.query(`DELETE FROM court_prep_items WHERE id = $1`, [id]);
+      res.json({ ok: true });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
