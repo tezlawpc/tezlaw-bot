@@ -372,6 +372,29 @@ async function initClientAuthTables() {
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_client_notes_client ON client_notes (client_key)`);
 
+  // ─── IOLTA / Client Trust Account (Cal. Rules of Prof. Conduct 1.15) ──
+  // Every deposit + withdrawal is logged with a running balance snapshot.
+  // Balance is validated at insert time — withdrawals cannot exceed current balance.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS trust_transactions (
+      id                     SERIAL PRIMARY KEY,
+      client_key             TEXT NOT NULL,
+      staff_id               INTEGER NOT NULL,
+      txn_type               TEXT NOT NULL CHECK (txn_type IN ('deposit', 'withdrawal')),
+      category               TEXT,
+      amount_cents           INTEGER NOT NULL CHECK (amount_cents > 0),
+      description            TEXT NOT NULL,
+      memo                   TEXT,
+      reference_number       TEXT,
+      transaction_date       DATE NOT NULL DEFAULT CURRENT_DATE,
+      running_balance_cents  INTEGER NOT NULL,
+      reversed_by_txn_id     INTEGER,
+      created_at             TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_trust_txn_client ON trust_transactions (client_key)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_trust_txn_date ON trust_transactions (transaction_date DESC)`);
+
   // ── Attorney Suite ─────────────────────────────────────────
   // Document templates (retainer, engagement letter, common motions)
   await db.query(`
@@ -4249,6 +4272,185 @@ function registerAppApi(app) {
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="tezlaw-time-${new Date().toISOString().substring(0, 10)}.csv"`);
       res.send(lines.join("\r\n"));
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  IOLTA / CLIENT TRUST ACCOUNTING (Cal. Rules of Prof. Conduct 1.15)
+  //  ─────────────────────────────────────────────────────
+  //  CA attorneys must maintain client trust accounts. Every deposit
+  //  and withdrawal is logged per client. Withdrawals cannot exceed
+  //  current balance. Every entry snapshots the running balance for
+  //  audit-friendly ledger presentation.
+  //
+  //  Categories: retainer, settlement, costs_advance, earned_fees,
+  //  refund, other. Deposits are always positive; withdrawals are
+  //  logged as positive amounts with txn_type='withdrawal'.
+  //
+  //  Firm-wide summary + reconciliation available to admin.
+  // ═══════════════════════════════════════════════════════
+
+  // Get a client's current trust balance + full transaction ledger
+  app.get("/api/staff/clients/:key/trust", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const r = await db.query(
+        `SELECT t.*, a.full_name AS staff_name
+         FROM trust_transactions t
+         LEFT JOIN admin_users a ON a.id = t.staff_id
+         WHERE t.client_key = $1
+         ORDER BY t.transaction_date DESC, t.id DESC`,
+        [req.params.key]
+      );
+      const currentBalance = r.rows.length ? r.rows[0].running_balance_cents : 0;
+      const totalDeposits = r.rows.filter(x => x.txn_type === "deposit").reduce((s, x) => s + x.amount_cents, 0);
+      const totalWithdrawals = r.rows.filter(x => x.txn_type === "withdrawal").reduce((s, x) => s + x.amount_cents, 0);
+      res.json({
+        ok: true,
+        current_balance_cents: currentBalance,
+        current_balance_display: `$${(currentBalance / 100).toFixed(2)}`,
+        total_deposits_cents: totalDeposits,
+        total_deposits_display: `$${(totalDeposits / 100).toFixed(2)}`,
+        total_withdrawals_cents: totalWithdrawals,
+        total_withdrawals_display: `$${(totalWithdrawals / 100).toFixed(2)}`,
+        transaction_count: r.rows.length,
+        transactions: r.rows,
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Record a trust transaction (deposit or withdrawal)
+  app.post("/api/staff/clients/:key/trust", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const { txn_type, category, amount_cents, description, memo, reference_number, transaction_date } = req.body || {};
+      if (!txn_type || !["deposit", "withdrawal"].includes(txn_type)) {
+        return res.status(400).json({ ok: false, error: "txn_type must be 'deposit' or 'withdrawal'" });
+      }
+      const amt = parseInt(amount_cents, 10);
+      if (!Number.isFinite(amt) || amt <= 0) {
+        return res.status(400).json({ ok: false, error: "amount_cents must be a positive integer" });
+      }
+      if (!description || !String(description).trim()) {
+        return res.status(400).json({ ok: false, error: "description required" });
+      }
+      // Compute new running balance
+      const balR = await db.query(
+        `SELECT COALESCE(running_balance_cents, 0)::int AS bal
+         FROM trust_transactions WHERE client_key = $1 ORDER BY id DESC LIMIT 1`,
+        [req.params.key]
+      );
+      const currentBal = balR.rows[0]?.bal || 0;
+      const newBal = txn_type === "deposit" ? currentBal + amt : currentBal - amt;
+      if (newBal < 0) {
+        return res.status(400).json({
+          ok: false,
+          error: `Insufficient trust funds. Current balance: $${(currentBal / 100).toFixed(2)}. Cannot withdraw $${(amt / 100).toFixed(2)}.`,
+          current_balance_cents: currentBal,
+        });
+      }
+      const r = await db.query(
+        `INSERT INTO trust_transactions
+           (client_key, staff_id, txn_type, category, amount_cents,
+            description, memo, reference_number, transaction_date,
+            running_balance_cents)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE), $10)
+         RETURNING *`,
+        [req.params.key, req.user.uid, txn_type,
+         category || null,
+         amt,
+         String(description).substring(0, 500),
+         memo ? String(memo).substring(0, 1000) : null,
+         reference_number ? String(reference_number).substring(0, 100) : null,
+         transaction_date || null,
+         newBal]
+      );
+      res.json({
+        ok: true,
+        transaction: r.rows[0],
+        new_balance_cents: newBal,
+        new_balance_display: `$${(newBal / 100).toFixed(2)}`,
+      });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Reverse a transaction (creates a mirror-image counter-entry, doesn't delete)
+  app.post("/api/staff/trust/:id/reverse", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const isAdmin = req.user.role === "admin";
+      if (!isAdmin) return res.status(403).json({ ok: false, error: "admin only" });
+      const origR = await db.query(`SELECT * FROM trust_transactions WHERE id = $1`, [id]);
+      if (!origR.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      const orig = origR.rows[0];
+      if (orig.reversed_by_txn_id) return res.status(400).json({ ok: false, error: "already reversed" });
+      const reverseType = orig.txn_type === "deposit" ? "withdrawal" : "deposit";
+      const balR = await db.query(
+        `SELECT COALESCE(running_balance_cents, 0)::int AS bal
+         FROM trust_transactions WHERE client_key = $1 ORDER BY id DESC LIMIT 1`,
+        [orig.client_key]
+      );
+      const currentBal = balR.rows[0]?.bal || 0;
+      const newBal = reverseType === "deposit" ? currentBal + orig.amount_cents : currentBal - orig.amount_cents;
+      if (newBal < 0) {
+        return res.status(400).json({
+          ok: false,
+          error: `Cannot reverse — would leave a negative balance ($${(newBal / 100).toFixed(2)}).`,
+        });
+      }
+      const r = await db.query(
+        `INSERT INTO trust_transactions
+           (client_key, staff_id, txn_type, category, amount_cents,
+            description, memo, transaction_date, running_balance_cents)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, $8)
+         RETURNING *`,
+        [orig.client_key, req.user.uid, reverseType, "reversal",
+         orig.amount_cents,
+         `REVERSAL of txn #${id}: ${orig.description}`,
+         `Reversed by ${req.user.n || "admin"} — reason: ${req.body?.reason || "not specified"}`,
+         newBal]
+      );
+      // Link original as reversed
+      await db.query(`UPDATE trust_transactions SET reversed_by_txn_id = $1 WHERE id = $2`, [r.rows[0].id, id]);
+      res.json({ ok: true, reversal: r.rows[0], new_balance_cents: newBal });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Admin: firm-wide trust account summary
+  app.get("/api/staff/admin/trust/summary", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      // Get latest running_balance for each client_key
+      const r = await db.query(`
+        WITH latest AS (
+          SELECT DISTINCT ON (client_key)
+            client_key, running_balance_cents, transaction_date, id
+          FROM trust_transactions
+          ORDER BY client_key, id DESC
+        )
+        SELECT
+          l.client_key,
+          l.running_balance_cents,
+          l.transaction_date AS last_activity,
+          (SELECT client_name FROM tasks t WHERE t.client_key = l.client_key LIMIT 1) AS client_name,
+          (SELECT COUNT(*)::int FROM trust_transactions WHERE client_key = l.client_key) AS txn_count
+        FROM latest l
+        WHERE l.running_balance_cents > 0
+        ORDER BY l.running_balance_cents DESC
+      `);
+      const firmTotal = r.rows.reduce((s, row) => s + (row.running_balance_cents || 0), 0);
+      res.json({
+        ok: true,
+        firm_total_cents: firmTotal,
+        firm_total_display: `$${(firmTotal / 100).toFixed(2)}`,
+        client_count: r.rows.length,
+        clients: r.rows.map(row => ({
+          ...row,
+          balance_display: `$${((row.running_balance_cents || 0) / 100).toFixed(2)}`,
+        })),
+      });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
