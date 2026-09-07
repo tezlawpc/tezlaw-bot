@@ -43,6 +43,11 @@ const ROLES = {
     description: "Full access to everything, including user + system settings",
     color: "#0C1C36",
   },
+  manager: {
+    label: "Manager / Case-load Supervisor",
+    description: "Sees all firm cases + tasks. Can reassign work. No admin tools (no user management, no matter defaults).",
+    color: "#0C1C36",
+  },
   attorney: {
     label: "Attorney",
     description: "Hearing notes (create/edit), clients, Dropbox, hearing notices",
@@ -84,48 +89,48 @@ const PERMISSIONS = {
 
   // Hearing notes — attorneys write, paralegals + viewers can read
   "hearings.write":       ["admin", "attorney"],
-  "hearings.read":        ["admin", "attorney", "paralegal", "viewer"],
+  "hearings.read":        ["admin", "manager", "attorney", "paralegal", "viewer"],
 
   // Firm-wide hearing note lists — separate keys per menu item so JJ can
   // grant/deny each individually in the per-user checkbox UI. Defaults keep
   // attorneys out (they interact with their own notes via dashboard).
-  "notes.master":         ["admin", "paralegal"],  // "Master Notes" sidebar link
-  "notes.individual":     ["admin", "paralegal"],  // "Individual Notes" sidebar link
-  "notes.history":        ["admin", "paralegal"],  // "Hearing History" sidebar link
+  "notes.master":         ["admin", "manager", "paralegal"],  // "Master Notes" sidebar link
+  "notes.individual":     ["admin", "manager", "paralegal"],  // "Individual Notes" sidebar link
+  "notes.history":        ["admin", "manager", "paralegal"],  // "Hearing History" sidebar link
   // Backward-compat alias — any old code still checking notes.list keeps working
-  "notes.list":           ["admin", "paralegal"],
+  "notes.list":           ["admin", "manager", "paralegal"],
 
   // Dashboard — everyone gets a landing page. Kept broad on purpose.
-  "dashboard.access":     ["admin", "attorney", "paralegal", "viewer"],
+  "dashboard.access":     ["admin", "manager", "attorney", "paralegal", "viewer"],
 
   // Client-facing tools — all roles, viewers read only
-  "clients.write":        ["admin", "attorney", "paralegal"],
-  "clients.read":         ["admin", "attorney", "paralegal", "viewer"],
+  "clients.write":        ["admin", "manager", "attorney", "paralegal"],
+  "clients.read":         ["admin", "manager", "attorney", "paralegal", "viewer"],
 
   // Dropbox files — download for all authed, upload/delete for staff
-  "dropbox.files.write":  ["admin", "attorney", "paralegal"],
-  "dropbox.files.read":   ["admin", "attorney", "paralegal", "viewer"],
+  "dropbox.files.write":  ["admin", "manager", "attorney", "paralegal"],
+  "dropbox.files.read":   ["admin", "manager", "attorney", "paralegal", "viewer"],
   // Configuring the Dropbox integration itself (auth tokens, folder scan) — admin
   "dropbox.setup":        ["admin"],
 
   // Hearing notices — everyone can view + send
-  "notices.send":         ["admin", "attorney", "paralegal"],
-  "notices.read":         ["admin", "attorney", "paralegal", "viewer"],
+  "notices.send":         ["admin", "manager", "attorney", "paralegal"],
+  "notices.read":         ["admin", "manager", "attorney", "paralegal", "viewer"],
 
   // Integration configuration — admin only
   "outlook.setup":        ["admin"],
 
   // Motions — attorneys draft and file, paralegals prepare, viewers read only
-  "motions.write":        ["admin", "attorney", "paralegal"],
-  "motions.read":         ["admin", "attorney", "paralegal", "viewer"],
+  "motions.write":        ["admin", "manager", "attorney", "paralegal"],
+  "motions.read":         ["admin", "manager", "attorney", "paralegal", "viewer"],
 
   // Calendar + deadlines — everyone reads, staff can edit
-  "calendar.read":        ["admin", "attorney", "paralegal", "viewer"],
-  "deadlines.read":       ["admin", "attorney", "paralegal", "viewer"],
-  "deadlines.write":      ["admin", "attorney", "paralegal"],
+  "calendar.read":        ["admin", "manager", "attorney", "paralegal", "viewer"],
+  "deadlines.read":       ["admin", "manager", "attorney", "paralegal", "viewer"],
+  "deadlines.write":      ["admin", "manager", "attorney", "paralegal"],
 
   // Analytics / reports — admin only (may include revenue, cost data)
-  "analytics.read":       ["admin"],
+  "analytics.read":       ["admin", "manager"],
 
   // Accounting — admin + paralegal (case manager handles bookkeeping).
   // Attorneys and viewers don't see accounting at all.
@@ -133,17 +138,17 @@ const PERMISSIONS = {
   "accounting.write":     ["admin", "paralegal"],
   // Personal Injury — everyone reads, staff writes. Separate from clients
   // so JJ can grant PI access without giving all clients access, or vice versa.
-  "pi.read":              ["admin", "attorney", "paralegal", "viewer"],
-  "pi.write":             ["admin", "attorney", "paralegal"],
+  "pi.read":              ["admin", "manager", "attorney", "paralegal", "viewer"],
+  "pi.write":             ["admin", "manager", "attorney", "paralegal"],
   // Federal Matters & Trademarks — same rules as regular clients
-  "federal.read":         ["admin", "attorney", "paralegal", "viewer"],
-  "federal.write":        ["admin", "attorney", "paralegal"],
+  "federal.read":         ["admin", "manager", "attorney", "paralegal", "viewer"],
+  "federal.write":        ["admin", "manager", "attorney", "paralegal"],
   // Task list — everyone can see and interact with tasks
-  "tasks.read":           ["admin", "attorney", "paralegal", "viewer"],
-  "tasks.write":          ["admin", "attorney", "paralegal"],
+  "tasks.read":           ["admin", "manager", "attorney", "paralegal", "viewer"],
+  "tasks.write":          ["admin", "manager", "attorney", "paralegal"],
 
   // Mobile PWA search — same as clients.read
-  "mobile.search":        ["admin", "attorney", "paralegal", "viewer"],
+  "mobile.search":        ["admin", "manager", "attorney", "paralegal", "viewer"],
 
   // ── Consultant portal (referral partners) ──────────────
   // Consultants are external referral partners who bring leads/matters to
