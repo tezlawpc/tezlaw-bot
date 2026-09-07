@@ -3815,6 +3815,108 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // Firm-wide duplicate sweep: return clusters of clients that likely
+  // represent the same person. Groups by normalized phone digits primarily,
+  // then by exact email, then by first+last name match.
+  app.get("/api/staff/admin/duplicate-sweep", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      // Get all distinct clients with normalized data
+      const allR = await db.query(
+        `SELECT DISTINCT client_key, client_name, client_phone, client_email, matter_type,
+                MAX(created_at) OVER (PARTITION BY client_key) AS last_activity
+         FROM tasks
+         WHERE client_key IS NOT NULL
+           AND client_key NOT IN (SELECT alias_key FROM client_aliases)
+         ORDER BY client_name`
+      );
+      const rows = allR.rows;
+      // Build clusters
+      const clusters = [];
+      const seen = new Set();
+      for (const row of rows) {
+        if (seen.has(row.client_key)) continue;
+        const cluster = { members: [row], reasons: new Set() };
+        seen.add(row.client_key);
+
+        // Match by phone digits (>=7 significant digits)
+        if (row.client_phone) {
+          const digits = extractDigits(row.client_phone);
+          if (digits.length >= 7) {
+            const last10 = digits.substring(digits.length - 10);
+            for (const other of rows) {
+              if (seen.has(other.client_key) || other.client_key === row.client_key) continue;
+              if (!other.client_phone) continue;
+              const otherDigits = extractDigits(other.client_phone);
+              if (otherDigits.length >= 7 && otherDigits.substring(otherDigits.length - 10) === last10) {
+                cluster.members.push(other);
+                seen.add(other.client_key);
+                cluster.reasons.add('same phone');
+              }
+            }
+          }
+        }
+        // Match by exact email
+        if (row.client_email) {
+          const emailLc = row.client_email.toLowerCase().trim();
+          for (const other of rows) {
+            if (seen.has(other.client_key) || other.client_key === row.client_key) continue;
+            if (other.client_email && other.client_email.toLowerCase().trim() === emailLc) {
+              cluster.members.push(other);
+              seen.add(other.client_key);
+              cluster.reasons.add('same email');
+            }
+          }
+        }
+        // Match by first+last name (both present, both matching)
+        if (row.client_name) {
+          const words = normalizeTerm(row.client_name).split(' ').filter(w => w.length >= 3);
+          if (words.length >= 2) {
+            const first = words[0], last = words[words.length - 1];
+            for (const other of rows) {
+              if (seen.has(other.client_key) || other.client_key === row.client_key) continue;
+              if (!other.client_name) continue;
+              const otherNorm = normalizeTerm(other.client_name);
+              if (otherNorm.includes(first) && otherNorm.includes(last)) {
+                cluster.members.push(other);
+                seen.add(other.client_key);
+                cluster.reasons.add('similar name');
+              }
+            }
+          }
+        }
+        if (cluster.members.length > 1) {
+          // Enrich with counts
+          for (const m of cluster.members) {
+            const cts = await db.query(
+              `SELECT
+                 (SELECT COUNT(*)::int FROM tasks WHERE client_key = $1) AS task_count,
+                 (SELECT COUNT(*)::int FROM client_invoices WHERE client_key = $1) AS invoice_count,
+                 (SELECT COUNT(*)::int FROM client_notes WHERE client_key = $1) AS note_count,
+                 (SELECT COUNT(*)::int FROM client_documents WHERE client_key = $1) AS doc_count,
+                 (SELECT COALESCE(SUM(amount_cents), 0)::int FROM client_invoices WHERE client_key = $1) AS invoice_cents`,
+              [m.client_key]
+            );
+            Object.assign(m, cts.rows[0]);
+          }
+          clusters.push({
+            reasons: Array.from(cluster.reasons),
+            members: cluster.members,
+          });
+        }
+      }
+      res.json({
+        ok: true,
+        total_clients: rows.length,
+        duplicate_clusters: clusters.length,
+        duplicate_clients_total: clusters.reduce((s, c) => s + c.members.length, 0),
+        clusters,
+      });
+    } catch (err) {
+      console.error("[sweep]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ═══════════════════════════════════════════════════════
   //  CASE TIMELINE (aggregated activity for a client)
   // ═══════════════════════════════════════════════════════
