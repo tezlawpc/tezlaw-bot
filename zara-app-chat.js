@@ -98,10 +98,31 @@ Tez Law's own context:
 - Serves California + nationwide (immigration/trademark)
 - Multilingual: English, Mandarin, Shanghainese, Spanish`;
 
-const CLIENT_SYSTEM_PROMPT = (clientName, lang) => {
+const CLIENT_SYSTEM_PROMPT = (clientName, lang, caseContext) => {
   const langInstr = lang === "zh-TW" ? "Respond in Traditional Chinese (繁體中文)."
                   : lang === "es"    ? "Responde en español."
                   : "Respond in English.";
+
+  // Build case-context block if we have profile data
+  let contextBlock = "";
+  if (caseContext) {
+    const parts = [];
+    if (caseContext.name) parts.push(`Client name: ${caseContext.name}`);
+    if (caseContext.a_number) parts.push(`A-number: ${caseContext.a_number}`);
+    if (caseContext.case_types && caseContext.case_types.length) {
+      parts.push(`Practice area(s): ${caseContext.case_types.join(", ")}`);
+    }
+    if (caseContext.upcoming_hearings && caseContext.upcoming_hearings.length) {
+      parts.push(`Upcoming hearing(s): ${caseContext.upcoming_hearings.join("; ")}`);
+    }
+    if (caseContext.open_deadlines && caseContext.open_deadlines.length) {
+      parts.push(`Open deadline(s): ${caseContext.open_deadlines.join("; ")}`);
+    }
+    if (parts.length) {
+      contextBlock = `\n\nHere is what the firm's system knows about this client (use this to personalize your answers — but do NOT recite it back verbatim unless directly asked):\n${parts.map(p => `- ${p}`).join("\n")}\n\nWhen answering, tailor your response to their practice area. For example, if they ask a general immigration question and their practice area is Immigration, dive into the immigration-specific answer. If they ask about something outside their practice area (e.g., an immigration client asks about personal injury), still answer helpfully, but mention Tez Law also handles that area if they need representation.`;
+    }
+  }
+
   return `You are Zara, Tez Law P.C.'s AI legal assistant. You are speaking with ${clientName || "a client"} of Tez Law via the client mobile app.
 
 The user is an authenticated client. Do NOT collect their name or contact info — you already know who they are. Do NOT act like an intake bot.
@@ -120,7 +141,7 @@ Format: clear paragraphs, use simple language, avoid legalese unless you define 
 
 ${langInstr}
 
-Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
+Tez Law contact: 626-678-8677 · jj@tezlawfirm.com${contextBlock}`;
 };
 
 module.exports = { chat, STAFF_SYSTEM_PROMPT, CLIENT_SYSTEM_PROMPT };
