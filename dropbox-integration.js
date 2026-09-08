@@ -311,6 +311,55 @@ async function getMetadata(path) {
   }
 }
 
+// ── Thumbnails ─────────────────────────────────────
+// Returns a base64-encoded JPEG thumbnail for a Dropbox file, or null if the
+// file type isn't previewable (images work; DOCX/XLSX return null).
+// Uses the CONTENT endpoint (content.dropboxapi.com) since it returns bytes.
+//
+// In-memory cache keyed by "path|size" — thumbnails don't change unless the
+// file changes, so caching for the process lifetime is safe. Entries evict
+// after 1 hour to bound memory.
+const _thumbCache = new Map(); // key -> { b64, expiresAt }
+const THUMB_CACHE_MS = 60 * 60 * 1000;
+
+async function getThumbnail(path, { size = "w128h128", format = "jpeg" } = {}) {
+  if (!path) return null;
+  const cacheKey = `${path}|${size}|${format}`;
+  const cached = _thumbCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.b64;
+
+  const token = await getAccessToken();
+  const pathRoot = await getPathRootHeader();
+  const arg = {
+    resource: { ".tag": "path", path },
+    format: { ".tag": format },
+    size: { ".tag": size },
+    mode: { ".tag": "strict" },
+  };
+  const headers = {
+    "Authorization": `Bearer ${token}`,
+    "Dropbox-API-Arg": JSON.stringify(arg),
+  };
+  if (pathRoot) headers["Dropbox-API-Path-Root"] = pathRoot;
+
+  try {
+    const resp = await axios({
+      method: "POST",
+      url: "https://content.dropboxapi.com/2/files/get_thumbnail_v2",
+      headers,
+      responseType: "arraybuffer",
+      timeout: 15000,
+    });
+    const b64 = Buffer.from(resp.data).toString("base64");
+    _thumbCache.set(cacheKey, { b64, expiresAt: Date.now() + THUMB_CACHE_MS });
+    return b64;
+  } catch (e) {
+    // File type not previewable, or gone — cache negative for shorter time
+    _thumbCache.set(cacheKey, { b64: null, expiresAt: Date.now() + 10 * 60 * 1000 });
+    return null;
+  }
+}
+
 // ── Client folder resolution ─────────────────────────────
 
 // Normalize a client name for fuzzy matching (case + punctuation insensitive)
@@ -769,6 +818,7 @@ module.exports = {
   deleteFile,
   createFolder,
   getMetadata,
+  getThumbnail,
   findClientFolder,
   suggestClientFolders,
   resolveClientFolder,
