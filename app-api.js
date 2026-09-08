@@ -338,6 +338,12 @@ async function initClientAuthTables() {
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_client_invoices_key ON client_invoices (client_key)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_client_invoices_status ON client_invoices (status)`);
+  // Stripe columns — added later, safe to run repeatedly
+  await db.query(`ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS stripe_payment_intent_id TEXT`);
+  await db.query(`ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS stripe_charge_id          TEXT`);
+  await db.query(`ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS stripe_last4              TEXT`);
+  await db.query(`ALTER TABLE client_invoices ADD COLUMN IF NOT EXISTS stripe_brand              TEXT`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_invoices_stripe_pi ON client_invoices (stripe_payment_intent_id)`);
 
   // Time tracking — billable and non-billable time entries
   await db.query(`
@@ -2620,6 +2626,91 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // ── Dropbox client folder listing (with thumbnails) ────────────
+  // Firm-side: list all files in the client's mapped Dropbox folder. Firm
+  // uses this for a quick preview grid inside the client detail. Client-side
+  // never sees this — clients only see explicitly-uploaded client_documents.
+  app.get("/api/staff/clients/:key/dropbox-files", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "You don't have access to this client" });
+      const dbx = require("./dropbox-integration");
+      if (!dbx.isConfigured()) return res.json({ ok: true, files: [], folder: null, configured: false });
+
+      // Look up client name + A# for folder resolution
+      const cRow = await db.query(
+        `SELECT client_name, a_number FROM client_dropbox_mapping WHERE client_key = $1 LIMIT 1`,
+        [req.params.key]
+      );
+      const info = cRow.rows[0] || {};
+      // Fall back to tasks table for name/A# if mapping doesn't have it
+      if (!info.client_name || !info.a_number) {
+        const tRow = await db.query(
+          `SELECT client_name, a_number FROM tasks WHERE client_key = $1 LIMIT 1`,
+          [req.params.key]
+        );
+        info.client_name = info.client_name || tRow.rows[0]?.client_name;
+        info.a_number = info.a_number || tRow.rows[0]?.a_number;
+      }
+
+      const result = await dbx.listClientFiles({
+        clientKey: req.params.key,
+        clientName: info.client_name,
+        aNumber: info.a_number,
+        useCache: true,
+      });
+
+      // Flag which files are thumbnail-able (Dropbox only supports images + PDFs)
+      const files = (result.files || []).map(f => {
+        const ext = (f.name.split(".").pop() || "").toLowerCase();
+        const isImg = ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "heic"].includes(ext);
+        const isPdf = ext === "pdf";
+        return {
+          ...f,
+          extension: ext,
+          thumbnailable: isImg || isPdf,
+          icon: isImg ? "🖼️" : isPdf ? "📕" : ["doc", "docx"].includes(ext) ? "📝" : ["xls", "xlsx"].includes(ext) ? "📊" : "📄",
+        };
+      });
+
+      res.json({ ok: true, folder: result.folder, files, resolved: result.resolved });
+    } catch (err) {
+      console.error("[dropbox-files]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Fetch a single thumbnail as a data-URL (base64 JPEG). Cheap to call because
+  // both the Dropbox response and the encoded string are cached in-memory.
+  app.get("/api/staff/dropbox/thumbnail", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const path = req.query.path;
+      if (!path) return res.status(400).json({ ok: false, error: "path required" });
+      const dbx = require("./dropbox-integration");
+      if (!dbx.isConfigured()) return res.json({ ok: true, dataUrl: null });
+      const size = req.query.size || "w128h128";
+      const b64 = await dbx.getThumbnail(path, { size, format: "jpeg" });
+      if (!b64) return res.json({ ok: true, dataUrl: null, available: false });
+      res.json({ ok: true, dataUrl: `data:image/jpeg;base64,${b64}`, available: true });
+    } catch (err) {
+      console.error("[thumbnail]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Get a short-lived Dropbox link to open a file
+  app.get("/api/staff/dropbox/open", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const path = req.query.path;
+      if (!path) return res.status(400).json({ ok: false, error: "path required" });
+      const dbx = require("./dropbox-integration");
+      const url = await dbx.getTemporaryLink(path);
+      res.json({ ok: true, url });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // Download a specific document (both client + firm — auth handled by joining on client_key)
   app.get("/api/documents/:id", requireBearer, async (req, res) => {
     try {
@@ -2839,6 +2930,222 @@ function registerAppApi(app) {
       } catch {}
       res.json({ ok: true, invoice: r.rows[0] });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  STRIPE PAYMENTS (in-app credit card via Payment Sheet)
+  //  ─────────────────────────────────────────────────────
+  //  Flow:
+  //    1. Client taps "Pay with card" on an invoice
+  //    2. Frontend calls POST /api/client/invoices/:id/payment-intent
+  //         → Backend creates a Stripe PaymentIntent for the invoice amount
+  //         → Returns { clientSecret, publishableKey, ephemeralKey, customer }
+  //    3. Frontend presents Stripe Payment Sheet (Apple Pay + card entry)
+  //    4. On success, Stripe fires webhook → we mark invoice `paid`
+  //         and push-notify admins
+  //  Env vars required:
+  //    STRIPE_SECRET_KEY   (sk_test_... or sk_live_...)
+  //    STRIPE_PUBLISHABLE_KEY (pk_test_... or pk_live_...)
+  //    STRIPE_WEBHOOK_SECRET (whsec_...)  — from Stripe dashboard webhook setup
+  // ═══════════════════════════════════════════════════════
+
+  const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY;
+  const STRIPE_PUB = process.env.STRIPE_PUBLISHABLE_KEY;
+  const STRIPE_WH_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+
+  // Lazy-load stripe so the app still boots if the key isn't configured
+  function getStripe() {
+    if (!STRIPE_SECRET) return null;
+    try {
+      const Stripe = require("stripe");
+      return new Stripe(STRIPE_SECRET, { apiVersion: "2024-06-20" });
+    } catch (e) {
+      console.warn("[stripe] package not installed:", e.message);
+      return null;
+    }
+  }
+
+  // Create a PaymentIntent for an invoice. Returns everything the mobile app
+  // needs to present the Stripe Payment Sheet.
+  app.post("/api/client/invoices/:id/payment-intent", requireBearer, requireClient, async (req, res) => {
+    try {
+      const stripe = getStripe();
+      if (!stripe) return res.status(503).json({ ok: false, error: "Card payments not configured. Please use another payment method." });
+
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const clientKey = acctR.rows[0]?.client_key;
+      if (!clientKey) return res.status(403).json({ ok: false, error: "no linked case" });
+
+      const invR = await db.query(
+        `SELECT * FROM client_invoices WHERE id = $1 AND client_key = $2 LIMIT 1`,
+        [id, clientKey]
+      );
+      const invoice = invR.rows[0];
+      if (!invoice) return res.status(404).json({ ok: false, error: "invoice not found" });
+      if (invoice.status === 'paid') return res.status(400).json({ ok: false, error: "Invoice already marked paid" });
+      if (invoice.status === 'void') return res.status(400).json({ ok: false, error: "Invoice was voided" });
+
+      // Reuse an existing PaymentIntent if one is still open (idempotency)
+      if (invoice.stripe_payment_intent_id) {
+        try {
+          const existing = await stripe.paymentIntents.retrieve(invoice.stripe_payment_intent_id);
+          if (['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing'].includes(existing.status)) {
+            const ephKey = existing.customer ? await stripe.ephemeralKeys.create({ customer: existing.customer }, { apiVersion: "2024-06-20" }) : null;
+            return res.json({
+              ok: true,
+              clientSecret: existing.client_secret,
+              publishableKey: STRIPE_PUB,
+              ephemeralKey: ephKey?.secret || null,
+              customer: existing.customer,
+              amount_cents: invoice.amount_cents,
+            });
+          }
+        } catch (e) { /* fall through to create new */ }
+      }
+
+      // Create or reuse a Stripe customer tied to this account
+      await db.query(`ALTER TABLE client_accounts ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT`).catch(() => {});
+      const custMetaR = await db.query(
+        `SELECT stripe_customer_id, phone FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      let customerId = custMetaR.rows[0]?.stripe_customer_id;
+
+      if (!customerId) {
+        const nameR = await db.query(
+          `SELECT client_name FROM tasks WHERE client_key = $1 LIMIT 1`,
+          [clientKey]
+        );
+        const customer = await stripe.customers.create({
+          phone: custMetaR.rows[0]?.phone,
+          name: nameR.rows[0]?.client_name || undefined,
+          metadata: { client_key: clientKey, account_id: String(req.user.uid) },
+        });
+        customerId = customer.id;
+        await db.query(
+          `UPDATE client_accounts SET stripe_customer_id = $1 WHERE id = $2`,
+          [customerId, req.user.uid]
+        );
+      }
+
+      const ephemeralKey = await stripe.ephemeralKeys.create(
+        { customer: customerId },
+        { apiVersion: "2024-06-20" }
+      );
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: invoice.amount_cents,
+        currency: "usd",
+        customer: customerId,
+        automatic_payment_methods: { enabled: true },
+        description: `Tez Law invoice #${invoice.id}: ${invoice.description.substring(0, 200)}`,
+        metadata: {
+          invoice_id: String(invoice.id),
+          client_key: clientKey,
+          account_id: String(req.user.uid),
+        },
+      });
+
+      await db.query(
+        `UPDATE client_invoices SET stripe_payment_intent_id = $1, updated_at = NOW() WHERE id = $2`,
+        [paymentIntent.id, invoice.id]
+      );
+
+      res.json({
+        ok: true,
+        clientSecret: paymentIntent.client_secret,
+        publishableKey: STRIPE_PUB,
+        ephemeralKey: ephemeralKey.secret,
+        customer: customerId,
+        amount_cents: invoice.amount_cents,
+      });
+    } catch (err) {
+      console.error("[stripe payment-intent]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Stripe webhook — receives payment events and marks invoices paid.
+  // Register at Stripe Dashboard → Developers → Webhooks:
+  //   URL: https://<render-url>/api/stripe/webhook
+  //   Events: payment_intent.succeeded, payment_intent.payment_failed
+  // NOTE: server.js must preserve raw body for this route so signature
+  // verification works. Add: express.json({ verify: (req,_,buf) => req.rawBody = buf })
+  app.post("/api/stripe/webhook", async (req, res) => {
+    try {
+      const stripe = getStripe();
+      if (!stripe || !STRIPE_WH_SECRET) return res.status(503).send("stripe not configured");
+
+      const sig = req.headers["stripe-signature"];
+      let event;
+      try {
+        const raw = req.rawBody || Buffer.from(JSON.stringify(req.body));
+        event = stripe.webhooks.constructEvent(raw, sig, STRIPE_WH_SECRET);
+      } catch (err) {
+        console.warn("[stripe webhook] signature verification failed:", err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+      }
+
+      if (event.type === "payment_intent.succeeded") {
+        const pi = event.data.object;
+        const invoiceId = parseInt(pi.metadata?.invoice_id, 10);
+        if (Number.isFinite(invoiceId)) {
+          const charge = pi.latest_charge ? await stripe.charges.retrieve(pi.latest_charge) : null;
+          const last4 = charge?.payment_method_details?.card?.last4 || null;
+          const brand = charge?.payment_method_details?.card?.brand || null;
+
+          const r = await db.query(
+            `UPDATE client_invoices
+             SET status = 'paid', paid_at = NOW(), paid_method = 'credit_card',
+                 stripe_charge_id = $1, stripe_last4 = $2, stripe_brand = $3,
+                 updated_at = NOW()
+             WHERE id = $4 AND status <> 'paid'
+             RETURNING *`,
+            [charge?.id || null, last4, brand, invoiceId]
+          );
+          if (r.rows[0]) {
+            const inv = r.rows[0];
+            try {
+              const push = require("./push-notifications");
+              await push.sendToAdmins({
+                title: `💳 Credit card payment received`,
+                body: `$${(inv.amount_cents / 100).toFixed(2)} · ${brand || 'card'} ending ${last4 || '••••'} · ${inv.description.substring(0, 50)}`,
+                data: { type: "invoice_paid_stripe", invoice_id: inv.id, client_key: inv.client_key },
+              });
+              // Also confirm to the client
+              const acctR = await db.query(
+                `SELECT id FROM client_accounts WHERE client_key = $1 LIMIT 1`,
+                [inv.client_key]
+              );
+              if (acctR.rows[0]) {
+                await push.sendToUser(acctR.rows[0].id, "client", {
+                  title: "✓ Payment received",
+                  body: `We received your payment of $${(inv.amount_cents / 100).toFixed(2)}. Thank you!`,
+                  data: { type: "payment_confirmed", invoice_id: inv.id },
+                });
+              }
+            } catch {}
+          }
+        }
+      } else if (event.type === "payment_intent.payment_failed") {
+        const pi = event.data.object;
+        const invoiceId = parseInt(pi.metadata?.invoice_id, 10);
+        if (Number.isFinite(invoiceId)) {
+          console.log(`[stripe] payment_failed for invoice ${invoiceId}: ${pi.last_payment_error?.message}`);
+        }
+      }
+
+      res.json({ received: true });
+    } catch (err) {
+      console.error("[stripe webhook]:", err);
+      res.status(500).send("webhook error");
+    }
   });
 
   // ═══════════════════════════════════════════════════════
