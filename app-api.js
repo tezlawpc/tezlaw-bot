@@ -6151,6 +6151,48 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // Create a new matter template (custom case flow) with its tasks
+  app.post("/api/staff/matter-templates", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const { matter_type, name, description, tasks } = req.body || {};
+      if (!matter_type || !name) return res.status(400).json({ ok: false, error: "matter_type and name required" });
+      if (!Array.isArray(tasks) || tasks.length === 0) return res.status(400).json({ ok: false, error: "at least one task required" });
+
+      await db.query('BEGIN');
+      try {
+        const t = await db.query(
+          `INSERT INTO matter_templates (matter_type, name, description) VALUES ($1, $2, $3) RETURNING id`,
+          [String(matter_type).substring(0, 50), String(name).substring(0, 200), description ? String(description).substring(0, 1000) : null]
+        );
+        const tid = t.rows[0].id;
+        for (let i = 0; i < tasks.length; i++) {
+          const task = tasks[i];
+          if (!task.description || !String(task.description).trim()) continue;
+          const priority = ['normal', 'high', 'urgent'].includes(task.priority) ? task.priority : 'normal';
+          const dueOffset = task.due_offset_days != null && Number.isFinite(parseInt(task.due_offset_days, 10))
+            ? parseInt(task.due_offset_days, 10) : null;
+          await db.query(
+            `INSERT INTO matter_template_tasks
+               (template_id, sort_order, description, priority, due_offset_days, category, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [tid, task.sort_order ?? i, String(task.description).trim().substring(0, 500),
+             priority, dueOffset,
+             task.category ? String(task.category).substring(0, 100) : null,
+             task.notes ? String(task.notes).substring(0, 1000) : null]
+          );
+        }
+        await db.query('COMMIT');
+        res.json({ ok: true, id: tid });
+      } catch (e) {
+        await db.query('ROLLBACK');
+        throw e;
+      }
+    } catch (err) {
+      console.error('[matter-template create]:', err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // Instantiate a template for a client — creates all tasks
   app.post("/api/staff/matter-templates/:id/instantiate", requireBearer, requireFirmUser, async (req, res) => {
     try {
