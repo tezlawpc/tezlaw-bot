@@ -911,6 +911,50 @@ Tel: (626) 678-8677`,
   await db.query(`CREATE INDEX IF NOT EXISTS idx_generated_documents_client ON generated_documents (client_key)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_generated_documents_author ON generated_documents (generated_by)`);
 
+  // ── E-signatures ──────────────────────────────────────
+  // Two-table design: signature_requests holds the "please sign this" record
+  // (created by firm), and signatures holds the captured signature bytes
+  // and ESIGN Act metadata (intent, IP, timestamp, name typed by signer).
+  //
+  // A request can be tied to a document in `generated_documents` (retainer,
+  // engagement letter) or `client_documents` (uploaded PDF). We store the
+  // document reference as a polymorphic pointer via kind + id.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS signature_requests (
+      id                 SERIAL PRIMARY KEY,
+      client_key         TEXT NOT NULL,
+      document_kind      TEXT NOT NULL,      -- 'generated' | 'client_upload' | 'inline'
+      document_id        INTEGER,             -- id in the referenced table (nullable for 'inline')
+      title              TEXT NOT NULL,       -- shown to client, e.g. "Retainer Agreement"
+      body_snapshot      TEXT NOT NULL,       -- immutable copy of the doc text at request time
+      signer_role        TEXT NOT NULL DEFAULT 'client',  -- 'client' | 'attorney' | future
+      created_by         INTEGER NOT NULL,    -- staff user id
+      status             TEXT NOT NULL DEFAULT 'pending', -- pending | signed | declined | cancelled
+      signed_at          TIMESTAMPTZ,
+      declined_at        TIMESTAMPTZ,
+      cancelled_at       TIMESTAMPTZ,
+      created_at         TIMESTAMPTZ DEFAULT NOW(),
+      updated_at         TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_sig_req_client ON signature_requests (client_key)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_sig_req_status ON signature_requests (status)`);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS signatures (
+      id                    SERIAL PRIMARY KEY,
+      signature_request_id  INTEGER NOT NULL REFERENCES signature_requests(id) ON DELETE CASCADE,
+      client_account_id     INTEGER,          -- who signed (nullable for firm-side)
+      signer_name           TEXT NOT NULL,    -- typed by signer as intent-to-sign
+      signature_image       TEXT NOT NULL,    -- base64-encoded PNG of drawn signature
+      user_agent            TEXT,
+      ip_address            TEXT,
+      esign_consent         BOOLEAN NOT NULL DEFAULT FALSE, -- explicit checkbox
+      signed_at             TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_signatures_request ON signatures (signature_request_id)`);
+
   // CLE credits (per-attorney)
   await db.query(`
     CREATE TABLE IF NOT EXISTS cle_credits (
@@ -994,6 +1038,33 @@ Tel: (626) 678-8677`,
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_document_signatures_token ON document_signatures (sign_token)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_document_signatures_doc ON document_signatures (generated_document_id)`);
+
+  // ── Appointment booking (paid consultation requests) ────────────────
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS appointments (
+      id                     SERIAL PRIMARY KEY,
+      client_key             TEXT NOT NULL,
+      client_account_id      INTEGER,
+      purpose                TEXT NOT NULL,
+      preferred_dates        TEXT,
+      notes                  TEXT,
+      fee_cents              INTEGER NOT NULL,
+      status                 TEXT NOT NULL DEFAULT 'awaiting_payment',
+      stripe_payment_intent_id TEXT,
+      paid_at                TIMESTAMPTZ,
+      confirmed_at           TIMESTAMPTZ,
+      confirmed_by           INTEGER,
+      scheduled_time         TIMESTAMPTZ,
+      scheduled_location     TEXT,
+      cancelled_at           TIMESTAMPTZ,
+      cancelled_by           INTEGER,
+      cancelled_reason       TEXT,
+      created_at             TIMESTAMPTZ DEFAULT NOW(),
+      updated_at             TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_appointments_client ON appointments (client_key)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments (status)`);
 }
 
 // In-memory cache of matter defaults. Reloaded on any admin update.
@@ -3094,6 +3165,40 @@ function registerAppApi(app) {
 
       if (event.type === "payment_intent.succeeded") {
         const pi = event.data.object;
+        // Route by metadata.kind
+        if (pi.metadata?.kind === "appointment_fee") {
+          const apptId = parseInt(pi.metadata?.appointment_id, 10);
+          if (Number.isFinite(apptId)) {
+            const r = await db.query(
+              `UPDATE appointments
+               SET status = 'paid_pending', paid_at = NOW(), updated_at = NOW()
+               WHERE id = $1 AND status IN ('awaiting_payment')
+               RETURNING *`,
+              [apptId]
+            );
+            if (r.rows[0]) {
+              const appt = r.rows[0];
+              try {
+                const push = require("./push-notifications");
+                await push.sendToAdmins({
+                  title: "💰 Consultation fee paid — pending time confirmation",
+                  body: `${appt.purpose.substring(0, 80)} · $${(appt.fee_cents / 100).toFixed(2)}`,
+                  data: { type: "appointment_paid", appointment_id: appt.id, client_key: appt.client_key },
+                });
+                if (appt.client_account_id) {
+                  await push.sendToUser(appt.client_account_id, "client", {
+                    title: "✓ Payment received",
+                    body: "Our office manager will confirm your appointment time shortly.",
+                    data: { type: "appointment_payment_confirmed", appointment_id: appt.id },
+                  });
+                }
+              } catch {}
+            }
+          }
+          return res.json({ received: true });
+        }
+
+        // Default: invoice payment
         const invoiceId = parseInt(pi.metadata?.invoice_id, 10);
         if (Number.isFinite(invoiceId)) {
           const charge = pi.latest_charge ? await stripe.charges.retrieve(pi.latest_charge) : null;
@@ -3146,6 +3251,476 @@ function registerAppApi(app) {
       console.error("[stripe webhook]:", err);
       res.status(500).send("webhook error");
     }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  E-SIGNATURES (ESIGN Act–compliant workflow)
+  //  ─────────────────────────────────────────────────────
+  //  Flow:
+  //   1. Firm creates a signature_request tied to a client + document
+  //   2. Client sees "Please sign" card in their app, opens the doc
+  //   3. Client:
+  //        a) reads the document text (body_snapshot preserved verbatim)
+  //        b) types their full name (intent to sign)
+  //        c) checks a consent box (ESIGN Act disclosure)
+  //        d) draws signature with finger/stylus → sent as base64 PNG
+  //   4. Server stores signature + metadata (IP, UA, timestamp, consent)
+  //   5. Push notification back to firm
+  // ═══════════════════════════════════════════════════════
+
+  // Firm: create signature request for a client
+  app.post("/api/staff/clients/:key/signature-requests", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const { title, body_snapshot, document_kind, document_id } = req.body || {};
+      if (!title || !body_snapshot) return res.status(400).json({ ok: false, error: "title + body_snapshot required" });
+      const kind = ['generated', 'client_upload', 'inline'].includes(document_kind) ? document_kind : 'inline';
+      const r = await db.query(
+        `INSERT INTO signature_requests (client_key, document_kind, document_id, title, body_snapshot, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [req.params.key, kind, document_id || null, String(title).substring(0, 200), body_snapshot, req.user.uid]
+      );
+      // Push notify the client
+      try {
+        const push = require("./push-notifications");
+        const acctR = await db.query(
+          `SELECT id FROM client_accounts WHERE client_key = $1 LIMIT 1`,
+          [req.params.key]
+        );
+        if (acctR.rows[0]) {
+          await push.sendToUser(acctR.rows[0].id, "client", {
+            title: "✍️ Signature requested",
+            body: `Please sign: ${String(title).substring(0, 80)}`,
+            data: { type: "signature_request", request_id: r.rows[0].id },
+          });
+        }
+      } catch {}
+      res.json({ ok: true, request: r.rows[0] });
+    } catch (err) {
+      console.error("[sig-req create]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Firm: list signature requests for a client (all statuses)
+  app.get("/api/staff/clients/:key/signature-requests", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const r = await db.query(
+        `SELECT r.*,
+                s.signer_name, s.signed_at AS actually_signed_at, s.esign_consent
+         FROM signature_requests r
+         LEFT JOIN signatures s ON s.signature_request_id = r.id
+         WHERE r.client_key = $1
+         ORDER BY r.created_at DESC`,
+        [req.params.key]
+      );
+      res.json({ ok: true, requests: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Client: list pending signature requests
+  app.get("/api/client/signature-requests", requireBearer, requireClient, async (req, res) => {
+    try {
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const clientKey = acctR.rows[0]?.client_key;
+      if (!clientKey) return res.json({ ok: true, requests: [] });
+      const r = await db.query(
+        `SELECT r.id, r.title, r.body_snapshot, r.status, r.created_at, r.signed_at
+         FROM signature_requests r
+         WHERE r.client_key = $1
+         ORDER BY (r.status = 'pending') DESC, r.created_at DESC`,
+        [clientKey]
+      );
+      res.json({ ok: true, requests: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Client: get one signature request (for signing)
+  app.get("/api/client/signature-requests/:id", requireBearer, requireClient, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const r = await db.query(
+        `SELECT * FROM signature_requests WHERE id = $1 AND client_key = $2 LIMIT 1`,
+        [id, acctR.rows[0]?.client_key]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      res.json({ ok: true, request: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Client: SIGN a request
+  app.post("/api/client/signature-requests/:id/sign", requireBearer, requireClient, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { signer_name, signature_image, esign_consent } = req.body || {};
+      if (!signer_name || !signature_image) return res.status(400).json({ ok: false, error: "signer_name and signature_image required" });
+      if (esign_consent !== true) return res.status(400).json({ ok: false, error: "You must consent to electronic signatures (ESIGN Act)" });
+
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const clientKey = acctR.rows[0]?.client_key;
+      // Verify the request belongs to this client and is still pending
+      const reqR = await db.query(
+        `SELECT * FROM signature_requests WHERE id = $1 AND client_key = $2 LIMIT 1`,
+        [id, clientKey]
+      );
+      if (!reqR.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      if (reqR.rows[0].status !== 'pending') return res.status(400).json({ ok: false, error: `already ${reqR.rows[0].status}` });
+
+      // Strip data-URL prefix if present
+      const cleanImage = String(signature_image).replace(/^data:image\/\w+;base64,/, '').substring(0, 2_000_000);
+      // Capture ESIGN metadata
+      const ua = String(req.headers['user-agent'] || '').substring(0, 500);
+      const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+
+      await db.query('BEGIN');
+      try {
+        await db.query(
+          `INSERT INTO signatures (signature_request_id, client_account_id, signer_name, signature_image, user_agent, ip_address, esign_consent)
+           VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
+          [id, req.user.uid, String(signer_name).substring(0, 200), cleanImage, ua, ip]
+        );
+        await db.query(
+          `UPDATE signature_requests SET status = 'signed', signed_at = NOW(), updated_at = NOW() WHERE id = $1`,
+          [id]
+        );
+        await db.query('COMMIT');
+      } catch (e) {
+        await db.query('ROLLBACK');
+        throw e;
+      }
+
+      // Notify firm
+      try {
+        const push = require("./push-notifications");
+        await push.sendToAdmins({
+          title: "✍️ Client signed a document",
+          body: `${signer_name} signed: ${reqR.rows[0].title.substring(0, 80)}`,
+          data: { type: "signature_completed", request_id: id, client_key: clientKey },
+        });
+      } catch {}
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[sign]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Firm: view the full signature (image + metadata) for audit
+  app.get("/api/staff/signature-requests/:id/signature", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const reqR = await db.query(
+        `SELECT client_key FROM signature_requests WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+      if (!reqR.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      const ok = await canUserAccessClient(req.user, reqR.rows[0].client_key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const r = await db.query(
+        `SELECT * FROM signatures WHERE signature_request_id = $1 ORDER BY signed_at DESC LIMIT 1`,
+        [id]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not signed yet" });
+      res.json({ ok: true, signature: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  APPOINTMENT BOOKING (paid consultation requests)
+  //  ─────────────────────────────────────────────────────
+  //  Flow:
+  //   1. Client requests an in-person appointment: purpose + preferred date range
+  //   2. Client pays consultation fee via Stripe (reuses PaymentIntent flow)
+  //   3. Backend marks appointment as 'paid_pending_confirmation'
+  //   4. Office manager sees pending list, picks actual time, confirms
+  //   5. Client gets push notification with confirmed time
+  //   6. Manager can add to their calendar externally
+  // ═══════════════════════════════════════════════════════
+
+  app.get("/api/health-appointments", (req, res) => res.json({ ok: true }));
+
+  // Client: create an appointment request. Returns Stripe intent for fee payment.
+  app.post("/api/client/appointments", requireBearer, requireClient, async (req, res) => {
+    try {
+      const { purpose, preferred_dates, notes } = req.body || {};
+      if (!purpose || !String(purpose).trim()) return res.status(400).json({ ok: false, error: "purpose required" });
+
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const clientKey = acctR.rows[0]?.client_key;
+      if (!clientKey) return res.status(403).json({ ok: false, error: "no linked case" });
+
+      // Standard consultation fee (env-configurable, default $150)
+      const FEE_CENTS = parseInt(process.env.CONSULTATION_FEE_CENTS || '15000', 10);
+
+      const r = await db.query(
+        `INSERT INTO appointments (client_key, client_account_id, purpose, preferred_dates, notes, fee_cents)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [clientKey, req.user.uid, String(purpose).substring(0, 500),
+         preferred_dates ? String(preferred_dates).substring(0, 300) : null,
+         notes ? String(notes).substring(0, 1000) : null,
+         FEE_CENTS]
+      );
+
+      // Notify firm that a new appointment request exists (payment pending)
+      try {
+        const push = require("./push-notifications");
+        await push.sendToAdmins({
+          title: "📅 New appointment request",
+          body: `${String(purpose).substring(0, 80)} · awaiting payment`,
+          data: { type: "appointment_requested", appointment_id: r.rows[0].id, client_key: clientKey },
+        });
+      } catch {}
+
+      res.json({ ok: true, appointment: r.rows[0], fee_cents: FEE_CENTS });
+    } catch (err) {
+      console.error("[appt create]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Client: start payment for an appointment (creates Stripe PaymentIntent)
+  app.post("/api/client/appointments/:id/payment-intent", requireBearer, requireClient, async (req, res) => {
+    try {
+      const stripe = getStripe();
+      if (!stripe) return res.status(503).json({ ok: false, error: "Card payments not configured" });
+
+      const id = parseInt(req.params.id, 10);
+      const acctR = await db.query(
+        `SELECT client_key, stripe_customer_id, phone FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const clientKey = acctR.rows[0]?.client_key;
+
+      const apptR = await db.query(
+        `SELECT * FROM appointments WHERE id = $1 AND client_key = $2 LIMIT 1`,
+        [id, clientKey]
+      );
+      const appt = apptR.rows[0];
+      if (!appt) return res.status(404).json({ ok: false, error: "not found" });
+      if (appt.status !== 'awaiting_payment') return res.status(400).json({ ok: false, error: `already ${appt.status}` });
+
+      // Reuse existing intent if pending
+      if (appt.stripe_payment_intent_id) {
+        try {
+          const existing = await stripe.paymentIntents.retrieve(appt.stripe_payment_intent_id);
+          if (['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing'].includes(existing.status)) {
+            const ephKey = existing.customer ? await stripe.ephemeralKeys.create({ customer: existing.customer }, { apiVersion: "2024-06-20" }) : null;
+            return res.json({
+              ok: true,
+              clientSecret: existing.client_secret,
+              publishableKey: STRIPE_PUB,
+              ephemeralKey: ephKey?.secret || null,
+              customer: existing.customer,
+              amount_cents: appt.fee_cents,
+            });
+          }
+        } catch (e) {}
+      }
+
+      // Get or create Stripe customer
+      let customerId = acctR.rows[0]?.stripe_customer_id;
+      if (!customerId) {
+        const nameR = await db.query(
+          `SELECT client_name FROM tasks WHERE client_key = $1 LIMIT 1`,
+          [clientKey]
+        );
+        const customer = await stripe.customers.create({
+          phone: acctR.rows[0]?.phone,
+          name: nameR.rows[0]?.client_name || undefined,
+          metadata: { client_key: clientKey, account_id: String(req.user.uid) },
+        });
+        customerId = customer.id;
+        await db.query(`UPDATE client_accounts SET stripe_customer_id = $1 WHERE id = $2`, [customerId, req.user.uid]);
+      }
+
+      const ephemeralKey = await stripe.ephemeralKeys.create(
+        { customer: customerId },
+        { apiVersion: "2024-06-20" }
+      );
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: appt.fee_cents,
+        currency: "usd",
+        customer: customerId,
+        automatic_payment_methods: { enabled: true },
+        description: `Tez Law consultation fee — appointment #${appt.id}`,
+        metadata: {
+          appointment_id: String(appt.id),
+          client_key: clientKey,
+          account_id: String(req.user.uid),
+          kind: "appointment_fee",
+        },
+      });
+
+      await db.query(
+        `UPDATE appointments SET stripe_payment_intent_id = $1, updated_at = NOW() WHERE id = $2`,
+        [paymentIntent.id, appt.id]
+      );
+
+      res.json({
+        ok: true,
+        clientSecret: paymentIntent.client_secret,
+        publishableKey: STRIPE_PUB,
+        ephemeralKey: ephemeralKey.secret,
+        customer: customerId,
+        amount_cents: appt.fee_cents,
+      });
+    } catch (err) {
+      console.error("[appt pi]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Client: list their own appointments
+  app.get("/api/client/appointments", requireBearer, requireClient, async (req, res) => {
+    try {
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const clientKey = acctR.rows[0]?.client_key;
+      if (!clientKey) return res.json({ ok: true, appointments: [] });
+      const r = await db.query(
+        `SELECT * FROM appointments WHERE client_key = $1 ORDER BY created_at DESC LIMIT 100`,
+        [clientKey]
+      );
+      res.json({ ok: true, appointments: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Client: cancel their own appointment (only if not yet confirmed)
+  app.patch("/api/client/appointments/:id/cancel", requireBearer, requireClient, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const acctR = await db.query(
+        `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
+        [req.user.uid]
+      );
+      const r = await db.query(
+        `UPDATE appointments SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = $1, updated_at = NOW()
+         WHERE id = $2 AND client_key = $3 AND status IN ('awaiting_payment', 'paid_pending')
+         RETURNING *`,
+        [req.user.uid, id, acctR.rows[0]?.client_key]
+      );
+      if (!r.rows[0]) return res.status(400).json({ ok: false, error: "Cannot cancel — either already confirmed or not yours" });
+      // Notify firm
+      try {
+        const push = require("./push-notifications");
+        await push.sendToAdmins({
+          title: "🚫 Client cancelled appointment",
+          body: `${r.rows[0].purpose.substring(0, 80)}`,
+          data: { type: "appointment_cancelled", appointment_id: r.rows[0].id, client_key: r.rows[0].client_key },
+        });
+      } catch {}
+      res.json({ ok: true, appointment: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Firm: list all paid pending + confirmed upcoming appointments
+  app.get("/api/staff/appointments", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const status = req.query.status || null; // 'paid_pending' | 'confirmed' | 'all'
+      let sql = `SELECT a.*, t.client_name FROM appointments a
+                 LEFT JOIN tasks t ON t.client_key = a.client_key
+                 WHERE 1=1`;
+      const params = [];
+      if (status && status !== 'all') {
+        params.push(status);
+        sql += ` AND a.status = $${params.length}`;
+      } else {
+        // Default: exclude cancelled + completed noise
+        sql += ` AND a.status IN ('paid_pending', 'confirmed', 'awaiting_payment')`;
+      }
+      sql += ` ORDER BY (a.status = 'paid_pending') DESC, a.created_at DESC LIMIT 200`;
+      const r = await db.query(sql, params);
+      res.json({ ok: true, appointments: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Firm: confirm an appointment — pick actual time + location
+  app.post("/api/staff/appointments/:id/confirm", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { scheduled_time, scheduled_location } = req.body || {};
+      if (!scheduled_time) return res.status(400).json({ ok: false, error: "scheduled_time required" });
+
+      const apptR = await db.query(`SELECT * FROM appointments WHERE id = $1 LIMIT 1`, [id]);
+      const appt = apptR.rows[0];
+      if (!appt) return res.status(404).json({ ok: false, error: "not found" });
+      if (appt.status !== 'paid_pending') return res.status(400).json({ ok: false, error: `Cannot confirm — status is ${appt.status}` });
+
+      const ok = await canUserAccessClient(req.user, appt.client_key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+
+      const r = await db.query(
+        `UPDATE appointments SET status = 'confirmed', confirmed_at = NOW(), confirmed_by = $1,
+                                  scheduled_time = $2, scheduled_location = $3, updated_at = NOW()
+         WHERE id = $4 RETURNING *`,
+        [req.user.uid, scheduled_time, scheduled_location ? String(scheduled_location).substring(0, 500) : '4141 S Nogales St C102, West Covina CA 91792', id]
+      );
+
+      // Push notify client
+      try {
+        const push = require("./push-notifications");
+        if (appt.client_account_id) {
+          const when = new Date(scheduled_time).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+          await push.sendToUser(appt.client_account_id, "client", {
+            title: "✅ Appointment confirmed",
+            body: `${when} — ${scheduled_location || 'at our office'}`,
+            data: { type: "appointment_confirmed", appointment_id: appt.id },
+          });
+        }
+      } catch {}
+      res.json({ ok: true, appointment: r.rows[0] });
+    } catch (err) {
+      console.error("[appt confirm]:", err);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Firm: cancel appointment
+  app.post("/api/staff/appointments/:id/cancel", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { reason } = req.body || {};
+      const apptR = await db.query(`SELECT * FROM appointments WHERE id = $1 LIMIT 1`, [id]);
+      const appt = apptR.rows[0];
+      if (!appt) return res.status(404).json({ ok: false, error: "not found" });
+      const ok = await canUserAccessClient(req.user, appt.client_key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const r = await db.query(
+        `UPDATE appointments SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = $1, cancelled_reason = $2, updated_at = NOW()
+         WHERE id = $3 RETURNING *`,
+        [req.user.uid, reason ? String(reason).substring(0, 500) : null, id]
+      );
+      try {
+        const push = require("./push-notifications");
+        if (appt.client_account_id) {
+          await push.sendToUser(appt.client_account_id, "client", {
+            title: "Appointment cancelled by firm",
+            body: reason || "Please contact us to reschedule.",
+            data: { type: "appointment_cancelled_by_firm", appointment_id: appt.id },
+          });
+        }
+      } catch {}
+      res.json({ ok: true, appointment: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
   // ═══════════════════════════════════════════════════════
