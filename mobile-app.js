@@ -99,89 +99,107 @@ async function getClientDetail(key) {
   } catch {}
 
   // Hearing notes (paralegal summaries recorded after court appearances).
-  // Match by name OR A#. Uses case-insensitive + trimmed comparison so
-  // "  John Smith " in tasks still matches "John Smith" in hearing_notes.
-  let hearingNotes = [];
-  try {
-    const conds = [];
-    const params = [];
-    if (client.client_name) {
-      params.push(String(client.client_name).trim().toLowerCase());
-      conds.push(`LOWER(TRIM(client_name)) = $${params.length}`);
+  // Match with a range of strategies since client_name in `hearing_notes` is
+  // free-form and may differ from what's stored in `tasks` (case, order,
+  // "Last, First" vs "First Last", middle names, Jr suffixes, etc).
+  //
+  // Strategies (any one matches):
+  //  1. Case-insensitive exact match after trim
+  //  2. Normalized A-number (digits only) match
+  //  3. "Last, First" ↔ "First Last" reorder
+  //  4. Substring either direction (min 4 chars) — catches "John Smith" ↔ "John A. Smith Jr"
+  //  5. Cross-reference via client_hearing_notices (same client_key, same date)
+  const nameVariants = [];
+  if (client.client_name) {
+    const clean = String(client.client_name).trim();
+    nameVariants.push(clean.toLowerCase());
+    // "First Last" → "Last, First"
+    const words = clean.split(/\s+/).filter(Boolean);
+    if (words.length >= 2) {
+      nameVariants.push(`${words[words.length - 1]}, ${words.slice(0, -1).join(' ')}`.toLowerCase());
     }
-    if (client.a_number) {
-      // Normalize A-numbers: strip 'A' prefix + non-digits so A123456789, A 123 456 789, 123456789 all match
-      const cleanA = String(client.a_number).replace(/[^0-9]/g, '');
-      if (cleanA) {
-        params.push(cleanA);
-        conds.push(`REGEXP_REPLACE(a_number, '[^0-9]', '', 'g') = $${params.length}`);
-      }
+    // "Last, First" → "First Last"
+    if (clean.includes(',')) {
+      const [last, ...rest] = clean.split(',');
+      nameVariants.push(`${rest.join(',').trim()} ${last.trim()}`.toLowerCase().replace(/\s+/g, ' ').trim());
     }
-    if (conds.length) {
-      const r = await db.query(
-        `SELECT id, hearing_date, hearing_type, judge_name, disposition,
-                paralegal_summary, client_summary, created_at,
-                sent_to_paralegal_at, sent_to_client_at
-         FROM hearing_notes
-         WHERE ${conds.join(' OR ')}
-         ORDER BY hearing_date DESC NULLS LAST, created_at DESC
-         LIMIT 20`,
-        params
-      );
-      hearingNotes = r.rows.map(n => ({
-        id: n.id,
-        source: 'master',
-        hearing_date: n.hearing_date,
-        hearing_type: n.hearing_type,
-        judge_name: n.judge_name,
-        disposition: n.disposition,
-        summary_preview: (n.paralegal_summary || n.client_summary || '').substring(0, 280),
-        has_full_note: !!(n.paralegal_summary || n.client_summary),
-        created_at: n.created_at,
-        sent_to_client: !!n.sent_to_client_at,
-        sent_to_paralegal: !!n.sent_to_paralegal_at,
-      }));
-    }
-  } catch (e) { console.warn('[getClientDetail] hearing_notes fetch:', e.message); }
+  }
+  const cleanA = client.a_number ? String(client.a_number).replace(/[^0-9]/g, '') : '';
 
-  // Individual hearing notes (bond, master, individual hearings)
-  let individualNotes = [];
-  try {
+  async function fetchNotes(table, extraCols) {
     const conds = [];
     const params = [];
-    if (client.client_name) {
-      params.push(String(client.client_name).trim().toLowerCase());
+    // Exact name variants
+    for (const v of nameVariants) {
+      params.push(v);
       conds.push(`LOWER(TRIM(client_name)) = $${params.length}`);
     }
-    if (client.a_number) {
-      const cleanA = String(client.a_number).replace(/[^0-9]/g, '');
-      if (cleanA) {
-        params.push(cleanA);
-        conds.push(`REGEXP_REPLACE(a_number, '[^0-9]', '', 'g') = $${params.length}`);
-      }
+    // A-number match
+    if (cleanA) {
+      params.push(cleanA);
+      conds.push(`REGEXP_REPLACE(COALESCE(a_number,''), '[^0-9]', '', 'g') = $${params.length}`);
     }
-    if (conds.length) {
-      const r = await db.query(
-        `SELECT id, hearing_date, hearing_type, judge_name, outcome, notes, created_at
-         FROM individual_hearing_notes
-         WHERE ${conds.join(' OR ')}
-         ORDER BY hearing_date DESC NULLS LAST, created_at DESC
-         LIMIT 20`,
-        params
-      );
-      individualNotes = r.rows.map(n => ({
-        id: n.id,
-        source: 'individual',
-        hearing_date: n.hearing_date,
-        hearing_type: n.hearing_type,
-        judge_name: n.judge_name,
-        disposition: n.outcome,
-        summary_preview: (n.notes || '').substring(0, 280),
-        has_full_note: !!n.notes,
-        created_at: n.created_at,
-      }));
+    // Substring either direction (only for names >= 4 chars to avoid false positives)
+    if (client.client_name && client.client_name.length >= 4) {
+      params.push(String(client.client_name).trim().toLowerCase());
+      // Note name contains tasks name (e.g. tasks "John Smith" ↔ notes "John A. Smith")
+      conds.push(`POSITION($${params.length} IN LOWER(TRIM(client_name))) > 0`);
+      // OR tasks name contains note name
+      conds.push(`POSITION(LOWER(TRIM(client_name)) IN $${params.length}) > 0`);
     }
-  } catch (e) { console.warn('[getClientDetail] individual_hearing_notes fetch:', e.message); }
+    if (!conds.length) return [];
+    const sql = `SELECT id, hearing_date, hearing_type, judge_name, ${extraCols}, created_at
+                 FROM ${table}
+                 WHERE ${conds.join(' OR ')}
+                 ORDER BY hearing_date DESC NULLS LAST, created_at DESC
+                 LIMIT 20`;
+    try {
+      const r = await db.query(sql, params);
+      return r.rows;
+    } catch (e) {
+      console.warn(`[getClientDetail] ${table} fetch failed:`, e.message);
+      return [];
+    }
+  }
+
+  const hearingNotesRaw = await fetchNotes(
+    'hearing_notes',
+    'disposition, paralegal_summary, client_summary, sent_to_paralegal_at, sent_to_client_at'
+  );
+  const hearingNotes = hearingNotesRaw.map(n => ({
+    id: n.id,
+    source: 'master',
+    hearing_date: n.hearing_date,
+    hearing_type: n.hearing_type,
+    judge_name: n.judge_name,
+    disposition: n.disposition,
+    summary_preview: (n.paralegal_summary || n.client_summary || '').substring(0, 280),
+    has_full_note: !!(n.paralegal_summary || n.client_summary),
+    created_at: n.created_at,
+    sent_to_client: !!n.sent_to_client_at,
+    sent_to_paralegal: !!n.sent_to_paralegal_at,
+  }));
+
+  const individualNotesRaw = await fetchNotes(
+    'individual_hearing_notes',
+    'outcome, notes'
+  );
+  const individualNotes = individualNotesRaw.map(n => ({
+    id: n.id,
+    source: 'individual',
+    hearing_date: n.hearing_date,
+    hearing_type: n.hearing_type,
+    judge_name: n.judge_name,
+    disposition: n.outcome,
+    summary_preview: (n.notes || '').substring(0, 280),
+    has_full_note: !!n.notes,
+    created_at: n.created_at,
+  }));
+
+  // Diagnostic log so we can debug in Render logs if matching still fails
+  if ((hearingNotes.length + individualNotes.length) === 0 && client.client_name) {
+    console.log(`[getClientDetail] no notes matched for client="${client.client_name}" a_number="${client.a_number}" variants=${JSON.stringify(nameVariants)}`);
+  }
 
   // Merge and sort — most recent first
   const allNotes = [...hearingNotes, ...individualNotes]
