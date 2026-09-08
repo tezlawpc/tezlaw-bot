@@ -1858,7 +1858,23 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
-  // Federal / Trademark matters — admin sees all; others see matters with matching
+  // Individual note detail — full note text for the detail viewer
+  app.get("/api/staff/notes/individual/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+      const r = await db.query(`SELECT * FROM individual_hearing_notes WHERE id = $1`, [id]);
+      if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
+      const note = r.rows[0];
+      if (!isAdmin(req.user)) {
+        const okKey = note.client_key ? await canUserAccessClient(req.user, note.client_key) : false;
+        if (!okKey && (!note.created_by || String(note.created_by) !== String(req.user.uid))) {
+          return res.status(403).json({ ok: false, error: "no access" });
+        }
+      }
+      res.json({ ok: true, note });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
   // assigned attorney or client_key visible to them.
   app.get("/api/staff/federal", requireBearer, requireFirmUser, async (req, res) => {
     try {
