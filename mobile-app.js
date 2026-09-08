@@ -98,6 +98,76 @@ async function getClientDetail(key) {
     unnotifiedNotices = r.rows;
   } catch {}
 
+  // Hearing notes (paralegal summaries recorded after court appearances).
+  // Match by name OR A#. Return a preview per note; frontend fetches full
+  // note text on demand via /api/staff/notes/master/:id
+  let hearingNotes = [];
+  try {
+    const conds = [];
+    const params = [];
+    if (client.client_name) { params.push(client.client_name); conds.push(`client_name = $${params.length}`); }
+    if (client.a_number) { params.push(client.a_number); conds.push(`a_number = $${params.length}`); }
+    if (conds.length) {
+      const r = await db.query(
+        `SELECT id, hearing_date, hearing_type, judge_name, disposition,
+                paralegal_summary, client_summary, created_at,
+                sent_to_paralegal_at, sent_to_client_at
+         FROM hearing_notes
+         WHERE ${conds.join(' OR ')}
+         ORDER BY hearing_date DESC NULLS LAST, created_at DESC
+         LIMIT 20`,
+        params
+      );
+      hearingNotes = r.rows.map(n => ({
+        id: n.id,
+        source: 'master',
+        hearing_date: n.hearing_date,
+        hearing_type: n.hearing_type,
+        judge_name: n.judge_name,
+        disposition: n.disposition,
+        summary_preview: (n.paralegal_summary || n.client_summary || '').substring(0, 280),
+        has_full_note: !!(n.paralegal_summary || n.client_summary),
+        created_at: n.created_at,
+        sent_to_client: !!n.sent_to_client_at,
+        sent_to_paralegal: !!n.sent_to_paralegal_at,
+      }));
+    }
+  } catch (e) { /* table may not exist on fresh installs */ }
+
+  // Individual hearing notes (bond, master, individual hearings)
+  let individualNotes = [];
+  try {
+    const conds = [];
+    const params = [];
+    if (client.client_name) { params.push(client.client_name); conds.push(`client_name = $${params.length}`); }
+    if (client.a_number) { params.push(client.a_number); conds.push(`a_number = $${params.length}`); }
+    if (conds.length) {
+      const r = await db.query(
+        `SELECT id, hearing_date, hearing_type, judge_name, outcome, notes, created_at
+         FROM individual_hearing_notes
+         WHERE ${conds.join(' OR ')}
+         ORDER BY hearing_date DESC NULLS LAST, created_at DESC
+         LIMIT 20`,
+        params
+      );
+      individualNotes = r.rows.map(n => ({
+        id: n.id,
+        source: 'individual',
+        hearing_date: n.hearing_date,
+        hearing_type: n.hearing_type,
+        judge_name: n.judge_name,
+        disposition: n.outcome,
+        summary_preview: (n.notes || '').substring(0, 280),
+        has_full_note: !!n.notes,
+        created_at: n.created_at,
+      }));
+    }
+  } catch (e) { /* table may not exist */ }
+
+  // Merge and sort — most recent first
+  const allNotes = [...hearingNotes, ...individualNotes]
+    .sort((a, b) => new Date(b.hearing_date || b.created_at || 0) - new Date(a.hearing_date || a.created_at || 0));
+
   const now = Date.now();
   return {
     key: client.key,
@@ -120,6 +190,7 @@ async function getClientDetail(key) {
       sent: h.sent,
       is_future: h.hearing_date && new Date(h.hearing_date).getTime() >= now,
     })).sort((a, b) => new Date(b.hearing_date || 0) - new Date(a.hearing_date || 0)),
+    hearing_notes: allNotes,
     deadlines,
     unnotified_notices: unnotifiedNotices,
   };
