@@ -99,14 +99,24 @@ async function getClientDetail(key) {
   } catch {}
 
   // Hearing notes (paralegal summaries recorded after court appearances).
-  // Match by name OR A#. Return a preview per note; frontend fetches full
-  // note text on demand via /api/staff/notes/master/:id
+  // Match by name OR A#. Uses case-insensitive + trimmed comparison so
+  // "  John Smith " in tasks still matches "John Smith" in hearing_notes.
   let hearingNotes = [];
   try {
     const conds = [];
     const params = [];
-    if (client.client_name) { params.push(client.client_name); conds.push(`client_name = $${params.length}`); }
-    if (client.a_number) { params.push(client.a_number); conds.push(`a_number = $${params.length}`); }
+    if (client.client_name) {
+      params.push(String(client.client_name).trim().toLowerCase());
+      conds.push(`LOWER(TRIM(client_name)) = $${params.length}`);
+    }
+    if (client.a_number) {
+      // Normalize A-numbers: strip 'A' prefix + non-digits so A123456789, A 123 456 789, 123456789 all match
+      const cleanA = String(client.a_number).replace(/[^0-9]/g, '');
+      if (cleanA) {
+        params.push(cleanA);
+        conds.push(`REGEXP_REPLACE(a_number, '[^0-9]', '', 'g') = $${params.length}`);
+      }
+    }
     if (conds.length) {
       const r = await db.query(
         `SELECT id, hearing_date, hearing_type, judge_name, disposition,
@@ -132,15 +142,24 @@ async function getClientDetail(key) {
         sent_to_paralegal: !!n.sent_to_paralegal_at,
       }));
     }
-  } catch (e) { /* table may not exist on fresh installs */ }
+  } catch (e) { console.warn('[getClientDetail] hearing_notes fetch:', e.message); }
 
   // Individual hearing notes (bond, master, individual hearings)
   let individualNotes = [];
   try {
     const conds = [];
     const params = [];
-    if (client.client_name) { params.push(client.client_name); conds.push(`client_name = $${params.length}`); }
-    if (client.a_number) { params.push(client.a_number); conds.push(`a_number = $${params.length}`); }
+    if (client.client_name) {
+      params.push(String(client.client_name).trim().toLowerCase());
+      conds.push(`LOWER(TRIM(client_name)) = $${params.length}`);
+    }
+    if (client.a_number) {
+      const cleanA = String(client.a_number).replace(/[^0-9]/g, '');
+      if (cleanA) {
+        params.push(cleanA);
+        conds.push(`REGEXP_REPLACE(a_number, '[^0-9]', '', 'g') = $${params.length}`);
+      }
+    }
     if (conds.length) {
       const r = await db.query(
         `SELECT id, hearing_date, hearing_type, judge_name, outcome, notes, created_at
@@ -162,7 +181,7 @@ async function getClientDetail(key) {
         created_at: n.created_at,
       }));
     }
-  } catch (e) { /* table may not exist */ }
+  } catch (e) { console.warn('[getClientDetail] individual_hearing_notes fetch:', e.message); }
 
   // Merge and sort — most recent first
   const allNotes = [...hearingNotes, ...individualNotes]
