@@ -1992,7 +1992,7 @@ function registerAppApi(app) {
   app.get("/api/staff/uscis/:receipt", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const uscis = require("./uscis");
-      const status = await uscis.lookupReceipt(req.params.receipt);
+      const status = await uscis.getCaseStatus(req.params.receipt);
       res.json({ ok: true, status });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
