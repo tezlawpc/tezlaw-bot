@@ -313,7 +313,7 @@ Rules:
     "https://api.anthropic.com/v1/messages",
     // 16000 tokens ≈ 12000 words — enough for a comprehensive merits hearing prep doc
     // (multiple witnesses, extensive Q&A, full closing argument). 4000 was truncating.
-    { model: modelForCall, max_tokens: 16000, messages },
+    { model: modelForCall, max_tokens: 32000, messages },
     {
       headers: {
         "x-api-key": process.env.ANTHROPIC_API_KEY,
