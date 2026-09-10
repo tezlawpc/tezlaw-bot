@@ -180,6 +180,11 @@ async function initClientAuthTables() {
   try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS client_phone TEXT`); } catch {}
   try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS client_email TEXT`); } catch {}
 
+  // ─── Ensure admin_users has email (used by team-management screen) ─────
+  // Older installations of admin_users didn't include email; the /admin/users
+  // endpoint SELECTs it and 500s if missing.
+  try { await db.query(`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email TEXT`); } catch {}
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS client_otp (
       id           SERIAL PRIMARY KEY,
