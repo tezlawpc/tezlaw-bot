@@ -2279,6 +2279,48 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // ── Create client-only (contact record without a full case) ─────────
+  //
+  // Sometimes JJ takes down contact info from a call before deciding whether
+  // to open a matter. The regular new-case wizard requires a matter type +
+  // template, which is friction for this use case. This endpoint inserts a
+  // minimal placeholder task with matter_type = 'Contact' so the client
+  // shows up in the clients list and can be converted to a real case later.
+  //
+  // client_key convention: 'contact-<slug>-<timestamp>' so it doesn't collide
+  // with matter-based keys.
+  app.post("/api/staff/clients/contact-only", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (!b.client_name || !String(b.client_name).trim()) {
+        return res.status(400).json({ ok: false, error: "client_name required" });
+      }
+      const name = String(b.client_name).trim();
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+      const client_key = `contact-${slug}-${Date.now().toString(36)}`;
+      const description = String(b.notes || '').trim() || `Contact record for ${name}`;
+      const r = await db.query(
+        `INSERT INTO tasks
+           (client_key, client_name, client_phone, client_email, matter_type,
+            description, assigned_to, referral_source, a_number,
+            completed, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, 'Contact', $5, $6, $7, $8, FALSE, NOW(), NOW())
+         RETURNING id, client_key, client_name, client_phone, client_email, matter_type, a_number`,
+        [
+          client_key,
+          name,
+          b.client_phone || null,
+          b.client_email || null,
+          description,
+          b.assigned_to || req.user.u || null,
+          b.referral_source || null,
+          b.a_number || null,
+        ]
+      );
+      res.json({ ok: true, client: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
   // Zara chat — available to all firm users (personal AI assistant, no shared data)
   app.post("/api/staff/chat", requireBearer, requireFirmUser, async (req, res) => {
     try {
