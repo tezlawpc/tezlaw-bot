@@ -185,6 +185,68 @@ async function initClientAuthTables() {
   // endpoint SELECTs it and 500s if missing.
   try { await db.query(`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email TEXT`); } catch {}
 
+  // ─── PI-specific columns on tasks (Phase 1 of PI workflow redesign) ────
+  // Option A schema: extend the case (tasks) row with PI-only fields rather
+  // than a separate pi_cases table. Fields are null for non-PI matters.
+  // See pi-workflow-redesign.html for the 10-stage lifecycle these support.
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_stage TEXT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_lit_substage TEXT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_stage_since TIMESTAMPTZ`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_incident_date DATE`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_incident_type TEXT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_own_carrier TEXT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_own_policy_number TEXT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_atfault_carrier TEXT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_atfault_policy_limits_cents BIGINT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_um_uim_coverage BOOLEAN`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_police_report_number TEXT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_police_agency TEXT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_reached_mmi BOOLEAN DEFAULT FALSE`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pi_mmi_date DATE`); } catch {}
+
+  // Related tables for the PI workflow (many-to-one on client_key)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS pi_medical_providers (
+      id                     SERIAL PRIMARY KEY,
+      client_key             TEXT NOT NULL,
+      provider_name          TEXT NOT NULL,
+      provider_type          TEXT,
+      is_lop                 BOOLEAN DEFAULT FALSE,
+      first_visit_date       DATE,
+      last_visit_date        DATE,
+      next_visit_date        DATE,
+      status                 TEXT DEFAULT 'active',
+      records_requested_date DATE,
+      records_received_date  DATE,
+      bill_received_date     DATE,
+      bill_itemized          BOOLEAN,
+      total_billed_cents     BIGINT,
+      notes                  TEXT,
+      created_at             TIMESTAMPTZ DEFAULT NOW(),
+      updated_at             TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_pi_providers_client ON pi_medical_providers(client_key)`);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS pi_liens (
+      id                        SERIAL PRIMARY KEY,
+      client_key                TEXT NOT NULL,
+      lien_type                 TEXT NOT NULL,
+      holder_name               TEXT NOT NULL,
+      notification_sent_date    DATE,
+      notification_required_by  DATE,
+      claimed_amount_cents      BIGINT,
+      negotiated_amount_cents   BIGINT,
+      status                    TEXT DEFAULT 'pending',
+      contact_info              TEXT,
+      notes                     TEXT,
+      created_at                TIMESTAMPTZ DEFAULT NOW(),
+      updated_at                TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_pi_liens_client ON pi_liens(client_key)`);
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS client_otp (
       id           SERIAL PRIMARY KEY,
@@ -1880,6 +1942,59 @@ function registerAppApi(app) {
       res.json({ ok: true, note });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
+
+  // ── Create hearing notes from the mobile app ─────────────────────────
+  //
+  // These POST endpoints accept a JSON body (not multipart form like the web
+  // /admin/hearing/notes routes) so the app can create master + individual
+  // notes directly from the phone. Body shape mirrors the DB columns.
+  //
+  // Both endpoints are permissive on which fields are required so the app
+  // can save "draft" notes with only what the attorney has typed so far.
+  app.post("/api/staff/notes/master", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const hn = require("./hearing-notes");
+      const body = req.body || {};
+      if (!body.client_name && !body.client_key) {
+        return res.status(400).json({ ok: false, error: "client_name or client_key required" });
+      }
+      // saveNote handles the insert + returns the new row's id. Pass created_by
+      // so the note is attributed to the app user; the web form does the same.
+      const noteId = await hn.saveNote(body, req.user.uid);
+      res.json({ ok: true, id: noteId });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/notes/individual", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const body = req.body || {};
+      if (!body.client_name && !body.client_key) {
+        return res.status(400).json({ ok: false, error: "client_name or client_key required" });
+      }
+      // Direct INSERT — individual_hearing_notes has a simpler shape than
+      // master notes and no dedicated saveNote() helper in the module.
+      const r = await db.query(
+        `INSERT INTO individual_hearing_notes
+           (client_key, client_name, a_number, hearing_date, judge_name, court_location,
+            case_type, outcome, notes, created_by, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, NOW())
+         RETURNING id`,
+        [
+          body.client_key || null,
+          body.client_name || null,
+          body.a_number || null,
+          body.hearing_date || null,
+          body.judge_name || null,
+          body.court_location || null,
+          body.case_type || null,
+          body.outcome || null,
+          body.notes || null,
+          req.user.uid,
+        ]
+      );
+      res.json({ ok: true, id: r.rows[0].id });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
   // assigned attorney or client_key visible to them.
   app.get("/api/staff/federal", requireBearer, requireFirmUser, async (req, res) => {
     try {
@@ -1903,12 +2018,49 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
-  // PI cases — same visibility model as federal
+  // ═══════════════════════════════════════════════════════
+  //  PI CASES (Phase 1 of PI workflow redesign)
+  //  ─────────────────────────────────────────────────────
+  //  Option A schema — PI cases are rows in `tasks` where matter_type LIKE '%injur%'
+  //  or '%accident%' etc, augmented with the pi_* columns added in initClientAuthTables.
+  //  Endpoints:
+  //    GET    /api/staff/pi                       — list all PI cases (kanban)
+  //    PATCH  /api/staff/pi/:client_key/stage     — move a case between stages
+  //    PATCH  /api/staff/pi/:client_key/fields    — update PI-specific fields
+  //    GET    /api/staff/pi/:client_key/providers — list medical providers
+  //    POST   /api/staff/pi/:client_key/providers — add a medical provider
+  //    PATCH  /api/staff/pi/providers/:id         — update a provider
+  //    DELETE /api/staff/pi/providers/:id         — delete a provider
+  //    GET    /api/staff/pi/:client_key/liens     — list liens
+  //    POST   /api/staff/pi/:client_key/liens     — add a lien
+  //    PATCH  /api/staff/pi/liens/:id             — update a lien
+  //    DELETE /api/staff/pi/liens/:id             — delete a lien
+  // ═══════════════════════════════════════════════════════
+
+  // Recognise PI matters by matter_type text. Keep this list here so the app
+  // and backend agree on what counts as a PI case.
+  const PI_MATTER_LIKE = "(LOWER(matter_type) LIKE '%injur%' OR LOWER(matter_type) LIKE '%accident%' OR LOWER(matter_type) LIKE '%pi%' OR LOWER(matter_type) LIKE '%personal injury%' OR LOWER(matter_type) LIKE '%car%' OR LOWER(matter_type) LIKE '%auto%' OR LOWER(matter_type) LIKE '%slip%')";
+
+  // Kanban list — aggregates one row per client, uses the client_key with the
+  // most recent activity as the "case" record. Returns stage + core PI fields
+  // so the kanban board can render columns without a second round trip.
   app.get("/api/staff/pi", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const r = await db.query(
-        `SELECT * FROM pi_cases ORDER BY updated_at DESC NULLS LAST LIMIT 500`
-      ).catch(() => ({ rows: [] }));
+        `SELECT DISTINCT ON (client_key)
+                client_key, client_name, client_phone, client_email, matter_type, a_number,
+                assigned_to, attorney, referral_source,
+                pi_stage, pi_lit_substage, pi_stage_since,
+                pi_incident_date, pi_incident_type,
+                pi_own_carrier, pi_atfault_carrier, pi_atfault_policy_limits_cents,
+                pi_um_uim_coverage, pi_police_report_number, pi_police_agency,
+                pi_reached_mmi, pi_mmi_date,
+                MAX(updated_at) OVER (PARTITION BY client_key) AS last_activity
+         FROM tasks
+         WHERE client_key IS NOT NULL AND ${PI_MATTER_LIKE}
+         ORDER BY client_key, updated_at DESC NULLS LAST
+         LIMIT 500`
+      ).catch(err => { console.error('[pi list]', err.message); return { rows: [] }; });
       let cases = r.rows;
       if (!isAdmin(req.user)) {
         const visibleKeys = await getVisibleClientKeys(req.user);
@@ -1921,6 +2073,209 @@ function registerAppApi(app) {
         }).slice(0, 200);
       }
       res.json({ ok: true, count: cases.length, cases });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Move a case to a new stage. Sets pi_stage_since = NOW() for "days-in-stage"
+  // tracking. Also accepts optional pi_lit_substage for the litigation sub-stages.
+  app.patch("/api/staff/pi/:client_key/stage", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const key = String(req.params.client_key);
+      if (!isAdmin(req.user)) {
+        const visible = await getVisibleClientKeys(req.user);
+        if (!visible.has(key)) return res.status(403).json({ ok: false, error: "no access" });
+      }
+      const stage = String(req.body?.stage || "").trim();
+      const validStages = ['incident','reporting','intake','liability','treatment','records','liens','pre_suit','litigation','settlement','closed'];
+      if (!validStages.includes(stage)) return res.status(400).json({ ok: false, error: `stage must be one of ${validStages.join(', ')}` });
+      const substage = req.body?.lit_substage ? String(req.body.lit_substage).trim() : null;
+      await db.query(
+        `UPDATE tasks SET pi_stage = $1, pi_lit_substage = $2, pi_stage_since = NOW(), updated_at = NOW() WHERE client_key = $3`,
+        [stage, substage, key]
+      );
+      res.json({ ok: true, stage, lit_substage: substage });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Update the PI-specific fields on a case (incident details, insurance, MMI, etc.)
+  // Body is an object of pi_* fields to update. Any field not present is left alone.
+  app.patch("/api/staff/pi/:client_key/fields", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const key = String(req.params.client_key);
+      if (!isAdmin(req.user)) {
+        const visible = await getVisibleClientKeys(req.user);
+        if (!visible.has(key)) return res.status(403).json({ ok: false, error: "no access" });
+      }
+      const allowed = [
+        'pi_incident_date','pi_incident_type','pi_own_carrier','pi_own_policy_number',
+        'pi_atfault_carrier','pi_atfault_policy_limits_cents','pi_um_uim_coverage',
+        'pi_police_report_number','pi_police_agency','pi_reached_mmi','pi_mmi_date'
+      ];
+      const sets = [];
+      const vals = [];
+      let idx = 1;
+      for (const f of allowed) {
+        if (Object.prototype.hasOwnProperty.call(req.body || {}, f)) {
+          sets.push(`${f} = $${idx++}`);
+          vals.push(req.body[f]);
+        }
+      }
+      if (!sets.length) return res.json({ ok: true, updated: 0 });
+      vals.push(key);
+      await db.query(`UPDATE tasks SET ${sets.join(', ')}, updated_at = NOW() WHERE client_key = $${idx}`, vals);
+      res.json({ ok: true, updated: sets.length });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Medical providers CRUD ─────────────────────────────────────────
+  app.get("/api/staff/pi/:client_key/providers", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const key = String(req.params.client_key);
+      if (!isAdmin(req.user)) {
+        const visible = await getVisibleClientKeys(req.user);
+        if (!visible.has(key)) return res.status(403).json({ ok: false, error: "no access" });
+      }
+      const r = await db.query(`SELECT * FROM pi_medical_providers WHERE client_key = $1 ORDER BY first_visit_date ASC NULLS LAST, id ASC`, [key]);
+      res.json({ ok: true, providers: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/pi/:client_key/providers", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const key = String(req.params.client_key);
+      if (!isAdmin(req.user)) {
+        const visible = await getVisibleClientKeys(req.user);
+        if (!visible.has(key)) return res.status(403).json({ ok: false, error: "no access" });
+      }
+      const b = req.body || {};
+      if (!b.provider_name) return res.status(400).json({ ok: false, error: "provider_name required" });
+      const r = await db.query(
+        `INSERT INTO pi_medical_providers
+           (client_key, provider_name, provider_type, is_lop, first_visit_date, last_visit_date,
+            next_visit_date, status, records_requested_date, records_received_date,
+            bill_received_date, bill_itemized, total_billed_cents, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+        [key, b.provider_name, b.provider_type || null, !!b.is_lop,
+         b.first_visit_date || null, b.last_visit_date || null, b.next_visit_date || null,
+         b.status || 'active', b.records_requested_date || null, b.records_received_date || null,
+         b.bill_received_date || null, b.bill_itemized ?? null, b.total_billed_cents || null,
+         b.notes || null]
+      );
+      res.json({ ok: true, provider: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/pi/providers/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const allowed = ['provider_name','provider_type','is_lop','first_visit_date','last_visit_date',
+                       'next_visit_date','status','records_requested_date','records_received_date',
+                       'bill_received_date','bill_itemized','total_billed_cents','notes'];
+      const sets = []; const vals = []; let idx = 1;
+      for (const f of allowed) {
+        if (Object.prototype.hasOwnProperty.call(req.body || {}, f)) {
+          sets.push(`${f} = $${idx++}`); vals.push(req.body[f]);
+        }
+      }
+      if (!sets.length) return res.json({ ok: true, updated: 0 });
+      vals.push(id);
+      const r = await db.query(`UPDATE pi_medical_providers SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${idx} RETURNING *`, vals);
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      // Access check on the returned client_key
+      if (!isAdmin(req.user)) {
+        const visible = await getVisibleClientKeys(req.user);
+        if (!visible.has(r.rows[0].client_key)) return res.status(403).json({ ok: false, error: "no access" });
+      }
+      res.json({ ok: true, provider: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/pi/providers/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(`DELETE FROM pi_medical_providers WHERE id = $1 RETURNING client_key`, [id]);
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      if (!isAdmin(req.user)) {
+        const visible = await getVisibleClientKeys(req.user);
+        if (!visible.has(r.rows[0].client_key)) return res.status(403).json({ ok: false, error: "no access" });
+      }
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Liens CRUD (Medi-Cal, Medicare, ERISA, LOP, hospital, etc.) ─────
+  app.get("/api/staff/pi/:client_key/liens", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const key = String(req.params.client_key);
+      if (!isAdmin(req.user)) {
+        const visible = await getVisibleClientKeys(req.user);
+        if (!visible.has(key)) return res.status(403).json({ ok: false, error: "no access" });
+      }
+      const r = await db.query(`SELECT * FROM pi_liens WHERE client_key = $1 ORDER BY created_at DESC`, [key]);
+      res.json({ ok: true, liens: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/pi/:client_key/liens", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const key = String(req.params.client_key);
+      if (!isAdmin(req.user)) {
+        const visible = await getVisibleClientKeys(req.user);
+        if (!visible.has(key)) return res.status(403).json({ ok: false, error: "no access" });
+      }
+      const b = req.body || {};
+      if (!b.lien_type || !b.holder_name) return res.status(400).json({ ok: false, error: "lien_type and holder_name required" });
+      const r = await db.query(
+        `INSERT INTO pi_liens
+           (client_key, lien_type, holder_name, notification_sent_date, notification_required_by,
+            claimed_amount_cents, negotiated_amount_cents, status, contact_info, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+        [key, b.lien_type, b.holder_name, b.notification_sent_date || null,
+         b.notification_required_by || null, b.claimed_amount_cents || null,
+         b.negotiated_amount_cents || null, b.status || 'pending',
+         b.contact_info || null, b.notes || null]
+      );
+      res.json({ ok: true, lien: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/pi/liens/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const allowed = ['lien_type','holder_name','notification_sent_date','notification_required_by',
+                       'claimed_amount_cents','negotiated_amount_cents','status','contact_info','notes'];
+      const sets = []; const vals = []; let idx = 1;
+      for (const f of allowed) {
+        if (Object.prototype.hasOwnProperty.call(req.body || {}, f)) {
+          sets.push(`${f} = $${idx++}`); vals.push(req.body[f]);
+        }
+      }
+      if (!sets.length) return res.json({ ok: true, updated: 0 });
+      vals.push(id);
+      const r = await db.query(`UPDATE pi_liens SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${idx} RETURNING *`, vals);
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      if (!isAdmin(req.user)) {
+        const visible = await getVisibleClientKeys(req.user);
+        if (!visible.has(r.rows[0].client_key)) return res.status(403).json({ ok: false, error: "no access" });
+      }
+      res.json({ ok: true, lien: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/pi/liens/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+      const r = await db.query(`DELETE FROM pi_liens WHERE id = $1 RETURNING client_key`, [id]);
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
+      if (!isAdmin(req.user)) {
+        const visible = await getVisibleClientKeys(req.user);
+        if (!visible.has(r.rows[0].client_key)) return res.status(403).json({ ok: false, error: "no access" });
+      }
+      res.json({ ok: true });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
