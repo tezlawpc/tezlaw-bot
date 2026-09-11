@@ -1858,18 +1858,16 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
-  // Master hearing notes list — filtered by user's clients OR notes they authored
+  // Master hearing notes list — matches the /admin/hearing/history web view
+  // (ORDER BY created_at DESC, up to 200) so the app and web show the same set.
+  // For non-admin users the query still filters to visible clients / authored notes.
   app.get("/api/staff/notes/master", requireBearer, requireFirmUser, async (req, res) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit || "50", 10), 200);
+      const limit = Math.min(parseInt(req.query.limit || "200", 10), 200);
       const admin = isAdmin(req.user);
-      const q = admin
-        ? `SELECT id, client_key, client_name, a_number, hearing_date, judge_name, court_location,
-                  client_language, paralegal_summary, created_at, created_by
-           FROM hearing_notes ORDER BY hearing_date DESC NULLS LAST, created_at DESC LIMIT $1`
-        : `SELECT id, client_key, client_name, a_number, hearing_date, judge_name, court_location,
-                  client_language, paralegal_summary, created_at, created_by
-           FROM hearing_notes ORDER BY hearing_date DESC NULLS LAST, created_at DESC LIMIT $1`;
+      const q = `SELECT id, client_key, client_name, a_number, hearing_date, judge_name, court_location,
+                        client_language, paralegal_summary, created_at, created_by
+                 FROM hearing_notes ORDER BY created_at DESC LIMIT $1`;
       const r = await db.query(q, [admin ? limit : 500]);
       let notes = r.rows;
       if (!admin) {
@@ -1902,15 +1900,15 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
-  // Individual notes list — same filter as master notes
+  // Individual notes list — same filter as master notes, same sort as web admin
   app.get("/api/staff/notes/individual", requireBearer, requireFirmUser, async (req, res) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit || "50", 10), 200);
+      const limit = Math.min(parseInt(req.query.limit || "200", 10), 200);
       const admin = isAdmin(req.user);
       const r = await db.query(
         `SELECT id, client_key, client_name, a_number, hearing_date, judge_name, court_location,
                 client_language, case_type, disposition, paralegal_summary, created_at, created_by
-         FROM individual_hearing_notes ORDER BY hearing_date DESC NULLS LAST, created_at DESC LIMIT $1`,
+         FROM individual_hearing_notes ORDER BY created_at DESC LIMIT $1`,
         [admin ? limit : 500]
       ).catch(() => ({ rows: [] }));
       let notes = r.rows;
