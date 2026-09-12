@@ -57,6 +57,50 @@ async function searchClients(q, limit = 25) {
     }
     if (results.length >= limit) break;
   }
+
+  // Merge in contact-only clients (matter_type='Contact' rows in tasks).
+  // aggregateClients() doesn't see them since it only reads hearing_notes
+  // and individual_hearing_notes, so a straight search would miss any
+  // client added via the app's "add contact" flow. Match on name / A# /
+  // phone / email / client_key.
+  if (results.length < limit) {
+    try {
+      const term = "%" + q.trim().toLowerCase() + "%";
+      const cR = await db.query(
+        `SELECT DISTINCT ON (client_key)
+                client_key, client_name, a_number, client_phone, client_email,
+                matter_type, referral_source, created_at
+         FROM tasks
+         WHERE client_key IS NOT NULL AND client_key LIKE 'contact-%'
+           AND (LOWER(client_name) LIKE $1 OR LOWER(client_key) LIKE $1
+                OR LOWER(a_number) LIKE $1 OR LOWER(client_phone) LIKE $1
+                OR LOWER(client_email) LIKE $1)
+         ORDER BY client_key, created_at DESC
+         LIMIT $2`,
+        [term, limit - results.length]
+      );
+      const already = new Set(results.map(r => r.key).filter(Boolean));
+      for (const row of cR.rows) {
+        if (already.has(row.client_key)) continue;
+        results.push({
+          key: row.client_key,
+          client_name: row.client_name || row.client_key,
+          a_number: row.a_number || null,
+          client_phone: row.client_phone,
+          client_email: row.client_email,
+          client_language: null,
+          case_types: [row.matter_type || "Contact"],
+          upcoming_hearing_date: null,
+          upcoming_hearing_type: null,
+          total_hearings: 0,
+          contact_only: true,
+        });
+      }
+    } catch (e) {
+      console.warn("[searchClients contact fallback]:", e.message);
+    }
+  }
+
   return results;
 }
 

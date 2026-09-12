@@ -4985,28 +4985,43 @@ function registerAppApi(app) {
         `SELECT * FROM cle_credits WHERE attorney_id = $1 ORDER BY credit_date DESC`,
         [req.user.uid]
       );
-      // Compute summary for current 3-year period
+      // Compute summary for current 3-year period (California MCLE cycle).
       const now = new Date();
       const threeYearsAgo = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate());
       const inWindow = r.rows.filter(x => new Date(x.credit_date) >= threeYearsAgo);
       const sum = (field) => inWindow.reduce((s, x) => s + Number(x[field] || 0), 0);
+      const totals = {
+        total_hours: sum("hours"),
+        ethics_hours: sum("ethics_hours"),
+        competence_hours: sum("competence_hours"),
+        bias_hours: sum("bias_hours"),
+        tech_hours: sum("tech_hours"),
+      };
+      const requirements = { total: 25, ethics: 4, competence: 1, bias: 1, tech: 1 };
+      // Shape matches what the mobile app expects — period_*, requirements,
+      // on_track (booleans). Keeping the older window_*/ca_requirements keys
+      // as aliases so nothing else that consumes this response breaks.
       res.json({
         ok: true,
         credits: r.rows,
         summary: {
+          period_start: threeYearsAgo.toISOString().substring(0, 10),
+          period_end: now.toISOString().substring(0, 10),
           window_start: threeYearsAgo.toISOString().substring(0, 10),
           window_end: now.toISOString().substring(0, 10),
-          total_hours: sum("hours"),
-          ethics_hours: sum("ethics_hours"),
-          competence_hours: sum("competence_hours"),
-          bias_hours: sum("bias_hours"),
-          tech_hours: sum("tech_hours"),
+          ...totals,
+          credit_count: inWindow.length,
+          requirements,
+          on_track: {
+            total: totals.total_hours >= requirements.total,
+            ethics: totals.ethics_hours >= requirements.ethics,
+            competence: totals.competence_hours >= requirements.competence,
+            bias: totals.bias_hours >= requirements.bias,
+            tech: totals.tech_hours >= requirements.tech,
+          },
           ca_requirements: {
-            total_needed: 25,
-            ethics_needed: 4,
-            competence_needed: 1,
-            bias_needed: 1,
-            tech_needed: 1,
+            total_needed: 25, ethics_needed: 4, competence_needed: 1,
+            bias_needed: 1, tech_needed: 1,
           },
         },
       });
@@ -5233,17 +5248,17 @@ function registerAppApi(app) {
            LIMIT 20`, clientParams
         ),
         db.query(
-          `SELECT id, description, client_name, client_key, matter_type, due_date, completed
+          `SELECT id, description, client_name, client_key, matter_type, due_date, status
            FROM tasks WHERE ${clientClauses.map((c, i) => c.replace(/client_key IN.*?\)/, '1=1')).join(' AND ')}
               OR (${clientClauses.map(c => c.replace(/LOWER\(client_name\)/, 'LOWER(description)')).join(' AND ')})
-           ORDER BY (completed IS NULL OR completed = false) DESC, due_date ASC NULLS LAST
+           ORDER BY (status = 'completed') ASC, due_date ASC NULLS LAST
            LIMIT 15`, clientParams.slice(0, words.length)
         ).catch(async () => {
           // Fallback: simple substring match for descriptions
           return db.query(
-            `SELECT id, description, client_name, client_key, matter_type, due_date, completed
+            `SELECT id, description, client_name, client_key, matter_type, due_date, status
              FROM tasks WHERE LOWER(description) LIKE $1
-             ORDER BY (completed IS NULL OR completed = false) DESC, due_date ASC NULLS LAST
+             ORDER BY (status = 'completed') ASC, due_date ASC NULLS LAST
              LIMIT 15`, [`%${qNorm}%`]
           );
         }),
