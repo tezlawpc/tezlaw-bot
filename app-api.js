@@ -1867,44 +1867,29 @@ function registerAppApi(app) {
   });
 
   // Master hearing notes list — matches the /admin/hearing/history web view
-  // (ORDER BY created_at DESC, up to 200) so the app and web show the same set.
-  // For non-admin users the query still filters to visible clients / authored notes.
+  // exactly: ORDER BY created_at DESC, up to 200. Neither hearing_notes nor
+  // individual_hearing_notes has a client_key or created_by column, so we
+  // don't try to filter per-user (which would return 0 rows). Access is
+  // gated by requireFirmUser (same as the web's gateByPerm("notes.history")).
   app.get("/api/staff/notes/master", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const limit = Math.min(parseInt(req.query.limit || "200", 10), 200);
-      const admin = isAdmin(req.user);
-      const q = `SELECT id, client_key, client_name, a_number, hearing_date, judge_name, court_location,
-                        client_language, paralegal_summary, created_at, created_by
+      const q = `SELECT id, client_name, a_number, hearing_date, judge_name, court_location,
+                        client_language, paralegal_summary, created_at
                  FROM hearing_notes ORDER BY created_at DESC LIMIT $1`;
-      const r = await db.query(q, [admin ? limit : 500]);
-      let notes = r.rows;
-      if (!admin) {
-        const visibleKeys = await getVisibleClientKeys(req.user);
-        // Include note if EITHER its client_key is visible OR the user created it
-        notes = notes.filter(n =>
-          (n.client_key && visibleKeys.has(n.client_key))
-          || (n.created_by && String(n.created_by) === String(req.user.uid))
-        );
-        notes = notes.slice(0, limit);
-      }
-      res.json({ ok: true, count: notes.length, notes });
+      const r = await db.query(q, [limit]);
+      res.json({ ok: true, count: r.rows.length, notes: r.rows });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
-  // Master note detail — 403 unless user can access
+  // Master note detail — any firm user can view (matches web /admin/hearing/history)
   app.get("/api/staff/notes/master/:id", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
       if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
       const r = await db.query(`SELECT * FROM hearing_notes WHERE id = $1`, [id]);
       if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
-      const note = r.rows[0];
-      if (!isAdmin(req.user)) {
-        const okKey = note.client_key ? await canUserAccessClient(req.user, note.client_key) : false;
-        const okAuthor = note.created_by && String(note.created_by) === String(req.user.uid);
-        if (!okKey && !okAuthor) return res.status(403).json({ ok: false, error: "You don't have access to this note" });
-      }
-      res.json({ ok: true, note });
+      res.json({ ok: true, note: r.rows[0] });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -1912,40 +1897,24 @@ function registerAppApi(app) {
   app.get("/api/staff/notes/individual", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const limit = Math.min(parseInt(req.query.limit || "200", 10), 200);
-      const admin = isAdmin(req.user);
       const r = await db.query(
-        `SELECT id, client_key, client_name, a_number, hearing_date, judge_name, court_location,
-                client_language, case_type, disposition, paralegal_summary, created_at, created_by
+        `SELECT id, client_name, a_number, hearing_date, judge_name, court_location,
+                client_language, case_type, disposition, paralegal_summary, created_at
          FROM individual_hearing_notes ORDER BY created_at DESC LIMIT $1`,
-        [admin ? limit : 500]
-      ).catch(() => ({ rows: [] }));
-      let notes = r.rows;
-      if (!admin) {
-        const visibleKeys = await getVisibleClientKeys(req.user);
-        notes = notes.filter(n =>
-          (n.client_key && visibleKeys.has(n.client_key))
-          || (n.created_by && String(n.created_by) === String(req.user.uid))
-        ).slice(0, limit);
-      }
-      res.json({ ok: true, count: notes.length, notes });
+        [limit]
+      );
+      res.json({ ok: true, count: r.rows.length, notes: r.rows });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
-  // Individual note detail — full note text for the detail viewer
+  // Individual note detail — any firm user can view
   app.get("/api/staff/notes/individual/:id", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
       if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
       const r = await db.query(`SELECT * FROM individual_hearing_notes WHERE id = $1`, [id]);
       if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
-      const note = r.rows[0];
-      if (!isAdmin(req.user)) {
-        const okKey = note.client_key ? await canUserAccessClient(req.user, note.client_key) : false;
-        if (!okKey && (!note.created_by || String(note.created_by) !== String(req.user.uid))) {
-          return res.status(403).json({ ok: false, error: "no access" });
-        }
-      }
-      res.json({ ok: true, note });
+      res.json({ ok: true, note: r.rows[0] });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -2005,12 +1974,9 @@ function registerAppApi(app) {
   // ── PATCH + DELETE hearing notes from the mobile app ─────────────────
   //
   // Permission model matches GET detail: admin OR note author OR user has
-  // access to the note's client_key. Editors only need to send the fields
-  // they changed; every other column is left untouched.
+  // These tables don't have client_key or created_by columns, so we can't
+  // filter per-user. Any firm user can PATCH; DELETE requires admin.
 
-  // Allowed fields the app is permitted to PATCH on master hearing notes.
-  // Web form has ~30 fields but the app only exposes the summary fields for
-  // quick fix-ups. Everything else must be edited via the web form.
   const MASTER_PATCH_FIELDS = new Set([
     "client_name", "a_number", "client_language", "client_email", "client_phone",
     "judge_name", "hearing_date", "hearing_type", "case_type", "court_location",
@@ -2020,26 +1986,10 @@ function registerAppApi(app) {
     "bond_outcome", "bond_amount",
   ]);
 
-  async function canEditMasterNote(user, id) {
-    if (isAdmin(user)) return true;
-    const r = await db.query(
-      `SELECT client_key, created_by FROM hearing_notes WHERE id = $1`,
-      [id]
-    );
-    if (!r.rows.length) return false;
-    const note = r.rows[0];
-    if (note.created_by && String(note.created_by) === String(user.uid)) return true;
-    if (note.client_key) return await canUserAccessClient(user, note.client_key);
-    return false;
-  }
-
   app.patch("/api/staff/notes/master/:id", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
       if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
-      if (!(await canEditMasterNote(req.user, id))) {
-        return res.status(403).json({ ok: false, error: "You don't have access to this note" });
-      }
       // Whitelist the fields the app is allowed to change.
       const body = req.body || {};
       const sets = [];
@@ -2078,14 +2028,10 @@ function registerAppApi(app) {
     try {
       const id = parseInt(req.params.id, 10);
       if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
-      // Only admins or the note author can delete. Regular clients-visible access
-      // is not enough to remove records permanently.
+      // Only admins can delete via the app (schema has no author column to
+      // fall back on for permission checks).
       if (!isAdmin(req.user)) {
-        const r = await db.query(`SELECT created_by FROM hearing_notes WHERE id = $1`, [id]);
-        if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
-        if (!r.rows[0].created_by || String(r.rows[0].created_by) !== String(req.user.uid)) {
-          return res.status(403).json({ ok: false, error: "Only the note author or an admin can delete a note" });
-        }
+        return res.status(403).json({ ok: false, error: "Only an admin can delete a note from the app" });
       }
       const hn = require("./hearing-notes");
       const result = await hn.deleteNote(id);
@@ -2104,26 +2050,10 @@ function registerAppApi(app) {
     "paralegal_summary",
   ]);
 
-  async function canEditIndividualNote(user, id) {
-    if (isAdmin(user)) return true;
-    const r = await db.query(
-      `SELECT client_key, created_by FROM individual_hearing_notes WHERE id = $1`,
-      [id]
-    );
-    if (!r.rows.length) return false;
-    const note = r.rows[0];
-    if (note.created_by && String(note.created_by) === String(user.uid)) return true;
-    if (note.client_key) return await canUserAccessClient(user, note.client_key);
-    return false;
-  }
-
   app.patch("/api/staff/notes/individual/:id", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
       if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
-      if (!(await canEditIndividualNote(req.user, id))) {
-        return res.status(403).json({ ok: false, error: "You don't have access to this note" });
-      }
       const body = req.body || {};
       const sets = [];
       const vals = [];
@@ -2153,11 +2083,7 @@ function registerAppApi(app) {
       const id = parseInt(req.params.id, 10);
       if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
       if (!isAdmin(req.user)) {
-        const r = await db.query(`SELECT created_by, client_name FROM individual_hearing_notes WHERE id = $1`, [id]);
-        if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
-        if (!r.rows[0].created_by || String(r.rows[0].created_by) !== String(req.user.uid)) {
-          return res.status(403).json({ ok: false, error: "Only the note author or an admin can delete a note" });
-        }
+        return res.status(403).json({ ok: false, error: "Only an admin can delete a note from the app" });
       }
       const r = await db.query(
         `DELETE FROM individual_hearing_notes WHERE id = $1 RETURNING id, client_name`,
