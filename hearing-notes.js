@@ -1078,41 +1078,45 @@ function renderAdminChrome({ title, body, activeItem = null }) {
 
 <!-- ── PWA / iOS Install Support ── -->
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#0C1C36">
+<meta name="theme-color" content="#3E2818">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Zara">
+<meta name="apple-mobile-web-app-title" content="Tara">
 <link rel="apple-touch-icon" href="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png">
 <link rel="apple-touch-icon" sizes="180x180" href="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png">
 <link rel="icon" type="image/png" href="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png">
-<title>${escapeHtml(title)} — Zara</title>
+<title>${escapeHtml(title)} — Tara</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;700&family=IM+Fell+English:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --sidebar-bg: #0C1C36;
-    --sidebar-bg-elev: #142645;
+    /* Britannia palette — walnut sidebar, sandstone canvas, gold accents */
+    --sidebar-bg: #3E2818;         /* walnut */
+    --sidebar-bg-elev: #5A3B22;    /* walnut-mid */
     --sidebar-width: 244px;
     --sidebar-width-mobile: 60px;
-    --brand-gold: #B79C62;
-    --brand-gold-light: #d4b979;
-    --brand-navy: #0C1C36;
-    --text-primary: rgba(255,255,255,.94);
-    --text-secondary: rgba(255,255,255,.65);
-    --text-tertiary: rgba(255,255,255,.42);
-    --section-header: rgba(183,156,98,.55);
-    --hover-bg: rgba(255,255,255,.06);
-    --active-bg: rgba(183,156,98,.16);
-    --active-color: #e6c988;
-    --divider: rgba(255,255,255,.07);
-    --canvas: #f5f2ea;
+    --brand-gold: #E0B44E;         /* gold-bright */
+    --brand-gold-light: #F0DDB4;   /* sandstone-lit */
+    --brand-navy: #3E2818;         /* walnut (kept name for compat) */
+    --text-primary: rgba(240,221,180,.94);
+    --text-secondary: rgba(240,221,180,.72);
+    --text-tertiary: rgba(240,221,180,.48);
+    --section-header: rgba(224,180,78,.65);
+    --hover-bg: rgba(224,180,78,.08);
+    --active-bg: rgba(224,180,78,.16);
+    --active-color: #FFA544;       /* ember-bright */
+    --divider: rgba(224,180,78,.14);
+    --canvas: #E4CC94;             /* sandstone */
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
-                 "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                 "Segoe UI", Roboto, Arial, sans-serif;
     background: var(--canvas);
-    color: var(--brand-navy);
+    color: #2A1810;                /* ink */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     letter-spacing: -0.005em;
@@ -1491,7 +1495,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   <div class="sidebar-brand">
     <img src="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png" alt="TEZ Law">
     <div class="brand-text">
-      <span class="brand-name">Zara</span>
+      <span class="brand-name">Tara</span>
       <span class="brand-role" id="brand-role">Admin Panel</span>
     </div>
   </div>
@@ -2028,7 +2032,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     </div>
 
     ${saved ? '<p style="color:#4CAF50; font-weight:bold;">✅ Saved to database.</p>' : ""}
-    ${merged ? '<div style="background:#fff8e1; border-left:4px solid #f9a825; padding:12px 16px; border-radius:4px; margin-bottom:10px; font-size:13px;"><strong>ℹ️ Merged with existing hearing note.</strong> Zara detected that a hearing note for this client at this time already existed (note #' + noteId + '). Instead of creating a duplicate, your changes were merged into the existing note. Scroll down to see revision history.</div>' : ""}
+    ${merged ? '<div style="background:#fff8e1; border-left:4px solid #f9a825; padding:12px 16px; border-radius:4px; margin-bottom:10px; font-size:13px;"><strong>ℹ️ Merged with existing hearing note.</strong> Tara detected that a hearing note for this client at this time already existed (note #' + noteId + '). Instead of creating a duplicate, your changes were merged into the existing note. Scroll down to see revision history.</div>' : ""}
     ${sent ? `<p style="color:#4CAF50; font-weight:bold;">📤 Sent to team group (${sent.chunks} message${sent.chunks > 1 ? "s" : ""}).</p>` : ""}
   ` : "";
 
