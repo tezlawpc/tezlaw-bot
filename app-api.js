@@ -1935,38 +1935,69 @@ function registerAppApi(app) {
       if (!body.client_name && !body.client_key) {
         return res.status(400).json({ ok: false, error: "client_name or client_key required" });
       }
-      // saveNote handles the insert + returns the new row's id. Pass created_by
-      // so the note is attributed to the app user; the web form does the same.
-      const noteId = await hn.saveNote(body, req.user.uid);
-      res.json({ ok: true, id: noteId });
+      // saveNote returns { id, paralegal_summary, client_summary, was_duplicate }.
+      // Pass hearing_type default "master" so this endpoint always creates a
+      // master row (individual notes use their own POST below).
+      body.hearing_type = body.hearing_type || "master";
+      const result = await hn.saveNote(body);
+      res.json({ ok: true, id: result.id, was_duplicate: !!result.was_duplicate });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
   app.post("/api/staff/notes/individual", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const body = req.body || {};
-      if (!body.client_name && !body.client_key) {
-        return res.status(400).json({ ok: false, error: "client_name or client_key required" });
+      if (!body.client_name) {
+        return res.status(400).json({ ok: false, error: "client_name required" });
       }
       // Direct INSERT — individual_hearing_notes has a simpler shape than
       // master notes and no dedicated saveNote() helper in the module.
+      // Schema has no client_key or created_by columns, so we omit both.
       const r = await db.query(
         `INSERT INTO individual_hearing_notes
-           (client_key, client_name, a_number, hearing_date, judge_name, court_location,
-            case_type, outcome, notes, created_by, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, NOW())
+           (client_name, a_number, client_language, client_email, client_phone, client_address,
+            case_type, hearing_date, judge_name, court_location, court_address,
+            dhs_attorney, attorney_appearance, respondent_appearance,
+            evidence_objections, pre_examination_notes,
+            closing_argument, disposition, disposition_notes,
+            next_hearing_date, next_hearing_type, next_action_deadline,
+            hearing_summary_raw, paralegal_summary, client_summary,
+            created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,
+                 $7,$8,$9,$10,$11,
+                 $12,$13,$14,
+                 $15,$16,
+                 $17,$18,$19,
+                 $20,$21,$22,
+                 $23,$24,$25,
+                 NOW())
          RETURNING id`,
         [
-          body.client_key || null,
-          body.client_name || null,
+          body.client_name,
           body.a_number || null,
+          body.client_language || "en",
+          body.client_email || null,
+          body.client_phone || null,
+          body.client_address || null,
+          body.case_type || null,
           body.hearing_date || null,
           body.judge_name || null,
           body.court_location || null,
-          body.case_type || null,
-          body.outcome || null,
-          body.notes || null,
-          req.user.uid,
+          body.court_address || null,
+          body.dhs_attorney || null,
+          body.attorney_appearance || null,
+          body.respondent_appearance || null,
+          body.evidence_objections || null,
+          body.pre_examination_notes || null,
+          body.closing_argument || null,
+          body.disposition || null,
+          body.disposition_notes || null,
+          body.next_hearing_date || null,
+          body.next_hearing_type || null,
+          body.next_action_deadline || null,
+          body.hearing_summary_raw || body.raw_notes || null,
+          body.paralegal_summary || null,
+          body.client_summary || null,
         ]
       );
       res.json({ ok: true, id: r.rows[0].id });
@@ -1981,11 +2012,16 @@ function registerAppApi(app) {
 
   const MASTER_PATCH_FIELDS = new Set([
     "client_name", "a_number", "client_language", "client_email", "client_phone",
-    "judge_name", "hearing_date", "hearing_type", "case_type", "court_location",
+    "client_address",
+    "judge_name", "hearing_date", "hearing_type", "case_type",
+    "dhs_attorney", "client_attendance", "attorney_appearance",
+    "pleadings_admitted", "pleadings_denied", "pleadings_contested", "pleadings_method",
+    "removability_conceded", "asylum_fee_needed", "biometrics_needed",
     "disposition", "disposition_notes",
     "next_hearing_date", "next_hearing_type",
     "raw_notes", "paralegal_summary", "client_summary",
     "bond_outcome", "bond_amount",
+    "interpreter_used", "interpreter_language",
   ]);
 
   app.patch("/api/staff/notes/master/:id", requireBearer, requireFirmUser, async (req, res) => {
@@ -2046,10 +2082,14 @@ function registerAppApi(app) {
 
   // Individual hearing notes — same pattern
   const INDIV_PATCH_FIELDS = new Set([
-    "client_name", "a_number", "client_language",
-    "judge_name", "hearing_date", "court_location",
-    "case_type", "outcome", "disposition", "notes",
-    "paralegal_summary",
+    "client_name", "a_number", "client_language", "client_email", "client_phone",
+    "client_address",
+    "case_type", "hearing_date", "judge_name", "court_location", "court_address",
+    "dhs_attorney", "attorney_appearance", "respondent_appearance",
+    "evidence_objections", "pre_examination_notes",
+    "closing_argument", "disposition", "disposition_notes",
+    "next_hearing_date", "next_hearing_type", "next_action_deadline",
+    "hearing_summary_raw", "paralegal_summary", "client_summary",
   ]);
 
   app.patch("/api/staff/notes/individual/:id", requireBearer, requireFirmUser, async (req, res) => {
