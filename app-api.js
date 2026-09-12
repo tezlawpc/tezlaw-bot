@@ -1874,8 +1874,10 @@ function registerAppApi(app) {
   app.get("/api/staff/notes/master", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const limit = Math.min(parseInt(req.query.limit || "200", 10), 200);
-      const q = `SELECT id, client_name, a_number, hearing_date, judge_name, court_location,
-                        client_language, paralegal_summary, created_at
+      const q = `SELECT id, client_name, a_number, hearing_date, hearing_type, judge_name,
+                        next_hearing_date, next_hearing_type, client_language,
+                        disposition, paralegal_summary,
+                        sent_to_paralegal_at, sent_to_client_at, created_at
                  FROM hearing_notes ORDER BY created_at DESC LIMIT $1`;
       const r = await db.query(q, [limit]);
       res.json({ ok: true, count: r.rows.length, notes: r.rows });
