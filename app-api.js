@@ -1811,6 +1811,47 @@ function registerAppApi(app) {
         }));
       }
 
+      // Merge in contact-only clients (from tasks with matter_type='Contact').
+      // These live in the tasks table because the app can create quick contact
+      // records without a full case, and aggregateClients() only pulls from
+      // hearing_notes / individual_hearing_notes so they'd otherwise be invisible.
+      try {
+        const existingKeys = new Set(results.map(r => r.key).filter(Boolean));
+        const cQ = q && q.length >= 2
+          ? `SELECT DISTINCT ON (client_key)
+                    client_key, client_name, a_number, client_phone, client_email, matter_type
+             FROM tasks
+             WHERE client_key IS NOT NULL AND client_key LIKE 'contact-%'
+               AND (LOWER(client_name) LIKE $1 OR LOWER(client_key) LIKE $1
+                    OR LOWER(a_number) LIKE $1 OR client_phone LIKE $1
+                    OR LOWER(client_email) LIKE $1)
+             ORDER BY client_key, created_at DESC LIMIT 200`
+          : `SELECT DISTINCT ON (client_key)
+                    client_key, client_name, a_number, client_phone, client_email, matter_type
+             FROM tasks
+             WHERE client_key IS NOT NULL AND client_key LIKE 'contact-%'
+             ORDER BY client_key, created_at DESC LIMIT 200`;
+        const cParams = q && q.length >= 2 ? [`%${q.toLowerCase()}%`] : [];
+        const cR = await db.query(cQ, cParams);
+        for (const row of cR.rows) {
+          if (!existingKeys.has(row.client_key)) {
+            results.push({
+              key: row.client_key,
+              client_name: row.client_name || row.client_key,
+              a_number: row.a_number || null,
+              client_phone: row.client_phone,
+              client_email: row.client_email,
+              case_types: [row.matter_type || "Contact"],
+              total_hearings: 0,
+              contact_only: true,
+            });
+            existingKeys.add(row.client_key);
+          }
+        }
+      } catch (e) {
+        console.warn("[clients merge contacts]:", e.message);
+      }
+
       // Merge in any linked client_accounts that aren't already in the roster.
       // Ensures phones the admin has manually linked show up in the Clients tab
       // even when the client has no hearings/tasks/deadlines yet.

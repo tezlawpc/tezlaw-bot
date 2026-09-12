@@ -65,7 +65,50 @@ async function searchClients(q, limit = 25) {
 async function getClientDetail(key) {
   const cp = require("./client-profiles");
   const all = await cp.aggregateClients();
-  const client = all.find(c => c.key === key);
+  let client = all.find(c => c.key === key);
+
+  // Fallback: contact-only clients live in tasks (matter_type='Contact')
+  // and never make it into hearing_notes / individual_hearing_notes, so
+  // aggregateClients() doesn't see them. Look them up directly.
+  if (!client) {
+    try {
+      const t = await db.query(
+        `SELECT client_key, client_name, a_number, client_phone, client_email,
+                matter_type, description, assigned_to, referral_source,
+                created_at, updated_at
+         FROM tasks
+         WHERE client_key = $1
+         ORDER BY created_at DESC LIMIT 1`,
+        [key]
+      );
+      if (t.rows.length) {
+        const row = t.rows[0];
+        client = {
+          key: row.client_key,
+          client_name: row.client_name || key,
+          a_number: row.a_number,
+          client_email: row.client_email,
+          client_phone: row.client_phone,
+          client_address: null,
+          client_language: null,
+          case_types: new Set([row.matter_type || "Contact"]),
+          judges: new Set(),
+          hearings: [],
+          upcoming: [],
+          deadlines: [],
+          sent_count: 0,
+          _contact_only: true,
+          _notes: row.description,
+          _referral_source: row.referral_source,
+          _assigned_to: row.assigned_to,
+          _created_at: row.created_at,
+        };
+      }
+    } catch (e) {
+      console.warn("[getClientDetail contact fallback]:", e.message);
+    }
+  }
+
   if (!client) return null;
 
   // Also fetch pending deadlines for this client
