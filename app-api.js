@@ -2004,7 +2004,8 @@ function registerAppApi(app) {
            (client_name, a_number, client_language, client_email, client_phone, client_address,
             case_type, hearing_date, judge_name, court_location, court_address,
             dhs_attorney, attorney_appearance, respondent_appearance,
-            evidence_objections, pre_examination_notes,
+            exhibits, evidence_objections, pre_examination_notes,
+            examinations,
             closing_argument, disposition, disposition_notes,
             next_hearing_date, next_hearing_type, next_action_deadline,
             hearing_summary_raw, paralegal_summary, client_summary,
@@ -2012,10 +2013,11 @@ function registerAppApi(app) {
          VALUES ($1,$2,$3,$4,$5,$6,
                  $7,$8,$9,$10,$11,
                  $12,$13,$14,
-                 $15,$16,
-                 $17,$18,$19,
-                 $20,$21,$22,
-                 $23,$24,$25,
+                 $15::jsonb,$16,$17,
+                 $18::jsonb,
+                 $19,$20,$21,
+                 $22,$23,$24,
+                 $25,$26,$27,
                  NOW())
          RETURNING id`,
         [
@@ -2033,8 +2035,10 @@ function registerAppApi(app) {
           body.dhs_attorney || null,
           body.attorney_appearance || null,
           body.respondent_appearance || null,
+          JSON.stringify(body.exhibits || []),
           body.evidence_objections || null,
           body.pre_examination_notes || null,
+          JSON.stringify(body.examinations || []),
           body.closing_argument || null,
           body.disposition || null,
           body.disposition_notes || null,
@@ -2048,6 +2052,60 @@ function registerAppApi(app) {
       );
       res.json({ ok: true, id: r.rows[0].id });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Upload a file attached to a hearing exhibit ──────────────────────
+  //
+  // Base64 upload (matches /api/client/documents shape). The file lands in
+  // client_documents so it's queryable + downloadable through the existing
+  // document pipeline; we just tag it with a hearing-specific category so
+  // the mobile exhibit editor can reference it by document id.
+  //
+  // Body: { hearing_note_id (int), hearing_kind ("individual"|"master"),
+  //         filename, mime_type, content_base64, exhibit_number, description }
+  // Returns: { ok, document: { id, filename, size_bytes, mime_type } }
+  //          The mobile app writes { file_id: id, filename } into the
+  //          exhibits[i] payload and PATCHes the hearing note.
+  app.post("/api/staff/hearings/upload-file", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const { hearing_note_id, hearing_kind, filename, mime_type,
+              content_base64, exhibit_number, description, client_key } = req.body || {};
+      if (!filename || !content_base64) {
+        return res.status(400).json({ ok: false, error: "filename and content_base64 required" });
+      }
+      const buf = Buffer.from(String(content_base64), 'base64');
+      if (buf.length === 0) return res.status(400).json({ ok: false, error: "empty file" });
+      if (buf.length > 25 * 1024 * 1024) {
+        return res.status(413).json({ ok: false, error: "File too large. Max 25 MB." });
+      }
+      const label = `Ex. ${exhibit_number || "?"}${description ? ": " + String(description).substring(0, 100) : ""}`;
+      const category = hearing_kind === "individual" ? "hearing-exhibit-individual" : "hearing-exhibit-master";
+      const noteRef = hearing_note_id ? ` (note #${hearing_note_id})` : "";
+      // client_documents.client_key is NOT NULL — fall back to a hearing-scoped
+      // synthetic key so orphaned hearing files still land in the table.
+      const effectiveKey = client_key
+        || (hearing_note_id ? `hearing-${hearing_kind || "master"}-${hearing_note_id}` : "hearing-unattached");
+      const r = await db.query(
+        `INSERT INTO client_documents
+           (client_key, filename, mime_type, size_bytes, category, note, content, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id, filename, mime_type, size_bytes, category, note, uploaded_at`,
+        [
+          effectiveKey,
+          String(filename).substring(0, 200),
+          String(mime_type || 'application/octet-stream').substring(0, 100),
+          buf.length,
+          category,
+          (label + noteRef).substring(0, 500),
+          buf,
+          String(req.user.u || "app-user").substring(0, 100),
+        ]
+      );
+      res.json({ ok: true, document: r.rows[0] });
+    } catch (err) {
+      console.error("[hearing upload]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
   });
 
   // ── PATCH + DELETE hearing notes from the mobile app ─────────────────
@@ -2137,6 +2195,9 @@ function registerAppApi(app) {
     "next_hearing_date", "next_hearing_type", "next_action_deadline",
     "hearing_summary_raw", "paralegal_summary", "client_summary",
   ]);
+  // JSONB columns need explicit stringification before PATCH — treated
+  // separately so the field whitelist stays clean.
+  const INDIV_JSONB_FIELDS = new Set(["exhibits", "examinations"]);
 
   app.patch("/api/staff/notes/individual/:id", requireBearer, requireFirmUser, async (req, res) => {
     try {
@@ -2147,6 +2208,11 @@ function registerAppApi(app) {
       const vals = [];
       let i = 1;
       for (const key of Object.keys(body)) {
+        if (INDIV_JSONB_FIELDS.has(key)) {
+          sets.push(`${key} = $${i++}::jsonb`);
+          vals.push(JSON.stringify(body[key] || []));
+          continue;
+        }
         if (!INDIV_PATCH_FIELDS.has(key)) continue;
         sets.push(`${key} = $${i++}`);
         vals.push(body[key] === "" ? null : body[key]);
