@@ -600,42 +600,183 @@ function renderLoginPage({ error = null, nextUrl = "", username = "" } = {}) {
 <html><head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sign in — Tez Law Firm</title>
+  <title>Sign in — Tara · Tez Law Firm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;700&family=IM+Fell+English:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f7f7f7; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .card { background: white; padding: 40px 40px 30px 40px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: min(400px, 90vw); }
-    h1 { color: #0C1C36; margin: 0 0 6px 0; font-size: 24px; text-align: center; }
-    .brand { text-align: center; color: #B79C62; font-size: 12px; letter-spacing: 2px; margin-bottom: 24px; font-weight: 600; }
-    label { display: block; margin: 12px 0 4px 0; color: #333; font-size: 13px; font-weight: 600; }
-    input[type="text"], input[type="password"] { width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 15px; box-sizing: border-box; }
-    input:focus { outline: none; border-color: #B79C62; }
-    .row { display: flex; align-items: center; margin: 14px 0; font-size: 13px; color: #555; }
-    .row input { margin-right: 6px; }
-    button { width: 100%; padding: 12px; background: #0C1C36; color: white; border: none; border-radius: 4px; font-size: 15px; cursor: pointer; margin-top: 16px; font-weight: 600; }
-    button:hover { background: #1a3057; }
-    .err { background: #fee; color: #900; padding: 10px 12px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; border-left: 3px solid #c00; }
-    .foot { text-align: center; color: #999; font-size: 11px; margin-top: 20px; }
+    :root {
+      --walnut:#3E2818; --walnut-mid:#5A3B22; --walnut-light:#7B5330;
+      --ink:#2A1810; --ink-body:#4A3020;
+      --sandstone:#E4CC94; --sandstone-lit:#F0DDB4;
+      --parchment:#FBF3DE; --parchment-lit:#FFF7E4;
+      --gold:#B8891E; --gold-bright:#E0B44E; --gold-deep:#7B5810;
+      --ember:#F07800; --ember-bright:#FFA544; --ember-deep:#B84200;
+      --wax-red:#A02818; --border-hair:#D4B983;
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body {
+      font-family:'Inter',-apple-system,sans-serif;
+      background:var(--walnut); min-height:100vh;
+      color:var(--ink); position:relative; overflow-x:hidden;
+    }
+    .hero-bg {
+      position:fixed; inset:0; z-index:0;
+      background-image:url('/static/britannia-hero.jpg');
+      background-size:cover; background-position:center;
+      filter:brightness(0.75);
+    }
+    .hero-overlay {
+      position:fixed; inset:0; z-index:1;
+      background:linear-gradient(180deg,
+        rgba(26,16,8,0.55) 0%,
+        rgba(26,16,8,0.75) 50%,
+        rgba(26,16,8,0.90) 100%);
+    }
+    .center-wrap {
+      position:relative; z-index:10;
+      min-height:100vh; display:flex; align-items:center; justify-content:center;
+      padding:24px;
+    }
+    .card {
+      background:var(--parchment-lit); border-radius:14px;
+      padding:40px 36px 32px; width:100%; max-width:420px;
+      box-shadow:0 24px 60px rgba(0,0,0,0.5), 0 0 0 1.5px var(--gold);
+      position:relative;
+    }
+    .corner {
+      position:absolute; font-family:'Cinzel',serif; font-size:20px;
+      color:var(--gold); opacity:0.55; user-select:none;
+    }
+    .corner.tl{top:8px;left:12px} .corner.tr{top:8px;right:12px}
+    .corner.bl{bottom:8px;left:12px} .corner.br{bottom:8px;right:12px}
+
+    .shield-wrap { position:relative; display:inline-block; margin-bottom:6px; }
+    .shield-glow {
+      position:absolute; inset:-10px;
+      background:var(--ember); opacity:0.18;
+      border-radius:999px; filter:blur(20px); z-index:0;
+    }
+    .shield-img {
+      position:relative; z-index:1;
+      width:74px; height:auto; display:block; margin:0 auto;
+    }
+
+    .head { text-align:center; margin-bottom:26px; }
+    h1 {
+      font-family:'Cinzel',serif; font-weight:700;
+      font-size:32px; color:var(--gold-bright);
+      letter-spacing:8px; margin-top:14px;
+      text-shadow:0 1px 6px rgba(184,66,0,0.35);
+    }
+    .sub {
+      font-family:'IM Fell English',serif; font-style:italic;
+      color:var(--walnut-mid); font-size:13px;
+      margin-top:4px; letter-spacing:2px;
+    }
+    .subtitle {
+      font-family:'IM Fell English',serif; font-style:italic;
+      color:var(--walnut-light); font-size:13px;
+      margin-top:8px;
+    }
+
+    label {
+      display:block; margin:14px 0 6px;
+      font-family:'Cinzel',serif; font-weight:500; font-size:11px;
+      color:var(--walnut); letter-spacing:2px; text-transform:uppercase;
+    }
+    input[type="text"], input[type="password"] {
+      width:100%; padding:12px 14px;
+      border:1px solid var(--border-hair); border-radius:8px;
+      font-size:15px; color:var(--ink);
+      background:var(--parchment);
+      font-family:'Inter',sans-serif;
+      transition:border-color .15s, background .15s;
+    }
+    input:focus {
+      outline:none; border-color:var(--ember); border-width:2px;
+      padding:11px 13px; background:#fff;
+    }
+    .row {
+      display:flex; align-items:center; margin:16px 0 4px;
+      font-size:13px; color:var(--walnut-mid);
+    }
+    .row input { margin-right:8px; }
+    .row label {
+      margin:0; font-family:'Inter',sans-serif; font-weight:500;
+      color:var(--walnut-mid); font-size:13px;
+      letter-spacing:normal; text-transform:none;
+      cursor:pointer;
+    }
+    button[type="submit"] {
+      width:100%; padding:16px;
+      background:var(--ember); color:var(--parchment-lit);
+      border:2px solid var(--wax-red); border-radius:10px;
+      font-family:'Cinzel',serif; font-weight:700;
+      font-size:14px; letter-spacing:3px; text-transform:uppercase;
+      cursor:pointer; margin-top:22px;
+      box-shadow:0 4px 14px rgba(184,66,0,0.35);
+      transition:transform .15s, background .15s;
+    }
+    button[type="submit"]:hover { background:var(--ember-deep); }
+    button[type="submit"]:active { transform:scale(0.98); }
+
+    .err {
+      background:rgba(160,40,24,0.10); color:var(--wax-red);
+      padding:12px 14px; border-radius:8px; margin-bottom:14px;
+      font-size:13px; border:1px solid var(--wax-red);
+      font-family:'Inter',sans-serif;
+    }
+    .foot {
+      position:fixed; z-index:10;
+      bottom:16px; left:0; right:0;
+      text-align:center;
+      font-family:'IM Fell English',serif; font-style:italic;
+      font-size:11px; color:var(--sandstone-lit);
+      opacity:0.7; letter-spacing:1px;
+      text-shadow:0 1px 3px rgba(0,0,0,0.5);
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="brand">TEZ LAW P.C.</div>
-    <h1>Sign in</h1>
-    ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
-    <form method="POST" action="/admin/login">
-      ${nextField}
-      <label for="username">Username</label>
-      <input type="text" id="username" name="username" value="${escapeHtml(username)}" autofocus required autocomplete="username">
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password" required autocomplete="current-password">
-      <div class="row">
-        <input type="checkbox" id="remember" name="remember" value="1">
-        <label for="remember" style="margin:0; font-weight:normal; cursor:pointer;">Remember me for 30 days</label>
+  <div class="hero-bg"></div>
+  <div class="hero-overlay"></div>
+
+  <div class="center-wrap">
+    <div class="card">
+      <span class="corner tl">❦</span>
+      <span class="corner tr">❦</span>
+
+      <div class="head">
+        <div class="shield-wrap">
+          <div class="shield-glow"></div>
+          <img src="/static/tez-shield.png" alt="Tez Law" class="shield-img">
+        </div>
+        <h1>TARA</h1>
+        <p class="sub">by Tez Law</p>
+        <p class="subtitle">Welcome back. Sign in to continue.</p>
       </div>
-      <button type="submit">Sign in</button>
-    </form>
-    <div class="foot">Protect your rights — we handle the rest.</div>
+
+      ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
+      <form method="POST" action="/admin/login">
+        ${nextField}
+        <label for="username">Username or email</label>
+        <input type="text" id="username" name="username" value="${escapeHtml(username)}" autofocus required autocomplete="username">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autocomplete="current-password">
+        <div class="row">
+          <input type="checkbox" id="remember" name="remember" value="1">
+          <label for="remember">Remember me for 30 days</label>
+        </div>
+        <button type="submit">Sign In</button>
+      </form>
+
+      <span class="corner bl">❦</span>
+      <span class="corner br">❦</span>
+    </div>
   </div>
+
+  <p class="foot">Protect your rights — we handle the rest.</p>
 </body></html>`;
 }
 
@@ -664,7 +805,7 @@ function renderSetupPage({ error = null, username = "", fullName = "" } = {}) {
     <div class="brand">TEZ LAW P.C.</div>
     <h1>Create the first admin account</h1>
     <div class="intro">
-      Zara doesn't have any admin users yet. Create the first one below — this account will have full access.
+      Tara doesn't have any admin users yet. Create the first one below — this account will have full access.
       You can add more users later via the Admin Users page.
     </div>
     ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
