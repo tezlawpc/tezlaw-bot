@@ -119,7 +119,7 @@ function formatConversationsForAnalysis(conversations) {
     if (count >= 60) break;                  // cap to control token spend
     out += `\n--- Conversation ${count + 1} [${convo.platform}] ---\n`;
     for (const msg of convo.messages) {
-      const label   = msg.role === "assistant" ? "ZARA" : "CLIENT";
+      const label   = msg.role === "assistant" ? "TARA" : "CLIENT";
       const content = msg.content.length > 400
         ? msg.content.substring(0, 400) + "..."
         : msg.content;
@@ -132,15 +132,15 @@ function formatConversationsForAnalysis(conversations) {
 
 // ── Claude analysis ───────────────────────────────────────
 async function analyzeWithClaude(conversationText, weekLabel) {
-  const prompt = `You are analyzing real conversations between Zara (AI legal assistant for Tez Law P.C. in West Covina, CA) and prospective clients over the past 7 days.
+  const prompt = `You are analyzing real conversations between Tara (AI legal assistant for Tez Law P.C. in West Covina, CA) and prospective clients over the past 7 days.
 
 Practice areas: Immigration, Car Accidents, Business Litigation, Patents/Trademarks, Estate Planning.
 
 Analyze the conversations and identify:
-1. Questions Zara answered weakly, vaguely, or incorrectly
-2. Topics that came up repeatedly that Zara lacks depth on
+1. Questions Tara answered weakly, vaguely, or incorrectly
+2. Topics that came up repeatedly that Tara lacks depth on
 3. Moments clients seemed frustrated, confused, or disengaged
-4. Knowledge gaps (things clearly missing from Zara's training)
+4. Knowledge gaps (things clearly missing from Tara's training)
 5. What practice areas dominated this week
 
 Then produce exactly these sections:
@@ -155,10 +155,10 @@ List each practice area with estimated % of questions.
 Up to 5 specific problems you observed, with a quote from the conversation if possible.
 
 ## RECOMMENDED PROMPT IMPROVEMENTS
-Exactly 3 specific, copy-paste-ready additions or edits to Zara's SYSTEM_PROMPT. Be concrete — don't say "add more detail," say exactly what text to add and where.
+Exactly 3 specific, copy-paste-ready additions or edits to Tara's SYSTEM_PROMPT. Be concrete — don't say "add more detail," say exactly what text to add and where.
 
 ## URGENT KNOWLEDGE GAPS
-Anything Zara clearly got wrong that could mislead a client on a legal matter. Flag these prominently.
+Anything Tara clearly got wrong that could mislead a client on a legal matter. Flag these prominently.
 
 ## SUGGESTED FOLLOW-UPS
 Any clients from this week who seem like warm leads that JJ should personally follow up with (describe their issue without identifying info).
@@ -212,7 +212,7 @@ function buildEmailHtml(analysis, stats, intakes, weekLabel) {
 
   <!-- Header -->
   <div style="background:#0C1C36;padding:24px 28px">
-    <h1 style="color:#B79C62;margin:0;font-size:22px">⚡ Zara Weekly Intelligence Report</h1>
+    <h1 style="color:#B79C62;margin:0;font-size:22px">⚡ Tara Weekly Intelligence Report</h1>
     <p style="color:#B79C62;opacity:.7;margin:6px 0 0;font-size:13px">${weekLabel} &nbsp;·&nbsp; Generated ${new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"})}</p>
   </div>
 
@@ -278,7 +278,7 @@ function buildEmailHtml(analysis, stats, intakes, weekLabel) {
 
   <!-- Footer -->
   <div style="background:#0C1C36;padding:16px 28px;text-align:center">
-    <p style="color:#B79C62;margin:0;font-size:12px">TEZ Law P.C. &nbsp;·&nbsp; Zara Analytics Engine &nbsp;·&nbsp; Every Sunday 9:00 AM</p>
+    <p style="color:#B79C62;margin:0;font-size:12px">TEZ Law P.C. &nbsp;·&nbsp; Tara Analytics Engine &nbsp;·&nbsp; Every Sunday 9:00 AM</p>
   </div>
 
 </body>
@@ -299,9 +299,9 @@ async function sendDigestEmail(analysis, stats, intakes, weekLabel) {
   });
 
   await transporter.sendMail({
-    from: `"Zara Analytics" <${GMAIL_EMAIL}>`,
+    from: `"Tara Analytics" <${GMAIL_EMAIL}>`,
     to: JJ_EMAIL,
-    subject: `📊 Zara Weekly Report — ${weekLabel}`,
+    subject: `📊 Tara Weekly Report — ${weekLabel}`,
     html: buildEmailHtml(analysis, stats, intakes, weekLabel),
   });
 
@@ -336,7 +336,7 @@ async function runWeeklyAnalysis(force = false) {
   const weekLabel = getWeekLabel();
   const weekKey   = weekLabel.replace(/\s/g, "-");
 
-  console.log(`\n📊 Zara Analytics — ${weekLabel}`);
+  console.log(`\n📊 Tara Analytics — ${weekLabel}`);
 
   if (!force) {
     const h = loadHistory();
@@ -360,7 +360,7 @@ async function runWeeklyAnalysis(force = false) {
   console.log("🤖 Sending to Claude for analysis...");
   let analysis;
   if (conversations.length === 0) {
-    analysis = "## WEEKLY SUMMARY\nNo conversations recorded this week. Zara may have been offline or no clients reached out.\n\n## PRACTICE AREA BREAKDOWN\nN/A\n\n## TOP ISSUES FOUND\nNo data.\n\n## RECOMMENDED PROMPT IMPROVEMENTS\nNo changes suggested — no data to analyze.\n\n## URGENT KNOWLEDGE GAPS\nNone detected.\n\n## SUGGESTED FOLLOW-UPS\nNone.";
+    analysis = "## WEEKLY SUMMARY\nNo conversations recorded this week. Tara may have been offline or no clients reached out.\n\n## PRACTICE AREA BREAKDOWN\nN/A\n\n## TOP ISSUES FOUND\nNo data.\n\n## RECOMMENDED PROMPT IMPROVEMENTS\nNo changes suggested — no data to analyze.\n\n## URGENT KNOWLEDGE GAPS\nNone detected.\n\n## SUGGESTED FOLLOW-UPS\nNone.";
   } else {
     analysis = await analyzeWithClaude(formatted, weekLabel);
   }

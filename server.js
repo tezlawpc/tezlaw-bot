@@ -76,6 +76,13 @@ app.use(express.urlencoded({ extended: true, limit: "25mb", parameterLimit: 5000
 app.use(express.text({ type: "text/xml" }));
 app.use(cookieParser());
 
+// Static assets (Britannia hero painting, tez shield, etc.) for admin panel theming.
+// Served with a long cache since these are content-hashed / rarely change.
+app.use("/static", express.static(require("path").join(__dirname, "public"), {
+  maxAge: "7d",
+  immutable: false,
+}));
+
 // ── Authentication ─────────────────────────────────────────
 // CRITICAL ORDER:
 //   1. requireAdminAuth middleware FIRST — sets req.user on every /admin/*
