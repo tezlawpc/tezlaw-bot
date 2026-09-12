@@ -187,6 +187,11 @@ async function initClientAuthTables() {
   // These may be missing on installations that only ran tasks.js's initTable.
   try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS client_phone TEXT`); } catch {}
   try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS client_email TEXT`); } catch {}
+  // referral_source (broker name for PI) and attorney (assigned attorney name,
+  // separate from the paralegal in assigned_to). Both referenced by the PI
+  // kanban SELECT and the contact-only-client INSERT.
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS referral_source TEXT`); } catch {}
+  try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS attorney TEXT`); } catch {}
 
   // ─── Ensure admin_users has email (used by team-management screen) ─────
   // Older installations of admin_users didn't include email; the /admin/users
@@ -2502,12 +2507,13 @@ function registerAppApi(app) {
       const description = String(b.notes || '').trim() || `Contact record for ${name}`;
       const r = await db.query(
         `INSERT INTO tasks
-           (client_key, client_name, client_phone, client_email, matter_type,
+           (title, client_key, client_name, client_phone, client_email, matter_type,
             description, assigned_to, referral_source, a_number,
-            completed, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, 'Contact', $5, $6, $7, $8, FALSE, NOW(), NOW())
+            status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 'Contact', $6, $7, $8, $9, 'completed', NOW(), NOW())
          RETURNING id, client_key, client_name, client_phone, client_email, matter_type, a_number`,
         [
+          `Contact: ${name}`,
           client_key,
           name,
           b.client_phone || null,
