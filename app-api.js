@@ -1993,6 +1993,173 @@ function registerAppApi(app) {
       res.json({ ok: true, id: r.rows[0].id });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
+
+  // ── PATCH + DELETE hearing notes from the mobile app ─────────────────
+  //
+  // Permission model matches GET detail: admin OR note author OR user has
+  // access to the note's client_key. Editors only need to send the fields
+  // they changed; every other column is left untouched.
+
+  // Allowed fields the app is permitted to PATCH on master hearing notes.
+  // Web form has ~30 fields but the app only exposes the summary fields for
+  // quick fix-ups. Everything else must be edited via the web form.
+  const MASTER_PATCH_FIELDS = new Set([
+    "client_name", "a_number", "client_language", "client_email", "client_phone",
+    "judge_name", "hearing_date", "hearing_type", "case_type", "court_location",
+    "disposition", "disposition_notes",
+    "next_hearing_date", "next_hearing_type",
+    "raw_notes", "paralegal_summary", "client_summary",
+    "bond_outcome", "bond_amount",
+  ]);
+
+  async function canEditMasterNote(user, id) {
+    if (isAdmin(user)) return true;
+    const r = await db.query(
+      `SELECT client_key, created_by FROM hearing_notes WHERE id = $1`,
+      [id]
+    );
+    if (!r.rows.length) return false;
+    const note = r.rows[0];
+    if (note.created_by && String(note.created_by) === String(user.uid)) return true;
+    if (note.client_key) return await canUserAccessClient(user, note.client_key);
+    return false;
+  }
+
+  app.patch("/api/staff/notes/master/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+      if (!(await canEditMasterNote(req.user, id))) {
+        return res.status(403).json({ ok: false, error: "You don't have access to this note" });
+      }
+      // Whitelist the fields the app is allowed to change.
+      const body = req.body || {};
+      const sets = [];
+      const vals = [];
+      let i = 1;
+      for (const key of Object.keys(body)) {
+        if (!MASTER_PATCH_FIELDS.has(key)) continue;
+        sets.push(`${key} = $${i++}`);
+        vals.push(body[key] === "" ? null : body[key]);
+      }
+      if (!sets.length) return res.status(400).json({ ok: false, error: "No editable fields provided" });
+      vals.push(id);
+      const q = `UPDATE hearing_notes SET ${sets.join(", ")}, updated_at = NOW() WHERE id = $${i} RETURNING id`;
+      const r = await db.query(q, vals).catch(async (err) => {
+        // updated_at column may not exist on older schemas — retry without it.
+        if (String(err.message).includes("updated_at")) {
+          const q2 = `UPDATE hearing_notes SET ${sets.join(", ")} WHERE id = $${i} RETURNING id`;
+          return db.query(q2, vals);
+        }
+        throw err;
+      });
+      if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
+      // Re-sync deadlines if the schedule fields changed.
+      if (body.next_hearing_date || body.hearing_date) {
+        try {
+          const dt = require("./deadline-tracker");
+          if (dt.syncFromHearingNote) await dt.syncFromHearingNote(id);
+          if (dt.syncMasterHearingDeadline) await dt.syncMasterHearingDeadline(id);
+        } catch (e) { /* non-fatal */ }
+      }
+      res.json({ ok: true, id, updated_fields: sets.length });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/notes/master/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+      // Only admins or the note author can delete. Regular clients-visible access
+      // is not enough to remove records permanently.
+      if (!isAdmin(req.user)) {
+        const r = await db.query(`SELECT created_by FROM hearing_notes WHERE id = $1`, [id]);
+        if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
+        if (!r.rows[0].created_by || String(r.rows[0].created_by) !== String(req.user.uid)) {
+          return res.status(403).json({ ok: false, error: "Only the note author or an admin can delete a note" });
+        }
+      }
+      const hn = require("./hearing-notes");
+      const result = await hn.deleteNote(id);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      const notFound = String(err.message || "").toLowerCase().includes("not found");
+      res.status(notFound ? 404 : 500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Individual hearing notes — same pattern
+  const INDIV_PATCH_FIELDS = new Set([
+    "client_name", "a_number", "client_language",
+    "judge_name", "hearing_date", "court_location",
+    "case_type", "outcome", "disposition", "notes",
+    "paralegal_summary",
+  ]);
+
+  async function canEditIndividualNote(user, id) {
+    if (isAdmin(user)) return true;
+    const r = await db.query(
+      `SELECT client_key, created_by FROM individual_hearing_notes WHERE id = $1`,
+      [id]
+    );
+    if (!r.rows.length) return false;
+    const note = r.rows[0];
+    if (note.created_by && String(note.created_by) === String(user.uid)) return true;
+    if (note.client_key) return await canUserAccessClient(user, note.client_key);
+    return false;
+  }
+
+  app.patch("/api/staff/notes/individual/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+      if (!(await canEditIndividualNote(req.user, id))) {
+        return res.status(403).json({ ok: false, error: "You don't have access to this note" });
+      }
+      const body = req.body || {};
+      const sets = [];
+      const vals = [];
+      let i = 1;
+      for (const key of Object.keys(body)) {
+        if (!INDIV_PATCH_FIELDS.has(key)) continue;
+        sets.push(`${key} = $${i++}`);
+        vals.push(body[key] === "" ? null : body[key]);
+      }
+      if (!sets.length) return res.status(400).json({ ok: false, error: "No editable fields provided" });
+      vals.push(id);
+      const q = `UPDATE individual_hearing_notes SET ${sets.join(", ")}, updated_at = NOW() WHERE id = $${i} RETURNING id`;
+      const r = await db.query(q, vals).catch(async (err) => {
+        if (String(err.message).includes("updated_at")) {
+          const q2 = `UPDATE individual_hearing_notes SET ${sets.join(", ")} WHERE id = $${i} RETURNING id`;
+          return db.query(q2, vals);
+        }
+        throw err;
+      });
+      if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
+      res.json({ ok: true, id, updated_fields: sets.length });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/notes/individual/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
+      if (!isAdmin(req.user)) {
+        const r = await db.query(`SELECT created_by, client_name FROM individual_hearing_notes WHERE id = $1`, [id]);
+        if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
+        if (!r.rows[0].created_by || String(r.rows[0].created_by) !== String(req.user.uid)) {
+          return res.status(403).json({ ok: false, error: "Only the note author or an admin can delete a note" });
+        }
+      }
+      const r = await db.query(
+        `DELETE FROM individual_hearing_notes WHERE id = $1 RETURNING id, client_name`,
+        [id]
+      );
+      if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
+      res.json({ ok: true, id: r.rows[0].id, client_name: r.rows[0].client_name });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
   // assigned attorney or client_key visible to them.
   app.get("/api/staff/federal", requireBearer, requireFirmUser, async (req, res) => {
     try {
