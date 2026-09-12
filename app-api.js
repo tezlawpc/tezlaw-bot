@@ -25,6 +25,14 @@ const crypto = require("crypto");
 const db = require("./db");
 const push = require("./push-notifications");
 const auth = require("./auth");
+const multer = require("multer");
+
+// Multipart audio upload for mobile dictation — same 30 MB cap as the web
+// /admin/hearing/notes/dictate/extract-only route in server.js.
+const mobileAudioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 },
+});
 
 // ── Utilities ─────────────────────────────────────────────
 
@@ -2159,6 +2167,66 @@ function registerAppApi(app) {
       res.json({ ok: true, id: r.rows[0].id, client_name: r.rows[0].client_name });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
+
+  // ── Voice dictation from mobile ──────────────────────────────────────
+  //
+  // POST /api/staff/notes/dictate  — multipart form-data
+  //   Fields:
+  //     audio (file) — required, m4a/webm/mp3, up to 30 MB
+  //     client_name (str), a_number (str), hearing_type (str) — optional hints
+  //   Returns: { ok, transcript, extracted } where extracted is a partial
+  //     hearing note ready to POST to /api/staff/notes/master
+  //
+  // Reuses the same voice-dictation module the web /admin/... route uses,
+  // just wrapped in Bearer auth instead of session cookie auth.
+  app.post(
+    "/api/staff/notes/dictate",
+    requireBearer, requireFirmUser,
+    mobileAudioUpload.single("audio"),
+    async (req, res) => {
+      try {
+        if (!req.file || !req.file.buffer) {
+          return res.status(400).json({ ok: false, error: "No audio file uploaded" });
+        }
+        const voice = require("./voice-dictation");
+        const filename = req.file.originalname || "dictation.m4a";
+        let buffer = req.file.buffer;
+        console.log(`[app-dictate] user=${req.user.uid} received ${buffer.length} bytes (${filename})`);
+
+        // Whisper 25 MB cap — leave compression to whoever wrote the web helper.
+        if (buffer.length > 24 * 1024 * 1024) {
+          try {
+            const helper = require("./voice-dictation");
+            if (typeof helper.compressAudioForWhisper === "function") {
+              buffer = await helper.compressAudioForWhisper(buffer, filename);
+              console.log(`[app-dictate] compressed to ${buffer.length} bytes`);
+            }
+          } catch (e) {
+            console.warn("[app-dictate] compression skipped:", e.message);
+          }
+        }
+
+        const transcript = await voice.transcribeAudio(buffer, filename);
+        console.log(`[app-dictate] transcript: ${transcript.length} chars`);
+        if (!transcript || transcript.trim().length < 5) {
+          return res.status(400).json({
+            ok: false,
+            error: "Transcript was empty or too short. The recording may have been silent.",
+          });
+        }
+        const hint = {
+          client_name: String(req.body.client_name || "").trim() || null,
+          a_number: String(req.body.a_number || "").trim() || null,
+          hearing_type: String(req.body.hearing_type || "").trim() || null,
+        };
+        const extracted = await voice.extractFieldsFromTranscript(transcript, hint);
+        res.json({ ok: true, transcript, extracted });
+      } catch (err) {
+        console.error("[app-dictate]:", err.message);
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    }
+  );
 
   // assigned attorney or client_key visible to them.
   app.get("/api/staff/federal", requireBearer, requireFirmUser, async (req, res) => {
