@@ -3170,6 +3170,86 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // Firm-side: unified inbox — one row per client with unread count, last
+  // message preview, timestamp. Powers the app's Inbox tab so JJ can see
+  // all pending replies at a glance without opening each client.
+  //
+  // ?unread=1 filters to threads with at least one unread client message.
+  // Marks nothing as read here — the app calls PATCH .../messages/read
+  // on the client detail screen when the user actually opens the thread.
+  app.get("/api/staff/inbox", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const unreadOnly = String(req.query.unread || "") === "1";
+      // One row per client_key with:
+      //   last message (any sender), unread count (client-sent only),
+      //   client_name (best-effort — from client_accounts, else tasks, else
+      //   hearing_notes)
+      const r = await db.query(`
+        WITH msg_agg AS (
+          SELECT
+            client_key,
+            COUNT(*) FILTER (WHERE sender_kind = 'client' AND read_at IS NULL) AS unread_count,
+            MAX(created_at) AS last_at,
+            (
+              SELECT jsonb_build_object(
+                'id', m.id, 'body', LEFT(m.body, 140),
+                'sender_kind', m.sender_kind, 'sender_name', m.sender_name,
+                'created_at', m.created_at, 'read_at', m.read_at
+              )
+              FROM client_messages m
+              WHERE m.client_key = cm.client_key
+              ORDER BY m.created_at DESC LIMIT 1
+            ) AS last_msg
+          FROM client_messages cm
+          GROUP BY client_key
+        )
+        SELECT
+          a.client_key,
+          COALESCE(
+            (SELECT client_name FROM client_accounts WHERE client_key = a.client_key LIMIT 1),
+            (SELECT client_name FROM tasks WHERE client_key = a.client_key AND client_name IS NOT NULL ORDER BY created_at DESC LIMIT 1),
+            (SELECT client_name FROM hearing_notes WHERE client_name IS NOT NULL ORDER BY created_at DESC LIMIT 1),
+            a.client_key
+          ) AS client_name,
+          a.unread_count::int,
+          a.last_at,
+          a.last_msg
+        FROM msg_agg a
+        ${unreadOnly ? "WHERE a.unread_count > 0" : ""}
+        ORDER BY a.last_at DESC NULLS LAST
+        LIMIT 200
+      `);
+      // Total unread across all threads — used for the tab-bar badge
+      const totalR = await db.query(
+        `SELECT COUNT(*)::int AS total_unread FROM client_messages
+         WHERE sender_kind = 'client' AND read_at IS NULL`
+      );
+      res.json({
+        ok: true,
+        threads: r.rows,
+        total_unread: totalR.rows[0]?.total_unread || 0,
+      });
+    } catch (err) {
+      console.error("[/api/staff/inbox]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Mark all messages in a thread as read (called when user opens the thread)
+  app.patch("/api/staff/clients/:key/messages/read", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const ok = await canUserAccessClient(req.user, req.params.key);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const r = await db.query(
+        `UPDATE client_messages SET read_at = NOW()
+         WHERE client_key = $1 AND sender_kind = 'client' AND read_at IS NULL
+         RETURNING id`,
+        [req.params.key]
+      );
+      res.json({ ok: true, marked_read: r.rows.length });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
   // Firm-side: send message to client — 403 unless user can access
   app.post("/api/staff/clients/:key/messages", requireBearer, requireFirmUser, async (req, res) => {
     try {
