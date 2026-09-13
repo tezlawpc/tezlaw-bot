@@ -115,17 +115,22 @@ async function getCaseStatus(receiptNumber) {
       validateStatus: () => true, // handle all codes manually
     });
 
+    console.log(`[uscis] HTTP status: ${res.status}`);
+
     // ── 200 Success ──────────────────────────────────────
     if (res.status === 200) {
       const cs = res.data?.case_status;
 
       if (!cs) {
+        console.error(`[uscis] parse_error — unexpected structure: ${JSON.stringify(res.data).substring(0, 200)}`);
         return {
           success: false,
           error:   "parse_error",
           message: "USCIS returned an unexpected response format. Please try again.",
         };
       }
+
+      console.log(`[uscis] ✅ ${normalized} — ${cs.current_case_status_text_en || "status received"}`);
 
       // Core fields
       const receiptNum    = cs.receiptNumber   || normalized;
