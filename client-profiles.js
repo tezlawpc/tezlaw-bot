@@ -416,7 +416,7 @@ function renderClientList(clients) {
         backdrop.innerHTML = ''
           + '<div style="background:#FBF3DE;border-radius:12px;padding:28px;max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 0 1.5px #B8891E;">'
           +   '<h2 style="margin:0 0 6px 0;font-family:Cinzel,serif;color:#3E2818;letter-spacing:2px;text-transform:uppercase;font-size:18px;">Add Client</h2>'
-          +   '<p style="margin:0 0 20px 0;font-family:\'IM Fell English\',serif;font-style:italic;color:#7B5330;font-size:13px;">Quick contact record — no case or matter needed. You can attach a case later.</p>'
+          +   '<p style="margin:0 0 20px 0;font-family:Georgia,serif;font-style:italic;color:#7B5330;font-size:13px;">Quick contact record — no case or matter needed. You can attach a case later.</p>'
           +   '<div id="addContactError" style="display:none;background:rgba(160,40,24,0.10);color:#A02818;padding:10px 12px;border-radius:6px;border:1px solid #A02818;margin-bottom:12px;font-size:13px;"></div>'
           +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">'
           +     '<div style="grid-column:1/-1;"><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Client Name *</label><input id="ac_name" type="text" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" autofocus></div>'
