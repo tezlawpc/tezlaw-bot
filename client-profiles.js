@@ -176,6 +176,47 @@ async function aggregateClients() {
     console.warn("[client-profiles] Dropbox-only client aggregation failed:", e.message);
   }
 
+  // Also include contact-only clients — rows in the tasks table with
+  // matter_type = 'Contact' inserted via the mobile app's "Add contact"
+  // flow. These never appear in hearing_notes / individual_hearing_notes,
+  // so without this merge they'd be invisible on the web /admin/clients
+  // page even though the row exists.
+  try {
+    const contactRes = await db.query(`
+      SELECT DISTINCT ON (client_key)
+             client_key, client_name, a_number, client_phone, client_email,
+             referral_source, description, assigned_to, created_at
+      FROM tasks
+      WHERE client_key IS NOT NULL AND client_key LIKE 'contact-%'
+      ORDER BY client_key, created_at DESC
+    `);
+    for (const row of contactRes.rows) {
+      if (clients[row.client_key]) continue;  // already covered by hearing notes / dropbox
+      clients[row.client_key] = {
+        key: row.client_key,
+        client_name: row.client_name || row.client_key,
+        a_number: row.a_number,
+        client_email: row.client_email,
+        client_phone: row.client_phone,
+        client_address: null,
+        client_language: null,
+        case_types: new Set(["Contact"]),
+        judges: new Set(),
+        hearings: [],
+        upcoming: [],
+        deadlines: [],
+        sent_count: 0,
+        contact_only: true,
+        broker: row.referral_source || null,
+        _notes: row.description,
+        _assigned_to: row.assigned_to,
+        _created_at: row.created_at,
+      };
+    }
+  } catch (e) {
+    console.warn("[client-profiles] Contact-only client aggregation failed:", e.message);
+  }
+
   // Enrich every client (including hearing-based ones) with dropbox_path + broker
   try {
     const allPaths = await db.query(
@@ -316,7 +357,8 @@ function renderClientList(clients) {
           <button type="button" onclick="clearFilters()" style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Clear</button>
         </div>
         <div style="border-left:1px solid #eee; padding-left:12px;">
-          <button type="button" onclick="bulkImportDropbox(true)" title="Preview what would be imported (no changes)" style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">👁 Preview import</button>
+          <button type="button" onclick="showAddContactModal()" title="Add a new client contact record (no case yet)" style="padding:9px 14px; background:#F07800; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">➕ Add Client</button>
+          <button type="button" onclick="bulkImportDropbox(true)" title="Preview what would be imported (no changes)" style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">👁 Preview import</button>
           <button type="button" onclick="bulkImportDropbox(false)" title="Scan Dropbox and add all client folders as clients" style="padding:9px 14px; background:#0061FF; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">📥 Import from Dropbox</button>
         </div>
       </div>
@@ -364,6 +406,78 @@ function renderClientList(clients) {
         document.getElementById("filter-lang").value = "";
         filterRows();
       }
+
+      // ── Add Client (contact-only) modal ──────────────────────────
+      function showAddContactModal() {
+        const backdrop = document.createElement("div");
+        backdrop.id = "addContactBackdrop";
+        backdrop.style.cssText = "position:fixed;inset:0;background:rgba(26,16,8,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;";
+        backdrop.onclick = (e) => { if (e.target === backdrop) closeAddContactModal(); };
+        backdrop.innerHTML = ''
+          + '<div style="background:#FBF3DE;border-radius:12px;padding:28px;max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 0 1.5px #B8891E;">'
+          +   '<h2 style="margin:0 0 6px 0;font-family:Cinzel,serif;color:#3E2818;letter-spacing:2px;text-transform:uppercase;font-size:18px;">Add Client</h2>'
+          +   '<p style="margin:0 0 20px 0;font-family:\'IM Fell English\',serif;font-style:italic;color:#7B5330;font-size:13px;">Quick contact record — no case or matter needed. You can attach a case later.</p>'
+          +   '<div id="addContactError" style="display:none;background:rgba(160,40,24,0.10);color:#A02818;padding:10px 12px;border-radius:6px;border:1px solid #A02818;margin-bottom:12px;font-size:13px;"></div>'
+          +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">'
+          +     '<div style="grid-column:1/-1;"><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Client Name *</label><input id="ac_name" type="text" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" autofocus></div>'
+          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Phone</label><input id="ac_phone" type="tel" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" placeholder="626-555-0100"></div>'
+          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Email</label><input id="ac_email" type="email" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;"></div>'
+          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">A-Number</label><input id="ac_anumber" type="text" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" placeholder="A200-000-000"></div>'
+          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Referral Source</label><input id="ac_referral" type="text" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" placeholder="e.g. broker name"></div>'
+          +     '<div style="grid-column:1/-1;"><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Notes</label><textarea id="ac_notes" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;min-height:60px;font-family:inherit;" placeholder="Anything you want to remember about this client..."></textarea></div>'
+          +   '</div>'
+          +   '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">'
+          +     '<button type="button" onclick="closeAddContactModal()" style="padding:10px 20px;background:transparent;border:1.5px solid #B8891E;color:#7B5810;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-weight:500;letter-spacing:1px;text-transform:uppercase;font-size:12px;">Cancel</button>'
+          +     '<button type="button" id="ac_submit" onclick="submitAddContact()" style="padding:10px 24px;background:#F07800;color:#FFF7E4;border:2px solid #A02818;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-weight:700;letter-spacing:2px;text-transform:uppercase;font-size:12px;box-shadow:0 3px 10px rgba(184,66,0,0.3);">Save Client</button>'
+          +   '</div>'
+          + '</div>';
+        document.body.appendChild(backdrop);
+        setTimeout(() => document.getElementById("ac_name").focus(), 50);
+      }
+      function closeAddContactModal() {
+        const b = document.getElementById("addContactBackdrop");
+        if (b) b.remove();
+      }
+      async function submitAddContact() {
+        const btn = document.getElementById("ac_submit");
+        const errBox = document.getElementById("addContactError");
+        errBox.style.display = "none";
+        const body = {
+          client_name: document.getElementById("ac_name").value.trim(),
+          client_phone: document.getElementById("ac_phone").value.trim() || null,
+          client_email: document.getElementById("ac_email").value.trim() || null,
+          a_number: document.getElementById("ac_anumber").value.trim() || null,
+          referral_source: document.getElementById("ac_referral").value.trim() || null,
+          notes: document.getElementById("ac_notes").value.trim() || null,
+        };
+        if (!body.client_name) {
+          errBox.textContent = "Client name is required.";
+          errBox.style.display = "block";
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = "Saving...";
+        try {
+          const resp = await fetch("/admin/clients/add-contact", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await resp.json();
+          if (!resp.ok || !data.ok) {
+            throw new Error(data.error || "Save failed");
+          }
+          closeAddContactModal();
+          // Reload so the new client appears in the list
+          location.reload();
+        } catch (err) {
+          errBox.textContent = "❌ " + (err.message || "Save failed");
+          errBox.style.display = "block";
+          btn.disabled = false;
+          btn.textContent = "Save Client";
+        }
+      }
+
       async function bulkImportDropbox(dryRun) {
         const status = document.getElementById("import-status");
         status.innerHTML = '<span style="color:#666;">⏳ Scanning Dropbox for client folders (this may take 20-90 seconds depending on folder count)…</span>';

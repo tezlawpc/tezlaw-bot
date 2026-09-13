@@ -8874,6 +8874,49 @@ app.get("/admin/clients", async (req, res) => {
   }
 });
 
+// Add a contact-only client (name/phone/email/A#/referral/notes) directly
+// from the web /admin/clients page — bypasses the New Case Wizard for
+// simple contact records the firm hasn't opened a matter for yet.
+app.post("/admin/clients/add-contact", async (req, res) => {
+  try {
+    const db = require("./db");
+    const b = req.body || {};
+    const name = String(b.client_name || "").trim();
+    if (!name) return res.status(400).json({ ok: false, error: "client_name required" });
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+    const client_key = `contact-${slug}-${Date.now().toString(36)}`;
+    const description = String(b.notes || "").trim() || `Contact record for ${name}`;
+    // Ensure the tasks columns exist (some older installs are missing them).
+    // app-api.js does this at boot but running this route stand-alone should
+    // still work.
+    try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS client_phone TEXT`); } catch {}
+    try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS client_email TEXT`); } catch {}
+    try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS referral_source TEXT`); } catch {}
+    const r = await db.query(
+      `INSERT INTO tasks
+         (title, client_key, client_name, client_phone, client_email, matter_type,
+          description, referral_source, a_number,
+          status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'Contact', $6, $7, $8, 'completed', NOW(), NOW())
+       RETURNING id, client_key, client_name`,
+      [
+        `Contact: ${name}`,
+        client_key,
+        name,
+        String(b.client_phone || "").trim() || null,
+        String(b.client_email || "").trim() || null,
+        description,
+        String(b.referral_source || "").trim() || null,
+        String(b.a_number || "").trim() || null,
+      ]
+    );
+    res.json({ ok: true, client: r.rows[0] });
+  } catch (err) {
+    console.error("[/admin/clients/add-contact]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Bulk import all client folders from configured Dropbox branches
 app.post("/admin/clients/bulk-import-dropbox", async (req, res) => {
   try {
