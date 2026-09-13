@@ -8874,6 +8874,35 @@ app.get("/admin/clients", async (req, res) => {
   }
 });
 
+// Diagnostic: raw list of last 20 rows in `tasks` where matter_type='Contact'
+// or client_key starts with 'contact-'. Useful to check whether the add-client
+// flow actually persisted a row when the client list appears empty.
+app.get("/admin/clients/debug-contacts", async (req, res) => {
+  try {
+    const db = require("./db");
+    const r = await db.query(`
+      SELECT id, client_key, client_name, client_phone, client_email,
+             matter_type, referral_source, description,
+             created_at, updated_at
+      FROM tasks
+      WHERE matter_type = 'Contact' OR client_key LIKE 'contact-%'
+      ORDER BY created_at DESC
+      LIMIT 20
+    `);
+    res.json({
+      ok: true,
+      count: r.rows.length,
+      contact_clients: r.rows,
+      hint: r.rows.length === 0
+        ? "The tasks table has no rows with matter_type='Contact' or client_key starting with 'contact-'. The 'Add Client' flow never persisted anything. Try adding a client, then reload this URL."
+        : "Rows exist. If they don't show up on /admin/clients or in search, aggregation or search is at fault.",
+    });
+  } catch (err) {
+    console.error("[/admin/clients/debug-contacts]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Add a contact-only client (name/phone/email/A#/referral/notes) directly
 // from the web /admin/clients page — bypasses the New Case Wizard for
 // simple contact records the firm hasn't opened a matter for yet.
