@@ -1148,4 +1148,10 @@ module.exports = {
   initWave1Tables, initMatterManagerTables, initMatterManagerV2, initMatterManagerV3, initMatterManagerV4, initMatterManagerV5, logAudit, createLead, updateLeadStage,
   runConflictCheck, logUnansweredQuestion,
   query,
+  // Pool + connect exposed for transactional callers (merge-duplicates,
+  // delete-account, etc.) that need BEGIN/COMMIT with a single pooled
+  // client. Without these, `await db.connect()` throws
+  // "db.connect is not a function".
+  connect: () => getPool().connect(),
+  getPool,
 };

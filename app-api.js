@@ -1470,36 +1470,9 @@ function registerAppApi(app) {
   //  PUSH NOTIFICATION TOKENS
   // ═══════════════════════════════════════════════════════
 
-  app.post("/api/push/register", requireBearer, async (req, res) => {
-    try {
-      const { token, platform } = req.body || {};
-      if (!token) return res.status(400).json({ ok: false, error: "token required" });
-      const userKind = req.user.r === "client" ? "client"
-        : req.user.r === "consultant" ? "consultant"
-        : "staff";
-      const userRef = String(req.user.uid);
-      await db.query(
-        `INSERT INTO push_tokens (user_kind, user_ref, expo_token, platform)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (expo_token) DO UPDATE SET user_kind = EXCLUDED.user_kind,
-           user_ref = EXCLUDED.user_ref, platform = EXCLUDED.platform, updated_at = NOW()`,
-        [userKind, userRef, token, platform || "ios"]
-      );
-      res.json({ ok: true });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  app.post("/api/push/unregister", requireBearer, async (req, res) => {
-    try {
-      const { token } = req.body || {};
-      if (token) await db.query(`DELETE FROM push_tokens WHERE expo_token = $1`, [token]);
-      res.json({ ok: true });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
+  // NOTE: /api/push/register and /api/push/unregister are defined once, later
+  // in this file (search for "/api/push/register"). An older duplicate here
+  // was silently overridden by Express — removed to make the routing map clear.
 
   // ═══════════════════════════════════════════════════════
   //  STAFF: DASHBOARD, TASKS, CALENDAR, CLIENTS, NOTES
