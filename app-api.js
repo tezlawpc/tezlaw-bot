@@ -2680,7 +2680,7 @@ function registerAppApi(app) {
   // USCIS receipt lookup — available to all firm users (public government data)
   app.get("/api/staff/uscis/:receipt", requireBearer, requireFirmUser, async (req, res) => {
     try {
-      const uscis = require("./uscis");
+      const uscis = require("./USCIS");
       const status = await uscis.getCaseStatus(req.params.receipt);
       res.json({ ok: true, status });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }

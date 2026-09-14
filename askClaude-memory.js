@@ -8,7 +8,7 @@ const db = require("./db");
 const { checkIntake, resetIntake } = require("./intake");
 const { checkJJMode, getJJPublicContext } = require("./jj-mode");
 const { detectPracticeArea, buildAgentPrompt } = require("./agents");
-const { extractReceiptNumber, getCaseStatus, formatCaseStatusMessage } = require("./uscis");
+const { extractReceiptNumber, getCaseStatus, formatCaseStatusMessage } = require("./USCIS");
 const { checkAnswerCache, storeCachedAnswer, detectPracticeArea: cacheDetectArea, appendSourceUrl } = require("./answer-cache");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
