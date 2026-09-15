@@ -193,6 +193,13 @@ async function initClientAuthTables() {
   try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS referral_source TEXT`); } catch {}
   try { await db.query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS attorney TEXT`); } catch {}
 
+  // Legacy push_tokens rows created before the /api/push/register dedupe
+  // (commit 2d46077) had user_kind='staff'. sendToAdmins joins on 'firm',
+  // so those rows silently produced no pushes. One-time backfill.
+  try {
+    await db.query(`UPDATE push_tokens SET user_kind = 'firm' WHERE user_kind = 'staff'`);
+  } catch {}
+
   // ─── Ensure admin_users has email (used by team-management screen) ─────
   // Older installations of admin_users didn't include email; the /admin/users
   // endpoint SELECTs it and 500s if missing.
@@ -3179,9 +3186,8 @@ function registerAppApi(app) {
         SELECT
           a.client_key,
           COALESCE(
-            (SELECT client_name FROM client_accounts WHERE client_key = a.client_key LIMIT 1),
+            (SELECT full_name FROM client_accounts WHERE client_key = a.client_key AND full_name IS NOT NULL LIMIT 1),
             (SELECT client_name FROM tasks WHERE client_key = a.client_key AND client_name IS NOT NULL ORDER BY created_at DESC LIMIT 1),
-            (SELECT client_name FROM hearing_notes WHERE client_name IS NOT NULL ORDER BY created_at DESC LIMIT 1),
             a.client_key
           ) AS client_name,
           a.unread_count::int,
@@ -3231,10 +3237,13 @@ function registerAppApi(app) {
       if (!ok) return res.status(403).json({ ok: false, error: "You don't have access to this client" });
       const body = String(req.body?.body || "").trim().substring(0, 4000);
       if (!body) return res.status(400).json({ ok: false, error: "Message body required" });
+      // sender_id is INTEGER; for firm users uid is a number, for client users
+      // it's a string like "c42" — coerce so we don't blow the INSERT.
+      const senderId = Number.isFinite(Number(req.user.uid)) ? Number(req.user.uid) : null;
       const r = await db.query(
-        `INSERT INTO client_messages (client_key, sender_kind, sender_name, sender_id, body)
-         VALUES ($1, 'firm', $2, $3, $4) RETURNING *`,
-        [clientKey, req.user.n || req.user.u, req.user.uid, body]
+        `INSERT INTO client_messages (client_key, sender_kind, sender_name, sender_id, sender_role, body)
+         VALUES ($1, 'firm', $2, $3, $4, $5) RETURNING *`,
+        [clientKey, req.user.n || req.user.u, senderId, req.user.r || null, body]
       );
       // Push notify the client — look up their phone from client_accounts
       try {
@@ -3252,7 +3261,13 @@ function registerAppApi(app) {
         }
       } catch {}
       res.json({ ok: true, message: r.rows[0] });
-    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+    } catch (err) {
+      // Surface the actual DB / logic error so the app-side toast is useful,
+      // instead of hiding it behind a generic "500 Internal Server Error".
+      console.error("[staff msg send] client_key=%s user=%s error=%s",
+        req.params.key, req.user?.uid, err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
   });
 
   // ═══════════════════════════════════════════════════════
