@@ -153,6 +153,46 @@ async function getClientDetail(key) {
     }
   }
 
+  // Fallback #2: client_accounts (SMS-OTP clients). When a client signs up
+  // via the app and sends messages, their client_key comes from the JWT
+  // (which was set from client_accounts.client_key). If that key doesn't
+  // match tasks or hearings — e.g. a self-registered client not yet linked
+  // to any matter — the previous fallbacks miss. Return a minimal client
+  // object built from the account row so at least the message thread and
+  // contact info render.
+  if (!client) {
+    try {
+      const a = await db.query(
+        `SELECT client_key, phone, full_name, email, preferred_lang, created_at, last_login_at
+         FROM client_accounts WHERE client_key = $1 LIMIT 1`,
+        [key]
+      );
+      if (a.rows.length) {
+        const row = a.rows[0];
+        client = {
+          key: row.client_key,
+          client_name: row.full_name || row.phone || key,
+          a_number: null,
+          client_email: row.email,
+          client_phone: row.phone,
+          client_address: null,
+          client_language: row.preferred_lang || null,
+          case_types: new Set(["Client Account"]),
+          judges: new Set(),
+          hearings: [],
+          upcoming: [],
+          deadlines: [],
+          sent_count: 0,
+          _account_only: true,
+          _created_at: row.created_at,
+          _last_login_at: row.last_login_at,
+        };
+      }
+    } catch (e) {
+      console.warn("[getClientDetail account fallback]:", e.message);
+    }
+  }
+
   if (!client) return null;
 
   // Also fetch pending deadlines for this client
