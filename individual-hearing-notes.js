@@ -303,6 +303,17 @@ Rules:
     throw new Error("Provide either pdfBuffer (with mimeType) or textContent.");
   }
 
+  // Prefill the assistant response with `{` — this is the standard trick to
+  // force JSON output. Without it, Claude sometimes prepends prose ("Here is
+  // the extracted data:") or wraps the JSON in explanation, which breaks
+  // JSON.parse. With the prefill, Claude continues from `{` as if it started
+  // the JSON already — the response is guaranteed to start as JSON syntax.
+  // We prepend `{` back when parsing.
+  messages.push({
+    role: "assistant",
+    content: "{",
+  });
+
   // Model selection: PDF uses Sonnet (needs vision reasoning). Plain text uses
   // Haiku 4.5 which is 5-10x faster and plenty capable for structured extraction
   // from already-plain text. This was blowing the 3-min timeout with Sonnet.
@@ -327,19 +338,57 @@ Rules:
   const elapsedMs = Date.now() - startedAt;
   console.log(`[extract-summary] ${modelForCall} completed in ${elapsedMs}ms (${(elapsedMs / 1000).toFixed(1)}s)`);
 
-  const text = resp.data.content?.[0]?.text?.trim() || "{}";
-  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const rawText = resp.data.content?.[0]?.text?.trim() || "";
   const stopReason = resp.data.stop_reason;
+
+  // Reconstruct the full JSON. Because we prefilled `{`, Claude's response
+  // continues from that opening brace — prepend it back to get valid JSON.
+  // Also handle a stray code fence if Claude added one anyway.
+  let candidate = "{" + rawText;
+  candidate = candidate
+    .replace(/^\{```(?:json)?\s*\{/i, "{")   // "{```json\n{" → "{"
+    .replace(/^\{```(?:json)?\s*/i, "{")     // "{```json" → "{"
+    .replace(/```\s*$/i, "")                 // trailing "```"
+    .trim();
+
   let extracted;
   try {
-    extracted = JSON.parse(cleaned);
-  } catch (e) {
+    extracted = JSON.parse(candidate);
+  } catch (parseErr) {
+    // Fallback 1: try WITHOUT the prefilled brace in case Claude sent JSON
+    // starting with its own `{`.
+    try { extracted = JSON.parse(rawText); }
+    catch {
+      // Fallback 2: regex-grab the first balanced-looking {...} block from
+      // the response and try to parse THAT. Handles cases where Claude
+      // wrapped valid JSON in prose despite the prefill.
+      const jsonBlob = ("{" + rawText).match(/\{[\s\S]*\}/);
+      if (jsonBlob) {
+        try { extracted = JSON.parse(jsonBlob[0]); }
+        catch {
+          // Fallback 3: chop off trailing garbage — sometimes Claude appends
+          // prose after the JSON. Find the last matching close-brace and
+          // truncate there.
+          const withPrefill = "{" + rawText;
+          const lastBrace = withPrefill.lastIndexOf("}");
+          if (lastBrace > 0) {
+            try { extracted = JSON.parse(withPrefill.substring(0, lastBrace + 1)); }
+            catch { /* fall through to throw below */ }
+          }
+        }
+      }
+    }
+  }
+
+  if (!extracted) {
     const truncatedNote = stopReason === "max_tokens"
       ? " (Claude's response was TRUNCATED — hit token limit. Try splitting the doc into a witness-testimony half and a closing-argument half, then upload separately.)"
       : "";
+    console.error("[extract-summary] JSON parse failed after all fallbacks. First 500 chars of response:", rawText.substring(0, 500));
+    console.error("[extract-summary] Last 500 chars of response:", rawText.substring(Math.max(0, rawText.length - 500)));
     throw new Error(
       `Extracted text from your document, but Claude's structured response wasn't valid JSON` +
-      `${truncatedNote}. Response length: ${cleaned.length} chars. Stop reason: ${stopReason || "unknown"}. ` +
+      `${truncatedNote}. Response length: ${rawText.length} chars. Stop reason: ${stopReason || "unknown"}. ` +
       `You can still see the raw extracted text at the bottom of the form and paste sections manually.`
     );
   }
