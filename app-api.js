@@ -1202,6 +1202,15 @@ async function issueClientToken(account) {
 function registerAppApi(app) {
   initClientAuthTables().catch(e => console.warn("[app-api] init:", e.message));
 
+  // Civil litigation module: initialize tables + register routes below.
+  try {
+    const civil = require("./civil-litigation");
+    civil.initTables().catch(e => console.warn("[civil-litigation] init:", e.message));
+    attachCivilLitigationRoutes(app, civil);
+  } catch (e) {
+    console.warn("[civil-litigation] module load failed:", e.message);
+  }
+
   // ═══════════════════════════════════════════════════════
   //  AUTH
   // ═══════════════════════════════════════════════════════
@@ -8145,6 +8154,177 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
   });
 
   console.log("[app-api] registered — mobile app endpoints live at /api/* (with role-based visibility + admin client linking)");
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CIVIL LITIGATION ROUTES
+//  (registered from within registerAppApi so requireBearer /
+//   requireFirmUser middleware are already in scope)
+// ═══════════════════════════════════════════════════════════
+function attachCivilLitigationRoutes(app, civil) {
+  // Reference to auth middleware already defined at module scope
+  const auth1 = requireBearer;
+  const auth2 = requireFirmUser;
+
+  // ── Kanban / list ──
+  app.get("/api/staff/civil/kanban", auth1, auth2, async (req, res) => {
+    try {
+      const filter = {};
+      if (req.query.lead_attorney_id) filter.lead_attorney_id = parseInt(req.query.lead_attorney_id, 10);
+      if (req.query.client_key) filter.client_key = req.query.client_key;
+      const board = await civil.kanban(filter);
+      res.json({ ok: true, ...board });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.get("/api/staff/civil/cases", auth1, auth2, async (req, res) => {
+    try {
+      const cases = await civil.listCases({
+        stage: req.query.stage,
+        status: req.query.status || "active",
+        client_key: req.query.client_key,
+        lead_attorney_id: req.query.lead_attorney_id ? parseInt(req.query.lead_attorney_id, 10) : undefined,
+        limit: req.query.limit,
+      });
+      res.json({ ok: true, count: cases.length, cases });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Metadata (stages, case types, roles, CCP rule list) ──
+  app.get("/api/staff/civil/meta", auth1, auth2, async (_req, res) => {
+    res.json({
+      ok: true,
+      stages: civil.STAGES,
+      case_types: civil.CASE_TYPES,
+      our_roles: civil.OUR_ROLES,
+      auto_deadline_rules: civil.CCP_RULES.map(r => ({
+        key: r.key,
+        trigger: r.triggerField,
+        priority: r.priority,
+      })),
+    });
+  });
+
+  // ── Case CRUD ──
+  app.post("/api/staff/civil/cases", auth1, auth2, async (req, res) => {
+    try {
+      const created = await civil.createCase({ ...req.body, created_by: req.user.u || req.user.n });
+      res.json({ ok: true, case: created });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.get("/api/staff/civil/cases/:id", auth1, auth2, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const summary = await civil.getCaseSummary(id);
+      if (!summary) return res.status(404).json({ ok: false, error: "Case not found" });
+      res.json({ ok: true, case: summary });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/civil/cases/:id", auth1, auth2, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const updated = await civil.updateCase(id, req.body || {});
+      res.json({ ok: true, case: updated });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/civil/cases/:id", auth1, auth2, async (req, res) => {
+    try {
+      if (!isAdmin(req.user)) return res.status(403).json({ ok: false, error: "Only admin can delete cases" });
+      const id = parseInt(req.params.id, 10);
+      const removed = await civil.deleteCase(id);
+      res.json({ ok: true, ...removed });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Move stage (kanban drag) ──
+  app.post("/api/staff/civil/cases/:id/move-stage", auth1, auth2, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { stage } = req.body || {};
+      if (!civil.STAGE_KEYS.has(stage)) return res.status(400).json({ ok: false, error: "Invalid stage" });
+      const updated = await civil.updateCase(id, { stage });
+      // Log a stage-move event on the timeline
+      await civil.logEvent(id, {
+        event_kind: "note",
+        event_date: civil.fmtDate(new Date()),
+        title: `Stage → ${civil.STAGES.find(s => s.key === stage)?.label || stage}`,
+        description: `Moved by ${req.user.n || req.user.u}`,
+        created_by: req.user.u || req.user.n,
+      });
+      res.json({ ok: true, case: updated });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Events (timeline) ──
+  app.get("/api/staff/civil/cases/:id/events", auth1, auth2, async (req, res) => {
+    try {
+      const events = await civil.listEvents(parseInt(req.params.id, 10), {
+        event_kind: req.query.kind, limit: req.query.limit,
+      });
+      res.json({ ok: true, events });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/events", auth1, auth2, async (req, res) => {
+    try {
+      const created = await civil.logEvent(parseInt(req.params.id, 10), {
+        ...req.body, created_by: req.user.u || req.user.n,
+      });
+      res.json({ ok: true, event: created });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Deadlines ──
+  app.get("/api/staff/civil/cases/:id/deadlines", auth1, auth2, async (req, res) => {
+    try {
+      const deadlines = await civil.listDeadlines(parseInt(req.params.id, 10), { status: req.query.status });
+      res.json({ ok: true, deadlines });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/deadlines", auth1, auth2, async (req, res) => {
+    try {
+      const created = await civil.addManualDeadline(parseInt(req.params.id, 10), req.body || {});
+      res.json({ ok: true, deadline: created });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/civil/deadlines/:id/complete", auth1, auth2, async (req, res) => {
+    try {
+      const updated = await civil.completeDeadline(parseInt(req.params.id, 10), req.user.n || req.user.u);
+      res.json({ ok: true, deadline: updated });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Force re-generation of auto-deadlines (idempotent — safe to call anytime)
+  app.post("/api/staff/civil/cases/:id/regenerate-deadlines", auth1, auth2, async (req, res) => {
+    try {
+      const r = await civil.autoGenerateDeadlines(parseInt(req.params.id, 10));
+      res.json({ ok: true, ...r });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Communications ──
+  app.get("/api/staff/civil/cases/:id/communications", auth1, auth2, async (req, res) => {
+    try {
+      const comms = await civil.listCommunications(parseInt(req.params.id, 10));
+      res.json({ ok: true, communications: comms });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/communications", auth1, auth2, async (req, res) => {
+    try {
+      const created = await civil.logCommunication(parseInt(req.params.id, 10), {
+        ...req.body, created_by: req.user.u || req.user.n,
+      });
+      res.json({ ok: true, communication: created });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  console.log("[civil-litigation] routes registered under /api/staff/civil/*");
 }
 
 module.exports = { registerAppApi };
