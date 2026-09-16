@@ -3238,6 +3238,116 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // Edit client fields — updates the most recent tasks row for the key AND
+  // syncs to client_accounts if there's a linked account. This lets JJ fix
+  // typos in name/phone/email/A-number/language/address on the fly from
+  // the client detail screen without leaving the app.
+  app.patch("/api/staff/clients/:key", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const clientKey = req.params.key;
+      const ok = await canUserAccessClient(req.user, clientKey);
+      if (!ok) return res.status(403).json({ ok: false, error: "no access" });
+      const editable = ["client_name", "client_phone", "client_email", "a_number",
+                        "client_language", "client_address", "referral_source",
+                        "attorney", "matter_type"];
+      const sets = [];
+      const vals = [];
+      let i = 1;
+      for (const f of editable) {
+        if (f in req.body) {
+          sets.push(`${f} = $${i++}`);
+          vals.push(req.body[f] === "" ? null : req.body[f]);
+        }
+      }
+      if (!sets.length) return res.status(400).json({ ok: false, error: "No editable fields provided" });
+      vals.push(clientKey);
+      // Update ALL tasks rows for this client (there may be multiple) so future
+      // lookups return the fresh data regardless of which row we hit first.
+      const r = await db.query(
+        `UPDATE tasks SET ${sets.join(", ")}, updated_at = NOW()
+         WHERE client_key = $${i} RETURNING id`,
+        vals
+      );
+      // Also sync to client_accounts if this key corresponds to an account
+      // (self-registered clients). Best-effort — silently no-op if no match.
+      try {
+        const acctSets = [];
+        const acctVals = [];
+        let j = 1;
+        const accountFields = {
+          client_name: "full_name",
+          client_email: "email",
+          client_language: "preferred_lang",
+        };
+        for (const [reqField, dbField] of Object.entries(accountFields)) {
+          if (reqField in req.body) {
+            acctSets.push(`${dbField} = $${j++}`);
+            acctVals.push(req.body[reqField] === "" ? null : req.body[reqField]);
+          }
+        }
+        if (acctSets.length) {
+          acctVals.push(clientKey);
+          await db.query(
+            `UPDATE client_accounts SET ${acctSets.join(", ")} WHERE client_key = $${j}`,
+            acctVals
+          );
+        }
+      } catch (e) { console.warn("[patch client accounts sync]:", e.message); }
+      res.json({ ok: true, updated_rows: r.rows.length });
+    } catch (err) {
+      console.error("[patch client]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // Link a client_account to an existing contact/case client_key. Two-phase:
+  // (1) SMS-OTP client signs up with phone → client_accounts row created with
+  //     auto-generated key. (2) JJ recognizes them as an existing contact and
+  //     merges the two: this endpoint updates client_accounts.client_key to
+  //     the target key AND rewrites all client_messages, so the two views
+  //     collapse into one thread.
+  app.post("/api/staff/clients/link-account", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      if (!isAdmin(req.user) && !isManager(req.user)) {
+        return res.status(403).json({ ok: false, error: "Only admin/manager can merge accounts" });
+      }
+      const { account_key, target_key } = req.body || {};
+      if (!account_key || !target_key) {
+        return res.status(400).json({ ok: false, error: "account_key and target_key required" });
+      }
+      if (account_key === target_key) {
+        return res.status(400).json({ ok: false, error: "Keys are identical — nothing to merge" });
+      }
+      // Transaction: rewrite messages first, then account key
+      const client = await db.connect();
+      try {
+        await client.query("BEGIN");
+        const msgR = await client.query(
+          `UPDATE client_messages SET client_key = $1 WHERE client_key = $2 RETURNING id`,
+          [target_key, account_key]
+        );
+        const acctR = await client.query(
+          `UPDATE client_accounts SET client_key = $1 WHERE client_key = $2 RETURNING id, phone`,
+          [target_key, account_key]
+        );
+        await client.query("COMMIT");
+        res.json({
+          ok: true,
+          messages_rewritten: msgR.rows.length,
+          accounts_relinked: acctR.rows.length,
+        });
+      } catch (e) {
+        await client.query("ROLLBACK");
+        throw e;
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      console.error("[link-account]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // Firm-side: send message to client — 403 unless user can access
   app.post("/api/staff/clients/:key/messages", requireBearer, requireFirmUser, async (req, res) => {
     try {
