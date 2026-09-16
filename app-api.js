@@ -1211,6 +1211,17 @@ function registerAppApi(app) {
     console.warn("[civil-litigation] module load failed:", e.message);
   }
 
+  // Civil discovery module (build 36): interrogatories/RFPs/RFAs/depos with
+  // auto-calculated CCP response due dates + MTC deadlines. Depends on
+  // civil_cases from the module above (FK references).
+  try {
+    const civilDisc = require("./civil-discovery");
+    civilDisc.initTables().catch(e => console.warn("[civil-discovery] init:", e.message));
+    attachCivilDiscoveryRoutes(app, civilDisc);
+  } catch (e) {
+    console.warn("[civil-discovery] module load failed:", e.message);
+  }
+
   // ═══════════════════════════════════════════════════════
   //  AUTH
   // ═══════════════════════════════════════════════════════
@@ -8435,6 +8446,145 @@ function attachCivilLitigationRoutes(app, civil) {
   });
 
   console.log("[civil-litigation] routes registered under /api/staff/civil/*");
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CIVIL DISCOVERY ROUTES
+//  Discovery sets (rogs/RFPs/RFAs/depos) + items + depositions.
+//  Same auth pattern (requireBearer + requireFirmUser).
+// ═══════════════════════════════════════════════════════════
+function attachCivilDiscoveryRoutes(app, disc) {
+  const auth1 = requireBearer;
+  const auth2 = requireFirmUser;
+
+  // Metadata for pickers (kinds, directions, methods, statuses)
+  app.get("/api/staff/civil/discovery/meta", auth1, auth2, (_req, res) => {
+    res.json({
+      ok: true,
+      kinds: disc.DISCOVERY_KINDS,
+      directions: disc.DIRECTIONS,
+      serve_methods: disc.SERVE_METHODS,
+      statuses: disc.STATUSES,
+    });
+  });
+
+  // ── Per-case: list + summary + create ──
+  app.get("/api/staff/civil/cases/:id/discovery", auth1, auth2, async (req, res) => {
+    try {
+      const caseId = parseInt(req.params.id, 10);
+      const [list, summary] = await Promise.all([
+        disc.listDiscovery(caseId, {
+          kind: req.query.kind, direction: req.query.direction, status: req.query.status,
+        }),
+        disc.getDiscoverySummary(caseId),
+      ]);
+      res.json({ ok: true, discovery: list, summary });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/discovery", auth1, auth2, async (req, res) => {
+    try {
+      const created = await disc.createDiscovery(parseInt(req.params.id, 10), {
+        ...req.body, created_by: req.user.u || req.user.n,
+      });
+      res.json({ ok: true, discovery: created });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Single set: get, update, delete ──
+  app.get("/api/staff/civil/discovery/:id", auth1, auth2, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const [d, items] = await Promise.all([disc.getDiscovery(id), disc.listItems(id)]);
+      if (!d) return res.status(404).json({ ok: false, error: "Discovery not found" });
+      res.json({ ok: true, discovery: d, items });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/civil/discovery/:id", auth1, auth2, async (req, res) => {
+    try {
+      const updated = await disc.updateDiscovery(parseInt(req.params.id, 10), req.body || {});
+      res.json({ ok: true, discovery: updated });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/civil/discovery/:id", auth1, auth2, async (req, res) => {
+    try {
+      if (!isAdmin(req.user)) return res.status(403).json({ ok: false, error: "admin only" });
+      const removed = await disc.deleteDiscovery(parseInt(req.params.id, 10));
+      res.json({ ok: true, ...(removed || {}) });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Responses received (kicks off MTC deadline calc) ──
+  app.post("/api/staff/civil/discovery/:id/responses", auth1, auth2, async (req, res) => {
+    try {
+      const updated = await disc.markResponsesReceived(parseInt(req.params.id, 10), req.body || {});
+      res.json({ ok: true, discovery: updated });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Meet-and-confer + motion to compel tracking ──
+  app.post("/api/staff/civil/discovery/:id/meet-confer", auth1, auth2, async (req, res) => {
+    try {
+      const updated = await disc.updateMeetConfer(parseInt(req.params.id, 10), req.body || {});
+      res.json({ ok: true, discovery: updated });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Individual items (interrogatories / RFPs / RFAs) ──
+  app.get("/api/staff/civil/discovery/:id/items", auth1, auth2, async (req, res) => {
+    try {
+      const items = await disc.listItems(parseInt(req.params.id, 10));
+      res.json({ ok: true, items });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/discovery/:id/items", auth1, auth2, async (req, res) => {
+    try {
+      const items = req.body?.items || [];
+      const created = await disc.addItems(parseInt(req.params.id, 10), items);
+      res.json({ ok: true, items: created });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/civil/discovery/items/:itemId", auth1, auth2, async (req, res) => {
+    try {
+      const updated = await disc.updateItem(parseInt(req.params.itemId, 10), req.body || {});
+      res.json({ ok: true, item: updated });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/civil/discovery/items/:itemId", auth1, auth2, async (req, res) => {
+    try {
+      const removed = await disc.deleteItem(parseInt(req.params.itemId, 10));
+      res.json({ ok: true, ...(removed || {}) });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Depositions ──
+  app.get("/api/staff/civil/cases/:id/depositions", auth1, auth2, async (req, res) => {
+    try {
+      const list = await disc.listDepositions(parseInt(req.params.id, 10));
+      res.json({ ok: true, depositions: list });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/depositions", auth1, auth2, async (req, res) => {
+    try {
+      const created = await disc.createDeposition(parseInt(req.params.id, 10), req.body || {});
+      res.json({ ok: true, deposition: created });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/civil/depositions/:id", auth1, auth2, async (req, res) => {
+    try {
+      const updated = await disc.updateDeposition(parseInt(req.params.id, 10), req.body || {});
+      res.json({ ok: true, deposition: updated });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  console.log("[civil-discovery] routes registered under /api/staff/civil/discovery/* and /depositions/*");
 }
 
 module.exports = { registerAppApi };
