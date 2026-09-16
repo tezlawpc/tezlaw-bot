@@ -1222,6 +1222,17 @@ function registerAppApi(app) {
     console.warn("[civil-discovery] module load failed:", e.message);
   }
 
+
+  // Diagnostic (no auth) — reveals which route modules loaded and deployment version.
+  // Remove after debugging.
+  app.get('/api/_diag/routes', (req, res) => {
+    const routes = (app._router?.stack || [])
+      .filter(l => l.route)
+      .map(l => Object.keys(l.route.methods)[0].toUpperCase() + ' ' + l.route.path)
+      .filter(r => r.includes('civil') || r.includes('users'));
+    res.json({ ok: true, deployed_at: new Date().toISOString(), civil_routes: routes });
+  });
+
   // Civil team assignments (build 38): multi-role team per case with
   // per-user billing rates. Depends on both civil_cases (FK) and
   // admin_users (FK to the firm user directory).
