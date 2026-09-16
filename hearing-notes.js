@@ -1571,6 +1571,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/pi" class="nav-link ${isActive('pi-dashboard')}" data-perm="pi.read">
         <span class="nav-icon">🚑</span><span class="nav-label">PI Dashboard</span>
       </a>
+      <a href="/admin/civil" class="nav-link ${isActive('civil')}" data-perm="matters.read">
+        <span class="nav-icon">⚖️</span><span class="nav-label">Civil Litigation</span>
+      </a>
       <a href="/admin/pi/cases" class="nav-link ${isActive('pi-cases')}" data-perm="pi.read">
         <span class="nav-icon">◈</span><span class="nav-label">All PI Cases</span>
       </a>

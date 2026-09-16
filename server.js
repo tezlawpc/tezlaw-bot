@@ -673,6 +673,31 @@ app.get("/admin/pi/cases", async (req, res) => {
   }
 });
 
+// ── Civil litigation kanban + case detail on web admin ──────
+app.get("/admin/civil", async (req, res) => {
+  try {
+    const civilUI = require("./civil-litigation-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await civilUI.renderKanban();
+    res.send(hearingNotes.renderAdminChrome({ title: "Civil Litigation", body, activeItem: "civil" }));
+  } catch (err) {
+    console.error("[civil kanban]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.get("/admin/civil/case/:id", async (req, res) => {
+  try {
+    const civilUI = require("./civil-litigation-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await civilUI.renderCaseDetail(parseInt(req.params.id, 10));
+    res.send(hearingNotes.renderAdminChrome({ title: "Civil Case", body, activeItem: "civil" }));
+  } catch (err) {
+    console.error("[civil case detail]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 app.get("/admin/pi/case/:id", async (req, res) => {
   try {
     const piUI = require("./personal-injury-ui");
