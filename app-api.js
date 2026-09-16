@@ -1222,6 +1222,17 @@ function registerAppApi(app) {
     console.warn("[civil-discovery] module load failed:", e.message);
   }
 
+  // Civil team assignments (build 38): multi-role team per case with
+  // per-user billing rates. Depends on both civil_cases (FK) and
+  // admin_users (FK to the firm user directory).
+  try {
+    const civilTeam = require("./civil-team");
+    civilTeam.initTables().catch(e => console.warn("[civil-team] init:", e.message));
+    attachCivilTeamRoutes(app, civilTeam);
+  } catch (e) {
+    console.warn("[civil-team] module load failed:", e.message);
+  }
+
   // ═══════════════════════════════════════════════════════
   //  AUTH
   // ═══════════════════════════════════════════════════════
@@ -8585,6 +8596,86 @@ function attachCivilDiscoveryRoutes(app, disc) {
   });
 
   console.log("[civil-discovery] routes registered under /api/staff/civil/discovery/* and /depositions/*");
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CIVIL TEAM ASSIGNMENT ROUTES
+//  Multi-role team per civil case + firm user directory + workload.
+// ═══════════════════════════════════════════════════════════
+function attachCivilTeamRoutes(app, team) {
+  const auth1 = requireBearer;
+  const auth2 = requireFirmUser;
+
+  // Metadata (roles list for the picker)
+  app.get("/api/staff/civil/team/meta", auth1, auth2, (_req, res) => {
+    res.json({ ok: true, roles: team.TEAM_ROLES });
+  });
+
+  // Firm user directory — everyone available for assignment
+  app.get("/api/staff/users", auth1, auth2, async (_req, res) => {
+    try {
+      const users = await team.listAssignableUsers();
+      res.json({ ok: true, users });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Per-case team ──
+  app.get("/api/staff/civil/cases/:id/team", auth1, auth2, async (req, res) => {
+    try {
+      const members = await team.listTeam(parseInt(req.params.id, 10), {
+        include_inactive: req.query.include_inactive === "1",
+      });
+      res.json({ ok: true, team: members });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/team", auth1, auth2, async (req, res) => {
+    try {
+      const added = await team.addAssignment(parseInt(req.params.id, 10), {
+        ...req.body, assigned_by: req.user.n || req.user.u,
+      });
+      res.json({ ok: true, assignment: added });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/civil/team/:id", auth1, auth2, async (req, res) => {
+    try {
+      const updated = await team.updateAssignment(parseInt(req.params.id, 10), req.body || {});
+      res.json({ ok: true, assignment: updated });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/civil/team/:id", auth1, auth2, async (req, res) => {
+    try {
+      const removed = await team.removeAssignment(
+        parseInt(req.params.id, 10),
+        req.user.n || req.user.u
+      );
+      res.json({ ok: true, assignment: removed });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── My cases (filtered by team membership) ──
+  app.get("/api/staff/civil/my-cases", auth1, auth2, async (req, res) => {
+    try {
+      const uid = Number(req.user.uid);
+      if (!Number.isFinite(uid)) return res.status(400).json({ ok: false, error: "no user id in token" });
+      const cases = await team.listCasesForUser(uid, {
+        role: req.query.role, stage: req.query.stage,
+      });
+      res.json({ ok: true, count: cases.length, cases });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Team workload (capacity view) ──
+  app.get("/api/staff/civil/team-workload", auth1, auth2, async (_req, res) => {
+    try {
+      const workload = await team.getTeamWorkload();
+      res.json({ ok: true, workload });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  console.log("[civil-team] routes registered under /api/staff/civil/team* and /users");
 }
 
 module.exports = { registerAppApi };
