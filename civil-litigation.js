@@ -405,6 +405,7 @@ async function updateCase(id, data) {
     "stage","trial_date","cmc_date","amount_in_controversy",
     "billing_type","hourly_rate","contingency_pct","retainer_amount","retainer_balance",
     "status","outcome_notes","internal_notes",
+    "court_docket_url",  // build 37 court-docket checker
   ]);
   const jsonbFields = new Set(["opposing_counsel"]);
   const sets = [];

@@ -1244,6 +1244,17 @@ function registerAppApi(app) {
     console.warn("[civil-team] module load failed:", e.message);
   }
 
+  // Court docket checker (build 37 — was originally sequenced as build 40):
+  // universal fetch-and-parse of any court portal URL using Claude to
+  // extract structured docket data. Adds columns to civil_cases.
+  try {
+    const civilDocket = require("./civil-court-docket");
+    civilDocket.initTables().catch(e => console.warn("[civil-court-docket] init:", e.message));
+    attachCivilDocketRoutes(app, civilDocket);
+  } catch (e) {
+    console.warn("[civil-court-docket] module load failed:", e.message);
+  }
+
   // ═══════════════════════════════════════════════════════
   //  AUTH
   // ═══════════════════════════════════════════════════════
@@ -8687,6 +8698,45 @@ function attachCivilTeamRoutes(app, team) {
   });
 
   console.log("[civil-team] routes registered under /api/staff/civil/team* and /users");
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CIVIL COURT DOCKET ROUTES (build 37)
+//  Fetch + Claude-parse any court portal URL. Manual trigger
+//  per case; cron scheduling can be layered on later.
+// ═══════════════════════════════════════════════════════════
+function attachCivilDocketRoutes(app, docket) {
+  const auth1 = requireBearer;
+  const auth2 = requireFirmUser;
+
+  // Check the docket for one case NOW. Long-running (up to ~35s) because
+  // it does HTTP fetch + Claude extraction. Client should show a spinner.
+  app.post("/api/staff/civil/cases/:id/check-docket", auth1, auth2, async (req, res) => {
+    try {
+      const result = await docket.checkCase(
+        parseInt(req.params.id, 10),
+        req.user.n || req.user.u
+      );
+      // Return 200 even on extraction failure so the app can display the
+      // error message — checkCase() records it in the audit trail either way.
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  // History of past checks for a case (audit trail)
+  app.get("/api/staff/civil/cases/:id/docket-checks", auth1, auth2, async (req, res) => {
+    try {
+      const checks = await docket.listChecks(
+        parseInt(req.params.id, 10),
+        Math.min(parseInt(req.query.limit || "20", 10), 100)
+      );
+      res.json({ ok: true, checks });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  console.log("[civil-court-docket] routes registered under /api/staff/civil/cases/:id/{check-docket,docket-checks}");
 }
 
 module.exports = { registerAppApi };
