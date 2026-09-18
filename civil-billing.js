@@ -34,6 +34,12 @@ async function initTables() {
   // Track when we last sent a budget alert so we don't spam JJ once per event.
   await db.query(`ALTER TABLE civil_cases ADD COLUMN IF NOT EXISTS last_budget_alert_at TIMESTAMPTZ`).catch(() => {});
   await db.query(`ALTER TABLE civil_cases ADD COLUMN IF NOT EXISTS last_budget_alert_pct NUMERIC`).catch(() => {});
+
+  // Communications logged billable_hours but had nowhere to put a rate, so
+  // call/email time counted toward hours and never toward dollars — which
+  // made every matter budget understate real burn. Same shape as events.
+  await db.query(`ALTER TABLE civil_case_communications ADD COLUMN IF NOT EXISTS billable_rate NUMERIC`).catch(() => {});
+  await db.query(`ALTER TABLE civil_case_communications ADD COLUMN IF NOT EXISTS billable_amount NUMERIC`).catch(() => {});
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -106,7 +112,8 @@ async function getBillingSummary(caseId) {
       [caseId]
     ),
     db.query(
-      `SELECT COALESCE(SUM(billable_hours), 0)::float AS h
+      `SELECT COALESCE(SUM(billable_hours), 0)::float AS h,
+              COALESCE(SUM(billable_amount), 0)::float AS a
        FROM civil_case_communications WHERE case_id = $1`,
       [caseId]
     ),
@@ -124,11 +131,12 @@ async function getBillingSummary(caseId) {
   const eventTotalHours  = allEventsR.rows[0]?.h || 0;
   const eventTotalAmount = allEventsR.rows[0]?.a || 0;
   const commHours        = commsR.rows[0]?.h || 0;
+  const commAmount       = commsR.rows[0]?.a || 0;
   const depoHours        = discoveryR.rows[0]?.h || 0;
   const depoAmount       = discoveryR.rows[0]?.a || 0;
 
   const totalHours  = eventTotalHours + commHours + depoHours;
-  const totalAmount = eventTotalAmount + depoAmount;
+  const totalAmount = eventTotalAmount + depoAmount + commAmount;
 
   const budget = c.matter_budget ? Number(c.matter_budget) : null;
   const alertPct = c.budget_alert_pct != null ? Number(c.budget_alert_pct) : 75;
@@ -152,6 +160,7 @@ async function getBillingSummary(caseId) {
     event_hours: Number(eventTotalHours.toFixed(2)),
     event_amount: Number(eventTotalAmount.toFixed(2)),
     communication_hours: Number(commHours.toFixed(2)),
+    communication_amount: Number(commAmount.toFixed(2)),
     deposition_hours: Number(depoHours.toFixed(2)),
     deposition_amount: Number(depoAmount.toFixed(2)),
     pct_of_budget: pctUsed != null ? Number(pctUsed.toFixed(1)) : null,

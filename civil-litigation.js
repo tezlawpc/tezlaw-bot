@@ -606,19 +606,38 @@ async function listDeadlines(caseId, filter = {}) {
 async function logCommunication(caseId, data) {
   const { kind, direction, channel, subject, body,
           contact_name, contact_email, contact_phone,
-          billable_hours, attorney_id, paralegal_id, document_ids, created_by } = data;
+          billable_hours, billable_rate,
+          attorney_id, paralegal_id, document_ids, created_by } = data;
+
+  // Build 38: same rate resolution as logEvent, so phone and email time
+  // lands in the matter budget instead of silently billing at $0.
+  const bh = billable_hours ? Number(billable_hours) : null;
+  let br = billable_rate != null && billable_rate !== "" ? Number(billable_rate) : null;
+  if (!Number.isFinite(br)) br = null;
+  if (br == null && bh != null) {
+    try {
+      const billing = require("./civil-billing");
+      br = await billing.resolveRate(attorney_id || paralegal_id || null, caseId);
+    } catch (e) {
+      console.warn("[civil-litigation] comm rate resolution failed:", e.message);
+    }
+  }
+  if (!Number.isFinite(br)) br = null;
+  const ba = bh != null && br != null ? Number((bh * br).toFixed(2)) : null;
+
   const r = await db.query(
     `INSERT INTO civil_case_communications
        (case_id, kind, direction, channel, subject, body,
         contact_name, contact_email, contact_phone,
-        billable_hours, attorney_id, paralegal_id, document_ids, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        billable_hours, billable_rate, billable_amount,
+        attorney_id, paralegal_id, document_ids, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      RETURNING *`,
     [
       caseId, kind || null, direction || null, channel || null,
       subject || null, body || null,
       contact_name || null, contact_email || null, contact_phone || null,
-      billable_hours ? Number(billable_hours) : null,
+      bh, br, ba,
       attorney_id || null, paralegal_id || null, document_ids || null,
       created_by || null,
     ]
