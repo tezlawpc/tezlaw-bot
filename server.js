@@ -698,6 +698,145 @@ app.get("/admin/civil/case/:id", async (req, res) => {
   }
 });
 
+// ── New civil case form ─────────────────────────────────────
+// The kanban's "+ NEW CASE" button has linked here since build 34, but the
+// route was never built, so it 404'd. Registered before /admin/civil/case/:id
+// so "new" can never be read as a case id.
+app.get("/admin/civil/new", async (req, res) => {
+  try {
+    const civil = require("./civil-litigation");
+    const hearingNotes = require("./hearing-notes");
+    const esc = v => String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    // Existing clients power a datalist so the case attaches to a real
+    // client_key. Failing to load them must not block creating a case.
+    let clients = [];
+    try {
+      const cp = require("./client-profiles");
+      const all = await cp.aggregateClients();
+      clients = all.filter(c => c && c.key).map(c => ({ key: c.key, name: c.client_name || c.key }));
+    } catch (e) { console.warn("[civil new] client list unavailable:", e.message); }
+
+    const L = "font-family:Cinzel,serif;font-size:10px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:4px;";
+    const I = "width:100%;padding:8px;border:1px solid #D4C4A0;border-radius:5px;background:#FBF3DE;color:#3E2818;font-size:13px;box-sizing:border-box;font-family:inherit;";
+    const field = (label, html, span) =>
+      `<div${span ? ` style="grid-column:1/-1;"` : ""}><label style="${L}">${label}</label>${html}</div>`;
+    const sel = (name, opts, placeholder) =>
+      `<select name="${name}" style="${I}">${placeholder ? `<option value="">${placeholder}</option>` : ""}` +
+      opts.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("") + `</select>`;
+
+    const body = `
+      <div style="padding:24px;max-width:960px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+          <h1 style="margin:0;font-family:'Cinzel',serif;color:#3E2818;">⚖️ New Civil Case</h1>
+          <a href="/admin/civil" style="color:#B84200;text-decoration:none;font-size:13px;">← Back to board</a>
+        </div>
+
+        <form onsubmit="submitCivil(event)" style="background:#F5EBD3;border:1px solid #D4C4A0;border-radius:8px;padding:20px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+
+            ${field("Client (required)", `<input list="civil-clients" name="client_key" required placeholder="start typing a client…" style="${I}">
+              <datalist id="civil-clients">${clients.map(c => `<option value="${esc(c.key)}">${esc(c.name)}</option>`).join("")}</datalist>
+              <div style="font-size:10px;color:#7B5330;margin-top:3px;font-style:italic;">Pick an existing client, or type a new key (lowercase-with-dashes).</div>`, true)}
+
+            ${field("Case Name (required)", `<input type="text" name="case_name" required placeholder="e.g. Nguyen v. Pacific Holdings LLC" style="${I}">`, true)}
+
+            ${field("Case Type", sel("case_type", civil.CASE_TYPES.map(t => ({ value: t, label: t })), "— select —"))}
+            ${field("Our Role", sel("our_role", civil.OUR_ROLES.map(r => ({ value: r, label: r })), "— select —"))}
+
+            ${field("Stage", sel("stage", civil.STAGES.map(st => ({ value: st.key, label: st.label }))))}
+            ${field("Case Number", `<input type="text" name="case_number" placeholder="e.g. 25STCV01234" style="${I}">`)}
+
+            ${field("Court", `<input type="text" name="court" placeholder="e.g. LASC — Stanley Mosk" style="${I}">`)}
+            ${field("County", `<input type="text" name="county" placeholder="e.g. Los Angeles" style="${I}">`)}
+
+            ${field("Opposing Party", `<input type="text" name="opposing_party" style="${I}">`)}
+            ${field("Amount in Controversy", `<input type="number" step="0.01" name="amount_in_controversy" placeholder="75000" style="${I}">`)}
+
+            <div style="grid-column:1/-1;padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">
+              <div style="font-family:Cinzel,serif;font-size:11px;font-weight:600;color:#A02818;letter-spacing:1px;margin-bottom:10px;">
+                ⚠ KEY DATES — these drive the automatic CCP deadline chain
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+                ${field("Statute of Limitations", `<input type="date" name="statute_of_limitations" style="${I}">`)}
+                ${field("Filed Date", `<input type="date" name="filed_date" style="${I}">`)}
+                ${field("Service Date", `<input type="date" name="service_date" style="${I}">`)}
+                ${field("CMC Date", `<input type="date" name="cmc_date" style="${I}">`)}
+                ${field("Trial Date", `<input type="date" name="trial_date" style="${I}">`)}
+              </div>
+              <div style="font-size:10px;color:#7B5330;margin-top:8px;font-style:italic;">
+                Leave blank if unknown — deadlines regenerate automatically whenever you fill one in later.
+              </div>
+            </div>
+
+            ${field("Billing Type", sel("billing_type", [
+              { value: "hourly", label: "Hourly" },
+              { value: "flat", label: "Flat fee" },
+              { value: "contingency", label: "Contingency" },
+              { value: "hybrid", label: "Hybrid" },
+            ]))}
+            ${field("Hourly Rate ($)", `<input type="number" step="0.01" name="hourly_rate" placeholder="500" style="${I}">`)}
+
+            ${field("Contingency (%)", `<input type="number" step="0.01" name="contingency_pct" placeholder="33.33" style="${I}">`)}
+            ${field("Retainer ($)", `<input type="number" step="0.01" name="retainer_amount" placeholder="5000" style="${I}">`)}
+
+            ${field("Internal Notes", `<textarea name="internal_notes" rows="3" style="${I}"></textarea>`, true)}
+          </div>
+
+          <div style="margin-top:18px;display:flex;align-items:center;gap:12px;">
+            <button type="submit" id="civil-submit" style="padding:11px 22px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;font-weight:600;letter-spacing:1.5px;">CREATE CASE</button>
+            <a href="/admin/civil" style="color:#7B5330;text-decoration:none;font-size:13px;">Cancel</a>
+            <span id="civil-err" style="color:#A02818;font-size:12px;"></span>
+          </div>
+        </form>
+      </div>
+
+      <script>
+        async function submitCivil(e) {
+          e.preventDefault();
+          var btn = document.getElementById("civil-submit");
+          var err = document.getElementById("civil-err");
+          err.textContent = "";
+          btn.disabled = true; btn.style.opacity = "0.5"; btn.textContent = "CREATING…";
+          try {
+            var data = Object.fromEntries(new FormData(e.target));
+            Object.keys(data).forEach(function (k) { if (data[k] === "") delete data[k]; });
+            var r = await fetch("/admin/civil", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(data)
+            });
+            var d = await r.json();
+            if (d.ok) { location.href = "/admin/civil/case/" + d.case.id; return; }
+            err.textContent = d.error || "Could not create the case.";
+          } catch (ex) {
+            err.textContent = ex.message;
+          }
+          btn.disabled = false; btn.style.opacity = "1"; btn.textContent = "CREATE CASE";
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "New Civil Case", body, activeItem: "civil" }));
+  } catch (err) {
+    console.error("[civil new]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/admin/civil", async (req, res) => {
+  try {
+    const civil = require("./civil-litigation");
+    const created = await civil.createCase({
+      ...req.body,
+      created_by: req.user?.n || req.user?.u || "web-admin",
+    });
+    res.json({ ok: true, case: created });
+  } catch (err) {
+    console.error("[civil create]:", err.message);
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/admin/pi/case/:id", async (req, res) => {
   try {
     const piUI = require("./personal-injury-ui");
