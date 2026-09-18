@@ -1256,6 +1256,20 @@ function registerAppApi(app) {
     console.warn("[civil-billing] module load failed:", e.message);
   }
 
+  // Civil ⇄ Dropbox sync (build 39): per-case folder mirror with
+  // categorised documents, bulk import, archive-on-close, and an hourly
+  // delta sync. Loads after civil-litigation because it logs timeline events.
+  try {
+    const civilDbx = require("./civil-dropbox");
+    civilDbx.initTables().catch(e => console.warn("[civil-dropbox] init:", e.message));
+    attachCivilDropboxRoutes(app, civilDbx);
+    if (process.env.CIVIL_DROPBOX_SYNC !== "off") {
+      civilDbx.startScheduler({ everyMinutes: Number(process.env.CIVIL_DROPBOX_SYNC_MINUTES) || 60 });
+    }
+  } catch (e) {
+    console.warn("[civil-dropbox] module load failed:", e.message);
+  }
+
   // Court docket checker (build 37 — was originally sequenced as build 40):
   // universal fetch-and-parse of any court portal URL using Claude to
   // extract structured docket data. Adds columns to civil_cases.
@@ -8781,6 +8795,90 @@ function attachCivilBillingRoutes(app, billing) {
   });
 
   console.log("[civil-billing] routes registered under /api/staff/civil/cases/:id/{billing-summary,budget,budget-check} and /wip-report");
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CIVIL ⇄ DROPBOX ROUTES (build 39)
+// ═══════════════════════════════════════════════════════════
+function attachCivilDropboxRoutes(app, cdx) {
+  const auth1 = requireBearer;
+  const auth2 = requireFirmUser;
+
+  // Category catalogue for the UI tabs
+  app.get("/api/staff/civil/files/meta", auth1, auth2, (_req, res) => {
+    res.json({ ok: true, categories: cdx.DOC_CATEGORIES.map(c => ({ key: c.key, label: c.label, color: c.color })) });
+  });
+
+  // ── Per-case files ──
+  app.get("/api/staff/civil/cases/:id/files", auth1, auth2, async (req, res) => {
+    try {
+      const caseId = parseInt(req.params.id, 10);
+      const [files, summary] = await Promise.all([
+        cdx.listCaseFiles(caseId, { category: req.query.category || null, includeRemoved: req.query.include_removed === "1" }),
+        cdx.categorySummary(caseId),
+      ]);
+      res.json({ ok: true, files, summary });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Folder mapping ──
+  app.put("/api/staff/civil/cases/:id/dropbox", auth1, auth2, async (req, res) => {
+    try {
+      const out = await cdx.setCaseFolder(parseInt(req.params.id, 10), req.body?.path);
+      res.json({ ok: true, ...out });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/civil/cases/:id/dropbox", auth1, auth2, async (req, res) => {
+    try { res.json(await cdx.clearCaseFolder(parseInt(req.params.id, 10))); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.get("/api/staff/civil/cases/:id/dropbox/suggest", auth1, auth2, async (req, res) => {
+    try { res.json({ ok: true, suggestions: await cdx.suggestFolderForCase(parseInt(req.params.id, 10)) }); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Sync ──
+  app.post("/api/staff/civil/cases/:id/dropbox/sync", auth1, auth2, async (req, res) => {
+    try { res.json(await cdx.syncCase(parseInt(req.params.id, 10), { force: req.query.force === "1" })); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/dropbox/sync-all", auth1, auth2, async (req, res) => {
+    try { res.json(await cdx.syncAll({ includeClosed: req.query.include_closed === "1" })); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Bulk import (dry run unless explicitly told otherwise) ──
+  app.post("/api/staff/civil/dropbox/bulk-import", auth1, auth2, async (req, res) => {
+    try {
+      res.json(await cdx.bulkImport({
+        dryRun: req.body?.apply !== true,
+        minScore: Number(req.body?.min_score) || 60,
+        sync: req.body?.sync === true,
+      }));
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Archive ──
+  app.post("/api/staff/civil/cases/:id/files/archive", auth1, auth2, async (req, res) => {
+    try { res.json(await cdx.archiveCaseFiles(parseInt(req.params.id, 10), { by: req.user.n || req.user.u })); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/files/unarchive", auth1, auth2, async (req, res) => {
+    try { res.json(await cdx.unarchiveCaseFiles(parseInt(req.params.id, 10))); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Temporary download link ──
+  app.get("/api/staff/civil/files/:fileId/link", auth1, auth2, async (req, res) => {
+    try { res.json({ ok: true, url: await cdx.fileLink(parseInt(req.params.fileId, 10)) }); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  console.log("[civil-dropbox] routes registered under /api/staff/civil/**/dropbox|files");
 }
 
 // ═══════════════════════════════════════════════════════════
