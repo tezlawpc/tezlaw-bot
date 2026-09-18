@@ -885,6 +885,15 @@ app.post("/admin/civil/dropbox/unlink-all", async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+app.post("/admin/civil/dropbox/import-cases", async (req, res) => {
+  try {
+    res.json(await _cdx().importCasesFromFolders({
+      dryRun: req.body?.apply !== true,
+      createdBy: req.user?.n || req.user?.u || "web-admin",
+    }));
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 app.post("/admin/civil/dropbox/bulk-import", async (req, res) => {
   try {
     res.json(await _cdx().bulkImport({
@@ -906,8 +915,9 @@ app.get("/admin/civil/dropbox", async (req, res) => {
           <a href="/admin/civil" style="color:#B84200;text-decoration:none;font-size:13px;">← Back to board</a>
         </div>
         <p style="color:#7B5330;font-style:italic;margin:0 0 18px 0;font-size:13px;">
-          Matches civil matters to their Dropbox folders by client name and case number, then mirrors the
-          documents in. A dry run changes nothing — review the matches before applying.
+          <strong>Preview import</strong> reads every folder under your civil root and proposes a case
+          (and a client) for each one. <strong>Match existing</strong> is the other direction — for cases
+          already in the system that just need their folder attached. Both change nothing until you apply.
         </p>
 
         <div id="rootbox" style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;margin-bottom:14px;">
@@ -923,8 +933,10 @@ app.get("/admin/civil/dropbox", async (req, res) => {
         </div>
 
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;">
-          <button onclick="bulk(false)" style="padding:10px 18px;background:#3E2818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">DRY RUN</button>
-          <button onclick="bulk(true)" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">APPLY + SYNC</button>
+          <button onclick="imp(false)" style="padding:10px 18px;background:#3E2818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">PREVIEW IMPORT</button>
+          <button onclick="imp(true)" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">CREATE CASES + CLIENTS</button>
+          <span style="width:1px;height:26px;background:#D4C4A0;"></span>
+          <button onclick="bulk(false)" style="padding:10px 14px;background:#FBF3DE;color:#3E2818;border:1px solid #D4C4A0;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:11px;letter-spacing:1px;">MATCH EXISTING</button>
           <button onclick="syncAll()" style="padding:10px 18px;background:#FBF3DE;color:#3E2818;border:1px solid #D4C4A0;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">SYNC ALL LINKED</button>
           <label style="font-size:12px;color:#7B5330;">min score
             <input id="minscore" type="number" value="60" style="width:60px;padding:5px;border:1px solid #D4C4A0;border-radius:4px;background:#FBF3DE;">
@@ -989,6 +1001,53 @@ app.get("/admin/civil/dropbox", async (req, res) => {
               + card("✅ Matched", "#166534", linked)
               + card("⚠ Ambiguous — link these by hand", "#F07800", amb)
               + card("○ No match found", "#7B5330", un);
+          } catch (e) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(e.message) + '</div>'; }
+        }
+        async function imp(apply) {
+          var out = document.getElementById("out");
+          if (apply && !confirm("Create a civil case for every matter folder, plus a client record where one does not already exist? Folders already linked are skipped, so running this twice is safe.")) return;
+          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Reading folders…</div>';
+          try {
+            var r = await fetch("/admin/civil/dropbox/import-cases", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ apply: apply })
+            });
+            var d = await r.json();
+            if (!d.ok) {
+              out.innerHTML = '<div style="padding:12px;background:#F5E4B4;border-left:3px solid #F07800;border-radius:4px;">'
+                + esc(d.hint || d.error || d.reason) + '</div>';
+              return;
+            }
+            var conf = { high: "#166534", medium: "#B8891E", low: "#A02818" };
+            var madeRows = d.created.map(function (c) {
+              return '<div style="padding:8px 10px;border-bottom:1px solid #E8DCC0;">'
+                + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">'
+                + (c.case_id ? '<a href="/admin/civil/case/' + c.case_id + '" style="color:#3E2818;font-weight:600;text-decoration:none;">' + esc(c.case_name) + '</a>'
+                             : '<span style="color:#3E2818;font-weight:600;">' + esc(c.case_name) + '</span>')
+                + '<span style="font-size:10px;font-weight:700;color:' + (conf[c.confidence] || "#7B5330") + ';">' + esc(c.confidence.toUpperCase()) + '</span></div>'
+                + '<div style="font-size:11px;color:#7B5330;margin-top:2px;">client: ' + esc(c.client_name)
+                + (c.client_created ? ' <em>(new)</em>' : ' <em>(existing)</em>')
+                + (c.case_number ? ' · #' + esc(c.case_number) : '')
+                + (c.files ? ' · ' + c.files + ' file(s)' : '')
+                + '<br>' + esc(c.path) + '</div></div>';
+            });
+            var skipRows = d.skipped.map(function (x) {
+              return '<div style="padding:6px 10px;border-bottom:1px solid #E8DCC0;font-size:12px;color:#7B5330;">'
+                + esc(x.folder) + ' — ' + esc(x.reason) + '</div>';
+            });
+            var failRows = d.failed.map(function (x) {
+              return '<div style="padding:6px 10px;border-bottom:1px solid #E8DCC0;font-size:12px;color:#A02818;">'
+                + esc(x.folder || x.path) + ' — ' + esc(x.error) + '</div>';
+            });
+            out.innerHTML = '<div style="padding:12px;background:' + (d.dry_run ? "#FBF3DE" : "#E8F0E4") + ';border:1px solid #D4C4A0;border-radius:6px;">'
+              + '<strong>' + (d.dry_run ? "PREVIEW — nothing was created" : "IMPORTED") + '</strong> · '
+              + d.created_count + ' case(s) · ' + d.clients_created + ' new client(s) · '
+              + d.skipped_count + ' skipped · ' + d.failed_count + ' failed'
+              + '<div style="font-size:11px;margin-top:4px;">root: ' + d.roots.map(esc).join(", ") + '</div></div>'
+              + card(d.dry_run ? "Cases that would be created" : "Cases created", "#166534", madeRows)
+              + card("Skipped", "#7B5330", skipRows)
+              + card("Failed", "#A02818", failRows)
+              + (d.dry_run && d.created_count ? '<div style="margin-top:10px;padding:10px;background:#F5E4B4;border-left:3px solid #F07800;border-radius:4px;font-size:12px;">Check the LOW-confidence rows above — those folder names did not match a familiar pattern, so the case and client names are the folder name verbatim. Everything is editable afterwards.</div>' : '');
           } catch (e) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(e.message) + '</div>'; }
         }
         async function loadRoots() {

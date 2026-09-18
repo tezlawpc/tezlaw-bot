@@ -628,6 +628,198 @@ async function bulkImport({ dryRun = true, minScore = 60, sync = false } = {}) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  IMPORT CASES *FROM* FOLDERS
+//  The other direction from bulkImport(): there, cases already
+//  exist and we hunt for their folders. Here the Dropbox folders
+//  ARE the case list — each one becomes a civil case, and a
+//  client record is created for it if none exists yet.
+// ═══════════════════════════════════════════════════════════
+
+// Folders that are plainly not matters. Anything here is reported as
+// skipped rather than silently turned into a case.
+const NON_CASE_FOLDERS = [
+  /^_/, /^\./, /^templates?$/i, /^forms?$/i, /^admin/i, /^archive/i, /^old\b/i,
+  /^misc/i, /^scans?$/i, /^inbox$/i, /^to ?file$/i, /^shared$/i, /^general$/i,
+  /^firm\b/i, /^marketing$/i, /^billing$/i, /^accounting$/i, /^closed$/i,
+];
+
+// California and federal case-number shapes, plus a generic fallback.
+const CASE_NUMBER_RES = [
+  /\b\d{2}[A-Z]{2,6}\d{4,6}\b/i,          // 25STCV01234, 25NNCV09262
+  /\b[A-Z]{2,6}\d{6,9}\b/,                 // CIVSB2512345
+  /\b\d{1,2}:\d{2}-[a-z]{2,3}-\d{3,6}\b/i, // 2:26-cv-00123
+  /\b\d{2}-\d{4,6}\b/,                     // 26-12345
+];
+
+// Turn a folder name into the fields a civil case needs. Deliberately
+// conservative: when the shape is unfamiliar the whole name becomes the case
+// name and the client, rather than guessing a split that could be wrong.
+function parseCaseFolderName(folderName) {
+  const raw = String(folderName || "").trim();
+  const out = { folder: raw, case_number: null, case_name: raw, client_name: raw, confidence: "low" };
+  if (!raw) return { ...out, looks_like_case: false, skip_reason: "empty name" };
+  if (NON_CASE_FOLDERS.some(re => re.test(raw))) {
+    return { ...out, looks_like_case: false, skip_reason: "looks like an admin/support folder" };
+  }
+
+  let rest = raw;
+
+  // Pull a case number out wherever it sits.
+  for (const re of CASE_NUMBER_RES) {
+    const m = rest.match(re);
+    if (m) {
+      out.case_number = m[0];
+      rest = (rest.slice(0, m.index) + " " + rest.slice(m.index + m[0].length));
+      break;
+    }
+  }
+  // Tidy separators left behind.
+  rest = rest.replace(/[\(\)\[\]]/g, " ").replace(/\s*[-–—_]\s*/g, " - ")
+             .replace(/\s+/g, " ").replace(/^[\s-]+|[\s-]+$/g, "");
+
+  // "Party v. Party" — the client is the first-named party.
+  const vs = rest.match(/^(.+?)\s+(?:v\.?|vs\.?|versus)\s+(.+)$/i);
+  if (vs) {
+    out.case_name = rest;
+    out.client_name = vs[1].trim();
+    out.confidence = "high";
+  } else {
+    // "Client - Matter description"
+    const dash = rest.split(" - ");
+    if (dash.length >= 2 && dash[0].trim().length >= 2) {
+      out.case_name = rest;
+      out.client_name = dash[0].trim();
+      out.confidence = "medium";
+    } else {
+      out.case_name = rest || raw;
+      out.client_name = rest || raw;
+      out.confidence = out.case_number ? "medium" : "low";
+    }
+  }
+
+  // "Last, First" reads better as "First Last" for a client record.
+  const comma = out.client_name.match(/^([^,]+),\s*(.+)$/);
+  if (comma && comma[2].split(/\s+/).length <= 3) {
+    out.client_name = (comma[2] + " " + comma[1]).replace(/\s+/g, " ").trim();
+  }
+
+  out.case_name = out.case_name.replace(/\s+/g, " ").trim() || raw;
+  out.client_name = out.client_name.replace(/\s+/g, " ").trim() || raw;
+  return { ...out, looks_like_case: true };
+}
+
+// Reuse an existing contact when the name already exists, so importing twice
+// doesn't produce duplicate clients.
+async function findOrCreateClient(clientName, { dryRun, createdBy }) {
+  const name = String(clientName || "").trim();
+  if (!name) throw new Error("client name required");
+  const norm = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+  const existing = await db.query(
+    `SELECT client_key, client_name FROM tasks
+      WHERE client_key IS NOT NULL
+        AND LOWER(REGEXP_REPLACE(COALESCE(client_name,''), '[^a-zA-Z0-9]+', ' ', 'g')) = $1
+      ORDER BY created_at ASC LIMIT 1`,
+    [norm]
+  ).catch(() => ({ rows: [] }));
+  if (existing.rows[0]) return { client_key: existing.rows[0].client_key, created: false, client_name: existing.rows[0].client_name };
+
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  const client_key = `contact-${slug}-${Date.now().toString(36)}`;
+  if (dryRun) return { client_key, created: true, client_name: name, dry_run: true };
+
+  // Same shape the app's contact-only endpoint writes, so imported clients
+  // show up in the normal client lists.
+  await db.query(
+    `INSERT INTO tasks
+       (title, client_key, client_name, matter_type, description, assigned_to, status, created_at, updated_at)
+     VALUES ($1, $2, $3, 'Contact', $4, $5, 'completed', NOW(), NOW())`,
+    [`Contact: ${name}`, client_key, name, `Imported from Dropbox civil folder`, createdBy || "dropbox-import"]
+  );
+  return { client_key, created: true, client_name: name };
+}
+
+// Walk the civil root and turn each matter folder into a case.
+async function importCasesFromFolders({ dryRun = true, root = null, createdBy = null } = {}) {
+  await initTables();
+  if (!dbx.isConfigured()) throw new Error("Dropbox is not connected");
+
+  const roots = root ? [normalizePath(root)] : await getCivilRoots();
+  const configured = root ? true : await rootsAreConfigured();
+  if (!configured) {
+    return {
+      ok: false, reason: "roots_not_configured",
+      hint: "Set the civil Dropbox root first — otherwise this would create cases from your immigration folders.",
+    };
+  }
+
+  // Folders already attached to a case must never be imported twice.
+  const linkedR = await db.query(`SELECT LOWER(dropbox_path) AS p FROM civil_cases WHERE dropbox_path IS NOT NULL`);
+  const linked = new Set(linkedR.rows.map(r => r.p));
+
+  const created = [], skipped = [], failed = [];
+  for (const r of roots) {
+    let entries;
+    try { entries = await dbx.listFolder(r || ""); }
+    catch (e) { failed.push({ folder: r, error: e.message }); continue; }
+    if (!entries) { failed.push({ folder: r, error: "root not found" }); continue; }
+
+    for (const e of entries) {
+      if (e[".tag"] !== "folder") continue;
+      const path = e.path_display;
+      if (linked.has(String(path).toLowerCase())) {
+        skipped.push({ folder: e.name, path, reason: "already linked to a case" });
+        continue;
+      }
+      const parsed = parseCaseFolderName(e.name);
+      if (!parsed.looks_like_case) {
+        skipped.push({ folder: e.name, path, reason: parsed.skip_reason });
+        continue;
+      }
+
+      try {
+        const client = await findOrCreateClient(parsed.client_name, { dryRun, createdBy });
+        if (dryRun) {
+          created.push({
+            folder: e.name, path, case_name: parsed.case_name, case_number: parsed.case_number,
+            client_name: client.client_name, client_key: client.client_key,
+            client_created: client.created, confidence: parsed.confidence, case_id: null,
+          });
+          continue;
+        }
+        const civil = require("./civil-litigation");
+        const newCase = await civil.createCase({
+          client_key: client.client_key,
+          case_name: parsed.case_name,
+          case_number: parsed.case_number,
+          stage: "intake",
+          internal_notes: `Imported from Dropbox folder: ${path}`,
+          created_by: createdBy || "dropbox-import",
+        });
+        await setCaseFolder(newCase.id, path);
+        let synced = null;
+        try { synced = await syncCase(newCase.id); } catch (err) { /* reported by the next sweep */ }
+        created.push({
+          folder: e.name, path, case_id: newCase.id, case_name: parsed.case_name,
+          case_number: parsed.case_number, client_name: client.client_name,
+          client_key: client.client_key, client_created: client.created,
+          confidence: parsed.confidence, files: synced ? synced.total : 0,
+        });
+      } catch (err) {
+        failed.push({ folder: e.name, path, error: err.message });
+      }
+    }
+  }
+
+  return {
+    ok: true, dry_run: dryRun, roots,
+    created_count: created.length, skipped_count: skipped.length, failed_count: failed.length,
+    clients_created: created.filter(c => c.client_created).length,
+    created, skipped, failed,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
 //  ARCHIVE
 //  Closing a matter freezes its file list: we stop syncing it
 //  and mark the rows archived. Nothing is deleted or moved in
@@ -767,7 +959,7 @@ module.exports = {
   setCaseFolder, clearCaseFolder, suggestFolderForCase, civilTokens,
   getCivilRoots, setCivilRoots, rootsAreConfigured, browseFolders, unlinkAll,
   syncCase, syncAll,
-  bulkImport,
+  bulkImport, importCasesFromFolders, parseCaseFolderName,
   archiveCaseFiles, unarchiveCaseFiles,
   listCaseFiles, categorySummary, fileLink,
   startScheduler, stopScheduler,
