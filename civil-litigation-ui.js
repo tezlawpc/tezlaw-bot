@@ -436,7 +436,7 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
         });
       }
       async function dbxArchive(id, on) {
-        if (on && !confirm("Archive this case file?\\n\\nThe document list is frozen and hourly sync pauses for this matter.\\nNothing is moved or deleted in Dropbox.")) return;
+        if (on && !confirm("Archive this case file? The document list is frozen and hourly sync pauses for this matter. Nothing is moved or deleted in Dropbox.")) return;
         dbxMsg(on ? "Archiving…" : "Unarchiving…");
         var d = await dbxPost("/admin/civil/case/" + id + "/files/" + (on ? "archive" : "unarchive"), {});
         if (d.ok) location.reload(); else dbxMsg(d.error || "Failed.", true);

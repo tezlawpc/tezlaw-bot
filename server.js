@@ -943,7 +943,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
         }
         async function bulk(apply) {
           var out = document.getElementById("out");
-          if (apply && !confirm("Link every confident match and sync their documents?\\n\\nAmbiguous matches are skipped — you link those by hand.")) return;
+          if (apply && !confirm("Link every confident match and sync their documents? Ambiguous matches are skipped \u2014 you link those by hand.")) return;
           out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Scanning Dropbox…</div>';
           try {
             var r = await fetch("/admin/civil/dropbox/bulk-import", {
@@ -1056,7 +1056,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
           });
         }
         async function unlinkAll() {
-          if (!confirm("Unlink every civil case from its Dropbox folder and clear the mirrored file list?\n\nNothing in Dropbox is moved or deleted. Use this to undo a bad import.")) return;
+          if (!confirm("Unlink every civil case from its Dropbox folder and clear the mirrored file list? Nothing in Dropbox is moved or deleted \u2014 this only undoes a bad import.")) return;
           var r = await fetch("/admin/civil/dropbox/unlink-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
           var d = await r.json();
           document.getElementById("out").innerHTML = d.ok
