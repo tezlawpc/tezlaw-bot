@@ -167,6 +167,17 @@ async function renderCaseDetail(id) {
     civil.listDeadlines(id, { status: "pending" }),
     civil.listCommunications(id),
   ]);
+
+  // Dropbox mirror — the module is optional, so a missing or unconfigured
+  // one must render an empty panel rather than break the whole page.
+  let files = [], fileCats = [], filesErr = null;
+  try {
+    const cdx = require("./civil-dropbox");
+    [files, fileCats] = await Promise.all([
+      cdx.listCaseFiles(id),
+      cdx.categorySummary(id),
+    ]);
+  } catch (e) { filesErr = e.message; }
   const stage = civil.STAGES.find(s => s.key === summary.stage) || civil.STAGES[0];
 
   const overviewRows = [
@@ -289,9 +300,134 @@ async function renderCaseDetail(id) {
         </div>
       `).join("") : `<div style="padding:20px;text-align:center;font-style:italic;color:#7B5330;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">No communications logged yet.</div>`}
 
+      ${renderDocumentsPanel(id, summary, files, fileCats, filesErr)}
+
       ${summary.internal_notes ? `<h2 style="font-family:Cinzel,serif;color:#3E2818;margin:24px 0 12px 0;font-size:16px;letter-spacing:1.5px;">📝 INTERNAL NOTES</h2><div style="background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;padding:16px;white-space:pre-wrap;">${esc(summary.internal_notes)}</div>` : ""}
     </div>
   `;
 }
 
-module.exports = { renderKanban, renderCaseDetail };
+
+// ── Documents panel (Dropbox mirror) ────────────────────────
+function renderDocumentsPanel(id, summary, files, cats, err) {
+  const linked = !!summary.dropbox_path;
+  const archived = !!summary.files_archived_at;
+  const synced = summary.dropbox_synced_at ? fmtDate(summary.dropbox_synced_at) : "never";
+  const live = files.filter(f => !f.removed_at);
+  const withFiles = cats.filter(c => c.count > 0);
+
+  const head = `<h2 style="font-family:Cinzel,serif;color:#3E2818;margin:24px 0 12px 0;font-size:16px;letter-spacing:1.5px;">📁 DOCUMENTS (${live.length})</h2>`;
+
+  if (err) {
+    return head + `<div style="padding:14px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;color:#7B5330;font-style:italic;">Document sync unavailable: ${esc(err)}</div>`;
+  }
+
+  const controls = `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;">
+      <input id="dbx-path" value="${esc(summary.dropbox_path || "")}" placeholder="/Civil/Client Folder — paste a Dropbox path or share link"
+             style="flex:1;min-width:260px;padding:8px;border:1px solid #D4C4A0;border-radius:5px;background:#FBF3DE;color:#3E2818;font-size:12px;">
+      <button onclick="dbxSave(${id})" style="padding:8px 14px;background:#3E2818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">${linked ? "UPDATE" : "LINK"} FOLDER</button>
+      <button onclick="dbxSuggest(${id})" style="padding:8px 14px;background:#FBF3DE;color:#3E2818;border:1px solid #D4C4A0;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">SUGGEST</button>
+      ${linked ? `<button onclick="dbxSync(${id})" style="padding:8px 14px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">SYNC NOW</button>` : ""}
+      ${linked ? `<button onclick="dbxArchive(${id}, ${archived ? "false" : "true"})" style="padding:8px 14px;background:${archived ? "#166534" : "#A02818"};color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">${archived ? "UNARCHIVE" : "ARCHIVE"}</button>` : ""}
+    </div>
+    <div id="dbx-msg" style="font-size:11px;color:#7B5330;margin-bottom:10px;">
+      ${linked ? `Linked to <strong>${esc(summary.dropbox_path)}</strong> · last synced ${esc(synced)}${archived ? ` · <span style="color:#A02818;font-weight:700;">ARCHIVED — sync paused</span>` : ""}` : "No Dropbox folder linked yet."}
+      ${summary.dropbox_sync_error ? `<div style="color:#A02818;margin-top:4px;">Last sync error: ${esc(summary.dropbox_sync_error)}</div>` : ""}
+    </div>
+    <div id="dbx-suggest"></div>`;
+
+  if (!live.length) {
+    return head + controls + `<div style="padding:16px;text-align:center;font-style:italic;color:#8B7355;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">${linked ? "No documents mirrored yet — hit Sync Now." : "Link a folder to mirror this matter's documents."}</div>`;
+  }
+
+  const tabs = withFiles.map(c =>
+    `<button onclick="dbxFilter('${c.key}')" data-cat="${c.key}" class="dbx-tab" style="padding:5px 10px;border:1px solid ${c.color};border-radius:14px;background:#FBF3DE;color:${c.color};cursor:pointer;font-size:11px;font-weight:600;">${esc(c.label)} ${c.count}</button>`
+  ).join(" ");
+
+  const rows = live.map(f => {
+    const cat = cats.find(c => c.key === f.category) || { color: "#4B5563", label: f.category };
+    const kb = f.size_bytes ? (f.size_bytes > 1048576 ? (f.size_bytes / 1048576).toFixed(1) + " MB" : Math.round(f.size_bytes / 1024) + " KB") : "";
+    return `
+      <div class="dbx-row" data-cat="${esc(f.category)}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #E8DCC0;">
+        <span style="flex-shrink:0;width:9px;height:9px;border-radius:2px;background:${cat.color};"></span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;color:#3E2818;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.name || "")}</div>
+          <div style="font-size:10px;color:#8B7355;">${esc(cat.label)}${f.relative_folder ? " · " + esc(f.relative_folder) : ""}${kb ? " · " + kb : ""}${f.server_modified ? " · " + fmtDate(f.server_modified) : ""}</div>
+        </div>
+        ${f.archived ? `<span style="font-size:9px;font-weight:700;color:#7B5330;letter-spacing:1px;">ARCHIVED</span>` : ""}
+        <a href="#" onclick="dbxOpen(event, ${f.id})" style="flex-shrink:0;font-size:11px;color:#B84200;text-decoration:none;font-weight:600;">OPEN ↗</a>
+      </div>`;
+  }).join("");
+
+  return head + controls + `
+    <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:5px;">
+      <button onclick="dbxFilter('')" class="dbx-tab" data-cat="" style="padding:5px 10px;border:1px solid #3E2818;border-radius:14px;background:#3E2818;color:#FBF3DE;cursor:pointer;font-size:11px;font-weight:600;">All ${live.length}</button>
+      ${tabs}
+    </div>
+    <div style="background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;overflow:hidden;">${rows}</div>
+
+    <script>
+      function dbxMsg(t, bad) {
+        var el = document.getElementById("dbx-msg");
+        el.innerHTML = t; el.style.color = bad ? "#A02818" : "#7B5330";
+      }
+      function dbxFilter(cat) {
+        document.querySelectorAll(".dbx-row").forEach(function (r) {
+          r.style.display = (!cat || r.dataset.cat === cat) ? "flex" : "none";
+        });
+        document.querySelectorAll(".dbx-tab").forEach(function (b) {
+          var on = (b.dataset.cat || "") === cat;
+          b.style.background = on ? "#3E2818" : "#FBF3DE";
+          b.style.color = on ? "#FBF3DE" : (b.style.borderColor || "#3E2818");
+        });
+      }
+      async function dbxPost(url, body) {
+        var r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+        return await r.json();
+      }
+      async function dbxSave(id) {
+        var path = document.getElementById("dbx-path").value.trim();
+        if (!path) { dbxMsg("Enter a Dropbox folder path first.", true); return; }
+        dbxMsg("Linking…");
+        var d = await dbxPost("/admin/civil/case/" + id + "/dropbox", { path: path });
+        if (d.ok) { dbxMsg("Linked. Syncing…"); await dbxSync(id); }
+        else dbxMsg(d.error || "Could not link that folder.", true);
+      }
+      async function dbxSync(id) {
+        dbxMsg("Syncing with Dropbox…");
+        var d = await dbxPost("/admin/civil/case/" + id + "/dropbox/sync", {});
+        if (d.ok) { dbxMsg("Synced: +" + (d.added || 0) + " new, " + (d.total || 0) + " total. Reloading…"); setTimeout(function(){ location.reload(); }, 900); }
+        else dbxMsg(d.error || d.reason || "Sync failed.", true);
+      }
+      async function dbxSuggest(id) {
+        dbxMsg("Looking for matching folders…");
+        var r = await fetch("/admin/civil/case/" + id + "/dropbox/suggest");
+        var d = await r.json();
+        var box = document.getElementById("dbx-suggest");
+        if (!d.ok || !d.suggestions || !d.suggestions.length) { dbxMsg("No likely folders found — paste the path manually.", true); box.innerHTML = ""; return; }
+        dbxMsg("Pick the matching folder:");
+        box.innerHTML = d.suggestions.map(function (s) {
+          return '<div style="padding:6px 8px;margin-bottom:4px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:5px;display:flex;justify-content:space-between;gap:10px;">'
+            + '<span style="font-size:12px;color:#3E2818;">' + s.path + '</span>'
+            + '<a href="#" onclick="document.getElementById(\'dbx-path\').value=this.dataset.p;document.getElementById(\'dbx-suggest\').innerHTML=\'\';return false;" data-p="' + s.path + '" style="font-size:11px;color:#B84200;font-weight:600;text-decoration:none;">USE (score ' + s.score + ')</a>'
+            + '</div>';
+        }).join("");
+      }
+      async function dbxArchive(id, on) {
+        if (on && !confirm("Archive this case file?\n\nThe document list is frozen and hourly sync pauses for this matter.\nNothing is moved or deleted in Dropbox.")) return;
+        dbxMsg(on ? "Archiving…" : "Unarchiving…");
+        var d = await dbxPost("/admin/civil/case/" + id + "/files/" + (on ? "archive" : "unarchive"), {});
+        if (d.ok) location.reload(); else dbxMsg(d.error || "Failed.", true);
+      }
+      async function dbxOpen(e, fileId) {
+        e.preventDefault();
+        var r = await fetch("/admin/civil/files/" + fileId + "/link");
+        var d = await r.json();
+        if (d.ok && d.url) window.open(d.url, "_blank");
+        else dbxMsg(d.error || "Could not open that file.", true);
+      }
+    </script>`;
+}
+
+module.exports = { renderKanban, renderCaseDetail, renderDocumentsPanel };

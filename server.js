@@ -823,6 +823,143 @@ app.get("/admin/civil/new", async (req, res) => {
   }
 });
 
+// ── Civil ⇄ Dropbox: admin-side actions ─────────────────────
+// These mirror the /api/staff/civil/**/dropbox endpoints but authenticate by
+// admin cookie (app.use("/admin", requireAdminAuth)) rather than a bearer
+// token, so the web case page can drive them directly.
+function _cdx() { return require("./civil-dropbox"); }
+
+app.post("/admin/civil/case/:id/dropbox", async (req, res) => {
+  try { res.json({ ok: true, ...(await _cdx().setCaseFolder(parseInt(req.params.id, 10), req.body?.path)) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/civil/case/:id/dropbox/sync", async (req, res) => {
+  try { res.json(await _cdx().syncCase(parseInt(req.params.id, 10), { force: req.query.force === "1" })); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get("/admin/civil/case/:id/dropbox/suggest", async (req, res) => {
+  try { res.json({ ok: true, suggestions: await _cdx().suggestFolderForCase(parseInt(req.params.id, 10)) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/civil/case/:id/files/archive", async (req, res) => {
+  try { res.json(await _cdx().archiveCaseFiles(parseInt(req.params.id, 10), { by: req.user?.n || req.user?.u || "web-admin" })); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/civil/case/:id/files/unarchive", async (req, res) => {
+  try { res.json(await _cdx().unarchiveCaseFiles(parseInt(req.params.id, 10))); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get("/admin/civil/files/:fileId/link", async (req, res) => {
+  try { res.json({ ok: true, url: await _cdx().fileLink(parseInt(req.params.fileId, 10)) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/civil/dropbox/sync-all", async (req, res) => {
+  try { res.json(await _cdx().syncAll({ includeClosed: req.query.include_closed === "1" })); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/civil/dropbox/bulk-import", async (req, res) => {
+  try {
+    res.json(await _cdx().bulkImport({
+      dryRun: req.body?.apply !== true,
+      minScore: Number(req.body?.min_score) || 60,
+      sync: req.body?.sync === true,
+    }));
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ── Bulk import console ─────────────────────────────────────
+app.get("/admin/civil/dropbox", async (req, res) => {
+  try {
+    const hearingNotes = require("./hearing-notes");
+    const body = `
+      <div style="padding:24px;max-width:1000px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <h1 style="margin:0;font-family:'Cinzel',serif;color:#3E2818;">📁 Civil Document Sync</h1>
+          <a href="/admin/civil" style="color:#B84200;text-decoration:none;font-size:13px;">← Back to board</a>
+        </div>
+        <p style="color:#7B5330;font-style:italic;margin:0 0 18px 0;font-size:13px;">
+          Matches civil matters to their Dropbox folders by client name and case number, then mirrors the
+          documents in. A dry run changes nothing — review the matches before applying.
+        </p>
+
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;">
+          <button onclick="bulk(false)" style="padding:10px 18px;background:#3E2818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">DRY RUN</button>
+          <button onclick="bulk(true)" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">APPLY + SYNC</button>
+          <button onclick="syncAll()" style="padding:10px 18px;background:#FBF3DE;color:#3E2818;border:1px solid #D4C4A0;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">SYNC ALL LINKED</button>
+          <label style="font-size:12px;color:#7B5330;">min score
+            <input id="minscore" type="number" value="60" style="width:60px;padding:5px;border:1px solid #D4C4A0;border-radius:4px;background:#FBF3DE;">
+          </label>
+        </div>
+
+        <div id="out" style="font-size:13px;color:#3E2818;"></div>
+      </div>
+
+      <script>
+        function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+        function card(title, colour, rows) {
+          if (!rows.length) return "";
+          return '<h3 style="font-family:Cinzel,serif;color:' + colour + ';margin:18px 0 8px 0;font-size:14px;letter-spacing:1px;">' + title + ' (' + rows.length + ')</h3>'
+            + '<div style="background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;overflow:hidden;">' + rows.join("") + '</div>';
+        }
+        async function bulk(apply) {
+          var out = document.getElementById("out");
+          if (apply && !confirm("Link every confident match and sync their documents?\n\nAmbiguous matches are skipped — you link those by hand.")) return;
+          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Scanning Dropbox…</div>';
+          try {
+            var r = await fetch("/admin/civil/dropbox/bulk-import", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ apply: apply, sync: apply, min_score: Number(document.getElementById("minscore").value) || 60 })
+            });
+            var d = await r.json();
+            if (!d.ok) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(d.error) + '</div>'; return; }
+            var head = '<div style="padding:12px;background:' + (d.dry_run ? "#FBF3DE" : "#E8F0E4") + ';border:1px solid #D4C4A0;border-radius:6px;">'
+              + '<strong>' + (d.dry_run ? "DRY RUN — nothing was changed" : "APPLIED") + '</strong> · '
+              + d.linked_count + ' matched · ' + d.ambiguous_count + ' ambiguous · ' + d.unmatched_count + ' unmatched</div>';
+            var linked = d.linked.map(function (x) {
+              return '<div style="padding:8px 10px;border-bottom:1px solid #E8DCC0;display:flex;justify-content:space-between;gap:10px;">'
+                + '<a href="/admin/civil/case/' + x.case_id + '" style="color:#3E2818;text-decoration:none;font-weight:600;">' + esc(x.case_name) + '</a>'
+                + '<span style="color:#7B5330;font-size:12px;">' + esc(x.folder) + ' <em>(' + x.score + ')</em></span></div>';
+            });
+            var amb = d.ambiguous.map(function (x) {
+              return '<div style="padding:8px 10px;border-bottom:1px solid #E8DCC0;">'
+                + '<a href="/admin/civil/case/' + x.id + '" style="color:#3E2818;font-weight:600;text-decoration:none;">' + esc(x.case_name) + '</a>'
+                + '<div style="font-size:11px;color:#7B5330;margin-top:3px;">' + x.candidates.map(function (c) { return esc(c.path) + " (" + c.score + ")"; }).join(" · ") + '</div></div>';
+            });
+            var un = d.unmatched.map(function (x) {
+              return '<div style="padding:8px 10px;border-bottom:1px solid #E8DCC0;">'
+                + '<a href="/admin/civil/case/' + x.id + '" style="color:#3E2818;text-decoration:none;">' + esc(x.case_name) + '</a>'
+                + (x.best ? '<span style="font-size:11px;color:#8B7355;"> — closest: ' + esc(x.best.path) + ' (' + x.best.score + ')</span>' : '') + '</div>';
+            });
+            out.innerHTML = head
+              + card("✅ Matched", "#166534", linked)
+              + card("⚠ Ambiguous — link these by hand", "#F07800", amb)
+              + card("○ No match found", "#7B5330", un);
+          } catch (e) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(e.message) + '</div>'; }
+        }
+        async function syncAll() {
+          var out = document.getElementById("out");
+          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Syncing every linked matter…</div>';
+          var r = await fetch("/admin/civil/dropbox/sync-all", { method: "POST" });
+          var d = await r.json();
+          out.innerHTML = d.ok
+            ? '<div style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">Synced ' + d.cases + ' matters · +' + d.added + ' new documents · ' + d.removed + ' removed · ' + d.failed + ' failed</div>'
+            : '<div style="color:#A02818;padding:12px;">' + esc(d.error || d.reason) + '</div>';
+        }
+      </script>`;
+    res.send(hearingNotes.renderAdminChrome({ title: "Civil Document Sync", body, activeItem: "civil" }));
+  } catch (err) {
+    console.error("[civil dropbox console]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 app.post("/admin/civil", async (req, res) => {
   try {
     const civil = require("./civil-litigation");
