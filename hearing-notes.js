@@ -1548,6 +1548,23 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
     </div>
 
+    <!-- ── Civil Litigation section ── -->
+    <div class="nav-section" id="section-civil">
+      <div class="nav-section-header">Civil Litigation</div>
+      <a href="/admin/civil" class="nav-link ${isActive('civil')}" data-perm="civil.read">
+        <span class="nav-icon">⚖️</span><span class="nav-label">All Cases</span>
+      </a>
+      <a href="/admin/civil?stage=discovery" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">◈</span><span class="nav-label">Discovery</span>
+      </a>
+      <a href="/admin/civil?stage=motions" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">§</span><span class="nav-label">Motion Practice</span>
+      </a>
+      <a href="/admin/civil?stage=trial_prep" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">⚠</span><span class="nav-label">Trial Prep</span>
+      </a>
+    </div>
+
     <!-- ── Federal & Trademarks section ── -->
     <div class="nav-section" id="section-federal">
       <div class="nav-section-header">Federal & TM</div>
@@ -1570,9 +1587,6 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <div class="nav-section-header">Personal Injury</div>
       <a href="/admin/pi" class="nav-link ${isActive('pi-dashboard')}" data-perm="pi.read">
         <span class="nav-icon">🚑</span><span class="nav-label">PI Dashboard</span>
-      </a>
-      <a href="/admin/civil" class="nav-link ${isActive('civil')}" data-perm="civil.read">
-        <span class="nav-icon">⚖️</span><span class="nav-label">Civil Litigation</span>
       </a>
       <a href="/admin/pi/cases" class="nav-link ${isActive('pi-cases')}" data-perm="pi.read">
         <span class="nav-icon">◈</span><span class="nav-label">All PI Cases</span>

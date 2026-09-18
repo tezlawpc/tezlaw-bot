@@ -32,8 +32,23 @@ function fmtDate(d) {
 }
 
 // ── Kanban board ────────────────────────────────────────────
-async function renderKanban() {
-  const board = await civil.kanban();
+// opts: { stage, status } — drives the filtered sidebar links. An unknown
+// stage key is ignored rather than returning an empty board, so a stale
+// bookmark still shows something useful.
+async function renderKanban(opts = {}) {
+  const validStage = opts.stage && civil.STAGES.some(s => s.key === opts.stage) ? opts.stage : null;
+  const filter = {};
+  if (validStage) filter.stage = validStage;
+  if (opts.status) filter.status = opts.status;
+  const board = await civil.kanban(filter);
+  const activeStage = validStage ? civil.STAGES.find(s => s.key === validStage) : null;
+  const filterBanner = activeStage ? `
+    <div style="margin-bottom:14px;padding:10px 14px;background:#FBF3DE;border:1px solid ${activeStage.color};border-left-width:4px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+      <div style="font-family:Cinzel,serif;font-size:13px;color:#3E2818;letter-spacing:1px;">
+        Filtered to <strong style="color:${activeStage.color};">${esc(activeStage.label)}</strong>
+      </div>
+      <a href="/admin/civil" style="font-size:12px;color:#B84200;text-decoration:none;font-weight:600;">Show all cases ×</a>
+    </div>` : "";
   const stagesHtml = board.stages.map(stage => {
     const cases = board.cases_by_stage[stage.key] || [];
     const cards = cases.map(c => {
@@ -78,11 +93,12 @@ async function renderKanban() {
         </div>
         <a href="/admin/civil/new" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;font-family:Cinzel,serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-decoration:none;">+ NEW CASE</a>
       </div>
+      <!--CIVIL_FILTER_BANNER-->
       <div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:12px;">
         ${stagesHtml}
       </div>
     </div>
-  `;
+  `.replace("<!--CIVIL_FILTER_BANNER-->", filterBanner);
 }
 
 // ── Case detail page ────────────────────────────────────────

@@ -678,7 +678,7 @@ app.get("/admin/civil", async (req, res) => {
   try {
     const civilUI = require("./civil-litigation-ui");
     const hearingNotes = require("./hearing-notes");
-    const body = await civilUI.renderKanban();
+    const body = await civilUI.renderKanban({ stage: req.query.stage, status: req.query.status });
     res.send(hearingNotes.renderAdminChrome({ title: "Civil Litigation", body, activeItem: "civil" }));
   } catch (err) {
     console.error("[civil kanban]:", err.message);
