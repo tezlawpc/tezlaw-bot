@@ -922,6 +922,21 @@ app.get("/admin/civil/dropbox", async (req, res) => {
             var head = '<div style="padding:12px;background:' + (d.dry_run ? "#FBF3DE" : "#E8F0E4") + ';border:1px solid #D4C4A0;border-radius:6px;">'
               + '<strong>' + (d.dry_run ? "DRY RUN — nothing was changed" : "APPLIED") + '</strong> · '
               + d.linked_count + ' matched · ' + d.ambiguous_count + ' ambiguous · ' + d.unmatched_count + ' unmatched</div>';
+            // A bare "0 matched" hides whether the problem is no cases, no
+            // configured roots, or genuinely weak scores. Always show why.
+            var g = d.diagnostics;
+            if (g) {
+              var roots = (g.roots_scanned || []).map(function (r) {
+                return '<li>' + esc(r.root) + ' — ' + (r.ok ? r.folders + ' folders' : 'unreadable' + (r.error ? ' (' + esc(r.error) + ')' : '')) + '</li>';
+              }).join("");
+              head += '<div style="margin-top:8px;padding:10px 12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;font-size:12px;color:#3E2818;">'
+                + '<strong>Scan details</strong>'
+                + '<div style="margin-top:4px;">' + g.total_civil_cases + ' civil case(s) in total · '
+                + g.cases_needing_a_folder + ' still need a folder · ' + g.folders_visible + ' Dropbox folder(s) visible</div>'
+                + (roots ? '<ul style="margin:6px 0 0 18px;padding:0;">' + roots + '</ul>' : '')
+                + (g.hint ? '<div style="margin-top:8px;padding:8px;background:#F5E4B4;border-left:3px solid #F07800;border-radius:4px;">' + esc(g.hint) + '</div>' : '')
+                + '</div>';
+            }
             var linked = d.linked.map(function (x) {
               return '<div style="padding:8px 10px;border-bottom:1px solid #E8DCC0;display:flex;justify-content:space-between;gap:10px;">'
                 + '<a href="/admin/civil/case/' + x.case_id + '" style="color:#3E2818;text-decoration:none;font-weight:600;">' + esc(x.case_name) + '</a>'

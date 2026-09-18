@@ -211,30 +211,82 @@ function normalizePath(input) {
   return p === "/" ? null : p;
 }
 
+// Roots to scan. CIVIL_DROPBOX_ROOTS lets civil folders live somewhere
+// separate from the immigration branches (mirroring PI_DROPBOX_ROOTS);
+// otherwise fall back to the shared branch roots, and finally to the
+// Dropbox root itself so a firm with no roots configured still gets matches.
+function getCivilRoots() {
+  const civil = (process.env.CIVIL_DROPBOX_ROOTS || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (civil.length) return civil;
+  const shared = dbx.getBranchRoots();
+  if (shared.length) return shared;
+  return [""];   // "" is the Dropbox root for files/list_folder
+}
+
+// Civil case names are adversarial ("Nguyen v. Pacific Holdings LLC"), so the
+// party names are the signal and the connective tissue is noise. Strip the
+// entity suffixes and "v." so "Nguyen" still matches a "Nguyen" folder.
+const CIVIL_STOPWORDS = new Set([
+  "v", "vs", "versus", "et", "al", "llc", "inc", "corp", "corporation",
+  "company", "co", "ltd", "lp", "llp", "plc", "trust", "estate",
+  "matter", "matters", "civil", "litigation", "lawsuit", "action",
+]);
+
+function civilTokens(text) {
+  return dbx.nameTokens(text).filter(t => !CIVIL_STOPWORDS.has(t));
+}
+
 // Auto-match a case to a folder by client name + case number, reusing the
 // scoring already tuned for the immigration side.
-async function suggestFolderForCase(caseId, { limit = 8 } = {}) {
+async function suggestFolderForCase(caseId, { limit = 8, debug = false } = {}) {
   const c = await getCaseRow(caseId);
   if (!c) throw new Error("Case not found");
-  const roots = dbx.getBranchRoots();
-  const terms = dbx.nameTokens([c.case_name, c.client_key].filter(Boolean).join(" "));
+
+  const roots = getCivilRoots();
+  // Both the case caption and the client key are worth matching on: folders
+  // are named after one or the other depending on who set them up.
+  const captionTerms = civilTokens(c.case_name);
+  const clientTerms = civilTokens(String(c.client_key || "").replace(/[-_]/g, " "));
   const digits = String(c.case_number || "").replace(/\D/g, "");
 
   const seen = [];
+  const rootErrors = [];
   for (const root of roots) {
     let entries;
-    try { entries = await dbx.listFolder(root); } catch (e) { continue; }
-    if (!entries) continue;
+    try { entries = await dbx.listFolder(root); }
+    catch (e) { rootErrors.push({ root, error: e.message }); continue; }
+    if (!entries) { rootErrors.push({ root, error: "folder not found" }); continue; }
+
     for (const e of entries) {
       if (e[".tag"] !== "folder") continue;
-      let score = dbx.scoreFolderMatch(e.name, terms, null) || 0;
-      // A case number appearing in the folder name is a very strong signal —
-      // stronger than any name-token overlap.
-      if (digits.length >= 4 && String(e.name).replace(/\D/g, "").includes(digits)) score += 80;
-      if (score > 0) seen.push({ path: e.path_display, name: e.name, score });
+      // scoreFolderMatch returns { score, reason } — not a bare number.
+      const byCaption = captionTerms.length ? (dbx.scoreFolderMatch(e.name, captionTerms, null) || {}) : {};
+      const byClient = clientTerms.length ? (dbx.scoreFolderMatch(e.name, clientTerms, null) || {}) : {};
+      let score = Math.max(Number(byCaption.score) || 0, Number(byClient.score) || 0);
+      let reason = (Number(byCaption.score) || 0) >= (Number(byClient.score) || 0)
+        ? byCaption.reason : byClient.reason;
+
+      // A case number in the folder name is the strongest signal there is —
+      // stronger than any name overlap, and it alone is enough to match.
+      if (digits.length >= 4 && String(e.name).replace(/\D/g, "").includes(digits)) {
+        score += 80;
+        reason = reason ? reason + " + case number" : "case number match";
+      }
+      if (score > 0) seen.push({ path: e.path_display, name: e.name, score, reason: reason || null });
     }
   }
-  return seen.sort((a, b) => b.score - a.score).slice(0, limit);
+
+  const ranked = seen.sort((a, b) => b.score - a.score).slice(0, limit);
+  if (!debug) return ranked;
+  return {
+    suggestions: ranked,
+    debug: {
+      roots, root_errors: rootErrors,
+      caption_terms: captionTerms, client_terms: clientTerms,
+      case_number_digits: digits || null,
+      folders_scanned: seen.length,
+    },
+  };
 }
 
 async function getCaseRow(caseId) {
@@ -439,6 +491,38 @@ async function bulkImport({ dryRun = true, minScore = 60, sync = false } = {}) {
       WHERE dropbox_path IS NULL AND status = 'active' ORDER BY updated_at DESC`
   );
 
+  // Diagnostics first: "0 matched" is ambiguous between "no cases",
+  // "no folders configured" and "nothing scored high enough".
+  const roots = getCivilRoots();
+  const totalCasesR = await db.query(`SELECT COUNT(*)::int AS n FROM civil_cases`);
+  const totalCases = totalCasesR.rows[0] ? totalCasesR.rows[0].n : 0;
+  let rootFolderCount = 0;
+  const rootReport = [];
+  for (const root of roots) {
+    try {
+      const entries = await dbx.listFolder(root);
+      const n = entries ? entries.filter(e => e[".tag"] === "folder").length : 0;
+      rootFolderCount += n;
+      rootReport.push({ root: root || "(Dropbox root)", folders: n, ok: entries !== null });
+    } catch (e) {
+      rootReport.push({ root: root || "(Dropbox root)", folders: 0, ok: false, error: e.message });
+    }
+  }
+
+  const diagnostics = {
+    total_civil_cases: totalCases,
+    cases_needing_a_folder: r.rows.length,
+    roots_scanned: rootReport,
+    folders_visible: rootFolderCount,
+    hint: totalCases === 0
+      ? "There are no civil cases in the database yet — create one first."
+      : r.rows.length === 0
+        ? "Every active case already has a folder linked."
+        : rootFolderCount === 0
+          ? "No folders were visible in the scanned roots. Set CIVIL_DROPBOX_ROOTS (or DROPBOX_BRANCH_ROOTS) to the Dropbox path holding your civil matter folders."
+          : null,
+  };
+
   const linked = [], ambiguous = [], unmatched = [];
   for (const c of r.rows) {
     let matches = [];
@@ -461,7 +545,7 @@ async function bulkImport({ dryRun = true, minScore = 60, sync = false } = {}) {
   return {
     ok: true, dry_run: dryRun,
     linked_count: linked.length, ambiguous_count: ambiguous.length, unmatched_count: unmatched.length,
-    linked, ambiguous, unmatched,
+    linked, ambiguous, unmatched, diagnostics,
   };
 }
 
@@ -602,7 +686,7 @@ module.exports = {
   initTables,
   DOC_CATEGORIES, CATEGORY_KEYS, categorizeFile,
   normalizePath,
-  setCaseFolder, clearCaseFolder, suggestFolderForCase,
+  setCaseFolder, clearCaseFolder, suggestFolderForCase, getCivilRoots, civilTokens,
   syncCase, syncAll,
   bulkImport,
   archiveCaseFiles, unarchiveCaseFiles,
