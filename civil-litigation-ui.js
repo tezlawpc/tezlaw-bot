@@ -49,53 +49,110 @@ async function renderKanban(opts = {}) {
       </div>
       <a href="/admin/civil" style="font-size:12px;color:#B84200;text-decoration:none;font-weight:600;">Show all cases ×</a>
     </div>` : "";
+  // Cards are triaged, not just listed: a litigator scanning this board cares
+  // first about what is about to blow up. Urgency = trial inside 60 days or
+  // SOL inside 90 days (hard, unextendable), then trial inside 120 days.
+  const DAY = 86400000;
+  const daysUntil = d => {
+    if (!d) return null;
+    const t = new Date(d).getTime();
+    return Number.isFinite(t) ? Math.ceil((t - Date.now()) / DAY) : null;
+  };
+  const urgencyOf = c => {
+    const t = daysUntil(c.trial_date);
+    const sol = daysUntil(c.statute_of_limitations);
+    if ((t !== null && t <= 60) || (sol !== null && sol <= 90)) return 2;
+    if (t !== null && t <= 120) return 1;
+    return 0;
+  };
+  const soonestOf = c => {
+    const xs = [daysUntil(c.trial_date), daysUntil(c.statute_of_limitations)].filter(v => v !== null);
+    return xs.length ? Math.min(...xs) : Infinity;
+  };
+
   const stagesHtml = board.stages.map(stage => {
-    const cases = board.cases_by_stage[stage.key] || [];
+    // Most-urgent first, then soonest date, then whatever moved last.
+    const cases = (board.cases_by_stage[stage.key] || []).slice().sort((a, b) => {
+      const ua = urgencyOf(a), ub = urgencyOf(b);
+      if (ua !== ub) return ub - ua;
+      const sa = soonestOf(a), sb = soonestOf(b);
+      if (sa !== sb) return sa - sb;
+      return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+    });
+
     const cards = cases.map(c => {
-      const role = c.our_role ? c.our_role.toUpperCase() : "";
+      const role = c.our_role ? c.our_role.toUpperCase().slice(0, 4) : "";
       const amt = c.amount_in_controversy ? fmtCurrency(c.amount_in_controversy) : "";
-      const trial = c.trial_date ? fmtDate(c.trial_date) : "";
+      const t = daysUntil(c.trial_date);
+      const sol = daysUntil(c.statute_of_limitations);
+      const u = urgencyOf(c);
+      const edge = u === 2 ? "#A02818" : u === 1 ? "#F07800" : stage.color;
+
+      const chip = (label, color, title) =>
+        `<span title="${esc(title)}" style="display:inline-block;padding:1px 4px;border-radius:3px;background:${color};color:#FBF3DE;font-size:9px;font-weight:700;line-height:1.4;white-space:nowrap;">${esc(label)}</span>`;
+
+      const chips = [
+        role ? `<span style="display:inline-block;padding:1px 4px;border:1px solid ${stage.color};border-radius:3px;color:${stage.color};font-size:9px;font-weight:600;line-height:1.4;">${esc(role)}</span>` : "",
+        t !== null ? chip(t < 0 ? "TRIAL PAST" : "T-" + t + "d", t <= 60 ? "#A02818" : t <= 120 ? "#F07800" : "#7B5330", "Trial: " + fmtDate(c.trial_date)) : "",
+        sol !== null && sol <= 180 ? chip("SOL " + sol + "d", sol <= 90 ? "#A02818" : "#B8891E", "SOL: " + fmtDate(c.statute_of_limitations)) : "",
+      ].filter(Boolean).join(" ");
+
+      const tip = [c.case_name, c.case_type, c.case_number ? "#" + c.case_number : "", amt]
+        .filter(Boolean).join(" · ");
+
       return `
-        <a href="/admin/civil/case/${c.id}" style="display:block;padding:10px;margin-bottom:8px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;text-decoration:none;color:#3E2818;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px;">
-            <div style="flex:1;font-family:Cinzel,serif;font-size:13px;font-weight:600;line-height:1.3;">${esc(c.case_name)}</div>
-            ${role ? `<div style="padding:2px 6px;border:1px solid ${stage.color};border-radius:4px;font-size:9px;font-weight:600;letter-spacing:1px;color:${stage.color};">${esc(role)}</div>` : ""}
-          </div>
-          ${c.case_type ? `<div style="font-style:italic;font-size:11px;color:#7B5330;">${esc(c.case_type)}</div>` : ""}
-          ${c.case_number ? `<div style="font-size:10px;color:#8B7355;margin-top:2px;">#${esc(c.case_number)}</div>` : ""}
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid #D4C4A0;">
-            ${trial ? `<div style="font-size:10px;font-weight:600;color:#A02818;">Trial: ${esc(trial)}</div>` : "<div></div>"}
-            ${amt ? `<div style="font-size:11px;font-weight:700;color:#B8891E;">${esc(amt)}</div>` : ""}
-          </div>
+        <a href="/admin/civil/case/${c.id}" title="${esc(tip)}" style="display:block;padding:6px 7px;margin-bottom:5px;background:#FBF3DE;border:1px solid #D4C4A0;border-left:3px solid ${edge};border-radius:5px;text-decoration:none;color:#3E2818;">
+          <div style="font-family:Cinzel,serif;font-size:11.5px;font-weight:600;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${esc(c.case_name)}</div>
+          ${chips ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:3px;">${chips}</div>` : ""}
+          ${amt ? `<div style="margin-top:3px;font-size:10px;font-weight:700;color:#B8891E;">${esc(amt)}</div>` : ""}
         </a>
       `;
-    }).join("") || `<div style="text-align:center;padding:20px;font-style:italic;color:#8B7355;font-size:12px;">—</div>`;
+    }).join("") || `<div style="text-align:center;padding:14px 4px;font-style:italic;color:#B0A188;font-size:11px;">—</div>`;
+
+    // Empty columns recede so attention lands where the work actually is.
+    const empty = cases.length === 0;
+    const urgentCount = cases.filter(c => urgencyOf(c) === 2).length;
 
     return `
-      <div style="min-width:280px;background:#F5EBD3;border:1px solid #D4C4A0;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 250px);">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:#FBF3DE;border-bottom:1px solid #D4C4A0;border-left:4px solid ${stage.color};">
-          <div style="font-family:Cinzel,serif;font-size:13px;font-weight:600;color:#3E2818;letter-spacing:1.5px;text-transform:uppercase;">${esc(stage.label)}</div>
-          <div style="min-width:22px;height:22px;padding:0 6px;border-radius:11px;background:${stage.color};color:#FBF3DE;font-family:Cinzel,serif;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${cases.length}</div>
+      <div style="min-width:0;background:#F5EBD3;border:1px solid #D4C4A0;border-radius:7px;overflow:hidden;display:flex;flex-direction:column;${empty ? "opacity:.55;" : ""}">
+        <div style="padding:7px 8px;background:#FBF3DE;border-bottom:1px solid #D4C4A0;border-top:3px solid ${stage.color};">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
+            <div style="font-family:Cinzel,serif;font-size:10px;font-weight:600;color:#3E2818;letter-spacing:.6px;text-transform:uppercase;line-height:1.2;">${esc(stage.label)}</div>
+            <div style="flex-shrink:0;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:${stage.color};color:#FBF3DE;font-family:Cinzel,serif;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;">${cases.length}</div>
+          </div>
+          ${urgentCount ? `<div style="margin-top:3px;font-size:9px;font-weight:700;color:#A02818;letter-spacing:.3px;">⚠ ${urgentCount} urgent</div>` : ""}
         </div>
-        <div style="padding:10px;overflow-y:auto;flex:1;">${cards}</div>
+        <div style="padding:6px;overflow-y:auto;flex:1;min-height:0;">${cards}</div>
       </div>
     `;
   }).join("");
 
   const totalActive = Object.values(board.counts).reduce((a, b) => a + b, 0);
+  const totalUrgent = Object.values(board.cases_by_stage || {})
+    .flat().filter(c => urgencyOf(c) === 2).length;
 
   return `
     <div style="padding:24px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <div>
           <h1 style="margin:0;font-family:'Cinzel',serif;color:#3E2818;">⚖️ Civil Litigation</h1>
-          <div style="color:#7B5330;font-style:italic;margin-top:4px;">${totalActive} active case${totalActive === 1 ? "" : "s"} across ${board.stages.length} stages</div>
+          <div style="color:#7B5330;font-style:italic;margin-top:4px;">
+            ${totalActive} active case${totalActive === 1 ? "" : "s"} across ${board.stages.length} stages${totalUrgent ? ` · <strong style="color:#A02818;font-style:normal;">${totalUrgent} need attention</strong>` : ""}
+          </div>
         </div>
         <a href="/admin/civil/new" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;font-family:Cinzel,serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-decoration:none;">+ NEW CASE</a>
       </div>
       <!--CIVIL_FILTER_BANNER-->
-      <div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:12px;">
+      <!-- One column per stage, all on screen: grid columns collapse to fit
+           rather than a flex row with min-width that forces sideways scroll.
+           Columns scroll vertically on their own; the board itself never does. -->
+      <div style="display:grid;grid-template-columns:repeat(${board.stages.length}, minmax(0, 1fr));gap:7px;align-items:stretch;height:calc(100vh - 230px);min-height:420px;">
         ${stagesHtml}
+      </div>
+      <div style="margin-top:10px;display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:#7B5330;">
+        <span><span style="display:inline-block;width:9px;height:9px;background:#A02818;border-radius:2px;vertical-align:middle;"></span> trial &le;60d or SOL &le;90d</span>
+        <span><span style="display:inline-block;width:9px;height:9px;background:#F07800;border-radius:2px;vertical-align:middle;"></span> trial &le;120d</span>
+        <span style="font-style:italic;">cards sorted most-urgent first · hover a card for full details</span>
       </div>
     </div>
   `.replace("<!--CIVIL_FILTER_BANNER-->", filterBanner);
