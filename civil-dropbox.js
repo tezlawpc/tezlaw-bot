@@ -154,6 +154,19 @@ async function initTables() {
                   ON civil_case_files (case_id, path_lower)`).catch(() => {});
   await db.query(`CREATE INDEX IF NOT EXISTS idx_civil_files_case_cat
                   ON civil_case_files (case_id, category) WHERE removed_at IS NULL`).catch(() => {});
+
+  // Roots live in the database, not an env var: getting this wrong sends the
+  // sync into the wrong practice area, and fixing it should not need a deploy.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS civil_dropbox_settings (
+      id          INTEGER PRIMARY KEY DEFAULT 1,
+      roots       TEXT,
+      updated_at  TIMESTAMPTZ DEFAULT NOW(),
+      updated_by  TEXT,
+      CONSTRAINT civil_dbx_single_row CHECK (id = 1)
+    )
+  `).catch(() => {});
+  await db.query(`INSERT INTO civil_dropbox_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`).catch(() => {});
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -215,12 +228,68 @@ function normalizePath(input) {
 // separate from the immigration branches (mirroring PI_DROPBOX_ROOTS);
 // otherwise fall back to the shared branch roots, and finally to the
 // Dropbox root itself so a firm with no roots configured still gets matches.
-function getCivilRoots() {
-  const civil = (process.env.CIVIL_DROPBOX_ROOTS || "").split(",").map(x => x.trim()).filter(Boolean);
-  if (civil.length) return civil;
+async function getCivilRoots() {
+  // 1. Explicitly configured in the UI — the only source that is unambiguous.
+  try {
+    const r = await db.query(`SELECT roots FROM civil_dropbox_settings WHERE id = 1`);
+    const saved = (r.rows[0] && r.rows[0].roots || "").split(",").map(x => x.trim()).filter(Boolean);
+    if (saved.length) return saved;
+  } catch (e) { /* table may not exist yet */ }
+  // 2. Env override.
+  const envRoots = (process.env.CIVIL_DROPBOX_ROOTS || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (envRoots.length) return envRoots;
+  // 3. Shared branch roots — these are the IMMIGRATION branches, so this is a
+  //    last resort and the caller flags it as unconfigured.
   const shared = dbx.getBranchRoots();
   if (shared.length) return shared;
-  return [""];   // "" is the Dropbox root for files/list_folder
+  return [""];
+}
+
+// True when we are falling back to immigration branches rather than using
+// roots chosen for civil. The console warns loudly in that state.
+async function rootsAreConfigured() {
+  try {
+    const r = await db.query(`SELECT roots FROM civil_dropbox_settings WHERE id = 1`);
+    if ((r.rows[0] && r.rows[0].roots || "").trim()) return true;
+  } catch (e) { /* ignore */ }
+  return !!(process.env.CIVIL_DROPBOX_ROOTS || "").trim();
+}
+
+async function setCivilRoots(roots, by) {
+  await initTables();
+  const list = (Array.isArray(roots) ? roots : String(roots || "").split(","))
+    .map(x => normalizePath(x)).filter(Boolean);
+  await db.query(
+    `UPDATE civil_dropbox_settings SET roots = $1, updated_at = NOW(), updated_by = $2 WHERE id = 1`,
+    [list.join(","), by || null]
+  );
+  return { ok: true, roots: list };
+}
+
+// Browse Dropbox folders so the right root can be picked by clicking rather
+// than typed from memory.
+async function browseFolders(path = "") {
+  if (!dbx.isConfigured()) throw new Error("Dropbox is not connected");
+  const p = path ? normalizePath(path) : "";
+  const entries = await dbx.listFolder(p || "");
+  if (!entries) throw new Error("Folder not found: " + (p || "(root)"));
+  const folders = entries.filter(e => e[".tag"] === "folder")
+    .map(e => ({ name: e.name, path: e.path_display }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const fileCount = entries.filter(e => e[".tag"] === "file").length;
+  return { path: p || "", parent: p ? (p.split("/").slice(0, -1).join("/") || "") : null, folders, file_count: fileCount };
+}
+
+// Undo a bad bulk import: unlink every case and drop the mirrored rows.
+// Nothing in Dropbox is touched.
+async function unlinkAll({ onlyUnderRoot = null } = {}) {
+  await initTables();
+  const vals = [];
+  let where = "dropbox_path IS NOT NULL";
+  if (onlyUnderRoot) { where += " AND dropbox_path ILIKE $1"; vals.push(normalizePath(onlyUnderRoot) + "%"); }
+  const r = await db.query(`SELECT id FROM civil_cases WHERE ${where}`, vals);
+  for (const row of r.rows) await clearCaseFolder(row.id);
+  return { ok: true, unlinked: r.rows.length };
 }
 
 // Civil case names are adversarial ("Nguyen v. Pacific Holdings LLC"), so the
@@ -242,7 +311,7 @@ async function suggestFolderForCase(caseId, { limit = 8, debug = false } = {}) {
   const c = await getCaseRow(caseId);
   if (!c) throw new Error("Case not found");
 
-  const roots = getCivilRoots();
+  const roots = await getCivilRoots();
   // Both the case caption and the client key are worth matching on: folders
   // are named after one or the other depending on who set them up.
   const captionTerms = civilTokens(c.case_name);
@@ -493,7 +562,8 @@ async function bulkImport({ dryRun = true, minScore = 60, sync = false } = {}) {
 
   // Diagnostics first: "0 matched" is ambiguous between "no cases",
   // "no folders configured" and "nothing scored high enough".
-  const roots = getCivilRoots();
+  const roots = await getCivilRoots();
+  const configured = await rootsAreConfigured();
   const totalCasesR = await db.query(`SELECT COUNT(*)::int AS n FROM civil_cases`);
   const totalCases = totalCasesR.rows[0] ? totalCasesR.rows[0].n : 0;
   let rootFolderCount = 0;
@@ -514,13 +584,16 @@ async function bulkImport({ dryRun = true, minScore = 60, sync = false } = {}) {
     cases_needing_a_folder: r.rows.length,
     roots_scanned: rootReport,
     folders_visible: rootFolderCount,
-    hint: totalCases === 0
-      ? "There are no civil cases in the database yet — create one first."
-      : r.rows.length === 0
-        ? "Every active case already has a folder linked."
-        : rootFolderCount === 0
-          ? "No folders were visible in the scanned roots. Set CIVIL_DROPBOX_ROOTS (or DROPBOX_BRANCH_ROOTS) to the Dropbox path holding your civil matter folders."
-          : null,
+    roots_configured: configured,
+    hint: !configured
+      ? "No civil Dropbox root is set, so this scanned the shared immigration branches — which is why matches land in folders like /USCIS/ASYLUM_EOIR. Pick your civil folder under 'Civil Dropbox root' above before importing."
+      : totalCases === 0
+        ? "There are no civil cases in the database yet — create one first."
+        : r.rows.length === 0
+          ? "Every active case already has a folder linked."
+          : rootFolderCount === 0
+            ? "No folders were visible in the configured root. Check the path is right."
+            : null,
   };
 
   const linked = [], ambiguous = [], unmatched = [];
@@ -534,6 +607,11 @@ async function bulkImport({ dryRun = true, minScore = 60, sync = false } = {}) {
     // Two near-equal candidates means guessing would be a coin flip.
     if (matches[1] && (best.score - matches[1].score) < 15) {
       ambiguous.push({ ...c, candidates: matches });
+      continue;
+    }
+    if (!dryRun && !configured) {
+      // Applying against immigration branches is never what was wanted.
+      unmatched.push({ ...c, best, blocked: "civil root not configured" });
       continue;
     }
     if (!dryRun) {
@@ -686,7 +764,8 @@ module.exports = {
   initTables,
   DOC_CATEGORIES, CATEGORY_KEYS, categorizeFile,
   normalizePath,
-  setCaseFolder, clearCaseFolder, suggestFolderForCase, getCivilRoots, civilTokens,
+  setCaseFolder, clearCaseFolder, suggestFolderForCase, civilTokens,
+  getCivilRoots, setCivilRoots, rootsAreConfigured, browseFolders, unlinkAll,
   syncCase, syncAll,
   bulkImport,
   archiveCaseFiles, unarchiveCaseFiles,

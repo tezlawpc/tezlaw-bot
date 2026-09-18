@@ -864,6 +864,27 @@ app.post("/admin/civil/dropbox/sync-all", async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+app.get("/admin/civil/dropbox/browse", async (req, res) => {
+  try { res.json({ ok: true, ...(await _cdx().browseFolders(req.query.path || "")) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get("/admin/civil/dropbox/roots", async (req, res) => {
+  try {
+    res.json({ ok: true, roots: await _cdx().getCivilRoots(), configured: await _cdx().rootsAreConfigured() });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/civil/dropbox/roots", async (req, res) => {
+  try { res.json(await _cdx().setCivilRoots(req.body?.roots, req.user?.n || req.user?.u || "web-admin")); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/civil/dropbox/unlink-all", async (req, res) => {
+  try { res.json(await _cdx().unlinkAll({ onlyUnderRoot: req.body?.under || null })); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 app.post("/admin/civil/dropbox/bulk-import", async (req, res) => {
   try {
     res.json(await _cdx().bulkImport({
@@ -888,6 +909,18 @@ app.get("/admin/civil/dropbox", async (req, res) => {
           Matches civil matters to their Dropbox folders by client name and case number, then mirrors the
           documents in. A dry run changes nothing — review the matches before applying.
         </p>
+
+        <div id="rootbox" style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;margin-bottom:14px;">
+          <div style="font-family:Cinzel,serif;font-size:12px;color:#3E2818;letter-spacing:1px;margin-bottom:6px;">CIVIL DROPBOX ROOT</div>
+          <div id="rootstate" style="font-size:12px;color:#7B5330;margin-bottom:8px;">Loading…</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            <input id="rootpath" placeholder="/Civil Litigation" style="flex:1;min-width:240px;padding:7px;border:1px solid #D4C4A0;border-radius:5px;background:#FFF;color:#3E2818;font-size:12px;">
+            <button onclick="saveRoots()" style="padding:7px 14px;background:#3E2818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">SAVE ROOT</button>
+            <button onclick="browse('')" style="padding:7px 14px;background:#FFF;color:#3E2818;border:1px solid #D4C4A0;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">BROWSE…</button>
+            <button onclick="unlinkAll()" style="padding:7px 14px;background:#A02818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">UNLINK ALL</button>
+          </div>
+          <div id="browser" style="margin-top:10px;"></div>
+        </div>
 
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;">
           <button onclick="bulk(false)" style="padding:10px 18px;background:#3E2818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">DRY RUN</button>
@@ -958,6 +991,79 @@ app.get("/admin/civil/dropbox", async (req, res) => {
               + card("○ No match found", "#7B5330", un);
           } catch (e) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(e.message) + '</div>'; }
         }
+        async function loadRoots() {
+          var r = await fetch("/admin/civil/dropbox/roots");
+          var d = await r.json();
+          var el = document.getElementById("rootstate");
+          if (!d.ok) { el.textContent = d.error; return; }
+          if (d.configured) {
+            el.innerHTML = 'Using <strong>' + d.roots.map(esc).join(", ") + '</strong>';
+            el.style.color = "#166534";
+            if (!document.getElementById("rootpath").value) document.getElementById("rootpath").value = d.roots[0] || "";
+          } else {
+            el.innerHTML = '<span style="color:#A02818;font-weight:700;">No civil root set.</span> '
+              + 'Falling back to the shared immigration branches (' + d.roots.map(esc).join(", ") + '), '
+              + 'which is why matches land in the wrong practice area. Pick your civil folder below.';
+            el.style.color = "#A02818";
+          }
+        }
+        async function saveRoots() {
+          var v = document.getElementById("rootpath").value.trim();
+          if (!v) { alert("Enter or browse to your civil folder first."); return; }
+          var r = await fetch("/admin/civil/dropbox/roots", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ roots: v })
+          });
+          var d = await r.json();
+          if (d.ok) { document.getElementById("browser").innerHTML = ""; loadRoots(); }
+          else alert(d.error || "Could not save.");
+        }
+        async function browse(path) {
+          var box = document.getElementById("browser");
+          box.textContent = "Loading…";
+          var r = await fetch("/admin/civil/dropbox/browse?path=" + encodeURIComponent(path || ""));
+          var d = await r.json();
+          box.innerHTML = "";
+          if (!d.ok) { box.textContent = d.error; return; }
+          var head = document.createElement("div");
+          head.style.cssText = "font-size:12px;color:#3E2818;margin-bottom:6px;";
+          head.textContent = (d.path || "(Dropbox root)") + " — " + d.folders.length + " folder(s), " + d.file_count + " file(s)";
+          box.appendChild(head);
+          if (d.parent !== null) {
+            var up = document.createElement("a");
+            up.href = "#"; up.textContent = "⬆ up";
+            up.style.cssText = "display:inline-block;margin-bottom:6px;font-size:12px;color:#B84200;text-decoration:none;font-weight:600;";
+            up.onclick = function (e) { e.preventDefault(); browse(d.parent); };
+            box.appendChild(up);
+          }
+          d.folders.forEach(function (f) {
+            var row = document.createElement("div");
+            row.style.cssText = "display:flex;justify-content:space-between;gap:10px;align-items:center;padding:5px 8px;border-bottom:1px solid #E8DCC0;";
+            var open = document.createElement("a");
+            open.href = "#"; open.textContent = "📁 " + f.name;
+            open.style.cssText = "font-size:12px;color:#3E2818;text-decoration:none;";
+            open.onclick = function (e) { e.preventDefault(); browse(f.path); };
+            var pick = document.createElement("a");
+            pick.href = "#"; pick.textContent = "USE THIS";
+            pick.style.cssText = "font-size:11px;color:#B84200;font-weight:600;text-decoration:none;white-space:nowrap;";
+            pick.onclick = function (e) {
+              e.preventDefault();
+              document.getElementById("rootpath").value = f.path;
+              box.innerHTML = "";
+            };
+            row.appendChild(open); row.appendChild(pick);
+            box.appendChild(row);
+          });
+        }
+        async function unlinkAll() {
+          if (!confirm("Unlink every civil case from its Dropbox folder and clear the mirrored file list?\n\nNothing in Dropbox is moved or deleted. Use this to undo a bad import.")) return;
+          var r = await fetch("/admin/civil/dropbox/unlink-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+          var d = await r.json();
+          document.getElementById("out").innerHTML = d.ok
+            ? '<div style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">Unlinked ' + d.unlinked + ' case(s). Set the right root, then run a dry run.</div>'
+            : '<div style="color:#A02818;padding:12px;">' + esc(d.error) + '</div>';
+        }
+        loadRoots();
         async function syncAll() {
           var out = document.getElementById("out");
           out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Syncing every linked matter…</div>';
