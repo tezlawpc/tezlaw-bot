@@ -472,7 +472,26 @@ async function logEvent(caseId, data) {
   } = data;
   if (!event_kind || !title) throw new Error("event_kind and title are required");
   const bh = billable_hours ? Number(billable_hours) : null;
-  const br = billable_rate ? Number(billable_rate) : null;
+
+  // ── Build 38: multi-rate timekeepers ──────────────────────
+  // An explicit billable_rate from the caller always wins. If the caller gave
+  // us hours but NO rate, resolve the rate for whoever actually logged the
+  // time: case-team override → that user's default (admin_users.billing_rate)
+  // → the case's hourly_rate. If resolution fails for any reason we fall
+  // through with a null rate rather than blocking the time entry.
+  let br = billable_rate != null && billable_rate !== "" ? Number(billable_rate) : null;
+  if (!Number.isFinite(br)) br = null;
+  if (br == null && bh != null) {
+    try {
+      const billing = require("./civil-billing");
+      const timekeeper = attorney_id || paralegal_id || null;
+      br = await billing.resolveRate(timekeeper, caseId);
+    } catch (e) {
+      console.warn("[civil-litigation] rate resolution failed:", e.message);
+    }
+  }
+  if (!Number.isFinite(br)) br = null;
+
   const ba = bh != null && br != null ? Number((bh * br).toFixed(2)) : null;
   const r = await db.query(
     `INSERT INTO civil_case_events

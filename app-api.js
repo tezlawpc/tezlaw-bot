@@ -1244,6 +1244,18 @@ function registerAppApi(app) {
     console.warn("[civil-team] module load failed:", e.message);
   }
 
+  // Civil billing + matter budgets (build 38): multi-rate timekeepers and
+  // budget burn tracking. Loads AFTER civil-team because rate resolution
+  // reads admin_users.billing_rate + civil_case_team.billing_rate, both of
+  // which that module's initTables() backfills.
+  try {
+    const civilBilling = require("./civil-billing");
+    civilBilling.initTables().catch(e => console.warn("[civil-billing] init:", e.message));
+    attachCivilBillingRoutes(app, civilBilling);
+  } catch (e) {
+    console.warn("[civil-billing] module load failed:", e.message);
+  }
+
   // Court docket checker (build 37 — was originally sequenced as build 40):
   // universal fetch-and-parse of any court portal URL using Claude to
   // extract structured docket data. Adds columns to civil_cases.
@@ -8424,10 +8436,24 @@ function attachCivilLitigationRoutes(app, civil) {
 
   app.post("/api/staff/civil/cases/:id/events", auth1, auth2, async (req, res) => {
     try {
-      const created = await civil.logEvent(parseInt(req.params.id, 10), {
+      const caseId = parseInt(req.params.id, 10);
+      const created = await civil.logEvent(caseId, {
         ...req.body, created_by: req.user.u || req.user.n,
       });
-      res.json({ ok: true, event: created });
+      // Build 38: if this entry pushed the matter past a budget threshold,
+      // hand the alert back so the app can surface it. Never let a budget
+      // check fail the time entry itself.
+      let budget_alert = null;
+      if (created?.billable_amount != null) {
+        try {
+          const billing = require("./civil-billing");
+          const alert = await billing.checkBudgetAlert(caseId);
+          if (alert?.should_alert) budget_alert = alert;
+        } catch (e) {
+          console.warn("[civil-billing] budget check failed:", e.message);
+        }
+      }
+      res.json({ ok: true, event: created, budget_alert });
     } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
   });
 
@@ -8698,6 +8724,62 @@ function attachCivilTeamRoutes(app, team) {
   });
 
   console.log("[civil-team] routes registered under /api/staff/civil/team* and /users");
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CIVIL BILLING + MATTER BUDGET ROUTES (build 38)
+//  Per-timekeeper billing breakdown, firm-wide WIP, matter
+//  budgets with burn alerts.
+// ═══════════════════════════════════════════════════════════
+function attachCivilBillingRoutes(app, billing) {
+  const auth1 = requireBearer;
+  const auth2 = requireFirmUser;
+
+  // ── Per-case billing summary: totals, breakdown by timekeeper, budget burn ──
+  app.get("/api/staff/civil/cases/:id/billing-summary", auth1, auth2, async (req, res) => {
+    try {
+      const summary = await billing.getBillingSummary(parseInt(req.params.id, 10));
+      if (!summary) return res.status(404).json({ ok: false, error: "case not found" });
+      res.json({ ok: true, summary });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Firm-wide WIP report (dashboard across all active cases) ──
+  app.get("/api/staff/civil/wip-report", auth1, auth2, async (_req, res) => {
+    try {
+      const cases = await billing.getFirmWip();
+      const totals = cases.reduce((acc, c) => {
+        acc.total_hours += Number(c.total_hours) || 0;
+        acc.total_amount += Number(c.total_amount) || 0;
+        if (c.over_budget) acc.over_budget_count += 1;
+        return acc;
+      }, { total_hours: 0, total_amount: 0, over_budget_count: 0 });
+      totals.total_hours = Number(totals.total_hours.toFixed(2));
+      totals.total_amount = Number(totals.total_amount.toFixed(2));
+      res.json({ ok: true, count: cases.length, totals, cases });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Set / update the matter budget + alert threshold ──
+  app.patch("/api/staff/civil/cases/:id/budget", auth1, auth2, async (req, res) => {
+    try {
+      const updated = await billing.updateBudget(parseInt(req.params.id, 10), req.body || {});
+      if (!updated) return res.status(404).json({ ok: false, error: "case not found" });
+      res.json({ ok: true, budget: updated });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Budget burn check — returns whether a threshold was just crossed.
+  //    Called automatically after each billable event (see the events POST
+  //    handler); exposed here so the app can also poll it on demand.
+  app.get("/api/staff/civil/cases/:id/budget-check", auth1, auth2, async (req, res) => {
+    try {
+      const alert = await billing.checkBudgetAlert(parseInt(req.params.id, 10));
+      res.json({ ok: true, alert });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  console.log("[civil-billing] routes registered under /api/staff/civil/cases/:id/{billing-summary,budget,budget-check} and /wip-report");
 }
 
 // ═══════════════════════════════════════════════════════════
