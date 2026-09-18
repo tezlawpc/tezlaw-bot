@@ -8774,7 +8774,8 @@ function attachCivilBillingRoutes(app, billing) {
   //    handler); exposed here so the app can also poll it on demand.
   app.get("/api/staff/civil/cases/:id/budget-check", auth1, auth2, async (req, res) => {
     try {
-      const alert = await billing.checkBudgetAlert(parseInt(req.params.id, 10));
+      // Peek only — a GET must not consume the threshold band.
+      const alert = await billing.checkBudgetAlert(parseInt(req.params.id, 10), { record: false });
       res.json({ ok: true, alert });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });

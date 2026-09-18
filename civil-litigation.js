@@ -680,10 +680,19 @@ async function getCaseSummary(caseId) {
        ORDER BY due_date ASC LIMIT 1`,
       [caseId]
     ),
+    // Same three sources as civil-billing.getBillingSummary, so the web
+    // admin case page and the app's Financials tab can't disagree about
+    // what a matter has billed.
     db.query(
       `SELECT COALESCE(SUM(billable_hours), 0)::float AS total_hours,
               COALESCE(SUM(billable_amount), 0)::float AS total_amount
-       FROM civil_case_events WHERE case_id = $1`,
+       FROM (
+         SELECT billable_hours, billable_amount FROM civil_case_events        WHERE case_id = $1
+         UNION ALL
+         SELECT billable_hours, billable_amount FROM civil_case_communications WHERE case_id = $1
+         UNION ALL
+         SELECT billable_hours, billable_amount FROM civil_depositions         WHERE case_id = $1
+       ) all_time`,
       [caseId]
     ),
     db.query(`SELECT COUNT(*)::int AS n FROM civil_case_events WHERE case_id = $1`, [caseId]),

@@ -86,21 +86,38 @@ async function getBillingSummary(caseId) {
                      last_budget_alert_at, last_budget_alert_pct
               FROM civil_cases WHERE id = $1`, [caseId]),
     db.query(
-      // Group by attorney_id first; fall back to paralegal_id if attorney is null.
-      // Join admin_users to get names + system roles for the display.
-      `SELECT
-         COALESCE(e.attorney_id, e.paralegal_id) AS user_id,
+      // Every billable row for this case, from all three sources, so the
+      // per-timekeeper breakdown reconciles to total_amount. Grouping only
+      // civil_case_events here would silently drop deposition and
+      // communication time and the columns would not add up to the total.
+      // Group by attorney_id first; fall back to paralegal_id if null.
+      `WITH all_time AS (
+         SELECT COALESCE(attorney_id, paralegal_id) AS user_id,
+                billable_hours, billable_amount, event_date AS entry_date
+         FROM civil_case_events
+         WHERE case_id = $1 AND billable_hours IS NOT NULL
+         UNION ALL
+         SELECT COALESCE(attorney_id, paralegal_id),
+                billable_hours, billable_amount, created_at::date
+         FROM civil_case_communications
+         WHERE case_id = $1 AND billable_hours IS NOT NULL
+         UNION ALL
+         SELECT COALESCE(attorney_id, paralegal_id),
+                billable_hours, billable_amount, scheduled_date
+         FROM civil_depositions
+         WHERE case_id = $1 AND billable_hours IS NOT NULL
+       )
+       SELECT
+         t.user_id,
          u.full_name, u.username, u.role AS system_role,
-         COUNT(*)::int                            AS entry_count,
-         COALESCE(SUM(e.billable_hours), 0)::float  AS total_hours,
-         COALESCE(SUM(e.billable_amount), 0)::float AS total_amount,
-         MIN(e.event_date)                        AS first_entry_date,
-         MAX(e.event_date)                        AS last_entry_date
-       FROM civil_case_events e
-       LEFT JOIN admin_users u
-         ON u.id = COALESCE(e.attorney_id, e.paralegal_id)
-       WHERE e.case_id = $1 AND e.billable_hours IS NOT NULL
-       GROUP BY user_id, u.full_name, u.username, u.role
+         COUNT(*)::int                              AS entry_count,
+         COALESCE(SUM(t.billable_hours), 0)::float  AS total_hours,
+         COALESCE(SUM(t.billable_amount), 0)::float AS total_amount,
+         MIN(t.entry_date)                          AS first_entry_date,
+         MAX(t.entry_date)                          AS last_entry_date
+       FROM all_time t
+       LEFT JOIN admin_users u ON u.id = t.user_id
+       GROUP BY t.user_id, u.full_name, u.username, u.role
        ORDER BY total_amount DESC NULLS LAST`,
       [caseId]
     ),
@@ -188,18 +205,31 @@ async function getBillingSummary(caseId) {
 // ═══════════════════════════════════════════════════════════
 
 async function getFirmWip() {
+  // Totals must match getBillingSummary exactly — events + communications +
+  // depositions. LATERAL subqueries rather than three LEFT JOINs, which would
+  // fan out rows and multiply the sums.
   const r = await db.query(`
     WITH case_totals AS (
       SELECT c.id AS case_id, c.case_name, c.client_key, c.stage,
              c.matter_budget, c.hourly_rate,
              c.lead_attorney_id,
-             COALESCE(SUM(e.billable_hours), 0)::float  AS total_hours,
-             COALESCE(SUM(e.billable_amount), 0)::float AS total_amount,
-             MAX(e.event_date)                          AS last_activity_date
+             (ev.h + cm.h + dp.h)::float  AS total_hours,
+             (ev.a + cm.a + dp.a)::float  AS total_amount,
+             GREATEST(ev.d, cm.d, dp.d)   AS last_activity_date
       FROM civil_cases c
-      LEFT JOIN civil_case_events e ON e.case_id = c.id AND e.billable_hours IS NOT NULL
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(billable_hours),0) h, COALESCE(SUM(billable_amount),0) a, MAX(event_date) d
+        FROM civil_case_events WHERE case_id = c.id AND billable_hours IS NOT NULL
+      ) ev ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(billable_hours),0) h, COALESCE(SUM(billable_amount),0) a, MAX(created_at::date) d
+        FROM civil_case_communications WHERE case_id = c.id AND billable_hours IS NOT NULL
+      ) cm ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(billable_hours),0) h, COALESCE(SUM(billable_amount),0) a, MAX(scheduled_date) d
+        FROM civil_depositions WHERE case_id = c.id AND billable_hours IS NOT NULL
+      ) dp ON TRUE
       WHERE c.status = 'active'
-      GROUP BY c.id
     )
     SELECT ct.*,
            u.full_name AS lead_attorney_name,
@@ -249,7 +279,11 @@ async function updateBudget(caseId, data) {
 //  so the caller can push-notify JJ or the lead attorney.
 // ═══════════════════════════════════════════════════════════
 
-async function checkBudgetAlert(caseId) {
+async function checkBudgetAlert(caseId, opts = {}) {
+  // record=false lets a caller peek without consuming the threshold band.
+  // The events POST records; the read-only GET endpoint must not, or polling
+  // it would swallow the alert before anyone saw it.
+  const record = opts.record !== false;
   const summary = await getBillingSummary(caseId);
   if (!summary || !summary.matter_budget) return { should_alert: false };
   const currentPct = summary.pct_of_budget || 0;
@@ -265,10 +299,12 @@ async function checkBudgetAlert(caseId) {
 
   const highestCrossed = Math.max(...crossed);
   // Record the alert threshold so we don't re-fire this band on the next entry
-  await db.query(
-    `UPDATE civil_cases SET last_budget_alert_at = NOW(), last_budget_alert_pct = $1 WHERE id = $2`,
-    [highestCrossed, caseId]
-  );
+  if (record) {
+    await db.query(
+      `UPDATE civil_cases SET last_budget_alert_at = NOW(), last_budget_alert_pct = $1 WHERE id = $2`,
+      [highestCrossed, caseId]
+    );
+  }
 
   return {
     should_alert: true,
