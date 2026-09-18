@@ -140,6 +140,14 @@ const PERMISSIONS = {
   // so JJ can grant PI access without giving all clients access, or vice versa.
   "pi.read":              ["admin", "manager", "attorney", "paralegal", "viewer"],
   "pi.write":             ["admin", "manager", "attorney", "paralegal"],
+  // Civil litigation — everyone reads, staff writes. Mirrors pi.* so civil
+  // access can be granted independently of clients or PI.
+  // NOTE: the sidebar link shipped gated on "matters.read", which was never
+  // a defined key here. An undefined key is falsy for every role including
+  // admin, so the Civil Litigation nav link was hidden from everyone while
+  // /admin/civil itself worked fine if you typed the URL.
+  "civil.read":           ["admin", "manager", "attorney", "paralegal", "viewer"],
+  "civil.write":          ["admin", "manager", "attorney", "paralegal"],
   // Federal Matters & Trademarks — same rules as regular clients
   "federal.read":         ["admin", "manager", "attorney", "paralegal", "viewer"],
   "federal.write":        ["admin", "manager", "attorney", "paralegal"],
@@ -1280,6 +1288,8 @@ function mount(app) {
     "federal.write": "Create/edit Federal & TM matters",
     "pi.read": "View PI (all sidebar links + brokers)",
     "pi.write": "Create/edit PI cases",
+    "civil.read": "View Civil Litigation (kanban + case detail)",
+    "civil.write": "Create/edit civil cases",
     "accounting.read": "View accounting (Ledger, IOLTA, IS/BS, QBO — all links)",
     "accounting.write": "Create accounting entries + QBO push",
     "notices.read": "View hearing notices",
