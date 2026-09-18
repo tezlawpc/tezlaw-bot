@@ -402,20 +402,41 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
       }
       async function dbxSuggest(id) {
         dbxMsg("Looking for matching folders…");
+        var box = document.getElementById("dbx-suggest");
+        box.innerHTML = "";
         var r = await fetch("/admin/civil/case/" + id + "/dropbox/suggest");
         var d = await r.json();
-        var box = document.getElementById("dbx-suggest");
-        if (!d.ok || !d.suggestions || !d.suggestions.length) { dbxMsg("No likely folders found — paste the path manually.", true); box.innerHTML = ""; return; }
+        if (!d.ok || !d.suggestions || !d.suggestions.length) {
+          dbxMsg("No likely folders found — paste the path manually.", true);
+          return;
+        }
         dbxMsg("Pick the matching folder:");
-        box.innerHTML = d.suggestions.map(function (s) {
-          return '<div style="padding:6px 8px;margin-bottom:4px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:5px;display:flex;justify-content:space-between;gap:10px;">'
-            + '<span style="font-size:12px;color:#3E2818;">' + s.path + '</span>'
-            + '<a href="#" onclick="document.getElementById(\'dbx-path\').value=this.dataset.p;document.getElementById(\'dbx-suggest\').innerHTML=\'\';return false;" data-p="' + s.path + '" style="font-size:11px;color:#B84200;font-weight:600;text-decoration:none;">USE (score ' + s.score + ')</a>'
-            + '</div>';
-        }).join("");
+        // Built with DOM APIs rather than an HTML string: folder names can
+        // contain quotes, and a nested-quote onclick is what broke this
+        // script block the first time round.
+        d.suggestions.forEach(function (sg) {
+          var row = document.createElement("div");
+          row.style.cssText = "padding:6px 8px;margin-bottom:4px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:5px;display:flex;justify-content:space-between;gap:10px;align-items:center;";
+          var label = document.createElement("span");
+          label.style.cssText = "font-size:12px;color:#3E2818;word-break:break-all;";
+          label.textContent = sg.path;
+          var use = document.createElement("a");
+          use.href = "#";
+          use.style.cssText = "font-size:11px;color:#B84200;font-weight:600;text-decoration:none;white-space:nowrap;";
+          use.textContent = "USE (score " + sg.score + ")";
+          use.onclick = function (ev) {
+            ev.preventDefault();
+            document.getElementById("dbx-path").value = sg.path;
+            box.innerHTML = "";
+            dbxMsg("Folder selected — press LINK FOLDER to save.");
+          };
+          row.appendChild(label);
+          row.appendChild(use);
+          box.appendChild(row);
+        });
       }
       async function dbxArchive(id, on) {
-        if (on && !confirm("Archive this case file?\n\nThe document list is frozen and hourly sync pauses for this matter.\nNothing is moved or deleted in Dropbox.")) return;
+        if (on && !confirm("Archive this case file?\\n\\nThe document list is frozen and hourly sync pauses for this matter.\\nNothing is moved or deleted in Dropbox.")) return;
         dbxMsg(on ? "Archiving…" : "Unarchiving…");
         var d = await dbxPost("/admin/civil/case/" + id + "/files/" + (on ? "archive" : "unarchive"), {});
         if (d.ok) location.reload(); else dbxMsg(d.error || "Failed.", true);

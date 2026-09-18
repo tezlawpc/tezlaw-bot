@@ -910,7 +910,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
         }
         async function bulk(apply) {
           var out = document.getElementById("out");
-          if (apply && !confirm("Link every confident match and sync their documents?\n\nAmbiguous matches are skipped — you link those by hand.")) return;
+          if (apply && !confirm("Link every confident match and sync their documents?\\n\\nAmbiguous matches are skipped — you link those by hand.")) return;
           out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Scanning Dropbox…</div>';
           try {
             var r = await fetch("/admin/civil/dropbox/bulk-import", {
