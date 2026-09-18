@@ -6582,13 +6582,22 @@ function detectDistress(msg) {
 }
 
 async function notifyDistress(userId, message, urgency, platform) {
-  if (!TEAM_TELEGRAM_CHAT_ID || !TELEGRAM_TOKEN) return;
-  // Never forward JJ's private messages to the team
+  // Distress alerts quote the client's own words back verbatim and are the
+  // most sensitive thing this bot forwards anywhere. They go to JJ ONLY,
+  // never the team group chat. If JJ_TELEGRAM_ID is unset we deliberately
+  // send nothing rather than falling back to the group — silence is the
+  // safe failure here, and the warning says so in the logs.
+  if (!TELEGRAM_TOKEN) return;
+  if (!JJ_TELEGRAM_ID) {
+    console.warn("[notifyDistress] JJ_TELEGRAM_ID not set — distress alert NOT sent (no fallback to team chat by design)");
+    return;
+  }
+  // Never forward JJ's own messages back to himself as a client distress alert
   if (isJJAuthenticated(platform, userId)) return;
   const emoji = urgency === "high" ? "🚨" : "⚠️";
   try {
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      chat_id: TEAM_TELEGRAM_CHAT_ID,
+      chat_id: String(JJ_TELEGRAM_ID),
       text: `${emoji} ${urgency.toUpperCase()} — ${platform}\n\n"${message.substring(0,200)}"\n\nFollow up immediately! 📞 626-678-8677`
     });
   } catch(e) { console.error("Distress notify error:", e.message); }
