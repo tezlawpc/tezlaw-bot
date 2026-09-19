@@ -1036,10 +1036,11 @@ function syncPage({ status, files, configured }, user) {
         }${status && status.state === "running" ? " · a scan is running now" : ""}</div>
       </div>
       <div style="white-space:nowrap;">
-        <button class="btn ghost sm" onclick="checkIt()">Test connection</button>
-        <button class="btn sm" onclick="runIt(false)">Scan now</button>
+        <button class="btn ghost sm" id="btnTest" onclick="checkIt()">Test connection</button>
+        <button class="btn sm" id="btnScan" onclick="runIt(false)">Scan now</button>
       </div>
     </div>
+    <div id="syncMsg" hidden style="margin-top:13px;padding:11px 13px;border-radius:7px;font-size:14px;"></div>
     ${
       last
         ? `<div class="row" style="margin-top:13px;gap:22px;flex-wrap:wrap;">
@@ -1068,21 +1069,60 @@ function syncPage({ status, files, configured }, user) {
     <tr><th>File in Dropbox</th><th>Status</th><th>In the portal</th><th>Last seen</th></tr>${rows}</table></div>
 
   <script>
+  // Both of these call Dropbox and can run for many seconds on a real
+  // folder. Without a visible in-flight state the page looks dead, so
+  // people click again — and every extra click was firing another walk
+  // and stacking another blocking alert on top of the last. The buttons
+  // now disable themselves for the duration and report in the page.
+  var busy = false;
+  function msg(text, tone){
+    var el = document.getElementById('syncMsg');
+    var c = tone === 'bad' ? ['var(--red)','#FBE9E9'] : tone === 'good' ? ['var(--green)','#E3F1EA'] : ['var(--ink2)','var(--bg)'];
+    el.style.color = c[0]; el.style.background = c[1];
+    el.textContent = text; el.hidden = false;
+  }
+  function setBusy(on, label){
+    busy = on;
+    var t = document.getElementById('btnTest'), r = document.getElementById('btnScan');
+    [t,r].forEach(function(b){ if(b){ b.disabled = on; b.style.opacity = on ? '.5' : '1'; b.style.cursor = on ? 'wait' : 'pointer'; } });
+    if(on && label) msg(label, 'info');
+  }
   async function post(url, body){
     const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
     const j = await r.json(); if(!j.ok) throw new Error(j.error||'Request failed'); return j;
   }
+  function ticker(base){
+    var n = 0;
+    return setInterval(function(){ n += 1; msg(base + ' (' + n + 's)', 'info'); }, 1000);
+  }
   async function checkIt(){
-    try{ const j = await post('${BASE}/api/sync/check');
-      alert(j.ok ? ('Connected to "'+j.folder+'". '+j.sampled+' file(s) visible.') : ('Not connected: '+j.error)); }
-    catch(e){ alert(e.message); }
+    if(busy) return;
+    setBusy(true, 'Contacting Dropbox\u2026');
+    var tick = ticker('Contacting Dropbox\u2026');
+    try{
+      const j = await post('${BASE}/api/sync/check');
+      clearInterval(tick);
+      if(j.ok){
+        msg('Connected to "' + j.folder + '". ' + j.sampled + ' file(s) across ' + (j.folders || 1) +
+            ' folder(s)' + (j.truncated ? ', and more beyond the sample' : '') + '.', 'good');
+      } else {
+        msg('Not connected. ' + j.error, 'bad');
+      }
+    }catch(e){ clearInterval(tick); msg(e.message, 'bad'); }
+    finally{ setBusy(false); }
   }
   async function runIt(full){
+    if(busy) return;
     if(full && !confirm('Retry every file that previously failed or was skipped?')) return;
-    try{ const j = await post('${BASE}/api/sync/run',{full:!!full});
-      alert('Scan finished. '+j.imported+' imported, '+j.skipped+' skipped, '+j.failed+' failed.');
-      location.reload(); }
-    catch(e){ alert(e.message); }
+    setBusy(true, 'Scanning\u2026');
+    var tick = ticker('Scanning the folder and importing new files\u2026');
+    try{
+      const j = await post('${BASE}/api/sync/run',{full:!!full});
+      clearInterval(tick);
+      msg('Scan finished. ' + j.imported + ' imported, ' + j.skipped + ' skipped, ' + j.failed + ' failed' +
+          (j.deferred ? '. More files remain \u2014 run it again to continue' : '') + '. Reloading\u2026', 'good');
+      setTimeout(function(){ location.reload(); }, 1400);
+    }catch(e){ clearInterval(tick); msg(e.message, 'bad'); setBusy(false); }
   }
   </script>`;
 
