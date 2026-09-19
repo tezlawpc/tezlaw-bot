@@ -44,3 +44,18 @@ jobs:
       # twin on the same handler, so the iOS app and the web admin cannot drift.
       - name: Civil app/web API parity
         run: node scripts/check-civil-parity.js
+
+      # The stage playbook must cover all nine stages, reference only real CCP
+      # rule keys, and raise the right warnings (missing SOL, unserved filing,
+      # no trial date in trial prep, and so on).
+      - name: Civil stage workspaces
+        run: node scripts/check-stage-workspace.js
+
+      # Loads the real public/civil-admin.js into jsdom against the real page
+      # HTML: panels must render, and every form must post the exact field
+      # names the civil-* modules destructure.
+      - name: Civil admin UI
+        run: node scripts/check-civil-admin-ui.js
+
+      - name: Civil stage page
+        run: node scripts/check-stage-page.js

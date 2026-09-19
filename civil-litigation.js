@@ -708,6 +708,270 @@ async function getCaseSummary(caseId) {
   };
 }
 
+
+// ═══════════════════════════════════════════════════════════
+//  STAGE WORKSPACES
+//  ────────────────────────────────────────────────────────
+//  The nav used to point every stage link at the same kanban board with a
+//  ?stage= filter, so "Discovery" and "Trial Prep" were the same screen with
+//  fewer cards. A litigator does different work at each phase, and the thing
+//  that matters is different too: in intake it is the SOL, in pleadings it is
+//  service and the responsive pleading, in trial prep it is the cutoffs
+//  counting backwards from the trial date.
+//
+//  STAGE_PLAYBOOK says, per stage: which date drives it, which of the 15 CCP
+//  rules belong to it, and what to warn about. getStageWorkspace() assembles
+//  that into one payload both the web workspace and the app can render.
+// ═══════════════════════════════════════════════════════════
+
+const STAGE_PLAYBOOK = {
+  intake: {
+    headline: "Assess the matter, clear conflicts, and sign the client.",
+    focusField: "statute_of_limitations",
+    focusLabel: "SOL",
+    rules: ["sol"],
+    caution: "The statute of limitations is jurisdictional and cannot be extended. An intake that sits is the one that becomes a malpractice claim.",
+    verbs: ["Record the SOL", "Run the conflict check", "Send the engagement letter", "Advance to Pre-Filing"],
+  },
+  pre_filing: {
+    headline: "Demand, toll, and draft. Only filing stops the clock.",
+    focusField: "statute_of_limitations",
+    focusLabel: "SOL",
+    rules: ["sol"],
+    caution: "A tolling agreement must be signed before the SOL runs — it cannot revive a lapsed claim.",
+    verbs: ["Send the demand letter", "Paper a tolling agreement", "Draft the complaint", "File and advance to Pleadings"],
+  },
+  pleadings: {
+    headline: "Get it filed, get it served, get the pleadings settled.",
+    focusField: "filed_date",
+    focusLabel: "Filed",
+    rules: ["proof_of_service", "answer_due", "cmc_statement", "cmc_meet_and_confer"],
+    caution: "Service must be accomplished within 60 days of filing (CRC 3.110(b)) and the action dismissed if not served within 3 years (CCP § 583.210).",
+    verbs: ["File proof of service", "Answer or demur", "File the CMC statement", "Meet and confer re: CMC"],
+  },
+  discovery: {
+    headline: "Propound, respond, and protect the motion-to-compel window.",
+    focusField: "trial_date",
+    focusLabel: "Trial",
+    rules: ["discovery_opens_plaintiff", "deposition_notices_plaintiff", "discovery_cutoff", "discovery_motions_cutoff"],
+    caution: "The 45-day motion-to-compel deadline is a hard one — blow it and the objections stand, however meritless.",
+    verbs: ["Propound a set", "Record responses received", "Meet and confer", "Notice a deposition"],
+    withDiscovery: true,
+  },
+  motions: {
+    headline: "Law and motion — summary judgment, demurrers, and the notice math.",
+    focusField: "trial_date",
+    focusLabel: "Trial",
+    rules: ["msj_filing_deadline", "msj_hearing_deadline", "discovery_motions_cutoff"],
+    caution: "An MSJ needs 75 days' notice and must be HEARD at least 30 days before trial (CCP § 437c) — the filing date is driven backwards from the trial date, not from today.",
+    verbs: ["Log a motion filed", "Calendar the hearing", "Track opposition and reply"],
+  },
+  trial_prep: {
+    headline: "Everything counts backwards from the trial date.",
+    focusField: "trial_date",
+    focusLabel: "Trial",
+    rules: ["expert_witness_exchange", "discovery_cutoff", "discovery_motions_cutoff",
+            "motions_in_limine", "trial_brief", "section_998_offer_cutoff"],
+    caution: "Expert exchange is 50 days out and discovery closes 30 days out. A matter here without a trial date has no deadlines at all — that is the dangerous state.",
+    verbs: ["Exchange expert lists", "File motions in limine", "Serve a 998 offer", "Prepare the trial brief"],
+  },
+  trial: {
+    headline: "In trial. Log what happens, day by day.",
+    focusField: "trial_date",
+    focusLabel: "Trial",
+    rules: [],
+    caution: "Log rulings and admissions as they happen — reconstructing them afterwards from memory is how appellate issues get lost.",
+    verbs: ["Log a hearing", "Log an order", "Record the verdict"],
+  },
+  post_trial: {
+    headline: "Judgment, post-trial motions, and the appeal clock.",
+    focusField: "trial_date",
+    focusLabel: "Trial ended",
+    rules: [],
+    caution: "New trial and JNOV motions run 15 days from the notice of entry of judgment; the notice of appeal runs 60 days (CRC 8.104). Neither is auto-generated — add them by hand the day judgment is entered.",
+    verbs: ["Add the post-trial motion deadline", "Add the appeal deadline", "Record the judgment"],
+  },
+  closed: {
+    headline: "Closed matters. Bill it out and archive the file.",
+    focusField: "updated_at",
+    focusLabel: "Last touched",
+    rules: [],
+    caution: "Archive the Dropbox mirror once the matter is done — it freezes the file list and stops the hourly sync from churning on dead matters.",
+    verbs: ["Final invoice", "Archive the case file", "Reopen if needed"],
+  },
+};
+
+function daysFromToday(d) {
+  if (!d) return null;
+  const t = new Date(d).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.ceil((t - Date.now()) / 86400000);
+}
+
+// Warnings a litigator would want raised without having to open the matter.
+function stageAlerts(stageKey, c, deadlines, extra) {
+  const out = [];
+  const sol = daysFromToday(c.statute_of_limitations);
+  const trial = daysFromToday(c.trial_date);
+  const filed = daysFromToday(c.filed_date);
+
+  if (stageKey === "intake" || stageKey === "pre_filing") {
+    if (!c.statute_of_limitations) out.push({ level: "warn", text: "No statute of limitations recorded" });
+    else if (sol !== null && sol < 0) out.push({ level: "danger", text: `SOL expired ${Math.abs(sol)} days ago` });
+    else if (sol !== null && sol <= 90) out.push({ level: "danger", text: `SOL in ${sol} days` });
+    else if (sol !== null && sol <= 180) out.push({ level: "warn", text: `SOL in ${sol} days` });
+    if (!c.retainer_amount && stageKey === "intake") out.push({ level: "info", text: "No retainer recorded" });
+  }
+
+  if (stageKey === "pleadings") {
+    if (!c.filed_date) out.push({ level: "warn", text: "Not filed yet — should this be in Pre-Filing?" });
+    if (c.filed_date && !c.service_date) {
+      const since = filed === null ? null : Math.abs(filed);
+      if (since !== null && since > 60) out.push({ level: "danger", text: `Filed ${since} days ago, still no service date` });
+      else if (since !== null && since > 45) out.push({ level: "warn", text: `Filed ${since} days ago — 60-day service deadline approaching` });
+    }
+    if (c.our_role === "defendant" && c.service_date && !c.answered_date) {
+      out.push({ level: "warn", text: "Served but no responsive pleading recorded" });
+    }
+  }
+
+  if (stageKey === "discovery" && extra) {
+    if (extra.overdue) out.push({ level: "danger", text: `${extra.overdue} overdue response${extra.overdue === 1 ? "" : "s"}` });
+    if (extra.mtc_soon) out.push({ level: "danger", text: `${extra.mtc_soon} motion-to-compel deadline${extra.mtc_soon === 1 ? "" : "s"} within 30 days` });
+    if (!extra.total) out.push({ level: "info", text: "No discovery propounded or received yet" });
+  }
+
+  if (stageKey === "motions" || stageKey === "trial_prep") {
+    if (!c.trial_date) out.push({ level: "danger", text: "No trial date — none of this stage's deadlines can be computed" });
+  }
+
+  if (stageKey === "trial_prep" && trial !== null) {
+    if (trial < 0) out.push({ level: "warn", text: `Trial date passed ${Math.abs(trial)} days ago` });
+    else if (trial <= 30) out.push({ level: "danger", text: `Trial in ${trial} days — discovery is closed` });
+    else if (trial <= 50) out.push({ level: "warn", text: `Trial in ${trial} days — expert exchange is due` });
+  }
+
+  if (stageKey === "post_trial" && !deadlines.length) {
+    out.push({ level: "warn", text: "No post-trial deadlines — add the 15-day motion and 60-day appeal dates by hand" });
+  }
+
+  if (stageKey === "closed" && !c.files_archived_at && c.dropbox_path) {
+    out.push({ level: "info", text: "Case file not archived — sync is still running on a closed matter" });
+  }
+
+  const overdue = deadlines.filter(d => daysFromToday(d.due_date) < 0);
+  if (overdue.length) out.push({ level: "danger", text: `${overdue.length} deadline${overdue.length === 1 ? "" : "s"} past due` });
+
+  return out;
+}
+
+async function getStageWorkspace(stageKey) {
+  const stage = STAGES.find(s => s.key === stageKey);
+  if (!stage) throw new Error("Unknown stage: " + stageKey);
+  const playbook = STAGE_PLAYBOOK[stageKey] || { rules: [], verbs: [] };
+
+  const cases = await listCases({ stage: stageKey, status: "active" });
+  const ids = cases.map(c => c.id);
+
+  // One query for every pending deadline in the stage, not one per case.
+  let deadlinesByCase = {};
+  if (ids.length) {
+    const r = await db.query(
+      `SELECT * FROM civil_case_deadlines
+        WHERE case_id = ANY($1::int[]) AND status = 'pending'
+        ORDER BY due_date ASC`,
+      [ids]
+    );
+    for (const d of r.rows) (deadlinesByCase[d.case_id] = deadlinesByCase[d.case_id] || []).push(d);
+  }
+
+  // Discovery counts, but only for the stage that shows them, and never fatal:
+  // civil-discovery is an optional module like the rest.
+  let discoveryByCase = {};
+  if (playbook.withDiscovery && ids.length) {
+    try {
+      const r = await db.query(
+        `SELECT case_id,
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (
+                  WHERE response_due_date < CURRENT_DATE
+                    AND status IN ('pending','deficient')
+                )::int AS overdue,
+                COUNT(*) FILTER (
+                  WHERE mtc_deadline IS NOT NULL
+                    AND mtc_filed_date IS NULL
+                    AND mtc_deadline <= CURRENT_DATE + INTERVAL '30 days'
+                )::int AS mtc_soon
+           FROM civil_discovery
+          WHERE case_id = ANY($1::int[])
+          GROUP BY case_id`,
+        [ids]
+      );
+      for (const row of r.rows) discoveryByCase[row.case_id] = row;
+    } catch (e) { /* module not installed — the stage still renders */ }
+  }
+
+  const ruleSet = new Set(playbook.rules || []);
+  const enriched = cases.map(c => {
+    const all = deadlinesByCase[c.id] || [];
+    // This stage's own deadlines, plus anything added by hand (which has no
+    // source_trigger and therefore belongs to whoever is looking at it).
+    const mine = all.filter(d => !d.source_trigger || ruleSet.has(d.source_trigger));
+    const extra = discoveryByCase[c.id] || null;
+    const focusDate = playbook.focusField ? c[playbook.focusField] : null;
+    return {
+      ...c,
+      deadlines: mine,
+      deadline_count_all: all.length,
+      discovery: extra,
+      focus: playbook.focusField
+        ? { label: playbook.focusLabel, field: playbook.focusField, date: focusDate, days: daysFromToday(focusDate) }
+        : null,
+      alerts: stageAlerts(stageKey, c, mine, extra),
+    };
+  });
+
+  // Most exposed first: anything with a danger alert, then by how soon the
+  // stage's focus date lands, then by the soonest deadline.
+  const score = x => {
+    if (x.alerts.some(a => a.level === "danger")) return 0;
+    if (x.alerts.some(a => a.level === "warn")) return 1;
+    return 2;
+  };
+  enriched.sort((a, b) => {
+    const sa = score(a), sb = score(b);
+    if (sa !== sb) return sa - sb;
+    const da = a.focus && a.focus.days !== null ? a.focus.days : Infinity;
+    const db_ = b.focus && b.focus.days !== null ? b.focus.days : Infinity;
+    if (da !== db_) return da - db_;
+    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+  });
+
+  const atRisk = enriched.filter(x => x.alerts.some(a => a.level === "danger")).length;
+  const atStake = enriched.reduce((sum, x) => sum + (Number(x.amount_in_controversy) || 0), 0);
+  const nextDeadline = enriched
+    .flatMap(x => x.deadlines.map(d => ({ ...d, case_name: x.case_name })))
+    .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0] || null;
+
+  return {
+    stage,
+    playbook: {
+      headline: playbook.headline || "",
+      caution: playbook.caution || "",
+      verbs: playbook.verbs || [],
+      rules: playbook.rules || [],
+    },
+    cases: enriched,
+    rollup: {
+      count: enriched.length,
+      at_risk: atRisk,
+      amount_at_stake: atStake,
+      open_deadlines: enriched.reduce((n, x) => n + x.deadlines.length, 0),
+      next_deadline: nextDeadline,
+    },
+  };
+}
+
 module.exports = {
   initTables,
   STAGES, STAGE_KEYS, CASE_TYPES, OUR_ROLES, CCP_RULES,
@@ -716,5 +980,6 @@ module.exports = {
   autoGenerateDeadlines, addManualDeadline, completeDeadline, listDeadlines,
   logCommunication, listCommunications,
   kanban, getCaseSummary,
+  STAGE_PLAYBOOK, getStageWorkspace,
   addCalendarDays, subCalendarDaysBackToCourtDay, fmtDate,
 };

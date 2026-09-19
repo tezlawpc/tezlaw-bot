@@ -823,6 +823,48 @@ app.get("/admin/civil/new", async (req, res) => {
   }
 });
 
+// ── Civil: per-stage workspaces ─────────────────────────────
+// Each lifecycle stage gets its own screen with the deadlines, warnings and
+// actions that belong to that phase. The nav used to point all of these at
+// /admin/civil?stage=<key>, which was the same kanban board with fewer cards
+// on it — same page, same title, no stage-specific function.
+app.get("/admin/civil/stage/:key", async (req, res) => {
+  try {
+    const civil = require("./civil-litigation");
+    const ui = require("./civil-litigation-ui");
+    const chrome = require("./hearing-notes");
+    const key = String(req.params.key || "");
+    const stage = civil.STAGES.find(s => s.key === key);
+    if (!stage) return res.status(404).send("Unknown civil stage: " + key);
+    const playbook = civil.STAGE_PLAYBOOK[key] || {};
+    const esc = t => String(t == null ? "" : t)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    const tabs = civil.STAGES.map(s => `
+      <a href="/admin/civil/stage/${s.key}" style="padding:6px 11px;border-radius:13px;text-decoration:none;font-size:11px;font-family:Cinzel,serif;letter-spacing:.6px;white-space:nowrap;border:1px solid ${s.key === key ? s.color : "#D4C4A0"};background:${s.key === key ? s.color : "#FBF3DE"};color:${s.key === key ? "#FBF3DE" : "#3E2818"};">${esc(s.label)}</a>`).join("");
+
+    // The mount point is an EMPTY div inside the wrapper, never the wrapper
+    // itself: renderStage() clears its host before drawing, which would
+    // otherwise wipe the heading and the stage tabs rendered here.
+    const body = `
+      <div style="padding:24px;max-width:1400px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+          <a href="/admin/civil" style="color:#B8891E;text-decoration:none;font-size:12px;">← Back to Kanban</a>
+          <a href="/admin/civil/wip" style="color:#B8891E;text-decoration:none;font-size:12px;">Work in Progress →</a>
+        </div>
+        <h1 style="margin:8px 0 4px 0;font-family:Cinzel,serif;color:${stage.color};">${esc(stage.label)}</h1>
+        <div style="color:#7B5330;font-style:italic;margin-bottom:14px;">${esc(playbook.headline || "")}</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:18px;">${tabs}</div>
+        <div data-civil-panel="stage" data-stage-key="${esc(key)}"></div>
+      </div>
+      ${ui.civilAdminScriptTag()}`;
+    res.send(chrome.renderAdminChrome({ title: stage.label + " — Civil", body, activeItem: "civil" }));
+  } catch (err) {
+    console.error("[civil stage]:", err.message);
+    res.status(500).send("Stage workspace failed: " + err.message);
+  }
+});
+
 // ── Civil: firm-wide work-in-progress report ────────────────
 // The app has had /api/staff/civil/wip-report since build 38; the web had no
 // way to see unbilled time across the whole book. The table itself is drawn

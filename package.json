@@ -5,10 +5,13 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node scripts/check-syntax.js && node scripts/check-inline-scripts.js && node scripts/check-civil-parity.js",
+    "test": "node scripts/check-syntax.js && node scripts/check-inline-scripts.js && node scripts/check-civil-parity.js && node scripts/check-stage-workspace.js && node scripts/check-civil-admin-ui.js && node scripts/check-stage-page.js",
     "check:syntax": "node scripts/check-syntax.js",
-    "check:scripts": "node scripts/check-inline-scripts.js",
-    "check:parity": "node scripts/check-civil-parity.js"
+    "check:inline-scripts": "node scripts/check-inline-scripts.js",
+    "check:civil-parity": "node scripts/check-civil-parity.js",
+    "check:stage-workspace": "node scripts/check-stage-workspace.js",
+    "check:civil-admin-ui": "node scripts/check-civil-admin-ui.js",
+    "check:stage-page": "node scripts/check-stage-page.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
@@ -29,5 +32,8 @@
     "ws": "^8.18.0",
     "xlsx": "^0.18.5",
     "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.0"
   }
 }

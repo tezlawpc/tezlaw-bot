@@ -8524,6 +8524,29 @@ function attachCivilLitigationRoutes(app, civil) {
     } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
   });
 
+  // ── Stage workspaces ──
+  // One screen per lifecycle stage, each with the deadlines, warnings and
+  // verbs that actually belong to that phase — as opposed to the kanban board
+  // filtered down, which is the same screen with fewer cards on it.
+  app.get("/api/staff/civil/stages", auth1, auth2, (_req, res) => {
+    res.json({
+      ok: true,
+      stages: civil.STAGES.map(s => ({
+        ...s,
+        headline: (civil.STAGE_PLAYBOOK[s.key] || {}).headline || "",
+      })),
+    });
+  });
+
+  app.get("/api/staff/civil/stage/:key", auth1, auth2, async (req, res) => {
+    try {
+      res.json({ ok: true, ...(await civil.getStageWorkspace(req.params.key)) });
+    } catch (err) {
+      const missing = /Unknown stage/.test(err.message);
+      res.status(missing ? 404 : 500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ── Deadlines ──
   app.get("/api/staff/civil/cases/:id/deadlines", auth1, auth2, async (req, res) => {
     try {

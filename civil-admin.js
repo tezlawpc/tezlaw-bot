@@ -986,6 +986,175 @@
   }
 
   // ═══════════════════════════════════════════════════════════
+  //  STAGE WORKSPACE (one screen per lifecycle phase)
+  // ═══════════════════════════════════════════════════════════
+  var ALERT_COLOR = { danger: C.waxRed, warn: C.ember, info: C.walnutLight };
+
+  function renderStage() {
+    var host = panel("stage");
+    var key = host.getAttribute("data-stage-key");
+    var root = clear(host);
+    root.appendChild(note("Loading " + key.replace(/_/g, " ") + "…"));
+
+    return api("/stage/" + encodeURIComponent(key)).then(function (d) {
+      clear(root);
+      var st = d.stage || {};
+      var pb = d.playbook || {};
+      var roll = d.rollup || {};
+
+      // ── What this phase is for ──
+      root.appendChild(h("div", {
+        style: "border-left:4px solid " + (st.color || C.walnut) + ";background:" + C.parchmentLit +
+               ";border:1px solid " + C.border + ";border-left-width:4px;border-radius:6px;padding:14px;margin-bottom:12px;",
+      }, [
+        h("div", { text: pb.headline || "", style: "font-family:Cinzel,serif;font-size:14px;color:" + C.ink + ";" }),
+        pb.caution ? h("div", {
+          text: pb.caution,
+          style: "margin-top:8px;font-size:12px;color:" + C.muted + ";font-style:italic;line-height:1.5;",
+        }) : null,
+        (pb.verbs || []).length ? h("div", { style: "margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;" },
+          pb.verbs.map(function (v) {
+            return h("span", {
+              text: v,
+              style: "padding:3px 9px;border:1px solid " + C.border + ";border-radius:11px;background:" +
+                     C.parchment + ";font-size:11px;color:" + C.walnut + ";",
+            });
+          })) : null,
+      ]));
+
+      // ── Rollup ──
+      root.appendChild(h("div", {
+        style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px;margin-bottom:14px;",
+      }, [
+        statCard("Matters", String(roll.count || 0)),
+        statCard("Need Attention", String(roll.at_risk || 0), roll.at_risk ? "danger alerts" : "all clear"),
+        statCard("Open Deadlines", String(roll.open_deadlines || 0)),
+        statCard("At Stake", roll.amount_at_stake ? money(roll.amount_at_stake) : "—"),
+      ]));
+
+      if (roll.next_deadline) {
+        var nd = roll.next_deadline;
+        var ndDays = daysUntil(nd.due_date);
+        root.appendChild(card([
+          h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;" }, [
+            h("div", {}, [
+              h("div", { text: "NEXT UP IN THIS STAGE", style: "font-family:Cinzel,serif;font-size:10px;letter-spacing:1.5px;color:" + C.muted + ";" }),
+              h("div", { text: nd.description, style: "font-size:13px;color:" + C.ink + ";margin-top:3px;" }),
+              h("div", { text: nd.case_name + (nd.ccp_rule ? " · " + nd.ccp_rule : ""), style: "font-size:11px;color:" + C.muted + ";font-style:italic;" }),
+            ]),
+            chip(fmtDate(nd.due_date) + (ndDays !== null ? (ndDays < 0 ? " · " + Math.abs(ndDays) + "d LATE" : " · " + ndDays + "d") : ""),
+                 ndDays !== null && ndDays < 0 ? C.waxRed : ndDays !== null && ndDays <= 14 ? C.ember : C.gold),
+          ]),
+        ], "border-left:4px solid " + C.gold + ";"));
+      }
+
+      // ── Matters ──
+      var cases = d.cases || [];
+      root.appendChild(heading("MATTERS IN " + String(st.label || key).toUpperCase() + " (" + cases.length + ")",
+        btn("+ NEW CASE", function () { location.href = "/admin/civil/new"; })));
+
+      if (!cases.length) {
+        root.appendChild(note("No active matters in this stage. Drag a card here from the board, or change a case's stage from its page."));
+        return;
+      }
+      cases.forEach(function (c) { root.appendChild(stageCaseCard(c, st)); });
+    }).catch(function (e) {
+      clear(root).appendChild(note("Stage workspace unavailable: " + e.message));
+    });
+  }
+
+  function stageCaseCard(c, st) {
+    var worst = c.alerts.some(function (a) { return a.level === "danger"; }) ? "danger"
+              : c.alerts.some(function (a) { return a.level === "warn"; }) ? "warn" : null;
+    var edge = worst ? ALERT_COLOR[worst] : (st.color || C.border);
+
+    var focusChip = null;
+    if (c.focus && c.focus.date) {
+      var dd = c.focus.days;
+      focusChip = chip(
+        c.focus.label + " " + fmtDate(c.focus.date) + (dd !== null ? (dd < 0 ? " · " + Math.abs(dd) + "d ago" : " · " + dd + "d") : ""),
+        dd === null ? C.walnutLight : dd < 0 ? C.waxRed : dd <= 30 ? C.waxRed : dd <= 90 ? C.ember : C.gold);
+    }
+
+    return card([
+      h("div", { style: "display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;" }, [
+        h("div", { style: "min-width:220px;" }, [
+          h("a", {
+            href: "/admin/civil/case/" + c.id, text: c.case_name,
+            style: "font-family:Cinzel,serif;font-size:14px;font-weight:600;color:" + C.ink + ";text-decoration:none;",
+          }),
+          h("div", {
+            text: [c.client_key, c.case_type, c.case_number ? "#" + c.case_number : "", (c.our_role || "").toUpperCase()]
+              .filter(Boolean).join(" · "),
+            style: "font-size:11px;color:" + C.muted + ";margin-top:3px;",
+          }),
+        ]),
+        h("div", { style: "display:flex;gap:5px;flex-wrap:wrap;align-items:flex-start;" }, [
+          focusChip,
+          c.amount_in_controversy ? chip(money(c.amount_in_controversy), C.walnutMid) : null,
+          c.files_archived_at ? chip("ARCHIVED", C.walnutLight) : null,
+        ]),
+      ]),
+
+      c.alerts.length ? h("div", { style: "margin-top:9px;display:flex;flex-direction:column;gap:4px;" },
+        c.alerts.map(function (a) {
+          return h("div", {
+            text: (a.level === "danger" ? "⚠ " : a.level === "warn" ? "• " : "· ") + a.text,
+            style: "font-size:12px;color:" + ALERT_COLOR[a.level] + ";" +
+                   (a.level === "danger" ? "font-weight:600;" : ""),
+          });
+        })) : null,
+
+      c.discovery ? h("div", {
+        text: c.discovery.total + " discovery set" + (c.discovery.total === 1 ? "" : "s") +
+              " · " + c.discovery.overdue + " overdue · " + c.discovery.mtc_soon + " MTC within 30d",
+        style: "margin-top:8px;font-size:11px;color:" + C.muted + ";",
+      }) : null,
+
+      c.deadlines.length ? h("div", { style: "margin-top:10px;border-top:1px solid " + C.border + ";padding-top:8px;" },
+        c.deadlines.slice(0, 5).map(function (dl) {
+          var dd = daysUntil(dl.due_date);
+          return h("div", { style: "display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:12px;" }, [
+            h("span", { text: dl.description, style: "color:" + C.ink + ";flex:1;" }),
+            h("span", {
+              text: fmtDate(dl.due_date) + (dd !== null ? (dd < 0 ? " (" + Math.abs(dd) + "d late)" : " (" + dd + "d)") : ""),
+              style: "white-space:nowrap;color:" + (dd !== null && dd < 0 ? C.waxRed : dd !== null && dd <= 14 ? C.emberDeep : C.muted) + ";",
+            }),
+          ]);
+        }).concat(c.deadlines.length > 5
+          ? [h("div", { text: "+" + (c.deadlines.length - 5) + " more", style: "font-size:11px;color:" + C.muted + ";font-style:italic;padding-top:3px;" })]
+          : [])) : null,
+
+      h("div", { style: "margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;" }, [
+        btn("OPEN MATTER", function () { location.href = "/admin/civil/case/" + c.id; }, "quiet"),
+        btn("ADVANCE STAGE", function () { openAdvance(c); }),
+      ]),
+    ], "border-left:4px solid " + edge + ";");
+  }
+
+  // Moving a matter on from a stage workspace is the whole point of the screen:
+  // you work the phase, then push it forward.
+  function openAdvance(c) {
+    var stages = META.stages || [];
+    var here = stages.map(function (s) { return s.key; }).indexOf(c.stage);
+    var suggested = here >= 0 && here + 1 < stages.length ? stages[here + 1].key : c.stage;
+    formModal("Advance " + c.case_name, [
+      { name: "stage", label: "Move to stage", type: "select", required: true, value: suggested,
+        options: stages.map(function (s) { return { value: s.key, label: s.label }; }),
+        hint: "Writes a Stage → entry on the matter's timeline." },
+    ], function (v) {
+      return fetch("/admin/civil/case/" + c.id + "/move-stage", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage: v.stage }),
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.ok) throw new Error(d.error || "Move failed");
+        toast("Moved to " + (d.label || v.stage));
+        return renderStage();
+      });
+    }, "MOVE");
+  }
+
+  // ═══════════════════════════════════════════════════════════
   //  WIP REPORT (firm-wide page)
   // ═══════════════════════════════════════════════════════════
   function renderWip() {
@@ -1069,6 +1238,16 @@
     CASE_ID = host ? parseInt(host.getAttribute("data-case-id"), 10) : null;
 
     if (panel("wip")) { renderWip(); return; }
+
+    // Stage workspaces need the stage list (for the advance picker) but no case.
+    if (panel("stage")) {
+      api("/meta").catch(function () { return {}; }).then(function (m) {
+        META = { stages: m.stages || [], case_types: m.case_types || [], our_roles: m.our_roles || [] };
+        return renderStage();
+      });
+      return;
+    }
+
     if (!CASE_ID) return;
 
     wireButtons();

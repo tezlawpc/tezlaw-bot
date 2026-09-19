@@ -1554,14 +1554,32 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/civil" class="nav-link ${isActive('civil')}" data-perm="civil.read">
         <span class="nav-icon">⚖️</span><span class="nav-label">All Cases</span>
       </a>
-      <a href="/admin/civil?stage=discovery" class="nav-link" data-perm="civil.read">
+      <a href="/admin/civil/stage/intake" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">◐</span><span class="nav-label">Intake / Assessment</span>
+      </a>
+      <a href="/admin/civil/stage/pre_filing" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">✎</span><span class="nav-label">Pre-Filing</span>
+      </a>
+      <a href="/admin/civil/stage/pleadings" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">❋</span><span class="nav-label">Pleadings</span>
+      </a>
+      <a href="/admin/civil/stage/discovery" class="nav-link" data-perm="civil.read">
         <span class="nav-icon">◈</span><span class="nav-label">Discovery</span>
       </a>
-      <a href="/admin/civil?stage=motions" class="nav-link" data-perm="civil.read">
+      <a href="/admin/civil/stage/motions" class="nav-link" data-perm="civil.read">
         <span class="nav-icon">§</span><span class="nav-label">Motion Practice</span>
       </a>
-      <a href="/admin/civil?stage=trial_prep" class="nav-link" data-perm="civil.read">
+      <a href="/admin/civil/stage/trial_prep" class="nav-link" data-perm="civil.read">
         <span class="nav-icon">⚠</span><span class="nav-label">Trial Prep</span>
+      </a>
+      <a href="/admin/civil/stage/trial" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">⚖</span><span class="nav-label">Trial</span>
+      </a>
+      <a href="/admin/civil/stage/post_trial" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">⟳</span><span class="nav-label">Post-Trial</span>
+      </a>
+      <a href="/admin/civil/stage/closed" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">✓</span><span class="nav-label">Closed</span>
       </a>
       <a href="/admin/civil/wip" class="nav-link" data-perm="civil.read">
         <span class="nav-icon">💰</span><span class="nav-label">Work in Progress</span>
