@@ -102,7 +102,7 @@ async function renderKanban(opts = {}) {
         .filter(Boolean).join(" · ");
 
       return `
-        <a href="/admin/civil/case/${c.id}" title="${esc(tip)}" style="display:block;padding:6px 7px;margin-bottom:5px;background:#FBF3DE;border:1px solid #D4C4A0;border-left:3px solid ${edge};border-radius:5px;text-decoration:none;color:#3E2818;">
+        <a href="/admin/civil/case/${c.id}" title="${esc(tip)}" draggable="true" data-case-id="${c.id}" data-stage="${esc(stage.key)}" class="civil-card" style="display:block;padding:6px 7px;margin-bottom:5px;background:#FBF3DE;border:1px solid #D4C4A0;border-left:3px solid ${edge};border-radius:5px;text-decoration:none;color:#3E2818;cursor:grab;">
           <div style="font-family:Cinzel,serif;font-size:11.5px;font-weight:600;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${esc(c.case_name)}</div>
           ${chips ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:3px;">${chips}</div>` : ""}
           ${amt ? `<div style="margin-top:3px;font-size:10px;font-weight:700;color:#B8891E;">${esc(amt)}</div>` : ""}
@@ -115,7 +115,7 @@ async function renderKanban(opts = {}) {
     const urgentCount = cases.filter(c => urgencyOf(c) === 2).length;
 
     return `
-      <div style="min-width:0;background:#F5EBD3;border:1px solid #D4C4A0;border-radius:7px;overflow:hidden;display:flex;flex-direction:column;${empty ? "opacity:.55;" : ""}">
+      <div class="civil-col" data-stage="${esc(stage.key)}" data-label="${esc(stage.label)}" style="min-width:0;background:#F5EBD3;border:1px solid #D4C4A0;border-radius:7px;overflow:hidden;display:flex;flex-direction:column;${empty ? "opacity:.55;" : ""}">
         <div style="padding:7px 8px;background:#FBF3DE;border-bottom:1px solid #D4C4A0;border-top:3px solid ${stage.color};">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
             <div style="font-family:Cinzel,serif;font-size:10px;font-weight:600;color:#3E2818;letter-spacing:.6px;text-transform:uppercase;line-height:1.2;">${esc(stage.label)}</div>
@@ -153,8 +153,76 @@ async function renderKanban(opts = {}) {
       <div style="margin-top:10px;display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:#7B5330;">
         <span><span style="display:inline-block;width:9px;height:9px;background:#A02818;border-radius:2px;vertical-align:middle;"></span> trial &le;60d or SOL &le;90d</span>
         <span><span style="display:inline-block;width:9px;height:9px;background:#F07800;border-radius:2px;vertical-align:middle;"></span> trial &le;120d</span>
-        <span style="font-style:italic;">cards sorted most-urgent first · hover a card for full details</span>
+        <span style="font-style:italic;">cards sorted most-urgent first · hover for details · drag a card to another column to change its stage</span>
       </div>
+      <div id="civilToast" style="display:none;position:fixed;bottom:18px;left:50%;transform:translateX(-50%);padding:9px 16px;background:#3E2818;color:#FBF3DE;border:1px solid #B8891E;border-radius:6px;font-size:12px;z-index:9999;"></div>
+      <script>
+        // NOTE: this block is written inside a server-side template literal.
+        // Never use backslash escapes (\\n, \\') or backtick templates here —
+        // the server consumes them before the browser ever sees this script.
+        (function () {
+          var dragged = null;
+
+          function toast(msg, bad) {
+            var t = document.getElementById("civilToast");
+            if (!t) return;
+            t.textContent = msg;
+            t.style.borderColor = bad ? "#A02818" : "#B8891E";
+            t.style.display = "block";
+            clearTimeout(t._h);
+            t._h = setTimeout(function () { t.style.display = "none"; }, 2600);
+          }
+
+          document.querySelectorAll(".civil-card").forEach(function (card) {
+            card.addEventListener("dragstart", function (e) {
+              dragged = card;
+              card.style.opacity = ".45";
+              try { e.dataTransfer.setData("text/plain", card.dataset.caseId); } catch (err) {}
+              if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+            });
+            card.addEventListener("dragend", function () {
+              card.style.opacity = "";
+              document.querySelectorAll(".civil-col").forEach(function (c) { c.style.outline = ""; });
+              dragged = null;
+            });
+          });
+
+          document.querySelectorAll(".civil-col").forEach(function (col) {
+            col.addEventListener("dragover", function (e) {
+              if (!dragged || dragged.dataset.stage === col.dataset.stage) return;
+              e.preventDefault();
+              if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+              col.style.outline = "2px dashed #F07800";
+            });
+            col.addEventListener("dragleave", function () { col.style.outline = ""; });
+            col.addEventListener("drop", function (e) {
+              col.style.outline = "";
+              if (!dragged) return;
+              e.preventDefault();
+              var card = dragged;
+              var target = col.dataset.stage;
+              if (card.dataset.stage === target) return;
+              card.style.opacity = ".45";
+              fetch("/admin/civil/case/" + card.dataset.caseId + "/move-stage", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ stage: target })
+              }).then(function (r) { return r.json(); }).then(function (d) {
+                if (d && d.ok) {
+                  toast("Moved to " + (col.dataset.label || target));
+                  location.reload();
+                } else {
+                  card.style.opacity = "";
+                  toast((d && d.error) || "Could not move that case", true);
+                }
+              }).catch(function (err) {
+                card.style.opacity = "";
+                toast("Could not move that case: " + err.message, true);
+              });
+            });
+          });
+        })();
+      </script>
     </div>
   `.replace("<!--CIVIL_FILTER_BANNER-->", filterBanner);
 }
@@ -236,8 +304,12 @@ async function renderCaseDetail(id) {
     <div style="padding:24px;max-width:1400px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <a href="/admin/civil" style="color:#B8891E;text-decoration:none;font-size:12px;">← Back to Kanban</a>
-        <div>
-          <span style="padding:6px 12px;background:${stage.color};color:#FBF3DE;font-family:Cinzel,serif;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;border-radius:4px;">${esc(stage.label)}</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <label for="civilStageSel" style="font-size:10px;color:#7B5330;font-family:Cinzel,serif;letter-spacing:1.2px;text-transform:uppercase;">Stage</label>
+          <select id="civilStageSel" data-case-id="${id}" data-current="${esc(stage.key)}" style="padding:6px 12px;background:${stage.color};color:#FBF3DE;font-family:Cinzel,serif;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;border:1px solid #5A3B22;border-radius:4px;cursor:pointer;">
+            ${civil.STAGES.map(s => `<option value="${esc(s.key)}"${s.key === stage.key ? " selected" : ""}>${esc(s.label)}</option>`).join("")}
+          </select>
+          <span id="civilStageMsg" style="font-size:11px;color:#7B5330;"></span>
         </div>
       </div>
       <h1 style="margin:8px 0 24px 0;font-family:Cinzel,serif;color:#3E2818;">${esc(summary.case_name)}</h1>
@@ -304,6 +376,36 @@ async function renderCaseDetail(id) {
       ${renderDocumentsPanel(id, summary, files, fileCats, filesErr)}
 
       ${summary.internal_notes ? `<h2 style="font-family:Cinzel,serif;color:#3E2818;margin:24px 0 12px 0;font-size:16px;letter-spacing:1.5px;">📝 INTERNAL NOTES</h2><div style="background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;padding:16px;white-space:pre-wrap;">${esc(summary.internal_notes)}</div>` : ""}
+      <script>
+        // NOTE: server-side template literal — no backslash escapes (\\n, \\')
+        // and no backtick templates in here.
+        (function () {
+          var sel = document.getElementById("civilStageSel");
+          var msg = document.getElementById("civilStageMsg");
+          if (!sel) return;
+          sel.addEventListener("change", function () {
+            var target = sel.value;
+            var previous = sel.dataset.current;
+            if (target === previous) return;
+            sel.disabled = true;
+            if (msg) { msg.style.color = "#7B5330"; msg.textContent = "Saving..."; }
+            fetch("/admin/civil/case/" + sel.dataset.caseId + "/move-stage", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ stage: target })
+            }).then(function (r) { return r.json(); }).then(function (d) {
+              if (d && d.ok) { location.reload(); return; }
+              sel.value = previous;
+              sel.disabled = false;
+              if (msg) { msg.style.color = "#A02818"; msg.textContent = (d && d.error) || "Could not change stage"; }
+            }).catch(function (err) {
+              sel.value = previous;
+              sel.disabled = false;
+              if (msg) { msg.style.color = "#A02818"; msg.textContent = "Could not change stage: " + err.message; }
+            });
+          });
+        })();
+      </script>
     </div>
   `;
 }

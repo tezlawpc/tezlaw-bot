@@ -823,6 +823,51 @@ app.get("/admin/civil/new", async (req, res) => {
   }
 });
 
+// ── Civil: move a matter between kanban stages ──────────────
+// The web board and case page had no way to change a case's stage at all —
+// only the iOS app did (POST /api/staff/civil/cases/:id/move-stage). This is
+// the admin-cookie mirror of that route, so the board drag and the case-page
+// dropdown both have somewhere to post to.
+app.post("/admin/civil/case/:id/move-stage", async (req, res) => {
+  try {
+    const civil = require("./civil-litigation");
+    const id = parseInt(req.params.id, 10);
+    const stage = (req.body && req.body.stage) || "";
+    if (!civil.STAGE_KEYS.has(stage)) {
+      return res.status(400).json({ ok: false, error: "Invalid stage" });
+    }
+    const before = await civil.getCase(id);
+    if (!before) return res.status(404).json({ ok: false, error: "Case not found" });
+    if (before.stage === stage) {
+      return res.json({ ok: true, unchanged: true, case: before });
+    }
+
+    // Moving a matter out of Closed by hand un-freezes its Dropbox mirror too,
+    // otherwise the case looks active but silently never syncs again. This has
+    // to run BEFORE the stage write: unarchiveCaseFiles restores the
+    // pre-archive stage itself, so doing it afterwards would undo the move.
+    if (before.stage === "closed" && stage !== "closed" && before.files_archived_at) {
+      try { await _cdx().unarchiveCaseFiles(id); } catch (e) { /* non-fatal */ }
+    }
+    const updated = await civil.updateCase(id, { stage });
+
+    const who = req.user?.n || req.user?.u || "web-admin";
+    const label = (civil.STAGES.find(s => s.key === stage) || {}).label || stage;
+    const fromLabel = (civil.STAGES.find(s => s.key === before.stage) || {}).label || before.stage;
+    try {
+      await civil.logEvent(id, {
+        event_kind: "note",
+        event_date: new Date().toISOString().slice(0, 10),
+        title: `Stage → ${label}`,
+        description: `Moved from ${fromLabel} by ${who}.`,
+        created_by: who,
+      });
+    } catch (e) { /* non-fatal */ }
+
+    res.json({ ok: true, case: updated, stage, label });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // ── Civil ⇄ Dropbox: admin-side actions ─────────────────────
 // These mirror the /api/staff/civil/**/dropbox endpoints but authenticate by
 // admin cookie (app.use("/admin", requireAdminAuth)) rather than a bearer
