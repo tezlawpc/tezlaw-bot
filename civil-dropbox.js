@@ -169,6 +169,46 @@ async function initTables() {
     )
   `).catch(() => {});
   await db.query(`INSERT INTO civil_dropbox_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`).catch(() => {});
+
+  await backfillArchivedStages();
+}
+
+// Cases archived before archiving moved a matter to Closed kept whatever stage
+// they were sitting in, so they stayed on the board looking active. Sweep them
+// into Closed once — guarded by a settings flag so a matter deliberately
+// re-opened later is never dragged back on the next boot.
+let _archiveBackfillChecked = false;
+async function backfillArchivedStages() {
+  if (_archiveBackfillChecked) return;
+  _archiveBackfillChecked = true;
+  try {
+    await db.query(
+      `ALTER TABLE civil_dropbox_settings
+         ADD COLUMN IF NOT EXISTS archive_stage_backfill_at TIMESTAMPTZ`
+    );
+    const done = await db.query(
+      `SELECT archive_stage_backfill_at FROM civil_dropbox_settings WHERE id = 1`
+    );
+    if (done.rows[0] && done.rows[0].archive_stage_backfill_at) return;
+
+    const r = await db.query(
+      `UPDATE civil_cases
+          SET stage_before_archive = COALESCE(stage_before_archive, stage),
+              stage = 'closed',
+              updated_at = NOW()
+        WHERE files_archived_at IS NOT NULL
+          AND COALESCE(stage, '') <> 'closed'
+        RETURNING id`
+    );
+    await db.query(
+      `UPDATE civil_dropbox_settings SET archive_stage_backfill_at = NOW() WHERE id = 1`
+    );
+    if (r.rowCount) {
+      console.log(`[civil-dropbox] backfill: moved ${r.rowCount} archived matter(s) to Closed`);
+    }
+  } catch (e) {
+    console.warn("[civil-dropbox] archive-stage backfill skipped:", e.message);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
