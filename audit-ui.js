@@ -70,6 +70,7 @@ function pill(text, color, bg) {
 function statusPill(status) {
   const map = {
     open: ["#B45309", "Open"],
+    pending_confirmation: ["#B45309", "Needs confirmation"],
     satisfied: ["#1C7C54", "Delivered"],
     answered_no: ["#1C7C54", "Answered — No"],
     answered_yes: ["#2C5F8A", "Answered — Yes"],
@@ -621,17 +622,27 @@ function checklistPage({ engagement: e, checklist }, user) {
     .map((b) => {
       const br = tax.BRACKET_BY_CODE[b];
       const list = byBracket[b];
-      const doneN = list.filter((i) => i.status !== "open").length;
+      const doneN = list.filter((i) => !["open", "pending_confirmation"].includes(i.status)).length;
       const rows = list
         .map((i) => {
-          const late = i.status === "open" && daysUntil(i.due_date) !== null && daysUntil(i.due_date) < 0;
+          const late =
+            ["open", "pending_confirmation"].includes(i.status) &&
+            daysUntil(i.due_date) !== null &&
+            daysUntil(i.due_date) < 0;
           return `<tr>
           <td style="white-space:nowrap;">${i.is_gate ? pill("GATE", "#991B1B") + " " : ""}<code>${esc(i.category_code || "")}</code></td>
           <td>${esc(i.label)}
             ${i.spawned_from_item ? `<div class="xs" style="color:var(--navy2);">Added by a YES sweep answer</div>` : ""}
             ${i.note ? `<details><summary>Guidance</summary><div class="sm" style="color:var(--ink2);">${esc(i.note)}</div></details>` : ""}
             ${i.doc_filename ? `<div class="xs"><a href="${BASE}/document/${i.satisfied_by_doc}">${esc(i.doc_filename)}</a> v${i.doc_version}</div>` : ""}
-            ${i.waiver_reason ? `<div class="xs muted">Waived: ${esc(i.waiver_reason)}</div>` : ""}</td>
+            ${i.waiver_reason ? `<div class="xs muted">Waived: ${esc(i.waiver_reason)}</div>` : ""}
+            ${
+              i.status === "pending_confirmation"
+                ? `<div class="xs" style="color:var(--red);font-weight:600;">A document was filed here but the
+                     classification was not confident enough to close a gating item. Open it and confirm the
+                     category — until then this counts as outstanding.</div>`
+                : ""
+            }</td>
           <td class="sm" style="white-space:nowrap;color:${late ? "var(--red)" : "var(--mute)"};font-weight:${late ? 600 : 400};">${fmtDate(i.due_date)}</td>
           <td>${statusPill(i.status)}${i.auditor_accepted ? " " + pill("ACCEPTED", "#1C7C54") : ""}</td>
           <td class="right" style="white-space:nowrap;">

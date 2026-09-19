@@ -463,7 +463,7 @@ async function notifyDueAndOverdue() {
     `SELECT i.*, c.period_label, c.tier, c.engagement_id
        FROM ngtf_audit_checklist_items i
        JOIN ngtf_audit_checklists c ON c.id = i.checklist_id
-      WHERE i.status IN ('open')
+      WHERE i.status IN ('open','pending_confirmation')
         AND i.due_date IS NOT NULL
         AND i.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
       ORDER BY i.is_gate DESC, i.due_date ASC`
@@ -472,7 +472,7 @@ async function notifyDueAndOverdue() {
     `SELECT i.*, c.period_label, c.tier, c.engagement_id
        FROM ngtf_audit_checklist_items i
        JOIN ngtf_audit_checklists c ON c.id = i.checklist_id
-      WHERE i.status IN ('open')
+      WHERE i.status IN ('open','pending_confirmation')
         AND i.due_date IS NOT NULL
         AND i.due_date < CURRENT_DATE
       ORDER BY i.is_gate DESC, i.due_date ASC`
@@ -554,7 +554,7 @@ async function notifyFilingDeadlines(daysAhead = [30, 14, 7, 3, 1]) {
       `SELECT COUNT(*)::int AS n, COUNT(*) FILTER (WHERE is_gate)::int AS gates
          FROM ngtf_audit_checklist_items i
          JOIN ngtf_audit_checklists c ON c.id = i.checklist_id
-        WHERE c.engagement_id = $1 AND i.status = 'open'`,
+        WHERE c.engagement_id = $1 AND i.status IN ('open','pending_confirmation')`,
       [eng.id]
     );
     const o = open.rows[0] || { n: 0, gates: 0 };
@@ -677,9 +677,9 @@ async function notifyCommitteeDigest() {
   const eng = await db.query(
     `SELECT e.*,
             (SELECT COUNT(*) FROM ngtf_audit_checklist_items i JOIN ngtf_audit_checklists c ON c.id=i.checklist_id
-              WHERE c.engagement_id=e.id AND i.status='open')::int AS open_items,
+              WHERE c.engagement_id=e.id AND i.status IN ('open','pending_confirmation'))::int AS open_items,
             (SELECT COUNT(*) FROM ngtf_audit_checklist_items i JOIN ngtf_audit_checklists c ON c.id=i.checklist_id
-              WHERE c.engagement_id=e.id AND i.status='open' AND i.is_gate)::int AS open_gates,
+              WHERE c.engagement_id=e.id AND i.status IN ('open','pending_confirmation') AND i.is_gate)::int AS open_gates,
             (SELECT COUNT(*) FROM ngtf_audit_comments cm
               WHERE cm.engagement_id=e.id AND cm.resolved=FALSE)::int AS open_notes
        FROM ngtf_audit_engagements e
