@@ -45,6 +45,11 @@ const SKIP_EXT = /\.(tmp|part|crdownload|lock|ini|db)$/i;
 
 let running = false;
 
+/** True while a scan is in flight in this process. */
+function isRunning() {
+  return running;
+}
+
 async function initSyncTables() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS ngtf_audit_sync_files (
@@ -155,10 +160,19 @@ async function run({ full = false, actor = null } = {}) {
 
     const holding = await inbox(who);
 
+    let sinceBeat = 0;
     for (const f of listing.files) {
       if (out.imported + out.failed >= PER_RUN) {
         out.deferred = true;
         break;
+      }
+
+      // Publish progress every few files. The scan no longer runs inside
+      // an HTTP request, so this is the only way the page can show what
+      // is happening rather than sitting on a spinner.
+      if (++sinceBeat >= 5) {
+        sinceBeat = 0;
+        await setStatus({ state: "running", progress: { ...out, of: listing.files.length } });
       }
 
       const base = f.name;
@@ -318,4 +332,4 @@ async function counts() {
   return o;
 }
 
-module.exports = { run, recent, counts, lastRun, initSyncTables, inbox, INBOX_LABEL };
+module.exports = { run, recent, counts, lastRun, isRunning, initSyncTables, inbox, INBOX_LABEL };

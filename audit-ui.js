@@ -1087,9 +1087,29 @@ function syncPage({ status, files, configured }, user) {
     [t,r].forEach(function(b){ if(b){ b.disabled = on; b.style.opacity = on ? '.5' : '1'; b.style.cursor = on ? 'wait' : 'pointer'; } });
     if(on && label) msg(label, 'info');
   }
+  // Parse defensively. A proxy timeout or a restart returns an HTML
+  // error page, and calling .json() on that throws a SyntaxError that
+  // browsers word unhelpfully — Safari says "The string did not match
+  // the expected pattern", which tells the reader nothing about what
+  // actually happened.
+  async function readJson(r){
+    const text = await r.text();
+    try{ return JSON.parse(text); }
+    catch(e){
+      throw new Error(
+        r.status >= 500 || r.status === 502 || r.status === 504
+          ? 'The server did not answer (HTTP ' + r.status + '). It may still be starting up \u2014 wait a moment and reload.'
+          : 'Unexpected reply from the server (HTTP ' + r.status + '). ' + text.slice(0,120)
+      );
+    }
+  }
   async function post(url, body){
     const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
-    const j = await r.json(); if(!j.ok) throw new Error(j.error||'Request failed'); return j;
+    const j = await readJson(r); if(!j.ok) throw new Error(j.error||'Request failed'); return j;
+  }
+  async function getJson(url){
+    const r = await fetch(url,{headers:{'Accept':'application/json'}});
+    return readJson(r);
   }
   function ticker(base){
     var n = 0;
@@ -1111,19 +1131,58 @@ function syncPage({ status, files, configured }, user) {
     }catch(e){ clearInterval(tick); msg(e.message, 'bad'); }
     finally{ setBusy(false); }
   }
+  // The scan runs detached on the server, so this starts it and then
+  // watches /api/sync/status. Nothing here holds an HTTP request open,
+  // which is what used to break on a folder large enough to run past
+  // Render's request timeout.
+  var poller = null;
   async function runIt(full){
     if(busy) return;
     if(full && !confirm('Retry every file that previously failed or was skipped?')) return;
-    setBusy(true, 'Scanning\u2026');
-    var tick = ticker('Scanning the folder and importing new files\u2026');
+    setBusy(true, 'Starting the scan\u2026');
     try{
-      const j = await post('${BASE}/api/sync/run',{full:!!full});
-      clearInterval(tick);
-      msg('Scan finished. ' + j.imported + ' imported, ' + j.skipped + ' skipped, ' + j.failed + ' failed' +
-          (j.deferred ? '. More files remain \u2014 run it again to continue' : '') + '. Reloading\u2026', 'good');
-      setTimeout(function(){ location.reload(); }, 1400);
-    }catch(e){ clearInterval(tick); msg(e.message, 'bad'); setBusy(false); }
+      await post('${BASE}/api/sync/run',{full:!!full});
+    }catch(e){ msg(e.message, 'bad'); setBusy(false); return; }
+    watch();
   }
+  function watch(){
+    var started = Date.now();
+    var misses = 0;
+    if(poller) clearInterval(poller);
+    poller = setInterval(async function(){
+      var secs = Math.round((Date.now() - started)/1000);
+      try{
+        const s = await getJson('${BASE}/api/sync/status');
+        misses = 0;
+        var st = s.lastRun || {};
+        if(s.running || st.state === 'running'){
+          var p = st.progress;
+          msg(p
+            ? 'Scanning\u2026 ' + p.imported + ' imported, ' + p.skipped + ' skipped of ' + p.of + ' files (' + secs + 's)'
+            : 'Scanning\u2026 (' + secs + 's)', 'info');
+          return;
+        }
+        clearInterval(poller); poller = null;
+        var r = st.lastResult || {};
+        if(st.state === 'error'){ msg('Scan failed. ' + (st.error || 'Unknown error'), 'bad'); setBusy(false); return; }
+        msg('Scan finished. ' + (r.imported||0) + ' imported, ' + (r.skipped||0) + ' skipped, ' + (r.failed||0) + ' failed' +
+            (r.deferred ? '. More files remain \u2014 run it again to continue' : '') + '. Reloading\u2026', 'good');
+        setTimeout(function(){ location.reload(); }, 1500);
+      }catch(e){
+        // A restart or a blip should not end the watch; the scan is
+        // running on the server regardless of this page.
+        if(++misses >= 10){ clearInterval(poller); poller = null; msg(e.message, 'bad'); setBusy(false); }
+        else msg('Scanning\u2026 waiting for the server (' + secs + 's)', 'info');
+      }
+    }, 2500);
+  }
+  // If a scan is already running when the page loads, pick up watching it.
+  (async function(){
+    try{
+      const s = await getJson('${BASE}/api/sync/status');
+      if(s.running || (s.lastRun && s.lastRun.state === 'running')){ setBusy(true, 'Scan in progress\u2026'); watch(); }
+    }catch(e){}
+  })();
   </script>`;
 
   return chrome({ title: "Dropbox", body, user, active: "sync", wide: true });

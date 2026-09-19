@@ -701,6 +701,7 @@ router.get("/api/sync/status", auth.requirePermission("dashboard.view"), wrap(as
   const dropbox = require("./audit-dropbox");
   ok(res, {
     configured: dropbox.configured(),
+    running: sync.isRunning(),
     lastRun: await sync.lastRun(),
     counts: await sync.counts(),
   });
@@ -711,12 +712,40 @@ router.post("/api/sync/check", auth.requirePermission("portal.settings"), wrap(a
   ok(res, await dropbox.check());
 }));
 
+// Starts a scan and returns IMMEDIATELY.
+//
+// The scan used to run inside this request, which worked on a small
+// folder and broke on a real one: Render cuts an HTTP request at about
+// 100 seconds, so a long walk had its connection severed mid-flight and
+// the browser tried to parse a proxy error page as JSON — surfacing as
+// Safari's "The string did not match the expected pattern."
+//
+// The work now runs detached and reports through /api/sync/status, which
+// the page polls. A scan that takes ten minutes is fine; nothing is
+// waiting on it.
 router.post("/api/sync/run", auth.requirePermission("portal.settings"), wrap(async (req, res) => {
   const sync = require("./audit-sync");
-  const result = await sync.run({ full: req.body && req.body.full === true, actor: req.auditUser });
-  notify.flush().catch((e) => console.error("[ngtf-audit] notification flush failed:", e.message));
-  if (!result.ok) return fail(res, result.error || "The scan failed.");
-  ok(res, result);
+  const dropbox = require("./audit-dropbox");
+
+  if (!dropbox.configured()) return fail(res, "Dropbox is not configured.");
+  if (sync.isRunning()) return fail(res, "A scan is already running. Watch its progress below.");
+
+  const full = !!(req.body && req.body.full === true);
+  const actor = req.auditUser;
+
+  // Deliberately not awaited.
+  sync
+    .run({ full, actor })
+    .then((r) => {
+      notify.flush().catch((e) => console.error("[ngtf-audit] notification flush failed:", e.message));
+      console.log(
+        `[ngtf-audit] scan finished: seen ${r.seen}, imported ${r.imported}, skipped ${r.skipped}, failed ${r.failed}`
+      );
+    })
+    .catch((e) => console.error("[ngtf-audit] scan crashed:", e.message));
+
+  await schema.logEvent({ event: "dropbox_sync_started", actor, detail: { full } });
+  ok(res, { started: true });
 }));
 
 router.get("/api/sync/files", auth.requirePermission("document.view_all"), wrap(async (req, res) => {
