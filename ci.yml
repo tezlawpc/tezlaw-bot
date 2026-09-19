@@ -59,3 +59,16 @@ jobs:
 
       - name: Civil stage page
         run: node scripts/check-stage-page.js
+
+      # The Zara ops panel sits behind a legacy Telegram-session guard. It must
+      # also accept the main admin session — without that, /panel.js serves
+      # HTML and every /admin/api/* call 401s — while still refusing everyone
+      # who is not an admin.
+      - name: Admin panel auth
+        run: node scripts/check-admin-auth.js
+
+      # /admin/panel/:tab embeds the ops panel. The embed route must be matched
+      # before the :tab route and must render with its own chrome suppressed,
+      # or the whole admin UI renders inside itself.
+      - name: Admin panel embed
+        run: node scripts/check-panel-embed.js

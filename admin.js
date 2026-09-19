@@ -119,10 +119,32 @@ function audit(req, action, target, oldVal, newVal) {
   db.logAudit("jj", action, target, oldVal, newVal, ip).catch(() => {});
 }
 
+// Two credentials open this panel:
+//
+//  1. The legacy admin_token cookie — the Telegram approve-a-login flow this
+//     module shipped with.
+//  2. The main admin session. server.js runs auth.requireAdminAuth on every
+//     /admin/* request before any route here is reached, and it sets req.user
+//     to { uid, u, n, r }. An admin who signed in normally is already
+//     authenticated by the time this runs.
+//
+// Only (1) used to count, so a normally-signed-in admin was bounced to
+// /admin/login on every request this guard covers — which for an already-valid
+// session redirects on to /admin/hearing/notes. That broke the whole panel:
+// "/" served the wrong page, /panel.js served HTML instead of JavaScript, and
+// every /admin/api/* call returned 401, leaving the panel inert.
+//
+// The role check is unchanged in effect: the ops panel stays admin-only, and
+// non-admins are still sent to the triage dashboard by the callers below.
 async function requireAuth(req, res, next) {
+  if (req.user && req.user.r === "admin") return next();
+
   const token = req.cookies?.admin_token || req.headers["x-admin-token"];
   if (await validateSession(token)) return next();
+
   if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Unauthorized" });
+  // A signed-in non-admin has somewhere better to be than the login page.
+  if (req.user) return res.redirect("/admin/dashboard");
   res.redirect("/admin/login");
 }
 
@@ -1214,7 +1236,13 @@ function loginPageHtml() {
 </html>`;
 }
 
-function dashboardHtml() {
+// opts.embedded renders the panel for display inside the main admin chrome:
+// no sidebar of its own, no logout button, no duplicate page chrome. It is set
+// by the caller rather than sniffed from the query string, because the query
+// does not survive the /admin/ -> /admin/login -> /admin/hearing/notes
+// redirect chain that the legacy Telegram session guard sends it through.
+function dashboardHtml(opts = {}) {
+  const bodyClass = opts.embedded ? ' class="embedded"' : '';
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -1563,15 +1591,20 @@ function dashboardHtml() {
     body.embedded #topbar,
     body.embedded .topbar,
     body.embedded .user-chip,
+    body.embedded .logout-btn,
     body.embedded #auth-user-chip { display: none !important; }
+    /* The outer chrome already shows the tab name. */
+    body.embedded .page-header h1 { display: none !important; }
+    body.embedded .page-header { border: 0 !important; padding-top: 0 !important; margin-top: 0 !important; }
     @media (max-width: 768px) {
       body.embedded .main { margin-left: 0 !important; padding: 12px !important; }
     }
   </style>
 </head>
-<body>
+<body${bodyClass}>
 <script>
-  // If loaded inside main admin chrome (iframe with ?embed=1), hide our own sidebar
+  // Belt and braces: the class is normally set server-side (see dashboardHtml),
+  // but honour ?embed=1 too for any caller that still passes it.
   if (new URLSearchParams(location.search).get('embed') === '1') {
     document.body.classList.add('embedded');
   }
@@ -2877,4 +2910,4 @@ function esc(s) {
 </html>`;
 }
 
-module.exports = { router, handleAdminCallback, initPromptTable, getSavedPrompt, requireAuth };
+module.exports = { router, handleAdminCallback, initPromptTable, getSavedPrompt, requireAuth, dashboardHtml };

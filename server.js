@@ -5350,6 +5350,37 @@ app.post("/admin/hearing/individual/:noteId/closing/:closingId/status", async (r
 // Loads /admin/?embed=1#tab in an iframe so the outer sidebar stays visible.
 // This lets JJ browse Intakes, Messages, Prompt, Research, etc. without leaving
 // the unified navigation.
+// The Zara operational panel, rendered for display INSIDE the admin chrome.
+//
+// /admin/panel/:tab used to iframe "/admin/?embed=1#<tab>". That never worked:
+// admin.js guards "/" with its own legacy Telegram-session check (a separate
+// admin_token cookie), so the request bounced to /admin/login, which — for an
+// already-authenticated user — bounces on to /admin/hearing/notes. The query
+// string was dropped on the way, so the panel never learned it was embedded,
+// and the iframe ended up rendering the whole Britannia admin page inside the
+// admin page: the "mirror screen".
+//
+// This route serves the panel HTML directly. Everything under /admin is
+// already behind auth.requireAdminAuth (server.js line 97), so the user is
+// authenticated; the role check below mirrors the one on /admin/.
+app.get("/admin/panel/embed", (req, res) => {
+  try {
+    if (req.user && req.user.r !== "admin") {
+      return res.status(403).send("The Zara operations panel is admin-only.");
+    }
+    const admin = require("./admin");
+    if (typeof admin.dashboardHtml !== "function") {
+      return res.status(500).send("Panel unavailable: admin.dashboardHtml is not exported.");
+    }
+    // Never let a stale copy of the panel outlive a deploy inside the frame.
+    res.set("Cache-Control", "no-store");
+    res.send(admin.dashboardHtml({ embedded: true }));
+  } catch (err) {
+    console.error("[/admin/panel/embed]:", err.message);
+    res.status(500).send("Panel failed to render: " + err.message);
+  }
+});
+
 app.get("/admin/panel/:tab", async (req, res) => {
   try {
     // Only admin role can see Zara operational tabs. Others → dashboard.
@@ -5402,7 +5433,7 @@ app.get("/admin/panel/:tab", async (req, res) => {
       body: `
         <div style="margin:-28px -32px -40px 0; padding:0; min-height:calc(100vh - 0px);">
           <iframe
-            src="/admin/?embed=1#${tab}"
+            src="/admin/panel/embed#${tab}"
             id="zara-embed"
             style="width:100%; min-height:calc(100vh - 8px); height:calc(100vh - 8px); border:0; display:block; background:white; border-radius:8px 0 0 0;"
             allow="clipboard-read; clipboard-write"
