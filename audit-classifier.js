@@ -42,8 +42,61 @@ const HAIKU_MODEL = process.env.AUDIT_CLASSIFIER_MODEL || "claude-3-5-haiku-2024
 const CONFIRM_THRESHOLD = Number(process.env.AUDIT_CLASSIFY_CONFIRM_AT || 55);
 const AI_TRIGGER_SCORE = Number(process.env.AUDIT_CLASSIFY_AI_BELOW || 70);
 const MAX_TEXT_FOR_AI = 6000;
+const MAX_TEXT = 200000;
 
 // ── Text extraction ─────────────────────────────────────────
+
+/**
+ * Reduce an HTML document to the words a human would read.
+ *
+ * This matters more than it looks. EDGAR serves every 10-K, 10-Q and 8-K
+ * as .htm, and a modern filing is roughly 95% inline styling and inline
+ * XBRL tags by volume. Returning the raw source and then truncating it
+ * gave the classifier a slice that was 96% markup and — on a real filing,
+ * where the styled preamble runs past the truncation point — contained
+ * none of the document's actual words. "QUARTERLY REPORT", "GOING
+ * CONCERN", the statement headings: all of it fell outside the window, so
+ * an EDGAR filing was effectively classified on its filename alone.
+ *
+ * Stripping first and truncating after puts real text in the window.
+ * Done with regexes rather than a parser on purpose: no new dependency,
+ * and classification wants a bag of words, not a DOM.
+ */
+function htmlToText(html) {
+  let s = String(html || "");
+  // Script, style and head metadata carry no classification signal and a
+  // great deal of volume.
+  s = s.replace(/<(script|style|head)\b[^>]*>[\s\S]*?<\/\1>/gi, " ");
+  // Block-level boundaries become line breaks so headings stay separable.
+  s = s.replace(/<\/(p|div|tr|h[1-6]|li|table|section)>/gi, "\n");
+  s = s.replace(/<br\s*\/?>/gi, "\n");
+  // Cell boundaries become spaces so "Total current liabilities" does not
+  // run into the figure beside it.
+  s = s.replace(/<\/t[dh]>/gi, " ");
+  s = s.replace(/<[^>]+>/g, " ");
+  // Entities, numeric and named. &#160;/&nbsp; dominate EDGAR documents.
+  s = s.replace(/&#(\d+);/g, (_, d) => {
+    const n = Number(d);
+    return n === 160 ? " " : n > 31 && n < 65536 ? String.fromCharCode(n) : " ";
+  });
+  s = s.replace(/&#x([0-9a-f]+);/gi, (_, h) => {
+    const n = parseInt(h, 16);
+    return n === 160 ? " " : n > 31 && n < 65536 ? String.fromCharCode(n) : " ";
+  });
+  s = s
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&(?:rsquo|lsquo|apos|#39);/gi, "'")
+    .replace(/&(?:rdquo|ldquo);/gi, '"')
+    .replace(/&(?:mdash|ndash);/gi, "-")
+    .replace(/&[a-z]+;/gi, " ");
+  // Collapse the whitespace the stripping leaves behind.
+  s = s.replace(/[ \t ]+/g, " ").replace(/\n\s*\n\s*\n+/g, "\n\n");
+  return s.trim();
+}
 
 async function extractText(buffer, filename, mimeType) {
   const name = String(filename || "").toLowerCase();
@@ -72,8 +125,19 @@ async function extractText(buffer, filename, mimeType) {
       });
       return { text: parts.join("\n"), pages: wb.SheetNames.length, engine: "xlsx", sheets: wb.SheetNames };
     }
-    if (["txt", "md", "json", "xml", "htm", "html"].includes(ext) || /^text\//.test(mimeType || "")) {
-      return { text: buffer.toString("utf8").slice(0, 200000), pages: null, engine: "utf8" };
+    // HTML and inline-XBRL: strip to readable text BEFORE truncating.
+    // Truncating the source first is what hid every EDGAR filing's body
+    // behind its own styling preamble.
+    if (["htm", "html", "xhtml"].includes(ext) || /html/.test(mimeType || "")) {
+      const text = htmlToText(buffer.toString("utf8"));
+      return { text: text.slice(0, MAX_TEXT), pages: null, engine: "html-text" };
+    }
+    if (["txt", "md", "json", "xml"].includes(ext) || /^text\//.test(mimeType || "")) {
+      const raw = buffer.toString("utf8");
+      // An .xml that is really a filing document gets the same treatment.
+      const looksMarkedUp = /<[a-z][^>]*>/i.test(raw.slice(0, 4000));
+      const text = looksMarkedUp ? htmlToText(raw) : raw;
+      return { text: text.slice(0, MAX_TEXT), pages: null, engine: looksMarkedUp ? "html-text" : "utf8" };
     }
   } catch (err) {
     return { text: "", pages: null, engine: "failed", error: err.message };
@@ -565,6 +629,7 @@ async function classify({ filename, buffer, mimeType, sizeBytes, useAI = true, p
 module.exports = {
   classify,
   extractText,
+  htmlToText,
   scoreDeterministic,
   preflight,
   haikuAvailable,

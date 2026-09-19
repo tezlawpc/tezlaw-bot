@@ -823,6 +823,27 @@ app.get("/admin/civil/new", async (req, res) => {
   }
 });
 
+// ── Civil: firm-wide work-in-progress report ────────────────
+// The app has had /api/staff/civil/wip-report since build 38; the web had no
+// way to see unbilled time across the whole book. The table itself is drawn
+// client-side by /static/civil-admin.js against the mirrored API.
+app.get("/admin/civil/wip", async (req, res) => {
+  try {
+    const ui = require("./civil-litigation-ui");
+    const chrome = require("./hearing-notes");
+    const body = `
+      <div data-civil-panel="wip" style="padding:24px;max-width:1400px;">
+        <a href="/admin/civil" style="color:#B8891E;text-decoration:none;font-size:12px;">← Back to Kanban</a>
+        <h1 style="margin:8px 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">💰 Work in Progress</h1>
+        <div style="color:#7B5330;font-style:italic;margin-bottom:16px;">Unbilled time across every active civil matter, highest first.</div>
+      </div>
+      ${ui.civilAdminScriptTag()}`;
+    res.send(chrome.renderAdminChrome({ title: "Civil WIP", body, activeItem: "civil" }));
+  } catch (err) {
+    res.status(500).send("WIP report failed: " + err.message);
+  }
+});
+
 // ── Civil: move a matter between kanban stages ──────────────
 // The web board and case page had no way to change a case's stage at all —
 // only the iOS app did (POST /api/staff/civil/cases/:id/move-stage). This is

@@ -65,6 +65,53 @@ function requireFirmUser(req, res, next) {
   next();
 }
 
+// ═══════════════════════════════════════════════════════
+//  CIVIL API PARITY BRIDGE
+//  ────────────────────────────────────────────────────
+//  Every /api/staff/civil/* route is registered a SECOND time under
+//  /admin/civil/api/*, hitting the identical handler.
+//
+//  Why: the two surfaces had drifted badly in both directions. Five civil
+//  modules (discovery, depositions, team, billing/budgets, docket) had full
+//  API coverage and no web UI at all, because each web feature needed a
+//  hand-written mirror route and most never got written. Mirroring at
+//  registration time means a route added for the app is on the web the same
+//  day, with no second implementation to keep in step.
+//
+//  Auth: the mirror drops requireBearer only. server.js gates everything
+//  under /admin with auth.requireAdminAuth (registered at line 97, long
+//  before this runs), and that middleware sets req.user to the same
+//  { uid, u, n, r } payload the app's bearer token carries — so
+//  requireFirmUser and every handler that reads req.user.n / req.user.u /
+//  isAdmin(req.user) keep working unchanged.
+const CIVIL_ADMIN_PREFIX = "/admin/civil/api";
+// Source prefixes that get an admin twin. /api/staff/users is in here because
+// the team picker needs the firm directory and it lives outside the civil
+// namespace; everything else the civil UI touches is under /api/staff/civil.
+const CIVIL_MIRROR_PREFIXES = ["/api/staff/civil", "/api/staff/users"];
+
+function makeCivilAdminMirror(app) {
+  const state = { mirrored: 0 };
+  const mirror = {};
+  for (const method of ["get", "post", "put", "patch", "delete"]) {
+    mirror[method] = (path, ...rest) => {
+      app[method](path, ...rest);           // the real bearer-auth route
+      if (typeof path !== "string") return;
+      const src = CIVIL_MIRROR_PREFIXES.find(p => path.startsWith(p));
+      if (!src) return;
+      const chain = rest.filter(fn => fn !== requireBearer);
+      if (!chain.length) return;
+      // "/api/staff/users" -> "/admin/civil/api/users"; the civil prefix keeps
+      // its own tail ("/cases/:id" -> "/admin/civil/api/cases/:id").
+      const tail = src === "/api/staff/users" ? "/users" : path.slice(src.length);
+      app[method](CIVIL_ADMIN_PREFIX + tail, ...chain);
+      state.mirrored++;
+    };
+  }
+  mirror.mirroredCount = () => state.mirrored;
+  return mirror;
+}
+
 function requireConsultantRole(req, res, next) {
   if (!req.user) return res.status(401).json({ ok: false, error: "Auth required" });
   if (req.user.r !== "consultant" && req.user.r !== "admin") {
@@ -1202,11 +1249,15 @@ async function issueClientToken(account) {
 function registerAppApi(app) {
   initClientAuthTables().catch(e => console.warn("[app-api] init:", e.message));
 
+  // Registering civil routes through this shim puts each one on BOTH
+  // /api/staff/civil/* (app, bearer) and /admin/civil/api/* (web, cookie).
+  const civilApp = makeCivilAdminMirror(app);
+
   // Civil litigation module: initialize tables + register routes below.
   try {
     const civil = require("./civil-litigation");
     civil.initTables().catch(e => console.warn("[civil-litigation] init:", e.message));
-    attachCivilLitigationRoutes(app, civil);
+    attachCivilLitigationRoutes(civilApp, civil);
   } catch (e) {
     console.warn("[civil-litigation] module load failed:", e.message);
   }
@@ -1217,7 +1268,7 @@ function registerAppApi(app) {
   try {
     const civilDisc = require("./civil-discovery");
     civilDisc.initTables().catch(e => console.warn("[civil-discovery] init:", e.message));
-    attachCivilDiscoveryRoutes(app, civilDisc);
+    attachCivilDiscoveryRoutes(civilApp, civilDisc);
   } catch (e) {
     console.warn("[civil-discovery] module load failed:", e.message);
   }
@@ -1239,7 +1290,7 @@ function registerAppApi(app) {
   try {
     const civilTeam = require("./civil-team");
     civilTeam.initTables().catch(e => console.warn("[civil-team] init:", e.message));
-    attachCivilTeamRoutes(app, civilTeam);
+    attachCivilTeamRoutes(civilApp, civilTeam);
   } catch (e) {
     console.warn("[civil-team] module load failed:", e.message);
   }
@@ -1251,7 +1302,7 @@ function registerAppApi(app) {
   try {
     const civilBilling = require("./civil-billing");
     civilBilling.initTables().catch(e => console.warn("[civil-billing] init:", e.message));
-    attachCivilBillingRoutes(app, civilBilling);
+    attachCivilBillingRoutes(civilApp, civilBilling);
   } catch (e) {
     console.warn("[civil-billing] module load failed:", e.message);
   }
@@ -1262,7 +1313,7 @@ function registerAppApi(app) {
   try {
     const civilDbx = require("./civil-dropbox");
     civilDbx.initTables().catch(e => console.warn("[civil-dropbox] init:", e.message));
-    attachCivilDropboxRoutes(app, civilDbx);
+    attachCivilDropboxRoutes(civilApp, civilDbx);
     if (process.env.CIVIL_DROPBOX_SYNC !== "off") {
       civilDbx.startScheduler({ everyMinutes: Number(process.env.CIVIL_DROPBOX_SYNC_MINUTES) || 60 });
     }
@@ -1276,10 +1327,12 @@ function registerAppApi(app) {
   try {
     const civilDocket = require("./civil-court-docket");
     civilDocket.initTables().catch(e => console.warn("[civil-court-docket] init:", e.message));
-    attachCivilDocketRoutes(app, civilDocket);
+    attachCivilDocketRoutes(civilApp, civilDocket);
   } catch (e) {
     console.warn("[civil-court-docket] module load failed:", e.message);
   }
+
+  console.log(`[civil] ${civilApp.mirroredCount()} API routes mirrored to ${CIVIL_ADMIN_PREFIX}/* for the web admin`);
 
   // ═══════════════════════════════════════════════════════
   //  AUTH

@@ -227,6 +227,40 @@ async function renderKanban(opts = {}) {
   `.replace("<!--CIVIL_FILTER_BANNER-->", filterBanner);
 }
 
+// The civil admin client is a REAL static file, not inline script. Everything
+// on these pages used to be written inside server-side template literals,
+// where \n and \' are eaten by the server before the browser sees them — a
+// bug that shipped three times and each time killed the entire script block.
+// New behaviour goes in public/civil-admin.js; only the small legacy blocks
+// below are still inline.
+//
+// /static is served with maxAge 7d, so the URL carries the file's mtime and a
+// deploy is picked up immediately instead of a week later.
+function civilAdminScriptTag() {
+  let v = "1";
+  try {
+    // Base 36 of the whole-millisecond mtime. `| 0` would wrap a 2026-era
+    // timestamp into a negative int32, which is neither stable nor monotonic.
+    v = Math.floor(require("fs").statSync(require("path").join(__dirname, "public", "civil-admin.js")).mtimeMs).toString(36);
+  } catch (e) { /* fall back to a constant — a stale cache beats a broken page */ }
+  return `<script src="/static/civil-admin.js?v=${v}" defer></script>`;
+}
+
+// A section heading with action buttons on the right.
+function sectionHead(title, buttons) {
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:24px 0 12px 0;">
+      <h2 style="margin:0;font-family:Cinzel,serif;color:#3E2818;font-size:16px;letter-spacing:1.5px;">${title}</h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">${buttons || ""}</div>
+    </div>`;
+}
+function actionBtn(action, label, kind) {
+  const bg = kind === "danger" ? "#A02818" : kind === "quiet" ? "#F5EBD3" : "#5A3B22";
+  const fg = kind === "quiet" ? "#3E2818" : "#FBF3DE";
+  const bd = kind === "quiet" ? "#D4C4A0" : "#B8891E";
+  return `<button type="button" data-civil-action="${action}" style="padding:7px 13px;background:${bg};color:${fg};border:1px solid ${bd};border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">${label}</button>`;
+}
+
 // ── Case detail page ────────────────────────────────────────
 async function renderCaseDetail(id) {
   const summary = await civil.getCaseSummary(id);
@@ -286,8 +320,9 @@ async function renderCaseDetail(id) {
       <td style="padding:10px;font-size:11px;color:#7B5330;">${esc(d.ccp_rule || "")}</td>
       <td style="padding:10px;"><span style="padding:2px 6px;background:${d.priority === "high" ? "#A02818" : d.priority === "low" ? "#8B7355" : "#B8891E"};color:#FBF3DE;font-size:10px;border-radius:3px;">${esc(d.priority)}</span></td>
       <td style="padding:10px;">${d.auto_generated ? "🤖 AUTO" : "MANUAL"}</td>
+      <td style="padding:10px;text-align:right;"><button type="button" data-civil-complete-deadline="${d.id}" style="padding:4px 9px;background:#F5EBD3;color:#3E2818;border:1px solid #D4C4A0;border-radius:4px;cursor:pointer;font-size:11px;">✓ Done</button></td>
     </tr>
-  `).join("") : `<tr><td colspan="5" style="padding:20px;text-align:center;font-style:italic;color:#7B5330;">No pending deadlines. Add trigger dates (filed, service, trial) to auto-generate.</td></tr>`;
+  `).join("") : `<tr><td colspan="6" style="padding:20px;text-align:center;font-style:italic;color:#7B5330;">No pending deadlines. Add trigger dates (filed, service, trial) to auto-generate.</td></tr>`;
 
   const eventsHtml = events.length ? events.map(e => `
     <tr style="border-bottom:1px solid #E5D5B8;">
@@ -301,7 +336,7 @@ async function renderCaseDetail(id) {
   `).join("") : `<tr><td colspan="6" style="padding:20px;text-align:center;font-style:italic;color:#7B5330;">No events logged yet.</td></tr>`;
 
   return `
-    <div style="padding:24px;max-width:1400px;">
+    <div data-case-id="${id}" style="padding:24px;max-width:1400px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <a href="/admin/civil" style="color:#B8891E;text-decoration:none;font-size:12px;">← Back to Kanban</a>
         <div style="display:flex;align-items:center;gap:8px;">
@@ -335,23 +370,36 @@ async function renderCaseDetail(id) {
       </div>
 
       <!-- Overview -->
-      <h2 style="font-family:Cinzel,serif;color:#3E2818;margin:24px 0 12px 0;font-size:16px;letter-spacing:1.5px;">📋 CASE OVERVIEW</h2>
+      ${sectionHead("📋 CASE OVERVIEW", actionBtn("edit-case", "EDIT CASE"))}
       <table style="width:100%;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;border-collapse:collapse;">
         ${overviewTable}
       </table>
       ${opposingHtml}
 
+      <!-- Court docket checker (build 37) — rendered by civil-admin.js -->
+      <div data-civil-panel="docket"></div>
+
+      <!-- Case team (build 38) — rendered by civil-admin.js -->
+      <div data-civil-panel="team"></div>
+
       <!-- Deadlines -->
-      <h2 style="font-family:Cinzel,serif;color:#3E2818;margin:24px 0 12px 0;font-size:16px;letter-spacing:1.5px;">⏰ PENDING DEADLINES (${deadlines.length})</h2>
+      ${sectionHead(`⏰ PENDING DEADLINES (${deadlines.length})`,
+        actionBtn("add-deadline", "+ ADD DEADLINE") + actionBtn("regenerate-deadlines", "🔄 REGENERATE", "quiet"))}
       <table style="width:100%;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;border-collapse:collapse;">
         <thead style="background:#3E2818;color:#FBF3DE;">
-          <tr><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">DUE DATE</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">DESCRIPTION</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">CCP RULE</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">PRIORITY</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">SOURCE</th></tr>
+          <tr><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">DUE DATE</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">DESCRIPTION</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">CCP RULE</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">PRIORITY</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">SOURCE</th><th style="padding:10px;"></th></tr>
         </thead>
         <tbody>${deadlinesHtml}</tbody>
       </table>
 
+      <!-- Discovery (build 36) — rendered by civil-admin.js -->
+      <div data-civil-panel="discovery"></div>
+
+      <!-- Depositions (build 36) — rendered by civil-admin.js -->
+      <div data-civil-panel="depos"></div>
+
       <!-- Events -->
-      <h2 style="font-family:Cinzel,serif;color:#3E2818;margin:24px 0 12px 0;font-size:16px;letter-spacing:1.5px;">📅 CASE TIMELINE (${events.length})</h2>
+      ${sectionHead(`📅 CASE TIMELINE (${events.length})`, actionBtn("log-event", "+ LOG EVENT"))}
       <table style="width:100%;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;border-collapse:collapse;">
         <thead style="background:#3E2818;color:#FBF3DE;">
           <tr><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">DATE</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">KIND</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">TITLE</th><th style="padding:10px;text-align:left;font-size:11px;letter-spacing:1px;">DETAILS</th><th style="padding:10px;text-align:right;font-size:11px;letter-spacing:1px;">HOURS</th><th style="padding:10px;text-align:right;font-size:11px;letter-spacing:1px;">BILLED</th></tr>
@@ -360,7 +408,7 @@ async function renderCaseDetail(id) {
       </table>
 
       <!-- Communications -->
-      <h2 style="font-family:Cinzel,serif;color:#3E2818;margin:24px 0 12px 0;font-size:16px;letter-spacing:1.5px;">💬 COMMUNICATIONS (${comms.length})</h2>
+      ${sectionHead(`💬 COMMUNICATIONS (${comms.length})`, actionBtn("log-comm", "+ LOG COMMUNICATION"))}
       ${comms.length ? comms.map(c => `
         <div style="background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;padding:12px;margin-bottom:8px;">
           <div style="display:flex;justify-content:space-between;font-size:11px;color:#7B5330;margin-bottom:6px;">
@@ -372,6 +420,9 @@ async function renderCaseDetail(id) {
           ${c.contact_name ? `<div style="font-size:11px;color:#7B5330;margin-top:6px;">${esc(c.contact_name)}${c.contact_email ? " · " + esc(c.contact_email) : ""}</div>` : ""}
         </div>
       `).join("") : `<div style="padding:20px;text-align:center;font-style:italic;color:#7B5330;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">No communications logged yet.</div>`}
+
+      <!-- Billing + matter budget (build 38) — rendered by civil-admin.js -->
+      <div data-civil-panel="financials"></div>
 
       ${renderDocumentsPanel(id, summary, files, fileCats, filesErr)}
 
@@ -406,6 +457,7 @@ async function renderCaseDetail(id) {
           });
         })();
       </script>
+      ${civilAdminScriptTag()}
     </div>
   `;
 }
@@ -554,4 +606,4 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
     </script>`;
 }
 
-module.exports = { renderKanban, renderCaseDetail, renderDocumentsPanel };
+module.exports = { renderKanban, renderCaseDetail, renderDocumentsPanel, civilAdminScriptTag };

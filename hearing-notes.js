@@ -1563,6 +1563,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/civil?stage=trial_prep" class="nav-link" data-perm="civil.read">
         <span class="nav-icon">⚠</span><span class="nav-label">Trial Prep</span>
       </a>
+      <a href="/admin/civil/wip" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">💰</span><span class="nav-label">Work in Progress</span>
+      </a>
       <a href="/admin/civil/dropbox" class="nav-link" data-perm="civil.read">
         <span class="nav-icon">📁</span><span class="nav-label">Document Sync</span>
       </a>
