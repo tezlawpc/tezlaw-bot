@@ -1058,9 +1058,10 @@ function syncPage({ status, files, configured }, user) {
            }`
         : ""
     }
-    <div class="xs muted" style="margin-top:13px;">A full rescan re-reads every file in the folder rather than
-      only what changed. It imports nothing already imported, so it is safe to run — just slower.
-      <a href="#" onclick="runIt(true);return false;">Run a full rescan</a>.</div>
+    <div class="xs muted" style="margin-top:13px;">Every scan walks the whole folder — Dropbox offers no
+      change feed for a shared link — and skips anything already imported at its current revision.
+      A retry run also re-attempts files that previously failed or were skipped.
+      <a href="#" onclick="runIt(true);return false;">Retry failed files</a>.</div>
   </div>
 
   <div class="card tight"><table>
@@ -1077,7 +1078,7 @@ function syncPage({ status, files, configured }, user) {
     catch(e){ alert(e.message); }
   }
   async function runIt(full){
-    if(full && !confirm('Re-read every file in the folder? Nothing already imported is imported again.')) return;
+    if(full && !confirm('Retry every file that previously failed or was skipped?')) return;
     try{ const j = await post('${BASE}/api/sync/run',{full:!!full});
       alert('Scan finished. '+j.imported+' imported, '+j.skipped+' skipped, '+j.failed+' failed.');
       location.reload(); }

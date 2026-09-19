@@ -108,19 +108,6 @@ function systemActor() {
   return { id: null, name: "Dropbox sync", email: "sync@portal.local", org: "company", role: "system" };
 }
 
-async function getCursor() {
-  const r = await db.query(`SELECT value FROM ngtf_audit_settings WHERE key='dropbox_cursor'`);
-  return r.rows[0] ? r.rows[0].value && r.rows[0].value.cursor : null;
-}
-
-async function setCursor(cursor) {
-  await db.query(
-    `INSERT INTO ngtf_audit_settings (key, value) VALUES ('dropbox_cursor', $1)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-    [JSON.stringify({ cursor, at: new Date().toISOString() })]
-  );
-}
-
 async function setStatus(patch) {
   const prev = await lastRun();
   await db.query(
@@ -139,7 +126,8 @@ async function lastRun() {
  * Run one scan.
  *
  * @param {object} opts
- *   full   — ignore the stored cursor and walk the whole folder
+ *   full   — also retry files previously recorded as failed, rather
+ *            than only picking up files never seen before
  *   actor  — who asked (a user for a manual run, the system for cron)
  */
 async function run({ full = false, actor = null } = {}) {
@@ -157,9 +145,12 @@ async function run({ full = false, actor = null } = {}) {
     await initSyncTables();
     await setStatus({ state: "running", startedAt: new Date().toISOString() });
 
-    const cursor = full ? null : await getCursor();
-    const listing = await dropbox.listAll({ cursor });
+    // No cursor: a shared link has no tree-wide cursor (see listAll), so
+    // every scan walks the folder again. Listing is cheap; the sync table
+    // is what stops a file being downloaded twice.
+    const listing = await dropbox.listAll({});
     out.seen = listing.files.length;
+    out.folders = listing.folders;
     out.truncated = listing.truncated;
 
     const holding = await inbox(who);
@@ -186,6 +177,13 @@ async function run({ full = false, actor = null } = {}) {
         `SELECT id, status FROM ngtf_audit_sync_files WHERE source='dropbox' AND remote_id=$1 AND remote_rev=$2`,
         [f.id, f.rev || ""]
       );
+      // A normal scan also leaves alone anything already tried and
+      // failed, so one bad file does not burn the per-run budget every
+      // night. A full run retries those.
+      if (seen.rows[0] && !full && ["failed", "skipped", "duplicate"].includes(seen.rows[0].status)) {
+        await db.query(`UPDATE ngtf_audit_sync_files SET last_seen_at=NOW() WHERE id=$1`, [seen.rows[0].id]);
+        continue;
+      }
       if (seen.rows[0] && seen.rows[0].status === "imported") {
         await db.query(`UPDATE ngtf_audit_sync_files SET last_seen_at=NOW() WHERE id=$1`, [seen.rows[0].id]);
         continue;
@@ -226,8 +224,6 @@ async function run({ full = false, actor = null } = {}) {
         await record(f, "failed", null, err.message);
       }
     }
-
-    if (listing.cursor) await setCursor(listing.cursor);
 
     out.ok = true;
     out.ms = Date.now() - started;

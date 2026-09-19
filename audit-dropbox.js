@@ -133,68 +133,88 @@ async function rpc(path, payload) {
 }
 
 /**
- * Every file under the shared folder, recursively.
+ * Every file under the shared folder.
  *
- * Returns { files, cursor }. Keeping the cursor lets the next scan ask
- * Dropbox only what changed rather than walking the whole tree, which
- * matters once the folder holds years of documents.
+ * Dropbox REFUSES `recursive: true` on a shared link:
+ *
+ *   Error in call to API function "files/list_folder":
+ *   Recursive list folder is not supported for shared link.
+ *
+ * Recursion is only available when the caller owns or has mounted the
+ * folder. Through a link the folder must be walked a level at a time,
+ * which is what this does: list the root, queue any folders it
+ * contains, repeat. Each listing is paged through in full before the
+ * next folder is opened.
+ *
+ * There is no tree-wide cursor for the same reason — a cursor belongs
+ * to one folder's listing, not to the whole link — so every scan walks
+ * the tree afresh. That costs a handful of metadata calls and nothing
+ * else: the expensive part is downloading, and the sync table means a
+ * file already imported at its current revision is never downloaded
+ * twice.
+ *
+ * Paths are built here rather than taken from `path_display`, because
+ * `download()` needs a path relative to the LINK root, which is what
+ * this construction produces.
  */
-async function listAll({ cursor = null, max = 10000 } = {}) {
+async function listAll({ max = 10000, maxDepth = 15 } = {}) {
   const url = sharedLink();
   if (!url) throw new Error("DROPBOX_SHARED_LINK is not set.");
 
   const files = [];
-  let res;
-  let cur = cursor;
+  const queue = [""];
+  const visited = new Set();
+  let folders = 0;
 
-  if (cur) {
-    try {
-      res = await rpc("/2/files/list_folder/continue", { cursor: cur });
-    } catch (err) {
-      // A cursor goes stale if the link is re-shared or the folder is
-      // moved. Fall back to a full walk rather than silently importing
-      // nothing for ever.
-      if (/reset|invalid|expired/i.test(err.message)) {
-        cur = null;
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  if (!res) {
-    res = await rpc("/2/files/list_folder", {
-      path: "",
-      shared_link: { url },
-      recursive: true,
-      include_deleted: false,
-      include_non_downloadable_files: false,
-      limit: 1000,
-    });
-  }
-
-  const take = (r) => {
+  const take = (r, parent) => {
     for (const e of r.entries || []) {
-      if (e[".tag"] !== "file") continue;
-      files.push({
-        id: e.id,
-        name: e.name,
-        path: e.path_display || e.path_lower || "/" + e.name,
-        rev: e.rev,
-        size: e.size,
-        contentHash: e.content_hash || null,
-        modified: e.server_modified || e.client_modified || null,
-      });
+      const childPath = `${parent}/${e.name}`;
+      if (e[".tag"] === "folder") {
+        if (childPath.split("/").length - 1 <= maxDepth) queue.push(childPath);
+      } else if (e[".tag"] === "file") {
+        files.push({
+          id: e.id,
+          name: e.name,
+          path: childPath,
+          rev: e.rev,
+          size: e.size,
+          contentHash: e.content_hash || null,
+          modified: e.server_modified || e.client_modified || null,
+        });
+      }
     }
   };
 
-  take(res);
-  while (res.has_more && files.length < max) {
-    res = await rpc("/2/files/list_folder/continue", { cursor: res.cursor });
-    take(res);
+  while (queue.length && files.length < max) {
+    const parent = queue.shift();
+    if (visited.has(parent)) continue;
+    visited.add(parent);
+
+    let res;
+    try {
+      res = await rpc("/2/files/list_folder", {
+        path: parent,
+        shared_link: { url },
+        recursive: false,
+        include_deleted: false,
+        include_non_downloadable_files: false,
+        limit: 1000,
+      });
+    } catch (err) {
+      // One unreadable subfolder should not abandon the whole scan.
+      if (parent === "") throw err;
+      continue;
+    }
+
+    take(res, parent);
+    while (res.has_more && files.length < max) {
+      res = await rpc("/2/files/list_folder/continue", { cursor: res.cursor });
+      take(res, parent);
+    }
+    folders++;
   }
 
-  return { files, cursor: res.cursor || null, truncated: files.length >= max };
+  return { files, folders, truncated: files.length >= max || queue.length > 0 };
 }
 
 /**
@@ -237,12 +257,21 @@ async function check() {
   }
   try {
     const meta = await rpc("/2/sharing/get_shared_link_metadata", { url: sharedLink() });
-    const probe = await listAll({ max: 200 });
+    if (meta[".tag"] === "file") {
+      return {
+        ok: false,
+        error:
+          `That link points at a single file ("${meta.name}"), not a folder. ` +
+          `Share the folder itself and use its link.`,
+      };
+    }
+    const probe = await listAll({ max: 300 });
     return {
       ok: true,
       folder: meta.name || "(unnamed)",
       kind: meta[".tag"],
       sampled: probe.files.length,
+      folders: probe.folders,
       truncated: probe.truncated,
     };
   } catch (err) {
