@@ -89,11 +89,11 @@ async function listEngagements({ includeArchived = true, limit = 60 } = {}) {
        (SELECT COUNT(*) FROM ngtf_audit_checklist_items i JOIN ngtf_audit_checklists c ON c.id=i.checklist_id
          WHERE c.engagement_id=e.id)::int AS item_count,
        (SELECT COUNT(*) FROM ngtf_audit_checklist_items i JOIN ngtf_audit_checklists c ON c.id=i.checklist_id
-         WHERE c.engagement_id=e.id AND i.status='open')::int AS open_count,
+         WHERE c.engagement_id=e.id AND i.status IN ('open','pending_confirmation'))::int AS open_count,
        (SELECT COUNT(*) FROM ngtf_audit_checklist_items i JOIN ngtf_audit_checklists c ON c.id=i.checklist_id
-         WHERE c.engagement_id=e.id AND i.status='open' AND i.is_gate)::int AS open_gates,
+         WHERE c.engagement_id=e.id AND i.status IN ('open','pending_confirmation') AND i.is_gate)::int AS open_gates,
        (SELECT COUNT(*) FROM ngtf_audit_checklist_items i JOIN ngtf_audit_checklists c ON c.id=i.checklist_id
-         WHERE c.engagement_id=e.id AND i.status='open' AND i.due_date < CURRENT_DATE)::int AS overdue_count,
+         WHERE c.engagement_id=e.id AND i.status IN ('open','pending_confirmation') AND i.due_date < CURRENT_DATE)::int AS overdue_count,
        (SELECT COUNT(*) FROM ngtf_audit_comments cm WHERE cm.engagement_id=e.id AND cm.resolved=FALSE)::int AS open_notes
      FROM ngtf_audit_engagements e
      ${includeArchived ? "" : "WHERE e.status NOT IN ('archived','locked')"}
@@ -351,7 +351,7 @@ async function archiveEngagement(engagementId, actor) {
   const openGates = await db.query(
     `SELECT COUNT(*)::int AS n FROM ngtf_audit_checklist_items i
        JOIN ngtf_audit_checklists c ON c.id=i.checklist_id
-      WHERE c.engagement_id=$1 AND i.status='open' AND i.is_gate`,
+      WHERE c.engagement_id=$1 AND i.status IN ('open','pending_confirmation') AND i.is_gate`,
     [engagementId]
   );
   const r = await db.query(
@@ -742,8 +742,58 @@ async function ingestDocument({
   });
 
   // Satisfy matching open checklist items.
+  //
+  // A GATING item is never satisfied by an unconfirmed machine guess.
+  //
+  // Gates are the items carrying statutory deadlines — the Rule 3-05/8-04
+  // acquired-business financials, the auditor consents, the significance
+  // test. Marking one "satisfied" tells the company it is delivered and
+  // tells the auditor it is available, and both stop chasing it. A wrong
+  // guess there does not merely misfile a document, it puts a false green
+  // on the one deadline somebody needed to be red.
+  //
+  // This is not hypothetical: an executed LOI scored 56 against a
+  // threshold of 55 and ticked off M-030, the acquired-business AUDITED
+  // FINANCIAL STATEMENTS, which is exactly the item whose 71-day clock the
+  // Victorville amendment already missed once. One point of confidence
+  // should not be able to do that.
+  //
+  // Non-gating items still auto-satisfy on a confident classification —
+  // that is the portal earning its keep. Gates wait for a human to confirm
+  // the category, and until then sit in 'pending_confirmation', which
+  // reads as outstanding on every count and countdown.
   const satisfied = [];
+  const heldForConfirmation = [];
   if (engagement && cls.categoryCode) {
+    const gateNeedsHuman = !!cls.needsConfirmation;
+
+    if (gateNeedsHuman) {
+      const held = await db.query(
+        `UPDATE ngtf_audit_checklist_items i
+            SET status='pending_confirmation', satisfied_by_doc=$1
+           FROM ngtf_audit_checklists c
+          WHERE c.id = i.checklist_id
+            AND c.engagement_id = $2
+            AND i.kind='document'
+            AND i.category_code = $3
+            AND i.status='open'
+            AND i.is_gate = TRUE
+          RETURNING i.id, i.label, i.is_gate`,
+        [doc.id, engagement.id, cls.categoryCode]
+      );
+      heldForConfirmation.push(...held.rows);
+      for (const it of held.rows) {
+        await schema.logEvent({
+          documentId: doc.id,
+          engagementId: engagement.id,
+          itemId: it.id,
+          event: "checklist_gate_held_for_confirmation",
+          actor: user,
+          detail: { label: it.label, confidence: cls.confidence, category: cls.categoryCode },
+        });
+      }
+    }
+
     const upd = await db.query(
       `UPDATE ngtf_audit_checklist_items i
           SET status='satisfied', satisfied_by_doc=$1, satisfied_at=NOW()
@@ -753,8 +803,9 @@ async function ingestDocument({
           AND i.kind='document'
           AND i.category_code = $3
           AND i.status='open'
+          AND ($4::boolean = FALSE OR i.is_gate = FALSE)
         RETURNING i.id, i.label, i.is_gate`,
-      [doc.id, engagement.id, cls.categoryCode]
+      [doc.id, engagement.id, cls.categoryCode, gateNeedsHuman]
     );
     satisfied.push(...upd.rows);
     for (const it of upd.rows) {
@@ -782,7 +833,14 @@ async function ingestDocument({
     console.error("[ngtf-audit] upload notification failed:", err.message);
   }
 
-  return { document: doc, classification: cls, engagement, satisfiedItems: satisfied, duplicateOf: null };
+  return {
+    document: doc,
+    classification: cls,
+    engagement,
+    satisfiedItems: satisfied,
+    heldForConfirmation,
+    duplicateOf: null,
+  };
 }
 
 async function getDocument(id, { withBytes = false } = {}) {
@@ -896,7 +954,37 @@ async function confirmClassification(documentId, user) {
   // C16: reporting success for an id that does not exist wrote a
   // permanent event row about a document that was never touched.
   if (!r.rowCount) throw new Error(`Document ${documentId} not found.`);
-  await schema.logEvent({ documentId, event: "classification_confirmed", actor: user });
+
+  // Release any gating item this document was holding. Ingest refuses to
+  // let an unconfirmed classification satisfy a gate, so the item has
+  // been sitting in 'pending_confirmation' counting as outstanding. A
+  // human has now vouched for the category, which is the signal the gate
+  // was waiting for — without this the item would stay outstanding
+  // forever and the confirmation would appear to do nothing.
+  const released = await db.query(
+    `UPDATE ngtf_audit_checklist_items
+        SET status='satisfied', satisfied_at=NOW()
+      WHERE satisfied_by_doc=$1 AND status='pending_confirmation'
+      RETURNING id, label, is_gate, checklist_id`,
+    [documentId]
+  );
+  for (const it of released.rows) {
+    await schema.logEvent({
+      documentId,
+      itemId: it.id,
+      event: "checklist_item_satisfied",
+      actor: user,
+      detail: { label: it.label, isGate: it.is_gate, via: "classification confirmed" },
+    });
+  }
+
+  await schema.logEvent({
+    documentId,
+    event: "classification_confirmed",
+    actor: user,
+    detail: { gatesReleased: released.rowCount },
+  });
+  return { released: released.rows };
 }
 
 // ══════════════════ CHECKLISTS ══════════════════
@@ -1226,7 +1314,7 @@ async function dashboard() {
   const overdue = await db.query(
     `SELECT i.id, i.label, i.category_code, i.due_date, i.is_gate, c.period_label, c.engagement_id
        FROM ngtf_audit_checklist_items i JOIN ngtf_audit_checklists c ON c.id=i.checklist_id
-      WHERE i.status='open' AND i.due_date < CURRENT_DATE
+      WHERE i.status IN ('open','pending_confirmation') AND i.due_date < CURRENT_DATE
       ORDER BY i.is_gate DESC, i.due_date ASC LIMIT 20`
   );
   const notes = await db.query(
@@ -1270,8 +1358,8 @@ async function bracketProgress(engagementId) {
     `SELECT i.bracket_code,
             COUNT(*)::int AS total,
             COUNT(*) FILTER (WHERE i.status IN ('satisfied','answered_no','waived','na'))::int AS done,
-            COUNT(*) FILTER (WHERE i.status='open' AND i.is_gate)::int AS open_gates,
-            COUNT(*) FILTER (WHERE i.status='open' AND i.due_date < CURRENT_DATE)::int AS overdue
+            COUNT(*) FILTER (WHERE i.status IN ('open','pending_confirmation') AND i.is_gate)::int AS open_gates,
+            COUNT(*) FILTER (WHERE i.status IN ('open','pending_confirmation') AND i.due_date < CURRENT_DATE)::int AS overdue
        FROM ngtf_audit_checklist_items i
        JOIN ngtf_audit_checklists c ON c.id=i.checklist_id
       WHERE c.engagement_id=$1 AND i.bracket_code IS NOT NULL
