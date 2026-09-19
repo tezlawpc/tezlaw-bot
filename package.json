@@ -4,7 +4,11 @@
   "description": "TEZ Law PC \u2014 Zara AI Assistant (All Platforms Combined)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node scripts/check-syntax.js && node scripts/check-inline-scripts.js && node scripts/check-civil-parity.js",
+    "check:syntax": "node scripts/check-syntax.js",
+    "check:scripts": "node scripts/check-inline-scripts.js",
+    "check:parity": "node scripts/check-civil-parity.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",

@@ -1,0 +1,46 @@
+name: CI
+
+# Render's deploy trigger for this service is "After CI Checks Pass". Before
+# this workflow existed the repo had no push-triggered checks at all, so a push
+# produced zero check runs and Render sat waiting for a result that was never
+# coming — which is why commits stopped deploying. This gives it a real check
+# to wait on, and the deploy fires as soon as this job goes green.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    name: Syntax + regression checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # Every .js file must parse. A syntax error anywhere takes the whole
+      # server down at boot, after the deploy has already swapped instances.
+      - name: Syntax
+        run: node scripts/check-syntax.js
+
+      # Admin pages that still emit inline <script> are rendered and the script
+      # the browser would actually receive is parsed. Catches the server-side
+      # template-literal trap, where \n and \' are consumed before the browser
+      # sees them and the whole block dies.
+      - name: Inline admin scripts
+        run: node scripts/check-inline-scripts.js
+
+      # Every /api/staff/civil/* route must still have its /admin/civil/api/*
+      # twin on the same handler, so the iOS app and the web admin cannot drift.
+      - name: Civil app/web API parity
+        run: node scripts/check-civil-parity.js
