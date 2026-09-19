@@ -885,6 +885,11 @@ app.post("/admin/civil/dropbox/unlink-all", async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+app.post("/admin/civil/dropbox/delete-imported", async (req, res) => {
+  try { res.json(await _cdx().deleteImportedCases({ dryRun: req.body?.apply !== true })); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 app.post("/admin/civil/dropbox/import-cases", async (req, res) => {
   try {
     res.json(await _cdx().importCasesFromFolders({
@@ -928,6 +933,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
             <button onclick="saveRoots()" style="padding:7px 14px;background:#3E2818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">SAVE ROOT</button>
             <button onclick="browse('')" style="padding:7px 14px;background:#FFF;color:#3E2818;border:1px solid #D4C4A0;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">BROWSE…</button>
             <button onclick="unlinkAll()" style="padding:7px 14px;background:#A02818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">UNLINK ALL</button>
+            <button onclick="resetImport()" style="padding:7px 14px;background:#7B1010;color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">DELETE IMPORTED CASES</button>
           </div>
           <div id="browser" style="margin-top:10px;"></div>
         </div>
@@ -1027,6 +1033,8 @@ app.get("/admin/civil/dropbox", async (req, res) => {
                 + '<span style="font-size:10px;font-weight:700;color:' + (conf[c.confidence] || "#7B5330") + ';">' + esc(c.confidence.toUpperCase()) + '</span></div>'
                 + '<div style="font-size:11px;color:#7B5330;margin-top:2px;">client: ' + esc(c.client_name)
                 + (c.client_created ? ' <em>(new)</em>' : ' <em>(existing)</em>')
+                + (c.nested ? ' · <span style="color:#B84200;">matter under client folder</span>' : '')
+                + (c.opposing_party ? ' · v. ' + esc(c.opposing_party) : '')
                 + (c.case_number ? ' · #' + esc(c.case_number) : '')
                 + (c.files ? ' · ' + c.files + ' file(s)' : '')
                 + '<br>' + esc(c.path) + '</div></div>';
@@ -1049,6 +1057,21 @@ app.get("/admin/civil/dropbox", async (req, res) => {
               + card("Failed", "#A02818", failRows)
               + (d.dry_run && d.created_count ? '<div style="margin-top:10px;padding:10px;background:#F5E4B4;border-left:3px solid #F07800;border-radius:4px;font-size:12px;">Check the LOW-confidence rows above — those folder names did not match a familiar pattern, so the case and client names are the folder name verbatim. Everything is editable afterwards.</div>' : '');
           } catch (e) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(e.message) + '</div>'; }
+        }
+        async function resetImport() {
+          var out = document.getElementById("out");
+          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Counting imported cases…</div>';
+          var r = await fetch("/admin/civil/dropbox/delete-imported", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+          var d = await r.json();
+          if (!d.ok) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(d.error) + '</div>'; return; }
+          if (!d.count) { out.innerHTML = '<div style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">No imported cases to remove.</div>'; return; }
+          if (!confirm("Delete " + d.count + " case(s) created by the Dropbox import, so the import can be re-run cleanly? Cases you created by hand are not touched, and nothing in Dropbox is changed.")) return;
+          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Deleting…</div>';
+          var r2 = await fetch("/admin/civil/dropbox/delete-imported", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apply: true }) });
+          var d2 = await r2.json();
+          out.innerHTML = d2.ok
+            ? '<div style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">Deleted ' + d2.deleted + ' of ' + d2.count + ' imported case(s). Run PREVIEW IMPORT to rebuild them.</div>'
+            : '<div style="color:#A02818;padding:12px;">' + esc(d2.error) + '</div>';
         }
         async function loadRoots() {
           var r = await fetch("/admin/civil/dropbox/roots");

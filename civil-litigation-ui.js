@@ -92,6 +92,7 @@ async function renderKanban(opts = {}) {
         `<span title="${esc(title)}" style="display:inline-block;padding:1px 4px;border-radius:3px;background:${color};color:#FBF3DE;font-size:9px;font-weight:700;line-height:1.4;white-space:nowrap;">${esc(label)}</span>`;
 
       const chips = [
+        c.files_archived_at ? chip("ARCHIVED", "#4B5563", "Case file archived — Dropbox sync paused") : "",
         role ? `<span style="display:inline-block;padding:1px 4px;border:1px solid ${stage.color};border-radius:3px;color:${stage.color};font-size:9px;font-weight:600;line-height:1.4;">${esc(role)}</span>` : "",
         t !== null ? chip(t < 0 ? "TRIAL PAST" : "T-" + t + "d", t <= 60 ? "#A02818" : t <= 120 ? "#F07800" : "#7B5330", "Trial: " + fmtDate(c.trial_date)) : "",
         sol !== null && sol <= 180 ? chip("SOL " + sol + "d", sol <= 90 ? "#A02818" : "#B8891E", "SOL: " + fmtDate(c.statute_of_limitations)) : "",

@@ -127,6 +127,8 @@ async function initTables() {
   await db.query(`ALTER TABLE civil_cases ADD COLUMN IF NOT EXISTS dropbox_sync_error TEXT`).catch(() => {});
   await db.query(`ALTER TABLE civil_cases ADD COLUMN IF NOT EXISTS dropbox_file_count INTEGER DEFAULT 0`).catch(() => {});
   await db.query(`ALTER TABLE civil_cases ADD COLUMN IF NOT EXISTS files_archived_at TIMESTAMPTZ`).catch(() => {});
+  // Remembered so un-archiving can put the matter back where it was.
+  await db.query(`ALTER TABLE civil_cases ADD COLUMN IF NOT EXISTS stage_before_archive TEXT`).catch(() => {});
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS civil_case_files (
@@ -656,7 +658,7 @@ const CASE_NUMBER_RES = [
 // name and the client, rather than guessing a split that could be wrong.
 function parseCaseFolderName(folderName) {
   const raw = String(folderName || "").trim();
-  const out = { folder: raw, case_number: null, case_name: raw, client_name: raw, confidence: "low" };
+  const out = { folder: raw, case_number: null, case_name: raw, client_name: raw, opposing_party: null, confidence: "low" };
   if (!raw) return { ...out, looks_like_case: false, skip_reason: "empty name" };
   if (NON_CASE_FOLDERS.some(re => re.test(raw))) {
     return { ...out, looks_like_case: false, skip_reason: "looks like an admin/support folder" };
@@ -673,21 +675,28 @@ function parseCaseFolderName(folderName) {
       break;
     }
   }
-  // Tidy separators left behind.
-  rest = rest.replace(/[\(\)\[\]]/g, " ").replace(/\s*[-–—_]\s*/g, " - ")
-             .replace(/\s+/g, " ").replace(/^[\s-]+|[\s-]+$/g, "");
+  // Only light cleaning here. Normalising dashes BEFORE the party split would
+  // turn "v-" into "v - " and "Yvette S- Ramirez" into "Yvette S - Ramirez",
+  // wrecking both the separator match and the party names.
+  rest = rest.replace(/[\(\)\[\]]/g, " ").replace(/\s+/g, " ")
+             .replace(/^[\s\-–—_]+|[\s\-–—_]+$/g, "");
 
-  // "Party v. Party" — the client is the first-named party.
-  const vs = rest.match(/^(.+?)\s+(?:v\.?|vs\.?|versus)\s+(.+)$/i);
+  // "Party v. Party" — the client is the first-named party, the other side is
+  // the opposing party. Real folder names use every separator going:
+  // "v.", "v-", "vs", "VS-", "versus".
+  const vs = rest.match(/^(.+?)\s+(?:v|vs|versus)[.\-–]?\s+(.+)$/i);
   if (vs) {
     out.case_name = rest;
-    out.client_name = vs[1].trim();
+    out.client_name = vs[1].trim().replace(/[\s\-–—_]+$/, "");
+    out.opposing_party = vs[2].trim().replace(/^[\s\-–—_]+/, "");
     out.confidence = "high";
   } else {
-    // "Client - Matter description"
-    const dash = rest.split(" - ");
+    // "Client - Matter description". Safe to normalise dashes now: we already
+    // know there is no party separator to damage.
+    const spaced = rest.replace(/\s*[-–—]\s*/g, " - ").replace(/\s+/g, " ").trim();
+    const dash = spaced.split(" - ");
     if (dash.length >= 2 && dash[0].trim().length >= 2) {
-      out.case_name = rest;
+      out.case_name = spaced;
       out.client_name = dash[0].trim();
       out.confidence = "medium";
     } else {
@@ -705,6 +714,7 @@ function parseCaseFolderName(folderName) {
 
   out.case_name = out.case_name.replace(/\s+/g, " ").trim() || raw;
   out.client_name = out.client_name.replace(/\s+/g, " ").trim() || raw;
+  if (out.opposing_party) out.opposing_party = out.opposing_party.replace(/\s+/g, " ").trim() || null;
   return { ...out, looks_like_case: true };
 }
 
@@ -766,24 +776,47 @@ async function importCasesFromFolders({ dryRun = true, root = null, createdBy = 
 
     for (const e of entries) {
       if (e[".tag"] !== "folder") continue;
-      const path = e.path_display;
+
+      // Is this a client folder holding several matters, or a matter itself?
+      // Real trees mix both: "BZ" holds "BZ v. Hernandez" and two siblings,
+      // while "ADREON vs TREASURE MOUNTAIN" IS the matter and its children are
+      // document categories. Children that read as matters settle it.
+      let units = [{ name: e.name, path: e.path_display, clientOverride: null }];
+      try {
+        const kids = await dbx.listFolder(e.path_display);
+        const matterKids = (kids || []).filter(k =>
+          k[".tag"] === "folder" && parseCaseFolderName(k.name).confidence === "high");
+        if (matterKids.length) {
+          units = matterKids.map(k => ({
+            name: k.name, path: k.path_display,
+            // The parent folder names the client more reliably than parsing
+            // the child ever could.
+            clientOverride: parseCaseFolderName(e.name).client_name,
+          }));
+        }
+      } catch (err) { /* unreadable child listing — treat the parent as the matter */ }
+
+      for (const unit of units) {
+      const path = unit.path;
       if (linked.has(String(path).toLowerCase())) {
-        skipped.push({ folder: e.name, path, reason: "already linked to a case" });
+        skipped.push({ folder: unit.name, path, reason: "already linked to a case" });
         continue;
       }
-      const parsed = parseCaseFolderName(e.name);
+      const parsed = parseCaseFolderName(unit.name);
       if (!parsed.looks_like_case) {
-        skipped.push({ folder: e.name, path, reason: parsed.skip_reason });
+        skipped.push({ folder: unit.name, path, reason: parsed.skip_reason });
         continue;
       }
 
       try {
-        const client = await findOrCreateClient(parsed.client_name, { dryRun, createdBy });
+        const client = await findOrCreateClient(unit.clientOverride || parsed.client_name, { dryRun, createdBy });
         if (dryRun) {
           created.push({
-            folder: e.name, path, case_name: parsed.case_name, case_number: parsed.case_number,
+            folder: unit.name, path, case_name: parsed.case_name, case_number: parsed.case_number,
+            opposing_party: parsed.opposing_party,
             client_name: client.client_name, client_key: client.client_key,
             client_created: client.created, confidence: parsed.confidence, case_id: null,
+            nested: !!unit.clientOverride,
           });
           continue;
         }
@@ -792,6 +825,7 @@ async function importCasesFromFolders({ dryRun = true, root = null, createdBy = 
           client_key: client.client_key,
           case_name: parsed.case_name,
           case_number: parsed.case_number,
+          opposing_party: parsed.opposing_party,
           stage: "intake",
           internal_notes: `Imported from Dropbox folder: ${path}`,
           created_by: createdBy || "dropbox-import",
@@ -800,13 +834,16 @@ async function importCasesFromFolders({ dryRun = true, root = null, createdBy = 
         let synced = null;
         try { synced = await syncCase(newCase.id); } catch (err) { /* reported by the next sweep */ }
         created.push({
-          folder: e.name, path, case_id: newCase.id, case_name: parsed.case_name,
-          case_number: parsed.case_number, client_name: client.client_name,
+          folder: unit.name, path, case_id: newCase.id, case_name: parsed.case_name,
+          case_number: parsed.case_number, opposing_party: parsed.opposing_party,
+          client_name: client.client_name,
           client_key: client.client_key, client_created: client.created,
           confidence: parsed.confidence, files: synced ? synced.total : 0,
+          nested: !!unit.clientOverride,
         });
       } catch (err) {
-        failed.push({ folder: e.name, path, error: err.message });
+        failed.push({ folder: unit.name, path, error: err.message });
+      }
       }
     }
   }
@@ -841,7 +878,18 @@ async function archiveCaseFiles(caseId, { by = null } = {}) {
       WHERE case_id = $1 AND removed_at IS NULL RETURNING id`,
     [caseId]
   );
-  await db.query(`UPDATE civil_cases SET files_archived_at = NOW() WHERE id = $1`, [caseId]);
+  // Archiving means the matter is finished, so move it to the Closed column.
+  // Previously this only froze the file list, which left closed matters sitting
+  // in their old kanban stage looking active.
+  await db.query(
+    `UPDATE civil_cases
+        SET files_archived_at = NOW(),
+            stage_before_archive = COALESCE(stage_before_archive, stage),
+            stage = 'closed',
+            updated_at = NOW()
+      WHERE id = $1`,
+    [caseId]
+  );
 
   try {
     const civil = require("./civil-litigation");
@@ -849,7 +897,7 @@ async function archiveCaseFiles(caseId, { by = null } = {}) {
       event_kind: "note",
       event_date: new Date().toISOString().slice(0, 10),
       title: "Case file archived",
-      description: `${r.rowCount} document${r.rowCount === 1 ? "" : "s"} frozen. Dropbox sync paused for this matter; nothing was moved or deleted in Dropbox.`,
+      description: `${r.rowCount} document${r.rowCount === 1 ? "" : "s"} frozen and the matter moved to Closed. Dropbox sync paused; nothing was moved or deleted in Dropbox.`,
       created_by: by || "dropbox-sync",
     });
   } catch (e) { /* non-fatal */ }
@@ -860,7 +908,16 @@ async function archiveCaseFiles(caseId, { by = null } = {}) {
 async function unarchiveCaseFiles(caseId) {
   await initTables();
   await db.query(`UPDATE civil_case_files SET archived = FALSE WHERE case_id = $1`, [caseId]);
-  await db.query(`UPDATE civil_cases SET files_archived_at = NULL WHERE id = $1`, [caseId]);
+  // Put it back in whatever stage it was in before it was archived.
+  await db.query(
+    `UPDATE civil_cases
+        SET files_archived_at = NULL,
+            stage = COALESCE(stage_before_archive, 'intake'),
+            stage_before_archive = NULL,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [caseId]
+  );
   return { ok: true, case_id: caseId };
 }
 
@@ -952,6 +1009,27 @@ function stopScheduler() {
   return { ok: true };
 }
 
+// Undo an import: deletes ONLY cases this module created (they carry the
+// import marker in internal_notes) so the corrected import can run again.
+// Cases created by hand are never touched. Client contacts are left alone —
+// they are harmless and may have been used elsewhere.
+async function deleteImportedCases({ dryRun = true } = {}) {
+  await initTables();
+  const r = await db.query(
+    `SELECT id, case_name FROM civil_cases
+      WHERE internal_notes LIKE 'Imported from Dropbox folder:%'
+      ORDER BY id ASC`
+  );
+  if (dryRun) return { ok: true, dry_run: true, count: r.rows.length, cases: r.rows };
+  const civil = require("./civil-litigation");
+  let deleted = 0;
+  for (const row of r.rows) {
+    try { await civil.deleteCase(row.id); deleted++; }
+    catch (e) { /* keep going — one bad row must not strand the rest */ }
+  }
+  return { ok: true, dry_run: false, count: r.rows.length, deleted };
+}
+
 module.exports = {
   initTables,
   DOC_CATEGORIES, CATEGORY_KEYS, categorizeFile,
@@ -959,7 +1037,7 @@ module.exports = {
   setCaseFolder, clearCaseFolder, suggestFolderForCase, civilTokens,
   getCivilRoots, setCivilRoots, rootsAreConfigured, browseFolders, unlinkAll,
   syncCase, syncAll,
-  bulkImport, importCasesFromFolders, parseCaseFolderName,
+  bulkImport, importCasesFromFolders, parseCaseFolderName, deleteImportedCases,
   archiveCaseFiles, unarchiveCaseFiles,
   listCaseFiles, categorySummary, fileLink,
   startScheduler, stopScheduler,
