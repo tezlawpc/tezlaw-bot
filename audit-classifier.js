@@ -267,6 +267,48 @@ function buildFallbackBrief({ category, period, filename, textInfo, sizeBytes })
 // Catch the problems that cause an auditor to bounce a PBC item
 // straight back, BEFORE the auditor is notified. Cheap to run and
 // saves a full round trip.
+/**
+ * Decide which engagement tier a classified document belongs to.
+ *
+ * Three rules, in order, and each exists because getting it wrong files
+ * a document somewhere it can never be found:
+ *
+ *  1. A tier inferred from the document's DATE wins, but only if the
+ *     category actually supports it. Previously an inferred tier was
+ *     used unconditionally, so a document whose category exists only at
+ *     the annual and event tiers could be assigned "monthly" and then
+ *     fail to open an engagement.
+ *
+ *  2. For a June-30 fiscal year end there is NO fourth-quarter 10-Q —
+ *     the fourth quarter IS the annual period. Without this, every
+ *     document dated April through June that resolved to the quarterly
+ *     tier threw "Quarter 4 has no 10-Q" and could not be filed at all,
+ *     which is a quarter of the year.
+ *
+ *  3. Otherwise the category's own preference order decides, and a
+ *     category offered only at the event tier goes there rather than
+ *     being forced into a period it does not belong to.
+ */
+function resolveTier(cat, period) {
+  const supported = (cat && cat.tiers) || [];
+  let tier = period && period.inferredTier;
+  if (tier && !supported.includes(tier)) tier = null;
+
+  if (!tier) {
+    tier = supported.includes("monthly")
+      ? "monthly"
+      : supported.includes("quarterly")
+      ? "quarterly"
+      : supported[0] || "monthly";
+  }
+
+  if (tier === "quarterly" && period && period.quarter && period.quarter.quarter === 4) {
+    tier = supported.includes("annual") ? "annual" : supported.includes("event") ? "event" : tier;
+  }
+
+  return tier;
+}
+
 function preflight({ category, filename, text, sizeBytes, textInfo }) {
   const flags = [];
   const t = normalize(text);
@@ -459,12 +501,18 @@ async function classify({ filename, buffer, mimeType, sizeBytes, useAI = true, p
   }
 
   const cat = tax.CATEGORY_BY_CODE[code];
-  const tier =
-    (period && period.inferredTier) ||
-    (cat.tiers.includes("monthly") ? "monthly" : cat.tiers.includes("quarterly") ? "quarterly" : cat.tiers[0]);
+  const tier = resolveTier(cat, period);
 
   const periodLabelForFolder =
-    tier === "annual" ? period.annual.label : tier === "quarterly" ? period.quarter.label : period.month.label;
+    tier === "annual"
+      ? period.annual.label
+      : tier === "quarterly"
+      ? period.quarter.label
+      : tier === "event"
+      ? // The event's own engagement label is derived downstream, from the
+        // document and its date. Until then the folder is provisional.
+        `EVT-${period.asOf || period.annual.end}`
+      : period.month.label;
 
   const flags = [
     ...new Set([

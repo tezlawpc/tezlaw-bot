@@ -1154,6 +1154,29 @@ function calendarPage({ fiscalYear, engagements }, user) {
           : ""
       }
     </div>
+    <div class="card"><h2>Event engagements</h2>
+      <div class="note">An acquisition, disposition, auditor change or non-reliance determination is not a
+        period, so it gets its own engagement keyed to the date it happened. Two clocks start that day:
+        the initial <b>Form 8-K within four business days</b> (Gen. Instr. B.1), and, if the Rule 3-05/8-04
+        significance test clears 20%, <b>audited financial statements of the acquired business within 71
+        calendar days</b> of that 8-K due date (Item 9.01(a)(4)). Run the significance test at signing —
+        a target audit cannot be produced in 71 days if it is commissioned on day 60, which is how the
+        Victorville Item 9.01 amendment came to be filed roughly two and a half months late.</div>
+      ${
+        auth.can(user, "engagement.create")
+          ? `<div style="margin-top:12px;">
+               <label>Open an engagement for a transaction</label>
+               <div class="row">
+                 <input type="text" id="evtlabel" placeholder="e.g. Jiun Jiang share exchange" style="max-width:260px;">
+                 <input type="date" id="evtdate" style="max-width:170px;">
+                 <button class="btn sm" onclick="openEvent(${fiscalYear})">Create</button>
+               </div>
+               <div class="xs muted" style="margin-top:5px;">37 document items, 7 of them gating. The date is
+                 the day the event occurred, not the day you are filing it.</div>
+             </div>`
+          : ""
+      }
+    </div>
     <div class="card"><h2>Late-filing history</h2>
       <div class="note amber">EDGAR shows Form 12b-25 filings for FYE 6/30/2025 (10-K) and for Q1 and Q3 of
         FY2026, and the Q2 FY2026 10-Q appears to have been filed after its due date with no NT on file.
@@ -1176,6 +1199,15 @@ function calendarPage({ fiscalYear, engagements }, user) {
     const label = (document.getElementById('s1label').value || '').trim();
     if(!label) return alert('Name the amendment, e.g. "Amendment No. 2" or "Initial S-1".');
     try{ const j = await post('${BASE}/api/engagement/open',{tier:'s1',fiscalYear:fy,n:label});
+      location.href='${BASE}/engagement/'+j.engagement.id; }
+    catch(e){ alert(e.message); }
+  }
+  async function openEvent(fy){
+    const label = (document.getElementById('evtlabel').value || '').trim();
+    const eventDate = (document.getElementById('evtdate').value || '').trim();
+    if(!label) return alert('Name the transaction, e.g. "Jiun Jiang share exchange".');
+    if(!eventDate) return alert('Enter the date the event occurred — both the 8-K and the 71-day amendment clock run from it.');
+    try{ const j = await post('${BASE}/api/engagement/open',{tier:'event',fiscalYear:fy,n:{label:label,eventDate:eventDate}});
       location.href='${BASE}/engagement/'+j.engagement.id; }
     catch(e){ alert(e.message); }
   }

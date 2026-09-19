@@ -307,9 +307,21 @@ them is the company pre-answering the interim review inquiries.
 | **Quarterly** | 78 | 18 | 22 |
 | **Annual** | 112 | 23 | 28 |
 | **S-1 bring-down** | 15 | 2 | 7 |
+| **Event** | 37 | 0 | 7 |
 
 The S-1 tier is opened per amendment from the Calendar page (AS 4101 requires the bring-down procedures to
 be repeated at *each* amendment, so each gets its own checklist).
+
+The **event** tier is a transaction rather than a period — an acquisition, disposition, auditor change or
+non-reliance determination — and its clock starts on the day the event occurred. Two deadlines drive it:
+the initial Form 8-K within **four business days** (Gen. Instr. B.1), and, where the Rule 3-05/8-04
+significance test clears 20%, audited financial statements of the acquired business within **71 calendar
+days** of that 8-K due date (Item 9.01(a)(4)). Only M-020 and M-030 carry the 71-day date; the other
+gating items are needed for the initial 8-K. Open one from the Calendar page, or upload a document that
+classifies to an event category and the portal opens one from the document's own date and filename.
+
+> Checked against the real case: the Victorville Treasure Holdings 8-K of 3 Sept 2025 produces an
+> Item 9.01 amendment deadline of **19 Nov 2025**. The amendment was filed 3 Feb 2026.
 
 Due dates are computed *backward* from the statutory filing deadline, so they respect Rule 0-3
 business-day rolling and the June-30 fiscal year automatically.

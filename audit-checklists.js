@@ -634,11 +634,132 @@ function buildFiscalYearPlan(fy) {
   return out.sort((a, b) => String(a.periodEnd).localeCompare(String(b.periodEnd)));
 }
 
+// ── Event engagements ───────────────────────────────────────
+//
+// An event engagement is not a period. It is one transaction — an
+// acquisition, a disposition, an auditor change, a non-reliance
+// determination — and its clock starts on the day the event happened
+// rather than on a fiscal boundary.
+//
+// Two deadlines drive it, and they are the reason this tier exists
+// separately from the quarterly checklist that merely ASKS whether an
+// event occurred:
+//
+//   Form 8-K Gen. Instr. B.1   four business days from the event
+//   Form 8-K Item 9.01(a)(4)   71 calendar days from that 8-K due date
+//                              for acquired-business financials
+//
+// The 71-day clock is the one that gets missed. It is why M-020 (the
+// significance test) and M-030 (the target's audited financials) carry
+// the amendment date rather than the 8-K date: the significance test
+// has to be run AT SIGNING, because if it clears 20% a full audit of
+// the target has to be produced inside 71 days, and that cannot be
+// commissioned on day 60. Nightfood's Victorville Item 9.01 amendment
+// missed this window by roughly two and a half months.
+
+/** Filesystem- and URL-safe fragment of an event name. */
+function eventSlug(label) {
+  return (
+    String(label || "event")
+      .trim()
+      .replace(/[^A-Za-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40)
+      .toUpperCase() || "EVENT"
+  );
+}
+
+/**
+ * Build the checklist for a single transaction.
+ *
+ * @param {number} fy      fiscal year the event falls in
+ * @param {object|string} spec  { label, eventDate } — a bare string is
+ *                              treated as the label with today's date.
+ */
+function buildEvent(fy, spec) {
+  const s = typeof spec === "string" ? { label: spec } : spec || {};
+  const label = s.label || "Unnamed event";
+  const eventDate = cal.dstr(s.eventDate) || cal.dstr(new Date());
+
+  const eightK = cal.eightKDeadline(eventDate);
+  const amendment = cal.eightKAFinancialsDeadline(eventDate);
+  const periodLabel = `EVT-${eventDate}-${eventSlug(label)}`;
+
+  // Rule 3-05/8-04 items run on the 71-day amendment clock; every other
+  // gating item is needed for the initial 8-K itself.
+  const AMENDMENT_ITEMS = new Set(["M-020", "M-030"]);
+
+  const codes = tax.categoriesForTier("event");
+  const items = codes.map((c) => ({
+    kind: "document",
+    categoryCode: c.code,
+    bracketCode: c.bracket,
+    label: c.label,
+    authority: c.authority,
+    isGate: !!c.gate,
+    owner: c.owner || "cfo",
+    dueDate: AMENDMENT_ITEMS.has(c.code)
+      ? amendment && amendment.amendmentDueDate
+      : c.gate
+      ? eightK && eightK.dueDate
+      : null,
+    folderPath: tax.folderPath(c.code, { fiscalYear: fy, periodLabel }),
+    note: c.note || null,
+  }));
+
+  const sweeps = SWEEP_QUESTIONS.filter((q) => q.tiers.includes("event")).map((q) => ({
+    kind: "sweep",
+    sweepId: q.id,
+    label: q.prompt,
+    authority: q.authority,
+    why: q.why,
+    spawns: q.spawns,
+    owner: q.owner,
+    isGate: false,
+    dueDate: null,
+  }));
+
+  return {
+    tier: "event",
+    fiscalYear: fy,
+    periodLabel,
+    periodName: `Event — ${label} (${eventDate})`,
+    periodEnd: eventDate,
+    eventDate,
+    eventLabel: label,
+    filingDeadline: eightK
+      ? {
+          form: "8-K",
+          dueDate: eightK.dueDate,
+          ntDueBy: null,
+          extendedDueDate: amendment ? amendment.amendmentDueDate : null,
+        }
+      : null,
+    targetCompleteBy: eightK ? eightK.dueDate : null,
+    items: [...items, ...sweeps],
+    counts: {
+      documents: items.length,
+      sweeps: sweeps.length,
+      gates: items.filter((i) => i.isGate).length,
+    },
+    headline:
+      `Event of ${eventDate}: "${label}". The initial Form 8-K is due ` +
+      `${eightK ? eightK.dueDate : "—"} (four business days, Gen. Instr. B.1). If this is a ` +
+      `business acquisition, run the Rule 3-05/8-04 significance test NOW, not at quarter end: ` +
+      `should it clear 20%, audited financial statements of the acquired business and pro forma ` +
+      `information are due by amendment on ${amendment ? amendment.amendmentDueDate : "—"} ` +
+      `(71 calendar days). Commission the target audit at signing — it cannot be produced inside ` +
+      `71 days if it is started on day 60, which is how the Victorville Item 9.01 amendment came ` +
+      `to be filed well past its window.`,
+  };
+}
+
 function build(tier, fy, n) {
   if (tier === "monthly") return buildMonthly(fy, n);
   if (tier === "quarterly") return buildQuarterly(fy, n);
   if (tier === "annual") return buildAnnual(fy);
   if (tier === "s1") return buildS1BringDown(fy, n || "S-1/A");
+  if (tier === "event") return buildEvent(fy, n);
   throw new Error(`Unknown tier "${tier}"`);
 }
 
@@ -650,6 +771,8 @@ module.exports = {
   buildQuarterly,
   buildAnnual,
   buildS1BringDown,
+  buildEvent,
+  eventSlug,
   buildFiscalYearPlan,
   monthlyDueDate,
   backFrom,

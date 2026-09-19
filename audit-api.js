@@ -393,9 +393,27 @@ router.post("/api/engagement/open", auth.requirePermission("engagement.create"),
   const tier = req.body.tier;
   const fy = parseInt(req.body.fiscalYear, 10);
   // For monthly/quarterly, n is the period number. For an S-1 bring-down
-  // it is the amendment label ("Amendment No. 2"), so it must not be
-  // coerced to an integer.
-  const n = tier === "s1" ? String(req.body.n || "S-1/A").trim() : req.body.n ? parseInt(req.body.n, 10) : null;
+  // it is the amendment label ("Amendment No. 2"), and for an event it is
+  // { label, eventDate } — neither may be coerced to an integer.
+  let n;
+  if (tier === "s1") {
+    n = String(req.body.n || "S-1/A").trim();
+  } else if (tier === "event") {
+    const label = String((req.body.n && req.body.n.label) || req.body.label || "").trim();
+    const eventDate = String((req.body.n && req.body.n.eventDate) || req.body.eventDate || "").trim();
+    if (!label) return fail(res, "An event engagement needs a name — what happened, in a few words.");
+    if (!eventDate) {
+      return fail(
+        res,
+        "An event engagement needs the date the event occurred. The 8-K clock runs four business " +
+          "days from that date and the Item 9.01(a)(4) amendment 71 days from the 8-K due date, so " +
+          "the portal cannot compute either without it."
+      );
+    }
+    n = { label, eventDate };
+  } else {
+    n = req.body.n ? parseInt(req.body.n, 10) : null;
+  }
   if (!tier || !fy) return fail(res, "tier and fiscalYear are required");
   const r = await store.openEngagement({ tier, fiscalYear: fy, n, actor: req.auditUser });
   notify.flush().catch((e) => console.error("[ngtf-audit] notification flush failed:", e.message));

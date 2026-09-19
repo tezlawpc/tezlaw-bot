@@ -105,10 +105,63 @@ async function listEngagements({ includeArchived = true, limit = 60 } = {}) {
 }
 
 /**
+ * Derive an event engagement's spec from the document being filed.
+ *
+ * Used when a document classifies to the event tier and no event
+ * engagement exists yet. The document's own date becomes the event
+ * date, and its filename — stripped of extension, parenthetical notes
+ * and any trailing date — becomes the working name.
+ *
+ * Passing an existing EVT- label through returns the same spec, so a
+ * second document filed against the same transaction lands on the same
+ * engagement rather than opening a duplicate.
+ */
+function eventSpecFor({ filename, asOf, periodLabel } = {}) {
+  if (periodLabel && /^EVT-/.test(String(periodLabel))) {
+    const m = String(periodLabel).match(/^EVT-(\d{4}-\d{2}-\d{2})-(.*)$/);
+    if (m) {
+      const spec = { label: m[2].replace(/-/g, " "), eventDate: m[1] };
+      spec.periodLabel = periodLabel;
+      return spec;
+    }
+  }
+
+  const stem = String(filename || "event")
+    .replace(/\.[A-Za-z0-9]{1,5}$/, "")
+    .replace(/\([^)]*\)/g, " ")
+    // a trailing date in the filename is the event date, not part of its name
+    .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s*\d{4}\b/gi, " ")
+    .replace(/\b\d{4}[-_.]\d{1,2}[-_.]\d{1,2}\b/g, " ")
+    .replace(/\b\d{1,2}[-_.]\d{1,2}[-_.]\d{2,4}\b/g, " ")
+    .replace(/[_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const sniffed = filename ? cal.sniffPeriod(String(filename)) : null;
+  const eventDate =
+    cal.dstr(asOf) || (sniffed && sniffed.asOf ? cal.dstr(sniffed.asOf) : null) || cal.dstr(new Date());
+
+  const spec = { label: stem || "Unnamed event", eventDate };
+  spec.periodLabel = `EVT-${eventDate}-${checklists.eventSlug(spec.label)}`;
+  return spec;
+}
+
+/**
  * Create an engagement and generate its checklist in one step.
  * Idempotent: returns the existing engagement if already present.
  */
 async function openEngagement({ tier, fiscalYear, n, actor }) {
+  // An event belongs to the fiscal year it OCCURRED in, which is not
+  // necessarily the one we are sitting in now. A June 2026 signing filed
+  // in September 2026 is an FY2026 event, and taking the fiscal year
+  // from today would bury it under FY2027 where nobody auditing FY2026
+  // would look for it.
+  if (tier === "event") {
+    const spec = typeof n === "string" ? { label: n } : n || {};
+    const evDate = cal.dstr(spec.eventDate);
+    if (evDate) fiscalYear = cal.fiscalYearOf(evDate);
+  }
+
   const plan = checklists.build(tier, fiscalYear, n);
   const existing = await findEngagement(fiscalYear, tier, plan.periodLabel);
   if (existing) {
@@ -386,7 +439,14 @@ async function ingestDocument({
         : cat.tiers.includes("quarterly")
         ? "quarterly"
         : cat.tiers[0];
-    const label = tier === "annual" ? periods.annual.label : tier === "quarterly" ? periods.quarter.label : periods.month.label;
+    const label =
+      tier === "event"
+        ? eventSpecFor({ filename, asOf: periodHint }).periodLabel
+        : tier === "annual"
+        ? periods.annual.label
+        : tier === "quarterly"
+        ? periods.quarter.label
+        : periods.month.label;
     cls = {
       classified: true,
       categoryCode: categoryOverride,
@@ -468,6 +528,16 @@ async function ingestDocument({
         ? Number(String(periodLabel).match(/^Q(\d)/)?.[1] || 1)
         : tier === "monthly"
         ? Number(String(periodLabel).match(/^M(\d+)/)?.[1] || 1)
+        : tier === "event"
+        ? // An event engagement is a transaction, not a period, so there
+          // is nothing to compute from a fiscal calendar. Derive it from
+          // the document itself: its own date is the event date and its
+          // filename is the working name. Whoever reviews it can rename
+          // the engagement afterwards. The alternative — refusing the
+          // upload because no event exists yet — is how the Jiun Jiang
+          // LOI got turned away, and an executed agreement is exactly
+          // the document that must not bounce.
+          eventSpecFor({ filename, asOf: cls.period && cls.period.asOf, periodLabel })
         : null;
     try {
       const res = await openEngagement({ tier, fiscalYear: fy, n, actor: user });
@@ -485,6 +555,22 @@ async function ingestDocument({
           `upload page, then try again. The file was not stored.`
       );
     }
+  }
+
+  // Re-derive the folder from the engagement the document ACTUALLY
+  // landed on. The classifier's path was a prediction made before the
+  // engagement existed, and for an event tier it can be wrong about the
+  // fiscal year: an event is filed under the year it occurred in, not
+  // the year we happen to be in when someone uploads it. A folder path
+  // that disagrees with the engagement is how a document becomes
+  // unfindable, so the engagement is the authority.
+  if (engagement && cls.categoryCode) {
+    fy = engagement.fiscal_year;
+    tier = engagement.tier;
+    periodLabel = engagement.period_label;
+    cls.folderPath = tax.folderPath(cls.categoryCode, { fiscalYear: fy, periodLabel });
+    cls.tier = tier;
+    cls.period = { ...(cls.period || {}), fiscalYear: fy, periodLabel };
   }
 
   // Duplicate detection — SCOPED TO THE RESOLVED ENGAGEMENT.
@@ -1222,6 +1308,7 @@ module.exports = {
   findEngagement,
   listEngagements,
   openEngagement,
+  eventSpecFor,
   ensureChecklist,
   reconcileChecklist,
   setReportReleaseDate,
