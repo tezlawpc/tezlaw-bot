@@ -96,6 +96,7 @@ const NAV = [
   { key: "triage", href: `${BASE}/triage`, label: "Triage", perm: "document.view_all" },
   { key: "calendar", href: `${BASE}/calendar`, label: "Calendar", perm: "dashboard.view" },
   { key: "taxonomy", href: `${BASE}/taxonomy`, label: "Document index", perm: "dashboard.view" },
+  { key: "sync", href: `${BASE}/sync`, label: "Dropbox", perm: "portal.settings" },
   { key: "users", href: `${BASE}/users`, label: "Users", perm: "portal.users" },
 ];
 
@@ -469,6 +470,20 @@ function engagementPage({ engagement: e, checklist, documents, progress, notes, 
         : ""
     }
     <a class="btn ghost sm" style="margin-top:13px;" href="${BASE}/api/engagement/${e.id}/pbc.xlsx">Export PBC index (.xlsx)</a>
+    ${
+      auth.can(user, "document.download")
+        ? `<div style="margin-top:15px;padding-top:14px;border-top:1px solid var(--line);">
+             <div style="font-weight:600;margin-bottom:3px;">Send this period</div>
+             <div class="xs muted" style="margin-bottom:9px;">Every document in its designated folder, with a manifest of
+               SHA-256 hashes and the PBC index. One archive instead of ${e.doc_count || "dozens of"} downloads.</div>
+             <label class="xs" style="display:block;margin-bottom:4px;">
+               <input type="checkbox" id="expSup"> Include superseded versions</label>
+             <label class="xs" style="display:block;margin-bottom:9px;">
+               <input type="checkbox" id="expCls" checked> Classified documents only</label>
+             <a class="btn sm" id="expBtn" href="${BASE}/api/engagement/${e.id}/export.zip?delivered=1">Download .zip</a>
+           </div>`
+        : ""
+    }
   </div>`;
 
   const docRows = documents.length
@@ -695,6 +710,22 @@ function checklistPage({ engagement: e, checklist }, user) {
       location.reload();
     }catch(e){ alert(e.message); }
   }
+  (function(){
+    // Keep the export link's query string in step with the checkboxes,
+    // so the href is always what the buttons say it is.
+    var b=document.getElementById('expBtn'); if(!b) return;
+    var sup=document.getElementById('expSup'), cls=document.getElementById('expCls');
+    var base=b.getAttribute('href').split('?')[0];
+    function sync(){
+      var q=[];
+      if(sup && sup.checked) q.push('superseded=1');
+      if(cls && cls.checked) q.push('delivered=1');
+      b.setAttribute('href', base + (q.length ? '?'+q.join('&') : ''));
+    }
+    if(sup) sup.addEventListener('change', sync);
+    if(cls) cls.addEventListener('change', sync);
+    sync();
+  })();
   async function accept(id){ try{ await post('${BASE}/api/item/'+id+'/accept'); location.reload(); }catch(e){ alert(e.message); } }
   async function reject(id){
     const r = prompt('What is wrong with it? The company will receive this note.');
@@ -947,6 +978,114 @@ function triagePage({ documents }, user) {
   </script>`;
 
   return chrome({ title: "Triage", body, user, active: "triage", wide: true });
+}
+
+// ── Dropbox sync ────────────────────────────────────────────
+function syncPage({ status, files, configured }, user) {
+  const last = (status && status.lastResult) || null;
+  const rows = files.length
+    ? files
+        .map((f) => {
+          const tone =
+            f.status === "imported" ? "#1C7C54" : f.status === "failed" ? "#991B1B" : "#667";
+          return `<tr>
+        <td><code class="xs">${esc(String(f.remote_path || "").replace(/^\//, ""))}</code>
+          ${f.error ? `<div class="xs" style="color:var(--red);">${esc(f.error)}</div>` : ""}</td>
+        <td>${pill(f.status, tone)}</td>
+        <td>${
+          f.document_id
+            ? `<a href="${BASE}/document/${f.document_id}">${esc(f.filename || "open")}</a>
+               <div class="xs muted"><code>${esc(f.category_code || "unclassified")}</code>${
+                 f.confidence == null ? "" : " · " + f.confidence + "%"
+               }${f.needs_confirmation ? " · needs confirmation" : ""}</div>`
+            : '<span class="xs muted">—</span>'
+        }</td>
+        <td class="sm" style="white-space:nowrap;">${fmtDate(f.last_seen_at)}</td></tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="4"><div class="empty">Nothing scanned yet.</div></td></tr>`;
+
+  const setup = `
+    <div class="note amber"><b>Dropbox is not connected.</b> Set these on the Render service, then run a check:
+      <div class="xs mono" style="margin-top:8px;line-height:1.8;">
+        DROPBOX_SHARED_LINK &nbsp; the folder's share URL<br>
+        DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN &nbsp; for a scheduled scan<br>
+        <span class="muted">or DROPBOX_ACCESS_TOKEN alone, which Dropbox expires after four hours</span>
+      </div>
+      <div class="xs" style="margin-top:9px;">Create the app at dropbox.com/developers with the
+        <code>sharing.read</code> and <code>files.metadata.read</code> scopes. The portal never writes to Dropbox.</div>
+    </div>`;
+
+  const body = `
+  <h1>Dropbox</h1>
+  <div class="sub">Scans the company folder and copies in anything new</div>
+
+  ${configured ? "" : setup}
+
+  <div class="note blue"><b>Imported documents satisfy nothing.</b> Everything the scan finds lands in a holding
+    engagement with no checklist, so no box is ticked and no gate closes until a person files it into a period.
+    A file sitting in a shared folder is not evidence that the company delivered it for the audit — only someone
+    filing it makes that true.</div>
+
+  <div class="card">
+    <div class="between">
+      <div>
+        <div style="font-weight:600;">${configured ? "Connected" : "Not connected"}</div>
+        <div class="xs muted">${
+          status && status.finishedAt ? "Last scan " + esc(String(status.finishedAt).replace("T", " ").slice(0, 16)) : "No scan has run yet"
+        }${status && status.state === "running" ? " · a scan is running now" : ""}</div>
+      </div>
+      <div style="white-space:nowrap;">
+        <button class="btn ghost sm" onclick="checkIt()">Test connection</button>
+        <button class="btn sm" onclick="runIt(false)">Scan now</button>
+      </div>
+    </div>
+    ${
+      last
+        ? `<div class="row" style="margin-top:13px;gap:22px;flex-wrap:wrap;">
+             <div><div class="xs muted">Seen</div><b>${last.seen || 0}</b></div>
+             <div><div class="xs muted">Imported</div><b style="color:var(--green);">${last.imported || 0}</b></div>
+             <div><div class="xs muted">New versions</div><b>${last.versions || 0}</b></div>
+             <div><div class="xs muted">Skipped</div><b>${last.skipped || 0}</b></div>
+             <div><div class="xs muted">Failed</div><b style="color:${last.failed ? "var(--red)" : "inherit"};">${last.failed || 0}</b></div>
+           </div>
+           ${last.deferred ? `<div class="xs" style="margin-top:9px;color:var(--amber);">More files remain; the next scan continues where this one stopped.</div>` : ""}
+           ${
+             last.errors && last.errors.length
+               ? `<details style="margin-top:10px;"><summary class="xs">Errors from the last scan</summary>
+                  <div class="xs mono" style="margin-top:6px;">${last.errors.map((e) => esc(e)).join("<br>")}</div></details>`
+               : ""
+           }`
+        : ""
+    }
+    <div class="xs muted" style="margin-top:13px;">A full rescan re-reads every file in the folder rather than
+      only what changed. It imports nothing already imported, so it is safe to run — just slower.
+      <a href="#" onclick="runIt(true);return false;">Run a full rescan</a>.</div>
+  </div>
+
+  <div class="card tight"><table>
+    <tr><th>File in Dropbox</th><th>Status</th><th>In the portal</th><th>Last seen</th></tr>${rows}</table></div>
+
+  <script>
+  async function post(url, body){
+    const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+    const j = await r.json(); if(!j.ok) throw new Error(j.error||'Request failed'); return j;
+  }
+  async function checkIt(){
+    try{ const j = await post('${BASE}/api/sync/check');
+      alert(j.ok ? ('Connected to "'+j.folder+'". '+j.sampled+' file(s) visible.') : ('Not connected: '+j.error)); }
+    catch(e){ alert(e.message); }
+  }
+  async function runIt(full){
+    if(full && !confirm('Re-read every file in the folder? Nothing already imported is imported again.')) return;
+    try{ const j = await post('${BASE}/api/sync/run',{full:!!full});
+      alert('Scan finished. '+j.imported+' imported, '+j.skipped+' skipped, '+j.failed+' failed.');
+      location.reload(); }
+    catch(e){ alert(e.message); }
+  }
+  </script>`;
+
+  return chrome({ title: "Dropbox", body, user, active: "sync", wide: true });
 }
 
 // ── Upload ──────────────────────────────────────────────────
@@ -1324,6 +1463,7 @@ module.exports = {
   documentPage,
   documentsPage,
   triagePage,
+  syncPage,
   uploadPage,
   taxonomyPage,
   calendarPage,

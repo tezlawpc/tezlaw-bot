@@ -203,6 +203,17 @@ async function createAll() {
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_audit_docs_uploaded ON ngtf_audit_documents (uploaded_at DESC)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_audit_docs_triage ON ngtf_audit_documents (needs_confirmation) WHERE needs_confirmation = TRUE`);
 
+  // Provenance, added additively so an already-deployed database picks
+  // these up on the next boot without a migration step.
+  //
+  // A document that arrived through a folder scan has a different
+  // evidential weight from one a person uploaded, and the record has to
+  // say which. Without this the audit trail would show a NULL uploader
+  // and no explanation, which is worse than either answer.
+  await db.query(`ALTER TABLE ngtf_audit_documents ADD COLUMN IF NOT EXISTS source TEXT`);
+  await db.query(`ALTER TABLE ngtf_audit_documents ADD COLUMN IF NOT EXISTS source_path TEXT`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_audit_docs_source ON ngtf_audit_documents (source) WHERE source IS NOT NULL`);
+
   // ── Immutable event log (chain of custody) ───────────────
   await db.query(`
     CREATE TABLE IF NOT EXISTS ngtf_audit_events (

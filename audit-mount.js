@@ -47,6 +47,12 @@ let _logged = false;
  */
 async function init() {
   await schema.initAuditTables();
+  try {
+    await require("./audit-sync").initSyncTables();
+  } catch (err) {
+    // The folder scan is an add-on; the portal must still boot without it.
+    console.error("[ngtf-audit] sync tables init failed:", err.message);
+  }
   if (!_logged) {
     _logged = true;
     console.log("[ngtf-audit] schema ready (tables, AS 1215 immutability triggers, settings)");
@@ -158,6 +164,39 @@ function startCron() {
     }
   }, opts);
 
+  // Dropbox folder scan.
+  //
+  // Daily at 06:00 by default, before anyone is looking, so the morning
+  // obligations sweep at 07:30 already reflects whatever arrived
+  // overnight. AUDIT_SYNC_CRON overrides it — "0 */6 * * *" for every
+  // six hours, "0 */3 * * *" for every three.
+  //
+  // Set AUDIT_SYNC_ENABLED=0 to keep the page and the manual button but
+  // stop the schedule, which is what you want while the classifier is
+  // still being tuned.
+  if (process.env.AUDIT_SYNC_ENABLED !== "0") {
+    const syncCron = process.env.AUDIT_SYNC_CRON || "0 6 * * *";
+    cron.schedule(
+      syncCron,
+      async () => {
+        try {
+          const sync = require("./audit-sync");
+          const dropbox = require("./audit-dropbox");
+          if (!dropbox.configured()) return;
+          const r = await sync.run({});
+          await notify.flush(100);
+          console.log(
+            `[ngtf-audit] dropbox scan: seen ${r.seen}, imported ${r.imported}, skipped ${r.skipped}, failed ${r.failed}`
+          );
+        } catch (err) {
+          console.error("[ngtf-audit] dropbox scan error:", err.message);
+        }
+      },
+      opts
+    );
+    console.log(`[ngtf-audit] dropbox scan scheduled (${syncCron}, timezone ${tz})`);
+  }
+
   // Audit committee weekly roll-up — Mondays at 08:30.
   cron.schedule("30 8 * * 1", async () => {
     try {
@@ -212,4 +251,7 @@ module.exports = {
   checklists: require("./audit-checklists"),
   classifier: require("./audit-classifier"),
   store: require("./audit-store"),
+  sync: require("./audit-sync"),
+  dropbox: require("./audit-dropbox"),
+  zip: require("./audit-zip"),
 };

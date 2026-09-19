@@ -201,6 +201,13 @@ router.get("/triage", auth.requirePermission("document.view_all"), htmlWrap(asyn
   res.send(ui.triagePage({ documents: docs }, req.auditUser));
 }));
 
+router.get("/sync", auth.requirePermission("portal.settings"), htmlWrap(async (req, res) => {
+  const sync = require("./audit-sync");
+  const dropbox = require("./audit-dropbox");
+  const [status, files] = await Promise.all([sync.lastRun(), sync.recent(60)]);
+  res.send(ui.syncPage({ status, files, configured: dropbox.configured() }, req.auditUser));
+}));
+
 router.get("/taxonomy", auth.requirePermission("dashboard.view"), htmlWrap(async (req, res) => {
   res.send(ui.taxonomyPage(req.auditUser));
 }));
@@ -537,6 +544,184 @@ router.get("/api/engagement/:id/pbc.xlsx", auth.requirePermission("checklist.vie
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="NGTF PBC Index ${engagement.period_label}.xlsx"`);
   res.send(buf);
+}));
+
+// ── Period export (.zip) ────────────────────────────────────
+//
+// The whole period as one archive: every document in its designated
+// folder, plus the PBC index and a manifest. This is what gets sent to
+// TAAD, or to the company, without anyone downloading 112 files by hand.
+//
+// It streams. Documents are fetched from Postgres ONE AT A TIME and
+// written straight to the response, so peak memory is roughly the
+// largest single document rather than the whole period — the difference
+// between working and killing a 512MB instance on an annual engagement.
+//
+// Both sides can run it: an auditor assembling a workpaper set and a
+// company officer sending records are the same operation, and the
+// export is read-only, so it raises no independence question. Every
+// document in the archive is recorded as downloaded by whoever ran it.
+router.get("/api/engagement/:id/export.zip", auth.requirePermission("document.download"), wrap(async (req, res) => {
+  const { ZipWriter } = require("./audit-zip");
+  const id = parseInt(req.params.id, 10);
+  const engagement = await store.getEngagement(id);
+  if (!engagement) return fail(res, "Engagement not found", 404);
+
+  const includeSuperseded = req.query.superseded === "1";
+  const includeIndex = req.query.index !== "0";
+  const onlyDelivered = req.query.delivered === "1";
+
+  const metas = await store.listDocuments({
+    engagementId: id,
+    status: includeSuperseded ? "all" : "active",
+    limit: 5000,
+  });
+
+  const canConfidential = auth.can(req.auditUser, "document.download_confidential");
+  const usable = metas.filter((d) => !d.is_confidential || canConfidential);
+  const withheld = metas.length - usable.length;
+  // "Classified only" drops anything still sitting unclassified, for an
+  // export going to an outside party who should not receive loose files.
+  const chosen = onlyDelivered ? usable.filter((d) => d.category_code) : usable;
+
+  const stamp = engagement.period_label.replace(/[^A-Za-z0-9._-]/g, "-");
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="NGTF ${stamp}.zip"`);
+  // Length is unknown until the last byte, so no Content-Length; the
+  // client gets a chunked response and a progress-free download.
+  res.setHeader("Cache-Control", "no-store");
+
+  const zip = new ZipWriter(res);
+  const manifest = [
+    ["Folder", "File", "Version", "Category", "Bracket", "Size (bytes)", "SHA-256", "Uploaded", "Uploaded by", "Status"],
+  ];
+  let added = 0;
+  let failed = 0;
+
+  for (const m of chosen) {
+    let doc;
+    try {
+      doc = await store.getDocument(m.id, { withBytes: true });
+    } catch (err) {
+      failed++;
+      continue;
+    }
+    if (!doc || !doc.file_data) {
+      failed++;
+      continue;
+    }
+    const folder = (doc.folder_path || "/Unfiled").replace(/^\//, "");
+    const entry = `${folder}/${doc.version > 1 ? `v${doc.version} ` : ""}${doc.filename}`;
+    await zip.add(entry, doc.file_data, doc.uploaded_at ? new Date(doc.uploaded_at) : new Date());
+    manifest.push([
+      folder,
+      doc.filename,
+      String(doc.version),
+      doc.category_code || "",
+      doc.bracket_code || "",
+      String(doc.size_bytes),
+      doc.sha256,
+      cal.dstr(doc.uploaded_at) || "",
+      doc.uploaded_by_name || "",
+      doc.status,
+    ]);
+    added++;
+    try {
+      await store.recordDownload({ documentId: doc.id, user: req.auditUser, req, bytes: doc.size_bytes });
+    } catch (err) {
+      /* the archive matters more than the log line; the export event below still records it */
+    }
+  }
+
+  // Manifest: what is in the archive, with hashes, so the recipient can
+  // verify nothing changed in transit.
+  const csv = manifest
+    .map((row) => row.map((c) => `"${String(c === null || c === undefined ? "" : c).replace(/"/g, '""')}"`).join(","))
+    .join("\r\n");
+  await zip.add("_MANIFEST.csv", Buffer.from("﻿" + csv, "utf8"));
+
+  const readme =
+    `NIGHTFOOD HOLDINGS, INC.\r\n` +
+    `${engagement.period_name || engagement.period_label}\r\n\r\n` +
+    `Exported ${new Date().toISOString()}\r\n` +
+    `By ${req.auditUser.name} <${req.auditUser.email}>\r\n\r\n` +
+    `Documents in this archive: ${added}\r\n` +
+    (failed ? `Documents that could not be read: ${failed}\r\n` : "") +
+    (withheld ? `Confidential documents withheld from this export: ${withheld}\r\n` : "") +
+    `Superseded versions: ${includeSuperseded ? "included" : "excluded"}\r\n\r\n` +
+    `Folders follow the portal's document index. _MANIFEST.csv lists every\r\n` +
+    `file with its SHA-256, so the recipient can verify contents.\r\n\r\n` +
+    `This archive is a copy. The portal remains the record of what was\r\n` +
+    `delivered and when, under AS 1215.\r\n`;
+  await zip.add("_README.txt", Buffer.from(readme, "utf8"));
+
+  if (includeIndex) {
+    try {
+      const checklist = await store.getChecklist(id);
+      if (checklist) {
+        const head = ["Ref", "Item", "Type", "Gating", "Status", "Due date", "Delivered file", "Authority"];
+        const irows = checklist.items.map((i) => [
+          i.category_code || i.sweep_id || "",
+          i.label,
+          i.kind === "sweep" ? "Inquiry" : "Document",
+          i.is_gate ? "YES" : "",
+          i.status,
+          cal.dstr(i.due_date) || "",
+          i.doc_filename || "",
+          Array.isArray(i.authority) ? i.authority.join("; ") : "",
+        ]);
+        const icsv = [head, ...irows]
+          .map((row) => row.map((c) => `"${String(c == null ? "" : c).replace(/"/g, '""')}"`).join(","))
+          .join("\r\n");
+        await zip.add("_PBC_INDEX.csv", Buffer.from("﻿" + icsv, "utf8"));
+      }
+    } catch (err) {
+      /* an index failure must not abort an otherwise complete archive */
+    }
+  }
+
+  await zip.finish();
+  res.end();
+
+  await schema.logEvent({
+    engagementId: id,
+    event: "period_exported",
+    actor: req.auditUser,
+    detail: { documents: added, failed, withheld, includeSuperseded },
+  });
+}));
+
+// ── Dropbox folder scan ─────────────────────────────────────
+//
+// Running a scan is a portal-administration action, not a document
+// action: it is configuration of where records come from. Company
+// contributors and auditors can see the result but cannot trigger it.
+router.get("/api/sync/status", auth.requirePermission("dashboard.view"), wrap(async (req, res) => {
+  const sync = require("./audit-sync");
+  const dropbox = require("./audit-dropbox");
+  ok(res, {
+    configured: dropbox.configured(),
+    lastRun: await sync.lastRun(),
+    counts: await sync.counts(),
+  });
+}));
+
+router.post("/api/sync/check", auth.requirePermission("portal.settings"), wrap(async (req, res) => {
+  const dropbox = require("./audit-dropbox");
+  ok(res, await dropbox.check());
+}));
+
+router.post("/api/sync/run", auth.requirePermission("portal.settings"), wrap(async (req, res) => {
+  const sync = require("./audit-sync");
+  const result = await sync.run({ full: req.body && req.body.full === true, actor: req.auditUser });
+  notify.flush().catch((e) => console.error("[ngtf-audit] notification flush failed:", e.message));
+  if (!result.ok) return fail(res, result.error || "The scan failed.");
+  ok(res, result);
+}));
+
+router.get("/api/sync/files", auth.requirePermission("document.view_all"), wrap(async (req, res) => {
+  const sync = require("./audit-sync");
+  ok(res, { files: await sync.recent(Math.min(200, parseInt(req.query.limit, 10) || 60)) });
 }));
 
 // ── Users ───────────────────────────────────────────────────

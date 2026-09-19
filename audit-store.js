@@ -403,6 +403,8 @@ async function ingestDocument({
   engagementOverride = null,
   additionReason = null,
   req = null,
+  source = null,
+  sourcePath = null,
 }) {
   if (!buffer || !buffer.length) throw new Error("Empty file");
   if (buffer.length > schema.MAX_FILE_BYTES) {
@@ -663,8 +665,8 @@ async function ingestDocument({
        (engagement_id, category_code, bracket_code, folder_path, filename, original_filename, mime_type,
         size_bytes, sha256, file_data, version, supersedes_id, fiscal_year, period_label, period_as_of, tier,
         classification, confidence, classify_method, needs_confirmation, brief, flags, is_confidential,
-        is_gate, uploaded_by, addition_reason, addition_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+        is_gate, uploaded_by, addition_reason, addition_by, source, source_path)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
      RETURNING id, filename, version, size_bytes, sha256, supersedes_id, uploaded_at, post_archive`,
     [
       engagement ? engagement.id : null,
@@ -691,9 +693,11 @@ async function ingestDocument({
       cls.flags && cls.flags.length ? cls.flags : null,
       !!cls.isConfidential,
       !!cls.isGate,
-      user.id,
+      user.id || null,
       isArchived ? additionReason : null,
-      isArchived ? user.id : null,
+      isArchived ? user.id || null : null,
+      source,
+      sourcePath,
     ]
     );
     doc = ins.rows[0];
