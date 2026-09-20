@@ -1581,6 +1581,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/civil/stage/closed" class="nav-link" data-perm="civil.read">
         <span class="nav-icon">✓</span><span class="nav-label">Closed</span>
       </a>
+      <a href="/admin/civil/triage" class="nav-link" data-perm="civil.read">
+        <span class="nav-icon">🧭</span><span class="nav-label">Stage Triage</span>
+      </a>
       <a href="/admin/civil/wip" class="nav-link" data-perm="civil.read">
         <span class="nav-icon">💰</span><span class="nav-label">Work in Progress</span>
       </a>

@@ -255,6 +255,9 @@
   var TEAM_ROLES = [];
   var DISCOVERY_META = null;
   var CASE_ROW = null;
+  var JURISDICTIONS = [];
+  var SERVICE_METHODS = [];
+  var UTBMS = null;
 
   var SERVE_METHODS = ["personal", "mail", "email", "efile", "overnight"];
   var DEPO_STATUSES = ["noticed", "confirmed", "held", "continued", "cancelled"];
@@ -814,6 +817,21 @@
     var oc = c.opposing_counsel || {};
     formModal("Edit case", [
       { name: "case_name", label: "Case name", type: "text", required: true, value: c.case_name },
+      { name: "jurisdiction", label: "Jurisdiction", type: "select", required: true, half: true,
+        value: c.jurisdiction || "CA",
+        // A failed catalogue fetch must not make the case uneditable, so fall
+        // back to whatever the matter already has rather than an empty select.
+        options: (JURISDICTIONS.length
+          ? JURISDICTIONS
+          : [{ key: c.jurisdiction || "CA", label: c.jurisdiction || "CA" }]
+        ).map(function (j) { return { value: j.key, label: j.label }; }),
+        hint: "Decides which rule set computes every deadline on this matter." },
+      { name: "service_method", label: "How we were served", type: "select", half: true,
+        value: c.service_method || "personal",
+        options: (SERVICE_METHODS.length ? SERVICE_METHODS
+          : ["personal", "mail", "email", "efile", "overnight", "fax"]
+        ).map(function (m) { return { value: m, label: m }; }),
+        hint: "Drives the service extension. Federal e-service adds nothing; Georgia adds three days." },
       { name: "case_type", label: "Case type", type: "select", half: true, value: c.case_type,
         options: [""].concat(META.case_types || []) },
       { name: "our_role", label: "Our role", type: "select", half: true, value: c.our_role,
@@ -828,6 +846,13 @@
       { name: "cmc_date", label: "CMC", type: "date", half: true, value: dateVal(c.cmc_date) },
       { name: "trial_date", label: "Trial", type: "date", half: true, value: dateVal(c.trial_date),
         hint: "Changing any trigger date regenerates the CCP deadline chain." },
+      { name: "answered_date", label: "Answer filed", type: "date", half: true, value: dateVal(c.answered_date) },
+      { name: "discovery_cutoff_date", label: "Discovery cutoff (from the order)", type: "date", half: true, value: dateVal(c.discovery_cutoff_date) },
+      { name: "judgment_date", label: "Judgment entered / signed", type: "date", half: true, value: dateVal(c.judgment_date),
+        hint: "Every post-trial and appellate clock runs from this date." },
+      { name: "judgment_notice_date", label: "Notice of entry served", type: "date", half: true, value: dateVal(c.judgment_notice_date),
+        hint: "California and Nevada run their clocks from service of notice, not from entry." },
+      { name: "verdict_date", label: "Verdict / decision", type: "date", half: true, value: dateVal(c.verdict_date) },
       { name: "amount_in_controversy", label: "Amount in controversy ($)", type: "number", step: "0.01", half: true, value: c.amount_in_controversy },
       { name: "billing_type", label: "Billing", type: "select", half: true, value: c.billing_type,
         options: ["", "hourly", "contingency", "flat", "hybrid", "pro bono"] },
@@ -843,6 +868,10 @@
     ], function (v) {
       var body = {
         case_name: v.case_name, case_type: v.case_type, our_role: v.our_role,
+        jurisdiction: v.jurisdiction, service_method: v.service_method,
+        answered_date: v.answered_date, discovery_cutoff_date: v.discovery_cutoff_date,
+        judgment_date: v.judgment_date, judgment_notice_date: v.judgment_notice_date,
+        verdict_date: v.verdict_date,
         court: v.court, county: v.county, case_number: v.case_number,
         opposing_party: v.opposing_party,
         filed_date: v.filed_date, service_date: v.service_date,
@@ -896,8 +925,17 @@
         { name: "event_date", label: "Date", type: "date", half: true, value: new Date().toISOString().slice(0, 10) },
         { name: "title", label: "Title", type: "text", required: true },
         { name: "description", label: "Description", type: "textarea" },
-        { name: "ccp_rule", label: "CCP rule", type: "text", half: true },
+        { name: "ccp_rule", label: "Rule cite", type: "text", half: true },
         { name: "outcome", label: "Outcome", type: "text", half: true },
+        { name: "utbms_code", label: "UTBMS task code", type: "select", half: true,
+          value: (UTBMS && UTBMS.stage_default && CASE_ROW) ? UTBMS.stage_default[CASE_ROW.stage] : "",
+          options: [{ value: "", label: "— none —" }].concat(
+            ((UTBMS && UTBMS.tasks) || []).map(function (t) { return { value: t.code, label: t.code + " " + t.label }; })),
+          hint: "Buckets this time into a phase budget and onto a LEDES invoice line." },
+        { name: "utbms_activity", label: "UTBMS activity", type: "select", half: true, value: "A103",
+          options: [{ value: "", label: "— none —" }].concat(
+            ((UTBMS && UTBMS.activities) || []).filter(function (a) { return !a.extended; })
+              .map(function (a) { return { value: a.code, label: a.code + " " + a.label }; })) },
         { name: "timekeeper", label: "Timekeeper", type: "select", half: true,
           options: [{ value: "", label: "— none —" }].concat(opts),
           hint: "Their own rate applies: team override, then firm default, then the case rate." },
@@ -909,6 +947,7 @@
           event_kind: v.event_kind, event_date: v.event_date || null,
           title: v.title, description: v.description || null,
           ccp_rule: v.ccp_rule || null, outcome: v.outcome || null,
+          utbms_code: v.utbms_code || null, utbms_activity: v.utbms_activity || null,
           billable_hours: num(v.billable_hours), billable_rate: num(v.billable_rate),
         };
         splitTimekeeper(opts, v.timekeeper, body);
@@ -938,9 +977,18 @@
         { name: "timekeeper", label: "Timekeeper", type: "select", half: true,
           options: [{ value: "", label: "— none —" }].concat(opts) },
         { name: "billable_hours", label: "Billable hours", type: "number", step: "0.25", half: true },
+        { name: "utbms_code", label: "UTBMS task code", type: "select", half: true,
+          value: (UTBMS && UTBMS.stage_default && CASE_ROW) ? UTBMS.stage_default[CASE_ROW.stage] : "",
+          options: [{ value: "", label: "— none —" }].concat(
+            ((UTBMS && UTBMS.tasks) || []).map(function (t) { return { value: t.code, label: t.code + " " + t.label }; })) },
+        { name: "utbms_activity", label: "UTBMS activity", type: "select", half: true, value: "A106",
+          options: [{ value: "", label: "— none —" }].concat(
+            ((UTBMS && UTBMS.activities) || []).filter(function (a) { return !a.extended; })
+              .map(function (a) { return { value: a.code, label: a.code + " " + a.label }; })) },
       ], function (v) {
         var body = {
           kind: v.kind, direction: v.direction, channel: v.channel,
+          utbms_code: v.utbms_code || null, utbms_activity: v.utbms_activity || null,
           subject: v.subject || null, body: v.body || null,
           contact_name: v.contact_name || null, contact_email: v.contact_email || null,
           contact_phone: v.contact_phone || null,
@@ -987,8 +1035,26 @@
 
   // ═══════════════════════════════════════════════════════════
   //  STAGE WORKSPACE (one screen per lifecycle phase)
+  //  ─────────────────────────────────────────────────────────
+  //  Four views over the same phase:
+  //    Matters   — the queue, triaged, with gates and progress
+  //    Checklist — this phase's tasks across every matter,
+  //                filterable by role (the case manager's screen)
+  //    Documents — the Dropbox files this phase produced
+  //    Budget    — UTBMS phase budget vs actual
   // ═══════════════════════════════════════════════════════════
   var ALERT_COLOR = { danger: C.waxRed, warn: C.ember, info: C.walnutLight };
+  var ROLE_COLOR = {
+    sales: "#0284C7", attorney: "#3E2818", case_manager: "#E0B44E",
+    docketing: "#7C3AED", billing: "#166534",
+  };
+  var ROLE_LABEL = {
+    sales: "Sales / Intake", attorney: "Attorney", case_manager: "Case Manager",
+    docketing: "Docketing", billing: "Billing",
+  };
+  var STAGE_VIEW = "matters";
+  var STAGE_ROLE = null;
+  var STAGE_DATA = null;
 
   function renderStage() {
     var host = panel("stage");
@@ -997,73 +1063,106 @@
     root.appendChild(note("Loading " + key.replace(/_/g, " ") + "…"));
 
     return api("/stage/" + encodeURIComponent(key)).then(function (d) {
-      clear(root);
-      var st = d.stage || {};
-      var pb = d.playbook || {};
-      var roll = d.rollup || {};
-
-      // ── What this phase is for ──
-      root.appendChild(h("div", {
-        style: "border-left:4px solid " + (st.color || C.walnut) + ";background:" + C.parchmentLit +
-               ";border:1px solid " + C.border + ";border-left-width:4px;border-radius:6px;padding:14px;margin-bottom:12px;",
-      }, [
-        h("div", { text: pb.headline || "", style: "font-family:Cinzel,serif;font-size:14px;color:" + C.ink + ";" }),
-        pb.caution ? h("div", {
-          text: pb.caution,
-          style: "margin-top:8px;font-size:12px;color:" + C.muted + ";font-style:italic;line-height:1.5;",
-        }) : null,
-        (pb.verbs || []).length ? h("div", { style: "margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;" },
-          pb.verbs.map(function (v) {
-            return h("span", {
-              text: v,
-              style: "padding:3px 9px;border:1px solid " + C.border + ";border-radius:11px;background:" +
-                     C.parchment + ";font-size:11px;color:" + C.walnut + ";",
-            });
-          })) : null,
-      ]));
-
-      // ── Rollup ──
-      root.appendChild(h("div", {
-        style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px;margin-bottom:14px;",
-      }, [
-        statCard("Matters", String(roll.count || 0)),
-        statCard("Need Attention", String(roll.at_risk || 0), roll.at_risk ? "danger alerts" : "all clear"),
-        statCard("Open Deadlines", String(roll.open_deadlines || 0)),
-        statCard("At Stake", roll.amount_at_stake ? money(roll.amount_at_stake) : "—"),
-      ]));
-
-      if (roll.next_deadline) {
-        var nd = roll.next_deadline;
-        var ndDays = daysUntil(nd.due_date);
-        root.appendChild(card([
-          h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;" }, [
-            h("div", {}, [
-              h("div", { text: "NEXT UP IN THIS STAGE", style: "font-family:Cinzel,serif;font-size:10px;letter-spacing:1.5px;color:" + C.muted + ";" }),
-              h("div", { text: nd.description, style: "font-size:13px;color:" + C.ink + ";margin-top:3px;" }),
-              h("div", { text: nd.case_name + (nd.ccp_rule ? " · " + nd.ccp_rule : ""), style: "font-size:11px;color:" + C.muted + ";font-style:italic;" }),
-            ]),
-            chip(fmtDate(nd.due_date) + (ndDays !== null ? (ndDays < 0 ? " · " + Math.abs(ndDays) + "d LATE" : " · " + ndDays + "d") : ""),
-                 ndDays !== null && ndDays < 0 ? C.waxRed : ndDays !== null && ndDays <= 14 ? C.ember : C.gold),
-          ]),
-        ], "border-left:4px solid " + C.gold + ";"));
-      }
-
-      // ── Matters ──
-      var cases = d.cases || [];
-      root.appendChild(heading("MATTERS IN " + String(st.label || key).toUpperCase() + " (" + cases.length + ")",
-        btn("+ NEW CASE", function () { location.href = "/admin/civil/new"; })));
-
-      if (!cases.length) {
-        root.appendChild(note("No active matters in this stage. Drag a card here from the board, or change a case's stage from its page."));
-        return;
-      }
-      cases.forEach(function (c) { root.appendChild(stageCaseCard(c, st)); });
+      STAGE_DATA = d;
+      drawStage(host, key, d);
     }).catch(function (e) {
       clear(root).appendChild(note("Stage workspace unavailable: " + e.message));
     });
   }
 
-  function stageCaseCard(c, st) {
+  function drawStage(host, key, d) {
+    var root = clear(host);
+    var st = d.stage || {};
+    var pb = d.playbook || {};
+    var roll = d.rollup || {};
+
+    // ── What this phase is for ──
+    root.appendChild(h("div", {
+      style: "border-left:4px solid " + (st.color || C.walnut) + ";background:" + C.parchmentLit +
+             ";border:1px solid " + C.border + ";border-left-width:4px;border-radius:6px;padding:14px;margin-bottom:12px;",
+    }, [
+      h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline;" }, [
+        h("div", { text: pb.headline || "", style: "font-family:Cinzel,serif;font-size:14px;color:" + C.ink + ";" }),
+        pb.utbms_phase ? chip("UTBMS " + pb.utbms_phase, C.walnutMid, "Time logged here bills to this UTBMS phase") : null,
+      ]),
+      pb.caution ? h("div", {
+        text: pb.caution,
+        style: "margin-top:8px;font-size:12px;color:" + C.muted + ";font-style:italic;line-height:1.5;",
+      }) : null,
+      h("div", { style: "margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;font-size:11px;color:" + C.muted + ";" }, [
+        pb.task_count ? h("span", { text: pb.task_count + " standard tasks" }) : null,
+        pb.gate_count ? h("span", { text: "· " + pb.gate_count + " gate criteria" }) : null,
+        pb.folder ? h("span", { text: "· " + pb.folder + "/" }) : null,
+        (pb.kpis || []).length ? h("span", { text: "· tracks: " + pb.kpis.join(", ") }) : null,
+      ]),
+    ]));
+
+    // ── Rollup ──
+    root.appendChild(h("div", {
+      style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px;",
+    }, [
+      statCard("Matters", String(roll.count || 0)),
+      statCard("Need Attention", String(roll.at_risk || 0), roll.at_risk ? "danger alerts" : "all clear"),
+      statCard("Gate Ready", String(roll.gate_ready || 0), "of " + (roll.count || 0) + " can advance"),
+      statCard("Open Tasks", String(roll.tasks_open || 0), roll.tasks_overdue ? roll.tasks_overdue + " overdue" : ""),
+      statCard("At Stake", roll.amount_at_stake ? money(roll.amount_at_stake) : "—"),
+    ]));
+
+    // ── View switcher ──
+    var views = [["matters", "Matters"], ["checklist", "Checklist"], ["documents", "Documents"], ["budget", "Budget"]];
+    root.appendChild(h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;" },
+      views.map(function (v) {
+        var active = STAGE_VIEW === v[0];
+        return h("button", {
+          type: "button", text: v[1],
+          onclick: function () { STAGE_VIEW = v[0]; drawStage(host, key, STAGE_DATA); },
+          style: "padding:7px 14px;border-radius:14px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;" +
+                 "border:1px solid " + (active ? C.gold : C.border) + ";background:" + (active ? C.walnut : C.parchmentLit) +
+                 ";color:" + (active ? C.goldBright : C.walnut) + ";",
+        });
+      })));
+
+    var body = h("div", {});
+    root.appendChild(body);
+
+    if (STAGE_VIEW === "matters")   return drawMatters(body, key, d);
+    if (STAGE_VIEW === "checklist") return drawChecklist(body, key, d);
+    if (STAGE_VIEW === "documents") return drawStageDocs(body, key, d);
+    if (STAGE_VIEW === "budget")    return drawStageBudget(body, key, d);
+  }
+
+  // ── View: matters ──────────────────────────────────────────
+  function drawMatters(root, key, d) {
+    var st = d.stage || {};
+    var roll = d.rollup || {};
+
+    if (roll.next_deadline) {
+      var nd = roll.next_deadline;
+      var ndDays = daysUntil(nd.due_date);
+      root.appendChild(card([
+        h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;" }, [
+          h("div", {}, [
+            h("div", { text: "NEXT UP IN THIS STAGE", style: "font-family:Cinzel,serif;font-size:10px;letter-spacing:1.5px;color:" + C.muted + ";" }),
+            h("div", { text: nd.description, style: "font-size:13px;color:" + C.ink + ";margin-top:3px;" }),
+            h("div", { text: nd.case_name + (nd.ccp_rule ? " · " + nd.ccp_rule : ""), style: "font-size:11px;color:" + C.muted + ";font-style:italic;" }),
+          ]),
+          chip(fmtDate(nd.due_date) + (ndDays !== null ? (ndDays < 0 ? " · " + Math.abs(ndDays) + "d LATE" : " · " + ndDays + "d") : ""),
+               ndDays !== null && ndDays < 0 ? C.waxRed : ndDays !== null && ndDays <= 14 ? C.ember : C.gold),
+        ]),
+      ], "border-left:4px solid " + C.gold + ";"));
+    }
+
+    var cases = d.cases || [];
+    root.appendChild(heading("MATTERS IN " + String(st.label || key).toUpperCase() + " (" + cases.length + ")",
+      btn("+ NEW CASE", function () { location.href = "/admin/civil/new"; })));
+    if (!cases.length) {
+      root.appendChild(note("No active matters in this stage."));
+      return;
+    }
+    cases.forEach(function (c) { root.appendChild(stageCaseCard(c, st, key)); });
+  }
+
+  function stageCaseCard(c, st, phaseKey) {
     var worst = c.alerts.some(function (a) { return a.level === "danger"; }) ? "danger"
               : c.alerts.some(function (a) { return a.level === "warn"; }) ? "warn" : null;
     var edge = worst ? ALERT_COLOR[worst] : (st.color || C.border);
@@ -1076,6 +1175,7 @@
         dd === null ? C.walnutLight : dd < 0 ? C.waxRed : dd <= 30 ? C.waxRed : dd <= 90 ? C.ember : C.gold);
     }
 
+    var prog = c.task_progress;
     return card([
       h("div", { style: "display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;" }, [
         h("div", { style: "min-width:220px;" }, [
@@ -1090,20 +1190,51 @@
           }),
         ]),
         h("div", { style: "display:flex;gap:5px;flex-wrap:wrap;align-items:flex-start;" }, [
+          c.jurisdiction ? chip(c.jurisdiction, C.walnutMid, "Deadlines computed under this jurisdiction's rules") : null,
           focusChip,
           c.amount_in_controversy ? chip(money(c.amount_in_controversy), C.walnutMid) : null,
           c.files_archived_at ? chip("ARCHIVED", C.walnutLight) : null,
         ]),
       ]),
 
+      // Checklist progress
+      prog && prog.total ? h("div", { style: "margin-top:10px;" }, [
+        h("div", { style: "display:flex;justify-content:space-between;font-size:11px;color:" + C.muted + ";margin-bottom:3px;" }, [
+          h("span", { text: "Checklist " + prog.done + " / " + prog.total +
+                            (prog.critical_open ? " · " + prog.critical_open + " critical open" : "") }),
+          h("span", { text: prog.pct + "%" }),
+        ]),
+        h("div", { style: "height:6px;border-radius:3px;background:" + C.parchment + ";overflow:hidden;border:1px solid " + C.border + ";" }, [
+          h("div", { style: "height:100%;width:" + prog.pct + "%;background:" +
+                     (prog.critical_open ? C.ember : prog.pct === 100 ? C.green : C.gold) + ";" }),
+        ]),
+      ]) : null,
+
       c.alerts.length ? h("div", { style: "margin-top:9px;display:flex;flex-direction:column;gap:4px;" },
         c.alerts.map(function (a) {
           return h("div", {
             text: (a.level === "danger" ? "⚠ " : a.level === "warn" ? "• " : "· ") + a.text,
-            style: "font-size:12px;color:" + ALERT_COLOR[a.level] + ";" +
-                   (a.level === "danger" ? "font-weight:600;" : ""),
+            style: "font-size:12px;color:" + ALERT_COLOR[a.level] + ";" + (a.level === "danger" ? "font-weight:600;" : ""),
           });
         })) : null,
+
+      // Gates
+      c.gates && c.gates.length ? h("div", { style: "margin-top:10px;" }, [
+        h("div", {
+          text: c.gate_ready ? "✓ GATE READY — all criteria met" : "GATE: " + c.gates_open + " of " + c.gates.length + " criteria outstanding",
+          style: "font-family:Cinzel,serif;font-size:10px;letter-spacing:1.2px;color:" +
+                 (c.gate_ready ? C.green : C.ember) + ";margin-bottom:5px;",
+        }),
+        h("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" },
+          c.gates.map(function (gt) {
+            return h("span", {
+              text: (gt.ok ? "✓ " : "○ ") + gt.label, title: gt.label,
+              style: "font-size:10px;padding:2px 7px;border-radius:9px;max-width:100%;" +
+                     "background:" + (gt.ok ? "#E7F0E7" : C.parchment) + ";color:" + (gt.ok ? C.green : C.muted) +
+                     ";border:1px solid " + (gt.ok ? C.green : C.border) + ";",
+            });
+          })),
+      ]) : null,
 
       c.discovery ? h("div", {
         text: c.discovery.total + " discovery set" + (c.discovery.total === 1 ? "" : "s") +
@@ -1113,45 +1244,524 @@
 
       c.deadlines.length ? h("div", { style: "margin-top:10px;border-top:1px solid " + C.border + ";padding-top:8px;" },
         c.deadlines.slice(0, 5).map(function (dl) {
-          var dd = daysUntil(dl.due_date);
+          var dd2 = daysUntil(dl.due_date);
           return h("div", { style: "display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:12px;" }, [
             h("span", { text: dl.description, style: "color:" + C.ink + ";flex:1;" }),
             h("span", {
-              text: fmtDate(dl.due_date) + (dd !== null ? (dd < 0 ? " (" + Math.abs(dd) + "d late)" : " (" + dd + "d)") : ""),
-              style: "white-space:nowrap;color:" + (dd !== null && dd < 0 ? C.waxRed : dd !== null && dd <= 14 ? C.emberDeep : C.muted) + ";",
+              text: fmtDate(dl.due_date) + (dd2 !== null ? (dd2 < 0 ? " (" + Math.abs(dd2) + "d late)" : " (" + dd2 + "d)") : ""),
+              style: "white-space:nowrap;color:" + (dd2 !== null && dd2 < 0 ? C.waxRed : dd2 !== null && dd2 <= 14 ? C.emberDeep : C.muted) + ";",
             }),
           ]);
         }).concat(c.deadlines.length > 5
           ? [h("div", { text: "+" + (c.deadlines.length - 5) + " more", style: "font-size:11px;color:" + C.muted + ";font-style:italic;padding-top:3px;" })]
           : [])) : null,
 
+      // Deadlines the jurisdiction cannot compute — surfaced as work, not hidden.
+      (c.unresolved_deadlines || []).length ? h("div", {
+        style: "margin-top:8px;padding:7px 9px;background:" + C.parchment + ";border-radius:4px;border-left:3px solid " + C.ember + ";",
+      }, [
+        h("div", { text: "NEEDS A DATE", style: "font-family:Cinzel,serif;font-size:9px;letter-spacing:1.2px;color:" + C.emberDeep + ";" }),
+      ].concat(c.unresolved_deadlines.slice(0, 3).map(function (u) {
+        return h("div", { text: u.label + " — " + u.reason, style: "font-size:11px;color:" + C.muted + ";margin-top:2px;" });
+      }))) : null,
+
       h("div", { style: "margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;" }, [
         btn("OPEN MATTER", function () { location.href = "/admin/civil/case/" + c.id; }, "quiet"),
+        (!prog || !prog.total)
+          ? btn("APPLY CHECKLIST", function () { applyTemplate(c.id, phaseKey); })
+          : btn("CHECKLIST", function () { openMatterChecklist(c, phaseKey); }, "quiet"),
         btn("ADVANCE STAGE", function () { openAdvance(c); }),
       ]),
     ], "border-left:4px solid " + edge + ";");
   }
 
+  function applyTemplate(caseId, phase) {
+    api("/cases/" + caseId + "/phase-tasks", { method: "POST", body: { phase: phase } })
+      .then(function (d) { toast(d.created + " tasks added"); return renderStage(); })
+      .catch(function (e) { toast(e.message, true); });
+  }
+
+  // ── View: checklist across the phase ───────────────────────
+  function drawChecklist(root, key, d) {
+    var roles = [null, "attorney", "case_manager", "sales", "docketing", "billing"];
+    root.appendChild(h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center;" },
+      [h("span", { text: "WHOSE WORK:", style: "font-family:Cinzel,serif;font-size:10px;letter-spacing:1.2px;color:" + C.muted + ";" })]
+      .concat(roles.map(function (r2) {
+        var active = STAGE_ROLE === r2;
+        return h("button", {
+          type: "button", text: r2 ? ROLE_LABEL[r2] : "Everyone",
+          onclick: function () { STAGE_ROLE = r2; drawStage(panel("stage"), key, STAGE_DATA); },
+          style: "padding:5px 11px;border-radius:12px;cursor:pointer;font-size:11px;" +
+                 "border:1px solid " + (active ? (r2 ? ROLE_COLOR[r2] : C.gold) : C.border) +
+                 ";background:" + (active ? (r2 ? ROLE_COLOR[r2] : C.walnut) : C.parchmentLit) +
+                 ";color:" + (active ? C.parchmentLit : C.walnut) + ";",
+        });
+      }))));
+
+    var holder = h("div", {});
+    root.appendChild(holder);
+    holder.appendChild(note("Loading the checklist…"));
+
+    var qs = "?phase=" + encodeURIComponent(key) + (STAGE_ROLE ? "&role=" + STAGE_ROLE : "");
+    api("/queue" + qs).then(function (q) {
+      clear(holder);
+      var tasks = q.tasks || [];
+      if (!tasks.length) {
+        holder.appendChild(note(STAGE_ROLE
+          ? "Nothing open for " + ROLE_LABEL[STAGE_ROLE] + " in this phase."
+          : "No open tasks in this phase. Apply the checklist to a matter from the Matters view."));
+        return;
+      }
+      // Grouped by matter, because that is how the work is actually done.
+      var byCase = {};
+      tasks.forEach(function (t2) { (byCase[t2.case_id] = byCase[t2.case_id] || []).push(t2); });
+      Object.keys(byCase).forEach(function (cid) {
+        var list = byCase[cid];
+        var first = list[0];
+        holder.appendChild(card([
+          h("a", {
+            href: "/admin/civil/case/" + cid, text: first.case_name,
+            style: "font-family:Cinzel,serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;",
+          }),
+          h("div", { style: "margin-top:8px;display:flex;flex-direction:column;gap:5px;" },
+            list.map(function (t2) { return taskRow(t2, key); })),
+        ]));
+      });
+    }).catch(function (e) { clear(holder).appendChild(note("Checklist unavailable: " + e.message)); });
+  }
+
+  function taskRow(t2, phaseKey) {
+    var dd = daysUntil(t2.due_date);
+    var row = h("div", {
+      style: "display:flex;align-items:flex-start;gap:9px;padding:6px 8px;border-radius:4px;background:" +
+             C.parchment + ";border-left:3px solid " + (ROLE_COLOR[t2.role] || C.border) + ";",
+    }, [
+      h("input", {
+        type: "checkbox", title: "Mark done",
+        onchange: function (e) {
+          var done = e.target.checked;
+          api("/phase-tasks/" + t2.id, { method: "PATCH", body: { status: done ? "done" : "open" } })
+            .then(function () { toast(done ? "Done" : "Reopened"); return renderStage(); })
+            .catch(function (err) { toast(err.message, true); e.target.checked = !done; });
+        },
+        style: "margin-top:3px;flex-shrink:0;",
+      }),
+      h("div", { style: "flex:1;min-width:0;" }, [
+        h("div", { text: t2.label, style: "font-size:12px;color:" + C.ink + ";line-height:1.4;" }),
+        h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin-top:3px;font-size:10px;color:" + C.muted + ";" }, [
+          h("span", { text: ROLE_LABEL[t2.role] || t2.role }),
+          t2.utbms_code ? h("span", { text: "· " + t2.utbms_code }) : null,
+          t2.assignee_name ? h("span", { text: "· " + t2.assignee_name }) : null,
+          t2.due_date ? h("span", {
+            text: "· due " + fmtDate(t2.due_date) + (dd !== null && dd < 0 ? " (" + Math.abs(dd) + "d late)" : ""),
+            style: dd !== null && dd < 0 ? "color:" + C.waxRed + ";font-weight:600;" : "",
+          }) : null,
+        ]),
+      ]),
+      t2.critical ? chip("CRITICAL", C.waxRed, "Omitting this is a malpractice exposure") : null,
+      btn("EDIT", function () { openEditTask(t2); }, "quiet"),
+    ]);
+    return row;
+  }
+
+  function openEditTask(t2) {
+    formModal("Task", [
+      { name: "label", label: "Task", type: "textarea", value: t2.label, required: true },
+      { name: "role", label: "Owner role", type: "select", half: true, value: t2.role,
+        options: Object.keys(ROLE_LABEL).map(function (k2) { return { value: k2, label: ROLE_LABEL[k2] }; }) },
+      { name: "due_date", label: "Due", type: "date", half: true, value: t2.due_date ? String(t2.due_date).slice(0, 10) : "" },
+      { name: "assignee_name", label: "Assigned to", type: "text", half: true, value: t2.assignee_name },
+      { name: "utbms_code", label: "UTBMS code", type: "text", half: true, value: t2.utbms_code },
+      { name: "status", label: "Status", type: "select", half: true, value: t2.status,
+        options: [{ value: "open", label: "Open" }, { value: "in_progress", label: "In progress" },
+                  { value: "done", label: "Done" }, { value: "na", label: "Not applicable" }] },
+      { name: "notes", label: "Notes", type: "textarea", value: t2.notes },
+    ], function (v) {
+      return api("/phase-tasks/" + t2.id, { method: "PATCH", body: v })
+        .then(function () { toast("Saved"); return renderStage(); });
+    });
+  }
+
+  function openMatterChecklist(c, phaseKey) {
+    var back = h("div", {
+      style: "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;" +
+             "align-items:flex-start;justify-content:center;padding:32px 16px;overflow:auto;",
+    });
+    var box = h("div", {
+      style: "background:" + C.parchment + ";border:1px solid " + C.gold + ";border-radius:8px;padding:18px;max-width:820px;width:100%;",
+    }, [
+      h("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;" }, [
+        h("div", { text: c.case_name, style: "font-family:Cinzel,serif;font-size:14px;color:" + C.walnut + ";" }),
+        btn("CLOSE", function () { document.body.removeChild(back); }, "quiet"),
+      ]),
+    ]);
+    var list = h("div", { style: "display:flex;flex-direction:column;gap:5px;" });
+    box.appendChild(list);
+    list.appendChild(note("Loading…"));
+    back.appendChild(box);
+    back.addEventListener("click", function (e) { if (e.target === back) document.body.removeChild(back); });
+    document.body.appendChild(back);
+
+    api("/cases/" + c.id + "/phase-tasks?phase=" + encodeURIComponent(phaseKey)).then(function (d) {
+      clear(list);
+      (d.tasks || []).forEach(function (t2) {
+        var row = taskRow(t2, phaseKey);
+        if (t2.status === "done") row.style.opacity = ".55";
+        var cb = row.querySelector("input[type=checkbox]");
+        if (cb) cb.checked = t2.status === "done";
+        list.appendChild(row);
+      });
+      if (!(d.tasks || []).length) {
+        list.appendChild(note("No checklist yet."));
+        list.appendChild(btn("APPLY THE " + phaseKey.replace(/_/g, " ").toUpperCase() + " CHECKLIST",
+          function () { applyTemplate(c.id, phaseKey); document.body.removeChild(back); }));
+      }
+    }).catch(function (e) { clear(list).appendChild(note(e.message)); });
+  }
+
+  // ── View: documents for this phase ─────────────────────────
+  function drawStageDocs(root, key, d) {
+    var cases = d.cases || [];
+    root.appendChild(heading("DOCUMENTS PRODUCED IN THIS PHASE",
+      h("span", { text: (d.playbook && d.playbook.folder) ? d.playbook.folder + "/" : "",
+                  style: "font-size:11px;color:" + C.muted + ";font-family:monospace;" })));
+    if (!cases.length) { root.appendChild(note("No matters in this stage.")); return; }
+
+    var linked = cases.filter(function (c) { return c.dropbox_path; });
+    if (!linked.length) {
+      root.appendChild(note("None of these matters has a Dropbox folder linked. Link one from the matter's Documents panel."));
+      return;
+    }
+    linked.forEach(function (c) {
+      var box = card([
+        h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;" }, [
+          h("a", { href: "/admin/civil/case/" + c.id, text: c.case_name,
+                   style: "font-family:Cinzel,serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;" }),
+          btn("RE-SORT FILES", function () {
+            api("/cases/" + c.id + "/files/rephase", { method: "POST" })
+              .then(function (r2) { toast(r2.phased + " of " + r2.files + " files sorted into phases"); return renderStage(); })
+              .catch(function (e) { toast(e.message, true); });
+          }, "quiet"),
+        ]),
+      ]);
+      var filesBox = h("div", { style: "margin-top:8px;" }, [note("Loading files…")]);
+      box.appendChild(filesBox);
+      root.appendChild(box);
+
+      api("/cases/" + c.id + "/files?phase=" + encodeURIComponent(key)).then(function (f) {
+        clear(filesBox);
+        var files = (f.files || []).filter(function (x) { return !x.removed_at; });
+        if (!files.length) {
+          var other = (f.phases || []).reduce(function (n, p) { return n + p.count; }, 0);
+          filesBox.appendChild(h("div", {
+            text: other
+              ? "No files filed to this phase yet (" + other + " in the matter overall). Try RE-SORT FILES."
+              : "No files mirrored yet.",
+            style: "font-size:12px;color:" + C.muted + ";font-style:italic;",
+          }));
+          return;
+        }
+        files.forEach(function (fl) {
+          filesBox.appendChild(h("div", {
+            style: "display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid " + C.border + ";",
+          }, [
+            h("a", {
+              href: "#", text: fl.name,
+              onclick: function (e) {
+                e.preventDefault();
+                api("/files/" + fl.id + "/link").then(function (r2) {
+                  if (r2.url) window.open(r2.url, "_blank", "noopener");
+                }).catch(function (err) { toast(err.message, true); });
+              },
+              style: "flex:1;font-size:12px;color:" + C.ink + ";text-decoration:none;",
+            }),
+            h("span", { text: fl.relative_folder || "", style: "font-size:10px;color:" + C.muted + ";" }),
+            h("span", { text: fl.server_modified ? fmtDate(fl.server_modified) : "", style: "font-size:10px;color:" + C.muted + ";" }),
+          ]));
+        });
+      }).catch(function (e) { clear(filesBox).appendChild(note(e.message)); });
+    });
+  }
+
+  // ── View: phase budget ─────────────────────────────────────
+  function drawStageBudget(root, key, d) {
+    var cases = d.cases || [];
+    root.appendChild(heading("UTBMS PHASE BUDGET vs ACTUAL",
+      h("span", { text: "The report corporate and insurance clients ask for",
+                  style: "font-size:11px;font-style:italic;color:" + C.muted + ";" })));
+    if (!cases.length) { root.appendChild(note("No matters in this stage.")); return; }
+
+    cases.forEach(function (c) {
+      var box = card([
+        h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;" }, [
+          h("a", { href: "/admin/civil/case/" + c.id, text: c.case_name,
+                   style: "font-family:Cinzel,serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;" }),
+          h("div", { style: "display:flex;gap:6px;" }, [
+            btn("SET PHASE BUDGET", function () { openPhaseBudget(c, d.playbook && d.playbook.utbms_phase); }, "quiet"),
+            btn("LEDES", function () { openLedes(c); }, "quiet"),
+          ]),
+        ]),
+      ]);
+      var rowsBox = h("div", { style: "margin-top:8px;" }, [note("Loading…")]);
+      box.appendChild(rowsBox);
+      root.appendChild(box);
+
+      api("/cases/" + c.id + "/phase-budget").then(function (b) {
+        clear(rowsBox);
+        var rows = (b.rows || []).filter(function (r2) { return r2.budget_amount || r2.actual_amount; });
+        if (!rows.length) {
+          rowsBox.appendChild(h("div", {
+            text: "No phase budget set and no coded time yet.",
+            style: "font-size:12px;color:" + C.muted + ";font-style:italic;",
+          }));
+          return;
+        }
+        rows.forEach(function (r2) {
+          var pct = r2.pct_consumed;
+          var barColor = r2.over_budget ? C.waxRed : (pct != null && pct >= 75) ? C.ember : C.gold;
+          rowsBox.appendChild(h("div", { style: "padding:6px 0;border-bottom:1px solid " + C.border + ";" }, [
+            h("div", { style: "display:flex;justify-content:space-between;gap:10px;font-size:12px;" }, [
+              h("span", { text: r2.utbms_phase + " " + r2.short, style: "color:" + C.ink + ";" }),
+              h("span", {
+                text: money(r2.actual_amount) + (r2.budget_amount ? " of " + money(r2.budget_amount) : " (no budget)"),
+                style: "color:" + (r2.over_budget ? C.waxRed : C.muted) + ";font-weight:600;",
+              }),
+            ]),
+            pct != null ? h("div", { style: "height:5px;border-radius:3px;background:" + C.parchment + ";margin-top:4px;overflow:hidden;" }, [
+              h("div", { style: "height:100%;width:" + Math.min(100, pct) + "%;background:" + barColor + ";" }),
+            ]) : null,
+            h("div", {
+              text: Number(r2.actual_hours || 0).toFixed(2) + "h" +
+                    (pct != null ? " · " + pct + "% consumed" : "") +
+                    (r2.variance != null ? " · variance " + money(r2.variance) : ""),
+              style: "font-size:10px;color:" + C.muted + ";margin-top:2px;",
+            }),
+          ]));
+        });
+        var tot = b.totals || {};
+        rowsBox.appendChild(h("div", {
+          text: "TOTAL " + money(tot.actual_amount) + (tot.budget_amount ? " of " + money(tot.budget_amount) : "") +
+                (tot.pct_consumed != null ? " · " + tot.pct_consumed + "%" : "") +
+                (tot.over_phases ? " · " + tot.over_phases + " phase(s) over budget" : ""),
+          style: "margin-top:8px;font-family:Cinzel,serif;font-size:12px;color:" +
+                 (tot.over_phases ? C.waxRed : C.ink) + ";",
+        }));
+      }).catch(function (e) { clear(rowsBox).appendChild(note(e.message)); });
+    });
+  }
+
+  function openPhaseBudget(c, defaultPhase) {
+    api("/utbms").then(function (u) {
+      formModal("Phase budget — " + c.case_name, [
+        { name: "utbms_phase", label: "UTBMS phase", type: "select", required: true, half: true,
+          value: defaultPhase || "L100",
+          options: (u.phases || []).map(function (p) { return { value: p.key, label: p.key + " " + p.label }; }) },
+        { name: "budget_amount", label: "Budget ($)", type: "number", step: "0.01", half: true },
+        { name: "budget_hours", label: "Budget hours", type: "number", step: "0.25", half: true },
+        { name: "notes", label: "Assumptions", type: "textarea",
+          hint: "e.g. assumes no class certification, one round of summary judgment, 250 GB of ESI." },
+      ], function (v) {
+        return api("/cases/" + c.id + "/phase-budget", { method: "PATCH", body: v })
+          .then(function () { toast("Phase budget saved"); return renderStage(); });
+      });
+    });
+  }
+
+  function openLedes(c) {
+    api("/cases/" + c.id + "/ledes").then(function (d) {
+      var probs = d.problems || [];
+      var back = h("div", {
+        style: "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;" +
+               "align-items:flex-start;justify-content:center;padding:32px 16px;overflow:auto;",
+      });
+      var box = h("div", {
+        style: "background:" + C.parchment + ";border:1px solid " + C.gold + ";border-radius:8px;padding:18px;max-width:820px;width:100%;",
+      }, [
+        h("div", { text: "LEDES 1998B — " + c.case_name,
+                   style: "font-family:Cinzel,serif;font-size:14px;letter-spacing:1.2px;text-transform:uppercase;color:" + C.walnut + ";margin-bottom:10px;" }),
+        h("div", { text: d.line_count + " billable line(s) · invoice " + (d.invoice || {}).invoice_number,
+                   style: "font-size:12px;color:" + C.muted + ";margin-bottom:10px;" }),
+        probs.length
+          ? h("div", { style: "background:" + C.parchmentLit + ";border-left:3px solid " + C.waxRed + ";padding:9px;border-radius:4px;margin-bottom:10px;" },
+              [h("div", { text: probs.length + " line(s) would be rejected by a client e-billing platform:",
+                          style: "font-size:12px;color:" + C.waxRed + ";font-weight:600;margin-bottom:5px;" })]
+              .concat(probs.slice(0, 8).map(function (p) {
+                return h("div", { text: "Line " + p.line + ": " + p.errors.join("; "),
+                                  style: "font-size:11px;color:" + C.muted + ";" });
+              })))
+          : h("div", { text: "✓ Every line passes UTBMS validation.",
+                       style: "font-size:12px;color:" + C.green + ";margin-bottom:10px;" }),
+        h("textarea", { rows: 10, readonly: "readonly",
+          style: "width:100%;box-sizing:border-box;font-family:monospace;font-size:10px;padding:8px;border:1px solid " +
+                 C.border + ";border-radius:4px;background:" + C.parchmentLit + ";color:" + C.ink + ";" }),
+        h("div", { style: "display:flex;gap:8px;justify-content:flex-end;margin-top:12px;" }, [
+          btn("CLOSE", function () { document.body.removeChild(back); }, "quiet"),
+          btn("DOWNLOAD", function () {
+            window.open("/admin/civil/api/cases/" + c.id + "/ledes?download=1", "_blank", "noopener");
+          }),
+        ]),
+      ]);
+      box.querySelector("textarea").value = d.file || "";
+      back.appendChild(box);
+      back.addEventListener("click", function (e) { if (e.target === back) document.body.removeChild(back); });
+      document.body.appendChild(back);
+    }).catch(function (e) { toast(e.message, true); });
+  }
+
   // Moving a matter on from a stage workspace is the whole point of the screen:
-  // you work the phase, then push it forward.
+  // you work the phase, then push it forward. The gate criteria are shown
+  // first, because advancing past an unmet gate is the thing to think twice about.
   function openAdvance(c) {
     var stages = META.stages || [];
     var here = stages.map(function (s) { return s.key; }).indexOf(c.stage);
     var suggested = here >= 0 && here + 1 < stages.length ? stages[here + 1].key : c.stage;
+    var openGates = (c.gates || []).filter(function (gt) { return !gt.ok; });
     formModal("Advance " + c.case_name, [
       { name: "stage", label: "Move to stage", type: "select", required: true, value: suggested,
         options: stages.map(function (s) { return { value: s.key, label: s.label }; }),
-        hint: "Writes a Stage → entry on the matter's timeline." },
+        hint: openGates.length
+          ? "⚠ " + openGates.length + " gate criterion/criteria not met: " + openGates.map(function (gt) { return gt.label; }).join("; ")
+          : "All gate criteria met. Writes a Stage → entry on the matter's timeline and applies the next phase's checklist." },
+      { name: "apply_template", label: "Apply the next phase's standard checklist", type: "checkbox", value: true },
     ], function (v) {
       return fetch("/admin/civil/case/" + c.id + "/move-stage", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stage: v.stage }),
-      }).then(function (r) { return r.json(); }).then(function (d) {
+      }).then(function (r2) { return r2.json(); }).then(function (d) {
         if (!d.ok) throw new Error(d.error || "Move failed");
-        toast("Moved to " + (d.label || v.stage));
-        return renderStage();
+        if (!v.apply_template) { toast("Moved to " + (d.label || v.stage)); return renderStage(); }
+        return api("/cases/" + c.id + "/phase-tasks", { method: "POST", body: { phase: v.stage } })
+          .catch(function () { return null; })
+          .then(function () { toast("Moved to " + (d.label || v.stage) + " and checklist applied"); return renderStage(); });
       });
     }, "MOVE");
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  STAGE TRIAGE
+  //  ─────────────────────────────────────────────────────────
+  //  A Dropbox import lands every matter in Intake, which is
+  //  true of none of them. This proposes where each one actually
+  //  belongs, from its own dates and the phases of its documents,
+  //  with the reasoning shown. Nothing moves until it is applied.
+  // ═══════════════════════════════════════════════════════════
+  function renderTriage() {
+    var root = clear(panel("triage"));
+    root.appendChild(h("div", {
+      style: "background:" + C.parchmentLit + ";border:1px solid " + C.border +
+             ";border-left:4px solid " + C.gold + ";border-radius:6px;padding:14px;margin-bottom:14px;",
+    }, [
+      h("div", { text: "Where does each matter actually belong?", style: "font-family:Cinzel,serif;font-size:14px;color:" + C.ink + ";" }),
+      h("div", {
+        text: "A folder import files every matter as Intake. This reads the matter's own dates — filed, served, answered, trial, judgment — " +
+              "and the lifecycle phase of its mirrored documents, and proposes a stage for each. High confidence means two or more " +
+              "independent signals agree. Nothing moves until you apply it.",
+        style: "margin-top:7px;font-size:12px;color:" + C.muted + ";line-height:1.55;",
+      }),
+      h("div", { style: "margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;" }, [
+        h("label", { text: "Only matters currently in:", style: "font-size:11px;color:" + C.muted + ";" }),
+        (function () {
+          var sel = h("select", { id: "triageFrom", style: "padding:6px 9px;border:1px solid " + C.border + ";border-radius:4px;background:" + C.parchmentLit + ";font-size:12px;" });
+          [{ value: "", label: "Any stage" }].concat((META.stages || []).map(function (s) { return { value: s.key, label: s.label }; }))
+            .forEach(function (o) {
+              var op = h("option", { value: o.value, text: o.label });
+              if (o.value === "intake") op.selected = true;
+              sel.appendChild(op);
+            });
+          return sel;
+        })(),
+        h("label", { text: "Minimum confidence:", style: "font-size:11px;color:" + C.muted + ";" }),
+        (function () {
+          var sel = h("select", { id: "triageConf", style: "padding:6px 9px;border:1px solid " + C.border + ";border-radius:4px;background:" + C.parchmentLit + ";font-size:12px;" });
+          [["high", "High only"], ["medium", "Medium and up"], ["low", "Anything"]].forEach(function (o) {
+            var op = h("option", { value: o[0], text: o[1] });
+            if (o[0] === "medium") op.selected = true;
+            sel.appendChild(op);
+          });
+          return sel;
+        })(),
+        btn("PREVIEW", runTriage),
+      ]),
+    ]));
+
+    var out = h("div", { id: "triageOut" });
+    root.appendChild(out);
+    return Promise.resolve();
+  }
+
+  function runTriage(apply) {
+    var out = clear(document.getElementById("triageOut"));
+    var from = (document.getElementById("triageFrom") || {}).value || null;
+    var conf = (document.getElementById("triageConf") || {}).value || "medium";
+    out.appendChild(note(apply === true ? "Applying…" : "Reading every matter…"));
+
+    return api("/stage-triage", {
+      method: "POST",
+      body: { apply: apply === true, from_stage: from, min_confidence: conf },
+    }).then(function (d) {
+      clear(out);
+      if (apply === true) {
+        toast(d.moved + " matter(s) moved");
+      }
+      var props = d.proposals || [];
+      out.appendChild(h("div", {
+        style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px;",
+      }, [
+        statCard("Considered", String(d.considered || 0)),
+        statCard("Would Move", String(props.length)),
+        statCard("Eligible", String(d.eligible || 0), "at this confidence"),
+        statCard("Moved", String(d.moved || 0), d.dry_run ? "dry run" : "applied"),
+      ]));
+
+      if (!props.length) {
+        out.appendChild(note("Every matter is already in a stage consistent with its dates and documents."));
+        return;
+      }
+
+      // Grouped by destination, because that is the decision being made.
+      var byTo = {};
+      props.forEach(function (p) { (byTo[p.to] = byTo[p.to] || []).push(p); });
+      Object.keys(byTo).forEach(function (to) {
+        var list = byTo[to];
+        var stage = (META.stages || []).filter(function (s) { return s.key === to; })[0] || { label: to, color: C.walnutMid };
+        out.appendChild(h("div", {
+          style: "margin:16px 0 8px 0;display:flex;align-items:center;gap:8px;",
+        }, [
+          chip("→ " + stage.label, stage.color || C.walnutMid),
+          h("span", { text: list.length + " matter" + (list.length === 1 ? "" : "s"), style: "font-size:12px;color:" + C.muted + ";" }),
+        ]));
+        list.forEach(function (p) {
+          out.appendChild(card([
+            h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;" }, [
+              h("div", { style: "flex:1;min-width:200px;" }, [
+                h("a", { href: "/admin/civil/case/" + p.case_id, text: p.case_name,
+                         style: "font-family:Cinzel,serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;" }),
+                h("div", { text: p.reasons.join(" · "), style: "font-size:11px;color:" + C.muted + ";margin-top:3px;" }),
+                p.error ? h("div", { text: "⚠ " + p.error, style: "font-size:11px;color:" + C.waxRed + ";" }) : null,
+              ]),
+              h("div", { style: "display:flex;gap:5px;align-items:center;" }, [
+                h("span", { text: p.from.replace(/_/g, " "), style: "font-size:11px;color:" + C.muted + ";" }),
+                h("span", { text: "→", style: "color:" + C.gold + ";" }),
+                chip(p.confidence.toUpperCase(),
+                     p.confidence === "high" ? C.green : p.confidence === "medium" ? C.gold : C.walnutLight),
+                p.eligible ? null : chip("BELOW FLOOR", C.walnutLight, "Will not move at the selected confidence"),
+              ]),
+            ]),
+          ], p.eligible ? "" : "opacity:.6;"));
+        });
+      });
+
+      if (d.dry_run && d.eligible) {
+        out.appendChild(h("div", { style: "margin-top:18px;display:flex;gap:8px;justify-content:flex-end;" }, [
+          btn("APPLY " + d.eligible + " MOVE" + (d.eligible === 1 ? "" : "S"), function () {
+            if (!confirm("Move " + d.eligible + " matters to their proposed stages? Each move is logged on the matter's timeline and applies that phase's checklist.")) return;
+            runTriage(true);
+          }),
+        ]));
+      }
+    }).catch(function (e) {
+      clear(out).appendChild(note("Triage failed: " + e.message));
+    });
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -1239,6 +1849,15 @@
 
     if (panel("wip")) { renderWip(); return; }
 
+    // Stage triage needs the stage list for its labels, but no case.
+    if (panel("triage")) {
+      api("/meta").catch(function () { return {}; }).then(function (m) {
+        META = { stages: m.stages || [], case_types: m.case_types || [], our_roles: m.our_roles || [] };
+        return renderTriage();
+      });
+      return;
+    }
+
     // Stage workspaces need the stage list (for the advance picker) but no case.
     if (panel("stage")) {
       api("/meta").catch(function () { return {}; }).then(function (m) {
@@ -1256,10 +1875,15 @@
       api("/team/meta").catch(function () { return { roles: [] }; }),
       api("/discovery/meta").catch(function () { return { kinds: [] }; }),
       refreshCase().catch(function () { return null; }),
+      api("/jurisdictions").catch(function () { return { jurisdictions: [], service_methods: [] }; }),
+      api("/utbms").catch(function () { return null; }),
     ]).then(function (r) {
       META = { stages: r[0].stages || [], case_types: r[0].case_types || [], our_roles: r[0].our_roles || [] };
       TEAM_ROLES = r[1].roles || [];
       DISCOVERY_META = r[2];
+      JURISDICTIONS = (r[4] && r[4].jurisdictions) || [];
+      SERVICE_METHODS = (r[4] && r[4].service_methods) || [];
+      UTBMS = r[5];
       return mountAll();
     });
   }

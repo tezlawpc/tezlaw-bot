@@ -154,6 +154,11 @@ async function initTables() {
   // One row per physical file per case. Re-syncing upserts on this.
   await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_civil_files_case_path
                   ON civil_case_files (case_id, path_lower)`).catch(() => {});
+  // Which lifecycle phase produced this document, so each stage workspace can
+  // show its own file set instead of the whole matter folder.
+  await db.query(`ALTER TABLE civil_case_files ADD COLUMN IF NOT EXISTS phase TEXT`).catch(() => {});
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_civil_files_phase
+                  ON civil_case_files (case_id, phase) WHERE removed_at IS NULL`).catch(() => {});
   await db.query(`CREATE INDEX IF NOT EXISTS idx_civil_files_case_cat
                   ON civil_case_files (case_id, category) WHERE removed_at IS NULL`).catch(() => {});
 
@@ -476,8 +481,8 @@ async function syncCase(caseId, { force = false } = {}) {
     const r = await db.query(
       `INSERT INTO civil_case_files
          (case_id, dropbox_id, path_lower, path_display, name, relative_folder, category,
-          size_bytes, rev, content_hash, client_modified, server_modified, last_seen_at, removed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW(), NULL)
+          size_bytes, rev, content_hash, client_modified, server_modified, phase, last_seen_at, removed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NOW(), NULL)
        ON CONFLICT (case_id, path_lower) DO UPDATE
          SET dropbox_id = EXCLUDED.dropbox_id,
              path_display = EXCLUDED.path_display,
@@ -489,13 +494,14 @@ async function syncCase(caseId, { force = false } = {}) {
              content_hash = EXCLUDED.content_hash,
              client_modified = EXCLUDED.client_modified,
              server_modified = EXCLUDED.server_modified,
+             phase = EXCLUDED.phase,
              last_seen_at = NOW(),
              removed_at = NULL
        RETURNING (xmax = 0) AS inserted`,
       [
         caseId, e.id || null, pathLower, e.path_display || null, e.name || null,
         rel || null, category, e.size || null, e.rev || null, e.content_hash || null,
-        e.client_modified || null, e.server_modified || null,
+        e.client_modified || null, e.server_modified || null, phaseOfFile(e.name, rel),
       ]
     );
     if (r.rows[0] && r.rows[0].inserted) added++; else updated++;
@@ -965,15 +971,56 @@ async function unarchiveCaseFiles(caseId) {
 //  READ
 // ═══════════════════════════════════════════════════════════
 
-async function listCaseFiles(caseId, { category = null, includeRemoved = false } = {}) {
+// Route a mirrored file to a lifecycle phase. The phase module is optional,
+// so a load failure leaves files unphased rather than failing the sync.
+let _phasesMod;
+function phaseOfFile(name, relativeFolder) {
+  try {
+    if (_phasesMod === undefined) _phasesMod = require("./civil-phases");
+    return _phasesMod ? _phasesMod.phaseForFile(name, relativeFolder) : null;
+  } catch (e) { _phasesMod = null; return null; }
+}
+
+/** Re-route every mirrored file for a case after the taxonomy changes. */
+async function rephaseCaseFiles(caseId) {
+  await initTables();
+  const r = await db.query(
+    `SELECT id, name, relative_folder FROM civil_case_files WHERE case_id = $1`, [caseId]);
+  let n = 0;
+  for (const row of r.rows) {
+    const ph = phaseOfFile(row.name, row.relative_folder);
+    await db.query(`UPDATE civil_case_files SET phase = $1 WHERE id = $2`, [ph, row.id]);
+    if (ph) n++;
+  }
+  return { ok: true, case_id: caseId, files: r.rows.length, phased: n };
+}
+
+/** File counts per lifecycle phase, for the stage tabs. */
+async function phaseSummary(caseId) {
+  await initTables();
+  const r = await db.query(
+    `SELECT COALESCE(phase, 'unfiled') AS phase, COUNT(*)::int AS count
+       FROM civil_case_files
+      WHERE case_id = $1 AND removed_at IS NULL
+      GROUP BY COALESCE(phase, 'unfiled')`,
+    [caseId]
+  );
+  return r.rows;
+}
+
+async function listCaseFiles(caseId, { category = null, includeRemoved = false, phase = null } = {}) {
   await initTables();
   const where = ["case_id = $1"];
   const vals = [caseId];
   let i = 2;
   if (!includeRemoved) where.push("removed_at IS NULL");
   if (category && CATEGORY_KEYS.has(category)) { where.push(`category = $${i++}`); vals.push(category); }
+  if (phase) {
+    if (phase === "unfiled") where.push("phase IS NULL");
+    else { where.push(`phase = $${i++}`); vals.push(phase); }
+  }
   const r = await db.query(
-    `SELECT id, dropbox_id, path_display, name, relative_folder, category,
+    `SELECT id, dropbox_id, path_display, name, relative_folder, category, phase,
             size_bytes, client_modified, server_modified, archived, first_seen_at, removed_at
        FROM civil_case_files
       WHERE ${where.join(" AND ")}
@@ -1079,6 +1126,6 @@ module.exports = {
   syncCase, syncAll,
   bulkImport, importCasesFromFolders, parseCaseFolderName, deleteImportedCases,
   archiveCaseFiles, unarchiveCaseFiles,
-  listCaseFiles, categorySummary, fileLink,
+  listCaseFiles, categorySummary, fileLink, phaseSummary, rephaseCaseFiles, phaseOfFile,
   startScheduler, stopScheduler,
 };

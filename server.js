@@ -823,6 +823,28 @@ app.get("/admin/civil/new", async (req, res) => {
   }
 });
 
+// ── Civil: stage triage ─────────────────────────────────────
+// A folder import files every matter as Intake. This page proposes where each
+// one actually belongs, from its own dates and its documents' phases.
+app.get("/admin/civil/triage", async (req, res) => {
+  try {
+    const ui = require("./civil-litigation-ui");
+    const chrome = require("./hearing-notes");
+    const body = `
+      <div style="padding:24px;max-width:1400px;">
+        <a href="/admin/civil" style="color:#B8891E;text-decoration:none;font-size:12px;">← Back to Kanban</a>
+        <h1 style="margin:8px 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">🧭 Stage Triage</h1>
+        <div style="color:#7B5330;font-style:italic;margin-bottom:16px;">Put every matter in the stage its own record says it is in.</div>
+        <div data-civil-panel="triage"></div>
+      </div>
+      ${ui.civilAdminScriptTag()}`;
+    res.send(chrome.renderAdminChrome({ title: "Stage Triage — Civil", body, activeItem: "civil" }));
+  } catch (err) {
+    console.error("[civil triage]:", err.message);
+    res.status(500).send("Triage failed: " + err.message);
+  }
+});
+
 // ── Civil: per-stage workspaces ─────────────────────────────
 // Each lifecycle stage gets its own screen with the deadlines, warnings and
 // actions that belong to that phase. The nav used to point all of these at

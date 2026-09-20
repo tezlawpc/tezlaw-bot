@@ -55,7 +55,8 @@ const DB = {
     directions: ["propounded", "received"],
     serve_methods: ["personal", "mail", "email", "efile", "overnight"] },
   "GET /cases/1": { ok: true, case: {
-    id: 1, case_name: "O'Brien v. Smith", hourly_rate: 450, court_docket_url: "https://court.example/case/123",
+    id: 1, case_name: "O'Brien v. Smith", hourly_rate: 450, stage: "discovery", jurisdiction: "CA",
+    court_docket_url: "https://court.example/case/123",
     last_docket_check_at: "2026-09-01", docket_snapshot: { judge: "Hon. A. Reyes", department: "12", current_status: "At issue" },
     opposing_counsel: { name: "R. Vance", firm: "Vance LLP" },
   } },
@@ -78,6 +79,15 @@ const DB = {
   "GET /cases/1/docket-checks?limit=10": { ok: true, checks: [
     { id: 31, checked_at: "2026-09-01", checked_by: "jj", success: true, changes_detected: true, changes_summary: "Trial set for 2027-01-11" },
   ] },
+  "GET /jurisdictions": { ok: true,
+    jurisdictions: [{ key: "CA", label: "California" }, { key: "FED", label: "Federal (FRCP)" }, { key: "NY", label: "New York" }],
+    service_methods: ["personal", "mail", "email", "efile", "overnight"], default: "CA" },
+  "GET /utbms": { ok: true,
+    phases: [{ key: "L300", label: "Discovery", short: "Discovery" }],
+    tasks: [{ code: "L310", phase: "L300", label: "Written Discovery" }],
+    activities: [{ code: "A103", label: "Draft/revise" }],
+    expenses: [{ code: "E112", label: "Court fees" }],
+    stage_default: { discovery: "L310" } },
   "GET /cases/1/billing-summary": { ok: true, summary: {
     case_id: 1, case_name: "O'Brien v. Smith", matter_budget: 20000, budget_alert_pct: 75,
     billing_type: "hourly", hourly_rate: 450, retainer_amount: 5000, retainer_balance: 1200,
@@ -181,6 +191,8 @@ function makeFetch() {
     setVal(m, "Timekeeper", "2");
   });
   const ev = CALLS.filter(c => c.key === "POST /cases/1/events").pop();
+  check("log-event carries a UTBMS task code", () => ev && ev.body.utbms_code === "L310");
+  check("log-event carries a UTBMS activity",  () => ev && ev.body.utbms_activity === "A103");
   check("log-event posts event_kind/title", () => ev && ev.body.event_kind === "hearing" && ev.body.title === "CMC held");
   check("log-event routes attorney_id",     () => ev && ev.body.attorney_id === 2 && ev.body.paralegal_id === undefined);
   check("log-event sends hours as number",  () => ev && ev.body.billable_hours === 1.5);
@@ -206,6 +218,10 @@ function makeFetch() {
   const ec = CALLS.filter(c => c.key === "PATCH /cases/1").pop();
   check("edit-case PATCHes case_name",        () => ec && ec.body.case_name === "O'Brien v. Smith (amended)");
   check("edit-case sends opposing_counsel obj", () => ec && typeof ec.body.opposing_counsel === "object");
+  check("edit-case sends the jurisdiction",     () => ec && ec.body.jurisdiction === "CA");
+  check("edit-case sends the service method",   () => ec && !!ec.body.service_method);
+  check("edit-case sends the judgment anchors",
+    () => ec && "judgment_date" in ec.body && "judgment_notice_date" in ec.body && "verdict_date" in ec.body);
 
   // Deadline complete button
   doc.querySelector("[data-civil-complete-deadline]").click();

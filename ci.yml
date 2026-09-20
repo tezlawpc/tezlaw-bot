@@ -45,6 +45,18 @@ jobs:
       - name: Civil app/web API parity
         run: node scripts/check-civil-parity.js
 
+      # The multi-jurisdiction deadline engine computes real filing deadlines.
+      # Pins the day counts, the service-method extensions (federal e-service
+      # adds nothing; Georgia adds three), the weekend and holiday rolls, and
+      # Texas's Monday snap.
+      - name: Jurisdiction deadline engine
+        run: node scripts/check-jurisdictions.js
+
+      # UTBMS code sets, LEDES 1998B output, the phase task templates and the
+      # document-to-phase routing.
+      - name: UTBMS and phase playbooks
+        run: node scripts/check-utbms-phases.js
+
       # The stage playbook must cover all nine stages, reference only real CCP
       # rule keys, and raise the right warnings (missing SOL, unserved filing,
       # no trial date in trial prep, and so on).

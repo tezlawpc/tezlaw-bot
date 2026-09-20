@@ -1321,6 +1321,18 @@ function registerAppApi(app) {
     console.warn("[civil-dropbox] module load failed:", e.message);
   }
 
+  // Phase playbooks, the multi-jurisdiction deadline engine, and UTBMS/LEDES
+  // billing. Loads after civil-litigation because it reads its tables.
+  try {
+    const civilPhases = require("./civil-phases");
+    const civilJur = require("./civil-jurisdictions");
+    const civilUtbms = require("./civil-utbms");
+    civilPhases.initTables().catch(e => console.warn("[civil-phases] init:", e.message));
+    attachCivilPlaybookRoutes(civilApp, civilPhases, civilJur, civilUtbms);
+  } catch (e) {
+    console.warn("[civil-phases] module load failed:", e.message);
+  }
+
   // Court docket checker (build 37 — was originally sequenced as build 40):
   // universal fetch-and-parse of any court portal URL using Claude to
   // extract structured docket data. Adds columns to civil_cases.
@@ -8873,6 +8885,248 @@ function attachCivilBillingRoutes(app, billing) {
   console.log("[civil-billing] routes registered under /api/staff/civil/cases/:id/{billing-summary,budget,budget-check} and /wip-report");
 }
 
+
+// ═══════════════════════════════════════════════════════════
+//  PHASE PLAYBOOKS, JURISDICTIONS AND UTBMS BILLING
+//  ─────────────────────────────────────────────────────────
+//  Registered through the same mirror as every other civil
+//  route, so the web admin and the app get them together.
+// ═══════════════════════════════════════════════════════════
+function attachCivilPlaybookRoutes(app, phases, jur, utbms) {
+  const auth1 = requireBearer;
+  const auth2 = requireFirmUser;
+  const who = req => (req.user && (req.user.u || req.user.n)) || "web";
+
+  // ── Catalogues ──
+  app.get("/api/staff/civil/playbook", auth1, auth2, (_req, res) => {
+    res.json({
+      ok: true,
+      roles: phases.ROLES,
+      phases: phases.PHASE_KEYS.map(k => {
+        const p = phases.PHASES[k];
+        return {
+          key: k, utbms_phase: p.utbmsPhase, headline: p.headline,
+          caution: p.caution, folder: p.folder, kpis: p.kpis,
+          tasks: p.tasks, gates: p.gates,
+        };
+      }),
+    });
+  });
+
+  app.get("/api/staff/civil/jurisdictions", auth1, auth2, (_req, res) => {
+    res.json({
+      ok: true,
+      jurisdictions: jur.JURISDICTIONS,
+      service_methods: jur.SERVICE_METHODS,
+      extensions: jur.SERVICE_EXTENSIONS,
+      anchor_fields: jur.ANCHOR_FIELDS,
+      default: jur.DEFAULT_JURISDICTION,
+    });
+  });
+
+  app.get("/api/staff/civil/utbms", auth1, auth2, (req, res) => {
+    const stage = req.query.stage;
+    res.json({
+      ok: true,
+      phases: utbms.TASK_PHASES,
+      tasks: stage ? utbms.codesForStage(stage) : utbms.TASK_CODES,
+      activities: utbms.ACTIVITY_CODES,
+      expenses: utbms.EXPENSE_CODES,
+      stage_default: utbms.STAGE_DEFAULT_TASK,
+    });
+  });
+
+  // ── Per-matter phase tasks ──
+  app.get("/api/staff/civil/cases/:id/phase-tasks", auth1, auth2, async (req, res) => {
+    try {
+      const caseId = parseInt(req.params.id, 10);
+      const [tasks, progress] = await Promise.all([
+        phases.listPhaseTasks(caseId, {
+          phase: req.query.phase, role: req.query.role, status: req.query.status,
+        }),
+        phases.phaseProgress(caseId),
+      ]);
+      res.json({ ok: true, tasks, progress });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Generate a phase's standard checklist on the matter. Idempotent, so it is
+  // safe to re-run after the template is extended.
+  app.post("/api/staff/civil/cases/:id/phase-tasks", auth1, auth2, async (req, res) => {
+    try {
+      const caseId = parseInt(req.params.id, 10);
+      const phase = (req.body && req.body.phase) || null;
+      if (!phase) return res.status(400).json({ ok: false, error: "phase is required" });
+      res.json({ ok: true, ...(await phases.applyPhaseTemplate(caseId, phase, { by: who(req) })) });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/civil/phase-tasks/:taskId", auth1, auth2, async (req, res) => {
+    try {
+      const task = await phases.updateTask(parseInt(req.params.taskId, 10), req.body || {}, who(req));
+      res.json({ ok: true, task });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // Everything on one role's plate across the whole book — the screen a case
+  // manager or an intake specialist lives in.
+  app.get("/api/staff/civil/queue", auth1, auth2, async (req, res) => {
+    try {
+      const tasks = await phases.roleQueue(req.query.role || null, {
+        phase: req.query.phase || null, limit: req.query.limit,
+      });
+      res.json({ ok: true, count: tasks.length, tasks });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Stage gates ──
+  app.get("/api/staff/civil/cases/:id/gates/:phase", auth1, auth2, async (req, res) => {
+    try {
+      res.json({ ok: true, ...(await phases.gateStatus(parseInt(req.params.id, 10), req.params.phase)) });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/gates/:phase", auth1, auth2, async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (!b.gate_key) return res.status(400).json({ ok: false, error: "gate_key is required" });
+      const gate = await phases.attestGate(parseInt(req.params.id, 10), req.params.phase, b.gate_key, {
+        satisfied: b.satisfied !== false, note: b.note || null, by: who(req),
+      });
+      res.json({ ok: true, gate });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Phase budgets (UTBMS) ──
+  app.get("/api/staff/civil/cases/:id/phase-budget", auth1, auth2, async (req, res) => {
+    try {
+      res.json({ ok: true, ...(await phases.phaseBudgetReport(parseInt(req.params.id, 10))) });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/civil/cases/:id/phase-budget", auth1, auth2, async (req, res) => {
+    try {
+      const b = req.body || {};
+      if (!b.utbms_phase) return res.status(400).json({ ok: false, error: "utbms_phase is required" });
+      const budget = await phases.setPhaseBudget(parseInt(req.params.id, 10), b.utbms_phase, b, who(req));
+      res.json({ ok: true, budget });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Stage triage ──
+  // Proposes where each matter actually belongs, from its own dates and the
+  // phases of its mirrored documents. Dry run unless apply is set.
+  app.post("/api/staff/civil/stage-triage", auth1, auth2, async (req, res) => {
+    try {
+      const b = req.body || {};
+      res.json(await phases.triageStages({
+        apply: b.apply === true,
+        minConfidence: b.min_confidence || "medium",
+        fromStage: b.from_stage || null,
+        by: who(req),
+      }));
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.get("/api/staff/civil/cases/:id/stage-suggestion", auth1, auth2, async (req, res) => {
+    try {
+      const civil = require("./civil-litigation");
+      const caseId = parseInt(req.params.id, 10);
+      const c = await civil.getCase(caseId);
+      if (!c) return res.status(404).json({ ok: false, error: "Case not found" });
+      let filePhases = [];
+      try {
+        const cdx = require("./civil-dropbox");
+        if (cdx.phaseSummary) filePhases = await cdx.phaseSummary(caseId);
+      } catch (e) { /* optional */ }
+      res.json({ ok: true, ...phases.suggestStage(c, filePhases) });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Deadline preview ──
+  // Shows what the matter's jurisdiction WOULD generate, including the rules
+  // it cannot compute and why, without writing anything.
+  app.get("/api/staff/civil/cases/:id/deadline-preview", auth1, auth2, async (req, res) => {
+    try {
+      const civil = require("./civil-litigation");
+      const c = await civil.getCase(parseInt(req.params.id, 10));
+      if (!c) return res.status(404).json({ ok: false, error: "Case not found" });
+      res.json({ ok: true, ...jur.computeDeadlines(c) });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── LEDES 1998B export ──
+  // Corporate and insurance clients require this in place of a PDF invoice.
+  app.get("/api/staff/civil/cases/:id/ledes", auth1, auth2, async (req, res) => {
+    try {
+      const civil = require("./civil-litigation");
+      const db2 = require("./db");
+      const caseId = parseInt(req.params.id, 10);
+      const c = await civil.getCase(caseId);
+      if (!c) return res.status(404).json({ ok: false, error: "Case not found" });
+
+      const rows = await db2.query(
+        `SELECT event_date AS d, title, description, billable_hours, billable_rate, billable_amount,
+                utbms_code, utbms_activity, attorney_id, paralegal_id
+           FROM civil_case_events
+          WHERE case_id = $1 AND billable_hours IS NOT NULL
+          UNION ALL
+         SELECT created_at::date AS d, subject AS title, body AS description,
+                billable_hours, billable_rate, billable_amount,
+                utbms_code, utbms_activity, attorney_id, paralegal_id
+           FROM civil_case_communications
+          WHERE case_id = $1 AND billable_hours IS NOT NULL
+          ORDER BY d ASC`,
+        [caseId]
+      );
+
+      const lines = rows.rows.map(r2 => ({
+        kind: "F",
+        date: r2.d,
+        units: Number(r2.billable_hours) || 0,
+        total: Number(r2.billable_amount) || 0,
+        unit_cost: Number(r2.billable_rate) || 0,
+        // A line with no code is still exported, but the validation report
+        // below names it so it can be fixed before the file is sent.
+        task_code: r2.utbms_code || "",
+        activity_code: r2.utbms_activity || "",
+        description: r2.description || r2.title || "",
+        timekeeper_id: String(r2.attorney_id || r2.paralegal_id || ""),
+        timekeeper_name: "",
+        timekeeper_classification: r2.attorney_id ? "PT" : "PL",
+      }));
+
+      const invoice = {
+        invoice_number: req.query.invoice || ("TEZ-" + caseId + "-" + new Date().toISOString().slice(0, 10).replace(/-/g, "")),
+        invoice_date: new Date(),
+        client_id: c.client_key,
+        client_matter_id: c.case_number || String(caseId),
+        law_firm_matter_id: String(caseId),
+        law_firm_id: process.env.LEDES_FIRM_ID || "TEZLAW",
+        billing_start: req.query.from || null,
+        billing_end: req.query.to || null,
+        description: c.case_name,
+      };
+
+      const problems = [];
+      lines.forEach((l, i) => {
+        const errs = utbms.validateLine(l);
+        if (errs.length) problems.push({ line: i + 1, date: l.date, errors: errs });
+      });
+
+      const file = utbms.buildLedes1998B(invoice, lines);
+      if (req.query.download === "1") {
+        res.set("Content-Type", "text/plain; charset=utf-8");
+        res.set("Content-Disposition", `attachment; filename="${invoice.invoice_number}.txt"`);
+        return res.send(file);
+      }
+      res.json({ ok: true, invoice, line_count: lines.length, problems, file });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  console.log("[civil-phases] playbook, jurisdiction, UTBMS and LEDES routes registered");
+}
+
 // ═══════════════════════════════════════════════════════════
 //  CIVIL ⇄ DROPBOX ROUTES (build 39)
 // ═══════════════════════════════════════════════════════════
@@ -8889,11 +9143,16 @@ function attachCivilDropboxRoutes(app, cdx) {
   app.get("/api/staff/civil/cases/:id/files", auth1, auth2, async (req, res) => {
     try {
       const caseId = parseInt(req.params.id, 10);
-      const [files, summary] = await Promise.all([
-        cdx.listCaseFiles(caseId, { category: req.query.category || null, includeRemoved: req.query.include_removed === "1" }),
+      const [files, summary, byPhase] = await Promise.all([
+        cdx.listCaseFiles(caseId, {
+          category: req.query.category || null,
+          phase: req.query.phase || null,
+          includeRemoved: req.query.include_removed === "1",
+        }),
         cdx.categorySummary(caseId),
+        cdx.phaseSummary ? cdx.phaseSummary(caseId).catch(() => []) : Promise.resolve([]),
       ]);
-      res.json({ ok: true, files, summary });
+      res.json({ ok: true, files, summary, phases: byPhase });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -8946,6 +9205,15 @@ function attachCivilDropboxRoutes(app, cdx) {
   app.post("/api/staff/civil/cases/:id/files/unarchive", auth1, auth2, async (req, res) => {
     try { res.json(await cdx.unarchiveCaseFiles(parseInt(req.params.id, 10))); }
     catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Re-route a matter's mirrored files to lifecycle phases. Needed after the
+  // folder taxonomy changes, and for files imported before phases existed.
+  app.post("/api/staff/civil/cases/:id/files/rephase", auth1, auth2, async (req, res) => {
+    try {
+      if (!cdx.rephaseCaseFiles) return res.status(501).json({ ok: false, error: "Phase mapping unavailable" });
+      res.json(await cdx.rephaseCaseFiles(parseInt(req.params.id, 10)));
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
   // ── Temporary download link ──
