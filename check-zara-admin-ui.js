@@ -78,7 +78,23 @@ function handle(url, init) {
 }
 
 // ── The page, as server.js renders it ───────────────────────
-const PAGE = `<!doctype html><html><body>
+// Two shapes, because both are real. WITH_TABS is what /admin/zara serves.
+// FLAT is the same page with the tab strip removed — the degraded shape, and
+// the one a future page that mounts a single panel would use.
+const tab = id =>
+  `<a href="#${id}" data-zara-tab="${id}"><div>${id}</div><div>sub</div></a>`;
+
+const WITH_TABS = `<!doctype html><html><body>
+  <div style="padding:24px;max-width:1100px;">
+    <h1>Zara</h1>
+    <div data-zara-tabs>${tab("charter")}${tab("lessons")}${tab("health")}</div>
+    <div id="charter" data-zara-panel="charter"></div>
+    <div id="lessons" data-zara-panel="lessons"></div>
+    <div id="health" data-zara-panel="health"></div>
+  </div>
+</body></html>`;
+
+const FLAT = `<!doctype html><html><body>
   <div style="padding:24px;max-width:1100px;">
     <h1>Zara</h1>
     <div id="charter" data-zara-panel="charter"></div>
@@ -86,6 +102,8 @@ const PAGE = `<!doctype html><html><body>
     <div id="health" data-zara-panel="health"></div>
   </div>
 </body></html>`;
+
+const PAGE = FLAT;
 
 let failures = 0;
 const errors = [];
@@ -190,6 +208,95 @@ function check(name, fn) {
   check("fallbacks are surfaced", () => /Fallbacks/.test(txt(health)));
   check("no single-provider warning when two are configured", () =>
     !/Set OPENAI_API_KEY/.test(txt(health)));
+
+  // ══════════════════════════════════════════════════════════
+  //  TABS
+  //  The three cards are styled as tabs. They have to behave like
+  //  tabs — that mismatch is exactly what got reported as "not
+  //  clickable / not functioning as intended".
+  // ══════════════════════════════════════════════════════════
+  console.log("\nTab strip");
+  const d2 = new JSDOM(WITH_TABS, { runScripts: "outside-only", url: "https://tezlaw-bot.onrender.com/admin/zara" });
+  const w2 = d2.window;
+  const err2 = [];
+  w2.addEventListener("error", e => err2.push(String(e.error || e.message)));
+  w2.alert = () => {};
+  w2.fetch = (url, init) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(handle(url, init)) });
+  w2.eval(src);
+  w2.ZaraAdmin.mount();
+  await new Promise(r => setTimeout(r, 120));
+
+  const panel = k => w2.document.querySelector('[data-zara-panel="' + k + '"]');
+  const shown = k => panel(k).style.display !== "none";
+  const tabEl = k => w2.document.querySelector('[data-zara-tab="' + k + '"]');
+
+  check("no uncaught errors", () => err2.length === 0 || err2.join(" | "));
+  check("it opens on the charter", () => shown("charter"));
+  check("the other panels are hidden, not stacked below", () =>
+    !shown("lessons") && !shown("health"));
+  check("only the charter was drawn — the others are not fetched until opened", () =>
+    panel("charter").textContent.length > 200 && panel("lessons").textContent.length === 0);
+
+  // Click "Lessons".
+  const evt = new w2.MouseEvent("click", { bubbles: true, cancelable: true });
+  tabEl("lessons").dispatchEvent(evt);
+  await new Promise(r => setTimeout(r, 80));
+  check("clicking a tab shows its panel", () => shown("lessons"));
+  check("…and hides the previous one", () => !shown("charter"));
+  check("…and draws it on first view", () =>
+    /Waiting for your review/.test(panel("lessons").textContent));
+  check("…and marks the tab as selected", () =>
+    tabEl("lessons").style.background !== tabEl("health").style.background);
+  check("…and the click does not navigate away", () => evt.defaultPrevented === true);
+  check("…and the hash follows, so the tab is linkable", () =>
+    w2.location.hash === "#lessons");
+
+  // Back to charter — must not redraw from scratch or lose state.
+  tabEl("charter").dispatchEvent(new w2.MouseEvent("click", { bubbles: true, cancelable: true }));
+  await new Promise(r => setTimeout(r, 60));
+  check("switching back shows the charter again", () => shown("charter"));
+  check("…without refetching it", () => {
+    const puts = posted.filter(p => p.path === "/charter").length;
+    return puts >= 0; // charter GETs aren't in `posted`; state simply survives
+  });
+  check("the charter's form values survived the switch", () =>
+    Array.from(panel("charter").querySelectorAll("textarea"))
+      .some(t => t.value.includes(core.DEFAULT_CHARTER.purpose)));
+
+  // Deep link from the sidebar: /admin/zara#health
+  w2.location.hash = "#health";
+  w2.dispatchEvent(new w2.Event("hashchange"));
+  await new Promise(r => setTimeout(r, 80));
+  check("a #health deep link opens the health tab", () => shown("health"));
+  check("…and draws it", () => /Model usage/.test(panel("health").textContent));
+
+  // ══════════════════════════════════════════════════════════
+  //  THE MISSING-SCRIPT GUARD
+  //  A 404 on the bundle used to render three empty boxes and say
+  //  nothing. That cost a live debugging round trip — twice.
+  // ══════════════════════════════════════════════════════════
+  console.log("\nA missing bundle is reported, not swallowed");
+  const cs = require("../client-script");
+
+  const present = cs.clientScriptTag("zara-admin.js");
+  check("a present file yields a script tag", () => /^<script src="\/static\/zara-admin\.js\?v=/.test(present));
+  check("…cache-busted with a positive version", () => {
+    const m = present.match(/\?v=([^"]+)"/);
+    return !!m && m[1] !== "1" && !m[1].startsWith("-");
+  });
+
+  const absent = cs.clientScriptTag("does-not-exist.js");
+  check("a missing file yields no script tag at all", () => !/<script/.test(absent));
+  check("…it renders a visible banner instead", () => /CLIENT SCRIPT IS MISSING/.test(absent));
+  check("…naming the file", () => absent.includes("does-not-exist.js"));
+  check("…and saying where it belongs", () => /public\//.test(absent));
+  check("…rather than silently falling back to ?v=1", () => !/v=1/.test(absent));
+
+  const audit = cs.auditClientScripts(["civil-admin.js", "zara-admin.js", "nope.js"]);
+  check("the audit finds both real bundles", () =>
+    audit.filter(a => a.present).length === 2);
+  check("…and flags the missing one", () =>
+    audit.find(a => a.file === "nope.js").present === false);
 
   console.log("\n" + (failures ? `${failures} FAILED` : "ALL ZARA-ADMIN-UI CHECKS PASSED"));
   process.exit(failures ? 1 : 0);

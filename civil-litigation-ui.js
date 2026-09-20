@@ -236,14 +236,10 @@ async function renderKanban(opts = {}) {
 //
 // /static is served with maxAge 7d, so the URL carries the file's mtime and a
 // deploy is picked up immediately instead of a week later.
+// A missing bundle used to fall back to ?v=1 and 404 silently, leaving the
+// page's mount points empty with nothing to explain why. It now says so.
 function civilAdminScriptTag() {
-  let v = "1";
-  try {
-    // Base 36 of the whole-millisecond mtime. `| 0` would wrap a 2026-era
-    // timestamp into a negative int32, which is neither stable nor monotonic.
-    v = Math.floor(require("fs").statSync(require("path").join(__dirname, "public", "civil-admin.js")).mtimeMs).toString(36);
-  } catch (e) { /* fall back to a constant — a stale cache beats a broken page */ }
-  return `<script src="/static/civil-admin.js?v=${v}" defer></script>`;
+  return require("./client-script").clientScriptTag("civil-admin.js");
 }
 
 // A section heading with action buttons on the right.

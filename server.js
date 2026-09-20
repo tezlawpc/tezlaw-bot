@@ -916,15 +916,15 @@ app.get("/admin/civil/wip", async (req, res) => {
 app.get("/admin/zara", async (req, res) => {
   try {
     const chrome = require("./hearing-notes");
-    let v = "1";
-    try {
-      v = Math.floor(require("fs").statSync(
-        require("path").join(__dirname, "public", "zara-admin.js")
-      ).mtimeMs).toString(36);
-    } catch (e) { /* a stale cache beats a broken page */ }
+    const scriptTag = require("./client-script").clientScriptTag("zara-admin.js");
 
+    // These are real tabs once the client script runs: it wires them up and
+    // shows one panel at a time. Before it runs — or if it never loads — they
+    // stay plain in-page anchors and all three sections render stacked, which
+    // still works. Progressive enhancement, so a script failure degrades to
+    // "long page" rather than "dead buttons".
     const tab = (id, icon, text, sub) => `
-      <a href="#${id}" style="flex:1;min-width:190px;text-decoration:none;border:1px solid #D4C4A0;border-radius:6px;padding:12px 14px;background:#FBF3DE;">
+      <a href="#${id}" data-zara-tab="${id}" style="flex:1;min-width:190px;text-decoration:none;border:1px solid #D4C4A0;border-radius:6px;padding:12px 14px;background:#FBF3DE;">
         <div style="font-family:Cinzel,serif;font-size:12px;letter-spacing:1.4px;color:#3E2818;">${icon} ${text}</div>
         <div style="font-size:11px;color:#7B5330;font-style:italic;margin-top:3px;">${sub}</div>
       </a>`;
@@ -936,7 +936,9 @@ app.get("/admin/zara", async (req, res) => {
           One definition of who she is, used by every surface: the app, the web admin, the voice line and the background jobs.
         </div>
 
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;">
+        ${scriptTag}
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;" data-zara-tabs>
           ${tab("charter", "◎", "Charter", "Purpose, goals, voice, boundaries")}
           ${tab("lessons", "✦", "Lessons", "What she has learned — you approve each one")}
           ${tab("health", "◍", "Model health", "Which model answered, and what it cost")}
@@ -945,8 +947,7 @@ app.get("/admin/zara", async (req, res) => {
         <div id="charter" data-zara-panel="charter"></div>
         <div id="lessons" style="margin-top:38px;" data-zara-panel="lessons"></div>
         <div id="health" style="margin-top:38px;" data-zara-panel="health"></div>
-      </div>
-      <script src="/static/zara-admin.js?v=${v}" defer></script>`;
+      </div>`;
 
     res.send(chrome.renderAdminChrome({ title: "Zara — Charter", body, activeItem: "zara" }));
   } catch (err) {
