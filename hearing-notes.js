@@ -1813,6 +1813,76 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       if (a && window.innerWidth <= 768) toggleDrawer(false);
     });
 
+    // ── Which nav item is highlighted ──────────────────────────
+    //
+    // This used to be decided entirely server-side: each route passed an
+    // activeItem string and the matching link got isActive(). That works only
+    // for links whose template actually calls isActive — and 43 of the 65 nav
+    // links never did. The civil stage links were among them, so clicking
+    // Intake, Pleadings or Discovery left the highlight sitting on "All Cases"
+    // (their route passes activeItem "civil"), and the sidebar gave no clue
+    // where you were. Federal, PI, Accounting and the panel links had the
+    // same gap.
+    //
+    // Deriving it from the URL fixes every link at once and cannot drift when
+    // someone adds a nav item, because there is no second place to update.
+    // Scoring, best first:
+    //   3  full match on path + query + hash   (/admin/zara#lessons)
+    //   2  path and query match                (/admin/federal?group=trademarks)
+    //   1  path matches exactly
+    //   0  href is a path prefix of where we are, scored by how specific it is
+    //      — so /admin/civil/stage/intake beats /admin/civil, and a case page
+    //      under /admin/civil/case/216 still lights up "All Cases"
+    // Nothing matches → leave whatever the server chose.
+    function highlightCurrentNav() {
+      try {
+        // No regex here on purpose. A literal like /\/+$/ written inside a
+        // server-side template literal loses its backslash before the browser
+        // sees it and becomes //+$/ — a line comment that silently kills the
+        // rest of the block. This is the third time that trap has bitten this
+        // codebase; a plain loop cannot be mangled.
+        const trimSlash = (s) => {
+          let out = String(s || "");
+          while (out.length > 1 && out.charAt(out.length - 1) === "/") out = out.slice(0, -1);
+          return out || "/";
+        };
+        const here = trimSlash(location.pathname);
+        const links = Array.from(document.querySelectorAll(".nav-link[href]"));
+        let best = null, bestScore = -1;
+
+        links.forEach(a => {
+          const raw = a.getAttribute("href") || "";
+          if (!raw || raw.charAt(0) !== "/") return;         // skip external/# only
+          const hashAt = raw.indexOf("#");
+          const hash = hashAt > -1 ? raw.slice(hashAt) : "";
+          const noHash = hashAt > -1 ? raw.slice(0, hashAt) : raw;
+          const qAt = noHash.indexOf("?");
+          const query = qAt > -1 ? noHash.slice(qAt) : "";
+          const path = trimSlash(qAt > -1 ? noHash.slice(0, qAt) : noHash);
+
+          let score = -1;
+          if (path === here) {
+            if (hash && hash === location.hash && query === location.search) score = 3000;
+            else if (query && query === location.search) score = 2000;
+            else if (!query && !hash) score = 1000;
+            else score = 900;                                 // right page, wrong tab
+          } else if (here.indexOf(path + "/") === 0) {
+            score = path.length;                              // longer prefix = more specific
+          }
+          if (score > bestScore) { bestScore = score; best = a; }
+        });
+
+        if (!best || bestScore < 0) return;                   // keep the server's choice
+        links.forEach(a => a.classList.remove("active"));
+        best.classList.add("active");
+      } catch (e) { /* highlighting is cosmetic — never break the nav over it */ }
+    }
+
+    highlightCurrentNav();
+    // Tabs that only change the hash (Zara's Lessons / Model Health) never
+    // reload, so the highlight has to follow them.
+    window.addEventListener("hashchange", highlightCurrentNav);
+
     fetch("/admin/whoami").then(r => r.json()).then(d => {
       if (!d.authenticated) return;
       const footer = document.getElementById("sidebar-user");
