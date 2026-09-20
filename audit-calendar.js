@@ -27,12 +27,39 @@
 //  (Sichenzia Ross Ference Carmel) owns the filing calendar.
 // ============================================================
 
-const FYE_MONTH = 6; // June
-const FYE_DAY = 30;
+// ── The fiscal calendar comes from the issuer profile ───────
+//
+// These were constants describing one company. They are now read
+// from the saved issuer profile, so a December-31 accelerated filer
+// gets correct dates without a code change. The fallbacks are
+// Nightfood's own values, which keeps every existing call site
+// behaving identically until a profile is saved.
+//
+// Read through functions rather than captured at load: the profile
+// can be edited while the process is running, and a stale fiscal
+// year end would silently misdate an entire engagement.
+const issuer = require("./audit-issuer");
 
-// Non-accelerated filer. Verified from NGTF cover pages (FY2025
-// 10-K and Q3 FY2026 10-Q): non-accelerated ☒, SRC ☒, EGC ☐.
-const FILER_STATUS = "non_accelerated";
+function activeProfile() {
+  try {
+    return issuer.current();
+  } catch (err) {
+    return null;
+  }
+}
+function FYE_MONTH_OF(profile) {
+  const p = profile || activeProfile();
+  return (p && Number(p.fiscalYearEndMonth)) || 6;
+}
+function FYE_DAY_OF(profile) {
+  const p = profile || activeProfile();
+  return (p && Number(p.fiscalYearEndDay)) || 30;
+}
+function FILER_STATUS_OF(profile) {
+  const p = profile || activeProfile();
+  return (p && p.filerStatus) || "non_accelerated";
+}
+
 const DEADLINE_DAYS = {
   non_accelerated: { annual: 90, quarterly: 45 },
   accelerated: { annual: 75, quarterly: 40 },
@@ -199,23 +226,26 @@ function fiscalYearOf(dateLike) {
   const dt = parse(dateLike);
   const y = dt.getUTCFullYear();
   const m = dt.getUTCMonth() + 1;
-  return m > FYE_MONTH ? y + 1 : y;
+  return m > FYE_MONTH_OF() ? y + 1 : y;
 }
 
 function fiscalYearBounds(fy) {
-  return { start: d(fy - 1, FYE_MONTH + 1, 1), end: d(fy, FYE_MONTH, FYE_DAY) };
+  const m = FYE_MONTH_OF();
+  // A December year end wraps: FY2027 starts 1 January 2027, not
+  // month 13 of 2026.
+  const startMonth = m === 12 ? 1 : m + 1;
+  const startYear = m === 12 ? fy : fy - 1;
+  return { start: d(startYear, startMonth, 1), end: d(fy, m, FYE_DAY_OF()) };
 }
 
 // Quarter ends for a June-30 FYE:
 //   Q1 = Sep 30 (FY-1)   Q2 = Dec 31 (FY-1)
 //   Q3 = Mar 31 (FY)     Q4/FY = Jun 30 (FY)
 function quarterEnds(fy) {
-  return [
-    { q: 1, end: d(fy - 1, 9, 30) },
-    { q: 2, end: d(fy - 1, 12, 31) },
-    { q: 3, end: d(fy, 3, 31) },
-    { q: 4, end: d(fy, 6, 30) },
-  ];
+  // Derived from the profile's fiscal year end rather than fixed to
+  // June: Q4 ends on the year end, and each earlier quarter three
+  // months before the next.
+  return issuer.quarterEndsFor(activeProfile(), fy);
 }
 
 function quarterOf(dateLike) {
@@ -230,7 +260,7 @@ function quarterOf(dateLike) {
 function fiscalMonths(fy) {
   const out = [];
   for (let i = 0; i < 12; i++) {
-    const cal = FYE_MONTH + 1 + i; // 7..18
+    const cal = FYE_MONTH_OF() + 1 + i;
     const y = cal > 12 ? fy : fy - 1;
     const m = cal > 12 ? cal - 12 : cal;
     const end = lastDayOfMonth(y, m);
@@ -260,7 +290,8 @@ function periodLabel(kind, fy, n, endDt) {
 
 // 10-Q due date: 45 days after quarter end for a non-accelerated
 // filer, rolled per Rule 0-3. Rule 12b-25 grace: 5 calendar days.
-function tenQDeadline(fy, quarter, status = FILER_STATUS) {
+function tenQDeadline(fy, quarter, status) {
+  status = status || FILER_STATUS_OF();
   const q = quarterEnds(fy).find((x) => x.q === quarter);
   if (!q || quarter === 4) return null;
   const days = DEADLINE_DAYS[status].quarterly;
@@ -282,7 +313,8 @@ function tenQDeadline(fy, quarter, status = FILER_STATUS) {
 
 // 10-K due date: 90 days after FYE for a non-accelerated filer.
 // Rule 12b-25 grace: 15 calendar days.
-function tenKDeadline(fy, status = FILER_STATUS) {
+function tenKDeadline(fy, status) {
+  status = status || FILER_STATUS_OF();
   const { end } = fiscalYearBounds(fy);
   const days = DEADLINE_DAYS[status].annual;
   const due = rollForward(addDays(end, days));
@@ -326,7 +358,8 @@ function filerStatusMeasurementDate(fy) {
 }
 
 // Full statutory calendar for one fiscal year.
-function filingCalendar(fy, status = FILER_STATUS) {
+function filingCalendar(fy, status) {
+  status = status || FILER_STATUS_OF();
   const rows = [];
   for (const q of [1, 2, 3]) rows.push(tenQDeadline(fy, q, status));
   rows.push(tenKDeadline(fy, status));
@@ -516,9 +549,6 @@ function sniffPeriod(text) {
 }
 
 module.exports = {
-  FYE_MONTH,
-  FYE_DAY,
-  FILER_STATUS,
   DEADLINE_DAYS,
   // date utils
   iso,
@@ -551,3 +581,13 @@ module.exports = {
   documentationCompletionDate,
   archiveCountdown,
 };
+
+// Defined after the export object exists, because assigning
+// module.exports wholesale would discard properties attached before
+// it. Getters rather than values so a profile edited at runtime is
+// reflected immediately — a stale fiscal year end would misdate an
+// entire engagement silently.
+Object.defineProperty(module.exports, "FYE_MONTH", { get: () => FYE_MONTH_OF(), enumerable: true });
+Object.defineProperty(module.exports, "FYE_DAY", { get: () => FYE_DAY_OF(), enumerable: true });
+Object.defineProperty(module.exports, "FILER_STATUS", { get: () => FILER_STATUS_OF(), enumerable: true });
+module.exports.profileAccessors = { FYE_MONTH_OF, FYE_DAY_OF, FILER_STATUS_OF };

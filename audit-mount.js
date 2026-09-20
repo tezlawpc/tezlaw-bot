@@ -47,6 +47,14 @@ let _logged = false;
  */
 async function init() {
   await schema.initAuditTables();
+  // Before anything computes a date. Every period label and filing
+  // deadline in the system derives from this, so it has to be settled
+  // ahead of the first checklist build.
+  try {
+    await require("./audit-issuer").ensureProfile();
+  } catch (err) {
+    console.error("[ngtf-audit] issuer profile init failed:", err.message);
+  }
   try {
     const sync = require("./audit-sync");
     await sync.initSyncTables();

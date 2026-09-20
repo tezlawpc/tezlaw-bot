@@ -105,6 +105,74 @@ async function listEngagements({ includeArchived = true, limit = 60 } = {}) {
 }
 
 /**
+ * Record a classification outcome as a labelled training example.
+ *
+ * Called on three events: a document imported with its guess, a human
+ * correcting that guess, and a human confirming it. Confirmations
+ * matter as much as corrections — a corpus of only corrections teaches
+ * a model that it is always wrong.
+ *
+ * Deliberately best-effort. This is an asset for the future, never a
+ * reason to fail an upload happening now.
+ */
+async function recordClassificationFeedback({
+  document,
+  classification,
+  outcome,
+  correctedCategory = null,
+  correctedBy = null,
+}) {
+  try {
+    const cls = classification || {};
+    const issuer = require("./audit-issuer");
+    const profile = issuer.current();
+    const text = cls.textSample || (cls.classification && cls.classification.textSample) || null;
+
+    await db.query(
+      `INSERT INTO ngtf_audit_classification_feedback
+        (document_id, filename, mime_type, size_bytes, page_count, text_sample, text_length,
+         extract_engine, guessed_category, guessed_bracket, confidence, method, candidates, flags,
+         corrected_category, outcome, corrected_by, issuer_profile, period_label, tier)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+      [
+        document ? document.id : null,
+        (document && document.filename) || cls.filename || "(unknown)",
+        (document && document.mime_type) || null,
+        (document && document.size_bytes) || null,
+        cls.pages || null,
+        // A bounded sample, not the document. Enough to learn the
+        // vocabulary of a category without turning this table into a
+        // second uncontrolled copy of the company's records.
+        text ? String(text).slice(0, 4000) : null,
+        cls.textLength || (text ? String(text).length : null),
+        cls.engine || null,
+        cls.categoryCode || null,
+        cls.bracketCode || null,
+        cls.confidence == null ? null : Number(cls.confidence),
+        cls.method || null,
+        cls.candidates ? JSON.stringify(cls.candidates).slice(0, 8000) : null,
+        cls.flags && cls.flags.length ? JSON.stringify(cls.flags) : null,
+        correctedCategory,
+        outcome,
+        correctedBy,
+        JSON.stringify({
+          fiscalYearEndMonth: profile.fiscalYearEndMonth,
+          fiscalYearEndDay: profile.fiscalYearEndDay,
+          filerStatus: profile.filerStatus,
+          smallerReportingCompany: profile.smallerReportingCompany,
+          emergingGrowthCompany: profile.emergingGrowthCompany,
+          exchange: profile.exchange,
+        }),
+        (document && document.period_label) || (cls.period && cls.period.periodLabel) || null,
+        (document && document.tier) || cls.tier || null,
+      ]
+    );
+  } catch (err) {
+    console.error("[ngtf-audit] classification feedback not recorded:", err.message);
+  }
+}
+
+/**
  * Derive an event engagement's spec from the document being filed.
  *
  * Used when a document classifies to the event tier and no event
@@ -824,6 +892,13 @@ async function ingestDocument({
     }
   }
 
+  // The guess, before anyone has judged it.
+  await recordClassificationFeedback({
+    document: doc,
+    classification: cls,
+    outcome: cls.needsConfirmation ? "guessed_unconfirmed" : "guessed_accepted",
+  });
+
   // Tell the auditor what arrived, with the brief.
   try {
     await notify.notifyDocumentUploaded({
@@ -929,6 +1004,14 @@ async function reclassify({ documentId, newCategory, user, reason }) {
     detail: { from: doc.category_code, to: newCategory, reason: reason || null },
   });
 
+  await recordClassificationFeedback({
+    document: doc,
+    classification: doc.classification || { categoryCode: doc.category_code, confidence: doc.confidence, method: doc.classify_method },
+    outcome: "corrected",
+    correctedCategory: newCategory,
+    correctedBy: user && user.id,
+  });
+
   // Re-run satisfaction against the corrected category.
   if (doc.engagement_id) {
     await db.query(
@@ -958,6 +1041,20 @@ async function confirmClassification(documentId, user) {
   // C16: reporting success for an id that does not exist wrote a
   // permanent event row about a document that was never touched.
   if (!r.rowCount) throw new Error(`Document ${documentId} not found.`);
+
+  try {
+    const d = await getDocument(documentId);
+    if (d) {
+      await recordClassificationFeedback({
+        document: d,
+        classification: d.classification || { categoryCode: d.category_code, confidence: d.confidence, method: d.classify_method },
+        outcome: "confirmed",
+        correctedBy: user && user.id,
+      });
+    }
+  } catch (err) {
+    /* best effort */
+  }
 
   // Release any gating item this document was holding. Ingest refuses to
   // let an unconfirmed classification satisfy a gate, so the item has
@@ -1401,6 +1498,7 @@ module.exports = {
   listEngagements,
   openEngagement,
   eventSpecFor,
+  recordClassificationFeedback,
   ensureChecklist,
   reconcileChecklist,
   setReportReleaseDate,

@@ -210,6 +210,46 @@ async function createAll() {
   // evidential weight from one a person uploaded, and the record has to
   // say which. Without this the audit trail would show a NULL uploader
   // and no explanation, which is worse than either answer.
+  // ── Classification training corpus ─────────────────────────
+  //
+  // Every human correction of a machine guess is a labelled example,
+  // and it is the one asset in this system that compounds. The rules
+  // are public — anyone can read Reg S-X. How a real registrant names
+  // and organises its records is not public, and cannot be obtained by
+  // reading the standards. After enough companies and enough periods
+  // this table is the part a competitor cannot catch up on.
+  //
+  // Kept deliberately separate from the event log: events are an audit
+  // trail under AS 1215 and must not be reshaped for machine learning,
+  // and a training row needs the features the classifier actually saw.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ngtf_audit_classification_feedback (
+      id               SERIAL PRIMARY KEY,
+      document_id      INTEGER,
+      filename         TEXT NOT NULL,
+      mime_type        TEXT,
+      size_bytes       BIGINT,
+      page_count       INTEGER,
+      text_sample      TEXT,
+      text_length      INTEGER,
+      extract_engine   TEXT,
+      guessed_category TEXT,
+      guessed_bracket  TEXT,
+      confidence       INTEGER,
+      method           TEXT,
+      candidates       JSONB,
+      flags            JSONB,
+      corrected_category TEXT,
+      outcome          TEXT NOT NULL,
+      corrected_by     INTEGER,
+      issuer_profile   JSONB,
+      period_label     TEXT,
+      tier             TEXT,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_feedback_outcome ON ngtf_audit_classification_feedback (outcome, created_at DESC)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_feedback_cats ON ngtf_audit_classification_feedback (guessed_category, corrected_category)`);
+
   await db.query(`ALTER TABLE ngtf_audit_documents ADD COLUMN IF NOT EXISTS source TEXT`);
   await db.query(`ALTER TABLE ngtf_audit_documents ADD COLUMN IF NOT EXISTS source_path TEXT`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_audit_docs_source ON ngtf_audit_documents (source) WHERE source IS NOT NULL`);
