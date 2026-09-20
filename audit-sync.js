@@ -74,6 +74,32 @@ async function initSyncTables() {
 }
 
 /**
+ * Clear a scan that was killed before it could finish.
+ *
+ * `running` is an in-process flag, so a fresh process by definition has
+ * no scan in flight. If the stored status still says "running" then the
+ * previous process died mid-scan — a deploy, a restart, an out-of-memory
+ * kill — and nothing ever wrote a final state.
+ *
+ * Without this the page polls a record that will never change and counts
+ * upwards for ever, showing a scan that stopped hours ago. Called once
+ * at boot, before anything can start a new run.
+ */
+async function clearStaleRun() {
+  const prev = await lastRun();
+  if (!prev || prev.state !== "running") return null;
+  await setStatus({
+    state: "interrupted",
+    finishedAt: new Date().toISOString(),
+    error:
+      "The scan was interrupted before it finished — the service restarted, usually because of a deploy. " +
+      "Nothing was lost: files already imported are recorded, and running the scan again continues from there.",
+  });
+  console.log("[ngtf-audit sync] cleared a scan left running by a previous process");
+  return prev;
+}
+
+/**
  * The holding engagement: a real engagement so documents have a home
  * and a page, deliberately with no checklist so nothing can be
  * satisfied inside it.
@@ -148,12 +174,19 @@ async function run({ full = false, actor = null } = {}) {
 
   try {
     await initSyncTables();
-    await setStatus({ state: "running", startedAt: new Date().toISOString() });
+    await setStatus({
+      state: "running",
+      startedAt: new Date().toISOString(),
+      lastBeatAt: new Date().toISOString(),
+      progress: null,
+      phase: "listing",
+    });
 
     // No cursor: a shared link has no tree-wide cursor (see listAll), so
     // every scan walks the folder again. Listing is cheap; the sync table
     // is what stops a file being downloaded twice.
     const listing = await dropbox.listAll({});
+    await setStatus({ state: "running", lastBeatAt: new Date().toISOString(), phase: "importing" });
     out.seen = listing.files.length;
     out.folders = listing.folders;
     out.truncated = listing.truncated;
@@ -172,7 +205,11 @@ async function run({ full = false, actor = null } = {}) {
       // is happening rather than sitting on a spinner.
       if (++sinceBeat >= 5) {
         sinceBeat = 0;
-        await setStatus({ state: "running", progress: { ...out, of: listing.files.length } });
+        await setStatus({
+          state: "running",
+          lastBeatAt: new Date().toISOString(),
+          progress: { ...out, of: listing.files.length },
+        });
       }
 
       const base = f.name;
@@ -332,4 +369,4 @@ async function counts() {
   return o;
 }
 
-module.exports = { run, recent, counts, lastRun, isRunning, initSyncTables, inbox, INBOX_LABEL };
+module.exports = { run, recent, counts, lastRun, isRunning, clearStaleRun, initSyncTables, inbox, INBOX_LABEL };

@@ -48,7 +48,13 @@ let _logged = false;
 async function init() {
   await schema.initAuditTables();
   try {
-    await require("./audit-sync").initSyncTables();
+    const sync = require("./audit-sync");
+    await sync.initSyncTables();
+    // A fresh process cannot have a scan in flight, so a stored status
+    // that still says "running" belongs to a process that was killed —
+    // almost always by a deploy. Retire it, or the sync page counts up
+    // for ever against a scan that stopped long ago.
+    await sync.clearStaleRun();
   } catch (err) {
     // The folder scan is an add-on; the portal must still boot without it.
     console.error("[ngtf-audit] sync tables init failed:", err.message);

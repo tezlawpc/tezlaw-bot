@@ -699,10 +699,16 @@ router.get("/api/engagement/:id/export.zip", auth.requirePermission("document.do
 router.get("/api/sync/status", auth.requirePermission("dashboard.view"), wrap(async (req, res) => {
   const sync = require("./audit-sync");
   const dropbox = require("./audit-dropbox");
+  const last = await sync.lastRun();
+  // A run is only live if THIS process is running it. Anything else
+  // claiming to be running is a leftover from a process that died.
+  const beat = last && last.lastBeatAt ? Date.parse(last.lastBeatAt) : 0;
+  const stale = !!(last && last.state === "running" && !sync.isRunning() && Date.now() - beat > 120000);
   ok(res, {
     configured: dropbox.configured(),
     running: sync.isRunning(),
-    lastRun: await sync.lastRun(),
+    stale,
+    lastRun: last,
     counts: await sync.counts(),
   });
 }));

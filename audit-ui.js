@@ -1155,16 +1155,30 @@ function syncPage({ status, files, configured }, user) {
         const s = await getJson('${BASE}/api/sync/status');
         misses = 0;
         var st = s.lastRun || {};
+        // A record still saying "running" while this process is not
+        // running one belongs to a scan that was killed — a deploy, a
+        // restart. Stop watching it rather than counting up for ever.
+        if(s.stale){
+          clearInterval(poller); poller = null;
+          msg('That scan stopped before it finished, almost certainly because the service restarted. ' +
+              'Nothing was lost \u2014 run it again and it continues from where it left off.', 'bad');
+          setBusy(false); return;
+        }
         if(s.running || st.state === 'running'){
           var p = st.progress;
           msg(p
-            ? 'Scanning\u2026 ' + p.imported + ' imported, ' + p.skipped + ' skipped of ' + p.of + ' files (' + secs + 's)'
-            : 'Scanning\u2026 (' + secs + 's)', 'info');
+            ? 'Importing\u2026 ' + p.imported + ' imported, ' + p.skipped + ' skipped of ' + p.of + ' files (' + secs + 's)'
+            : (st.phase === 'listing'
+                ? 'Listing the folder\u2026 one request per subfolder, so a deep tree takes a while (' + secs + 's)'
+                : 'Starting\u2026 (' + secs + 's)'), 'info');
           return;
         }
         clearInterval(poller); poller = null;
         var r = st.lastResult || {};
-        if(st.state === 'error'){ msg('Scan failed. ' + (st.error || 'Unknown error'), 'bad'); setBusy(false); return; }
+        if(st.state === 'error' || st.state === 'interrupted'){
+          msg((st.state === 'interrupted' ? '' : 'Scan failed. ') + (st.error || 'Unknown error'), 'bad');
+          setBusy(false); return;
+        }
         msg('Scan finished. ' + (r.imported||0) + ' imported, ' + (r.skipped||0) + ' skipped, ' + (r.failed||0) + ' failed' +
             (r.deferred ? '. More files remain \u2014 run it again to continue' : '') + '. Reloading\u2026', 'good');
         setTimeout(function(){ location.reload(); }, 1500);
@@ -1180,7 +1194,7 @@ function syncPage({ status, files, configured }, user) {
   (async function(){
     try{
       const s = await getJson('${BASE}/api/sync/status');
-      if(s.running || (s.lastRun && s.lastRun.state === 'running')){ setBusy(true, 'Scan in progress\u2026'); watch(); }
+      if(!s.stale && (s.running || (s.lastRun && s.lastRun.state === 'running'))){ setBusy(true, 'Scan in progress\u2026'); watch(); }
     }catch(e){}
   })();
   </script>`;
