@@ -85,10 +85,17 @@ function requireFirmUser(req, res, next) {
 //  requireFirmUser and every handler that reads req.user.n / req.user.u /
 //  isAdmin(req.user) keep working unchanged.
 const CIVIL_ADMIN_PREFIX = "/admin/civil/api";
-// Source prefixes that get an admin twin. /api/staff/users is in here because
-// the team picker needs the firm directory and it lives outside the civil
-// namespace; everything else the civil UI touches is under /api/staff/civil.
-const CIVIL_MIRROR_PREFIXES = ["/api/staff/civil", "/api/staff/users"];
+// Source prefixes that get an admin twin, and where each lands.
+//   · /api/staff/civil keeps its own tail: /cases/:id -> /admin/civil/api/cases/:id
+//   · /api/staff/users collapses to a single path: the team picker needs the
+//     firm directory and it lives outside the civil namespace.
+//   · /api/staff/zara gets its own admin namespace rather than being filed
+//     under "civil" — Zara is not a litigation feature.
+const CIVIL_MIRROR_PREFIXES = [
+  { src: "/api/staff/civil", dest: CIVIL_ADMIN_PREFIX },
+  { src: "/api/staff/users", dest: CIVIL_ADMIN_PREFIX + "/users", collapse: true },
+  { src: "/api/staff/zara", dest: "/admin/zara/api" },
+];
 
 function makeCivilAdminMirror(app) {
   const state = { mirrored: 0 };
@@ -97,14 +104,12 @@ function makeCivilAdminMirror(app) {
     mirror[method] = (path, ...rest) => {
       app[method](path, ...rest);           // the real bearer-auth route
       if (typeof path !== "string") return;
-      const src = CIVIL_MIRROR_PREFIXES.find(p => path.startsWith(p));
-      if (!src) return;
+      const rule = CIVIL_MIRROR_PREFIXES.find(p => path.startsWith(p.src));
+      if (!rule) return;
       const chain = rest.filter(fn => fn !== requireBearer);
       if (!chain.length) return;
-      // "/api/staff/users" -> "/admin/civil/api/users"; the civil prefix keeps
-      // its own tail ("/cases/:id" -> "/admin/civil/api/cases/:id").
-      const tail = src === "/api/staff/users" ? "/users" : path.slice(src.length);
-      app[method](CIVIL_ADMIN_PREFIX + tail, ...chain);
+      const twin = rule.collapse ? rule.dest : rule.dest + path.slice(rule.src.length);
+      app[method](twin, ...chain);
       state.mirrored++;
     };
   }
@@ -1252,6 +1257,18 @@ function registerAppApi(app) {
   // Registering civil routes through this shim puts each one on BOTH
   // /api/staff/civil/* (app, bearer) and /admin/civil/api/* (web, cookie).
   const civilApp = makeCivilAdminMirror(app);
+
+  // Zara's own identity: the charter, the lessons, the provider health.
+  // Registered FIRST so that /api/staff/zara/* exists even if a civil
+  // module later fails to load — Zara is not a litigation feature and
+  // should not go down with one.
+  try {
+    const zaraCore = require("./zara-core");
+    zaraCore.initTables().catch(e => console.warn("[zara-core] init:", e.message));
+    attachZaraCoreRoutes(civilApp, zaraCore);
+  } catch (e) {
+    console.warn("[zara-core] module load failed:", e.message);
+  }
 
   // Civil litigation module: initialize tables + register routes below.
   try {
@@ -2769,8 +2786,12 @@ function registerAppApi(app) {
       if (!zaraChat || typeof zaraChat.chat !== "function") {
         return res.status(501).json({ ok: false, error: "Chat not available on backend" });
       }
+      // surface + extra, not systemPrompt: Zara's identity, goals,
+      // boundaries and learned lessons come from the charter in
+      // zara-core; STAFF_OPS adds only what is local to this surface.
       const answer = await zaraChat.chat({
-        systemPrompt: zaraChat.STAFF_SYSTEM_PROMPT,
+        surface: "staff",
+        extra: zaraChat.STAFF_OPS,
         message: String(message),
         history: history || [],
         db,
@@ -8383,7 +8404,8 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
       }
 
       const answer = await zaraChat.chat({
-        systemPrompt: zaraChat.CLIENT_SYSTEM_PROMPT(
+        surface: "client",
+        extra: zaraChat.CLIENT_OPS(
           req.user.n,
           req.user.lang || "en",
           caseContext
@@ -9262,6 +9284,150 @@ function attachCivilDocketRoutes(app, docket) {
   });
 
   console.log("[civil-court-docket] routes registered under /api/staff/civil/cases/:id/{check-docket,docket-checks}");
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ZARA CORE ROUTES
+//  ─────────────────────────────────────────────────────────
+//  The charter, the lessons and the provider health. Registered
+//  through the same mirror as the civil routes, so the app and the
+//  web admin see identical endpoints.
+//
+//  WRITES ARE ADMIN-ONLY. Reading who Zara is should be open to the
+//  firm — a paralegal ought to be able to see the rules she is
+//  operating under. Changing who she is is a management act.
+// ═══════════════════════════════════════════════════════════
+function attachZaraCoreRoutes(app, core) {
+  const auth1 = requireBearer;
+  const auth2 = requireFirmUser;
+  const who = req => (req.user && (req.user.u || req.user.n)) || "web";
+  const adminOnly = (req, res, next) =>
+    isAdmin(req.user) ? next()
+      : res.status(403).json({ ok: false, error: "Admin role required to change Zara" });
+
+  // ── Charter ──
+  app.get("/api/staff/zara/charter", auth1, auth2, async (_req, res) => {
+    try {
+      const charter = await core.getCharter({ fresh: true });
+      res.json({
+        ok: true,
+        charter,
+        // Sent so the UI can display them as read-only. They are not
+        // part of the editable document and a PUT that includes them
+        // has them stripped server-side.
+        boundaries: core.BOUNDARIES,
+        surfaces: Object.entries(core.SURFACES).map(([key, s]) => ({ key, label: s.label })),
+        tiers: Object.fromEntries(
+          Object.entries(core.TIERS).map(([k, v]) => [k, v.anthropic])
+        ),
+      });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
+  app.put("/api/staff/zara/charter", auth1, auth2, adminOnly, async (req, res) => {
+    try {
+      const { charter, note } = req.body || {};
+      if (!charter || typeof charter !== "object") {
+        return res.status(400).json({ ok: false, error: "charter object required" });
+      }
+      if (!String(charter.name || "").trim()) {
+        return res.status(400).json({ ok: false, error: "charter.name is required" });
+      }
+      const row = await core.saveCharter(charter, { by: who(req), note: note || null });
+      res.json({ ok: true, version: row.version, saved_at: row.created_at });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
+  app.get("/api/staff/zara/charter/history", auth1, auth2, async (req, res) => {
+    try {
+      res.json({ ok: true, versions: await core.charterHistory(Number(req.query.limit) || 20) });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
+  // What the model actually receives. The single most useful debugging
+  // tool here: when Zara behaves oddly, read the prompt she was given.
+  app.get("/api/staff/zara/prompt", auth1, auth2, async (req, res) => {
+    try {
+      const surface = String(req.query.surface || "staff");
+      const prompt = await core.composePrompt({ surface, lessonScope: surface });
+      res.json({ ok: true, surface, prompt, chars: prompt.length });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
+  // ── Lessons ──
+  app.get("/api/staff/zara/lessons", auth1, auth2, async (req, res) => {
+    try {
+      res.json({
+        ok: true,
+        lessons: await core.listLessons({
+          status: req.query.status || null,
+          scope: req.query.scope || null,
+        }),
+      });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
+  // A human can write a lesson directly. This is the fast path for
+  // "Zara, remember this" — it still lands as `proposed`, because the
+  // review step is the point.
+  app.post("/api/staff/zara/lessons", auth1, auth2, async (req, res) => {
+    try {
+      const { lesson, rationale, scope } = req.body || {};
+      const row = await core.proposeLesson({
+        lesson, rationale: rationale || null,
+        scope: scope || "global", source: "human", by: who(req),
+      });
+      res.json({ ok: true, lesson: row });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  });
+
+  app.post("/api/staff/zara/lessons/:id/approve", auth1, auth2, adminOnly, async (req, res) => {
+    try {
+      const row = await core.approveLesson(Number(req.params.id), {
+        by: who(req),
+        weight: req.body?.weight != null ? Number(req.body.weight) : null,
+      });
+      res.json({ ok: true, lesson: row });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  });
+
+  app.post("/api/staff/zara/lessons/:id/reject", auth1, auth2, adminOnly, async (req, res) => {
+    try {
+      res.json({ ok: true, lesson: await core.rejectLesson(Number(req.params.id), { by: who(req) }) });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  });
+
+  app.post("/api/staff/zara/lessons/:id/retire", auth1, auth2, adminOnly, async (req, res) => {
+    try {
+      res.json({ ok: true, lesson: await core.retireLesson(Number(req.params.id), { by: who(req) }) });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  });
+
+  // ── Reflection: turn a correction into a proposed lesson ──
+  // This is the endpoint the "that answer was wrong, here's the right
+  // one" button calls. Zara distils the lesson; a human still approves it.
+  app.post("/api/staff/zara/reflect", auth1, auth2, async (req, res) => {
+    try {
+      const { question, answer, correction, scope } = req.body || {};
+      if (!String(correction || "").trim()) {
+        return res.status(400).json({ ok: false, error: "correction required" });
+      }
+      const out = await core.reflect({
+        question, answer, correction,
+        scope: scope || "global", by: who(req),
+      });
+      res.json({ ok: true, ...out });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
+  // ── Health: providers, cost, fallbacks ──
+  app.get("/api/staff/zara/health", auth1, auth2, async (req, res) => {
+    try {
+      res.json({ ok: true, health: await core.health({ hours: Number(req.query.hours) || 24 }) });
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
+  console.log("[zara-core] routes registered under /api/staff/zara/* (+ /admin/zara/api/* twins)");
 }
 
 module.exports = { registerAppApi };

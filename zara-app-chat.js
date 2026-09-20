@@ -1,22 +1,23 @@
 /**
- * zara-app-chat.js — Direct Anthropic API call for the in-app Zara chat.
+ * zara-app-chat.js — the in-app Zara chat surface.
  *
  * DIFFERENT from askClaude-memory (which is the lead-intake bot for
  * Telegram/WhatsApp/WeChat). This one is for authenticated users inside
  * the mobile app who just want legal Q&A — no intake, no name extraction.
  *
- * Uses Claude Sonnet for higher-quality legal answers. Uses ephemeral
- * cache_control on the system prompt so repeated turns hit prompt cache.
+ * MIGRATED TO zara-core. This file used to own a copy of Zara's
+ * personality and a hardcoded model string. It now owns only what is
+ * genuinely local to this surface: the firm-data tools and the
+ * operational instructions for using them. Who Zara IS comes from the
+ * charter in zara-core, so editing her in the admin panel changes her
+ * here too — and swapping models is one edit in zara-core's TIERS table
+ * rather than twenty edits across the repo.
  *
- * STAFF MODE also has tool_use support for querying firm data
+ * STAFF MODE keeps tool_use support for querying firm data
  * (case counts, task lists, upcoming hearings, client lookup).
  */
 
-const axios = require("axios");
-
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-4-5-20250929";  // current Sonnet — high-quality legal reasoning
-const MAX_TOKENS = 1500;
+const core = require("./zara-core");
 
 // ═══════════════════════════════════════════════════════
 //  FIRM-DATA TOOLS (staff mode only)
@@ -561,95 +562,64 @@ async function executeTool(db, user, name, args) {
 /**
  * Ask Zara a legal question with optional conversation history.
  *
+ * Two ways to call this:
+ *
+ *   PREFERRED — name the surface and let the charter supply the
+ *   identity:   chat({ surface: "staff", extra: STAFF_OPS, ... })
+ *
+ *   LEGACY — hand over a fully-formed prompt:
+ *               chat({ systemPrompt, ... })
+ *   This still works so that call sites can migrate one at a time,
+ *   but a prompt passed this way bypasses the charter, the boundaries
+ *   and the learned lessons. It is a migration ramp, not a feature.
+ *
  * @param {object} opts
- * @param {string} opts.systemPrompt   Full system prompt (should describe role + user context)
+ * @param {string} [opts.surface]      Surface key from zara-core.SURFACES
+ * @param {string} [opts.extra]        Surface-local operating instructions
+ * @param {string} [opts.context]      Runtime facts for this conversation
+ * @param {string} [opts.systemPrompt] Legacy: full prompt, bypasses composition
  * @param {string} opts.message        The user's current message
- * @param {Array}  opts.history        Prior turns [{ role: 'user'|'assistant', content: string }, ...]
- * @param {object} [opts.db]           Optional pg pool for tool_use (staff mode only)
- * @param {object} [opts.user]         Optional user object { uid, role } for tool_use (staff only)
+ * @param {Array}  opts.history        Prior turns [{ role, content }, ...]
+ * @param {object} [opts.db]           Optional pg pool for tool_use (staff only)
+ * @param {object} [opts.user]         Optional { uid, role } for tool_use (staff only)
  * @returns {Promise<string>}          Zara's reply as plain text
  */
-async function chat({ systemPrompt, message, history = [], db, user }) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
-
+async function chat({
+  systemPrompt, surface = "staff", extra = "", context = "",
+  message, history = [], db, user,
+}) {
   // Only enable tools when we have both db + a staff/admin user
   const useTools = !!(db && user && user.role && user.role !== "client");
 
-  // Build message list: prior history + current turn
-  const trimmedHistory = (history || [])
-    .filter(t => t && t.role && t.content)
-    .slice(-8)
-    .map(t => ({
-      role: t.role === "assistant" ? "assistant" : "user",
-      content: String(t.content).substring(0, 4000),
-    }));
+  const out = await core.think({
+    surface,
+    tier: "balanced",
+    message,
+    history,
+    context,
+    extra,
+    lessonScope: surface,
+    // Legacy path: a caller that still passes a whole prompt gets it used verbatim.
+    system: systemPrompt || undefined,
+    maxTokens: 1500,
+    tools: useTools ? STAFF_TOOLS : null,
+    onToolUse: useTools
+      ? (name, input) => executeTool(db, user, name, input)
+      : null,
+  });
 
-  const messages = [
-    ...trimmedHistory,
-    { role: "user", content: String(message).substring(0, 8000) },
-  ];
-
-  const baseBody = {
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    system: [
-      { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
-    ],
-  };
-  if (useTools) baseBody.tools = STAFF_TOOLS;
-
-  const headers = {
-    "content-type": "application/json",
-    "x-api-key": apiKey,
-    "anthropic-version": "2023-06-01",
-  };
-
-  // Tool-use loop (max 6 rounds)
-  let currentMessages = messages;
-  for (let round = 0; round < 6; round++) {
-    const res = await axios.post(
-      ANTHROPIC_API_URL,
-      { ...baseBody, messages: currentMessages },
-      { headers, timeout: 60000 }
-    );
-
-    const stopReason = res.data?.stop_reason;
-    const blocks = res.data?.content || [];
-
-    if (stopReason === "tool_use") {
-      // Collect tool_use blocks + execute each
-      const toolUses = blocks.filter(b => b.type === "tool_use");
-      if (!toolUses.length) break;
-      const toolResults = [];
-      for (const t of toolUses) {
-        const result = await executeTool(db, user, t.name, t.input || {});
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: t.id,
-          content: JSON.stringify(result).substring(0, 30000),
-        });
-      }
-      // Append assistant turn + tool_result user turn, continue loop
-      currentMessages = [
-        ...currentMessages,
-        { role: "assistant", content: blocks },
-        { role: "user", content: toolResults },
-      ];
-      continue;
-    }
-
-    // Normal text response — extract and return
-    const text = blocks.filter(b => b.type === "text").map(b => b.text).join("\n").trim();
-    return text || "(no response)";
-  }
-
-  return "(tool-use loop exceeded)";
+  return out.text || "(no response)";
 }
 
-// System prompts — kept here for consistency
+// ═══════════════════════════════════════════════════════
+//  SURFACE-LOCAL OPERATING INSTRUCTIONS
+//  ─────────────────────────────────────────────────────
+//  What is left here after the migration is only what is true of
+//  THIS surface: which tools exist and how to use them. Zara's
+//  identity, goals, voice and boundaries come from the charter.
+// ═══════════════════════════════════════════════════════
 
-const STAFF_SYSTEM_PROMPT = `You are Zara, Tez Law P.C.'s AI legal assistant. You are speaking with a firm staff member (attorney, paralegal, or admin) via the internal Tez Law mobile app.
+const STAFF_OPS = `HOW THIS SURFACE WORKS
 
 The user is authenticated. Do NOT collect their name, phone number, or matter type — you already know they are firm staff. Do NOT act like an intake bot. Do NOT say "someone from our office will reach out."
 
@@ -684,7 +654,7 @@ Tez Law's own context:
 - Serves California + nationwide (immigration/trademark)
 - Multilingual: English, Mandarin, Shanghainese, Spanish`;
 
-const CLIENT_SYSTEM_PROMPT = (clientName, lang, caseContext) => {
+const CLIENT_OPS = (clientName, lang, caseContext) => {
   const langInstr = lang === "zh-TW" ? "Respond in Traditional Chinese (繁體中文)."
                   : lang === "es"    ? "Responde en español."
                   : "Respond in English.";
@@ -709,7 +679,9 @@ const CLIENT_SYSTEM_PROMPT = (clientName, lang, caseContext) => {
     }
   }
 
-  return `You are Zara, Tez Law P.C.'s AI legal assistant. You are speaking with ${clientName || "a client"} of Tez Law via the client mobile app.
+  return `HOW THIS SURFACE WORKS
+
+You are speaking with ${clientName || "a client"} of Tez Law via the client mobile app.
 
 The user is an authenticated client. Do NOT collect their name or contact info — you already know who they are. Do NOT act like an intake bot.
 
@@ -730,4 +702,14 @@ ${langInstr}
 Tez Law contact: 626-678-8677 · jj@tezlawfirm.com${contextBlock}`;
 };
 
-module.exports = { chat, STAFF_SYSTEM_PROMPT, CLIENT_SYSTEM_PROMPT };
+// The old names are kept as aliases so nothing breaks mid-migration.
+// They now return operating instructions only — the identity they used
+// to carry lives in the charter and is prepended by zara-core.
+module.exports = {
+  chat,
+  STAFF_TOOLS,
+  STAFF_OPS,
+  CLIENT_OPS,
+  STAFF_SYSTEM_PROMPT: STAFF_OPS,
+  CLIENT_SYSTEM_PROMPT: CLIENT_OPS,
+};

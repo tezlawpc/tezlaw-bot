@@ -908,6 +908,53 @@ app.get("/admin/civil/wip", async (req, res) => {
   }
 });
 
+// ── Zara: the charter console ───────────────────────────────
+// Zara's personality, goals, voice and boundaries used to be 21 separate
+// hardcoded system prompts across 20 files, each drifting on its own. They
+// now come from one charter, and this is where it is edited — without a
+// deploy, versioned, with the boundaries shown but not editable.
+app.get("/admin/zara", async (req, res) => {
+  try {
+    const chrome = require("./hearing-notes");
+    let v = "1";
+    try {
+      v = Math.floor(require("fs").statSync(
+        require("path").join(__dirname, "public", "zara-admin.js")
+      ).mtimeMs).toString(36);
+    } catch (e) { /* a stale cache beats a broken page */ }
+
+    const tab = (id, icon, text, sub) => `
+      <a href="#${id}" style="flex:1;min-width:190px;text-decoration:none;border:1px solid #D4C4A0;border-radius:6px;padding:12px 14px;background:#FBF3DE;">
+        <div style="font-family:Cinzel,serif;font-size:12px;letter-spacing:1.4px;color:#3E2818;">${icon} ${text}</div>
+        <div style="font-size:11px;color:#7B5330;font-style:italic;margin-top:3px;">${sub}</div>
+      </a>`;
+
+    const body = `
+      <div style="padding:24px;max-width:1100px;">
+        <h1 style="margin:0 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">◎ Zara</h1>
+        <div style="color:#7B5330;font-style:italic;margin-bottom:18px;">
+          One definition of who she is, used by every surface: the app, the web admin, the voice line and the background jobs.
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;">
+          ${tab("charter", "◎", "Charter", "Purpose, goals, voice, boundaries")}
+          ${tab("lessons", "✦", "Lessons", "What she has learned — you approve each one")}
+          ${tab("health", "◍", "Model health", "Which model answered, and what it cost")}
+        </div>
+
+        <div id="charter" data-zara-panel="charter"></div>
+        <div id="lessons" style="margin-top:38px;" data-zara-panel="lessons"></div>
+        <div id="health" style="margin-top:38px;" data-zara-panel="health"></div>
+      </div>
+      <script src="/static/zara-admin.js?v=${v}" defer></script>`;
+
+    res.send(chrome.renderAdminChrome({ title: "Zara — Charter", body, activeItem: "zara" }));
+  } catch (err) {
+    console.error("[zara admin]:", err.message);
+    res.status(500).send("Zara console failed: " + err.message);
+  }
+});
+
 // ── Civil: move a matter between kanban stages ──────────────
 // The web board and case page had no way to change a case's stage at all —
 // only the iOS app did (POST /api/staff/civil/cases/:id/move-stage). This is

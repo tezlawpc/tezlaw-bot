@@ -84,3 +84,19 @@ jobs:
       # or the whole admin UI renders inside itself.
       - name: Admin panel embed
         run: node scripts/check-panel-embed.js
+
+      # Zara's charter is editable from a web page, so the guarantees that
+      # make that safe have to be enforced in code: the boundaries reach
+      # every prompt on every surface and no charter edit can weaken them;
+      # a lesson needs a human before it reaches a prompt; a tool-using call
+      # never silently degrades to a provider that cannot run the tools;
+      # and she still answers with the database down.
+      - name: Zara core
+        run: node scripts/check-zara-core.js
+
+      # The charter console is the only place Zara can be changed. Loads the
+      # real public/zara-admin.js into jsdom against the real page markup:
+      # the panels must draw, the boundaries must render read-only, and the
+      # save button must post the exact shape the PUT handler destructures.
+      - name: Zara admin UI
+        run: node scripts/check-zara-admin-ui.js

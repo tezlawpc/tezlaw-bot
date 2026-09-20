@@ -1702,6 +1702,25 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
     </div>
 
+    <!-- ── Zara ── -->
+    <!-- Zara's own definition. Her personality, goals and boundaries used to
+         live in 21 hardcoded prompts across the repo; they now live in one
+         charter that is edited here, without a deploy. -->
+    <div class="nav-section" id="section-zara">
+      <div class="nav-section-header">
+        <span>Zara</span>
+      </div>
+      <a href="/admin/zara" class="nav-link ${isActive('zara')}" data-perm="users.manage">
+        <span class="nav-icon">◎</span><span class="nav-label">Charter</span>
+      </a>
+      <a href="/admin/zara#lessons" class="nav-link" data-perm="users.manage">
+        <span class="nav-icon">✦</span><span class="nav-label">Lessons</span>
+      </a>
+      <a href="/admin/zara#health" class="nav-link" data-perm="users.manage">
+        <span class="nav-icon">◍</span><span class="nav-label">Model Health</span>
+      </a>
+    </div>
+
     <!-- ── Integrations ── -->
     <div class="nav-section" id="section-integrations">
       <div class="nav-section-header">
