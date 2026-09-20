@@ -102,6 +102,20 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
   }
 
   // Awaiting password — normalize by removing all spaces/punctuation for flexible input
+  //
+  // Everything returned from this branch carries `redact: true`. The caller
+  // in askClaude-memory.js persists every inbound message to the messages
+  // table, which meant JJ's password was being written to the database in
+  // plaintext on every single authentication — once per login, forever, in a
+  // table that is read back for conversation history and shows up in admin
+  // views. Redacting here rather than at the call site keeps the decision
+  // next to the only code that knows the message is a credential.
+  //
+  // This does not solve the wider problem: the password is still typed into
+  // Telegram/WhatsApp, so it lives in those chat histories on both devices
+  // and on their servers. A chat-typed password is a shared secret sent over
+  // a channel neither of us controls. Worth replacing with a one-time code
+  // or a link-based login eventually.
   if (isAwaitingPassword(platform, userId)) {
     const normalize = (s) => s.toLowerCase().replace(/[\s\-_.,!?]+/g, "");
     // A null password must never match. Without this guard an unset env var
@@ -115,12 +129,13 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
         ? `✅ Welcome back, JJ! You're now in private mode.\n\n📚 Here's what I remember:\n\n${memory}\n\nWhat would you like to work on today?`
         : "✅ Welcome back, JJ! You're in private mode. What would you like to work on today?";
       sendVoiceReply(platform, userId, "Welcome back JJ! You're now in private mode. How can I help you today?").catch(() => {});
-      return { handled: true, message: welcomeMsg };
+      return { handled: true, message: welcomeMsg, redact: true };
     } else {
       // Wrong password — clear state
       delete jjSessions[key];
       return {
         handled: true,
+        redact: true,   // a failed attempt is still a credential guess
         message: "❌ Incorrect password. Switching back to public mode."
       };
     }

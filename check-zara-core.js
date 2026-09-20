@@ -622,6 +622,28 @@ async function section(title, fn) {
       () => !/tezlaw2026jj/.test(src));
     check("an unset JJ_PASSWORD disables private mode rather than failing open",
       () => /JJ_PASSWORD \|\| null/.test(src) && /JJ_PASSWORD && normalize/.test(src));
+
+    // JJ types his password into Telegram/WhatsApp, and every inbound
+    // message is persisted. Both outcomes of a password attempt — right and
+    // wrong — must be marked so the caller stores a marker, not the secret.
+    const awaiting = src.split("isAwaitingPassword(platform, userId)")[2] || "";
+    const branch = awaiting.slice(0, awaiting.indexOf("Intelligent trigger detection"));
+    const returns = branch.match(/return \{[\s\S]*?\};/g) || [];
+    check("the password branch has both a success and a failure return",
+      () => returns.length === 2 || `found ${returns.length}`);
+    check("both are marked redact — neither the password nor a wrong guess is stored",
+      () => returns.every(r => /redact:\s*true/.test(r)));
+
+    const caller = fs.readFileSync(path.join(__dirname, "..", "askClaude-memory.js"), "utf8");
+    check("the caller honours the redact flag",
+      () => /jj\.redact/.test(caller));
+    check("…and stores a marker instead of the message",
+      () => /private mode authentication/.test(caller));
+    check("…before any saveMessage of the inbound text", () => {
+      const i = caller.indexOf("jj.redact");
+      const j = caller.indexOf('saveMessage(platform, platformId, "user", inbound)');
+      return i > -1 && j > i;
+    });
   });
 
   console.log("\n" + (failures ? `${failures} FAILED` : "all checks passed"));

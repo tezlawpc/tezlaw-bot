@@ -143,7 +143,15 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       sendProgress,
     });
     if (jj.handled) {
-      await db.saveMessage(platform, platformId, "user", isPdf ? "[PDF uploaded]" : isDocx ? "[DOCX uploaded]" : isImage ? "[Image uploaded]" : userMessage);
+      // jj.redact means the inbound message was a password attempt. Writing
+      // it here would put JJ's private-mode credential into the messages
+      // table in plaintext — which is exactly what used to happen, on every
+      // login. Store a marker instead: the fact that an authentication was
+      // attempted is worth keeping; the secret is not.
+      const inbound = jj.redact
+        ? "[private mode authentication — content withheld]"
+        : (isPdf ? "[PDF uploaded]" : isDocx ? "[DOCX uploaded]" : isImage ? "[Image uploaded]" : userMessage);
+      await db.saveMessage(platform, platformId, "user", inbound);
       await db.saveMessage(platform, platformId, "assistant", jj.message);
       // If JJ mode returned an attachment (e.g., filled .docx from /draft),
       // pass it back to caller via a special reply object.
