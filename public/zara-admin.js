@@ -540,17 +540,76 @@
     health: renderHealth,
   };
 
+  function draw(host, name) {
+    if (!PANELS[name]) return;
+    try { PANELS[name](host); }
+    catch (e) {
+      clear(host);
+      host.appendChild(note("Panel '" + name + "' failed: " + e.message, "bad"));
+    }
+  }
+
+  // The three cards at the top are styled as tabs, so they had better behave
+  // like tabs. Server-side they are plain anchors over three stacked sections
+  // — which is what you get if this script never loads — and this upgrades
+  // them in place: one panel visible at a time, drawn on first view, with the
+  // hash kept in sync so a link like /admin/zara#lessons lands in the right
+  // place and Back works.
+  function wireTabs() {
+    var strip = document.querySelector("[data-zara-tabs]");
+    var tabs = document.querySelectorAll("[data-zara-tab]");
+    if (!strip || !tabs.length) return false;
+
+    var panels = {};
+    Object.keys(PANELS).forEach(function (k) {
+      panels[k] = document.querySelector('[data-zara-panel="' + k + '"]');
+    });
+    var drawn = {};
+
+    function show(name, push) {
+      if (!panels[name]) name = "charter";
+      Object.keys(panels).forEach(function (k) {
+        if (!panels[k]) return;
+        panels[k].style.display = k === name ? "" : "none";
+        panels[k].style.marginTop = "0";
+      });
+      for (var i = 0; i < tabs.length; i++) {
+        var on = tabs[i].getAttribute("data-zara-tab") === name;
+        tabs[i].style.background = on ? C.walnutMid : C.parchmentLit;
+        tabs[i].style.borderColor = on ? C.walnutMid : C.border;
+        var kids = tabs[i].children;
+        if (kids[0]) kids[0].style.color = on ? C.parchmentLit : C.walnut;
+        if (kids[1]) kids[1].style.color = on ? C.parchment : C.muted;
+      }
+      if (!drawn[name] && panels[name]) { drawn[name] = true; draw(panels[name], name); }
+      if (push && window.history && window.history.replaceState) {
+        window.history.replaceState(null, "", "#" + name);
+      }
+    }
+
+    for (var i = 0; i < tabs.length; i++) {
+      (function (el) {
+        el.addEventListener("click", function (e) {
+          e.preventDefault();
+          show(el.getAttribute("data-zara-tab"), true);
+        });
+      })(tabs[i]);
+    }
+    window.addEventListener("hashchange", function () {
+      show((window.location.hash || "").replace("#", "") || "charter", false);
+    });
+
+    show((window.location.hash || "").replace("#", "") || "charter", false);
+    return true;
+  }
+
   function mount() {
+    // If the tab strip is there, it owns which panel is drawn and when.
+    if (wireTabs()) return;
+    // Otherwise draw everything — this is also the path the tests take.
     var hosts = document.querySelectorAll("[data-zara-panel]");
     for (var i = 0; i < hosts.length; i++) {
-      var name = hosts[i].getAttribute("data-zara-panel");
-      if (PANELS[name]) {
-        try { PANELS[name](hosts[i]); }
-        catch (e) {
-          clear(hosts[i]);
-          hosts[i].appendChild(note("Panel '" + name + "' failed: " + e.message, "bad"));
-        }
-      }
+      draw(hosts[i], hosts[i].getAttribute("data-zara-panel"));
     }
   }
 
