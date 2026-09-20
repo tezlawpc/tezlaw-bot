@@ -506,10 +506,15 @@ async function createMyCaseNote(caseName, noteBody) {
 //  CLAUDE PARALEGAL BRAIN
 //  Processes JJ's instruction and returns structured action plan
 // ============================================================
-const PARALEGAL_SYSTEM_PROMPT = `You are Zara, the AI paralegal for Tez Law P.C. in West Covina, California.
-You are in JJ PRIVATE MODE — you are speaking directly with JJ Zhang, Managing Attorney (CA Bar #326666).
+// MIGRATED TO zara-core. The identity that used to open this prompt now
+// comes from the charter via the `paralegal` surface; what stays here is
+// what is specific to this workbench — the team directory, the output
+// contract, the action schema.
+const PARALEGAL_OPS = `HOW THIS SURFACE WORKS — the paralegal workbench.
 
-Your role is to act as an expert California litigation and immigration paralegal.
+You are speaking directly with JJ Zhang, Managing Attorney (CA Bar #326666).
+
+Your role here is expert California litigation and immigration paralegal work.
 
 ============================
 TEAM
@@ -725,7 +730,21 @@ async function handleParalegalCommand(message, options = {}) {
     // ── Step 4: Call Claude with web search tool loop ───────
     // Uses the same tool_use loop pattern as jj-mode.js so Claude
     // can research current statutes, case law, and EOIR/court updates
-    const systemWithDeadlines = PARALEGAL_SYSTEM_PROMPT + deadlineBlock;
+    // Charter first, then this surface's own instructions, then the live
+    // deadline block. Same shape as jj-mode: the call stays local because
+    // web_search is a server-side tool, but the identity comes from the core.
+    const core = require("./zara-core");
+    let systemWithDeadlines;
+    try {
+      systemWithDeadlines = await core.composePrompt({
+        surface: "paralegal",
+        extra: PARALEGAL_OPS + deadlineBlock,
+        lessonScope: "paralegal",
+      });
+    } catch (e) {
+      console.warn("[paralegal] charter compose failed, using local ops only:", e.message);
+      systemWithDeadlines = PARALEGAL_OPS + deadlineBlock;
+    }
 
     const paralegalTools = [{ type: "web_search_20250305", name: "web_search" }];
     let loopMessages = [{ role: "user", content: message }];
@@ -738,7 +757,7 @@ async function handleParalegalCommand(message, options = {}) {
         const resp = await axios.post(
           "https://api.anthropic.com/v1/messages",
           {
-            model:    "claude-sonnet-4-6",
+            model:    require("./zara-core").TIERS.balanced.anthropic,
             max_tokens: 2500,
             system:   systemWithDeadlines,
             tools:    paralegalTools,

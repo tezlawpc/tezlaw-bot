@@ -103,7 +103,7 @@ async function detectViolation(userMessage, zaraResponse) {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model: "claude-haiku-4-5-20251001",
+        model: require("./zara-core").TIERS.fast.anthropic,
         max_tokens: 200,
         system: `You are a legal ethics compliance checker for a law firm AI assistant named Zara.
 Your job is to detect when Zara has made a definitive legal conclusion, guarantee, or unauthorized legal advice.

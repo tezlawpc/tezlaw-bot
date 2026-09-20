@@ -109,7 +109,7 @@ async function askClaude(systemPrompt, conversation) {
   const res = await axios.post(
     "https://api.anthropic.com/v1/messages",
     {
-      model:      "claude-haiku-4-5-20251001",
+      model:      require("./zara-core").TIERS.fast.anthropic,
       max_tokens: 60,
       system:     systemPrompt,
       messages:   conversation,
@@ -337,7 +337,7 @@ Do NOT give case status, deadlines, or legal advice. ONE sentence only. Under 20
 ============================
 VOICE CALL — IDENTITY & RULES
 ============================
-You are Zara, the AI phone intake assistant for Tez Law P.C. in West Covina, California. You are warm, calm, and professional.
+You are on a live phone call, doing intake. Warm, calm, professional.
 
 HARD LIMIT: ONE short sentence per reply. Under 20 words. No exceptions.
 No bullet points. No lists. Speak like a warm, human receptionist.
@@ -597,7 +597,28 @@ async function generateReply(session, speechText) {
 
   // Claude response (passes full session so prompt builder can include the right protocols)
   session.conversation.push({ role: "user", content: speechText });
-  const systemPrompt = buildVoicePrompt(session.savedPrompt, session);
+
+  // Charter + the voice surface framing, then this call's own rules last so
+  // the one-sentence limit is the final word. Composed per turn, but the
+  // charter and lessons are both cached in zara-core on a 60s TTL, so this
+  // costs no database round trip mid-call — dead air on a phone line is a
+  // worse failure than a slightly stale lesson.
+  //
+  // If composition fails for any reason the call continues on the local
+  // prompt alone. A caller in trouble does not get hung up on because the
+  // charter table was briefly unreachable.
+  const voiceOps = buildVoicePrompt(session.savedPrompt, session);
+  let systemPrompt = voiceOps;
+  try {
+    systemPrompt = await require("./zara-core").composePrompt({
+      surface: "voice",
+      extra: voiceOps,
+      lessonScope: "voice",
+    });
+  } catch (e) {
+    console.warn("[voice] charter compose failed, using local prompt:", e.message);
+  }
+
   const aiReply = await askClaude(systemPrompt, session.conversation);
   console.log(`[voice] Zara reply: "${aiReply.substring(0, 80)}"`);
 

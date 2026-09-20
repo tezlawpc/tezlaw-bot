@@ -108,7 +108,7 @@ function callClaudeAPI(prompt, maxTokens = 4000) {
     if (!apiKey) return reject(new Error("ANTHROPIC_API_KEY not configured"));
 
     const payload = JSON.stringify({
-      model: "claude-sonnet-4-6",
+      model: require("./zara-core").TIERS.balanced.anthropic,
       max_tokens: maxTokens,
       messages: [{ role: "user", content: prompt }]
     });

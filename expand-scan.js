@@ -407,7 +407,7 @@ ${ruling.full_text.substring(0, MAX_PROMPT_CHARS)}`;
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model:      "claude-haiku-4-5-20251001",
+        model:      require("./zara-core").TIERS.fast.anthropic,
         max_tokens: 1000,
         system: [
           { type: "text", text: STATIC_SCHEMA_PROMPT, cache_control: { type: "ephemeral" } },

@@ -94,7 +94,7 @@ The raw_notes field should contain the full transcript verbatim (or lightly clea
   const anthResp = await axios.post(
     "https://api.anthropic.com/v1/messages",
     {
-      model: "claude-sonnet-4-6",
+      model: require("./zara-core").TIERS.balanced.anthropic,
       max_tokens: 4000,
       tools: [{
         name: "record_hearing_note",

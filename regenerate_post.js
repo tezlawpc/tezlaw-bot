@@ -10,7 +10,7 @@ async function askClaude(prompt) {
   const response = await axios.post(
     "https://api.anthropic.com/v1/messages",
     {
-      model: "claude-sonnet-4-6",
+      model: require("./zara-core").TIERS.balanced.anthropic,
       max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     },

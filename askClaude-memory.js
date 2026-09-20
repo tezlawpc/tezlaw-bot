@@ -402,7 +402,7 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
           {
             // Upgrade from the deprecated claude-sonnet-4-20250514 to the
             // current 4.6 (JJ chose not to downgrade to Haiku for quality reasons).
-            model:      "claude-sonnet-4-6",
+            model:      require("./zara-core").TIERS.balanced.anthropic,
             max_tokens: 1024,
             // Cache the system prompt: it's the ~2-3KB Zara personality + firm
             // context and is identical across every message from every user.

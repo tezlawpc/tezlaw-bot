@@ -170,7 +170,7 @@ ${conversationText}`;
   const response = await axios.post(
     "https://api.anthropic.com/v1/messages",
     {
-      model: "claude-opus-4-5",
+      model: require("./zara-core").TIERS.deep.anthropic,
       max_tokens: 2500,
       system: "You are a senior AI product manager reviewing a legal chatbot's performance. Be specific, direct, and actionable. Prioritize catching anything that could mislead clients on legal matters.",
       messages: [{ role: "user", content: prompt }],

@@ -44,7 +44,7 @@ Respond ONLY in JSON:
 
   try {
     const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: require("./zara-core").TIERS.fast.anthropic,
       max_tokens: 300,
       messages: [{ role: "user", content: prompt }],
     });

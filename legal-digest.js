@@ -266,7 +266,7 @@ async function scoreRelevance(opinions) {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model:      "claude-haiku-4-5-20251001",
+        model:      require("./zara-core").TIERS.fast.anthropic,
         max_tokens: 1000,
         messages: [{
           role:    "user",
@@ -338,17 +338,32 @@ async function generateDigestSummary(relevantOpinions) {
    ${text}`;
   }).join("\n\n---\n\n");
 
+  // Composed once per digest run, not per opinion.
+  let digestSystem = "You are Zara, AI legal assistant for JJ Zhang at Tez Law P.C. in West Covina, CA.";
+  try {
+    digestSystem = await require("./zara-core").composePrompt({
+      surface: "system",
+      lessonScope: "digest",
+      extra: "You are writing JJ's daily legal intelligence digest. Every case you brief must come from the opinion text you were given — if the text does not support a holding, say so rather than characterising it.",
+    });
+  } catch (e) {
+    console.warn("[legal-digest] charter compose failed, using minimal identity:", e.message);
+  }
+
   try {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model:      "claude-sonnet-4-5-20250929",
+        model:      require("./zara-core").TIERS.balanced.anthropic,
         max_tokens: 4500,                       // raised for substantive briefs
+        // The identity used to be pasted into the user turn here, which is
+        // both the wrong place for it and a second copy of Zara to keep in
+        // step. It now comes from the charter as a real system prompt, on
+        // the `system` surface — this runs unattended, with no one to ask.
+        system: [{ type: "text", text: digestSystem, cache_control: { type: "ephemeral" } }],
         messages: [{
           role:    "user",
-          content: `You are Zara, AI legal assistant for JJ Zhang at Tez Law P.C. in West Covina, CA.
-
-JJ's practice areas: immigration (asylum/removal/CAT/cancellation), personal injury (auto/premises/wrongful death), eviction/UD (CA), business litigation (contracts/trade secrets), employment (FEHA/PAGA/wage hour), estate planning/probate, real estate, public entity/securities, federal civil rights.
+          content: `JJ's practice areas: immigration (asylum/removal/CAT/cancellation), personal injury (auto/premises/wrongful death), eviction/UD (CA), business litigation (contracts/trade secrets), employment (FEHA/PAGA/wage hour), estate planning/probate, real estate, public entity/securities, federal civil rights.
 
 Write JJ's daily legal intelligence digest based on these opinions. For EACH opinion you include, provide a SUBSTANTIVE brief with:
 
@@ -548,7 +563,7 @@ async function answersContradict(oldAnswer, newAnswer) {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model:      "claude-haiku-4-5-20251001",
+        model:      require("./zara-core").TIERS.fast.anthropic,
         max_tokens: 50,
         messages: [{
           role:    "user",
@@ -687,7 +702,7 @@ async function seedCacheFromOpinion(opinion) {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model:      "claude-haiku-4-5-20251001",
+        model:      require("./zara-core").TIERS.fast.anthropic,
         max_tokens: 800,
         messages: [{
           role:    "user",

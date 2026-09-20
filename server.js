@@ -10976,7 +10976,7 @@ Do not repeat the same file for multiple exhibits unless it truly represents mul
     const anthResp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model: "claude-sonnet-4-6",
+        model: require("./zara-core").TIERS.balanced.anthropic,
         max_tokens: 4000,
         tools: [{
           name: "report_matches",

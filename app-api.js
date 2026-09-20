@@ -8194,8 +8194,16 @@ ${groups.map(g => `
       if (!zaraChat || typeof zaraChat.chat !== "function") {
         return res.status(501).json({ ok: false, error: "Chat not available" });
       }
-      // Custom system prompt for consultants — limited scope, less firm-data-specific
-      const consultantPrompt = `You are Zara, Tez Law P.C.'s AI legal assistant. You are speaking with a REFERRAL CONSULTANT — not a firm attorney. The consultant submits leads and work orders to Tez Law and manages client relationships they've brought in.
+      // Operating instructions only — the identity, the boundaries and the
+      // confidentiality rule come from the charter via the `consultant`
+      // surface. Worth being explicit about why that matters here: a
+      // consultant is not an employee, so this is the surface where a
+      // confidentiality slip reaches someone outside the firm. Prompt
+      // wording alone is not a control, which is why the boundary is
+      // compiled in rather than written here.
+      const consultantOps = `HOW THIS SURFACE WORKS
+
+The consultant submits leads and work orders to Tez Law and manages client relationships they have brought in. They see only their own referrals.
 
 Do NOT:
 - Give advice that requires practicing law (that's what Tez Law's attorneys do)
@@ -8216,7 +8224,8 @@ Format: clear paragraphs, plain language. No excessive markdown.
 Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
 
       const answer = await zaraChat.chat({
-        systemPrompt: consultantPrompt,
+        surface: "consultant",
+        extra: consultantOps,
         message: String(message),
         history: history || [],
         // No db/user — consultant chat doesn't get firm-data tools

@@ -820,7 +820,7 @@ router.post("/api/post/publish", requireAuth, async (req, res) => {
       for (const lang of langs) {
         try {
           const tx = await client.messages.create({
-            model: "claude-haiku-4-5-20251001",
+            model: require("./zara-core").TIERS.fast.anthropic,
             max_tokens: 2000,
             messages: [{
               role: "user",

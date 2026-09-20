@@ -12,7 +12,22 @@ const { sendVoiceReply } = require("./voice");
 const jjSessions = {};
 // State: null | 'awaiting_password' | 'authenticated'
 
-const JJ_PASSWORD = process.env.JJ_PASSWORD || "tezlaw2026jj";
+// No fallback, deliberately. This used to fall back to a literal default
+// when the env var was unset, which meant a working password to JJ's
+// private channel was sitting in the repository, and a missing env var
+// failed open rather than closed — the deploy looked healthy while anyone
+// who had read the source could authenticate as JJ. (The old default is
+// not repeated here for the same reason it was removed. Treat it as
+// compromised: it lived in git history and should never be reused.)
+//
+// Now: if JJ_PASSWORD is unset, private mode cannot be entered at all and
+// the reason is logged. A feature that is off is recoverable; a channel
+// that anyone can walk into is not.
+const JJ_PASSWORD = process.env.JJ_PASSWORD || null;
+if (!JJ_PASSWORD) {
+  console.warn("[jj-mode] JJ_PASSWORD is not set — private mode is DISABLED. " +
+    "Set it in the environment to enable it.");
+}
 
 // ── Trigger phrases ───────────────────────────────────────
 const JJ_TRIGGERS_KEYWORDS = ["jj", "zhang", "private", "switch",
@@ -31,7 +46,7 @@ async function isJJTrigger(message) {
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model: "claude-haiku-4-5-20251001",
+        model: require("./zara-core").TIERS.fast.anthropic,
         max_tokens: 10,
         messages: [{
           role: "user",
@@ -89,7 +104,9 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
   // Awaiting password — normalize by removing all spaces/punctuation for flexible input
   if (isAwaitingPassword(platform, userId)) {
     const normalize = (s) => s.toLowerCase().replace(/[\s\-_.,!?]+/g, "");
-    if (normalize(userMessage) === normalize(JJ_PASSWORD)) {
+    // A null password must never match. Without this guard an unset env var
+    // would make normalize(null) throw, or worse, compare loosely.
+    if (JJ_PASSWORD && normalize(userMessage) === normalize(JJ_PASSWORD)) {
       jjSessions[key] = "authenticated";
       // Persist auth to DB so it survives Render redeploys
       try { await db.setJJSession(platform, userId, true); } catch(e) {}
@@ -1791,9 +1808,29 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     }
   }
 
-  // Build JJ-specific system prompt
+  // Build the prompt from the charter, not from a copy of Zara kept here.
+  //
+  // The model call below stays local rather than going through
+  // core.think(): it uses Anthropic's SERVER-side web_search tool, which
+  // resolves inside the API rather than through an onToolUse callback, so
+  // the core's client-side tool loop does not apply. What comes from the
+  // core is what matters — the charter, the ranked goals, the voice, the
+  // boundaries and the learned lessons — plus the model string, so this
+  // surface upgrades with the rest of the firm instead of drifting.
   const jjContext = await getJJContext();
-  let jjSystemPrompt = buildJJSystemPrompt(jjContext);
+  const core = require("./zara-core");
+  let jjSystemPrompt;
+  try {
+    jjSystemPrompt = await core.composePrompt({
+      surface: "jj",
+      extra: buildJJOps(jjContext),
+      lessonScope: "jj",
+    });
+  } catch (e) {
+    // Never let a charter problem take JJ's channel down.
+    console.warn("[jj-mode] charter compose failed, using local ops only:", e.message);
+    jjSystemPrompt = buildJJOps(jjContext);
+  }
 
   // Track retrieved source IDs for feedback recording later
   let retrievedMoatIds = [];
@@ -1961,7 +1998,9 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
         const resp = await axios.post(
           "https://api.anthropic.com/v1/messages",
           {
-            model: "claude-sonnet-4-6",
+            // Tier, not a model string — one edit in zara-core's TIERS
+            // table moves every surface, including this one.
+            model: require("./zara-core").TIERS.balanced.anthropic,
             max_tokens: 8192,
             // Cache the system prompt. It's very long (JJ's practice details,
             // active matters, tool definitions, private-mode rules — several KB)
@@ -2143,12 +2182,27 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
   }
 }
 
-// ── Build JJ-specific system prompt ──────────────────────
-function buildJJSystemPrompt(jjContext) {
+// ── Build JJ-specific operating instructions ─────────────
+//
+// MIGRATED TO zara-core. This used to open with "You are Zara in PRIVATE
+// MODE — JJ Zhang's personal AI assistant with no restrictions", which sat
+// in direct contradiction with the citation rules further down the same
+// prompt. "No restrictions" is not a thing you can safely tell a model that
+// is about to discuss case law: the sentence that unlocks candor is the same
+// sentence that unlocks invention, and this is the one channel where a
+// fabricated citation would go straight into JJ's own work.
+//
+// What JJ actually wanted from private mode is breadth of subject and
+// bluntness of delivery, not the absence of rules. That is now the `jj`
+// surface in zara-core: maximum directness, disagreement encouraged, every
+// topic in scope — on top of boundaries that no prompt can switch off.
+function buildJJOps(jjContext) {
   return [
-    "You are Zara in PRIVATE MODE — JJ Zhang's personal AI assistant with no restrictions.",
+    "HOW THIS SURFACE WORKS — JJ's private channel.",
     "",
-    "JJ Zhang is the Managing Attorney of Tez Law P.C. This is a private, unlimited collaborative session.",
+    "This is a private collaborative session with the Managing Attorney. Every subject is in scope: firm strategy, finances, personnel, personal decisions, investments, coding, writing, or learning something new together. Breadth of topic is the point of this channel.",
+    "",
+    "What does NOT change here is the accuracy floor. JJ relies on this channel for real work, so an invented citation or a confidently wrong fact does more damage here than anywhere else in the firm, not less. Being unrestricted in subject is not being unrestricted in rigour.",
     "",
     "YOU CAN HELP JJ WITH ANYTHING:",
     "- Legal research, case strategy, complex legal analysis",
@@ -2176,9 +2230,10 @@ function buildJJSystemPrompt(jjContext) {
     "7. Legal blog posts (Justia blog, Above the Law, Law360, legal newsletters) are COMMENTARY — never authority",
     "",
     "RULES IN JJ MODE:",
-    "- No topic restrictions — help with anything JJ asks",
-    "- Be direct, detailed, and treat JJ as a peer",
-    "- No disclaimers or oversimplification needed",
+    "- Every subject is in scope — help with anything JJ asks",
+    "- Be direct, detailed, and treat JJ as a peer. Disagree with him when you think he is wrong, and say why",
+    "- No hedging, disclaimers or oversimplification — he is the Managing Attorney, not a member of the public",
+    "- Still say 'I don't know' when you don't. Candour includes candour about uncertainty",
     "- Remember everything — it all goes into the permanent knowledge base",
     "- Respond in whatever language JJ uses",
     "- When JJ shares or teaches you something, acknowledge what you are saving",

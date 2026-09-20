@@ -307,7 +307,7 @@ NO commentary outside the JSON. Begin with { and end with }.`;
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model:      "claude-sonnet-4-5-20250929",
+        model:      require("./zara-core").TIERS.balanced.anthropic,
         max_tokens: 3500,
         messages: [{ role: "user", content: prompt }],
       },
@@ -392,7 +392,7 @@ NO commentary outside the JSON. Begin with { and end with }.`;
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model:      "claude-sonnet-4-5-20250929",
+        model:      require("./zara-core").TIERS.balanced.anthropic,
         max_tokens: 1500,
         messages: [{ role: "user", content: prompt }],
       },
@@ -533,7 +533,7 @@ NO commentary outside JSON. Begin with { and end with }.`;
     const resp = await axios.post(
       "https://api.anthropic.com/v1/messages",
       {
-        model:      "claude-sonnet-4-5-20250929",
+        model:      require("./zara-core").TIERS.balanced.anthropic,
         max_tokens: 3000,
         messages: [{ role: "user", content: prompt }],
       },
