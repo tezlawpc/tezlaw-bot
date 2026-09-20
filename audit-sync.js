@@ -37,7 +37,11 @@ const cal = require("./audit-calendar");
 
 const INBOX_LABEL = "INBOX-DROPBOX";
 const MAX_FILE_MB = Number(process.env.AUDIT_SYNC_MAX_FILE_MB || process.env.AUDIT_MAX_FILE_MB || 50);
-const PER_RUN = Number(process.env.AUDIT_SYNC_MAX_PER_RUN || 150);
+// Deliberately modest. Each run is a complete unit of work: the sooner
+// it finishes, the less a restart costs, and the sync table means the
+// next run resumes rather than repeats. Raise AUDIT_SYNC_MAX_PER_RUN
+// once the service is proven stable over a few full runs.
+const PER_RUN = Number(process.env.AUDIT_SYNC_MAX_PER_RUN || 60);
 
 // Skip what is noise in every shared folder.
 const SKIP_NAME = /^(~\$|\.|Icon\r|Thumbs\.db$|\.DS_Store$|desktop\.ini$)/i;
@@ -140,6 +144,16 @@ function systemActor() {
 }
 
 async function setStatus(patch) {
+  try {
+    await writeStatus(patch);
+  } catch (err) {
+    // Progress reporting is a convenience. A transient database error
+    // while writing it must not end a scan that is otherwise working.
+    console.error("[ngtf-audit sync] could not record progress:", err.message);
+  }
+}
+
+async function writeStatus(patch) {
   const prev = await lastRun();
   await db.query(
     `INSERT INTO ngtf_audit_settings (key, value) VALUES ('dropbox_sync_status', $1)
@@ -149,8 +163,13 @@ async function setStatus(patch) {
 }
 
 async function lastRun() {
-  const r = await db.query(`SELECT value FROM ngtf_audit_settings WHERE key='dropbox_sync_status'`);
-  return r.rows[0] ? r.rows[0].value : null;
+  try {
+    const r = await db.query(`SELECT value FROM ngtf_audit_settings WHERE key='dropbox_sync_status'`);
+    return r.rows[0] ? r.rows[0].value : null;
+  } catch (err) {
+    console.error("[ngtf-audit sync] could not read status:", err.message);
+    return null;
+  }
 }
 
 /**

@@ -125,4 +125,50 @@ process.on("unhandledRejection", (err) => {
   console.error("[ngtf-audit] unhandled rejection:", err && err.stack ? err.stack : err);
 });
 
+// ── Keep a dropped database connection from killing the process ─────
+//
+// node-postgres emits an 'error' event on a pooled client when its TCP
+// connection dies while the client sits idle — a managed-Postgres idle
+// timeout, a failover, a network blip. With no listener, Node treats it
+// as an uncaught exception and the process EXITS:
+//
+//   throw er; // Unhandled 'error' event
+//   Error: Connection terminated unexpectedly
+//       at Connection.<anonymous> (pg/lib/client.js:204)
+//
+// That is what was killing every folder scan. A scan downloads a file
+// for several seconds at a time, so pooled connections sit idle exactly
+// long enough to be reaped, and the death looked like an unexplained
+// restart. The pool recovers from this on its own — it discards the
+// dead client and opens a new one — provided somebody is listening.
+try {
+  const db = require("./db");
+  const pool = typeof db.getPool === "function" ? db.getPool() : null;
+  if (pool && typeof pool.on === "function") {
+    pool.on("error", (err) => {
+      console.error("[ngtf-audit] idle database client dropped (recovering):", err.message);
+    });
+  } else {
+    console.warn("[ngtf-audit] could not attach a pool error handler — db.js exposes no getPool()");
+  }
+} catch (err) {
+  console.error("[ngtf-audit] pool error handler not attached:", err.message);
+}
+
+// Last line of defence. A connection error that still reaches here is
+// survivable and must not take the process down mid-scan. Anything else
+// is a real defect: log it in full and exit so Render restarts cleanly
+// rather than leaving a half-broken process serving requests.
+process.on("uncaughtException", (err) => {
+  const msg = (err && err.message) || String(err);
+  const recoverable =
+    /Connection terminated|ECONNRESET|EPIPE|ETIMEDOUT|socket hang up|Client has encountered a connection error/i.test(msg);
+  if (recoverable) {
+    console.error("[ngtf-audit] recoverable connection error (continuing):", msg);
+    return;
+  }
+  console.error("[ngtf-audit] FATAL uncaught exception:", err && err.stack ? err.stack : err);
+  process.exit(1);
+});
+
 module.exports = { app, server };
