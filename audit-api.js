@@ -223,6 +223,24 @@ router.get("/upload", auth.requirePermission("document.upload"), htmlWrap(async 
   res.send(ui.uploadPage({ engagements }, req.auditUser));
 }));
 
+router.get("/profile", auth.requirePermission("dashboard.view"), htmlWrap(async (req, res) => {
+  const issuer = require("./audit-issuer");
+  const profile = await issuer.load({ fresh: true });
+  const v = issuer.validate(profile);
+  res.send(
+    ui.profilePage({ profile, derived: issuer.derive(profile), warnings: v.warnings }, req.auditUser)
+  );
+}));
+
+router.get("/playbooks", auth.requirePermission("dashboard.view"), htmlWrap(async (req, res) => {
+  const playbooks = require("./audit-playbooks");
+  const [declared, engagements] = await Promise.all([
+    store.listDeclaredActions(40),
+    store.listEngagements({ includeArchived: false, limit: 60 }),
+  ]);
+  res.send(ui.playbooksPage({ playbooks: playbooks.list(), declared, engagements }, req.auditUser));
+}));
+
 router.get("/users", auth.requirePermission("portal.users"), htmlWrap(async (req, res) => {
   const users = await auth.listUsers();
   res.send(ui.usersPage({ users }, req.auditUser));
@@ -760,6 +778,116 @@ router.get("/api/sync/files", auth.requirePermission("document.view_all"), wrap(
 }));
 
 // ── Users ───────────────────────────────────────────────────
+// ════════════════ ISSUER PROFILE ════════════════
+//
+// Readable by anyone who can see the dashboard, because the auditor
+// needs to know the filer status and the year end to do the work at all.
+// Writable only by the portal administrator, because these fields move
+// every filing deadline in the system at once.
+
+router.get("/api/issuer/profile", auth.requirePermission("dashboard.view"), wrap(async (req, res) => {
+  const issuer = require("./audit-issuer");
+  const profile = await issuer.load({ fresh: true });
+  ok(res, { profile, derived: issuer.derive(profile), validation: issuer.validate(profile) });
+}));
+
+router.post("/api/issuer/profile", auth.requirePermission("portal.settings"), wrap(async (req, res) => {
+  const issuer = require("./audit-issuer");
+  const b = req.body || {};
+  const prev = await issuer.load({ fresh: true });
+
+  const next = {
+    ...prev,
+    name: String(b.name || "").trim(),
+    ticker: String(b.ticker || "").trim().toUpperCase(),
+    cik: String(b.cik || "").trim(),
+    stateOfIncorporation: String(b.stateOfIncorporation || "").trim(),
+    principalOffice: String(b.principalOffice || "").trim(),
+    timezone: String(b.timezone || "America/New_York").trim(),
+    fiscalYearEndMonth: parseInt(b.fiscalYearEndMonth, 10),
+    fiscalYearEndDay: parseInt(b.fiscalYearEndDay, 10),
+    filerStatus: String(b.filerStatus || prev.filerStatus),
+    exchange: String(b.exchange || prev.exchange),
+    smallerReportingCompany: !!b.smallerReportingCompany,
+    emergingGrowthCompany: !!b.emergingGrowthCompany,
+    icfrAuditorAttestation: !!b.icfrAuditorAttestation,
+    goingConcernDoubt: !!b.goingConcernDoubt,
+    egcFirstSaleDate: b.egcFirstSaleDate ? String(b.egcFirstSaleDate).slice(0, 10) : null,
+    auditor: String(b.auditor || "").trim(),
+    predecessorAuditor: String(b.predecessorAuditor || "").trim(),
+  };
+
+  if (!next.name) return fail(res, "The registrant name is required.");
+
+  // Changing the fiscal calendar after periods exist is not forbidden,
+  // but it is not silent either. Engagements already open keep the dates
+  // they were created with, so a year end that moves leaves the portal
+  // holding two different calendars at once and somebody has to know.
+  const calendarMoved =
+    next.fiscalYearEndMonth !== prev.fiscalYearEndMonth || next.fiscalYearEndDay !== prev.fiscalYearEndDay;
+  let openPeriods = 0;
+  if (calendarMoved) {
+    const r = await db.query(
+      `SELECT COUNT(*)::int AS n FROM ngtf_audit_engagements WHERE status NOT IN ('archived','locked')`
+    );
+    openPeriods = r.rows[0] ? r.rows[0].n : 0;
+  }
+
+  const saved = await issuer.save(next, req.auditUser);
+  const warnings = [...saved.warnings];
+  if (calendarMoved && openPeriods) {
+    warnings.push(
+      `The fiscal year end moved, and ${openPeriods} engagement${openPeriods === 1 ? "" : "s"} already ` +
+        `exist on the old calendar. Those keep the period ends and filing deadlines they were created with; ` +
+        `only periods opened from now on use the new year end. If the old ones are wrong, they need to be ` +
+        `reopened deliberately rather than re-dated underneath the audit trail.`
+    );
+  }
+  ok(res, { profile: saved.profile, derived: issuer.derive(saved.profile), warnings });
+}));
+
+// ════════════════ CORPORATE ACTIONS ════════════════
+
+router.get("/api/playbooks", auth.requirePermission("dashboard.view"), wrap(async (req, res) => {
+  const playbooks = require("./audit-playbooks");
+  ok(res, { playbooks: playbooks.list(), declared: await store.listDeclaredActions(40) });
+}));
+
+/** Compute the dates without saving anything. */
+router.post("/api/playbooks/preview", auth.requirePermission("dashboard.view"), wrap(async (req, res) => {
+  const playbooks = require("./audit-playbooks");
+  const key = String(req.body.key || "");
+  const anchors = req.body.anchors && typeof req.body.anchors === "object" ? req.body.anchors : {};
+  const clean = {};
+  for (const k of ["approval", "effective", "application", "event"]) {
+    if (anchors[k]) clean[k] = String(anchors[k]).slice(0, 10);
+  }
+  if (!Object.keys(clean).length) {
+    return fail(res, "Enter at least one date. Every deadline in the sequence is an offset from the action's own dates.");
+  }
+  ok(res, { built: playbooks.build(key, clean) });
+}));
+
+router.post("/api/playbooks/declare", auth.requirePermission("engagement.create"), wrap(async (req, res) => {
+  const key = String(req.body.key || "");
+  const anchors = req.body.anchors && typeof req.body.anchors === "object" ? req.body.anchors : {};
+  const clean = {};
+  for (const k of ["approval", "effective", "application", "event"]) {
+    if (anchors[k]) clean[k] = String(anchors[k]).slice(0, 10);
+  }
+  const engagementId = req.body.engagementId ? parseInt(req.body.engagementId, 10) : null;
+  const r = await store.openPlaybookEngagement({ key, anchors: clean, engagementId, actor: req.auditUser });
+  notify.flush().catch((e) => console.error("[ngtf-audit] notification flush failed:", e.message));
+  ok(res, {
+    engagementId: r.engagement.id,
+    periodLabel: r.engagement.period_label,
+    created: r.created,
+    added: r.added,
+    alreadyPresent: r.alreadyPresent,
+    needsVerification: r.built.counts.needsVerification,
+  });
+}));
+
 router.post("/api/users", auth.requirePermission("portal.users"), wrap(async (req, res) => {
   const { email, name, role, password, firmName, title, phone } = req.body || {};
   const u = await auth.createUser({ email, name, role, password, firmName, title, phone });

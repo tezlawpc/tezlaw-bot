@@ -334,6 +334,37 @@ async function createAll() {
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_audit_items_due ON ngtf_audit_checklist_items (due_date, status)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_audit_items_cat ON ngtf_audit_checklist_items (category_code, checklist_id)`);
 
+  // ── Corporate action provenance on a checklist item ──────
+  //
+  // An item generated from a playbook has to carry HOW MUCH ITS DATE CAN
+  // BE TRUSTED all the way to the screen. A date computed from a rule
+  // whose text has been checked is not the same object as a date
+  // computed from a rule believed to apply, and presenting the two
+  // identically is the failure mode this whole feature exists to avoid:
+  // somebody plans around a number nobody verified.
+  //
+  //   date_confidence  computed | approximate | unconfirmed  (NULL for
+  //                    ordinary taxonomy items, which are treated as
+  //                    computed)
+  //   verified         whether the citation behind the step has been
+  //                    checked against primary sources
+  //
+  // Additive columns, so an existing installation upgrades in place.
+  await db.query(`ALTER TABLE ngtf_audit_checklist_items ADD COLUMN IF NOT EXISTS date_confidence TEXT`);
+  await db.query(`ALTER TABLE ngtf_audit_checklist_items ADD COLUMN IF NOT EXISTS verified BOOLEAN`);
+  await db.query(`ALTER TABLE ngtf_audit_checklist_items ADD COLUMN IF NOT EXISTS playbook_key TEXT`);
+  await db.query(`ALTER TABLE ngtf_audit_checklist_items ADD COLUMN IF NOT EXISTS playbook_step_id TEXT`);
+  await db.query(`ALTER TABLE ngtf_audit_checklist_items ADD COLUMN IF NOT EXISTS anchor_date DATE`);
+  // Declaring the same action twice must not double the checklist. The
+  // partial unique index is what makes the re-declare idempotent rather
+  // than the application remembering to check first.
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ngtf_audit_items_playbook
+      ON ngtf_audit_checklist_items (checklist_id, playbook_key, playbook_step_id)
+      WHERE playbook_key IS NOT NULL
+  `);
+  await db.query(`ALTER TABLE ngtf_audit_engagements ADD COLUMN IF NOT EXISTS action_key TEXT`);
+
   // ── Auditor ↔ company threaded comments / PBC follow-ups ─
   await db.query(`
     CREATE TABLE IF NOT EXISTS ngtf_audit_comments (

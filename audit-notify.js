@@ -42,6 +42,48 @@ const db = require("./db");
 const tax = require("./audit-taxonomy");
 const cal = require("./audit-calendar");
 const schema = require("./audit-schema");
+const issuer = require("./audit-issuer");
+
+// ── Who these messages are about ────────────────────────────
+//
+// Read from the issuer profile rather than written into the templates.
+// An email is the part of the portal that travels: it gets forwarded,
+// printed and pasted into board packs, and it has to still be correct
+// when it arrives somewhere the portal is not.
+
+/** Subject line tag, e.g. "[NGTF]". */
+function tag() {
+  const p = issuer.current();
+  return `[${p.ticker || p.name || "Audit"}]`;
+}
+
+/** Masthead line for the email shell. */
+function mastLine() {
+  const p = issuer.current();
+  return [p.name, p.ticker, "Audit Portal"].filter(Boolean).join(" · ");
+}
+
+function issuerName() {
+  return issuer.current().name || "the registrant";
+}
+
+/**
+ * How much a date can be relied on, in words that survive a forward.
+ *
+ * A corporate action obligation can be created from a rule whose citation
+ * has not been checked. The portal labels that on screen. Without this,
+ * the label stopped at the screen: the reminder email stated an
+ * unverified date in the same voice as a statutory deadline, which is
+ * the single failure this whole feature exists to prevent, because the
+ * email is what people actually act on.
+ */
+function confidenceTag(row) {
+  if (!row || !row.date_confidence || row.date_confidence === "computed") return "";
+  if (row.date_confidence === "approximate") {
+    return ` <span style="color:#B45309;font-weight:600;">[APPROXIMATE DATE — measured in trading days, confirm before relying on it]</span>`;
+  }
+  return ` <span style="color:#9C4221;font-weight:600;">[UNVERIFIED — this obligation is believed to apply but its citation and day count have not been confirmed; treat the date as a prompt to check, not a deadline]</span>`;
+}
 
 // ── Transport config ────────────────────────────────────────
 const SMTP = {
@@ -50,7 +92,7 @@ const SMTP = {
   user: process.env.AUDIT_SMTP_USER || process.env.GMAIL_EMAIL || null,
   pass: process.env.AUDIT_SMTP_PASS || process.env.GMAIL_APP_PASSWORD || null,
   from: process.env.AUDIT_FROM_EMAIL || process.env.GMAIL_EMAIL || null,
-  fromName: process.env.AUDIT_FROM_NAME || "Nightfood Audit Portal",
+  fromName: process.env.AUDIT_FROM_NAME || null, // falls back to the issuer name at send time
 };
 const TWILIO = {
   sid: process.env.TWILIO_ACCOUNT_SID || null,
@@ -213,7 +255,10 @@ async function sendEmail(to, subject, html) {
   const t = transport();
   if (!t) throw new Error("SMTP not configured (set AUDIT_SMTP_USER/AUDIT_SMTP_PASS or GMAIL_EMAIL/GMAIL_APP_PASSWORD)");
   await t.sendMail({
-    from: `"${SMTP.fromName}" <${SMTP.from || SMTP.user}>`,
+    // A display name with a stray double quote in it produces a header
+    // some servers reject outright, and the issuer name is now
+    // user-entered, so it is stripped rather than trusted.
+    from: `"${String(SMTP.fromName || `${issuerName()} Audit Portal`).replace(/"/g, "")}" <${SMTP.from || SMTP.user}>`,
     to,
     subject,
     html,
@@ -298,12 +343,12 @@ function shell(title, inner, accent = "#1F3A5F") {
   return `
   <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:640px;margin:0 auto;background:#fff;">
     <div style="background:${accent};color:#fff;padding:18px 22px;">
-      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.75;">Nightfood Holdings, Inc. · NGTF · Audit Portal</div>
+      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.75;">${esc(mastLine())}</div>
       <div style="font-size:19px;font-weight:600;margin-top:4px;">${esc(title)}</div>
     </div>
     <div style="padding:22px;color:#1a1a1a;font-size:14px;line-height:1.6;">${inner}</div>
     <div style="padding:14px 22px;background:#F6F7F9;color:#667;font-size:11px;line-height:1.5;border-top:1px solid #E3E6EA;">
-      Automated message from the Nightfood audit portal. Documents are retained for seven years from the
+      Automated message from the ${esc(issuerName())} audit portal. Documents are retained for seven years from the
       report release date under PCAOB AS 1215.14 and become append-only at the documentation completion
       date under AS 1215.16. Every download is logged.
     </div>
@@ -340,8 +385,8 @@ async function notifyDocumentUploaded({ document, classification, uploader, enga
   const accent = br ? br.color : "#667";
 
   const subject = classification.classified
-    ? `[NGTF] ${cat.label} uploaded — ${classification.period.periodLabel}`
-    : `[NGTF] Unclassified document uploaded — needs triage`;
+    ? `${tag()} ${cat.label} uploaded — ${classification.period.periodLabel}`
+    : `${tag()} Unclassified document uploaded — needs triage`;
 
   const flagsHtml = (classification.flags || []).length
     ? `<div style="margin:12px 0;padding:10px 12px;background:#FFF6E5;border-left:3px solid #B45309;font-size:13px;">
@@ -387,7 +432,7 @@ async function notifyDocumentUploaded({ document, classification, uploader, enga
     kind: "document_uploaded",
     recipients,
     subject,
-    body: shell(subject.replace("[NGTF] ", ""), inner, accent),
+    body: shell(subject.replace(tag() + " ", ""), inner, accent),
     documentId: document.id,
     engagementId: engagement ? engagement.id : null,
     instant: true,
@@ -397,7 +442,7 @@ async function notifyDocumentUploaded({ document, classification, uploader, enga
 
 /** A sweep answered YES means new obligations just appeared. */
 async function notifySweepYes({ item, answerNote, spawned, user, engagement }) {
-  const subject = `[NGTF] Sweep answered YES — ${spawned.length} new item${spawned.length === 1 ? "" : "s"} required`;
+  const subject = `${tag()} Sweep answered YES — ${spawned.length} new item${spawned.length === 1 ? "" : "s"} required`;
   const inner = `
     <p style="margin:0 0 10px;">A period-end sweep question was answered <strong>YES</strong>, which adds document requirements to the checklist.</p>
     ${kvTable([
@@ -433,7 +478,7 @@ async function notifySweepYes({ item, answerNote, spawned, user, engagement }) {
 
 /** Auditor raised a review note / rejected an item → company. */
 async function notifyReviewNote({ comment, document, item, author, engagement }) {
-  const subject = `[NGTF] Auditor review note${document ? ` — ${document.filename}` : ""}`;
+  const subject = `${tag()} Auditor review note${document ? ` — ${document.filename}` : ""}`;
   const inner = `
     <p style="margin:0 0 10px;">${esc(author.name)}${author.firmName ? ` (${esc(author.firmName)})` : ""} raised a note requiring a response.</p>
     ${kvTable([
@@ -481,8 +526,8 @@ async function notifyDueAndOverdue() {
 
   const gatesOverdue = overdue.rows.filter((r) => r.is_gate);
   const subject = gatesOverdue.length
-    ? `[NGTF] ${gatesOverdue.length} GATING item${gatesOverdue.length === 1 ? "" : "s"} overdue — filing at risk`
-    : `[NGTF] ${overdue.rows.length} overdue, ${soon.rows.length} due within 3 days`;
+    ? `${tag()} ${gatesOverdue.length} GATING item${gatesOverdue.length === 1 ? "" : "s"} overdue — filing at risk`
+    : `${tag()} ${overdue.rows.length} overdue, ${soon.rows.length} due within 3 days`;
 
   const list = (rows, color) =>
     rows.length
@@ -491,8 +536,8 @@ async function notifyDueAndOverdue() {
           .map(
             (r) =>
               `<li style="margin-bottom:4px;">${r.is_gate ? `<strong style="color:${color};">[GATE]</strong> ` : ""}${esc(
-                r.category_code || r.sweep_id || ""
-              )} ${esc(r.label.slice(0, 110))} <span style="color:#889;">— due ${esc(cal.dstr(r.due_date))} · ${esc(r.period_label)}</span></li>`
+                r.playbook_step_id || r.category_code || r.sweep_id || ""
+              )} ${esc(r.label.slice(0, 110))} <span style="color:#889;">— due ${esc(cal.dstr(r.due_date))} · ${esc(r.period_label)}</span>${confidenceTag(r)}</li>`
           )
           .join("")}</ul>`
       : "<p style='color:#889;margin:4px 0 14px;'>None.</p>";
@@ -558,7 +603,7 @@ async function notifyFilingDeadlines(daysAhead = [30, 14, 7, 3, 1]) {
       [eng.id]
     );
     const o = open.rows[0] || { n: 0, gates: 0 };
-    const subject = `[NGTF] ${eng.filing_form || "Filing"} due in ${days} day${days === 1 ? "" : "s"} — ${eng.period_label}`;
+    const subject = `${tag()} ${eng.filing_form || "Filing"} due in ${days} day${days === 1 ? "" : "s"} — ${eng.period_label}`;
     const inner = `
       ${kvTable([
         ["Form", esc(eng.filing_form || "—")],
@@ -578,8 +623,11 @@ async function notifyFilingDeadlines(daysAhead = [30, 14, 7, 3, 1]) {
              </div>`
           : `<div style="margin:12px 0;padding:10px 12px;background:#F2F6FA;border-left:3px solid #2C5F8A;font-size:13px;">
                Part III may be incorporated by reference only from a proxy or information statement filed
-               within 120 days of fiscal year end. Because Nightfood is not an emerging growth company, the
-               auditor's report must include critical audit matters under AS 3101.
+               within 120 days of fiscal year end. ${
+                 issuer.derive(issuer.current()).camsApply
+                   ? `Because ${esc(issuerName())} is not an emerging growth company, the auditor's report must include critical audit matters under AS 3101.`
+                   : `${esc(issuerName())} is an emerging growth company, so the auditor's report omits critical audit matters.`
+               }
              </div>`
       }
       <div style="margin:12px 0;padding:10px 12px;background:#FFF6E5;border-left:3px solid #B45309;font-size:13px;">
@@ -637,8 +685,8 @@ async function notifyArchiveCountdown() {
 
     const subject =
       cd.daysRemaining < 0
-        ? `[NGTF] AS 1215 documentation completion date PASSED — ${eng.period_label}`
-        : `[NGTF] AS 1215 archive due in ${cd.daysRemaining} day${cd.daysRemaining === 1 ? "" : "s"} — ${eng.period_label}`;
+        ? `${tag()} AS 1215 documentation completion date PASSED — ${eng.period_label}`
+        : `${tag()} AS 1215 archive due in ${cd.daysRemaining} day${cd.daysRemaining === 1 ? "" : "s"} — ${eng.period_label}`;
     const inner = `
       ${kvTable([
         ["Engagement", esc(eng.period_name || eng.period_label)],
@@ -651,7 +699,7 @@ async function notifyArchiveCountdown() {
         AS 1215.15 as amended by PCAOB Release 2024-004 requires the complete and final documentation set to
         be assembled within <strong>14 days</strong> of report release — not the 45 days that applied before.
         For firms auditing 100 or fewer issuers this applies to fiscal years beginning on or after
-        December 15, 2025, which covers Nightfood's FY2027 (beginning July 1, 2026).
+        December 15, 2025.
         <br><br>
         Once archived, AS 1215.16 permits <strong>additions only</strong>: nothing may be deleted, and every
         addition must record the date added, the preparer and the reason. The portal enforces this in the
@@ -717,9 +765,11 @@ async function notifyCommitteeDigest() {
       Reminder on the committee's own obligations: AS 1301 requires the auditor to communicate with the
       committee — including the schedule of uncorrected misstatements, significant estimates, related-party
       matters, going concern, disagreements with management, and any difficulties encountered such as delays
-      in receiving information — <strong>before</strong> the report is issued. Because Nightfood is not an
-      emerging growth company, that communication record is also the population from which critical audit
-      matters are drawn under AS 3101.
+      in receiving information — <strong>before</strong> the report is issued. ${
+        issuer.derive(issuer.current()).camsApply
+          ? "Because this registrant is not an emerging growth company, that communication record is also the population from which critical audit matters are drawn under AS 3101."
+          : "This registrant is an emerging growth company, so the auditor's report omits critical audit matters and that population is not drawn."
+      }
     </div>
     ${button("Open portal", portalLink("/audit"), "#6B21A8")}
   `;
@@ -727,7 +777,7 @@ async function notifyCommitteeDigest() {
   await enqueue({
     kind: "committee_digest",
     recipients,
-    subject: `[NGTF] Audit committee weekly status`,
+    subject: `${tag()} Audit committee weekly status`,
     body: shell("Audit committee weekly status", inner, "#6B21A8"),
     instant: false,
   });
@@ -744,7 +794,7 @@ async function notifyEngagementEvent({ engagement, event, actor, detail }) {
     locked: "Engagement locked",
     legal_hold: "Legal hold applied",
   };
-  const subject = `[NGTF] ${titles[event] || event} — ${engagement.period_label}`;
+  const subject = `${tag()} ${titles[event] || event} — ${engagement.period_label}`;
   const inner = `
     ${kvTable([
       ["Engagement", esc(engagement.period_name || engagement.period_label)],
@@ -782,7 +832,7 @@ async function selfTest(toEmail) {
     try {
       await sendEmail(
         toEmail,
-        "[NGTF] Audit portal notification test",
+        tag() + " Audit portal notification test",
         shell("Notification test", "<p>If you are reading this, email delivery from the audit portal is working.</p>")
       );
       out.emailSent = true;

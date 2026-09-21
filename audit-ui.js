@@ -19,6 +19,7 @@ const tax = require("./audit-taxonomy");
 const cal = require("./audit-calendar");
 const auth = require("./audit-auth");
 const checklists = require("./audit-checklists");
+const issuer = require("./audit-issuer");
 
 // Mount path. The portal is mount-path agnostic: every link below is
 // built from this, so the same tree serves at /audit inside the host
@@ -67,6 +68,42 @@ function pill(text, color, bg) {
   return `<span class="pill" style="color:${color};background:${bg || color + "18"};border-color:${color}44;">${esc(text)}</span>`;
 }
 
+const MONTHS = ["", "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"];
+
+/**
+ * The masthead, read from the issuer profile rather than hardcoded.
+ *
+ * It used to say "Nightfood Holdings, Inc. · NGTF · CIK 0001593001 · FYE
+ * June 30" in the markup. That is a property of one registrant, not of
+ * the software, and leaving it there would have made the profile page a
+ * form that changes nothing visible — which is how a settings screen
+ * comes to be quietly wrong.
+ */
+function masthead() {
+  const p = issuer.current();
+  const bits = [];
+  if (p.ticker) bits.push(p.ticker);
+  if (p.cik) bits.push(`CIK ${p.cik}`);
+  bits.push("PCAOB Audit Portal");
+  if (p.fiscalYearEndMonth && p.fiscalYearEndDay) {
+    bits.push(`FYE ${MONTHS[p.fiscalYearEndMonth]} ${p.fiscalYearEndDay}`);
+  }
+  return { name: p.name || "Audit Portal", line: bits.join(" · "), configured: !!p.name };
+}
+
+/**
+ * How much a date can be relied on. NULL means an ordinary taxonomy item
+ * whose date comes from a rule the portal implements, so it gets no
+ * badge at all: the badge means something only if most rows do not
+ * carry one.
+ */
+function confidencePill(conf) {
+  if (!conf || conf === "computed") return "";
+  if (conf === "approximate") return pill("APPROXIMATE", "#B45309");
+  return pill("UNVERIFIED", "#9C4221");
+}
+
 function statusPill(status) {
   const map = {
     open: ["#B45309", "Open"],
@@ -95,7 +132,9 @@ const NAV = [
   { key: "documents", href: `${BASE}/documents`, label: "Documents", perm: "document.view_all" },
   { key: "triage", href: `${BASE}/triage`, label: "Triage", perm: "document.view_all" },
   { key: "calendar", href: `${BASE}/calendar`, label: "Calendar", perm: "dashboard.view" },
+  { key: "playbooks", href: `${BASE}/playbooks`, label: "Corporate actions", perm: "dashboard.view" },
   { key: "taxonomy", href: `${BASE}/taxonomy`, label: "Document index", perm: "dashboard.view" },
+  { key: "profile", href: `${BASE}/profile`, label: "Issuer profile", perm: "dashboard.view" },
   { key: "sync", href: `${BASE}/sync`, label: "Dropbox", perm: "portal.settings" },
   { key: "users", href: `${BASE}/users`, label: "Users", perm: "portal.users" },
 ];
@@ -109,11 +148,12 @@ function chrome({ title, body, user, active, wide = false }) {
     .join("");
 
   const roleInfo = user ? auth.ROLES[user.role] : null;
+  const mast = masthead();
 
   return `<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} · NGTF Audit Portal</title>
+<title>${esc(title)} · ${esc(mast.configured ? mast.name : "Audit Portal")}</title>
 <style>
   :root{
     --ink:#11161D; --ink2:#3A4553; --mute:#6B7684; --line:#E2E6EB; --bg:#F5F7F9;
@@ -205,8 +245,8 @@ function chrome({ title, body, user, active, wide = false }) {
 </head><body>
 <header class="top">
   <div class="brandrow">
-    <div class="brand">Nightfood Holdings, Inc.
-      <small>NGTF · CIK 0001593001 · PCAOB Audit Portal · FYE June 30</small></div>
+    <div class="brand">${esc(mast.name)}
+      <small>${esc(mast.line)}</small></div>
     ${
       user
         ? `<div class="who"><b>${esc(user.name)}</b>${user.firmName ? ` · ${esc(user.firmName)}` : ""}<br>
@@ -393,12 +433,36 @@ function dashboardPage(d, user) {
         .join("")}</table>`
     : `<div class="empty">No engagements yet. <a href="${BASE}/calendar">Open one from the Calendar</a>.</div>`;
 
+  // The reporting posture used to be a sentence typed into this page. It
+  // is now derived, so it cannot say "not an EGC" about a registrant
+  // whose profile says otherwise.
+  const prof = issuer.current();
+  const der = issuer.derive(prof);
+  const posture = [
+    der.filerStatusLabel.toLowerCase(),
+    der.scaledDisclosure ? "smaller reporting company" : "not a smaller reporting company",
+    der.camsApply
+      ? "not an EGC, so AS 3101 critical audit matters apply"
+      : "emerging growth company, so the auditor's report omits critical audit matters",
+    der.icfrAttestation
+      ? "SOX 404(b) auditor attestation applies"
+      : "no SOX 404(b) auditor attestation required",
+  ].join(" · ");
+
   const body = `
   <div class="between"><div>
     <h1>Audit dashboard</h1>
-    <div class="sub">Non-accelerated filer · smaller reporting company · not an EGC, so AS 3101 critical audit
-      matters apply · no SOX 404(b) auditor attestation required</div>
+    <div class="sub">${esc(posture)}</div>
   </div>${auth.can(user, "document.upload") ? `<a class="btn" href="${BASE}/upload">Upload documents</a>` : ""}</div>
+  ${
+    !prof.name
+      ? `<div class="note red"><b>No issuer profile has been set, so this portal is computing every period
+         from a December 31 fiscal year end.</b> That is a default, not a determination about this registrant.
+         Until the profile is filled in, period labels, quarter ends and filing deadlines are very likely wrong,
+         and engagements opened now will keep the wrong dates even after the profile is corrected.
+         <a href="${BASE}/profile">Set the issuer profile</a> before opening any period.</div>`
+      : ""
+  }
   ${stats}
   ${openGates ? `<div class="note red"><b>${openGates} gating item${openGates === 1 ? " is" : "s are"} still open.</b>
     A gating item is one where a standard or rule prevents the report or filing from issuing until it is
@@ -645,9 +709,16 @@ function checklistPage({ engagement: e, checklist }, user) {
             daysUntil(i.due_date) !== null &&
             daysUntil(i.due_date) < 0;
           return `<tr>
-          <td style="white-space:nowrap;">${i.is_gate ? pill("GATE", "#991B1B") + " " : ""}<code>${esc(i.category_code || "")}</code></td>
+          <td style="white-space:nowrap;">${i.is_gate ? pill("GATE", "#991B1B") + " " : ""}<code>${esc(i.playbook_step_id || i.category_code || "")}</code></td>
           <td>${esc(i.label)}
             ${i.spawned_from_item ? `<div class="xs" style="color:var(--navy2);">Added by a YES sweep answer</div>` : ""}
+            ${
+              i.playbook_key
+                ? `<div class="xs" style="color:var(--navy2);">From the ${esc(i.playbook_key.replace(/_/g, " "))} playbook${
+                    i.anchor_date ? `, measured from ${fmtDate(i.anchor_date)}` : ""
+                  }</div>`
+                : ""
+            }
             ${i.note ? `<details><summary>Guidance</summary><div class="sm" style="color:var(--ink2);">${esc(i.note)}</div></details>` : ""}
             ${i.doc_filename ? `<div class="xs"><a href="${BASE}/document/${i.satisfied_by_doc}">${esc(i.doc_filename)}</a> v${i.doc_version}</div>` : ""}
             ${i.waiver_reason ? `<div class="xs muted">Waived: ${esc(i.waiver_reason)}</div>` : ""}
@@ -658,7 +729,8 @@ function checklistPage({ engagement: e, checklist }, user) {
                      category — until then this counts as outstanding.</div>`
                 : ""
             }</td>
-          <td class="sm" style="white-space:nowrap;color:${late ? "var(--red)" : "var(--mute)"};font-weight:${late ? 600 : 400};">${fmtDate(i.due_date)}</td>
+          <td class="sm" style="white-space:nowrap;color:${late ? "var(--red)" : "var(--mute)"};font-weight:${late ? 600 : 400};">${fmtDate(i.due_date)}
+            ${i.date_confidence && i.date_confidence !== "computed" ? `<div style="margin-top:3px;">${confidencePill(i.date_confidence)}</div>` : ""}</td>
           <td>${statusPill(i.status)}${i.auditor_accepted ? " " + pill("ACCEPTED", "#1C7C54") : ""}</td>
           <td class="right" style="white-space:nowrap;">
             ${canAccept && i.status === "satisfied" && !i.auditor_accepted ? `<button class="btn sm ok" onclick="accept(${i.id})">Accept</button> ` : ""}
@@ -1487,6 +1559,372 @@ function calendarPage({ fiscalYear, engagements }, user) {
 }
 
 // ── Users ───────────────────────────────────────────────────
+// ── Issuer profile ──────────────────────────────────────────
+//
+// The page that makes the rest of the portal general. Every filing
+// deadline, every period label and every applicable-rule conclusion
+// below is computed from these fields rather than written into code, so
+// this form is the difference between a portal built for one registrant
+// and a portal that can be pointed at another one.
+function profilePage({ profile: p, derived, warnings = [] }, user) {
+  const canEdit = auth.can(user, "portal.settings");
+  const d = derived || issuer.derive(p);
+
+  const opt = (v, cur, label) =>
+    `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(label)}</option>`;
+
+  const monthOpts = MONTHS.slice(1)
+    .map((m, i) => opt(i + 1, p.fiscalYearEndMonth, m))
+    .join("");
+  const dayOpts = Array.from({ length: 31 }, (_, i) => opt(i + 1, p.fiscalYearEndDay, String(i + 1))).join("");
+  const filerOpts = Object.entries(issuer.FILER_STATUSES)
+    .map(([k, v]) => opt(k, p.filerStatus, `${v.label} — ${v.annualDays}/${v.quarterlyDays} days`))
+    .join("");
+  const exchangeOpts = Object.entries(issuer.EXCHANGES)
+    .map(([k, v]) => opt(k, p.exchange, v.label))
+    .join("");
+
+  const check = (id, val, label, help) => `
+    <label style="display:flex;gap:9px;align-items:flex-start;margin:13px 0 0;font-weight:400;">
+      <input type="checkbox" id="${id}" ${val ? "checked" : ""} ${canEdit ? "" : "disabled"}
+        style="width:auto;margin-top:2px;flex:0 0 auto;">
+      <span><b style="font-size:12px;">${esc(label)}</b>
+        <div class="xs muted" style="margin-top:2px;">${help}</div></span></label>`;
+
+  // What the profile implies, each with the authority it rests on. This
+  // is the part that is genuinely hard to copy, so it is the part the
+  // page puts in front of the reader rather than hiding behind a save.
+  const conclusions = d.conclusions
+    .map(
+      (c) => `<tr>
+      <td style="white-space:nowrap;">${
+        c.value === true
+          ? pill("APPLIES", "#991B1B")
+          : c.value === false
+          ? pill("DOES NOT APPLY", "#1C7C54")
+          : pill(String(c.value).toUpperCase(), "#2C5F8A")
+      }</td>
+      <td class="sm">${esc(c.why)}</td>
+      <td class="xs muted" style="white-space:nowrap;">${esc((c.authority || []).join(" · ")) || "—"}</td></tr>`
+    )
+    .join("");
+
+  // The periods this fiscal calendar produces. A year end entered wrongly
+  // is close to invisible in a form and obvious in a list of dates, so the
+  // page shows the dates rather than asking anyone to trust the form.
+  const thisFy = cal.fiscalYearOf(new Date());
+  let preview = "";
+  try {
+    const qs = issuer.quarterEndsFor(p, thisFy);
+    const start = issuer.fiscalYearStart(p, thisFy);
+    const measure = issuer.filerStatusMeasurementDateFor(p, thisFy);
+    preview = `
+      <div class="card"><h2>What this fiscal calendar produces for FY${thisFy}</h2>
+      <div class="sm muted" style="margin-bottom:10px;">Fiscal year ${fmtDate(cal.iso(start))} to
+        ${fmtDate(cal.iso(qs[3].end))}. A fiscal year is named for the calendar year in which it ends.</div>
+      <table>
+        <tr><th>Period</th><th>Ends</th><th>Filing</th><th>Due</th></tr>
+        ${qs
+          .map((q) => {
+            const isFY = q.q === 4;
+            const days = isFY ? d.annualDays : d.quarterlyDays;
+            const due = cal.addDays(q.end, days);
+            return `<tr><td>${isFY ? "Q4 / fiscal year end" : "Q" + q.q}</td>
+              <td class="sm">${fmtDate(cal.iso(q.end))}</td>
+              <td class="sm">${isFY ? "10-K" : "10-Q"}</td>
+              <td class="sm">${fmtDate(cal.iso(due))} <span class="xs muted">(${days} days)</span></td></tr>`;
+          })
+          .join("")}
+      </table>
+      <div class="note blue" style="margin:12px 16px 14px;">The Rule 12b-2 public float measurement date for
+        FY${thisFy} is <b>${fmtDate(cal.iso(measure))}</b>, the last day of the second fiscal quarter. Float
+        measured then is what moves a company between filer statuses, and with it the deadlines above.</div>
+      </div>`;
+  } catch (err) {
+    preview = `<div class="note red">This fiscal year end does not produce a valid calendar: ${esc(err.message)}</div>`;
+  }
+
+  const warn = warnings.length
+    ? `<div class="note amber"><b>Worth a second look.</b><ul style="margin:6px 0 0;padding-left:18px;">
+       ${warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>`
+    : "";
+
+  const body = `
+  <div class="between"><div>
+    <h1>Issuer profile</h1>
+    <div class="sub">The facts every deadline in this portal is computed from</div></div>
+    ${canEdit ? `<button class="btn" onclick="save()" id="saveBtn">Save profile</button>` : ""}</div>
+
+  ${
+    !p.name
+      ? `<div class="note red"><b>No issuer has been configured.</b> Until the name and fiscal year end are set,
+         the portal is computing every period from a December 31 default, which is almost certainly not this
+         registrant's year end. Fill this in before opening any engagement.</div>`
+      : ""
+  }
+  ${warn}
+
+  <div class="note blue"><b>Nothing on this page is a determination the software makes.</b> Filer status, smaller
+    reporting company status and emerging growth company status are determinations the registrant makes and
+    states on its own cover pages. The portal records what was determined and computes from it. If a value here
+    disagrees with the most recent 10-K cover page, the cover page is right and this is wrong.</div>
+
+  <div class="card"><h2>Identity</h2>
+    <div class="grid g2">
+      <div><label>Registrant name</label><input type="text" id="f-name" value="${esc(p.name)}" ${canEdit ? "" : "disabled"}></div>
+      <div><label>Ticker</label><input type="text" id="f-ticker" value="${esc(p.ticker)}" ${canEdit ? "" : "disabled"}></div>
+      <div><label>CIK</label><input type="text" id="f-cik" value="${esc(p.cik)}" ${canEdit ? "" : "disabled"}></div>
+      <div><label>State of incorporation</label><input type="text" id="f-state" value="${esc(p.stateOfIncorporation)}" ${canEdit ? "" : "disabled"}></div>
+      <div><label>Principal office</label><input type="text" id="f-office" value="${esc(p.principalOffice)}" ${canEdit ? "" : "disabled"}></div>
+      <div><label>Reporting timezone</label><input type="text" id="f-tz" value="${esc(p.timezone)}" ${canEdit ? "" : "disabled"}></div>
+    </div></div>
+
+  <div class="card"><h2>Fiscal calendar</h2>
+    <div class="sm muted" style="margin-bottom:4px;">Every period label, every quarter end and every filing
+      deadline in the portal derives from these two fields. Changing them re-dates future periods; engagements
+      already open keep the dates they were created with.</div>
+    <div class="grid g2">
+      <div><label>Fiscal year end month</label><select id="f-fyem" ${canEdit ? "" : "disabled"}>${monthOpts}</select></div>
+      <div><label>Fiscal year end day</label><select id="f-fyed" ${canEdit ? "" : "disabled"}>${dayOpts}</select></div>
+    </div>
+    <div class="xs muted" style="margin-top:8px;">A 52/53-week fiscal year is not supported. If this registrant
+      uses one, the portal will compute period ends a few days out and the dates need checking by hand.</div>
+  </div>
+
+  <div class="card"><h2>Reporting posture</h2>
+    <div class="grid g2">
+      <div><label>Filer status (Exchange Act Rule 12b-2)</label><select id="f-filer" ${canEdit ? "" : "disabled"}>${filerOpts}</select>
+        <div class="xs muted" style="margin-top:4px;">Sets the 10-K and 10-Q deadlines for every period.</div></div>
+      <div><label>Exchange or quotation venue</label><select id="f-exchange" ${canEdit ? "" : "disabled"}>${exchangeOpts}</select>
+        <div class="xs muted" style="margin-top:4px;">Decides whose listing rules bind, and whether they bind at all.</div></div>
+    </div>
+    ${check("f-src", p.smallerReportingCompany, "Smaller reporting company", "Scaled disclosure, and financial statements under Reg S-X Article 8 rather than Article 3.")}
+    ${check("f-egc", p.emergingGrowthCompany, "Emerging growth company", "An EGC's auditor's report omits critical audit matters, and the status expires — normally five years from the first registered sale.")}
+    ${check("f-icfr", p.icfrAuditorAttestation, "Auditor attestation on ICFR is obtained", "Section 404(b). Not required of a non-accelerated filer, and not of an EGC at all. Management's own 404(a) report is required either way.")}
+    ${check("f-gc", p.goingConcernDoubt, "Substantial doubt about going concern", "Drives the ASC 205-40 evaluation, the disclosure and the emphasis paragraph in the auditor's report.")}
+    <div class="grid g2" style="margin-top:14px;">
+      <div><label>EGC first registered sale date</label><input type="date" id="f-egcdate" value="${esc(p.egcFirstSaleDate || "")}" ${canEdit ? "" : "disabled"}>
+        <div class="xs muted" style="margin-top:4px;">Leave blank if not an EGC. Used to warn before the status lapses.</div></div>
+    </div>
+  </div>
+
+  <div class="card"><h2>Audit</h2>
+    <div class="grid g2">
+      <div><label>Independent registered public accounting firm</label><input type="text" id="f-auditor" value="${esc(p.auditor)}" ${canEdit ? "" : "disabled"}></div>
+      <div><label>Predecessor auditor</label><input type="text" id="f-pred" value="${esc(p.predecessorAuditor)}" ${canEdit ? "" : "disabled"}>
+        <div class="xs muted" style="margin-top:4px;">Where a predecessor's reports still cover periods presented, its consent is needed on any registration statement.</div></div>
+    </div></div>
+
+  <div class="card tight"><div style="padding:14px 18px 0;"><h2>What this profile implies</h2>
+    <div class="sm muted" style="margin-bottom:11px;">Derived on every request, never stored, so these cannot
+      drift out of step with the facts above.</div></div>
+    <table><tr><th>Conclusion</th><th>Why</th><th>Authority</th></tr>${conclusions}</table></div>
+
+  ${preview}
+
+  ${
+    canEdit
+      ? `<div class="row"><button class="btn" onclick="save()">Save profile</button>
+         <span id="msg" class="sm muted"></span></div>`
+      : `<div class="note amber">You can see this profile but not change it. Filer status and fiscal year end
+         drive the whole filing calendar, so editing is limited to the portal administrator.</div>`
+  }
+
+  <script>
+  function v(id){ var e=document.getElementById(id); return e? e.value.trim() : ''; }
+  function c(id){ var e=document.getElementById(id); return e? !!e.checked : false; }
+  async function save(){
+    var btn=document.getElementById('saveBtn'), msg=document.getElementById('msg');
+    var body={
+      name:v('f-name'), ticker:v('f-ticker'), cik:v('f-cik'),
+      stateOfIncorporation:v('f-state'), principalOffice:v('f-office'),
+      timezone:v('f-tz')||'America/New_York',
+      fiscalYearEndMonth:parseInt(v('f-fyem'),10), fiscalYearEndDay:parseInt(v('f-fyed'),10),
+      filerStatus:v('f-filer'), exchange:v('f-exchange'),
+      smallerReportingCompany:c('f-src'), emergingGrowthCompany:c('f-egc'),
+      icfrAuditorAttestation:c('f-icfr'), goingConcernDoubt:c('f-gc'),
+      egcFirstSaleDate:v('f-egcdate')||null,
+      auditor:v('f-auditor'), predecessorAuditor:v('f-pred')
+    };
+    if(!body.name) return alert('The registrant name is required.');
+    if(btn) btn.disabled=true;
+    if(msg) msg.textContent='Saving...';
+    try{
+      var r=await fetch('${BASE}/api/issuer/profile',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      var j=await r.json();
+      if(!j.ok) throw new Error(j.error||'Save failed');
+      if(j.warnings && j.warnings.length) alert('Saved, with notes:\\n\\n' + j.warnings.join('\\n\\n'));
+      location.reload();
+    }catch(e){
+      if(btn) btn.disabled=false;
+      if(msg) msg.textContent='';
+      alert(e.message);
+    }
+  }
+  </script>`;
+
+  return chrome({ title: "Issuer profile", body, user, active: "profile" });
+}
+
+// ── Corporate actions ───────────────────────────────────────
+function playbooksPage({ playbooks, declared, engagements }, user) {
+  const canDeclare = auth.can(user, "engagement.create");
+
+  const cards = playbooks
+    .map(
+      (p) => `<div class="card" style="border-left:3px solid var(--navy2);">
+      <div class="between"><div style="flex:1;min-width:260px;">
+        <div style="font-weight:650;font-size:14px;">${esc(p.label)}</div>
+        <div class="xs muted" style="margin-top:3px;">${p.steps} obligations ·
+          ${p.verified} with a checked citation ·
+          ${p.needsVerification ? `<b style="color:var(--rust);">${p.needsVerification} still to verify</b>` : "all verified"}</div>
+      </div>
+      ${canDeclare ? `<button class="btn sm" onclick="pick('${esc(p.key)}')">Declare this action</button>` : ""}</div>
+      <div class="sm" style="color:var(--ink2);margin-top:9px;">${esc(p.headline)}</div>
+      <div class="xs muted" style="margin-top:8px;">Measured from: ${p.anchors
+        .map((a) => esc(a.label.toLowerCase()))
+        .join(", ")}</div>
+      <div id="form-${esc(p.key)}" style="display:none;margin-top:13px;padding-top:13px;border-top:1px solid var(--line);">
+        <div class="grid g2">
+          ${p.anchors
+            .map(
+              (a) => `<div><label>${esc(a.label)}</label>
+              <input type="date" id="a-${esc(p.key)}-${esc(a.key)}">
+              <div class="xs muted" style="margin-top:3px;">${esc(a.help)} ${a.steps} step${a.steps === 1 ? "" : "s"} measured from it.</div></div>`
+            )
+            .join("")}
+          <div><label>Attach to</label>
+            <select id="e-${esc(p.key)}">
+              <option value="">A new engagement for this action</option>
+              ${engagements
+                .map((e) => `<option value="${e.id}">${esc(e.period_name || e.period_label)}</option>`)
+                .join("")}
+            </select>
+            <div class="xs muted" style="margin-top:3px;">A new engagement keeps the action's obligations
+              together. Attach to an existing one only if the action belongs to that period's close.</div></div>
+        </div>
+        <div class="row" style="margin-top:12px;">
+          <button class="btn ghost" onclick="preview('${esc(p.key)}')">Preview the dates</button>
+          <button class="btn" onclick="declare('${esc(p.key)}')">Create the checklist items</button>
+          <span class="sm muted" id="msg-${esc(p.key)}"></span>
+        </div>
+        <div id="out-${esc(p.key)}"></div>
+      </div>
+    </div>`
+    )
+    .join("");
+
+  const declaredRows = declared.length
+    ? declared
+        .map(
+          (a) => `<tr>
+        <td><a href="${BASE}/checklist/${a.engagement_id}">${esc(a.period_name || a.period_label)}</a>
+          <div class="xs muted">${esc(String(a.playbook_key).replace(/_/g, " "))}</div></td>
+        <td class="sm">${fmtDate(a.first_anchor)}</td>
+        <td class="sm">${a.steps} obligation${a.steps === 1 ? "" : "s"}${
+            a.unverified ? `<div class="xs" style="color:var(--rust);">${a.unverified} unverified</div>` : ""
+          }</td>
+        <td class="sm">${a.outstanding} open</td>
+        <td class="sm">${fmtDate(a.next_due)}</td>
+        <td>${statusPill(a.status)}</td></tr>`
+        )
+        .join("")
+    : `<tr><td colspan="6" class="empty">No corporate action has been declared yet.</td></tr>`;
+
+  const body = `
+  <h1>Corporate actions</h1>
+  <div class="sub">Declare an action once, and every obligation it drags behind it becomes a dated checklist item</div>
+
+  <div class="note amber"><b>Read the confidence label on every date before you plan around it.</b>
+    A step marked <b>UNVERIFIED</b> is believed to apply, but its citation, its trigger or its day count has not
+    been checked against the primary source. It is still created, because a reminder to go and check is worth
+    more than silence, and it never gates a close. A step marked <b>APPROXIMATE</b> is measured in trading days,
+    which are approximated here with the federal business day calendar: the exchanges observe Good Friday and do
+    not observe Columbus Day or Veterans Day, so it can be out by a day or two.</div>
+
+  <div class="note blue">This is a working calendar assembled from the rules cited, not legal advice, and it does
+    not replace securities counsel. Its purpose is narrower and more specific: to make sure that no obligation in
+    a sequence goes unnoticed because it belongs to nobody. The exchange mechanics after a reverse split are the
+    usual example. Counsel watches the securities filings, the transfer agent watches the mechanics, the auditor
+    watches the financial statements, and the requirement that sits between them is the one that costs months.</div>
+
+  <h2 style="margin-top:20px;">Declared actions</h2>
+  <div class="card tight"><table>
+    <tr><th>Action</th><th>From</th><th>Obligations</th><th>Outstanding</th><th>Next due</th><th>Status</th></tr>
+    ${declaredRows}</table></div>
+
+  <h2 style="margin-top:22px;">Available playbooks</h2>
+  ${cards}
+
+  <script>
+  var LAST = {};
+  function pick(k){
+    var f=document.getElementById('form-'+k);
+    f.style.display = f.style.display==='none' ? 'block' : 'none';
+  }
+  function anchorsFor(k){
+    var out={}, inputs=document.querySelectorAll('[id^="a-'+k+'-"]');
+    for(var i=0;i<inputs.length;i++){
+      var key=inputs[i].id.substring(('a-'+k+'-').length);
+      if(inputs[i].value) out[key]=inputs[i].value;
+    }
+    return out;
+  }
+  function conf(c){
+    if(c==='unconfirmed') return '<span class="pill" style="color:#9C4221;background:#9C422118;border-color:#9C422144;">UNVERIFIED</span>';
+    if(c==='approximate') return '<span class="pill" style="color:#B45309;background:#B4530918;border-color:#B4530944;">APPROXIMATE</span>';
+    return '';
+  }
+  function escape(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(m){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); }
+  async function preview(k){
+    var msg=document.getElementById('msg-'+k), out=document.getElementById('out-'+k);
+    var anchors=anchorsFor(k);
+    if(!Object.keys(anchors).length){ return alert('Enter at least one date. Every deadline in the sequence is an offset from the action\\'s own dates.'); }
+    msg.textContent='Computing...';
+    try{
+      var r=await fetch('${BASE}/api/playbooks/preview',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k,anchors:anchors})});
+      var j=await r.json();
+      if(!j.ok) throw new Error(j.error||'Failed');
+      LAST[k]=j.built;
+      var rows=j.built.items.map(function(i){
+        return '<tr><td style="white-space:nowrap;"><code>'+escape(i.id)+'</code></td>'+
+          '<td>'+escape(i.label)+
+            (i.note?'<details><summary>Guidance</summary><div class="sm" style="color:var(--ink2);white-space:pre-line;">'+escape(i.note)+'</div></details>':'')+
+            '<div class="xs muted">'+escape((i.authority||[]).join(" · "))+'</div></td>'+
+          '<td class="sm" style="white-space:nowrap;">'+(i.dueDate||'no fixed date')+
+            (conf(i.dateConfidence)?'<div style="margin-top:3px;">'+conf(i.dateConfidence)+'</div>':'')+'</td></tr>';
+      }).join('');
+      out.innerHTML='<div class="card tight" style="margin-top:12px;"><table>'+
+        '<tr><th>Ref</th><th>Obligation</th><th>Due</th></tr>'+rows+'</table></div>'+
+        '<div class="xs muted">'+j.built.counts.total+' obligations, '+
+        j.built.counts.needsVerification+' of which still need their citation checked. Nothing has been saved yet.</div>';
+      msg.textContent='';
+    }catch(e){ msg.textContent=''; alert(e.message); }
+  }
+  async function declare(k){
+    var anchors=anchorsFor(k);
+    if(!Object.keys(anchors).length){ return alert('Enter at least one date first.'); }
+    if(!confirm('This creates real checklist items with real due dates. Unverified steps are included and labelled as unverified. Continue?')) return;
+    var msg=document.getElementById('msg-'+k);
+    msg.textContent='Creating...';
+    var engSel=document.getElementById('e-'+k);
+    try{
+      var r=await fetch('${BASE}/api/playbooks/declare',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({key:k,anchors:anchors,engagementId:engSel && engSel.value ? parseInt(engSel.value,10) : null})});
+      var j=await r.json();
+      if(!j.ok) throw new Error(j.error||'Failed');
+      location.href='${BASE}/checklist/'+j.engagementId;
+    }catch(e){ msg.textContent=''; alert(e.message); }
+  }
+  </script>`;
+
+  return chrome({ title: "Corporate actions", body, user, active: "playbooks", wide: true });
+}
+
 function usersPage({ users }, user) {
   const roleOptions = Object.entries(auth.ROLES)
     .map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`)
@@ -1581,5 +2019,7 @@ module.exports = {
   uploadPage,
   taxonomyPage,
   calendarPage,
+  profilePage,
+  playbooksPage,
   usersPage,
 };

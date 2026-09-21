@@ -272,6 +272,55 @@ async function openEngagement({ tier, fiscalYear, n, actor }) {
   return { engagement: eng, created: true };
 }
 
+/**
+ * Insert one checklist item.
+ *
+ * Single place so that the ordinary taxonomy path and the corporate
+ * action path cannot drift apart in what they store. An ordinary item
+ * leaves date_confidence NULL, which the UI reads as "computed from a
+ * rule the portal implements"; only a playbook step sets it explicitly,
+ * and only a playbook step can be unverified.
+ *
+ * ON CONFLICT DO NOTHING covers the partial unique index on
+ * (checklist_id, playbook_key, playbook_step_id): re-declaring an action
+ * re-dates nothing and duplicates nothing. It is a no-op for ordinary
+ * items, which have no playbook key and so are not covered by the index.
+ */
+async function insertChecklistItem(checklistId, engagementId, item) {
+  const r = await db.query(
+    `INSERT INTO ngtf_audit_checklist_items
+       (checklist_id, engagement_id, kind, category_code, bracket_code, sweep_id, label,
+        authority, why, note, owner_role, due_date, is_gate, sensitive, spawn_codes,
+        date_confidence, verified, playbook_key, playbook_step_id, anchor_date)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+     ON CONFLICT DO NOTHING
+     RETURNING *`,
+    [
+      checklistId,
+      engagementId,
+      item.kind,
+      item.categoryCode || null,
+      item.bracketCode || null,
+      item.sweepId || null,
+      item.label,
+      item.authority || null,
+      item.why || null,
+      item.note || null,
+      item.owner || null,
+      item.dueDate || null,
+      !!item.isGate,
+      !!item.sensitive,
+      item.spawns || null,
+      item.dateConfidence || null,
+      typeof item.verified === "boolean" ? item.verified : null,
+      item.playbookKey || null,
+      item.playbookStepId || null,
+      item.anchorDate || null,
+    ]
+  );
+  return r.rows[0] || null;
+}
+
 async function ensureChecklist(engagement, plan) {
   const existing = await db.query(
     `SELECT * FROM ngtf_audit_checklists WHERE fiscal_year=$1 AND tier=$2 AND period_label=$3`,
@@ -300,29 +349,7 @@ async function ensureChecklist(engagement, plan) {
   ).rows[0];
 
   for (const item of p.items) {
-    await db.query(
-      `INSERT INTO ngtf_audit_checklist_items
-         (checklist_id, engagement_id, kind, category_code, bracket_code, sweep_id, label,
-          authority, why, note, owner_role, due_date, is_gate, sensitive, spawn_codes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-      [
-        cl.id,
-        engagement.id,
-        item.kind,
-        item.categoryCode || null,
-        item.bracketCode || null,
-        item.sweepId || null,
-        item.label,
-        item.authority || null,
-        item.why || null,
-        item.note || null,
-        item.owner || null,
-        item.dueDate || null,
-        !!item.isGate,
-        !!item.sensitive,
-        item.spawns || null,
-      ]
-    );
+    await insertChecklistItem(cl.id, engagement.id, item);
   }
 
   // Back-satisfy any documents already uploaded for this period.
@@ -371,6 +398,246 @@ async function reconcileChecklist(checklistId) {
     [checklistId]
   );
   return r.rowCount;
+}
+
+// ══════════════════ CORPORATE ACTIONS ══════════════════
+//
+// A playbook that returns an array and forgets it is a document, not a
+// control. The obligations only do their job once they are rows with due
+// dates on a checklist, because that is what the morning sweep reads and
+// what turns red when a date passes.
+//
+// The single design rule here: an unverified step is still created, and
+// it is still labelled unverified all the way down to the row. The
+// portal would rather chase somebody about a date it is not sure of than
+// stay silent about an obligation nobody else is watching. What it must
+// never do is present the two kinds of date as the same thing.
+
+/**
+ * Turn a declared corporate action into real checklist items.
+ *
+ * @param {object}  o
+ * @param {string}  o.key           playbook key
+ * @param {object}  o.anchors       { approval, effective, application, event }
+ * @param {number}  [o.engagementId] attach to an existing engagement
+ *                                   instead of opening one for the action
+ * @param {object}  o.actor
+ */
+async function openPlaybookEngagement({ key, anchors = {}, engagementId = null, actor } = {}) {
+  const playbooks = require("./audit-playbooks");
+  const built = playbooks.build(key, anchors);
+
+  // Without at least one anchor every step is dateless, which is the one
+  // outcome worth refusing: a checklist of undated obligations looks
+  // complete and chases nobody.
+  const primary =
+    cal.dstr(anchors.effective) ||
+    cal.dstr(anchors.event) ||
+    cal.dstr(anchors.application) ||
+    cal.dstr(anchors.approval);
+  if (!primary) {
+    throw new Error(
+      "A corporate action needs at least one date to measure from. Every deadline in the sequence is an " +
+        "offset from the action's own dates, so without one the portal can compute nothing and would be " +
+        "creating a list of obligations with no due dates."
+    );
+  }
+
+  let engagement;
+  let created = false;
+
+  if (engagementId) {
+    engagement = await assertMutable(engagementId, "adding corporate action obligations");
+    if (!engagement) throw new Error("That engagement no longer exists.");
+  } else {
+    // The action gets its own engagement, on the event tier, so it
+    // appears in every place engagements already appear — the dashboard,
+    // the calendar, the ZIP export period picker — without any of those
+    // needing to learn about playbooks.
+    const periodLabel = `EVT-${primary}-${checklists.eventSlug(built.label)}`;
+    const fy = cal.fiscalYearOf(primary);
+    const existing = await findEngagement(fy, "event", periodLabel);
+    if (existing) {
+      engagement = existing;
+    } else {
+      // The filing deadline shown on the engagement is the 8-K, where the
+      // playbook has one whose date is computed rather than assumed. A
+      // date nobody has verified does not get to be the headline deadline.
+      const eightK = built.items.find(
+        (i) => i.category === "L-190" && i.dueDate && i.dateConfidence === "computed"
+      );
+      const dated = built.items.filter((i) => i.dueDate).map((i) => i.dueDate).sort();
+      const r = await db.query(
+        `INSERT INTO ngtf_audit_engagements
+           (fiscal_year, tier, period_label, period_name, period_end, status,
+            filing_form, filing_due_date, headline, action_key)
+         VALUES ($1,'event',$2,$3,$4,'open',$5,$6,$7,$8)
+         RETURNING *`,
+        [
+          fy,
+          periodLabel,
+          `Corporate action — ${built.label} (${primary})`,
+          primary,
+          eightK ? "8-K" : null,
+          eightK ? eightK.dueDate : null,
+          built.headline,
+          built.key,
+        ]
+      );
+      engagement = r.rows[0];
+      created = true;
+      void dated;
+    }
+  }
+
+  // Find or create the checklist this action's items live on.
+  let cl = (
+    await db.query(`SELECT * FROM ngtf_audit_checklists WHERE engagement_id=$1 LIMIT 1`, [engagement.id])
+  ).rows[0];
+
+  if (!cl) {
+    const dates = built.items.filter((i) => i.dueDate).map((i) => i.dueDate).sort();
+    cl = (
+      await db.query(
+        `INSERT INTO ngtf_audit_checklists
+           (engagement_id, tier, fiscal_year, period_label, period_name, period_end, headline,
+            filing_due_date, target_complete_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+        [
+          engagement.id,
+          engagement.tier,
+          engagement.fiscal_year,
+          engagement.period_label,
+          engagement.period_name,
+          engagement.period_end,
+          built.headline,
+          engagement.filing_due_date || null,
+          dates.length ? dates[dates.length - 1] : null,
+        ]
+      )
+    ).rows[0];
+  }
+
+  const addedRows = [];
+  for (const step of built.items) {
+    const cat = step.category ? tax.CATEGORY_BY_CODE[step.category] : null;
+    const row = await insertChecklistItem(cl.id, engagement.id, {
+      kind: "document",
+      categoryCode: step.category || null,
+      bracketCode: cat ? cat.bracket : null,
+      label: step.label,
+      authority: step.authority || null,
+      note: playbookItemNote(step),
+      owner: step.owner || "cfo",
+      dueDate: step.dueDate || null,
+      // A step whose citation has not been checked never gates anything.
+      // Blocking a close on an obligation the portal is not sure exists
+      // would be the software substituting its own uncertainty for the
+      // company's judgment.
+      isGate: step.verified && step.dateConfidence === "computed" && !!(cat && cat.gate),
+      dateConfidence: step.dateConfidence,
+      verified: !!step.verified,
+      playbookKey: built.key,
+      playbookStepId: step.id,
+      anchorDate: step.anchorDate || null,
+    });
+    if (row) addedRows.push(row);
+  }
+
+  await reconcileChecklist(cl.id);
+
+  await schema.logEvent({
+    engagementId: engagement.id,
+    event: "corporate_action_declared",
+    actor,
+    detail: {
+      playbook: built.key,
+      anchors,
+      stepsCreated: addedRows.length,
+      stepsAlreadyPresent: built.items.length - addedRows.length,
+      needsVerification: built.counts.needsVerification,
+    },
+  });
+
+  if (created) {
+    await notify
+      .notifyEngagementEvent({
+        engagement,
+        event: "opened",
+        actor,
+        detail: { items: addedRows.length, playbook: built.key },
+      })
+      .catch(() => {});
+  }
+
+  return {
+    engagement,
+    checklist: cl,
+    created,
+    built,
+    added: addedRows.length,
+    alreadyPresent: built.items.length - addedRows.length,
+  };
+}
+
+/**
+ * The note stored on the row.
+ *
+ * An unverified step carries its warning in the item itself rather than
+ * only in a legend somewhere, because the row is what gets screenshotted,
+ * emailed and pasted into a status update, and it has to still be honest
+ * when it arrives somewhere the legend did not.
+ */
+function playbookItemNote(step) {
+  const parts = [];
+  if (!step.verified) {
+    parts.push(
+      "UNVERIFIED. This obligation is believed to apply, but its citation, its trigger or its day count " +
+        "has not been confirmed against the primary source. Treat the date as a prompt to go and check, " +
+        "not as a deadline."
+    );
+  }
+  // Not an else. Both can be true at once, and a step that is unverified
+  // AND measured on an approximated calendar is wrong in two independent
+  // ways. The row carries a single confidence label, so this note is the
+  // only place the second warning survives.
+  if (step.approximate) {
+    parts.push(
+      "APPROXIMATE DATE. Measured in trading days, which are approximated here with the federal business " +
+        "day calendar. The exchanges observe Good Friday and do not observe Columbus Day or Veterans Day, " +
+        "so this can be out by a day or two in either direction. Confirm before relying on it."
+    );
+  }
+  if (step.note) parts.push(step.note);
+  if (!step.dueDate) {
+    parts.push("No fixed date: this obligation has no offset the portal can compute, and is tracked by hand.");
+  }
+  return parts.join("\n\n") || null;
+}
+
+/** Corporate actions already declared, newest first. */
+async function listDeclaredActions(limit = 40) {
+  const r = await db.query(
+    `SELECT i.playbook_key,
+            i.engagement_id,
+            e.period_label,
+            e.period_name,
+            e.status,
+            MIN(i.anchor_date)                                        AS first_anchor,
+            COUNT(*)::int                                             AS steps,
+            COUNT(*) FILTER (WHERE i.verified IS FALSE)::int           AS unverified,
+            COUNT(*) FILTER (WHERE i.status IN ('open','pending_confirmation'))::int AS outstanding,
+            MIN(i.due_date) FILTER (WHERE i.status IN ('open','pending_confirmation')) AS next_due,
+            MAX(i.created_at)                                         AS declared_at
+       FROM ngtf_audit_checklist_items i
+       JOIN ngtf_audit_engagements e ON e.id = i.engagement_id
+      WHERE i.playbook_key IS NOT NULL
+      GROUP BY i.playbook_key, i.engagement_id, e.period_label, e.period_name, e.status
+      ORDER BY MAX(i.created_at) DESC
+      LIMIT $1`,
+    [limit]
+  );
+  return r.rows;
 }
 
 async function setReportReleaseDate(engagementId, dateStr, actor) {
@@ -1500,7 +1767,11 @@ module.exports = {
   eventSpecFor,
   recordClassificationFeedback,
   ensureChecklist,
+  insertChecklistItem,
   reconcileChecklist,
+  // corporate actions
+  openPlaybookEngagement,
+  listDeclaredActions,
   setReportReleaseDate,
   archiveEngagement,
   setLegalHold,

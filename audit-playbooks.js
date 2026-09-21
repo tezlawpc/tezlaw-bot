@@ -108,7 +108,7 @@ const PLAYBOOKS = {
         offset: D.none(),
         anchor: "approval",
         owner: "cfo",
-        category: "A-020",
+        category: "A-040",
         authority: ["State corporate law", "Exchange Act Rule 14c-2"],
         verified: false,
         note:
@@ -123,7 +123,7 @@ const PLAYBOOKS = {
         offset: D.calendarDaysBefore(25),
         anchor: "effective",
         owner: "cfo",
-        category: "L-190",
+        category: "K-050",
         authority: ["FINRA Rule 6490", "SEA Rule 10b-17"],
         verified: false,
         note:
@@ -138,7 +138,7 @@ const PLAYBOOKS = {
         offset: D.none(),
         anchor: "effective",
         owner: "cfo",
-        category: "A-030",
+        category: "A-060",
         authority: ["State corporate law"],
         verified: true,
       },
@@ -172,7 +172,7 @@ const PLAYBOOKS = {
         offset: D.none(),
         anchor: "effective",
         owner: "cfo",
-        category: "F-010",
+        category: "H-090",
         authority: ["ASC 260-10-55-12", "Reg S-X 8-03"],
         verified: true,
         note: "A split is applied retroactively to every period presented, including EPS.",
@@ -183,7 +183,7 @@ const PLAYBOOKS = {
         offset: D.tradingDaysAfter(30),
         anchor: "effective",
         owner: "cfo",
-        category: "K-050",
+        category: "L-210",
         approximate: true,
         authority: ["Nasdaq Rule 5505", "Nasdaq Rule 5510", "Nasdaq IM-5101-1"],
         verified: false,
@@ -217,7 +217,7 @@ const PLAYBOOKS = {
         offset: D.none(),
         anchor: "effective",
         owner: "cfo",
-        category: "K-050",
+        category: "H-100",
         authority: ["Nasdaq Rule 5210", "Nasdaq Rule 5110"],
         verified: false,
         note:
@@ -269,7 +269,7 @@ const PLAYBOOKS = {
         offset: D.calendarDaysBefore(60),
         anchor: "application",
         owner: "cfo",
-        category: "A-020",
+        category: "A-040",
         authority: ["Nasdaq Rule 5620(b)"],
         verified: true,
         note:
@@ -294,7 +294,7 @@ const PLAYBOOKS = {
         offset: D.calendarDaysBefore(45),
         anchor: "application",
         owner: "cfo",
-        category: "A-040",
+        category: "A-050",
         authority: ["Nasdaq Rule 5605"],
         verified: false,
         note:
@@ -308,7 +308,7 @@ const PLAYBOOKS = {
         offset: D.calendarDaysBefore(30),
         anchor: "application",
         owner: "cfo",
-        category: "F-010",
+        category: "L-210",
         authority: ["Nasdaq Rule 5505(b)"],
         verified: false,
         note:
@@ -421,15 +421,56 @@ function build(key, anchors = {}) {
   };
 }
 
+// The dates a playbook actually measures from, in the order a person
+// would be asked for them. Derived from the steps rather than restated
+// beside them, so a new step cannot introduce an anchor that the form
+// never collects — which would silently leave that step undated.
+const ANCHOR_LABELS = {
+  approval: "Board approval date",
+  effective: "Effective date",
+  application: "Application date",
+  event: "Date of the event",
+};
+
+const ANCHOR_HELP = {
+  approval: "The date the board resolved to do it.",
+  effective: "The date it takes effect, which is what most of the sequence is measured from.",
+  application: "The date the application is intended to be filed. Everything else works backwards from it.",
+  event: "The date of dismissal, resignation or engagement, which starts the four business day clock.",
+};
+
+function anchorsUsed(key) {
+  const pb = PLAYBOOKS[key];
+  if (!pb) return [];
+  const seen = [];
+  for (const s of pb.steps) {
+    if (s.anchor && !seen.includes(s.anchor)) seen.push(s.anchor);
+  }
+  // Ask for the approval date before the effective date, and the event
+  // date before anything else, matching the order they occur.
+  const order = ["approval", "event", "effective", "application"];
+  return seen
+    .sort((a, b) => order.indexOf(a) - order.indexOf(b))
+    .map((a) => ({
+      key: a,
+      label: ANCHOR_LABELS[a] || a,
+      help: ANCHOR_HELP[a] || "",
+      steps: pb.steps.filter((s) => s.anchor === a).length,
+    }));
+}
+
 function list() {
   return Object.values(PLAYBOOKS).map((p) => ({
     key: p.key,
     label: p.label,
+    headline: p.headline,
     anchorLabel: p.anchorLabel,
     secondAnchorLabel: p.secondAnchorLabel || null,
+    anchors: anchorsUsed(p.key),
     steps: p.steps.length,
+    verified: p.steps.filter((s) => s.verified).length,
     needsVerification: p.steps.filter((s) => !s.verified).length,
   }));
 }
 
-module.exports = { PLAYBOOKS, build, list, resolveOffset, D };
+module.exports = { PLAYBOOKS, build, list, anchorsUsed, ANCHOR_LABELS, resolveOffset, D };
