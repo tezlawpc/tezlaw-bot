@@ -750,7 +750,10 @@ app.get("/admin/civil/new", async (req, res) => {
 
             ${field("Client (required)", `<input list="civil-clients" name="client_key" required placeholder="start typing a client…" style="${I}">
               <datalist id="civil-clients">${clients.map(c => `<option value="${esc(c.key)}">${esc(c.name)}</option>`).join("")}</datalist>
-              <div style="font-size:10px;color:#7B5330;margin-top:3px;font-style:italic;">Pick an existing client, or type a new key (lowercase-with-dashes).</div>`, true)}
+              <div style="font-size:10px;color:#7B5330;margin-top:3px;font-style:italic;">Pick an existing client, or type a new key (lowercase-with-dashes). A new key gets a client profile automatically.</div>`, true)}
+
+            ${field("Client Name (for a new client)", `<input type="text" name="client_name" placeholder="e.g. Ana Ruiz — leave blank for an existing client" style="${I}">
+              <div style="font-size:10px;color:#7B5330;margin-top:3px;font-style:italic;">Only used when the key above is new. Left blank, the name is taken from the caption.</div>`, true)}
 
             ${field("Case Name (required)", `<input type="text" name="case_name" required placeholder="e.g. Nguyen v. Pacific Holdings LLC" style="${I}">`, true)}
 
@@ -801,6 +804,11 @@ app.get("/admin/civil/new", async (req, res) => {
             <a href="/admin/civil" style="color:#7B5330;text-decoration:none;font-size:13px;">Cancel</a>
             <span id="civil-err" style="color:#A02818;font-size:12px;"></span>
           </div>
+          <div id="civil-setup" style="margin-top:10px;font-size:12px;line-height:1.5;"></div>
+          <div style="margin-top:8px;font-size:10.5px;color:#7B5330;font-style:italic;">
+            Creating the case also creates the client profile (if the client is new) and the matter's
+            Dropbox folder with the standard subfolders, linked and synced.
+          </div>
         </form>
       </div>
 
@@ -820,7 +828,23 @@ app.get("/admin/civil/new", async (req, res) => {
               body: JSON.stringify(data)
             });
             var d = await r.json();
-            if (d.ok) { location.href = "/admin/civil/case/" + d.case.id; return; }
+            if (d.ok) {
+              // Say what was set up before leaving the page. A Dropbox folder
+              // that could not be made is worth three seconds of the
+              // attorney's attention; a clean setup is worth one.
+              var p = d.provisioning || {};
+              var folderOk = p.dropbox && (p.dropbox.created || p.dropbox.adopted || p.dropbox.linked);
+              var msg = document.getElementById("civil-setup");
+              if (msg && p.summary) {
+                msg.style.color = folderOk || p.pending ? "#166534" : "#A02818";
+                msg.textContent = "Case created — " + p.summary + ".";
+              }
+              btn.textContent = "OPENING…";
+              setTimeout(function () {
+                location.href = "/admin/civil/case/" + d.case.id;
+              }, folderOk || !p.summary ? 1100 : 3200);
+              return;
+            }
             err.textContent = d.error || "Could not create the case.";
           } catch (ex) {
             err.textContent = ex.message;
@@ -1376,11 +1400,18 @@ app.get("/admin/civil/dropbox", async (req, res) => {
 app.post("/admin/civil", async (req, res) => {
   try {
     const civil = require("./civil-litigation");
-    const created = await civil.createCase({
-      ...req.body,
-      created_by: req.user?.n || req.user?.u || "web-admin",
+    const createdBy = req.user?.n || req.user?.u || "web-admin";
+    const created = await civil.createCase({ ...req.body, created_by: createdBy });
+
+    // The client profile and the Dropbox folder, set up the moment the case
+    // exists. Best-effort by design: the case is already saved, and nothing
+    // in here is allowed to turn a successful create into an error.
+    const provisioning = await require("./civil-provision").provisionWithin(created, {
+      createdBy,
+      clientName: req.body && req.body.client_name,
+      subfolders: !(req.body && req.body.skip_subfolders),
     });
-    res.json({ ok: true, case: created });
+    res.json({ ok: true, case: created, provisioning });
   } catch (err) {
     console.error("[civil create]:", err.message);
     res.status(400).json({ ok: false, error: err.message });

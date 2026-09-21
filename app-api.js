@@ -8494,8 +8494,32 @@ function attachCivilLitigationRoutes(app, civil) {
   // ── Case CRUD ──
   app.post("/api/staff/civil/cases", auth1, auth2, async (req, res) => {
     try {
-      const created = await civil.createCase({ ...req.body, created_by: req.user.u || req.user.n });
-      res.json({ ok: true, case: created });
+      const createdBy = req.user.u || req.user.n;
+      const created = await civil.createCase({ ...req.body, created_by: createdBy });
+      // Same setup the web form gets — client profile and Dropbox folder —
+      // so a matter opened from the phone is not a second-class matter.
+      const provisioning = await require("./civil-provision").provisionWithin(created, {
+        createdBy,
+        clientName: req.body && req.body.client_name,
+      });
+      res.json({ ok: true, case: created, provisioning });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // Re-run setup on a case that already exists: after Dropbox was down when
+  // it was opened, or for any of the matters opened before this existed.
+  // Safe to press twice — an existing contact is reused and an existing
+  // folder is linked, never duplicated. Mirrored to
+  // /admin/civil/api/cases/:id/provision for the web.
+  app.post("/api/staff/civil/cases/:id/provision", auth1, auth2, async (req, res) => {
+    try {
+      const row = await civil.getCase(parseInt(req.params.id, 10));
+      if (!row) return res.status(404).json({ ok: false, error: "Case not found" });
+      const provisioning = await require("./civil-provision").provisionNewCase(row, {
+        createdBy: req.user.u || req.user.n,
+        clientName: req.body && req.body.client_name,
+      });
+      res.json({ ok: true, provisioning });
     } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
   });
 

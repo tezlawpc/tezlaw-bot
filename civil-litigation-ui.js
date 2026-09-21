@@ -518,6 +518,7 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
              style="flex:1;min-width:260px;padding:8px;border:1px solid #D4C4A0;border-radius:5px;background:#FBF3DE;color:#3E2818;font-size:12px;">
       <button onclick="dbxSave(${id})" style="padding:8px 14px;background:#3E2818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">${linked ? "UPDATE" : "LINK"} FOLDER</button>
       <button onclick="dbxSuggest(${id})" style="padding:8px 14px;background:#FBF3DE;color:#3E2818;border:1px solid #D4C4A0;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">SUGGEST</button>
+      ${linked ? "" : `<button onclick="dbxProvision(${id})" title="Create this matter's folder in the civil Dropbox root, with the standard subfolders, and link it" style="padding:8px 14px;background:#166534;color:#FBF3DE;border:1px solid #0F3D22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">CREATE FOLDER</button>`}
       ${linked ? `<button onclick="dbxSync(${id})" style="padding:8px 14px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">SYNC NOW</button>` : ""}
       ${linked ? `<button onclick="dbxArchive(${id}, ${archived ? "false" : "true"})" style="padding:8px 14px;background:${archived ? "#166534" : "#A02818"};color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">${archived ? "UNARCHIVE" : "ARCHIVE"}</button>` : ""}
     </div>
@@ -527,37 +528,11 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
     </div>
     <div id="dbx-suggest"></div>`;
 
-  if (!live.length) {
-    return head + controls + `<div style="padding:16px;text-align:center;font-style:italic;color:#8B7355;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">${linked ? "No documents mirrored yet — hit Sync Now." : "Link a folder to mirror this matter's documents."}</div>`;
-  }
-
-  const tabs = withFiles.map(c =>
-    `<button onclick="dbxFilter('${c.key}')" data-cat="${c.key}" class="dbx-tab" style="padding:5px 10px;border:1px solid ${c.color};border-radius:14px;background:#FBF3DE;color:${c.color};cursor:pointer;font-size:11px;font-weight:600;">${esc(c.label)} ${c.count}</button>`
-  ).join(" ");
-
-  const rows = live.map(f => {
-    const cat = cats.find(c => c.key === f.category) || { color: "#4B5563", label: f.category };
-    const kb = f.size_bytes ? (f.size_bytes > 1048576 ? (f.size_bytes / 1048576).toFixed(1) + " MB" : Math.round(f.size_bytes / 1024) + " KB") : "";
-    return `
-      <div class="dbx-row" data-cat="${esc(f.category)}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #E8DCC0;">
-        <span style="flex-shrink:0;width:9px;height:9px;border-radius:2px;background:${cat.color};"></span>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;color:#3E2818;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.name || "")}</div>
-          <div style="font-size:10px;color:#8B7355;">${esc(cat.label)}${f.relative_folder ? " · " + esc(f.relative_folder) : ""}${kb ? " · " + kb : ""}${f.server_modified ? " · " + fmtDate(f.server_modified) : ""}</div>
-        </div>
-        ${f.archived ? `<span style="font-size:9px;font-weight:700;color:#7B5330;letter-spacing:1px;">ARCHIVED</span>` : ""}
-        <a href="#" onclick="dbxOpen(event, ${f.id})" style="flex-shrink:0;font-size:11px;color:#B84200;text-decoration:none;font-weight:600;">OPEN ↗</a>
-      </div>`;
-  }).join("");
-
-  return head + controls + `
-    <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:5px;">
-      <button onclick="dbxFilter('')" class="dbx-tab" data-cat="" style="padding:5px 10px;border:1px solid #3E2818;border-radius:14px;background:#3E2818;color:#FBF3DE;cursor:pointer;font-size:11px;font-weight:600;">All ${live.length}</button>
-      ${tabs}
-    </div>
-    <div style="background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;overflow:hidden;">${rows}</div>
-
-    <script>
+  // The handlers for every button above. This used to ride along only with
+  // the file list, so on a matter with no documents yet — every unlinked
+  // case, and every brand-new one — LINK FOLDER, SUGGEST and SYNC NOW
+  // called functions that were never defined, and did nothing at all.
+  const script = `    <script>
       function dbxMsg(t, bad) {
         var el = document.getElementById("dbx-msg");
         el.innerHTML = t; el.style.color = bad ? "#A02818" : "#7B5330";
@@ -625,6 +600,27 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
           box.appendChild(row);
         });
       }
+      // Make the folder rather than find it: for a matter opened before
+      // setup was automatic, or one opened while Dropbox was down. Safe to
+      // press twice — an existing folder of the same name is linked, not
+      // duplicated.
+      async function dbxProvision(id) {
+        dbxMsg("Creating the matter folder in Dropbox…");
+        var d = await dbxPost("/admin/civil/api/cases/" + id + "/provision", {});
+        var p = (d && d.provisioning) || {};
+        var ok = p.dropbox && (p.dropbox.created || p.dropbox.adopted || p.dropbox.linked);
+        if (ok) {
+          var el = document.getElementById("dbx-msg");
+          el.style.color = "#166534";
+          el.textContent = p.summary + ". Reloading…";
+          setTimeout(function () { location.reload(); }, 1100);
+          return;
+        }
+        var why = (p.dropbox && (p.dropbox.reason || p.dropbox.error)) || (d && d.error) || "Could not create the folder.";
+        var el2 = document.getElementById("dbx-msg");
+        el2.style.color = "#A02818";
+        el2.textContent = why;
+      }
       async function dbxArchive(id, on) {
         if (on && !confirm("Archive this case file? The document list is frozen and hourly sync pauses for this matter. Nothing is moved or deleted in Dropbox.")) return;
         dbxMsg(on ? "Archiving…" : "Unarchiving…");
@@ -639,6 +635,38 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
         else dbxMsg(d.error || "Could not open that file.", true);
       }
     </script>`;
+
+  if (!live.length) {
+    return head + controls + `<div style="padding:16px;text-align:center;font-style:italic;color:#8B7355;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">${linked ? "No documents mirrored yet — hit Sync Now." : "Link a folder to mirror this matter's documents."}</div>` + script;
+  }
+
+  const tabs = withFiles.map(c =>
+    `<button onclick="dbxFilter('${c.key}')" data-cat="${c.key}" class="dbx-tab" style="padding:5px 10px;border:1px solid ${c.color};border-radius:14px;background:#FBF3DE;color:${c.color};cursor:pointer;font-size:11px;font-weight:600;">${esc(c.label)} ${c.count}</button>`
+  ).join(" ");
+
+  const rows = live.map(f => {
+    const cat = cats.find(c => c.key === f.category) || { color: "#4B5563", label: f.category };
+    const kb = f.size_bytes ? (f.size_bytes > 1048576 ? (f.size_bytes / 1048576).toFixed(1) + " MB" : Math.round(f.size_bytes / 1024) + " KB") : "";
+    return `
+      <div class="dbx-row" data-cat="${esc(f.category)}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid #E8DCC0;">
+        <span style="flex-shrink:0;width:9px;height:9px;border-radius:2px;background:${cat.color};"></span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;color:#3E2818;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.name || "")}</div>
+          <div style="font-size:10px;color:#8B7355;">${esc(cat.label)}${f.relative_folder ? " · " + esc(f.relative_folder) : ""}${kb ? " · " + kb : ""}${f.server_modified ? " · " + fmtDate(f.server_modified) : ""}</div>
+        </div>
+        ${f.archived ? `<span style="font-size:9px;font-weight:700;color:#7B5330;letter-spacing:1px;">ARCHIVED</span>` : ""}
+        <a href="#" onclick="dbxOpen(event, ${f.id})" style="flex-shrink:0;font-size:11px;color:#B84200;text-decoration:none;font-weight:600;">OPEN ↗</a>
+      </div>`;
+  }).join("");
+
+  return head + controls + `
+    <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:5px;">
+      <button onclick="dbxFilter('')" class="dbx-tab" data-cat="" style="padding:5px 10px;border:1px solid #3E2818;border-radius:14px;background:#3E2818;color:#FBF3DE;cursor:pointer;font-size:11px;font-weight:600;">All ${live.length}</button>
+      ${tabs}
+    </div>
+    <div style="background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;overflow:hidden;">${rows}</div>
+
+    ${script}`;
 }
 
 module.exports = { renderKanban, renderCaseDetail, renderDocumentsPanel, civilAdminScriptTag };
