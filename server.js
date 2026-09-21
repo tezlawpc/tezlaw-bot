@@ -734,6 +734,18 @@ app.get("/admin/civil/new", async (req, res) => {
         </div>
 
         <form onsubmit="submitCivil(event)" style="background:#F5EBD3;border:1px solid #D4C4A0;border-radius:8px;padding:20px;">
+
+          <!-- Open the matter from its own papers. Zara reads the complaint,
+               summons and retainer and PROPOSES fields; every one is quoted
+               from the document and ticked off by the attorney before it goes
+               anywhere near this form. Nothing here saves anything. -->
+          <div style="margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid #D4C4A0;">
+            <div style="font-family:Cinzel,serif;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;margin-bottom:8px;">
+              ◎ START FROM THE DOCUMENTS <span style="font-weight:400;color:#7B5330;text-transform:none;letter-spacing:0;font-style:italic;font-size:11px;">— optional, and you confirm every field</span>
+            </div>
+            <div data-civil-intake></div>
+          </div>
+
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
 
             ${field("Client (required)", `<input list="civil-clients" name="client_key" required placeholder="start typing a client…" style="${I}">
@@ -815,7 +827,8 @@ app.get("/admin/civil/new", async (req, res) => {
           }
           btn.disabled = false; btn.style.opacity = "1"; btn.textContent = "CREATE CASE";
         }
-      </script>`;
+      </script>
+      ${require("./client-script").clientScriptTag("civil-intake.js")}`;
     res.send(hearingNotes.renderAdminChrome({ title: "New Civil Case", body, activeItem: "civil" }));
   } catch (err) {
     console.error("[civil new]:", err.message);
@@ -905,6 +918,25 @@ app.get("/admin/civil/wip", async (req, res) => {
     res.send(chrome.renderAdminChrome({ title: "Civil WIP", body, activeItem: "civil" }));
   } catch (err) {
     res.status(500).send("WIP report failed: " + err.message);
+  }
+});
+
+// ── Civil: read a new matter out of its own documents ───────
+// Upload the complaint and summons (and the retainer, if signed) and Zara
+// proposes the fields that are printed on them. Nothing is saved: the answer
+// populates the new-case form, which the attorney then confirms. Every
+// proposed value carries the phrase it came from, so confirming is reading
+// one line rather than trusting the machine.
+app.post("/admin/civil/intake/extract", docUpload.array("documents", 6), async (req, res) => {
+  try {
+    const files = (req.files || []).map(f => ({ buffer: f.buffer, filename: f.originalname }));
+    if (!files.length) return res.status(400).json({ ok: false, error: "No documents uploaded" });
+    const ex = require("./civil-intake-extract");
+    const out = await ex.extractFromDocuments(files, { kind: req.body?.kind || null });
+    res.json(out);
+  } catch (err) {
+    console.error("[civil intake extract]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

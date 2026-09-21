@@ -194,7 +194,11 @@ function audit(label, html) {
   const app1 = mk('// ── Civil ⇄ Dropbox: admin-side actions', 'app.post("/admin/civil", async (req, res) => {');
   const s1 = app1.listen(0, async () => {
     audit('dropbox-console', await (await fetch('http://127.0.0.1:' + s1.address().port + '/admin/civil/dropbox')).text());
-    const app2 = mk('app.get("/admin/civil/new"', 'app.post("/admin/civil"');
+    // End the slice at the very next route, not at the create-case POST:
+    // between them now sit routes that close over module-level things this
+    // harness does not have (the multer instance the document intake uses),
+    // and evaluating those throws before the form is ever rendered.
+    const app2 = mk('app.get("/admin/civil/new"', 'app.get("/admin/civil/triage"');
     const s2 = app2.listen(0, async () => {
       audit('new-case-form', await (await fetch('http://127.0.0.1:' + s2.address().port + '/admin/civil/new')).text());
       console.log('\n' + '='.repeat(48) + `\n${total} script block(s), ${bad} problem(s)\n` + '='.repeat(48));

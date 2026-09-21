@@ -101,11 +101,26 @@ async function renderKanban(opts = {}) {
       const tip = [c.case_name, c.case_type, c.case_number ? "#" + c.case_number : "", amt]
         .filter(Boolean).join(" · ");
 
+      // A full-width row, not a column card. Nine columns at 1fr each left
+      // about 150px per card on a laptop, which is why every case name was
+      // clamped to two lines and truncated — "Global Student Housing LLC vs.
+      // James Turco" and "Global Student Housing LLC vs. Jane Tran" looked
+      // identical. Across the full width the name never needs truncating,
+      // which is the whole point of a case list.
+      const meta = [
+        c.case_number ? "#" + esc(c.case_number) : "",
+        c.case_type ? esc(c.case_type) : "",
+        c.court ? esc(c.court) : "",
+      ].filter(Boolean).join(" &middot; ");
+
       return `
-        <a href="/admin/civil/case/${c.id}" title="${esc(tip)}" draggable="true" data-case-id="${c.id}" data-stage="${esc(stage.key)}" class="civil-card" style="display:block;padding:6px 7px;margin-bottom:5px;background:#FBF3DE;border:1px solid #D4C4A0;border-left:3px solid ${edge};border-radius:5px;text-decoration:none;color:#3E2818;cursor:grab;">
-          <div style="font-family:Cinzel,serif;font-size:11.5px;font-weight:600;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${esc(c.case_name)}</div>
-          ${chips ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:3px;">${chips}</div>` : ""}
-          ${amt ? `<div style="margin-top:3px;font-size:10px;font-weight:700;color:#B8891E;">${esc(amt)}</div>` : ""}
+        <a href="/admin/civil/case/${c.id}" title="${esc(tip)}" draggable="true" data-case-id="${c.id}" data-stage="${esc(stage.key)}" class="civil-card" style="display:flex;align-items:center;gap:10px;padding:8px 11px;margin-bottom:4px;background:#FBF3DE;border:1px solid #D4C4A0;border-left:3px solid ${edge};border-radius:5px;text-decoration:none;color:#3E2818;cursor:grab;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-family:Cinzel,serif;font-size:13px;font-weight:600;line-height:1.3;">${esc(c.case_name)}</div>
+            ${meta ? `<div style="margin-top:2px;font-size:10.5px;color:#7B5330;">${meta}</div>` : ""}
+          </div>
+          ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex-shrink:0;">${chips}</div>` : ""}
+          ${amt ? `<div style="flex-shrink:0;min-width:86px;text-align:right;font-size:11.5px;font-weight:700;color:#B8891E;">${esc(amt)}</div>` : ""}
         </a>
       `;
     }).join("") || `<div style="text-align:center;padding:14px 4px;font-style:italic;color:#B0A188;font-size:11px;">—</div>`;
@@ -114,17 +129,24 @@ async function renderKanban(opts = {}) {
     const empty = cases.length === 0;
     const urgentCount = cases.filter(c => urgencyOf(c) === 2).length;
 
+    // Each stage is a full-width band. An empty stage collapses to its
+    // header rather than reserving a column of blank space — with 115 of
+    // ~220 matters in Intake, the old board spent most of its width on
+    // columns that had nothing in them.
     return `
-      <div class="civil-col" data-stage="${esc(stage.key)}" data-label="${esc(stage.label)}" style="min-width:0;background:#F5EBD3;border:1px solid #D4C4A0;border-radius:7px;overflow:hidden;display:flex;flex-direction:column;${empty ? "opacity:.55;" : ""}">
-        <div style="padding:7px 8px;background:#FBF3DE;border-bottom:1px solid #D4C4A0;border-top:3px solid ${stage.color};">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
-            <div style="font-family:Cinzel,serif;font-size:10px;font-weight:600;color:#3E2818;letter-spacing:.6px;text-transform:uppercase;line-height:1.2;">${esc(stage.label)}</div>
-            <div style="flex-shrink:0;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:${stage.color};color:#FBF3DE;font-family:Cinzel,serif;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;">${cases.length}</div>
+      <details class="civil-col" data-stage="${esc(stage.key)}" data-label="${esc(stage.label)}" ${empty ? "" : "open"} style="background:#F5EBD3;border:1px solid #D4C4A0;border-left:4px solid ${stage.color};border-radius:7px;overflow:hidden;margin-bottom:9px;${empty ? "opacity:.6;" : ""}">
+        <summary style="padding:9px 12px;background:#FBF3DE;border-bottom:1px solid #D4C4A0;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div style="display:flex;align-items:center;gap:9px;min-width:0;">
+            <div style="font-family:Cinzel,serif;font-size:12px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;">${esc(stage.label)}</div>
+            ${urgentCount ? `<span style="font-size:10px;font-weight:700;color:#A02818;letter-spacing:.3px;">&#9888; ${urgentCount} urgent</span>` : ""}
           </div>
-          ${urgentCount ? `<div style="margin-top:3px;font-size:9px;font-weight:700;color:#A02818;letter-spacing:.3px;">⚠ ${urgentCount} urgent</div>` : ""}
-        </div>
-        <div style="padding:6px;overflow-y:auto;flex:1;min-height:0;">${cards}</div>
-      </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <a href="/admin/civil/stage/${esc(stage.key)}" style="font-size:10.5px;color:#B8891E;text-decoration:none;">open workspace &rarr;</a>
+            <div style="min-width:22px;height:20px;padding:0 7px;border-radius:10px;background:${stage.color};color:#FBF3DE;font-family:Cinzel,serif;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${cases.length}</div>
+          </div>
+        </summary>
+        <div style="padding:7px;">${cards}</div>
+      </details>
     `;
   }).join("");
 
@@ -144,16 +166,17 @@ async function renderKanban(opts = {}) {
         <a href="/admin/civil/new" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;font-family:Cinzel,serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-decoration:none;">+ NEW CASE</a>
       </div>
       <!--CIVIL_FILTER_BANNER-->
-      <!-- One column per stage, all on screen: grid columns collapse to fit
-           rather than a flex row with min-width that forces sideways scroll.
-           Columns scroll vertically on their own; the board itself never does. -->
-      <div style="display:grid;grid-template-columns:repeat(${board.stages.length}, minmax(0, 1fr));gap:7px;align-items:stretch;height:calc(100vh - 230px);min-height:420px;">
+      <!-- Stacked, not side by side. Nine columns sharing the width meant no
+           case name was ever fully readable; down the page each row gets the
+           whole width. Stages stay collapsible, so the lifecycle order is
+           still visible at a glance even with a stage of 115 matters open. -->
+      <div style="max-width:1200px;">
         ${stagesHtml}
       </div>
       <div style="margin-top:10px;display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:#7B5330;">
         <span><span style="display:inline-block;width:9px;height:9px;background:#A02818;border-radius:2px;vertical-align:middle;"></span> trial &le;60d or SOL &le;90d</span>
         <span><span style="display:inline-block;width:9px;height:9px;background:#F07800;border-radius:2px;vertical-align:middle;"></span> trial &le;120d</span>
-        <span style="font-style:italic;">cards sorted most-urgent first · hover for details · drag a card to another column to change its stage</span>
+        <span style="font-style:italic;">cards sorted most-urgent first · hover for details · drag a row onto another stage to change it &middot; click a stage header to collapse it</span>
       </div>
       <div id="civilToast" style="display:none;position:fixed;bottom:18px;left:50%;transform:translateX(-50%);padding:9px 16px;background:#3E2818;color:#FBF3DE;border:1px solid #B8891E;border-radius:6px;font-size:12px;z-index:9999;"></div>
       <script>

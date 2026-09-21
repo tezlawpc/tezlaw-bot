@@ -2105,6 +2105,13 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   ${body}
 </div>
 
+<!-- Zara, on every admin page. The app has had a chat since build 36; the
+     web, where most of the firm's work actually happens, had none. Loaded
+     as a real static file rather than inlined, for the same reason every
+     other admin script is: escapes inside a server-side template literal
+     are consumed before the browser sees them. -->
+${require("./client-script").clientScriptTag("zara-chat.js")}
+
 </body>
 </html>`;
 }

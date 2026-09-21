@@ -95,6 +95,9 @@ const CIVIL_MIRROR_PREFIXES = [
   { src: "/api/staff/civil", dest: CIVIL_ADMIN_PREFIX },
   { src: "/api/staff/users", dest: CIVIL_ADMIN_PREFIX + "/users", collapse: true },
   { src: "/api/staff/zara", dest: "/admin/zara/api" },
+  // The web admin had no way to talk to Zara at all: the chat endpoint was
+  // bearer-only, so it existed for the app and for nobody sitting at a desk.
+  { src: "/api/staff/chat", dest: "/admin/zara/api/chat", collapse: true },
 ];
 
 function makeCivilAdminMirror(app) {
@@ -2789,9 +2792,16 @@ function registerAppApi(app) {
       // surface + extra, not systemPrompt: Zara's identity, goals,
       // boundaries and learned lessons come from the charter in
       // zara-core; STAFF_OPS adds only what is local to this surface.
+      // The web widget sends where the user is. A question like "what is the
+      // SOL on this one?" is unanswerable without it, and asking the user to
+      // re-type the case name they are already looking at is the kind of
+      // friction that stops people using the thing.
+      const pageContext = String(req.body?.context || "").slice(0, 600);
+
       const answer = await zaraChat.chat({
         surface: "staff",
         extra: zaraChat.STAFF_OPS,
+        context: pageContext,
         message: String(message),
         history: history || [],
         db,
