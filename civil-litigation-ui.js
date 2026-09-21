@@ -444,6 +444,9 @@ async function renderCaseDetail(id) {
       <!-- Case team (build 38) — rendered by civil-admin.js -->
       <div data-civil-panel="team"></div>
 
+      <!-- Hearings and the notes from them (civil-hearings.js) — rendered by civil-admin.js -->
+      <div data-civil-panel="hearings"></div>
+
       <!-- Deadlines -->
       ${sectionHead(`⏰ PENDING DEADLINES (${deadlines.length})`,
         actionBtn("add-deadline", "+ ADD DEADLINE") + actionBtn("regenerate-deadlines", "🔄 REGENERATE", "quiet"))}

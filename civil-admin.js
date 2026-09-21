@@ -272,6 +272,7 @@
       panel("docket") ? renderDocket() : null,
       panel("financials") ? renderFinancials() : null,
       panel("time") ? renderTime() : null,
+      panel("hearings") ? renderHearings() : null,
     ]);
   }
   function reload() { return mountAll(); }
@@ -706,6 +707,194 @@
   }
 
   // ── Financials / budget ────────────────────────────────────
+  // ── Hearings ───────────────────────────────────────────────
+  //
+  // Upcoming hearings first, then past ones with their notes. Adding one
+  // puts it on the deadline list with a reminder; recording the outcome
+  // takes the notes and ruling, schedules a continuance in the same step,
+  // and can log the appearance time.
+  var HEARING_META = null;
+  function hearingMeta() {
+    if (HEARING_META) return Promise.resolve(HEARING_META);
+    return api("/hearings/meta").then(function (d) { HEARING_META = d; return d; })
+      .catch(function () {
+        return { types: ["Case Management Conference", "Motion hearing", "Trial", "Other"],
+                 appearances: ["In person", "Remote (video)", "Telephonic"] };
+      });
+  }
+
+  function hearingFields(meta, v) {
+    v = v || {};
+    return [
+      { name: "hearing_date", label: "Date", type: "date", required: true, half: true,
+        value: v.hearing_date ? String(v.hearing_date).slice(0, 10) : "" },
+      { name: "hearing_time", label: "Time", type: "text", half: true, value: v.hearing_time || "",
+        hint: "e.g. 8:30 AM" },
+      { name: "hearing_type", label: "Type", type: "select", required: true, half: true,
+        value: v.hearing_type || "", options: [{ value: "", label: "— select —" }].concat(meta.types || []) },
+      { name: "department", label: "Department", type: "text", half: true, value: v.department || "",
+        hint: v.id ? "" : "Blank = same as the last hearing" },
+      { name: "judge", label: "Judge", type: "text", half: true, value: v.judge || "" },
+      { name: "appearance", label: "Appearance", type: "select", half: true, value: v.appearance || "",
+        options: [{ value: "", label: "— select —" }].concat(meta.appearances || []) },
+      { name: "location", label: "Courthouse / location", type: "text", half: true, value: v.location || "" },
+      { name: "appearing", label: "Who is appearing", type: "text", half: true, value: v.appearing || "" },
+      { name: "purpose", label: "What it is for", type: "text", value: v.purpose || "",
+        hint: "e.g. Plaintiff's motion to compel further responses to RFPs, Set One" },
+      { name: "notes", label: "Notes", type: "textarea", rows: 3, value: v.notes || "",
+        hint: "Prep notes before; courtroom notes after." },
+    ];
+  }
+
+  function openAddHearing() {
+    hearingMeta().then(function (meta) {
+      formModal("Add hearing", hearingFields(meta), function (v) {
+        return api("/cases/" + CASE_ID + "/hearings", { method: "POST", body: v })
+          .then(function () { toast("Hearing added — it is on the deadline list with a reminder"); setTimeout(function () { location.reload(); }, 700); });
+      }, "ADD HEARING");
+    });
+  }
+
+  function openEditHearing(hr) {
+    hearingMeta().then(function (meta) {
+      var fields = hearingFields(meta, hr);
+      if (hr.status !== "scheduled") {
+        fields.push({ name: "ruling", label: "Ruling / result", type: "textarea", rows: 2, value: hr.ruling || "" });
+        fields.push({ name: "next_steps", label: "Next steps", type: "textarea", rows: 2, value: hr.next_steps || "" });
+      }
+      formModal("Edit hearing", fields, function (v) {
+        return api("/hearings/" + hr.id, { method: "PATCH", body: v })
+          .then(function () { location.reload(); });
+      }, "SAVE");
+    });
+  }
+
+  function openOutcome(hr) {
+    formModal("What happened — " + hr.hearing_type + " (" + fmtDate(hr.hearing_date) + ")", [
+      { name: "status", label: "Result", type: "select", required: true, half: true, value: "held",
+        options: [
+          { value: "held", label: "Held" },
+          { value: "continued", label: "Continued" },
+          { value: "vacated", label: "Vacated" },
+          { value: "off_calendar", label: "Off calendar" },
+        ] },
+      { name: "continued_to", label: "Continued to", type: "date", half: true,
+        hint: "Only if continued — the new hearing is scheduled for you." },
+      { name: "ruling", label: "Ruling / what the court did", type: "textarea", rows: 3, value: hr.ruling || "",
+        hint: "e.g. Motion granted in part; further responses due within 20 days." },
+      { name: "notes", label: "Hearing notes", type: "textarea", rows: 5, value: hr.notes || "",
+        hint: "What was argued, what the judge said, anything to remember." },
+      { name: "next_steps", label: "Next steps", type: "textarea", rows: 2, value: hr.next_steps || "" },
+      { name: "hours", label: "Bill time for the appearance (hours)", type: "number", step: "0.1", half: true,
+        hint: "Optional — added to Time & Billing." },
+    ], function (v) {
+      if (v.status === "continued" && !v.continued_to) return Promise.reject(new Error("Continued to what date?"));
+      return api("/hearings/" + hr.id + "/outcome", {
+        method: "POST",
+        body: { status: v.status, continued_to: v.continued_to || null, ruling: v.ruling, notes: v.notes,
+                next_steps: v.next_steps, hours: num(v.hours) },
+      }).then(function (d) {
+        var msg = "Saved";
+        if (d.continued) msg += " — continued hearing set for " + fmtDate(d.continued.hearing_date);
+        if (d.time) msg += " · " + d.time.billable_hours + "h logged";
+        if (d.time_error) msg += " · time not logged: " + d.time_error;
+        toast(msg);
+        setTimeout(function () { location.reload(); }, 900);
+      });
+    }, "SAVE OUTCOME");
+  }
+
+  function deleteHearing(hr) {
+    if (!confirm("Remove this hearing?\n\n" + hr.hearing_type + " — " + fmtDate(hr.hearing_date) +
+                 "\n\nIts deadline reminder goes too. The case history keeps a record, including any notes.")) return;
+    api("/hearings/" + hr.id, { method: "DELETE" })
+      .then(function () { location.reload(); })
+      .catch(function (e) { toast(e.message, true); });
+  }
+
+  var HEARING_STATUS = {
+    scheduled: { label: "SCHEDULED", color: C.gold },
+    held: { label: "HELD", color: C.green || "#166534" },
+    continued: { label: "CONTINUED", color: C.ember },
+    vacated: { label: "VACATED", color: C.walnutLight },
+    off_calendar: { label: "OFF CALENDAR", color: C.walnutLight },
+  };
+
+  function hearingCard(hr) {
+    var st = HEARING_STATUS[hr.status] || HEARING_STATUS.scheduled;
+    var upcoming = hr.status === "scheduled";
+    var days = daysUntil(hr.hearing_date);
+    var small = "font-size:11px;padding:3px 9px;border-radius:4px;cursor:pointer;border:1px solid " + C.border + ";";
+    var meta = [hr.hearing_time, hr.department && "Dept. " + hr.department, hr.judge, hr.location, hr.appearance, hr.appearing && "Appearing: " + hr.appearing]
+      .filter(Boolean).join(" · ");
+
+    var bodyBits = [];
+    if (hr.purpose) bodyBits.push(h("div", { text: hr.purpose, style: "font-size:12.5px;color:" + C.walnut + ";margin-top:6px;" }));
+    if (hr.ruling) bodyBits.push(h("div", { style: "margin-top:8px;font-size:12.5px;line-height:1.5;" }, [
+      h("strong", { text: "Ruling: ", style: "color:" + C.ink + ";" }), hr.ruling]));
+    if (hr.notes) bodyBits.push(h("div", {
+      text: hr.notes,
+      style: "margin-top:8px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;padding:8px 10px;background:" + C.parchment +
+             ";border-left:3px solid " + C.border + ";border-radius:3px;color:" + C.walnut + ";",
+    }));
+    if (hr.next_steps) bodyBits.push(h("div", { style: "margin-top:8px;font-size:12.5px;" }, [
+      h("strong", { text: "Next: ", style: "color:" + C.ink + ";" }), hr.next_steps]));
+    if (hr.continued_to) bodyBits.push(h("div", {
+      text: "↪ Continued to " + fmtDate(hr.continued_to),
+      style: "margin-top:6px;font-size:12px;color:" + C.emberDeep + ";font-weight:600;" }));
+
+    return card([
+      h("div", { style: "display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;" }, [
+        h("div", { style: "min-width:0;" }, [
+          h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;" }, [
+            h("strong", { text: fmtDate(hr.hearing_date), style: "font-size:14px;color:" + C.ink + ";" }),
+            h("span", { text: hr.hearing_type, style: "font-family:Cinzel,serif;font-size:12.5px;color:" + C.walnut + ";letter-spacing:.5px;" }),
+            chip(st.label, st.color),
+            upcoming && days !== null && days >= 0 && days <= 14
+              ? chip(days === 0 ? "TODAY" : "in " + days + "d", days <= 3 ? C.waxRed : C.ember) : null,
+            upcoming && days !== null && days < 0 ? chip("PAST — RECORD OUTCOME", C.waxRed) : null,
+          ]),
+          meta ? h("div", { text: meta, style: "font-size:11.5px;color:" + C.muted + ";margin-top:3px;" }) : null,
+        ]),
+        h("div", { style: "display:flex;gap:5px;flex-wrap:wrap;" }, [
+          upcoming ? h("button", { type: "button", text: "Record outcome & notes", onclick: function () { openOutcome(hr); },
+            style: small + "background:" + C.walnutMid + ";color:" + C.parchmentLit + ";border-color:" + C.gold + ";" }) : null,
+          h("button", { type: "button", text: upcoming ? "Edit" : "Edit notes", onclick: function () { openEditHearing(hr); },
+            style: small + "background:" + C.parchment + ";color:" + C.walnut + ";" }),
+          h("button", { type: "button", text: "🗑", title: "Remove", onclick: function () { deleteHearing(hr); },
+            style: small + "background:" + C.parchmentLit + ";color:" + C.waxRed + ";" }),
+        ]),
+      ]),
+    ].concat(bodyBits), upcoming ? "border-left:4px solid " + C.gold + ";" : "");
+  }
+
+  function renderHearings() {
+    var root = clear(panel("hearings"));
+    return api("/cases/" + CASE_ID + "/hearings").then(function (d) {
+      var list = d.hearings || [];
+      var upcoming = list.filter(function (x) { return x.status === "scheduled"; });
+      var past = list.filter(function (x) { return x.status !== "scheduled"; });
+      root.appendChild(heading("🏛 HEARINGS (" + upcoming.length + " upcoming)", btn("+ ADD HEARING", openAddHearing)));
+      if (!list.length) {
+        root.appendChild(note("No hearings yet. Add one and it goes on the deadline list with a reminder; after it, record the ruling and your notes here."));
+        return;
+      }
+      upcoming.forEach(function (hr) { root.appendChild(hearingCard(hr)); });
+      if (past.length) {
+        var det = h("details", { style: "margin-top:6px;" }, [
+          h("summary", { text: "PAST HEARINGS & NOTES (" + past.length + ")",
+            style: "cursor:pointer;font-family:Cinzel,serif;font-size:11.5px;letter-spacing:1.2px;color:" + C.muted + ";padding:6px 0;" }),
+        ]);
+        if (!upcoming.length) det.open = true;
+        past.forEach(function (hr) { det.appendChild(hearingCard(hr)); });
+        root.appendChild(det);
+      }
+    }).catch(function (e) {
+      root.appendChild(heading("🏛 HEARINGS"));
+      root.appendChild(note("Hearings could not load: " + e.message));
+    });
+  }
+
   // ── Time & billing ─────────────────────────────────────────
   //
   // Log time, see what is unbilled, put it on an invoice. The server

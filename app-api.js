@@ -8677,6 +8677,45 @@ function attachCivilLitigationRoutes(app, civil) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // ── Hearings ──
+  // A hearing and the notes from it, on one record. See civil-hearings.js.
+  const chear = require("./civil-hearings");
+
+  app.get("/api/staff/civil/hearings/meta", auth1, auth2, (_req, res) => {
+    res.json({ ok: true, types: chear.TYPES, appearances: chear.APPEARANCES, statuses: chear.STATUSES });
+  });
+
+  app.get("/api/staff/civil/cases/:id/hearings", auth1, auth2, async (req, res) => {
+    try { res.json({ ok: true, hearings: await chear.listHearings(parseInt(req.params.id, 10)) }); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/hearings", auth1, auth2, async (req, res) => {
+    try {
+      const hearing = await chear.addHearing(parseInt(req.params.id, 10), req.body || {}, { by: req.user.n || req.user.u });
+      res.json({ ok: true, hearing });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/civil/hearings/:id", auth1, auth2, async (req, res) => {
+    try {
+      res.json({ ok: true, hearing: await chear.updateHearing(parseInt(req.params.id, 10), req.body || {}, { by: req.user.n || req.user.u }) });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/hearings/:id/outcome", auth1, auth2, async (req, res) => {
+    try {
+      const out = await chear.recordOutcome(parseInt(req.params.id, 10), req.body || {},
+        { by: req.user.n || req.user.u, userId: req.user.uid });
+      res.json(Object.assign({ ok: true }, out));
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/civil/hearings/:id", auth1, auth2, async (req, res) => {
+    try { res.json(await chear.deleteHearing(parseInt(req.params.id, 10), { by: req.user.n || req.user.u })); }
+    catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
   // ── Time & billing ──
   // Time entries, unbilled totals and invoices. See civil-time.js for the
   // rules (billed time is frozen; voiding never deletes).

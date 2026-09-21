@@ -93,6 +93,17 @@ const DB = {
     activities: [{ code: "A103", label: "Draft/revise" }],
     expenses: [{ code: "E112", label: "Court fees" }],
     stage_default: { discovery: "L310" } },
+  "GET /hearings/meta": { ok: true,
+    types: ["Case Management Conference", "Motion hearing", "Trial", "Other"],
+    appearances: ["In person", "Remote (video)"], statuses: ["scheduled", "held", "continued"] },
+  "GET /cases/1/hearings": { ok: true, hearings: [
+    { id: 51, hearing_date: "2099-10-22", hearing_time: "8:30 AM", hearing_type: "Motion hearing", department: "12",
+      judge: "Hon. A. Reyes", appearance: "Remote (video)", status: "scheduled", purpose: "Motion to compel further responses" },
+    { id: 52, hearing_date: "2026-08-01", hearing_type: "Case Management Conference", department: "12",
+      status: "continued", continued_to: "2099-10-22", ruling: "CMC continued; trial setting deferred.",
+      notes: "Judge asked about mediation status.", next_steps: "Propose mediators" },
+  ] },
+  "POST /hearings/51/outcome": { ok: true, hearing: {}, continued: { hearing_date: "2099-12-01" }, time: { billable_hours: 1.2 } },
   "GET /cases/1/time?status=unbilled": { ok: true,
     entries: [
       { source: "event", id: 71, event_kind: "time", entry_date: "2026-09-18", timekeeper: "JJ Zhang",
@@ -309,6 +320,49 @@ function makeFetch() {
   });
   check("log-time refuses to post without hours", () =>
     CALLS.filter(c => c.key === "POST /cases/1/time").length === 1);
+
+  console.log("\n=== hearings ===");
+  const hText = text('[data-civil-panel="hearings"]');
+  check("the hearings panel renders", () => /HEARINGS \(1 upcoming\)/.test(hText));
+  check("…with the upcoming hearing and its details", () => /Motion hearing/.test(hText) && /Dept\. 12/.test(hText) && /8:30 AM/.test(hText));
+  check("…and past hearings with their notes and ruling", () =>
+    /Judge asked about mediation status/.test(hText) && /trial setting deferred/.test(hText) && /Propose mediators/.test(hText));
+  check("…showing where a continuance went", () => /Continued to/.test(hText));
+
+  const addBtn = [...doc.querySelectorAll('[data-civil-panel="hearings"] button')].find(b => /ADD HEARING/.test(b.textContent));
+  addBtn.click();
+  await new Promise(r => setTimeout(r, 250));
+  let hm = [...doc.querySelectorAll("div")].reverse().find(d => d.style.position === "fixed" && d.style.zIndex === "9998");
+  setVal(hm, "Date", "2099-11-05");
+  setVal(hm, "Type", "Case Management Conference");
+  setVal(hm, "Time", "9:00 AM");
+  setVal(hm, "Notes", "Bring the joint CMC statement.");
+  [...hm.querySelectorAll("button")].pop().click();
+  await new Promise(r => setTimeout(r, 250));
+  const ah = CALLS.filter(c => c.key === "POST /cases/1/hearings").pop();
+  check("add-hearing posts date, type, time and notes", () =>
+    ah && ah.body.hearing_date === "2099-11-05" && ah.body.hearing_type === "Case Management Conference" &&
+    ah.body.hearing_time === "9:00 AM" && ah.body.notes === "Bring the joint CMC statement.");
+
+  const outBtn = [...doc.querySelectorAll('[data-civil-panel="hearings"] button')].find(b => /Record outcome/.test(b.textContent));
+  check("an upcoming hearing offers Record outcome & notes", () => !!outBtn);
+  outBtn.click();
+  await new Promise(r => setTimeout(r, 250));
+  hm = [...doc.querySelectorAll("div")].reverse().find(d => d.style.position === "fixed" && d.style.zIndex === "9998");
+  setVal(hm, "Result", "continued");
+  [...hm.querySelectorAll("button")].pop().click();
+  await new Promise(r => setTimeout(r, 250));
+  check("continued with no date is stopped in the form", () =>
+    !CALLS.some(c => c.key === "POST /hearings/51/outcome") && /what date/.test(hm.textContent));
+  setVal(hm, "Continued to", "2099-12-01");
+  setVal(hm, "Hearing notes", "Court inclined to grant; wants narrower requests.");
+  setVal(hm, "Bill time for the appearance (hours)", "1.2");
+  [...hm.querySelectorAll("button")].pop().click();
+  await new Promise(r => setTimeout(r, 250));
+  const oc = CALLS.filter(c => c.key === "POST /hearings/51/outcome").pop();
+  check("outcome posts status, new date, notes and hours", () =>
+    oc && oc.body.status === "continued" && oc.body.continued_to === "2099-12-01" &&
+    /narrower requests/.test(oc.body.notes) && oc.body.hours === 1.2);
 
   console.log("\n=== meet-and-confer blank-key guard ===");
   const mcBtn = [...doc.querySelectorAll('[data-civil-panel="discovery"] button')]
