@@ -9429,6 +9429,16 @@ function attachZaraCoreRoutes(app, core) {
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
 
+  // ── Weekly digest: preview it, or send it now ──
+  // `preview` renders without sending, so you can see what Monday would
+  // bring without waiting for Monday.
+  app.post("/api/staff/zara/digest", auth1, auth2, adminOnly, async (req, res) => {
+    try {
+      const digest = require("./zara-digest");
+      res.json(await digest.runWeeklyDigest({ force: req.body?.preview === true }));
+    } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  });
+
   // ── Health: providers, cost, fallbacks ──
   app.get("/api/staff/zara/health", auth1, auth2, async (req, res) => {
     try {

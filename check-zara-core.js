@@ -57,6 +57,28 @@ function fakeQuery(sql, vals = []) {
     return Promise.resolve({ rows: store.charter.slice().sort((a, b) => b.version - a.version) });
   }
 
+  // ── Queries the weekly digest makes ──
+  if (/SELECT id, lesson, scope, source, proposed_by, created_at FROM zara_lessons/i.test(s)) {
+    return Promise.resolve({
+      rows: store.lessons
+        .filter(l => l.status === "proposed" && !l.retired_at)
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
+    });
+  }
+  if (/SELECT MIN\(created_at\) AS t FROM zara_lessons/i.test(s)) {
+    const pend = store.lessons.filter(l => l.status === "proposed" && !l.retired_at);
+    const t = pend.length
+      ? new Date(Math.min(...pend.map(l => new Date(l.created_at).getTime())))
+      : null;
+    return Promise.resolve({ rows: [{ t }] });
+  }
+  if (/COUNT\(\*\)::int AS n FROM zara_lessons/i.test(s)) {
+    const approvedWindow = /approved_at >/.test(s);
+    const n = store.lessons.filter(l =>
+      l.status === "active" && !l.retired_at && (!approvedWindow || !!l.approved_by)).length;
+    return Promise.resolve({ rows: [{ n }] });
+  }
+
   if (/INSERT INTO zara_lessons/i.test(s)) {
     const row = {
       id: store.lessons.length + 1,
@@ -644,6 +666,58 @@ async function section(title, fn) {
       const j = caller.indexOf('saveMessage(platform, platformId, "user", inbound)');
       return i > -1 && j > i;
     });
+  });
+
+  // ════════════════════════════════════════════════════════
+  await section("The weekly lesson digest", async () => {
+    // JJ is the only approver by his own choice. That is defensible, but it
+    // makes him a queue with a silent failure mode: proposals pile up, Zara
+    // keeps repeating the mistake they came from, and nothing says so. The
+    // digest exists to make that impossible — and to stay quiet otherwise.
+    const digest = require("../zara-digest");
+
+    // Nothing pending → nothing sent. A digest that arrives every week
+    // regardless is one that stops being read.
+    for (const l of store.lessons) l.status = "active";
+    const empty = await digest.buildDigest();
+    check("with nothing pending, it builds nothing", () => empty === null);
+    const quiet = await digest.runWeeklyDigest();
+    check("…and sends nothing", () => quiet.sent === false);
+    check("…and says why", () => /nothing pending/i.test(quiet.reason || ""));
+
+    // Something pending → a real message.
+    const p1 = await core.proposeLesson({
+      lesson: "Check the proof of service before computing a response deadline.",
+      scope: "global", source: "reflection", by: "zara",
+    });
+    const d = await digest.buildDigest();
+    check("with one pending, it builds a digest", () => d && d.pending.length === 1);
+
+    const text = digest.formatDigest(d);
+    check("the message names the count", () => /1 lesson waiting/.test(text));
+    check("…includes the lesson itself", () => text.includes("proof of service"));
+    check("…says where it came from", () => /from a correction/.test(text));
+    check("…links straight to the review page", () => /\/admin\/zara#lessons/.test(text));
+
+    // The number that actually matters: how long the oldest has waited.
+    store.lessons.find(l => l.id === p1.id).created_at =
+      new Date(Date.now() - 21 * 86400000);
+    const stale = await digest.buildDigest();
+    check("it measures how long the oldest has waited",
+      () => stale.oldestWaitingDays >= 20);
+    const staleText = digest.formatDigest(stale);
+    check("…and escalates the wording past two weeks",
+      () => /keeps making the mistake/.test(staleText));
+
+    // Preview must not send.
+    const preview = await digest.runWeeklyDigest({ force: true });
+    check("preview renders without sending", () => preview.sent === false && !!preview.preview);
+
+    check("HTML in a lesson cannot break the message",
+      () => !/<b>evil/.test(digest.formatDigest({
+        pending: [{ lesson: "<b>evil</b>", scope: "global", source: "human", created_at: new Date() }],
+        approvedThisWeek: 0, activeTotal: 0, oldestWaitingDays: 0,
+      })));
   });
 
   console.log("\n" + (failures ? `${failures} FAILED` : "all checks passed"));

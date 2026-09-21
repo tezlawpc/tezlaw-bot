@@ -11833,6 +11833,17 @@ app.listen(PORT, async () => {
     console.error("❌ Legal digest scheduler failed:", e.message);
   }
 
+  // ── Zara's weekly lesson queue ───────────────────────────
+  // JJ is the only approver, so proposals wait on him. Without this the
+  // queue is silent: Zara keeps repeating a mistake somebody already
+  // corrected, and nothing surfaces that fact. Sends only when something
+  // is actually waiting.
+  try {
+    require("./zara-digest").scheduleZaraDigest();
+  } catch (e) {
+    console.error("❌ Zara lesson digest scheduler failed:", e.message);
+  }
+
   // ── Matter Manager — Daily deadline summary (7:00 AM PT) ─
   try {
     const { default: cron } = await import("node-cron").catch(() => ({ default: require("node-cron") }));
