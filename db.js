@@ -279,6 +279,7 @@ async function getJJMemories(limit = 50) {
     const res = await getPool().query(
       `SELECT id, timestamp, jj_said, zara_said FROM jj_memory
        WHERE jj_said NOT LIKE '_session_%'
+         AND left(jj_said, 8) <> '_failed_'   -- wrong-password records, not memories
        ORDER BY timestamp DESC LIMIT $1`,
       [limit]
     );

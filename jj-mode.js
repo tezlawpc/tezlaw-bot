@@ -29,6 +29,88 @@ if (!JJ_PASSWORD) {
     "Set it in the environment to enable it.");
 }
 
+// ── Where private mode may be entered ─────────────────────
+//
+// NOT from the public website. The website chat is anonymous: anyone on
+// the internet can open it, and its session id is whatever the visitor's
+// browser sends. Private mode reads client names, A-numbers, hearing notes
+// and leads, and can delete hearing notes — so on the website, the trigger
+// phrase is treated as an ordinary message and the password prompt never
+// appears. JJ still has private mode on Telegram, WhatsApp, WeChat and
+// Messenger, where the sender is a real account.
+const PRIVATE_MODE_BLOCKED = new Set(["website", "web", "webchat"]);
+
+function privateModeAllowed(platform) {
+  return !PRIVATE_MODE_BLOCKED.has(String(platform || "").toLowerCase());
+}
+
+// ── Wrong-password lockout ────────────────────────────────
+//
+// Before this, a wrong password just reset the prompt, so guessing was
+// unlimited. Now:
+//   · 3 wrong passwords from one sender within 24 hours locks that sender
+//     out for 24 hours, and JJ is alerted on Telegram.
+//   · 10 wrong passwords across ALL senders within an hour switches private
+//     mode off everywhere for an hour, and JJ is alerted — so rotating
+//     accounts to get fresh guesses does not work either.
+// While locked, the trigger phrase is treated as an ordinary message: a
+// guesser learns nothing about whether the lock is on.
+//
+// Failures are stored in the jj_memory table (the same place sessions are
+// kept) so a redeploy does not hand out a fresh set of guesses.
+const LOCK_AFTER = 3;
+const LOCK_WINDOW_MS = 24 * 60 * 60 * 1000;
+const GLOBAL_LIMIT = 10;
+const GLOBAL_WINDOW_MS = 60 * 60 * 1000;
+const failKey = (platform, userId) => `_failed_${platform}_${userId}`;
+
+async function recentFailures(platform, userId, sinceMs) {
+  try {
+    const since = new Date(Date.now() - sinceMs).toISOString();
+    const r = platform
+      ? await db.query(`SELECT COUNT(*)::int AS n FROM jj_memory WHERE jj_said = $1 AND timestamp >= $2`,
+          [failKey(platform, userId), since])
+      : await db.query(`SELECT COUNT(*)::int AS n FROM jj_memory WHERE left(jj_said, 8) = '_failed_' AND timestamp >= $1`,
+          [since]);
+    return r.rows[0] ? r.rows[0].n : 0;
+  } catch (e) {
+    console.error("[jj-mode] failure count:", e.message);
+    return 0;
+  }
+}
+
+async function recordFailure(platform, userId) {
+  try {
+    await db.query(`INSERT INTO jj_memory (timestamp, jj_said, zara_said) VALUES ($1, $2, $3)`,
+      [new Date(Date.now()).toISOString(), failKey(platform, userId), "wrong password"]);
+  } catch (e) { console.error("[jj-mode] record failure:", e.message); }
+}
+
+async function clearFailures(platform, userId) {
+  try { await db.query(`DELETE FROM jj_memory WHERE jj_said = $1`, [failKey(platform, userId)]); }
+  catch (e) { /* non-fatal */ }
+}
+
+async function isLockedOut(platform, userId) {
+  if (await recentFailures(platform, userId, LOCK_WINDOW_MS) >= LOCK_AFTER) return "sender";
+  if (await recentFailures(null, null, GLOBAL_WINDOW_MS) >= GLOBAL_LIMIT) return "global";
+  return null;
+}
+
+// Straight to JJ's Telegram. Never includes what was typed.
+// Plain text on purpose: a sender id containing "_" or "*" would break
+// Telegram's Markdown parser, and a security alert that fails to send
+// because of formatting is worse than an unformatted one.
+async function alertJJ(text) {
+  const token = process.env.TELEGRAM_TOKEN, chat = process.env.JJ_TELEGRAM_ID;
+  console.warn("[jj-mode] SECURITY: " + text);
+  if (!token || !chat) return;
+  try {
+    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`,
+      { chat_id: chat, text, disable_web_page_preview: true }, { timeout: 10000 });
+  } catch (e) { console.error("[jj-mode] alert failed:", e.message); }
+}
+
 // ── Trigger phrases ───────────────────────────────────────
 const JJ_TRIGGERS_KEYWORDS = ["jj", "zhang", "private", "switch",
   "private channel", "private mode", "attorney mode", "jj mode",
@@ -95,6 +177,14 @@ function isAwaitingPassword(platform, userId) {
 async function checkJJMode(platform, userId, userMessage, options = {}) {
   const key = `${platform}:${userId}`;
 
+  // The public website never reaches private mode — not the prompt, not a
+  // stored session. Any session left over from before this rule is dropped.
+  if (!privateModeAllowed(platform)) {
+    if (jjSessions[key]) delete jjSessions[key];
+    try { if (await db.getJJSession(platform, userId)) await db.setJJSession(platform, userId, false); } catch (e) {}
+    return { handled: false };
+  }
+
   // Already authenticated — handle JJ commands (pass options for docs/images)
   // DB-backed check so auth survives Render redeploys
   if (await isJJAuthenticatedAsync(platform, userId)) {
@@ -116,12 +206,18 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
   // and on their servers. A chat-typed password is a shared secret sent over
   // a channel neither of us controls. Worth replacing with a one-time code
   // or a link-based login eventually.
+  if (isAwaitingPassword(platform, userId) && await isLockedOut(platform, userId)) {
+    // Locked while a prompt was open: close it without comparing anything.
+    delete jjSessions[key];
+    return { handled: false };
+  }
   if (isAwaitingPassword(platform, userId)) {
     const normalize = (s) => s.toLowerCase().replace(/[\s\-_.,!?]+/g, "");
     // A null password must never match. Without this guard an unset env var
     // would make normalize(null) throw, or worse, compare loosely.
     if (JJ_PASSWORD && normalize(userMessage) === normalize(JJ_PASSWORD)) {
       jjSessions[key] = "authenticated";
+      await clearFailures(platform, userId);
       // Persist auth to DB so it survives Render redeploys
       try { await db.setJJSession(platform, userId, true); } catch(e) {}
       const memory = await getJJMemorySummary();
@@ -131,8 +227,19 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
       sendVoiceReply(platform, userId, "Welcome back JJ! You're now in private mode. How can I help you today?").catch(() => {});
       return { handled: true, message: welcomeMsg, redact: true };
     } else {
-      // Wrong password — clear state
+      // Wrong password — clear state, count it, and lock out on the third.
       delete jjSessions[key];
+      await recordFailure(platform, userId);
+      const mine = await recentFailures(platform, userId, LOCK_WINDOW_MS);
+      const everyone = await recentFailures(null, null, GLOBAL_WINDOW_MS);
+      if (mine === LOCK_AFTER) {
+        alertJJ(`🔒 Private mode locked\n${LOCK_AFTER} wrong passwords from ${platform} sender ${String(userId).slice(0, 40)} ` +
+          `in 24 hours. That sender is locked out for 24 hours.\n\nIf this was not you, someone is guessing your password — change JJ_PASSWORD in Render.`).catch(() => {});
+      }
+      if (everyone === GLOBAL_LIMIT) {
+        alertJJ(`🚨 Private mode switched off for an hour\n${GLOBAL_LIMIT} wrong passwords across all channels in the last hour. ` +
+          `Nobody can enter private mode until the hour passes.\n\nChange JJ_PASSWORD in Render now.`).catch(() => {});
+      }
       return {
         handled: true,
         redact: true,   // a failed attempt is still a credential guess
@@ -141,8 +248,10 @@ async function checkJJMode(platform, userId, userMessage, options = {}) {
     }
   }
 
-  // Intelligent trigger detection
+  // Intelligent trigger detection. While locked out, the trigger is just an
+  // ordinary message — the prompt does not appear, and nothing says why.
   if (await isJJTrigger(userMessage)) {
+    if (await isLockedOut(platform, userId)) return { handled: false };
     jjSessions[key] = "awaiting_password";
     return {
       handled: true,
@@ -2417,6 +2526,8 @@ async function handleDraftConfirmation(userId, session, options) {
 
 module.exports = {
   checkJJMode,
+  privateModeAllowed, isLockedOut,
+  LOCK_AFTER, GLOBAL_LIMIT,
   isJJAuthenticated,
   isJJAuthenticatedAsync,
   getJJPublicContext,
