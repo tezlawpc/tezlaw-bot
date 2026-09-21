@@ -41,4 +41,24 @@ console.log('handler mismatches :', wrongHandler.length);
 const sample = admin.find(r => r.p === '/admin/civil/api/cases/:id');
 const chain = (app._router?.stack || app.router?.stack).find(l => l.route && l.route.path === '/admin/civil/api/cases/:id' && l.route.methods.get);
 console.log('GET twin mw count  :', chain ? chain.route.stack.length : 'n/a', '(staff side has 3: bearer, firmUser, handler)');
-process.exit(missing.length || wrongHandler.length ? 1 : 0);
+
+// Every rule in the mirror table must actually produce a twin. A rule only
+// works for routes registered THROUGH the mirror; a route registered on the
+// raw app silently gets none. That is how the web Zara chat 404'd for a week:
+// "/api/staff/chat" had a rule, but its route was on app, not civilApp.
+const { CIVIL_MIRROR_PREFIXES } = require('../app-api');
+const deadRules = [];
+for (const rule of CIVIL_MIRROR_PREFIXES) {
+  const srcRoutes = routes.filter(r => r.p === rule.src || r.p.startsWith(rule.src + '/'));
+  if (!srcRoutes.length) { deadRules.push(rule.src + ' (no such route)'); continue; }
+  for (const r of srcRoutes) {
+    const twinPath = rule.collapse ? rule.dest : rule.dest + r.p.slice(rule.src.length);
+    const twin = routes.find(t => t.m === r.m && t.p === twinPath);
+    if (!twin) deadRules.push(r.m.toUpperCase() + ' ' + r.p + ' → ' + twinPath);
+    else if (twin.h !== r.h) wrongHandler.push(r.p);
+  }
+}
+console.log('mirror rules       :', CIVIL_MIRROR_PREFIXES.length, '— routes with no twin:', deadRules.length, deadRules.slice(0, 5));
+const chatTwin = routes.find(r => r.m === 'post' && r.p === '/admin/zara/api/chat');
+console.log('web Zara chat      :', chatTwin ? 'POST /admin/zara/api/chat registered' : 'MISSING — the chat widget will 404');
+process.exit(missing.length || wrongHandler.length || deadRules.length || !chatTwin ? 1 : 0);

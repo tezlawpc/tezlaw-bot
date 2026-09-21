@@ -27,7 +27,12 @@ const civilStub = {
   CASE_TYPES: ["breach of contract"],
   OUR_ROLES: ["plaintiff"],
   listEvents: async () => [],
-  listDeadlines: async () => [{ id: 9, due_date: "2026-11-01", description: "File CMC statement", ccp_rule: "CRC 3.725", priority: "high", auto_generated: true }],
+  listDeadlines: async (_id, f) => (f && Array.isArray(f.status))
+    ? [{ id: 12, due_date: "2026-08-01", description: "Serve initial disclosures", status: "completed",
+         completed_at: "2026-07-30", completed_by: "jj", auto_generated: false },
+       { id: 13, due_date: "2026-08-15", description: "Auto CMC reminder", status: "dismissed",
+         completed_at: "2026-08-01", completed_by: "jj", auto_generated: true }]
+    : [{ id: 9, due_date: "2026-11-01", description: "File CMC statement", ccp_rule: "CRC 3.725", priority: "high", auto_generated: true }],
   listCommunications: async () => [],
   getCaseSummary: async () => ({
     id: 1, case_name: "O'Brien v. Smith", client_key: "obrien", stage: "discovery",
@@ -88,6 +93,31 @@ const DB = {
     activities: [{ code: "A103", label: "Draft/revise" }],
     expenses: [{ code: "E112", label: "Court fees" }],
     stage_default: { discovery: "L310" } },
+  "GET /hearings/meta": { ok: true,
+    types: ["Case Management Conference", "Motion hearing", "Trial", "Other"],
+    appearances: ["In person", "Remote (video)"], statuses: ["scheduled", "held", "continued"] },
+  "GET /cases/1/hearings": { ok: true, hearings: [
+    { id: 51, hearing_date: "2099-10-22", hearing_time: "8:30 AM", hearing_type: "Motion hearing", department: "12",
+      judge: "Hon. A. Reyes", appearance: "Remote (video)", status: "scheduled", purpose: "Motion to compel further responses" },
+    { id: 52, hearing_date: "2026-08-01", hearing_type: "Case Management Conference", department: "12",
+      status: "continued", continued_to: "2099-10-22", ruling: "CMC continued; trial setting deferred.",
+      notes: "Judge asked about mediation status.", next_steps: "Propose mediators" },
+  ] },
+  "POST /hearings/51/outcome": { ok: true, hearing: {}, continued: { hearing_date: "2099-12-01" }, time: { billable_hours: 1.2 } },
+  "GET /cases/1/time?status=unbilled": { ok: true,
+    entries: [
+      { source: "event", id: 71, event_kind: "time", entry_date: "2026-09-18", timekeeper: "JJ Zhang",
+        narrative: "Draft opposition to demurrer", billable_hours: 2.5, billable_rate: 550, billable_amount: 1375,
+        no_charge: false, invoice_id: null, utbms_code: "L210", utbms_activity: "A103" },
+      { source: "comm", id: 81, event_kind: "communication", entry_date: "2026-09-17", timekeeper: "Jue Wang",
+        narrative: "Call with client re documents", billable_hours: 0.3, billable_rate: null, billable_amount: null,
+        no_charge: false, invoice_id: null },
+    ],
+    unbilled_totals: { entries: 2, hours: 2.8, amount: 1375, no_charge_hours: 0, unpriced: 1 },
+    invoices: [
+      { id: 4, invoice_number: "TEZ-1-001", invoice_date: "2026-08-31", total_hours: 10, total_amount: 5500, status: "issued" },
+      { id: 3, invoice_number: "TEZ-1-000", invoice_date: "2026-07-31", total_hours: 1, total_amount: 550, status: "void" },
+    ] },
   "GET /cases/1/billing-summary": { ok: true, summary: {
     case_id: 1, case_name: "O'Brien v. Smith", matter_budget: 20000, budget_alert_pct: 75,
     billing_type: "hourly", hourly_rate: 450, retainer_amount: 5000, retainer_balance: 1200,
@@ -227,6 +257,112 @@ function makeFetch() {
   doc.querySelector("[data-civil-complete-deadline]").click();
   await new Promise(r => setTimeout(r, 150));
   check("complete-deadline PATCHes the right id", () => CALLS.some(c => c.key === "PATCH /deadlines/9/complete"));
+
+  console.log("\n=== deadlines: delete, reopen, the completed list ===");
+  check("a pending deadline has a delete button", () =>
+    !!doc.querySelector('[data-civil-delete-deadline="9"]'));
+  check("completed deadlines are listed, not hidden", () => /Serve initial disclosures/.test(doc.body.textContent));
+  check("…a completed one can be reopened", () => !!doc.querySelector('[data-civil-reopen-deadline="12"]'));
+  check("…and deleted", () => !!doc.querySelector('[data-civil-delete-deadline="12"]'));
+  check("a dismissed auto deadline offers Restore", () =>
+    /Restore/.test((doc.querySelector('[data-civil-reopen-deadline="13"]') || {}).textContent || ""));
+
+  let confirmText = "";
+  w.confirm = t => { confirmText = t; return true; };
+  doc.querySelector('[data-civil-delete-deadline="9"]').click();
+  await new Promise(r => setTimeout(r, 150));
+  check("delete sends DELETE for that deadline", () => CALLS.some(c => c.key === "DELETE /deadlines/9"));
+  check("…and warns that an AUTO deadline is dismissed, not deleted", () => /dismissed rather than deleted/.test(confirmText));
+  doc.querySelector('[data-civil-delete-deadline="12"]').click();
+  await new Promise(r => setTimeout(r, 150));
+  check("…a manual one says it will be deleted", () => /will be deleted/.test(confirmText));
+  w.confirm = () => false;
+  const before = CALLS.length;
+  doc.querySelector('[data-civil-delete-deadline="9"]').click();
+  await new Promise(r => setTimeout(r, 150));
+  check("cancelling the confirm deletes nothing", () => !CALLS.slice(before).some(c => /^DELETE/.test(c.key)));
+  w.confirm = () => true;
+  doc.querySelector('[data-civil-reopen-deadline="12"]').click();
+  await new Promise(r => setTimeout(r, 150));
+  check("reopen PATCHes the right id", () => CALLS.some(c => c.key === "PATCH /deadlines/12/reopen"));
+
+  console.log("\n=== time & billing ===");
+  const timeText = text('[data-civil-panel="time"]');
+  check("the time panel renders", () => /TIME & BILLING/.test(timeText));
+  check("…shows unbilled entries", () => /Draft opposition to demurrer/.test(timeText) && /Call with client/.test(timeText));
+  check("…with the unbilled total", () => /\$1,375\.00/.test(timeText));
+  check("…flags time with no rate rather than hiding it", () => /no rate/.test(timeText) && /short/.test(timeText));
+  check("…lists invoices, marking the void one", () => /TEZ-1-001/.test(timeText) && /VOID/.test(timeText));
+  check("…with print and LEDES links for a live invoice", () => {
+    const links = [...doc.querySelectorAll('[data-civil-panel="time"] a')].map(a => a.getAttribute("href"));
+    return links.includes("/admin/civil/api/invoices/4/print") &&
+           links.includes("/admin/civil/api/cases/1/ledes?invoice_id=4&download=1");
+  });
+  check("…and no LEDES or void link on a void invoice", () =>
+    ![...doc.querySelectorAll('[data-civil-panel="time"] a')].some(a => /invoice_id=3/.test(a.getAttribute("href") || "")));
+  check("the header has a LOG TIME button", () => !!doc.querySelector('[data-civil-action="log-time"]'));
+
+  await openAndSubmit("log-time", m => {
+    setVal(m, "Hours", "1.2");
+    setVal(m, "Description (prints on the invoice)", "Review and revise discovery responses");
+    setVal(m, "Timekeeper", "3");
+  });
+  const lt = CALLS.filter(c => c.key === "POST /cases/1/time").pop();
+  check("log-time posts hours as a number", () => lt && lt.body.hours === 1.2);
+  check("…with the narrative", () => lt && lt.body.description === "Review and revise discovery responses");
+  check("…the timekeeper and their role", () => lt && lt.body.timekeeper_id === 3 && lt.body.timekeeper_role === "paralegal");
+  check("…the stage's default UTBMS task", () => lt && lt.body.utbms_code === "L310");
+  check("…and no rate override unless one was typed", () => lt && lt.body.rate === null);
+
+  await openAndSubmit("log-time", m => {
+    setVal(m, "Hours", "");
+    setVal(m, "Description (prints on the invoice)", "x");
+  });
+  check("log-time refuses to post without hours", () =>
+    CALLS.filter(c => c.key === "POST /cases/1/time").length === 1);
+
+  console.log("\n=== hearings ===");
+  const hText = text('[data-civil-panel="hearings"]');
+  check("the hearings panel renders", () => /HEARINGS \(1 upcoming\)/.test(hText));
+  check("…with the upcoming hearing and its details", () => /Motion hearing/.test(hText) && /Dept\. 12/.test(hText) && /8:30 AM/.test(hText));
+  check("…and past hearings with their notes and ruling", () =>
+    /Judge asked about mediation status/.test(hText) && /trial setting deferred/.test(hText) && /Propose mediators/.test(hText));
+  check("…showing where a continuance went", () => /Continued to/.test(hText));
+
+  const addBtn = [...doc.querySelectorAll('[data-civil-panel="hearings"] button')].find(b => /ADD HEARING/.test(b.textContent));
+  addBtn.click();
+  await new Promise(r => setTimeout(r, 250));
+  let hm = [...doc.querySelectorAll("div")].reverse().find(d => d.style.position === "fixed" && d.style.zIndex === "9998");
+  setVal(hm, "Date", "2099-11-05");
+  setVal(hm, "Type", "Case Management Conference");
+  setVal(hm, "Time", "9:00 AM");
+  setVal(hm, "Notes", "Bring the joint CMC statement.");
+  [...hm.querySelectorAll("button")].pop().click();
+  await new Promise(r => setTimeout(r, 250));
+  const ah = CALLS.filter(c => c.key === "POST /cases/1/hearings").pop();
+  check("add-hearing posts date, type, time and notes", () =>
+    ah && ah.body.hearing_date === "2099-11-05" && ah.body.hearing_type === "Case Management Conference" &&
+    ah.body.hearing_time === "9:00 AM" && ah.body.notes === "Bring the joint CMC statement.");
+
+  const outBtn = [...doc.querySelectorAll('[data-civil-panel="hearings"] button')].find(b => /Record outcome/.test(b.textContent));
+  check("an upcoming hearing offers Record outcome & notes", () => !!outBtn);
+  outBtn.click();
+  await new Promise(r => setTimeout(r, 250));
+  hm = [...doc.querySelectorAll("div")].reverse().find(d => d.style.position === "fixed" && d.style.zIndex === "9998");
+  setVal(hm, "Result", "continued");
+  [...hm.querySelectorAll("button")].pop().click();
+  await new Promise(r => setTimeout(r, 250));
+  check("continued with no date is stopped in the form", () =>
+    !CALLS.some(c => c.key === "POST /hearings/51/outcome") && /what date/.test(hm.textContent));
+  setVal(hm, "Continued to", "2099-12-01");
+  setVal(hm, "Hearing notes", "Court inclined to grant; wants narrower requests.");
+  setVal(hm, "Bill time for the appearance (hours)", "1.2");
+  [...hm.querySelectorAll("button")].pop().click();
+  await new Promise(r => setTimeout(r, 250));
+  const oc = CALLS.filter(c => c.key === "POST /hearings/51/outcome").pop();
+  check("outcome posts status, new date, notes and hours", () =>
+    oc && oc.body.status === "continued" && oc.body.continued_to === "2099-12-01" &&
+    /narrower requests/.test(oc.body.notes) && oc.body.hours === 1.2);
 
   console.log("\n=== meet-and-confer blank-key guard ===");
   const mcBtn = [...doc.querySelectorAll('[data-civil-panel="discovery"] button')]

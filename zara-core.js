@@ -565,6 +565,10 @@ async function think(opts = {}) {
     context = "", lessonScope = null, extra = "",
     system: rawSystem, tools = null, onToolUse = null,
     maxTokens = null, timeout = 60000, maxToolRounds = 6,
+    // A chat message is capped so a pasted novel cannot blow the budget. A
+    // job that reads whole documents (the intake reader) raises it: at 8000
+    // it was sending the instructions and barely the first page.
+    maxMessageChars = 8000,
   } = opts;
 
   const spec = TIERS[tier] || TIERS.balanced;
@@ -578,7 +582,7 @@ async function think(opts = {}) {
       content: typeof t.content === "string" ? t.content.substring(0, 4000) : t.content,
     }));
   let messages = [...trimmed];
-  if (message) messages.push({ role: "user", content: String(message).substring(0, 8000) });
+  if (message) messages.push({ role: "user", content: String(message).substring(0, maxMessageChars) });
   if (!messages.length) throw new Error("think() needs a message or history");
 
   const chain = providerOrder();

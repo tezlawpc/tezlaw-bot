@@ -60,12 +60,21 @@ function healOne(file) {
 
   const stray = path.join(ROOT_DIR, base);
   if (!fs.existsSync(stray)) return false;
+  const target = path.join(PUBLIC_DIR, base);
   try {
+    // A root copy only ever exists because GitHub's web upload flattened a
+    // NEW version of the file. So when public/ also has one and they differ,
+    // the public/ copy is the stale one: the root copy wins. (This is what
+    // left the LOG TIME button dead — the page was new, its script was old.)
+    if (fs.existsSync(target) && fs.readFileSync(target).equals(fs.readFileSync(stray))) return false;
+    const replacing = fs.existsSync(target);
     fs.mkdirSync(PUBLIC_DIR, { recursive: true });
-    fs.copyFileSync(stray, path.join(PUBLIC_DIR, base));
+    fs.copyFileSync(stray, target);
     console.warn(
       `[client-script] ${base} was in the repository root, not public/. ` +
-      `Copied it into public/ so the page works. Move it in git to make this permanent.`
+      (replacing ? "It differed from public/" + base + ", so the root copy (the newer upload) replaced it. "
+                 : "Copied it into public/ so the page works. ") +
+      `Move it in git to make this permanent.`
     );
     return true;
   } catch (e) {
@@ -76,7 +85,7 @@ function healOne(file) {
 
 /** Run once at boot so a stray bundle is fixed before the first request. */
 function healClientBundles() {
-  return CLIENT_BUNDLES.filter(f => !fs.existsSync(path.join(PUBLIC_DIR, f)) && healOne(f));
+  return CLIENT_BUNDLES.filter(f => healOne(f));
 }
 
 function esc(t) {

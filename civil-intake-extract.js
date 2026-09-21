@@ -135,14 +135,55 @@ function buildPrompt(kind, docs) {
 // ── Parsing the answer ──────────────────────────────────────
 
 function parseJson(text) {
-  const raw = String(text || "").trim();
+  let raw = String(text || "").trim();
+  // zara-core appends a note when an answer hits the length limit.
+  raw = raw.replace(/\n*\(Cut off at the length limit[\s\S]*$/, "").trim();
   // Models sometimes wrap JSON in a fence even when told not to.
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)(?:```|$)/);
   const candidate = fenced ? fenced[1] : raw;
   const start = candidate.indexOf("{");
+  if (start === -1) throw new Error("Zara did not return JSON");
   const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("Zara did not return JSON");
-  return JSON.parse(candidate.slice(start, end + 1));
+  if (end > start) {
+    const whole = candidate.slice(start, end + 1);
+    try { return JSON.parse(whole); } catch (e) { /* fall through to repair */ }
+    try { return JSON.parse(whole.replace(/,\s*([}\]])/g, "$1")); } catch (e) { /* repair below */ }
+  }
+  // Cut off mid-object (a long _evidence block on a many-defendant complaint
+  // is what hits the limit). Close what is open; everything before the cut
+  // is still good, and a field lost to the cut just stays blank.
+  return JSON.parse(closeTruncated(candidate.slice(start)));
+}
+
+/** Close the strings, arrays and objects a truncated JSON text left open. */
+function closeTruncated(s) {
+  const stack = [];
+  let inStr = false, esc = false, lastSafe = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{" || ch === "[") stack.push(ch === "{" ? "}" : "]");
+    else if (ch === "}" || ch === "]") stack.pop();
+    if (!inStr && (ch === "," || ch === "{" || ch === "[")) lastSafe = i;
+  }
+  // Drop the half-written member after the last complete one.
+  let body = s.slice(0, lastSafe + 1).replace(/[,\s]+$/, "");
+  // Recount what is open at that point.
+  const open = [];
+  inStr = false; esc = false;
+  for (const ch of body) {
+    if (inStr) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true;
+    else if (ch === "{" || ch === "[") open.push(ch === "{" ? "}" : "]");
+    else if (ch === "}" || ch === "]") open.pop();
+  }
+  return body + open.reverse().join("");
 }
 
 const NUMERIC = new Set(["amount_in_controversy", "hourly_rate", "contingency_pct", "retainer_amount"]);
@@ -224,24 +265,42 @@ async function extractFromDocuments(files = [], opts = {}) {
 
   const kind = opts.kind || (docs.every(d => d.kind === "retainer") ? "retainer" : "pleading");
 
-  const out = await core.think({
+  const prompt = buildPrompt(kind, docs);
+  const ask = (message) => core.think({
     surface: "system",
     tier: "balanced",
-    message: buildPrompt(kind, docs),
+    message,
     lessonScope: "intake",
-    extra: "You are reading filed court papers or a fee agreement to pre-fill a new matter for an attorney to confirm. Accuracy beats completeness: a null you were honest about costs a few seconds of typing, a wrong value that looks plausible gets filed with the court.",
-    maxTokens: 1600,
+    extra: "You are reading filed court papers or a fee agreement to pre-fill a new matter for an attorney to confirm. Accuracy beats completeness: a null you were honest about costs a few seconds of typing, a wrong value that looks plausible gets filed with the court. Your whole reply is one JSON object and nothing else.",
+    // 1600 was too few for a complaint with many defendants plus a quote per
+    // field: the answer was cut off mid-JSON and nothing could be read.
+    maxTokens: 4000,
+    // Every document, not just the first page of the first one.
+    maxMessageChars: prompt.length + 100,
+    timeout: 120000,
   });
 
+  let out = await ask(prompt);
   let parsed;
   try {
     parsed = parseJson(out.text);
-  } catch (e) {
-    return {
-      ok: false, kind, fields: {}, evidence: {}, unread: false,
-      warnings: warnings.concat("Zara's answer could not be read as JSON."),
-      error: e.message,
-    };
+  } catch (e1) {
+    console.warn("[civil-intake] unreadable answer (" + e1.message + "): " + String(out.text || "").slice(0, 300));
+    // One retry, asking for the JSON alone and shorter quotes.
+    try {
+      out = await ask(prompt + "\n\nIMPORTANT: reply with the JSON object ONLY — no words before or after it. " +
+        "Keep each _evidence quote under 60 characters.");
+      parsed = parseJson(out.text);
+    } catch (e2) {
+      console.warn("[civil-intake] retry unreadable (" + e2.message + "): " + String(out && out.text || "").slice(0, 300));
+      return {
+        ok: false, kind, fields: {}, evidence: {}, unread: false,
+        warnings: warnings.concat("Zara could not read these documents this time (" +
+          (out && out.text ? "her answer was not in the expected format" : "no answer came back") +
+          "). Try again, or upload the complaint on its own."),
+        error: e2.message,
+      };
+    }
   }
 
   const fields = clean(kind, parsed);

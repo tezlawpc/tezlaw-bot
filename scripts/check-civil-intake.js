@@ -38,12 +38,14 @@ function check(name, fn) {
 // The extractor is the thing under test; the model is not. `reply` is what
 // each test wants Zara to have said.
 let reply = "{}";
+let replies = [];          // one per call, when a test needs a sequence
+const thinkCalls = [];
 const ex = (() => {
   const orig = Module._load;
   Module._load = function (r, ...rest) {
     if (r === "./zara-core") {
       return {
-        think: async () => ({ text: reply, model: "stub" }),
+        think: async (a) => { thinkCalls.push(a); return { text: replies.length ? replies.shift() : reply, model: "stub" }; },
         DEFAULT_CHARTER: {}, BOUNDARIES: [],
       };
     }
@@ -156,6 +158,34 @@ const txt = s => ({ buffer: Buffer.from(s, "utf8"), filename: "complaint.txt" })
   const prose = await ex.extractFromDocuments([txt("some pleading text")]);
   check("prose instead of JSON fails closed", () => prose.ok === false);
   check("…with nothing proposed", () => Object.keys(prose.fields).length === 0);
+
+  // ── "Zara's answer could not be read as JSON" (JJ, uploading Liu v. Turco) ──
+  const cut = '{"case_name": "Jing Liu v. James Turco, et al.", "defendants": ["James Turco", "Margaret Cheng Turco", "American Gateway Regional Centers"], ' +
+    '"_evidence": {"case_name": "JING LIU, Plaintiff, v. JAMES TURCO", "defendants": "JAMES TURCO; MARGARET CHENG TUR' +
+    '\n\n(Cut off at the length limit. Reply "continue" for the rest.)';
+  check("an answer cut off mid-JSON is repaired, not thrown away", () => {
+    const o = ex.parseJson(cut);
+    return o.case_name === "Jing Liu v. James Turco, et al." && o.defendants.length === 3 && o._evidence.case_name === "JING LIU, Plaintiff, v. JAMES TURCO";
+  });
+  check("…and a trailing comma does not sink it", () => ex.parseJson('{"a": 1, "b": [1,2,],}').b.length === 2);
+  check("…nor an unterminated fence", () => ex.parseJson('```json\n{"a": 5}').a === 5);
+
+  thinkCalls.length = 0;
+  replies = ["Here are the details: case is Liu v. Turco.", JSON.stringify({ case_name: "Liu v. Turco", _evidence: { case_name: "LIU v. TURCO" } })];
+  const retried = await ex.extractFromDocuments([txt("LIU v. TURCO complaint")]);
+  check("an unreadable answer gets one retry asking for JSON only", () =>
+    thinkCalls.length === 2 && /JSON object ONLY/.test(thinkCalls[1].message) && retried.ok && retried.fields.case_name === "Liu v. Turco");
+  check("the reader has room for a long answer", () => thinkCalls[0].maxTokens >= 4000);
+  const longDoc = txt("CAPTION " + "x".repeat(15000) + " PRAYER FOR RELIEF");
+  thinkCalls.length = 0; replies = [];
+  await ex.extractFromDocuments([longDoc, txt("SUMMONS " + "y".repeat(5000))]);
+  check("…and reads every document, not the first 8000 characters", () =>
+    thinkCalls[0].maxMessageChars >= thinkCalls[0].message.length && /PRAYER FOR RELIEF/.test(thinkCalls[0].message) && /SUMMONS/.test(thinkCalls[0].message));
+  replies = ["nope", "still nope"];
+  const failed = await ex.extractFromDocuments([txt("x")]);
+  check("two unreadable answers fail with a plain message", () =>
+    failed.ok === false && failed.warnings.some(w => /could not read these documents this time/.test(w)));
+  replies = [];
 
   reply = JSON.stringify({ case_name: null, court: null, _evidence: {} });
   const empty = await ex.extractFromDocuments([txt("some pleading text")]);

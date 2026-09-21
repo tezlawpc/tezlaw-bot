@@ -271,6 +271,8 @@
       panel("depos") ? renderDepos() : null,
       panel("docket") ? renderDocket() : null,
       panel("financials") ? renderFinancials() : null,
+      panel("time") ? renderTime() : null,
+      panel("hearings") ? renderHearings() : null,
     ]);
   }
   function reload() { return mountAll(); }
@@ -705,6 +707,427 @@
   }
 
   // ── Financials / budget ────────────────────────────────────
+  // ── Hearings ───────────────────────────────────────────────
+  //
+  // Upcoming hearings first, then past ones with their notes. Adding one
+  // puts it on the deadline list with a reminder; recording the outcome
+  // takes the notes and ruling, schedules a continuance in the same step,
+  // and can log the appearance time.
+  var HEARING_META = null;
+  function hearingMeta() {
+    if (HEARING_META) return Promise.resolve(HEARING_META);
+    return api("/hearings/meta").then(function (d) { HEARING_META = d; return d; })
+      .catch(function () {
+        return { types: ["Case Management Conference", "Motion hearing", "Trial", "Other"],
+                 appearances: ["In person", "Remote (video)", "Telephonic"] };
+      });
+  }
+
+  function hearingFields(meta, v) {
+    v = v || {};
+    return [
+      { name: "hearing_date", label: "Date", type: "date", required: true, half: true,
+        value: v.hearing_date ? String(v.hearing_date).slice(0, 10) : "" },
+      { name: "hearing_time", label: "Time", type: "text", half: true, value: v.hearing_time || "",
+        hint: "e.g. 8:30 AM" },
+      { name: "hearing_type", label: "Type", type: "select", required: true, half: true,
+        value: v.hearing_type || "", options: [{ value: "", label: "— select —" }].concat(meta.types || []) },
+      { name: "department", label: "Department", type: "text", half: true, value: v.department || "",
+        hint: v.id ? "" : "Blank = same as the last hearing" },
+      { name: "judge", label: "Judge", type: "text", half: true, value: v.judge || "" },
+      { name: "appearance", label: "Appearance", type: "select", half: true, value: v.appearance || "",
+        options: [{ value: "", label: "— select —" }].concat(meta.appearances || []) },
+      { name: "location", label: "Courthouse / location", type: "text", half: true, value: v.location || "" },
+      { name: "appearing", label: "Who is appearing", type: "text", half: true, value: v.appearing || "" },
+      { name: "purpose", label: "What it is for", type: "text", value: v.purpose || "",
+        hint: "e.g. Plaintiff's motion to compel further responses to RFPs, Set One" },
+      { name: "notes", label: "Notes", type: "textarea", rows: 3, value: v.notes || "",
+        hint: "Prep notes before; courtroom notes after." },
+    ];
+  }
+
+  function openAddHearing() {
+    hearingMeta().then(function (meta) {
+      formModal("Add hearing", hearingFields(meta), function (v) {
+        return api("/cases/" + CASE_ID + "/hearings", { method: "POST", body: v })
+          .then(function () { toast("Hearing added — it is on the deadline list with a reminder"); setTimeout(function () { location.reload(); }, 700); });
+      }, "ADD HEARING");
+    });
+  }
+
+  function openEditHearing(hr) {
+    hearingMeta().then(function (meta) {
+      var fields = hearingFields(meta, hr);
+      if (hr.status !== "scheduled") {
+        fields.push({ name: "ruling", label: "Ruling / result", type: "textarea", rows: 2, value: hr.ruling || "" });
+        fields.push({ name: "next_steps", label: "Next steps", type: "textarea", rows: 2, value: hr.next_steps || "" });
+      }
+      formModal("Edit hearing", fields, function (v) {
+        return api("/hearings/" + hr.id, { method: "PATCH", body: v })
+          .then(function () { location.reload(); });
+      }, "SAVE");
+    });
+  }
+
+  function openOutcome(hr) {
+    formModal("What happened — " + hr.hearing_type + " (" + fmtDate(hr.hearing_date) + ")", [
+      { name: "status", label: "Result", type: "select", required: true, half: true, value: "held",
+        options: [
+          { value: "held", label: "Held" },
+          { value: "continued", label: "Continued" },
+          { value: "vacated", label: "Vacated" },
+          { value: "off_calendar", label: "Off calendar" },
+        ] },
+      { name: "continued_to", label: "Continued to", type: "date", half: true,
+        hint: "Only if continued — the new hearing is scheduled for you." },
+      { name: "ruling", label: "Ruling / what the court did", type: "textarea", rows: 3, value: hr.ruling || "",
+        hint: "e.g. Motion granted in part; further responses due within 20 days." },
+      { name: "notes", label: "Hearing notes", type: "textarea", rows: 5, value: hr.notes || "",
+        hint: "What was argued, what the judge said, anything to remember." },
+      { name: "next_steps", label: "Next steps", type: "textarea", rows: 2, value: hr.next_steps || "" },
+      { name: "hours", label: "Bill time for the appearance (hours)", type: "number", step: "0.1", half: true,
+        hint: "Optional — added to Time & Billing." },
+    ], function (v) {
+      if (v.status === "continued" && !v.continued_to) return Promise.reject(new Error("Continued to what date?"));
+      return api("/hearings/" + hr.id + "/outcome", {
+        method: "POST",
+        body: { status: v.status, continued_to: v.continued_to || null, ruling: v.ruling, notes: v.notes,
+                next_steps: v.next_steps, hours: num(v.hours) },
+      }).then(function (d) {
+        var msg = "Saved";
+        if (d.continued) msg += " — continued hearing set for " + fmtDate(d.continued.hearing_date);
+        if (d.time) msg += " · " + d.time.billable_hours + "h logged";
+        if (d.time_error) msg += " · time not logged: " + d.time_error;
+        toast(msg);
+        setTimeout(function () { location.reload(); }, 900);
+      });
+    }, "SAVE OUTCOME");
+  }
+
+  function deleteHearing(hr) {
+    if (!confirm("Remove this hearing?\n\n" + hr.hearing_type + " — " + fmtDate(hr.hearing_date) +
+                 "\n\nIts deadline reminder goes too. The case history keeps a record, including any notes.")) return;
+    api("/hearings/" + hr.id, { method: "DELETE" })
+      .then(function () { location.reload(); })
+      .catch(function (e) { toast(e.message, true); });
+  }
+
+  var HEARING_STATUS = {
+    scheduled: { label: "SCHEDULED", color: C.gold },
+    held: { label: "HELD", color: C.green || "#166534" },
+    continued: { label: "CONTINUED", color: C.ember },
+    vacated: { label: "VACATED", color: C.walnutLight },
+    off_calendar: { label: "OFF CALENDAR", color: C.walnutLight },
+  };
+
+  function hearingCard(hr) {
+    var st = HEARING_STATUS[hr.status] || HEARING_STATUS.scheduled;
+    var upcoming = hr.status === "scheduled";
+    var days = daysUntil(hr.hearing_date);
+    var small = "font-size:11px;padding:3px 9px;border-radius:4px;cursor:pointer;border:1px solid " + C.border + ";";
+    var meta = [hr.hearing_time, hr.department && "Dept. " + hr.department, hr.judge, hr.location, hr.appearance, hr.appearing && "Appearing: " + hr.appearing]
+      .filter(Boolean).join(" · ");
+
+    var bodyBits = [];
+    if (hr.purpose) bodyBits.push(h("div", { text: hr.purpose, style: "font-size:12.5px;color:" + C.walnut + ";margin-top:6px;" }));
+    if (hr.ruling) bodyBits.push(h("div", { style: "margin-top:8px;font-size:12.5px;line-height:1.5;" }, [
+      h("strong", { text: "Ruling: ", style: "color:" + C.ink + ";" }), hr.ruling]));
+    if (hr.notes) bodyBits.push(h("div", {
+      text: hr.notes,
+      style: "margin-top:8px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;padding:8px 10px;background:" + C.parchment +
+             ";border-left:3px solid " + C.border + ";border-radius:3px;color:" + C.walnut + ";",
+    }));
+    if (hr.next_steps) bodyBits.push(h("div", { style: "margin-top:8px;font-size:12.5px;" }, [
+      h("strong", { text: "Next: ", style: "color:" + C.ink + ";" }), hr.next_steps]));
+    if (hr.continued_to) bodyBits.push(h("div", {
+      text: "↪ Continued to " + fmtDate(hr.continued_to),
+      style: "margin-top:6px;font-size:12px;color:" + C.emberDeep + ";font-weight:600;" }));
+
+    return card([
+      h("div", { style: "display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;" }, [
+        h("div", { style: "min-width:0;" }, [
+          h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;" }, [
+            h("strong", { text: fmtDate(hr.hearing_date), style: "font-size:14px;color:" + C.ink + ";" }),
+            h("span", { text: hr.hearing_type, style: "font-family:Cinzel,serif;font-size:12.5px;color:" + C.walnut + ";letter-spacing:.5px;" }),
+            chip(st.label, st.color),
+            upcoming && days !== null && days >= 0 && days <= 14
+              ? chip(days === 0 ? "TODAY" : "in " + days + "d", days <= 3 ? C.waxRed : C.ember) : null,
+            upcoming && days !== null && days < 0 ? chip("PAST — RECORD OUTCOME", C.waxRed) : null,
+          ]),
+          meta ? h("div", { text: meta, style: "font-size:11.5px;color:" + C.muted + ";margin-top:3px;" }) : null,
+        ]),
+        h("div", { style: "display:flex;gap:5px;flex-wrap:wrap;" }, [
+          upcoming ? h("button", { type: "button", text: "Record outcome & notes", onclick: function () { openOutcome(hr); },
+            style: small + "background:" + C.walnutMid + ";color:" + C.parchmentLit + ";border-color:" + C.gold + ";" }) : null,
+          h("button", { type: "button", text: upcoming ? "Edit" : "Edit notes", onclick: function () { openEditHearing(hr); },
+            style: small + "background:" + C.parchment + ";color:" + C.walnut + ";" }),
+          h("button", { type: "button", text: "🗑", title: "Remove", onclick: function () { deleteHearing(hr); },
+            style: small + "background:" + C.parchmentLit + ";color:" + C.waxRed + ";" }),
+        ]),
+      ]),
+    ].concat(bodyBits), upcoming ? "border-left:4px solid " + C.gold + ";" : "");
+  }
+
+  function renderHearings() {
+    var root = clear(panel("hearings"));
+    return api("/cases/" + CASE_ID + "/hearings").then(function (d) {
+      var list = d.hearings || [];
+      var upcoming = list.filter(function (x) { return x.status === "scheduled"; });
+      var past = list.filter(function (x) { return x.status !== "scheduled"; });
+      root.appendChild(heading("🏛 HEARINGS (" + upcoming.length + " upcoming)", btn("+ ADD HEARING", openAddHearing)));
+      if (!list.length) {
+        root.appendChild(note("No hearings yet. Add one and it goes on the deadline list with a reminder; after it, record the ruling and your notes here."));
+        return;
+      }
+      upcoming.forEach(function (hr) { root.appendChild(hearingCard(hr)); });
+      if (past.length) {
+        var det = h("details", { style: "margin-top:6px;" }, [
+          h("summary", { text: "PAST HEARINGS & NOTES (" + past.length + ")",
+            style: "cursor:pointer;font-family:Cinzel,serif;font-size:11.5px;letter-spacing:1.2px;color:" + C.muted + ";padding:6px 0;" }),
+        ]);
+        if (!upcoming.length) det.open = true;
+        past.forEach(function (hr) { det.appendChild(hearingCard(hr)); });
+        root.appendChild(det);
+      }
+    }).catch(function (e) {
+      root.appendChild(heading("🏛 HEARINGS"));
+      root.appendChild(note("Hearings could not load: " + e.message));
+    });
+  }
+
+  // ── Time & billing ─────────────────────────────────────────
+  //
+  // Log time, see what is unbilled, put it on an invoice. The server
+  // (civil-time.js) owns the rules: billed time is frozen until its invoice
+  // is voided, and voiding never deletes anything.
+  var timeShowBilled = false;
+
+  // Timekeepers: the case team if there is one, otherwise every firm user.
+  // Most matters have no team assigned yet, and a time form that offers
+  // nobody to bill as is a time form nobody uses.
+  function billingTimekeepers() {
+    return timekeeperOptions().then(function (opts) {
+      if (opts.length) return opts;
+      return api("/users").then(function (d) {
+        return (d.users || []).map(function (u) {
+          return {
+            value: u.id,
+            label: (u.full_name || u.username) + (u.billing_rate ? " ($" + u.billing_rate + "/hr)" : ""),
+            role: u.default_role || u.role,
+          };
+        });
+      }).catch(function () { return []; });
+    });
+  }
+
+  function timeFields(opts, v) {
+    v = v || {};
+    return [
+      { name: "date", label: "Date", type: "date", half: true, required: true,
+        value: v.date || new Date().toISOString().slice(0, 10) },
+      { name: "hours", label: "Hours", type: "number", step: "0.1", half: true, required: true,
+        value: v.hours != null ? v.hours : "", hint: "Tenths: 0.1 = 6 minutes." },
+      { name: "description", label: "Description (prints on the invoice)", type: "textarea", required: true,
+        value: v.description || "", rows: 3 },
+      { name: "timekeeper_id", label: "Timekeeper", type: "select", half: true, value: v.timekeeper_id || "",
+        options: [{ value: "", label: "— me —" }].concat(opts),
+        hint: "Their rate applies unless you override it." },
+      { name: "rate", label: "Rate override ($/hr)", type: "number", step: "0.01", half: true,
+        value: v.rate != null ? v.rate : "", hint: "Blank = team rate → firm default → case rate." },
+      { name: "utbms_code", label: "UTBMS task", type: "select", half: true,
+        value: v.utbms_code != null ? v.utbms_code
+          : ((UTBMS && UTBMS.stage_default && CASE_ROW) ? UTBMS.stage_default[CASE_ROW.stage] : ""),
+        options: [{ value: "", label: "— none —" }].concat(
+          ((UTBMS && UTBMS.tasks) || []).map(function (t) { return { value: t.code, label: t.code + " " + t.label }; })) },
+      { name: "utbms_activity", label: "UTBMS activity", type: "select", half: true,
+        value: v.utbms_activity != null ? v.utbms_activity : "",
+        options: [{ value: "", label: "— none —" }].concat(
+          ((UTBMS && UTBMS.activities) || []).filter(function (a) { return !a.extended; })
+            .map(function (a) { return { value: a.code, label: a.code + " " + a.label }; })) },
+      { name: "no_charge", label: "No charge (shows on the invoice at $0)", type: "checkbox", value: !!v.no_charge },
+    ];
+  }
+
+  function timeBody(v, opts) {
+    var picked = opts.filter(function (o) { return String(o.value) === String(v.timekeeper_id); })[0];
+    return {
+      date: v.date || null, hours: num(v.hours), description: v.description,
+      timekeeper_id: v.timekeeper_id ? Number(v.timekeeper_id) : null,
+      timekeeper_role: picked ? picked.role : null,
+      rate: v.rate === "" ? null : num(v.rate),
+      utbms_code: v.utbms_code || null, utbms_activity: v.utbms_activity || null,
+      no_charge: !!v.no_charge,
+    };
+  }
+
+  function openLogTime() {
+    // A failed timekeeper lookup must not leave the button dead: log the
+    // time without a timekeeper list rather than doing nothing.
+    billingTimekeepers().catch(function () { return []; }).then(function (opts) {
+      formModal("Log time", timeFields(opts), function (v) {
+        return api("/cases/" + CASE_ID + "/time", { method: "POST", body: timeBody(v, opts) })
+          .then(function () { toast("Time logged"); renderTime(); if (panel("financials")) renderFinancials(); });
+      }, "LOG TIME");
+    }).catch(function (err) { toast("Could not open the time form: " + err.message, true); });
+  }
+
+  function openEditTime(e) {
+    billingTimekeepers().then(function (opts) {
+      var fields = timeFields(opts, {
+        date: e.entry_date ? String(e.entry_date).slice(0, 10) : "",
+        hours: e.billable_hours, description: e.narrative, rate: e.billable_rate,
+        utbms_code: e.utbms_code || "", utbms_activity: e.utbms_activity || "", no_charge: e.no_charge,
+      }).filter(function (f) { return f.name !== "timekeeper_id"; });
+      formModal("Edit time", fields, function (v) {
+        var b = timeBody(v, opts);
+        delete b.timekeeper_id; delete b.timekeeper_role;
+        return api("/time/" + e.source + "/" + e.id, { method: "PATCH", body: b })
+          .then(function () { renderTime(); if (panel("financials")) renderFinancials(); });
+      }, "SAVE");
+    });
+  }
+
+  function deleteTime(e) {
+    var what = e.source === "event" && e.event_kind === "time"
+      ? "Delete this time entry?"
+      : "Remove the hours from this " + (e.event_kind || "entry") + "? The " + (e.event_kind || "entry") + " itself stays in the case history.";
+    if (!confirm(what + "\n\n" + (e.narrative || "") + " — " + e.billable_hours + "h")) return;
+    api("/time/" + e.source + "/" + e.id, { method: "DELETE" })
+      .then(function () { renderTime(); if (panel("financials")) renderFinancials(); })
+      .catch(function (err) { toast(err.message, true); });
+  }
+
+  function openInvoice(unbilledTotals) {
+    formModal("Prepare invoice", [
+      { name: "from", label: "From", type: "date", half: true, hint: "Blank = all unbilled time" },
+      { name: "to", label: "To", type: "date", half: true, value: new Date().toISOString().slice(0, 10) },
+      { name: "notes", label: "Note printed on the invoice (optional)", type: "textarea", rows: 2 },
+    ], function (v) {
+      return api("/cases/" + CASE_ID + "/invoices", {
+        method: "POST", body: { from: v.from || null, to: v.to || null, notes: v.notes || null },
+      }).then(function (d) {
+        toast("Invoice " + d.invoice.invoice_number + " prepared");
+        renderTime(); if (panel("financials")) renderFinancials();
+        window.open("/admin/civil/api/invoices/" + d.invoice.id + "/print", "_blank");
+      });
+    }, "CREATE INVOICE");
+  }
+
+  function voidInvoice(inv) {
+    if (!confirm("Void invoice " + inv.invoice_number + "?\n\nIt stays on file marked VOID, and its time goes back to unbilled so it can be corrected and invoiced again.")) return;
+    api("/invoices/" + inv.id + "/void", { method: "POST" })
+      .then(function () { renderTime(); if (panel("financials")) renderFinancials(); })
+      .catch(function (err) { toast(err.message, true); });
+  }
+
+  function renderTime() {
+    var root = clear(panel("time"));
+    return api("/cases/" + CASE_ID + "/time?status=" + (timeShowBilled ? "all" : "unbilled")).then(function (d) {
+      var t = d.unbilled_totals || {};
+      var right = h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;" }, [
+        btn("⏱ LOG TIME", openLogTime),
+        t.entries ? btn("PREPARE INVOICE", function () { openInvoice(t); }, "quiet") : null,
+      ]);
+      root.appendChild(heading("⏱ TIME & BILLING", right));
+
+      root.appendChild(h("div", {
+        style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px;",
+      }, [
+        statCard("Unbilled hours", Number(t.hours || 0).toFixed(2) + "h", (t.entries || 0) + " entr" + (t.entries === 1 ? "y" : "ies")),
+        statCard("Unbilled amount", money(t.amount || 0), t.no_charge_hours ? t.no_charge_hours + "h no charge" : ""),
+        statCard("Invoices", String((d.invoices || []).filter(function (i) { return i.status !== "void"; }).length),
+          (d.invoices || []).length ? "last " + (d.invoices[0].invoice_number) : "none yet"),
+      ]));
+      if (t.unpriced) {
+        root.appendChild(h("div", {
+          text: "⚠ " + t.unpriced + " entr" + (t.unpriced === 1 ? "y has" : "ies have") +
+                " no rate, so the total above is short. Edit them to add a rate, or set the case's hourly rate.",
+          style: "margin-bottom:10px;padding:9px 11px;border:1px solid " + C.waxRed + ";border-left-width:3px;border-radius:5px;font-size:12px;color:" + C.walnut + ";background:" + C.parchmentLit + ";",
+        }));
+      }
+
+      var entries = d.entries || [];
+      var toggle = h("label", { style: "display:flex;gap:6px;align-items:center;font-size:11.5px;color:" + C.muted + ";margin-bottom:8px;cursor:pointer;" }, [
+        h("input", { type: "checkbox" }), "Show billed time too",
+      ]);
+      toggle.firstChild.checked = timeShowBilled;
+      toggle.firstChild.addEventListener("change", function () { timeShowBilled = this.checked; renderTime(); });
+      root.appendChild(toggle);
+
+      if (!entries.length) {
+        root.appendChild(note(timeShowBilled ? "No time recorded on this matter yet." : "No unbilled time. Use ⏱ LOG TIME to record work."));
+      } else {
+        var th = "padding:8px;text-align:left;font-size:10px;letter-spacing:1px;";
+        var table = h("table", { style: "width:100%;border-collapse:collapse;background:" + C.parchmentLit + ";border:1px solid " + C.border + ";border-radius:6px;font-size:12.5px;" }, [
+          h("thead", { style: "background:" + C.walnut + ";color:" + C.parchmentLit + ";" }, [h("tr", null, [
+            h("th", { text: "DATE", style: th }), h("th", { text: "WHO", style: th }),
+            h("th", { text: "DESCRIPTION", style: th }), h("th", { text: "HOURS", style: th + "text-align:right;" }),
+            h("th", { text: "AMOUNT", style: th + "text-align:right;" }), h("th", { style: th }),
+          ])]),
+        ]);
+        var tb = h("tbody");
+        entries.forEach(function (e) {
+          var billed = !!e.invoice_id;
+          var td = "padding:8px;border-top:1px solid " + C.border + ";vertical-align:top;";
+          tb.appendChild(h("tr", { style: billed ? "opacity:.6;" : "" }, [
+            h("td", { text: fmtDate(e.entry_date), style: td + "white-space:nowrap;" }),
+            h("td", { text: e.timekeeper || "—", style: td + "white-space:nowrap;" }),
+            h("td", { style: td }, [
+              e.narrative || "",
+              e.event_kind && e.event_kind !== "time" ? h("span", { text: " · " + e.event_kind, style: "color:" + C.muted + ";font-size:11px;" }) : null,
+              e.utbms_code ? h("span", { text: " " + e.utbms_code + (e.utbms_activity ? "/" + e.utbms_activity : ""), style: "color:" + C.muted + ";font-size:10.5px;" }) : null,
+            ]),
+            h("td", { text: Number(e.billable_hours || 0).toFixed(2), style: td + "text-align:right;" }),
+            h("td", { text: e.no_charge ? "NO CHARGE" : (e.billable_amount == null ? "no rate" : money(e.billable_amount)),
+                      style: td + "text-align:right;white-space:nowrap;" + (e.billable_amount == null && !e.no_charge ? "color:" + C.waxRed + ";" : "") }),
+            h("td", { style: td + "text-align:right;white-space:nowrap;" }, billed
+              ? [h("span", { text: e.invoice_number || "billed", style: "font-size:10.5px;color:" + C.muted + ";" })]
+              : [
+                  h("button", { type: "button", text: "Edit", onclick: function () { openEditTime(e); },
+                    style: "padding:3px 8px;background:" + C.parchment + ";border:1px solid " + C.border + ";border-radius:4px;cursor:pointer;font-size:11px;color:" + C.walnut + ";" }),
+                  " ",
+                  h("button", { type: "button", text: "🗑", title: "Delete", onclick: function () { deleteTime(e); },
+                    style: "padding:3px 7px;background:" + C.parchmentLit + ";border:1px solid " + C.border + ";border-radius:4px;cursor:pointer;font-size:11px;color:" + C.waxRed + ";" }),
+                ]),
+          ]));
+        });
+        table.appendChild(tb);
+        root.appendChild(table);
+      }
+
+      var invs = d.invoices || [];
+      if (invs.length) {
+        root.appendChild(h("div", {
+          text: "INVOICES",
+          style: "font-family:Cinzel,serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin:16px 0 8px 0;",
+        }));
+        invs.forEach(function (inv) {
+          var isVoid = inv.status === "void";
+          root.appendChild(card([
+            h("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;" + (isVoid ? "opacity:.55;" : "") }, [
+              h("div", null, [
+                h("strong", { text: inv.invoice_number + (isVoid ? "  — VOID" : ""), style: "color:" + (isVoid ? C.waxRed : C.ink) + ";" }),
+                h("div", { text: fmtDate(inv.invoice_date) + " · " + Number(inv.total_hours || 0).toFixed(2) + "h · " + money(inv.total_amount),
+                  style: "font-size:11.5px;color:" + C.muted + ";margin-top:2px;" }),
+              ]),
+              h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;" }, [
+                h("a", { href: "/admin/civil/api/invoices/" + inv.id + "/print", target: "_blank", text: "View / print",
+                  style: "font-size:11.5px;color:" + C.emberDeep + ";text-decoration:none;font-weight:600;" }),
+                isVoid ? null : h("a", { href: "/admin/civil/api/cases/" + CASE_ID + "/ledes?invoice_id=" + inv.id + "&download=1", text: "LEDES",
+                  style: "font-size:11.5px;color:" + C.emberDeep + ";text-decoration:none;font-weight:600;" }),
+                isVoid ? null : h("a", { href: "#", text: "Void", onclick: function (ev) { ev.preventDefault(); voidInvoice(inv); },
+                  style: "font-size:11.5px;color:" + C.waxRed + ";text-decoration:none;" }),
+              ]),
+            ]),
+          ], "padding:10px 12px;"));
+        });
+      }
+    }).catch(function (e) {
+      root.appendChild(heading("⏱ TIME & BILLING"));
+      root.appendChild(note("Time & billing could not load: " + e.message));
+    });
+  }
+
   function renderFinancials() {
     var root = clear(panel("financials"));
     return api("/cases/" + CASE_ID + "/billing-summary").then(function (d) {
@@ -1022,6 +1445,27 @@
 
   function completeDeadline(id) {
     api("/deadlines/" + id + "/complete", { method: "PATCH" })
+      .then(function () { location.reload(); })
+      .catch(function (e) { toast(e.message, true); });
+  }
+
+  // Remove a deadline. Auto-generated ones are dismissed rather than deleted
+  // (Regenerate would otherwise put them straight back), and the confirm says
+  // which will happen so nobody is surprised later.
+  function deleteDeadline(id, label, isAuto) {
+    var msg = "Remove this deadline?\n\n" + (label || "") + "\n\n" +
+      (isAuto
+        ? "It was generated from the case's trigger dates, so it will be dismissed rather than deleted — Regenerate will not bring it back, and it can be restored from the completed list."
+        : "It will be deleted.") +
+      "\n\nThe case history keeps a record of the removal.";
+    if (!confirm(msg)) return;
+    api("/deadlines/" + id, { method: "DELETE" })
+      .then(function () { location.reload(); })
+      .catch(function (e) { toast(e.message, true); });
+  }
+
+  function reopenDeadline(id) {
+    api("/deadlines/" + id + "/reopen", { method: "PATCH" })
       .then(function () { location.reload(); })
       .catch(function (e) { toast(e.message, true); });
   }
@@ -1830,6 +2274,7 @@
       "log-event": openLogEvent,
       "log-comm": openLogComm,
       "add-deadline": openAddDeadline,
+      "log-time": openLogTime,
       "regenerate-deadlines": regenerateDeadlines,
     };
     document.querySelectorAll("[data-civil-action]").forEach(function (el) {
@@ -1839,6 +2284,17 @@
     document.querySelectorAll("[data-civil-complete-deadline]").forEach(function (el) {
       el.addEventListener("click", function () {
         completeDeadline(el.getAttribute("data-civil-complete-deadline"));
+      });
+    });
+    document.querySelectorAll("[data-civil-delete-deadline]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        deleteDeadline(el.getAttribute("data-civil-delete-deadline"),
+          el.getAttribute("data-label"), el.getAttribute("data-auto") === "1");
+      });
+    });
+    document.querySelectorAll("[data-civil-reopen-deadline]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        reopenDeadline(el.getAttribute("data-civil-reopen-deadline"));
       });
     });
   }

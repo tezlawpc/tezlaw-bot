@@ -201,6 +201,8 @@ const STAFF_TOOLS = [
       },
     },
   },
+  // Read the case folder; propose changes the user applies with one click.
+  ...require("./zara-case-tools").CASE_TOOLS,
 ];
 
 // Tool executors — each returns a plain object; caller stringifies for tool_result content.
@@ -211,11 +213,14 @@ function roleOf(user) {
   return (user && (user.role || user.r)) || null;
 }
 
-async function executeTool(db, user, name, args) {
+async function executeTool(db, user, name, args, sink = null) {
   const isAdmin = roleOf(user) === "admin";
   const userId = user.uid;
 
   try {
+    const caseTools = require("./zara-case-tools");
+    if (caseTools.NAMES.has(name)) return await caseTools.run(name, args, { user, sink });
+
     if (name === "get_civil_matter") {
       return await require("./civil-snapshot").snapshot(args.case_id);
     }
@@ -618,7 +623,7 @@ async function executeTool(db, user, name, args) {
  */
 async function chat({
   systemPrompt, surface = "staff", extra = "", context = "",
-  message, history = [], db, user,
+  message, history = [], db, user, proposals = null,
 }) {
   // Only enable tools when we have both db + a staff/admin user
   const role = roleOf(user);
@@ -642,7 +647,7 @@ async function chat({
     timeout: surface === "staff" ? 150000 : 60000,
     tools: useTools ? STAFF_TOOLS : null,
     onToolUse: useTools
-      ? (name, input) => executeTool(db, user, name, input)
+      ? (name, input) => executeTool(db, user, name, input, proposals)
       : null,
   });
 
@@ -678,6 +683,17 @@ You have TOOLS to look up real firm data — USE THEM whenever the user asks abo
 - Client trust (IOLTA) balances and recent transactions → get_client_trust_balance
 - Firm-wide trust total for reconciliation → get_firm_trust_summary (admin only)
 - Case templates / standard workflows → list_matter_templates
+- Documents in a civil matter's Dropbox folder → list_case_documents, then read_case_document to read and analyze one
+
+THIS SYSTEM IS THE FIRM'S CASE MANAGEMENT SYSTEM. The firm does not use MyCase (or any other practice-management product) any more. Never tell the user to update something "in MyCase" or anywhere else: the matter, its deadlines, hearings, notes, time, billing and the Dropbox case folder all live here, and you can propose changes to them.
+
+CHANGING A CIVIL MATTER. You cannot write to the file directly — you PROPOSE, and the user applies:
+- Case details (dates, court, case number, jurisdiction, service, fee terms…) → propose_matter_update
+- A note, a deadline or a hearing → propose_case_entry (one call per entry)
+- A memo or analysis saved as a Word document in the Dropbox case folder → propose_memo
+Each proposal appears under your reply as a card with an Apply button. When the user gives you new facts ("now you have the full picture, update the file"), compare them with the matter, then propose every change in THIS reply — all of them, not a sample — and finish with a short list of what you proposed. Say "review and press Apply"; never say a change is saved, made or done. If a fact is ambiguous, propose what is clear and ask about the rest. Deadlines: propose the ones that follow from the facts, citing the rule, and say which date each is counted from.
+
+DOCUMENTS THE USER ATTACHES in this chat are already filed in the case's Dropbox folder (the chat says where) and their text is given to you under ATTACHED DOCUMENTS. Analyze them and propose the updates they support.
 
 Answer legal questions substantively and professionally, drawing on:
 - Immigration law (USCIS, immigration court, BIA, 9th Circuit)
@@ -685,7 +701,7 @@ Answer legal questions substantively and professionally, drawing on:
 - Business litigation and trademarks (USPTO)
 - Estate planning, real estate, landlord/tenant
 
-Give concise but substantive answers. Cite relevant statutes, case law, or agency guidance when helpful. For firm-specific questions, use tools first, then answer with the actual data. Never say "I don't have access to your case management system" — you DO have access via the tools above.
+Give concise but substantive answers. Cite relevant statutes, case law, or agency guidance when helpful. For firm-specific questions, use tools first, then answer with the actual data. Never say "I don't have access to your case management system" — you DO have access via the tools above, and you are part of it.
 
 EVERY REPLY IS FINAL. The user cannot receive a second message from you until they write again, so never end a reply with "let me pull that together", "one moment", "I'll look into it" or any promise of work to come — that leaves them waiting for something that will never arrive. If you need data, call the tool NOW, in this reply, and answer with what it returns. If you cannot get it, say so plainly and say what they can do instead.
 

@@ -640,15 +640,20 @@ async function section(title, fn) {
     check("and it keeps the citation rules",
       () => /NEVER fabricate or guess at reporter volumes/.test(body));
 
+    // Checked by shape rather than by quoting the retired password, which
+    // this test used to do — putting the old secret back into the repo in
+    // the very check meant to keep it out.
     check("the plaintext password fallback is gone",
-      () => !/tezlaw2026jj/.test(src));
+      () => !/process\.env\.JJ_PASSWORD\s*\|\|\s*["'`]/.test(src));
     check("an unset JJ_PASSWORD disables private mode rather than failing open",
       () => /JJ_PASSWORD \|\| null/.test(src) && /JJ_PASSWORD && normalize/.test(src));
 
     // JJ types his password into Telegram/WhatsApp, and every inbound
     // message is persisted. Both outcomes of a password attempt — right and
     // wrong — must be marked so the caller stores a marker, not the secret.
-    const awaiting = src.split("isAwaitingPassword(platform, userId)")[2] || "";
+    // Anchor on the branch that actually compares the password (there is
+    // also a lockout check on the same condition just before it).
+    const awaiting = src.split("if (isAwaitingPassword(platform, userId)) {")[1] || "";
     const branch = awaiting.slice(0, awaiting.indexOf("Intelligent trigger detection"));
     const returns = branch.match(/return \{[\s\S]*?\};/g) || [];
     check("the password branch has both a success and a failure return",

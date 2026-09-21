@@ -2821,6 +2821,25 @@ function registerAppApi(app) {
         console.warn("[api chat staff] matter snapshot:", e.message);
       }
 
+      // Documents attached in the chat: the attach route already filed them
+      // and extracted their text; the widget sends that text back with the
+      // question so Zara can analyze it.
+      const atts = Array.isArray(req.body?.attachments) ? req.body.attachments.slice(0, 5) : [];
+      if (atts.length) {
+        let budget = 60000;
+        pageContext += "\n\nATTACHED DOCUMENTS (attached by the user in this chat):";
+        for (const a of atts) {
+          const t = String(a && a.text || "").slice(0, Math.max(0, budget));
+          budget -= t.length;
+          pageContext += `\n\n=== ${String(a && a.name || "document").slice(0, 200)}` +
+            (a && a.filed_to ? ` (filed to ${String(a.filed_to).slice(0, 200)})` : " (not filed — no case open)") +
+            ` ===\n` + (t || "[no readable text — possibly a scan without OCR]");
+        }
+      }
+
+      // Anything Zara proposes (update the matter, add a deadline, save a
+      // memo) is collected here and returned as Apply/Discard cards.
+      const proposals = [];
       const answer = await zaraChat.chat({
         surface: "staff",
         extra: zaraChat.STAFF_OPS,
@@ -2829,8 +2848,9 @@ function registerAppApi(app) {
         history: history || [],
         db,
         user: req.user,
+        proposals,
       });
-      res.json({ ok: true, reply: { answer } });
+      res.json({ ok: true, reply: { answer, proposals } });
     } catch (err) {
       console.error("[api chat staff]:", err.message);
       res.status(500).json({ ok: false, error: err.message });
@@ -9641,6 +9661,61 @@ function attachZaraCoreRoutes(app, core) {
       const live = isAdmin(req.user);
       if (live) row = await core.approveLesson(row.id, { by: who(req) });
       res.json({ ok: true, saved: true, live, lesson: row });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  });
+
+  // ── Zara's proposals: the user decides ──
+  // Zara never writes to a matter. She proposes; these two buttons decide.
+  app.post("/api/staff/zara/proposals/:id/apply", auth1, auth2, async (req, res) => {
+    try {
+      const out = await require("./zara-actions").applyProposal(Number(req.params.id), {
+        by: who(req), userId: req.user && req.user.uid,
+      });
+      res.json(out);
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  });
+  app.post("/api/staff/zara/proposals/:id/discard", auth1, auth2, async (req, res) => {
+    try {
+      res.json(await require("./zara-actions").discardProposal(Number(req.params.id), { by: who(req) }));
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  });
+
+  // Documents attached in the chat. On a case page they are filed into that
+  // matter's Dropbox folder (sorted like any other upload — attaching is the
+  // user's own action), and either way their text comes back for Zara to read.
+  const zaraAttach = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024, files: 5 } });
+  app.post("/api/staff/zara/attach", auth1, auth2, zaraAttach.array("files", 5), async (req, res) => {
+    try {
+      const files = req.files || [];
+      if (!files.length) return res.status(400).json({ ok: false, error: "No files attached" });
+      const caseId = parseInt(req.body && req.body.case_id, 10) || null;
+      const extract = require("./civil-intake-extract");
+      const docs = [];
+      for (const f of files) {
+        const d = { name: f.originalname, text: "", truncated: false };
+        try {
+          const t = String(await extract.textFromBuffer(f.buffer, f.originalname) || "").replace(/\n{3,}/g, "\n\n").trim();
+          d.truncated = t.length > 30000;
+          d.text = t.slice(0, 30000);
+          if (!t) d.error = "No readable text — probably a scan without OCR";
+        } catch (e) { d.error = e.message; }
+        docs.push(d);
+      }
+      let filed = null;
+      if (caseId) {
+        try {
+          filed = await require("./civil-upload").uploadToCase(caseId, files, { by: `${who(req)} (via Zara chat)` });
+          for (const u of filed.uploaded || []) {
+            const d = docs.find(x => x.name && require("./civil-upload").safeFileName(x.name) === u.name);
+            if (d) d.filed_to = `${u.folder_label} as ${u.saved_as}`;
+          }
+          for (const f of filed.failed || []) {
+            const d = docs.find(x => require("./civil-upload").safeFileName(x.name) === f.name);
+            if (d) d.file_error = f.error;
+          }
+        } catch (e) { filed = { ok: false, error: e.message }; }
+      }
+      res.json({ ok: true, case_id: caseId, docs, filed });
     } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
   });
 

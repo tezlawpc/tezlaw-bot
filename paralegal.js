@@ -6,7 +6,7 @@
 //  - California CCP deadline calculator (state civil)
 //  - EOIR Immigration Court deadline calculator
 //  - Federal District Court (CACD/CAED/CACD) deadline calculator
-//  - Case note entry → MyCase (via API)
+//  - Deadlines → the civil matter in this system (MyCase is no longer used)
 //  - Team email notifications
 //  - Document drafting (M&C letters, tasks, case summaries)
 //  - Next step recommendations
@@ -23,7 +23,6 @@ const nodemailer = require("nodemailer");
 
 // ── Env vars ─────────────────────────────────────────────────
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MYCASE_API_KEY    = process.env.MYCASE_API_KEY;
 const GMAIL_EMAIL       = process.env.GMAIL_EMAIL;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 
@@ -422,84 +421,63 @@ async function notifyTeam(subject, body, recipients = []) {
 }
 
 // ============================================================
-//  MYCASE INTEGRATION
-//  Creates tasks and case notes via MyCase API
+//  CIVIL MATTER CALENDARING (replaces the MyCase integration)
+//  ----------------------------------------------------------
+//  The firm no longer uses MyCase: the civil-litigation module
+//  here is the case management system. Deadlines the paralegal
+//  finds are put on the matter itself — but only when the message
+//  names exactly ONE civil matter, and never twice.
 // ============================================================
-async function createMyCaseTask(caseName, taskTitle, dueDate, description = "") {
-  if (!MYCASE_API_KEY) {
-    return { success: false, error: "MYCASE_API_KEY not set" };
-  }
-  try {
-    // First — search for the case
-    const searchResp = await axios.get(
-      `https://app.mycase.com/api/v1/cases?q=${encodeURIComponent(caseName)}`,
-      {
-        headers: {
-          "X-Auth-Token": MYCASE_API_KEY,
-          "Content-Type": "application/json",
-        },
-        timeout: 8000,
-      }
-    );
-    const cases = searchResp.data?.cases || searchResp.data || [];
-    if (!cases.length) return { success: false, error: `No MyCase case found for: ${caseName}` };
 
-    const caseId = cases[0].id;
-
-    // Create the task
-    const taskResp = await axios.post(
-      "https://app.mycase.com/api/v1/tasks",
-      {
-        task: {
-          case_id:     caseId,
-          name:        taskTitle,
-          due_date:    dueDate, // YYYY-MM-DD
-          description: `${description}\n\n[Auto-created by Zara Paralegal Agent]`,
-          status:      "open",
-          priority:    "high",
-        }
-      },
-      {
-        headers: {
-          "X-Auth-Token": MYCASE_API_KEY,
-          "Content-Type": "application/json",
-        },
-        timeout: 8000,
-      }
-    );
-    return { success: true, taskId: taskResp.data?.task?.id };
-  } catch (err) {
-    console.error("[paralegal] MyCase error:", err.response?.data || err.message);
-    return { success: false, error: err.response?.data?.message || err.message };
-  }
+/** Case-number or caption candidates from a free-text instruction. */
+function matterQueries(message) {
+  const m = String(message || "");
+  const out = [];
+  const num = m.match(/\b\d{1,2}:\d{2}-[a-z]{2,4}-\d{3,6}\b/i) || m.match(/\b\d{2}[A-Z]{2,6}\d{4,}\b/);
+  if (num) out.push(num[0]);
+  const cap = m.match(/([A-Z][\w.'-]+(?: [A-Z][\w.'-]+)*) (?:v\.?|vs\.?) ([A-Z][\w.'-]+)/);
+  if (cap) { out.push(cap[2]); out.push(cap[1].split(" ").pop()); }
+  return out.filter(q => q && q.length >= 3);
 }
 
-async function createMyCaseNote(caseName, noteBody) {
-  if (!MYCASE_API_KEY) return { success: false, error: "MYCASE_API_KEY not set" };
-  try {
-    const searchResp = await axios.get(
-      `https://app.mycase.com/api/v1/cases?q=${encodeURIComponent(caseName)}`,
-      { headers: { "X-Auth-Token": MYCASE_API_KEY, "Content-Type": "application/json" }, timeout: 8000 }
-    );
-    const cases = searchResp.data?.cases || searchResp.data || [];
-    if (!cases.length) return { success: false, error: `No MyCase case found for: ${caseName}` };
-
-    const caseId = cases[0].id;
-    await axios.post(
-      "https://app.mycase.com/api/v1/case_notes",
-      {
-        case_note: {
-          case_id: caseId,
-          body:    `${noteBody}\n\n[Auto-created by Zara Paralegal Agent ${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT]`,
-        }
-      },
-      { headers: { "X-Auth-Token": MYCASE_API_KEY, "Content-Type": "application/json" }, timeout: 8000 }
-    );
-    return { success: true };
-  } catch (err) {
-    console.error("[paralegal] MyCase note error:", err.response?.data || err.message);
-    return { success: false, error: err.response?.data?.message || err.message };
+async function calendarOnCivilMatter(message, deadlines) {
+  const snap = require("./civil-snapshot");
+  const civil = require("./civil-litigation");
+  let matter = null;
+  for (const q of matterQueries(message)) {
+    let found;
+    try { found = await snap.findMatters(q, 3); } catch { continue; }
+    if (found.length === 1) { matter = found[0]; break; }
+    if (found.length > 1) return { matter: null, reason: `"${q}" matches ${found.length} civil matters — add these deadlines on the case page` };
   }
+  if (!matter) return { matter: null, reason: "no civil matter in this message matched a case in the system" };
+
+  const existing = await civil.listDeadlines(matter.id, { status: ["pending", "completed"] });
+  const have = new Set(existing.map(d => String(d.due_date instanceof Date ? d.due_date.toISOString() : d.due_date).slice(0, 10) + "|" + String(d.description).toLowerCase()));
+  const added = [], skipped = [];
+  for (const dl of deadlines) {
+    const when = new Date(dl.date);
+    if (!dl.date || isNaN(when)) { skipped.push({ label: dl.label, why: "no fixed date" }); continue; }
+    const due = when.toISOString().slice(0, 10);
+    const description = String(dl.label || "").replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF\uFE0F]/gu, "").trim();
+    const key = due + "|" + description.toLowerCase();
+    if (have.has(key)) { skipped.push({ label: description, why: "already on the matter" }); continue; }
+    await civil.addManualDeadline(matter.id, {
+      due_date: due, description, ccp_rule: dl.rule || null,
+      priority: dl.priority === "CRITICAL" || dl.priority === "HIGH" ? "high" : "medium",
+    });
+    have.add(key);
+    added.push({ label: description, due });
+  }
+  return { matter, added, skipped };
+}
+
+// Kept so older callers do not crash; MyCase is no longer used.
+async function createMyCaseTask() {
+  return { success: false, error: "MyCase is no longer used — deadlines go on the civil matter" };
+}
+async function createMyCaseNote() {
+  return { success: false, error: "MyCase is no longer used — notes go on the civil matter" };
 }
 
 // ============================================================
@@ -810,34 +788,19 @@ async function handleParalegalCommand(message, options = {}) {
 
     if (!claudeReply) claudeReply = "I had trouble generating the analysis. Please try again.";
 
-    // ── Step 5: Auto-create MyCase tasks for CRITICAL deadlines ──
+    // ── Step 5: Put the deadlines on the civil matter ──────────
+    // (Used to create MyCase tasks. The firm no longer uses MyCase.)
     const criticalDeadlines = deadlines.filter(d => d.priority === "CRITICAL" || d.priority === "HIGH");
-    const mycaseResults = [];
-
-    if (MYCASE_API_KEY && criticalDeadlines.length > 0) {
-      // Extract case name from message (best effort)
-      const caseNameMatch = message.match(/([A-Z][a-z]+ (?:v\.?|vs\.?) [A-Z][a-z]+)/i) ||
-                            message.match(/([A-Z][a-z]+(?: [A-Z][a-z]+)+)/);
-      const caseName = caseNameMatch ? caseNameMatch[1] : null;
-
-      if (caseName) {
-        for (const dl of criticalDeadlines.slice(0, 3)) { // max 3 tasks auto-created
-          if (dl.date && dl.date !== "ASAP — as soon as retained" && dl.date !== "Before filing" && !dl.date.includes("days before")) {
-            const dueDateRaw = new Date(dl.date);
-            if (!isNaN(dueDateRaw)) {
-              const dueDate = dueDateRaw.toISOString().split("T")[0];
-              const result = await createMyCaseTask(
-                caseName,
-                dl.label.replace(/[⚠️📅📋💰✈️⏱️]/u, "").trim(),
-                dueDate,
-                dl.note
-              );
-              mycaseResults.push({ label: dl.label, ...result });
-            }
-          }
-        }
-      }
+    let calendared = null;
+    if (criticalDeadlines.length > 0) {
+      try { calendared = await calendarOnCivilMatter(message, criticalDeadlines); }
+      catch (e) { calendared = { matter: null, reason: e.message }; }
     }
+    const calendarSummary = !calendared ? "" : calendared.matter
+      ? `Added to ${calendared.matter.case_name} (civil matter #${calendared.matter.id}):\n` +
+        (calendared.added.length ? calendared.added.map(a => `• ${a.label} — ${a.due}`).join("\n") : "• nothing new") +
+        (calendared.skipped.length ? "\nNot added:\n" + calendared.skipped.map(x => `• ${x.label} (${x.why})`).join("\n") : "")
+      : `Deadlines not calendared: ${calendared.reason}.`;
 
     // ── Step 6: Send team notification email ─────────────────
     let emailSent = false;
@@ -851,7 +814,7 @@ ${claudeReply}
 
 ${criticalDeadlines.length > 0 ? `\nCRITICAL DEADLINES:\n${criticalDeadlines.map(d => `• ${d.label}: ${d.date}\n  ${d.note}`).join("\n")}` : ""}
 
-${mycaseResults.length > 0 ? `\nMyCase tasks created:\n${mycaseResults.map(r => `• ${r.label}: ${r.success ? "✅ Created" : "❌ " + r.error}`).join("\n")}` : ""}
+${calendarSummary ? `\n${calendarSummary}` : ""}
 
 ---
 This notification was sent automatically by Zara.
@@ -868,12 +831,7 @@ Reply to JJ Zhang at jj@tezlawfirm.com with any questions.
     // ── Step 7: Build final response for JJ ─────────────────
     let finalReply = claudeReply;
 
-    if (mycaseResults.length > 0) {
-      const mcSummary = mycaseResults.map(r =>
-        `${r.success ? "✅" : "❌"} MyCase: ${r.label.replace(/[⚠️📅📋💰✈️⏱️]/u, "").trim()} ${r.success ? "(task created)" : "— " + r.error}`
-      ).join("\n");
-      finalReply += `\n\n──────────────\n${mcSummary}`;
-    }
+    if (calendarSummary) finalReply += `\n\n──────────────\n${calendarSummary}`;
 
     if (teamToNotify.length > 1) {
       const notified = teamToNotify
@@ -905,4 +863,6 @@ module.exports = {
   notifyTeam,
   createMyCaseTask,
   createMyCaseNote,
+  calendarOnCivilMatter,
+  matterQueries,
 };

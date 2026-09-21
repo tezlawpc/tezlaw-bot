@@ -169,6 +169,18 @@ Module._load = origLoad;
     check("…and the copy is the real file, not an empty one", () =>
       fs.statSync(inPublic).size === fs.statSync(stash).size);
 
+    // The case that actually broke LOG TIME: public/ HAS the file, but it
+    // is an old version, and the new upload is stranded at the root.
+    fs.writeFileSync(inPublic, "/* stale */");
+    delete require.cache[require.resolve("../client-script")];
+    const freshStale = require("../client-script");
+    const healedList = freshStale.healClientBundles();
+    check("a newer upload at the root replaces a stale copy in public/", () =>
+      healedList.includes(NAME) && fs.readFileSync(inPublic).equals(fs.readFileSync(stash)));
+    delete require.cache[require.resolve("../client-script")];
+    check("…and identical copies are left alone", () =>
+      require("../client-script").healClientBundles().length === 0);
+
     // The dangerous half.
     fs.unlinkSync(inPublic);
     delete require.cache[require.resolve("../client-script")];

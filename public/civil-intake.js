@@ -78,6 +78,12 @@
     client_name: "Client name", fee_arrangement_notes: "Fee notes",
   };
 
+  // The documents dropped here, kept until the case exists. They are the
+  // matter's opening papers, so once CREATE CASE succeeds they are filed into
+  // its Dropbox folder — the attorney should not have to upload the same
+  // complaint twice.
+  var pending = [];
+
   function fmt(v) {
     if (Array.isArray(v)) return v.join("; ");
     return String(v);
@@ -133,7 +139,11 @@
       for (var i = 0; i < Math.min(files.length, 6); i++) {
         fd.append("documents", files[i]);
         names.push(files[i].name);
+        // Add, not replace: dropping the retainer after the complaint keeps both.
+        var dup = pending.some(function (p) { return p.name === files[i].name && p.size === files[i].size; });
+        if (!dup) pending.push(files[i]);
       }
+      drawPending();
       clear(results);
       status.style.color = C.muted;
       status.textContent = "Reading " + names.join(", ") + "… this takes a few seconds.";
@@ -314,11 +324,38 @@
       }
     }
 
+    var pendingLine = h("div", { style: "font-size:11.5px;color:" + C.green + ";margin-top:6px;" });
+    function drawPending() {
+      if (!pending.length) { pendingLine.textContent = ""; return; }
+      pendingLine.textContent = "📁 " + pending.length + " document" + (pending.length === 1 ? "" : "s") +
+        " will be filed to this matter's Dropbox folder when you create the case: " +
+        pending.map(function (f) { return f.name; }).join(", ");
+    }
+
     clear(host);
     host.appendChild(drop);
     host.appendChild(fileInput);
+    host.appendChild(pendingLine);
     host.appendChild(status);
     host.appendChild(results);
+  }
+
+  /**
+   * File the documents dropped on this form into the new case's Dropbox
+   * folder. Called by the form once the case exists. Resolves with the
+   * server's report; never rejects, because the case is already created and
+   * a filing hiccup must not look like the case failed.
+   */
+  function fileTo(caseId) {
+    if (!pending.length) return Promise.resolve({ ok: true, uploaded: [], failed: [] });
+    var fd = new FormData();
+    pending.forEach(function (f) { fd.append("files", f); });
+    // "intake" tells the server these are the opening papers, so a file it
+    // cannot sort by name goes to Pleadings rather than Uncategorized.
+    fd.append("source", "intake");
+    return fetch("/admin/civil/api/cases/" + encodeURIComponent(caseId) + "/upload", { method: "POST", body: fd })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, error: "HTTP " + r.status }; }); })
+      .catch(function (e) { return { ok: false, error: e.message }; });
   }
 
   function boot() {
@@ -334,5 +371,9 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 
-  window.CivilIntake = { boot: boot };
+  window.CivilIntake = {
+    boot: boot,
+    fileTo: fileTo,
+    pendingCount: function () { return pending.length; },
+  };
 })();
