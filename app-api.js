@@ -1273,6 +1273,17 @@ function registerAppApi(app) {
     console.warn("[zara-core] module load failed:", e.message);
   }
 
+  // Templates and e-signature: documents made from filed ones, signed
+  // online, filed back to the case folder (esign*.js).
+  try {
+    require("./esign").initTables().catch(e => console.warn("[esign] init:", e.message));
+    const er = require("./esign-routes");
+    er.attachStaffRoutes(civilApp, { requireBearer, requireFirmUser });
+    er.attachPublicRoutes(app);
+  } catch (e) {
+    console.warn("[esign] module load failed:", e.message);
+  }
+
   // Civil litigation module: initialize tables + register routes below.
   try {
     const civil = require("./civil-litigation");

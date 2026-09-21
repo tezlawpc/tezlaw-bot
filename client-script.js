@@ -49,6 +49,8 @@ const CLIENT_BUNDLES = [
   "zara-chat.js",
   "civil-intake.js",
   "civil-docs.js",
+  "esign-admin.js",
+  "esign-sign.js",
 ];
 
 const healed = new Set();

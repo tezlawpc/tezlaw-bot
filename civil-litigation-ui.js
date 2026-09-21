@@ -164,7 +164,10 @@ async function renderKanban(opts = {}) {
             ${totalActive} active case${totalActive === 1 ? "" : "s"} across ${board.stages.length} stages${totalUrgent ? ` · <strong style="color:#A02818;font-style:normal;">${totalUrgent} need attention</strong>` : ""}
           </div>
         </div>
-        <a href="/admin/civil/new" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;font-family:Cinzel,serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-decoration:none;">+ NEW CASE</a>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <a href="/admin/civil/templates" style="padding:10px 16px;background:#FBF3DE;color:#3E2818;border:1px solid #B8891E;border-radius:6px;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.2px;text-decoration:none;">✍ TEMPLATES</a>
+          <a href="/admin/civil/new" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;font-family:Cinzel,serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-decoration:none;">+ NEW CASE</a>
+        </div>
       </div>
       <!--CIVIL_FILTER_BANNER-->
       <!-- Stacked, not side by side. Nine columns sharing the width meant no
@@ -447,6 +450,9 @@ async function renderCaseDetail(id) {
       <!-- Hearings and the notes from them (civil-hearings.js) — rendered by civil-admin.js -->
       <div data-civil-panel="hearings"></div>
 
+      <!-- Documents out for e-signature (esign.js) — rendered by esign-admin.js -->
+      <div data-esign="case" data-esign-case="${esc(String(id))}"></div>
+
       <!-- Deadlines -->
       ${sectionHead(`⏰ PENDING DEADLINES (${deadlines.length})`,
         actionBtn("add-deadline", "+ ADD DEADLINE") + actionBtn("regenerate-deadlines", "🔄 REGENERATE", "quiet"))}
@@ -527,6 +533,7 @@ async function renderCaseDetail(id) {
         })();
       </script>
       ${civilAdminScriptTag()}
+      ${require("./client-script").clientScriptTag("esign-admin.js")}
     </div>
   `;
 }

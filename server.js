@@ -971,6 +971,27 @@ app.get("/admin/civil/wip", async (req, res) => {
   }
 });
 
+// ── Templates for e-signature ───────────────────────────────
+// Upload a document already filed; Zara turns it into a template with
+// fill-in fields and signature spots. Review, then activate. Drawn by
+// /static/esign-admin.js against /admin/civil/api/esign/*.
+app.get("/admin/civil/templates", async (req, res) => {
+  try {
+    const chrome = require("./hearing-notes");
+    const body = `
+      <div style="padding:24px;max-width:1200px;">
+        <a href="/admin/civil" style="color:#B8891E;text-decoration:none;font-size:12px;">← Back to Kanban</a>
+        <h1 style="margin:8px 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">✍ Document Templates</h1>
+        <div style="color:#7B5330;font-style:italic;margin-bottom:16px;">Upload a document you have filed before. Zara turns the case-specific parts into fill-in fields and finds where each person signs. Review it, activate it, then prepare it from any case page and send it for signature.</div>
+        <div data-esign="templates"></div>
+      </div>
+      ${require("./client-script").clientScriptTag("esign-admin.js")}`;
+    res.send(chrome.renderAdminChrome({ title: "Document Templates", body, activeItem: "civil" }));
+  } catch (err) {
+    res.status(500).send("Templates page failed: " + err.message);
+  }
+});
+
 // ── Civil: read a new matter out of its own documents ───────
 // Upload the complaint and summons (and the retainer, if signed) and Zara
 // proposes the fields that are printed on them. Nothing is saved: the answer
