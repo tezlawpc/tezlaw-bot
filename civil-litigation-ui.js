@@ -526,7 +526,11 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
       ${linked ? `Linked to <strong>${esc(summary.dropbox_path)}</strong> · last synced ${esc(synced)}${archived ? ` · <span style="color:#A02818;font-weight:700;">ARCHIVED — sync paused</span>` : ""}` : "No Dropbox folder linked yet."}
       ${summary.dropbox_sync_error ? `<div style="color:#A02818;margin-top:4px;">Last sync error: ${esc(summary.dropbox_sync_error)}</div>` : ""}
     </div>
-    <div id="dbx-suggest"></div>`;
+    <div id="dbx-suggest"></div>
+    ${archived ? "" : `<div data-civil-upload data-case-id="${esc(String(id))}"
+         data-categories="${esc(JSON.stringify((cats || []).filter(c => c.key !== "other").map(c => ({ key: c.key, label: c.label }))))}"
+         style="margin:4px 0 14px 0;"></div>
+    ${require("./client-script").clientScriptTag("civil-docs.js")}`}`;
 
   // The handlers for every button above. This used to ride along only with
   // the file list, so on a matter with no documents yet — every unlinked

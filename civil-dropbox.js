@@ -86,6 +86,14 @@ const CATEGORY_NAME_RE = DOC_CATEGORIES
              label: c.label.toLowerCase() };
   });
 
+// Checked against the file NAME before the general rules — see step 3.
+const PRIORITY_NAME_RULES = [
+  [/\bretainer\b/, "billing"],
+  [/\bfee\s*agreement\b/, "billing"],
+  [/\bengagement\s*(letter|agreement)\b/, "billing"],
+  [/\b(legal\s*)?services\s*agreement\b/, "billing"],
+];
+
 // Classify on the folder path first — a file sitting in a "Discovery"
 // subfolder is discovery even if its name is "Draft3_final.docx" — then
 // fall back to the filename.
@@ -105,7 +113,17 @@ function categorizeFile(fileName, relativeFolder = "") {
     }
   }
 
-  // 3. Filename named for the category, then by content pattern.
+  // 3. A few names that are unambiguous but that the generic patterns get
+  //    wrong because of the ORDER they are tried in. "Retainer Agreement"
+  //    contains "agreement", which the Evidence patterns claim (for
+  //    contracts in dispute) before Billing is ever reached — so every
+  //    retainer was being filed as evidence. A fee agreement is the firm's
+  //    own paperwork about the engagement, never evidence in the case.
+  for (const [re, key] of PRIORITY_NAME_RULES) {
+    if (re.test(name)) return key;
+  }
+
+  // 4. Filename named for the category, then by content pattern.
   for (const c of CATEGORY_NAME_RE) {
     if (c.re.test(name)) return c.key;
   }

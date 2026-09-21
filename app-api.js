@@ -8506,6 +8506,30 @@ function attachCivilLitigationRoutes(app, civil) {
     } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
   });
 
+  // Upload documents into the case's Dropbox folder, sorted into the right
+  // subfolder. Dropbox is the matter file; the case page only mirrors it.
+  // Mirrored to /admin/civil/api/cases/:id/upload for the web — the mirror
+  // carries the multer middleware along with the handler.
+  //   body.category  optional category key to force (else auto-sorted)
+  //   body.source    "intake" when the files came from the new-case form,
+  //                  which makes unrecognisable files default to Pleadings
+  const civilDocUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 100 * 1024 * 1024, files: 20 },
+  });
+  app.post("/api/staff/civil/cases/:id/upload", auth1, auth2, civilDocUpload.array("files", 20), async (req, res) => {
+    try {
+      const b = req.body || {};
+      const out = await require("./civil-upload").uploadToCase(parseInt(req.params.id, 10), req.files || [], {
+        category: b.category || null,
+        fallback: b.source === "intake" ? "pleadings" : null,
+        source: b.source === "intake" ? "intake" : "web",
+        by: req.user.u || req.user.n,
+      });
+      res.status(out.ok ? 200 : 502).json(out);
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
   // Re-run setup on a case that already exists: after Dropbox was down when
   // it was opened, or for any of the matters opened before this existed.
   // Safe to press twice — an existing contact is reused and an existing

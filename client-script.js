@@ -48,6 +48,7 @@ const CLIENT_BUNDLES = [
   "zara-admin.js",
   "zara-chat.js",
   "civil-intake.js",
+  "civil-docs.js",
 ];
 
 const healed = new Set();

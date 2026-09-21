@@ -839,10 +839,36 @@ app.get("/admin/civil/new", async (req, res) => {
                 msg.style.color = folderOk || p.pending ? "#166534" : "#A02818";
                 msg.textContent = "Case created — " + p.summary + ".";
               }
+
+              // The complaint, summons and retainer dropped at the top of
+              // this form are the matter's opening papers: file them into its
+              // new Dropbox folder now, sorted, rather than making the
+              // attorney upload them a second time from the case page.
+              var filedOk = true;
+              var ci = window.CivilIntake;
+              if (ci && ci.pendingCount && ci.pendingCount() > 0) {
+                btn.textContent = "FILING DOCUMENTS…";
+                var up = await ci.fileTo(d.case.id);
+                var n = (up.uploaded || []).length;
+                var bad = (up.failed || []).length;
+                filedOk = !!up.ok && !bad;
+                if (msg) {
+                  var line = document.createElement("div");
+                  line.style.color = filedOk ? "#166534" : "#A02818";
+                  line.textContent = n
+                    ? n + " document" + (n === 1 ? "" : "s") + " filed to Dropbox: " +
+                      (up.uploaded || []).map(function (u) { return u.saved_as + " → " + u.folder_label; }).join("; ") +
+                      (bad ? ". " + bad + " could not be filed — upload them again from the case page." : ".")
+                    : "The documents could not be filed to Dropbox (" + (up.error || "unknown error") +
+                      "). The case is created — upload them from the case page.";
+                  msg.appendChild(line);
+                }
+              }
+
               btn.textContent = "OPENING…";
               setTimeout(function () {
                 location.href = "/admin/civil/case/" + d.case.id;
-              }, folderOk || !p.summary ? 1100 : 3200);
+              }, (folderOk || !p.summary) && filedOk ? 1400 : 4000);
               return;
             }
             err.textContent = d.error || "Could not create the case.";
