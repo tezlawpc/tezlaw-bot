@@ -61,13 +61,56 @@ function audit(label, html) {
     try { new vm.Script(code); }
     catch (e) { bad++; console.log('  FAIL  ' + tag + ' parse: ' + e.message); return; }
     // 2. any string literal crossing a newline?
+    //
+    // This is the check that matters: the server-template-literal traps all
+    // end the same way — a \n or \' that the server consumes reaches the
+    // browser as a real newline or a bare quote, and a '...' or "..." string
+    // ends up spanning lines.
+    //
+    // Doing it per line, statelessly, produced two kinds of false positive:
+    // an apostrophe inside a double-quoted string ("didn't"), and an
+    // apostrophe inside a BROWSER-side template literal that legitimately
+    // spans lines ("don't" inside a `...` block). So the scan carries its
+    // state across lines and understands three things: which delimiter it is
+    // inside, escapes, and ${ } expressions within a template literal, where
+    // ordinary quoting rules resume.
     const offenders = [];
-    code.split('\n').forEach((l, n) => {
-      const s = l.replace(/\\./g, '').replace(/\/\/.*$/, '');
-      if ((s.match(/"/g) || []).length % 2 === 1 || (s.match(/'/g) || []).length % 2 === 1) {
-        offenders.push((n + 1) + ': ' + l.trim().slice(0, 70));
+    {
+      let quote = null;          // null | ' | " | `
+      let tmplDepth = 0;         // how many ${ } we are inside
+      const stack = [];          // template literals suspended by a ${
+      const lines = code.split('\n');
+      for (let n = 0; n < lines.length; n++) {
+        const l = lines[n];
+        let esc = false;
+        for (let i = 0; i < l.length; i++) {
+          const ch = l[i];
+          if (esc) { esc = false; continue; }
+          if (ch === '\\') { esc = true; continue; }
+
+          if (quote === '`') {
+            if (ch === '`') { quote = null; continue; }
+            if (ch === '$' && l[i + 1] === '{') {   // into an expression
+              stack.push('`'); quote = null; tmplDepth++; i++; continue;
+            }
+            continue;
+          }
+          if (quote) { if (ch === quote) quote = null; continue; }
+
+          if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+          if (ch === '}' && tmplDepth > 0) {        // back out to the literal
+            tmplDepth--; quote = stack.pop() || null; continue;
+          }
+          if (ch === '/' && l[i + 1] === '/') break;   // comment to end of line
+        }
+        // A backtick may legitimately stay open across lines. A quoted string
+        // may not — that is the bug this whole file exists to catch.
+        if (quote === '"' || quote === "'") {
+          offenders.push((n + 1) + ': ' + l.trim().slice(0, 70));
+          quote = null;   // resync so one break does not cascade
+        }
       }
-    });
+    }
     if (offenders.length) { bad++; console.log('  FAIL  ' + tag + ' unterminated string at line ' + offenders[0]); return; }
     // 3. every onclick handler defined?
     console.log('  PASS  ' + tag + ' (' + code.length + ' chars)');
@@ -82,6 +125,32 @@ function audit(label, html) {
 (async () => {
   const ui = require(REPO + '/civil-litigation-ui.js');
   console.log('\n=== inline script audit ===');
+
+  // The admin chrome carries the largest inline script in the app — the nav,
+  // the permission filter, the drawer and the active-link highlighting — and
+  // it was EXEMPT from this check, because line ~47 stubs renderAdminChrome
+  // out to keep the page bodies small. That exemption let a real instance of
+  // the exact bug this file exists to catch ship to production: a regex
+  // literal written as /\/+$/ inside a server-side template literal reached
+  // the browser as //+$/, commenting out the rest of the block and silently
+  // disabling the whole script. Audited from the real module, unstubbed.
+  {
+    const Module = require('module');
+    const keep = Module._load;
+    Module._load = function (r, ...rest) {
+      if (r === './db') return { query: async () => ({ rows: [] }) };
+      return keep.call(this, r, ...rest);
+    };
+    let chrome = null;
+    try { chrome = require(REPO + '/hearing-notes.js'); } catch (e) {
+      bad++; console.log('  FAIL  admin-chrome could not be loaded: ' + e.message);
+    }
+    Module._load = keep;
+    if (chrome && chrome.renderAdminChrome) {
+      audit('admin-chrome', chrome.renderAdminChrome({ title: 'T', body: '<div></div>', activeItem: 'civil' }));
+    }
+  }
+
   audit('case-detail', await ui.renderCaseDetail(1));
 
   // Wave B: the new panels are mounted by /static/civil-admin.js, so the page
@@ -125,7 +194,11 @@ function audit(label, html) {
   const app1 = mk('// ── Civil ⇄ Dropbox: admin-side actions', 'app.post("/admin/civil", async (req, res) => {');
   const s1 = app1.listen(0, async () => {
     audit('dropbox-console', await (await fetch('http://127.0.0.1:' + s1.address().port + '/admin/civil/dropbox')).text());
-    const app2 = mk('app.get("/admin/civil/new"', 'app.post("/admin/civil"');
+    // End the slice at the very next route, not at the create-case POST:
+    // between them now sit routes that close over module-level things this
+    // harness does not have (the multer instance the document intake uses),
+    // and evaluating those throws before the form is ever rendered.
+    const app2 = mk('app.get("/admin/civil/new"', 'app.get("/admin/civil/triage"');
     const s2 = app2.listen(0, async () => {
       audit('new-case-form', await (await fetch('http://127.0.0.1:' + s2.address().port + '/admin/civil/new')).text());
       console.log('\n' + '='.repeat(48) + `\n${total} script block(s), ${bad} problem(s)\n` + '='.repeat(48));

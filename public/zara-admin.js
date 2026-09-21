@@ -492,6 +492,30 @@
           : null,
       ]));
 
+      host.appendChild(card([
+        h("div", { style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap;" }, [
+          btn("Preview the weekly digest", function () {
+            var out = document.getElementById("zara-digest-preview");
+            if (out) { out.parentNode.removeChild(out); return; }
+            api("/digest", { method: "POST", body: { preview: true } }).then(function (r) {
+              var box = h("div", { id: "zara-digest-preview", style: "margin-top:12px;" }, [
+                h("pre", {
+                  text: r.preview || "Nothing pending — no digest would be sent this week.",
+                  style: "white-space:pre-wrap;font-size:12px;line-height:1.5;background:#fff;border:1px solid " +
+                         C.border + ";border-radius:4px;padding:12px;color:" + C.walnut + ";",
+                }),
+              ]);
+              host.querySelector("#zara-digest-host").appendChild(box);
+            }).catch(function (e) { alert(e.message); });
+          }, "quiet"),
+          h("span", {
+            text: "Mondays 08:00 Pacific, and only when lessons are actually waiting.",
+            style: "font-size:12px;color:" + C.muted + ";font-style:italic;",
+          }),
+        ]),
+        h("div", { id: "zara-digest-host" }),
+      ]));
+
       host.appendChild(heading("Model usage, last 7 days",
         "Which model actually answered. A rising 'fallbacks' number means Anthropic was failing and Zara quietly carried on — worth knowing."));
 
