@@ -1883,8 +1883,28 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     // reload, so the highlight has to follow them.
     window.addEventListener("hashchange", highlightCurrentNav);
 
-    fetch("/admin/whoami").then(r => r.json()).then(d => {
-      if (!d.authenticated) return;
+    // ── Why the sidebar used to flash on every click ──────────
+    //
+    // The admin is server-rendered, so each nav click is a full page load.
+    // That alone is a brief flash. What made it feel like the whole app was
+    // reloading was this: the nav ships with visibility:hidden and is only
+    // revealed after /admin/whoami comes back, so that items the user's role
+    // cannot reach are filtered out before they are ever visible. Correct,
+    // but it meant the entire menu vanished and reappeared on every single
+    // navigation, gated on a network round trip.
+    //
+    // The user's role does not change between two clicks. So the answer is
+    // cached in sessionStorage and applied SYNCHRONOUSLY on the next load —
+    // the nav is drawn correctly on first paint and never blinks. The fetch
+    // still runs, and re-applies, so a role change lands on the next page.
+    //
+    // This is display-only. Every route is authorised server-side; hiding a
+    // link the user cannot use is a courtesy, not a control, so caching it
+    // for the length of a browser session gives nothing away.
+    const WHOAMI_KEY = "tez_admin_whoami_v1";
+
+    function applyWhoami(d) {
+      if (!d || !d.authenticated) { revealNav(); return; }
       const footer = document.getElementById("sidebar-user");
       const avatar = document.getElementById("user-avatar");
       const nameEl = document.getElementById("user-name");
@@ -1916,13 +1936,33 @@ function renderAdminChrome({ title, body, activeItem = null }) {
         const visibleLinks = Array.from(links).filter(l => l.style.display !== "none");
         if (visibleLinks.length === 0) section.style.display = "none";
       });
-      // Reveal the nav now that filtering is done (prevents flash-of-forbidden-items)
+      revealNav();
+    }
+
+    function revealNav() {
       const nav = document.querySelector("aside nav");
       if (nav) nav.style.visibility = "visible";
+    }
+
+    // Apply the cached answer first, before anything is painted. On a repeat
+    // navigation this is the whole story and the nav never blinks.
+    let cachedWhoami = null;
+    try { cachedWhoami = JSON.parse(sessionStorage.getItem(WHOAMI_KEY) || "null"); }
+    catch (e) { cachedWhoami = null; }
+    if (cachedWhoami) applyWhoami(cachedWhoami);
+
+    // Then confirm with the server. On the first page of a session this is
+    // what reveals the nav; afterwards it is a silent revalidation.
+    fetch("/admin/whoami").then(r => r.json()).then(d => {
+      try { sessionStorage.setItem(WHOAMI_KEY, JSON.stringify(d)); } catch (e) { /* private mode */ }
+      // Permissions may have been revoked since the cached copy, so re-run
+      // the filter from scratch rather than trusting what is on screen.
+      document.querySelectorAll("[data-perm]").forEach(el => { el.style.display = ""; });
+      document.querySelectorAll(".nav-section").forEach(sec => { sec.style.display = ""; });
+      applyWhoami(d);
     }).catch(() => {
-      // If whoami fails, still reveal the nav — users need to see something
-      const nav = document.querySelector("aside nav");
-      if (nav) nav.style.visibility = "visible";
+      // Offline or the endpoint is down: show the nav rather than nothing.
+      revealNav();
     });
 
     // Register PWA service worker for iOS/Android home screen install

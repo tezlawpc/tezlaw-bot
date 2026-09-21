@@ -48,7 +48,6 @@ function activeFor(url) {
   const { window } = dom;
   // whoami is irrelevant to highlighting; stub it so the script doesn't hang.
   window.fetch = () => Promise.resolve({ json: () => Promise.resolve({ authenticated: false }) });
-  window.navigator.serviceWorker = undefined;
 
   // Run only the page's own inline scripts.
   const scripts = Array.from(window.document.querySelectorAll("script:not([src])"));
@@ -122,5 +121,84 @@ console.log("\nThe regression that started this");
     () => !act.includes("/admin/civil"));
 }
 
-console.log("\n" + (failures ? `${failures} FAILED` : "ALL NAV-HIGHLIGHT CHECKS PASSED"));
-process.exit(failures ? 1 : 0);
+(async () => {
+  // ════════════════════════════════════════════════════════════
+  //  The sidebar must not blink on every navigation.
+  //
+  //  The nav ships hidden and was revealed only after /admin/whoami returned,
+  //  so the whole menu vanished and reappeared on every click — on a
+  //  server-rendered admin, that is every click. The role is cached for the
+  //  session and applied before first paint; the fetch still runs and
+  //  re-applies.
+  // ════════════════════════════════════════════════════════════
+  console.log("\nThe sidebar does not blink between pages");
+  {
+    const WHO = { authenticated: true, name: "JJ Zhang", role: "admin", role_label: "Administrator",
+                  permissions: { "civil.read": true, "users.manage": true } };
+
+    function boot(url, seeded, { failFetch = false } = {}) {
+      const dom = new JSDOM(html, { url: "https://tezlaw-bot.onrender.com" + url, runScripts: "outside-only" });
+      const { window } = dom;
+      const store = {};
+      Object.defineProperty(window, "sessionStorage", {
+        value: {
+          getItem: k => (k in store ? store[k] : null),
+          setItem: (k, v) => { store[k] = String(v); },
+          removeItem: k => { delete store[k]; },
+        },
+        configurable: true,
+      });
+      if (seeded) window.sessionStorage.setItem("tez_admin_whoami_v1", JSON.stringify(WHO));
+
+      let resolveFetch;
+      const pending = new Promise(res => { resolveFetch = res; });
+      window.fetch = () => failFetch
+        ? Promise.reject(new Error("offline"))
+        : pending.then(() => ({ json: () => Promise.resolve(WHO) }));
+    
+      for (const sc of Array.from(window.document.querySelectorAll("script:not([src])"))) {
+        try { window.eval(sc.textContent); } catch (e) { /* unrelated blocks */ }
+      }
+      const nav = window.document.querySelector("aside nav");
+      return { window, nav, store, settle: async () => { resolveFetch(); await new Promise(r => setTimeout(r, 30)); } };
+    }
+
+    // First page of a session: nothing cached, so the nav waits — that is
+    // correct, it must not flash forbidden items.
+    const cold = boot("/admin/civil", false);
+    check("with no cached role, the nav stays hidden until whoami answers",
+      () => cold.nav.style.visibility !== "visible");
+    await cold.settle();
+    check("…then becomes visible", () => cold.nav.style.visibility === "visible");
+    check("…and the answer is cached for next time",
+      () => !!cold.store["tez_admin_whoami_v1"]);
+
+    // Every subsequent navigation: visible immediately, before any fetch
+    // resolves. This is the fix.
+    const warm = boot("/admin/civil/stage/discovery", true);
+    check("with a cached role, the nav is visible on first paint — no blink",
+      () => warm.nav.style.visibility === "visible");
+    check("…and the permission filter has already run", () => {
+      const hidden = Array.from(warm.window.document.querySelectorAll("[data-perm]"))
+        .filter(el => el.style.display === "none");
+      const allowed = Array.from(warm.window.document.querySelectorAll('[data-perm="civil.read"]'));
+      return allowed.every(el => el.style.display !== "none") && hidden.length > 0;
+    });
+    check("…and the highlight is already on the right item", () => {
+      const act = Array.from(warm.window.document.querySelectorAll(".nav-link.active"));
+      return act.length === 1 && act[0].getAttribute("href") === "/admin/civil/stage/discovery";
+    });
+    await warm.settle();
+    check("…and it stays visible after the fetch re-applies",
+      () => warm.nav.style.visibility === "visible");
+
+    // A failed whoami must show the nav rather than leave a blank rail.
+    const broken = boot("/admin/civil", false, { failFetch: true });
+    await broken.settle();
+    check("if whoami fails entirely, the nav is shown anyway",
+      () => broken.nav.style.visibility === "visible");
+  }
+
+  console.log("\n" + (failures ? `${failures} FAILED` : "ALL NAV-HIGHLIGHT CHECKS PASSED"));
+  process.exit(failures ? 1 : 0);
+})();
