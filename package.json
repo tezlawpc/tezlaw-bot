@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node scripts/check-syntax.js && node scripts/check-inline-scripts.js && node scripts/check-civil-parity.js && node scripts/check-jurisdictions.js && node scripts/check-utbms-phases.js && node scripts/check-stage-workspace.js && node scripts/check-civil-admin-ui.js && node scripts/check-stage-page.js && node scripts/check-admin-auth.js && node scripts/check-panel-embed.js && node scripts/check-zara-core.js && node scripts/check-zara-admin-ui.js && node scripts/check-nav-highlight.js && node scripts/check-civil-intake.js",
+    "test": "node scripts/check-syntax.js && node scripts/check-inline-scripts.js && node scripts/check-civil-parity.js && node scripts/check-jurisdictions.js && node scripts/check-utbms-phases.js && node scripts/check-stage-workspace.js && node scripts/check-civil-admin-ui.js && node scripts/check-stage-page.js && node scripts/check-admin-auth.js && node scripts/check-panel-embed.js && node scripts/check-zara-core.js && node scripts/check-zara-admin-ui.js && node scripts/check-nav-highlight.js && node scripts/check-civil-intake.js && node scripts/check-kanban-layout.js",
     "check:syntax": "node scripts/check-syntax.js",
     "check:inline-scripts": "node scripts/check-inline-scripts.js",
     "check:civil-parity": "node scripts/check-civil-parity.js",
@@ -15,8 +15,8 @@
     "check:civil-admin-ui": "node scripts/check-civil-admin-ui.js",
     "check:stage-page": "node scripts/check-stage-page.js",
     "check:admin-auth": "node scripts/check-admin-auth.js",
-    "check:civil-intake": "node scripts/check-civil-intake.js",
-    "check:panel-embed": "node scripts/check-panel-embed.js && node scripts/check-zara-core.js && node scripts/check-zara-admin-ui.js && node scripts/check-nav-highlight.js && node scripts/check-civil-intake.js"
+    "check:civil-intake": "node scripts/check-civil-intake.js && node scripts/check-kanban-layout.js",
+    "check:panel-embed": "node scripts/check-panel-embed.js && node scripts/check-zara-core.js && node scripts/check-zara-admin-ui.js && node scripts/check-nav-highlight.js && node scripts/check-civil-intake.js && node scripts/check-kanban-layout.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",

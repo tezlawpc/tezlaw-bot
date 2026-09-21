@@ -139,13 +139,14 @@ async function renderKanban(opts = {}) {
           <div style="display:flex;align-items:center;gap:9px;min-width:0;">
             <div style="font-family:Cinzel,serif;font-size:12px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;">${esc(stage.label)}</div>
             ${urgentCount ? `<span style="font-size:10px;font-weight:700;color:#A02818;letter-spacing:.3px;">&#9888; ${urgentCount} urgent</span>` : ""}
+            ${cases.length > 8 ? `<span style="font-size:10px;color:#7B5330;font-style:italic;">scrolls &#8597;</span>` : ""}
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
             <a href="/admin/civil/stage/${esc(stage.key)}" style="font-size:10.5px;color:#B8891E;text-decoration:none;">open workspace &rarr;</a>
             <div style="min-width:22px;height:20px;padding:0 7px;border-radius:10px;background:${stage.color};color:#FBF3DE;font-family:Cinzel,serif;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;">${cases.length}</div>
           </div>
         </summary>
-        <div style="padding:7px;">${cards}</div>
+        <div class="civil-col-scroll" style="padding:7px;max-height:46vh;overflow-y:auto;overscroll-behavior:contain;">${cards}</div>
       </details>
     `;
   }).join("");
@@ -170,6 +171,21 @@ async function renderKanban(opts = {}) {
            case name was ever fully readable; down the page each row gets the
            whole width. Stages stay collapsible, so the lifecycle order is
            still visible at a glance even with a stage of 115 matters open. -->
+      <style>
+        /* Each stage band scrolls inside itself, capped at 46vh — roughly
+           eight rows. Without this, Intake alone ran 115 rows and the page
+           was six screens long, so the lifecycle order the board exists to
+           show was never visible at once. Now every stage header is on
+           screen together and you scroll inside whichever one you are
+           working in. */
+        .civil-col-scroll::-webkit-scrollbar { width: 9px; }
+        .civil-col-scroll::-webkit-scrollbar-track { background: #EFE3C6; }
+        .civil-col-scroll::-webkit-scrollbar-thumb { background: #C9B68C; border-radius: 5px; }
+        .civil-col-scroll::-webkit-scrollbar-thumb:hover { background: #B8891E; }
+        .civil-col-scroll { scrollbar-width: thin; scrollbar-color: #C9B68C #EFE3C6; }
+        .civil-col > summary::-webkit-details-marker { display: none; }
+        .civil-col > summary:hover { background: #F7EFD9; }
+      </style>
       <div style="max-width:1200px;">
         ${stagesHtml}
       </div>

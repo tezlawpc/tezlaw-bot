@@ -11865,6 +11865,21 @@ app.listen(PORT, async () => {
     console.error("❌ Legal digest scheduler failed:", e.message);
   }
 
+  // ── Client bundles in the wrong folder ───────────────────
+  // GitHub's web uploader flattens folder paths, and so does unzipping a
+  // delivery carelessly. Four times a client bundle has landed in the repo
+  // root instead of public/, and every time the page came up empty or
+  // banner'd until someone moved one file by hand. Now the server moves it.
+  try {
+    const moved = require("./client-script").healClientBundles();
+    if (moved.length) {
+      console.warn("⚠️  Rescued client bundles from the repo root:", moved.join(", "),
+        "— move them in git so this stops happening.");
+    }
+  } catch (e) {
+    console.error("❌ client bundle check failed:", e.message);
+  }
+
   // ── Zara's weekly lesson queue ───────────────────────────
   // JJ is the only approver, so proposals wait on him. Without this the
   // queue is silent: Zara keeps repeating a mistake somebody already

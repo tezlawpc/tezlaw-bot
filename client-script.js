@@ -24,6 +24,59 @@ const fs = require("fs");
 const path = require("path");
 
 const PUBLIC_DIR = path.join(__dirname, "public");
+const ROOT_DIR = __dirname;
+
+// ── Self-healing ────────────────────────────────────────────
+//
+// Four separate times now, a client bundle has arrived in the repository
+// ROOT instead of public/ — GitHub's web "Upload files" flattens folder
+// paths, and unzipping a delivery without preserving folders does the
+// same. Each time the symptom was identical (a red banner, or worse, a
+// silently empty page) and each time the fix was a human moving one file.
+//
+// The server can just do it. If a bundle is missing from public/ but an
+// identically-named file is sitting at the root, copy it across and say
+// so in the log. Deliberately one-directional and only when public/ has
+// nothing: a stale root copy can never overwrite the real one, which
+// matters because this repo currently has four such strays.
+//
+// Only these names are ever moved. Copying anything that happened to be
+// at the root into a publicly-served directory is how a .env ends up on
+// the internet.
+const CLIENT_BUNDLES = [
+  "civil-admin.js",
+  "zara-admin.js",
+  "zara-chat.js",
+  "civil-intake.js",
+];
+
+const healed = new Set();
+
+function healOne(file) {
+  const base = path.basename(file);
+  if (!CLIENT_BUNDLES.includes(base) || healed.has(base)) return false;
+  healed.add(base);
+
+  const stray = path.join(ROOT_DIR, base);
+  if (!fs.existsSync(stray)) return false;
+  try {
+    fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+    fs.copyFileSync(stray, path.join(PUBLIC_DIR, base));
+    console.warn(
+      `[client-script] ${base} was in the repository root, not public/. ` +
+      `Copied it into public/ so the page works. Move it in git to make this permanent.`
+    );
+    return true;
+  } catch (e) {
+    console.error(`[client-script] could not rescue ${base} from the root: ${e.message}`);
+    return false;
+  }
+}
+
+/** Run once at boot so a stray bundle is fixed before the first request. */
+function healClientBundles() {
+  return CLIENT_BUNDLES.filter(f => !fs.existsSync(path.join(PUBLIC_DIR, f)) && healOne(f));
+}
 
 function esc(t) {
   return String(t == null ? "" : t)
@@ -36,7 +89,11 @@ function esc(t) {
  * @returns {string}     a <script> tag, or a visible diagnostic banner
  */
 function clientScriptTag(file) {
-  const full = path.join(PUBLIC_DIR, path.basename(file));
+  // Reduced to a bare filename before anything else touches it, so neither
+  // the filesystem lookup nor the banner ever sees a path.
+  file = path.basename(String(file || ""));
+  const full = path.join(PUBLIC_DIR, file);
+  if (!fs.existsSync(full)) healOne(file);   // a stray at the root is not a failure
   let v;
   try {
     // Base 36 of the whole-millisecond mtime. `| 0` would wrap a
@@ -60,9 +117,11 @@ function missingBanner(file, why) {
         page can load. The panels below will stay empty until it is uploaded.
       </div>
       <div style="font-size:12px;color:#7B5330;margin-top:8px;font-style:italic;">
-        Fix: upload <code>${esc(file)}</code> into the repository's <code>public/</code> folder —
-        the same folder as <code>tez-shield.png</code> — and redeploy. It is a client-side file;
-        putting it in the repository root will not work.
+        Fix: put <code>${esc(file)}</code> in the repository's <code>public/</code> folder — the same
+        folder as <code>tez-shield.png</code> — and redeploy. If the file is in the repository root
+        instead, the server moves it across by itself on the next boot; this banner means it is not
+        in the repository at all. GitHub's web uploader flattens folders, so add it with
+        <code>git add public/${esc(file)}</code> rather than by drag-and-drop.
       </div>
     </div>`;
 }
@@ -80,4 +139,7 @@ function auditClientScripts(files) {
   });
 }
 
-module.exports = { clientScriptTag, auditClientScripts, PUBLIC_DIR };
+module.exports = {
+  clientScriptTag, auditClientScripts, healClientBundles,
+  PUBLIC_DIR, ROOT_DIR, CLIENT_BUNDLES,
+};
