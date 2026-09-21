@@ -2803,7 +2803,23 @@ function registerAppApi(app) {
       // SOL on this one?" is unanswerable without it, and asking the user to
       // re-type the case name they are already looking at is the kind of
       // friction that stops people using the thing.
-      const pageContext = String(req.body?.context || "").slice(0, 600);
+      let pageContext = String(req.body?.context || "").slice(0, 600);
+
+      // On a civil case page, hand her the matter itself. "What's the status
+      // of this one?" then needs no lookup: the answer is already in front of
+      // her, current as of this message. A failure here costs nothing — she
+      // still has the get_civil_matter tool.
+      try {
+        const snap = require("./civil-snapshot");
+        const caseId = snap.caseIdFromContext(pageContext);
+        if (caseId) {
+          const s2 = await snap.snapshot(caseId);
+          pageContext += "\n\nMATTER SNAPSHOT (civil matter #" + caseId + ", live from the case file):\n" +
+            JSON.stringify(s2).slice(0, 14000);
+        }
+      } catch (e) {
+        console.warn("[api chat staff] matter snapshot:", e.message);
+      }
 
       const answer = await zaraChat.chat({
         surface: "staff",

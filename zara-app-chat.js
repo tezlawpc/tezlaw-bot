@@ -25,6 +25,24 @@ const core = require("./zara-core");
 
 const STAFF_TOOLS = [
   {
+    name: "get_civil_matter",
+    description: "Everything on one civil litigation matter: case details and key dates, pending deadlines, upcoming hearings and the notes/rulings from past ones, unbilled and billed time, invoices, and recent activity. Use whenever the user asks about a civil case — status, what is due, next hearing, what happened at the last hearing, billing. If they are on a case page, the page context gives the id.",
+    input_schema: {
+      type: "object",
+      properties: { case_id: { type: "number", description: "The civil matter id (e.g. 223)." } },
+      required: ["case_id"],
+    },
+  },
+  {
+    name: "find_civil_matter",
+    description: "Find civil litigation matters by caption, party, case number or client. Returns ids to pass to get_civil_matter.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "Part of the case name, a party, or the case number." } },
+      required: ["query"],
+    },
+  },
+  {
     name: "count_active_cases",
     description: "Count how many currently open/active cases (tasks) the firm has, optionally grouped by matter type. Returns totals broken down by matter type (Immigration, Personal Injury, etc.).",
     input_schema: {
@@ -186,11 +204,25 @@ const STAFF_TOOLS = [
 ];
 
 // Tool executors — each returns a plain object; caller stringifies for tool_result content.
+// Session tokens carry the role as `r` ({ uid, u, n, r }); older callers
+// passed `role`. Reading only `role` is what silently switched every staff
+// tool off — Zara was told she had tools and was never given any.
+function roleOf(user) {
+  return (user && (user.role || user.r)) || null;
+}
+
 async function executeTool(db, user, name, args) {
-  const isAdmin = user.role === "admin";
+  const isAdmin = roleOf(user) === "admin";
   const userId = user.uid;
 
   try {
+    if (name === "get_civil_matter") {
+      return await require("./civil-snapshot").snapshot(args.case_id);
+    }
+    if (name === "find_civil_matter") {
+      return { matters: await require("./civil-snapshot").findMatters(args.query) };
+    }
+
     if (name === "count_active_cases") {
       const params = [];
       let where = "1=1";
@@ -589,7 +621,8 @@ async function chat({
   message, history = [], db, user,
 }) {
   // Only enable tools when we have both db + a staff/admin user
-  const useTools = !!(db && user && user.role && user.role !== "client");
+  const role = roleOf(user);
+  const useTools = !!(db && user && role && role !== "client");
 
   const out = await core.think({
     surface,
@@ -645,6 +678,10 @@ Answer legal questions substantively and professionally, drawing on:
 - Estate planning, real estate, landlord/tenant
 
 Give concise but substantive answers. Cite relevant statutes, case law, or agency guidance when helpful. For firm-specific questions, use tools first, then answer with the actual data. Never say "I don't have access to your case management system" — you DO have access via the tools above.
+
+EVERY REPLY IS FINAL. The user cannot receive a second message from you until they write again, so never end a reply with "let me pull that together", "one moment", "I'll look into it" or any promise of work to come — that leaves them waiting for something that will never arrive. If you need data, call the tool NOW, in this reply, and answer with what it returns. If you cannot get it, say so plainly and say what they can do instead.
+
+CIVIL MATTERS: for anything about a civil litigation case — status, deadlines, hearings, hearing notes, billing — call get_civil_matter. If the page context already includes a MATTER SNAPSHOT, answer from it directly; it is current as of this message. Lead with what is most urgent (a deadline or hearing in the next two weeks, anything past due), then the rest.
 
 Format: use short paragraphs, bullet points for lists, and bold for key terms. No excessive markdown.
 

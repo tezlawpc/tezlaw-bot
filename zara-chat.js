@@ -234,7 +234,14 @@
     log.push({ role: "user", text: q });
     busy = true; draw(); saveLog();
 
+    // Never leave "Zara is thinking…" up indefinitely. A tool-using answer
+    // takes a few seconds, occasionally twenty; past ninety something is
+    // wrong, and the person deserves to be told rather than left waiting.
+    var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 90000);
+
     fetch("/admin/zara/api/chat", {
+      signal: ctrl ? ctrl.signal : undefined,
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
@@ -254,9 +261,12 @@
         log.push({ role: "assistant", text: typeof a === "string" ? a : JSON.stringify(a) });
       })
       .catch(function (e) {
-        log.push({ role: "assistant", text: "Couldn't reach Zara: " + e.message, error: true });
+        var msg = e && e.name === "AbortError"
+          ? "Zara took more than 90 seconds and the request was stopped. Please ask again."
+          : "Couldn't reach Zara: " + e.message;
+        log.push({ role: "assistant", text: msg, error: true });
       })
-      .then(function () { busy = false; draw(); saveLog(); });
+      .then(function () { clearTimeout(timer); busy = false; draw(); saveLog(); });
   }
 
   function setOpen(open) {
