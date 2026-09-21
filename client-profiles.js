@@ -181,13 +181,19 @@ async function aggregateClients() {
   // flow. These never appear in hearing_notes / individual_hearing_notes,
   // so without this merge they'd be invisible on the web /admin/clients
   // page even though the row exists.
+  //
+  // Matched by matter_type as well as by the 'contact-' key prefix. Opening
+  // a civil matter creates the client's contact row under the key the
+  // attorney typed on the form ("ruiz-ana"), which has no prefix — and a
+  // prefix-only match made those clients invisible here even though the
+  // row had been written. That was the "client profile is not created" bug.
   try {
     const contactRes = await db.query(`
       SELECT DISTINCT ON (client_key)
              client_key, client_name, a_number, client_phone, client_email,
              referral_source, description, assigned_to, created_at
       FROM tasks
-      WHERE client_key IS NOT NULL AND client_key LIKE 'contact-%'
+      WHERE client_key IS NOT NULL AND (client_key LIKE 'contact-%' OR matter_type = 'Contact')
       ORDER BY client_key, created_at DESC
     `);
     for (const row of contactRes.rows) {

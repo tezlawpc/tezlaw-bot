@@ -1965,7 +1965,7 @@ function registerAppApi(app) {
           ? `SELECT DISTINCT ON (client_key)
                     client_key, client_name, a_number, client_phone, client_email, matter_type
              FROM tasks
-             WHERE client_key IS NOT NULL AND client_key LIKE 'contact-%'
+             WHERE client_key IS NOT NULL AND (client_key LIKE 'contact-%' OR matter_type = 'Contact')
                AND (LOWER(client_name) LIKE $1 OR LOWER(client_key) LIKE $1
                     OR LOWER(a_number) LIKE $1 OR client_phone LIKE $1
                     OR LOWER(client_email) LIKE $1)
@@ -1973,7 +1973,7 @@ function registerAppApi(app) {
           : `SELECT DISTINCT ON (client_key)
                     client_key, client_name, a_number, client_phone, client_email, matter_type
              FROM tasks
-             WHERE client_key IS NOT NULL AND client_key LIKE 'contact-%'
+             WHERE client_key IS NOT NULL AND (client_key LIKE 'contact-%' OR matter_type = 'Contact')
              ORDER BY client_key, created_at DESC LIMIT 200`;
         const cParams = q && q.length >= 2 ? [`%${q.toLowerCase()}%`] : [];
         const cR = await db.query(cQ, cParams);

@@ -55,6 +55,8 @@ function reset(over = {}) {
     dbDown: false,
     dbxDown: false,
     slowMs: 0,
+    roster: [],
+    rosterDown: false,
   }, over);
 }
 reset();
@@ -106,6 +108,13 @@ const fakeCdx = {
   syncCase: async () => { S.synced++; return { ok: true }; },
 };
 
+const fakeCp = {
+  aggregateClients: async () => {
+    if (S.rosterDown) throw new Error("roster unavailable");
+    return S.roster;
+  },
+};
+
 const fakeCivil = {
   logEvent: async (id, ev) => { if (S.dbDown) throw new Error("db down"); S.events.push({ id, ...ev }); },
 };
@@ -117,6 +126,7 @@ const P = (() => {
     if (r === "./dropbox-integration") return fakeDbx;
     if (r === "./civil-dropbox") return fakeCdx;
     if (r === "./civil-litigation") return fakeCivil;
+    if (r === "./client-profiles") return fakeCp;
     return orig.call(this, r, ...rest);
   };
   const m = require("../civil-provision");
@@ -172,6 +182,20 @@ const caseRow = (over = {}) => Object.assign({
   let c = await P.ensureClientProfile(caseRow({ client_key: "existing-client" }));
   check("a client already on file is reused", () => c.created === false && c.reason === "already on file");
   check("…and nothing is inserted", () => S.inserts.length === 0);
+
+  // The immigration clients in the form's dropdown have keys like
+  // "n-ana-ruiz" and live in hearing notes, not in tasks. Checking tasks
+  // alone would write a duplicate contact for every one of them.
+  reset({ roster: [{ key: "n-ana-ruiz", client_name: "Ana Ruiz" }] });
+  c = await P.ensureClientProfile(caseRow({ client_key: "n-ana-ruiz" }));
+  check("an immigration client picked from the dropdown is recognised", () =>
+    c.created === false && c.reason === "already on file" && c.name === "Ana Ruiz");
+  check("…and no duplicate contact is written for them", () => S.inserts.length === 0);
+
+  reset({ rosterDown: true });
+  c = await P.ensureClientProfile(caseRow({ client_key: "existing-client" }));
+  check("with the roster down, the narrower check still finds a contact", () =>
+    c.created === false && c.reason === "already on file");
 
   reset();
   c = await P.ensureClientProfile(caseRow(), { clientName: "Ana Ruiz", createdBy: "jj" });
@@ -270,6 +294,32 @@ const caseRow = (over = {}) => Object.assign({
   reset();
   rep = await P.provisionWithin(caseRow(), {}, 2000);
   check("a quick setup comes back complete, not pending", () => !rep.pending && rep.dropbox.created);
+
+  console.log("\n── The contact is actually visible ─────────────");
+  // The bug JJ hit: the contact row was written, under the key typed on the
+  // form ("ruiz-ana"), but every reader of the client list only matched keys
+  // starting "contact-". The row existed; no page could see it. Every one of
+  // those readers must match on matter_type as well.
+  const readers = [
+    ["client-profiles.js", "the web client list"],
+    ["app-api.js", "the app's client list"],
+    ["mobile-app.js", "client search"],
+  ];
+  readers.forEach(([file, what]) => {
+    const src = fs.readFileSync(path.join(REPO, file), "utf8");
+    const prefixOnly = (src.match(/client_key IS NOT NULL AND client_key LIKE 'contact-%'/g) || []).length;
+    const widened = (src.match(/client_key LIKE 'contact-%' OR matter_type = 'Contact'/g) || []).length;
+    check(`${what} finds contacts whatever their key looks like`, () =>
+      (prefixOnly === 0 && widened > 0) || `${prefixOnly} prefix-only queries left in ${file}`);
+  });
+  const provSrc = fs.readFileSync(path.join(REPO, "civil-provision.js"), "utf8");
+  check("the contact this module writes is typed 'Contact', which those readers match", () =>
+    /matter_type[^)]*\)\s*VALUES \([^)]*'Contact'/.test(provSrc));
+
+  reset({ dbDown: true, roster: [] });
+  rep = await P.provisionNewCase(caseRow());
+  check("a client profile that could not be made is SAID in the summary", () =>
+    /no client profile/.test(rep.summary) || rep.summary);
 
   console.log("\n── Wiring ──────────────────────────────────────");
   const server = fs.readFileSync(path.join(REPO, "server.js"), "utf8");

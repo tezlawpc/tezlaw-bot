@@ -111,6 +111,22 @@ async function ensureClientProfile(caseRow, { createdBy = null, clientName = nul
   const key = String(caseRow.client_key || "").trim();
   if (!key) return { key: null, created: false, reason: "the case has no client key" };
 
+  // "Already a client" means already in the client roster — which is built
+  // from hearing notes, the Dropbox mapping AND contact rows, not from the
+  // tasks table alone. Checking tasks only would miss every immigration
+  // client (keys like "n-ana-ruiz" or "a-123456789") picked from the form's
+  // dropdown, and write a duplicate contact row for each of them.
+  try {
+    const cp = require("./client-profiles");
+    const roster = await cp.aggregateClients();
+    const hit = roster.find(x => x && x.key === key);
+    if (hit) {
+      return { key, created: false, name: hit.client_name || key, reason: "already on file" };
+    }
+  } catch (e) {
+    // Roster unavailable: fall through to the narrower tasks check rather
+    // than guessing either way.
+  }
   try {
     const existing = await db.query(
       `SELECT client_name FROM tasks WHERE client_key = $1 ORDER BY created_at ASC LIMIT 1`,
@@ -280,6 +296,10 @@ async function provisionNewCase(caseRow, { createdBy = null, clientName = null, 
   const bits = [];
   if (report.client && report.client.created) bits.push(`client profile created (${report.client.name})`);
   else if (report.client && report.client.reason === "already on file") bits.push("client already on file");
+  else if (report.client && (report.client.error || report.client.reason)) {
+    // Said out loud: a missing client profile used to fail silently.
+    bits.push(`no client profile — ${report.client.error || report.client.reason}`);
+  }
   if (report.dropbox && report.dropbox.created) bits.push(`Dropbox folder created at ${report.dropbox.path}`);
   else if (report.dropbox && report.dropbox.adopted) bits.push(`linked to the existing Dropbox folder ${report.dropbox.path}`);
   else if (report.dropbox && (report.dropbox.reason || report.dropbox.error)) {
