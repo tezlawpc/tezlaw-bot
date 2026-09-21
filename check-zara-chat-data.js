@@ -162,7 +162,7 @@ const chatMod = require("../zara-app-chat");
 
   console.log("\n── The widget never waits forever ──────────────");
   const js = fs.readFileSync(path.join(REPO, "public", "zara-chat.js"), "utf8");
-  check("the request is aborted after 90 seconds", () => /setTimeout\(function \(\) \{ if \(ctrl\) ctrl\.abort\(\); \}, 90000\)/.test(js));
+  check("the request is aborted after 3 minutes", () => /setTimeout\(function \(\) \{ if \(ctrl\) ctrl\.abort\(\); \}, 180000\)/.test(js));
   const dom = new JSDOM(`<!doctype html><html><body><h1>x</h1></body></html>`, { runScripts: "outside-only", url: "https://tezlawfirm.com/admin/civil/case/223" });
   const w = dom.window;
   w.fetch = () => { const e = new Error("aborted"); e.name = "AbortError"; return Promise.reject(e); };
@@ -173,7 +173,7 @@ const chatMod = require("../zara-app-chat");
   ta.value = "status?";
   ta.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter" }));
   await new Promise(r => setTimeout(r, 30));
-  check("a timed-out request says so plainly", () => /more than 90 seconds/.test(w.document.body.textContent));
+  check("a timed-out request says so plainly", () => /more than 3 minutes/.test(w.document.body.textContent));
   check("…and is not left on \"thinking\"", () => !/Zara is thinking/.test(w.document.body.textContent));
 
   console.log("\n" + (failures ? `${failures} FAILED` : "ALL ZARA-CHAT-DATA CHECKS PASSED"));

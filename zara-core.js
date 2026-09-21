@@ -458,7 +458,7 @@ const PROVIDERS = {
   anthropic: {
     name: "anthropic",
     enabled: () => !!process.env.ANTHROPIC_API_KEY,
-    async call({ model, system, messages, maxTokens, tools, timeout }) {
+    async call({ model, system, messages, maxTokens, tools, timeout, toolChoice }) {
       const body = {
         model,
         max_tokens: maxTokens,
@@ -468,6 +468,7 @@ const PROVIDERS = {
         messages,
       };
       if (tools && tools.length) body.tools = tools;
+      if (tools && tools.length && toolChoice) body.tool_choice = toolChoice;
       const res = await axios.post("https://api.anthropic.com/v1/messages", body, {
         headers: {
           "content-type": "application/json",
@@ -592,12 +593,22 @@ async function think(opts = {}) {
 
     try {
       let current = messages;
-      for (let round = 0; round < maxToolRounds; round++) {
+      // Text she writes alongside a tool call ("Here is my analysis... let me
+      // also check the notes") used to be thrown away: only the LAST round's
+      // text was returned. When that last round came back empty, which
+      // happens when she has already said everything before the lookup, the
+      // whole answer vanished and the user saw "(no response)".
+      const said = [];
+      let nudged = false;
+      for (let round = 0; round < maxToolRounds + 1; round++) {
         const out = await provider.call({
           model, system, messages: current,
           maxTokens: maxTokens || spec.max_tokens,
           tools, timeout,
+          // After the nudge below she must answer in words, not call more tools.
+          toolChoice: nudged ? { type: "none" } : undefined,
         });
+        if (out.text && out.stop_reason === "tool_use") said.push(out.text);
 
         if (out.stop_reason === "tool_use" && onToolUse) {
           const uses = (out.blocks || []).filter(b => b.type === "tool_use");
@@ -620,13 +631,42 @@ async function think(opts = {}) {
           }
         }
 
+        let text = out.text || "";
+        if (!text && said.length) text = said.join("\n\n");
+
+        // Still nothing: ask once, plainly, for the answer, with tools off so
+        // it cannot wander into another lookup. Appended to the last user
+        // turn so the conversation still alternates.
+        if (!text && !nudged) {
+          nudged = true;
+          const NUDGE = "Please give your full answer now, in plain text.";
+          const last = current[current.length - 1];
+          if (last && last.role === "user") {
+            const content = Array.isArray(last.content)
+              ? [...last.content, { type: "text", text: NUDGE }]
+              : String(last.content) + "\n\n" + NUDGE;
+            current = [...current.slice(0, -1), { role: "user", content }];
+          } else {
+            if (out.blocks && out.blocks.length) current = [...current, { role: "assistant", content: out.blocks }];
+            current = [...current, { role: "user", content: NUDGE }];
+          }
+          continue;
+        }
+
+        // A long answer that hit the length limit says so, rather than just
+        // stopping mid-sentence.
+        if (text && out.stop_reason === "max_tokens") {
+          text += "\n\n(Cut off at the length limit. Reply \"continue\" for the rest.)";
+        }
+
         await logThought({
           surface, tier, provider: provider.name, model,
           input_tokens: out.input_tokens, output_tokens: out.output_tokens,
           latency_ms: Date.now() - started, fell_back: pi > 0,
+          error: text ? null : "empty answer after nudge",
         });
         return {
-          text: out.text || "",
+          text,
           provider: provider.name, model, tier,
           fell_back: pi > 0,
           stop_reason: out.stop_reason,

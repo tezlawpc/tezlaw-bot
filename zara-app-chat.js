@@ -634,14 +634,22 @@ async function chat({
     lessonScope: surface,
     // Legacy path: a caller that still passes a whole prompt gets it used verbatim.
     system: systemPrompt || undefined,
-    maxTokens: 1500,
+    // Staff ask for strategy memos, not one-liners. 1500 tokens cut a
+    // strategy answer off mid-thought; 4000 fits a real analysis. Client
+    // and consultant answers stay short by design.
+    maxTokens: surface === "staff" ? 4000 : 1500,
+    // A 4000-token answer can take over a minute to write.
+    timeout: surface === "staff" ? 150000 : 60000,
     tools: useTools ? STAFF_TOOLS : null,
     onToolUse: useTools
       ? (name, input) => executeTool(db, user, name, input)
       : null,
   });
 
-  return out.text || "(no response)";
+  // Never hand back a bare "(no response)": say what happened and what to do.
+  return out.text ||
+    "I wasn't able to put an answer together for that one. Please try asking again, " +
+    "or break the question into smaller parts.";
 }
 
 // ═══════════════════════════════════════════════════════
