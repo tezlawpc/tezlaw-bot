@@ -300,9 +300,12 @@ function actionBtn(action, label, kind) {
 async function renderCaseDetail(id) {
   const summary = await civil.getCaseSummary(id);
   if (!summary) return `<div style="padding:40px;text-align:center;color:#7B5330;">Case not found</div>`;
-  const [events, deadlines, comms] = await Promise.all([
+  const [events, deadlines, closedDeadlines, comms] = await Promise.all([
     civil.listEvents(id, { limit: 100 }),
     civil.listDeadlines(id, { status: "pending" }),
+    // Done and dismissed ones, so they can be reopened or deleted. They used
+    // to vanish from the page entirely the moment ✓ Done was pressed.
+    civil.listDeadlines(id, { status: ["completed", "dismissed"], newestFirst: true }).catch(() => []),
     civil.listCommunications(id),
   ]);
 
@@ -355,9 +358,33 @@ async function renderCaseDetail(id) {
       <td style="padding:10px;font-size:11px;color:#7B5330;">${esc(d.ccp_rule || "")}</td>
       <td style="padding:10px;"><span style="padding:2px 6px;background:${d.priority === "high" ? "#A02818" : d.priority === "low" ? "#8B7355" : "#B8891E"};color:#FBF3DE;font-size:10px;border-radius:3px;">${esc(d.priority)}</span></td>
       <td style="padding:10px;">${d.auto_generated ? "🤖 AUTO" : "MANUAL"}</td>
-      <td style="padding:10px;text-align:right;"><button type="button" data-civil-complete-deadline="${d.id}" style="padding:4px 9px;background:#F5EBD3;color:#3E2818;border:1px solid #D4C4A0;border-radius:4px;cursor:pointer;font-size:11px;">✓ Done</button></td>
+      <td style="padding:10px;text-align:right;white-space:nowrap;"><button type="button" data-civil-complete-deadline="${d.id}" style="padding:4px 9px;background:#F5EBD3;color:#3E2818;border:1px solid #D4C4A0;border-radius:4px;cursor:pointer;font-size:11px;">✓ Done</button> <button type="button" data-civil-delete-deadline="${d.id}" data-auto="${d.auto_generated ? "1" : "0"}" data-label="${esc(d.description)}" title="Remove this deadline" style="padding:4px 8px;background:#FBF3DE;color:#A02818;border:1px solid #D4C4A0;border-radius:4px;cursor:pointer;font-size:11px;">🗑</button></td>
     </tr>
   `).join("") : `<tr><td colspan="6" style="padding:20px;text-align:center;font-style:italic;color:#7B5330;">No pending deadlines. Add trigger dates (filed, service, trial) to auto-generate.</td></tr>`;
+
+  // Completed and dismissed deadlines — collapsed, newest first, each with
+  // Reopen and Delete. A deadline marked Done by mistake could not be undone
+  // before this, and a completed one could not be removed at all.
+  const closedHtml = closedDeadlines.length ? `
+    <details style="margin-top:10px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">
+      <summary style="padding:10px 12px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1px;color:#3E2818;">
+        COMPLETED &amp; REMOVED DEADLINES (${closedDeadlines.length})
+      </summary>
+      <table style="width:100%;border-collapse:collapse;">
+        ${closedDeadlines.map(d => `
+          <tr style="border-top:1px solid #E5D5B8;${d.status === "dismissed" ? "opacity:.65;" : ""}">
+            <td style="padding:8px 10px;white-space:nowrap;text-decoration:line-through;color:#7B5330;">${fmtDate(d.due_date)}</td>
+            <td style="padding:8px 10px;color:#3E2818;">${esc(d.description)}</td>
+            <td style="padding:8px 10px;font-size:11px;color:#7B5330;white-space:nowrap;">
+              ${d.status === "dismissed" ? "removed" : "done"}${d.completed_at ? " " + fmtDate(d.completed_at) : ""}${d.completed_by ? " · " + esc(d.completed_by) : ""}
+            </td>
+            <td style="padding:8px 10px;text-align:right;white-space:nowrap;">
+              <button type="button" data-civil-reopen-deadline="${d.id}" style="padding:3px 8px;background:#F5EBD3;color:#3E2818;border:1px solid #D4C4A0;border-radius:4px;cursor:pointer;font-size:11px;">${d.status === "dismissed" ? "↺ Restore" : "↺ Reopen"}</button>
+              ${d.status === "dismissed" ? "" : `<button type="button" data-civil-delete-deadline="${d.id}" data-auto="${d.auto_generated ? "1" : "0"}" data-label="${esc(d.description)}" title="Remove this deadline" style="padding:3px 8px;background:#FBF3DE;color:#A02818;border:1px solid #D4C4A0;border-radius:4px;cursor:pointer;font-size:11px;">🗑</button>`}
+            </td>
+          </tr>`).join("")}
+      </table>
+    </details>` : "";
 
   const eventsHtml = events.length ? events.map(e => `
     <tr style="border-bottom:1px solid #E5D5B8;">
@@ -405,7 +432,7 @@ async function renderCaseDetail(id) {
       </div>
 
       <!-- Overview -->
-      ${sectionHead("📋 CASE OVERVIEW", actionBtn("edit-case", "EDIT CASE"))}
+      ${sectionHead("📋 CASE OVERVIEW", `<span style="display:flex;gap:8px;">${actionBtn("log-time", "⏱ LOG TIME")}${actionBtn("edit-case", "EDIT CASE")}</span>`)}
       <table style="width:100%;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;border-collapse:collapse;">
         ${overviewTable}
       </table>
@@ -426,6 +453,7 @@ async function renderCaseDetail(id) {
         </thead>
         <tbody>${deadlinesHtml}</tbody>
       </table>
+      ${closedHtml}
 
       <!-- Discovery (build 36) — rendered by civil-admin.js -->
       <div data-civil-panel="discovery"></div>
@@ -457,6 +485,9 @@ async function renderCaseDetail(id) {
       `).join("") : `<div style="padding:20px;text-align:center;font-style:italic;color:#7B5330;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">No communications logged yet.</div>`}
 
       <!-- Billing + matter budget (build 38) — rendered by civil-admin.js -->
+      <!-- Time & billing (civil-time.js) — rendered by civil-admin.js -->
+      <div data-civil-panel="time"></div>
+
       <div data-civil-panel="financials"></div>
 
       ${renderDocumentsPanel(id, summary, files, fileCats, filesErr)}

@@ -2780,7 +2780,14 @@ function registerAppApi(app) {
   });
 
   // Zara chat — available to all firm users (personal AI assistant, no shared data)
-  app.post("/api/staff/chat", requireBearer, requireFirmUser, async (req, res) => {
+  //
+  // Registered through civilApp, NOT app. The mirror table has always listed
+  // "/api/staff/chat → /admin/zara/api/chat", but a mirror rule only takes
+  // effect for routes registered through the mirror — this one was on the
+  // raw app, so the web chat widget posted to a route that never existed
+  // and every question came back "Couldn't reach Zara: HTTP 404".
+  // check-civil-parity.js now fails if any mirror rule has no twin.
+  civilApp.post("/api/staff/chat", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const { message, history } = req.body || {};
       if (!message) return res.status(400).json({ ok: false, error: "message required" });
@@ -8670,6 +8677,83 @@ function attachCivilLitigationRoutes(app, civil) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // ── Time & billing ──
+  // Time entries, unbilled totals and invoices. See civil-time.js for the
+  // rules (billed time is frozen; voiding never deletes).
+  const ctime = require("./civil-time");
+  const whoName = req => req.user.n || req.user.u;
+
+  app.get("/api/staff/civil/cases/:id/time", auth1, auth2, async (req, res) => {
+    try {
+      const status = ["unbilled", "billed", "all"].includes(req.query.status) ? req.query.status : "unbilled";
+      const caseId = parseInt(req.params.id, 10);
+      const entries = await ctime.listTime(caseId, { status });
+      const unbilled = status === "unbilled" ? entries : await ctime.listTime(caseId, { status: "unbilled" });
+      res.json({ ok: true, entries, unbilled_totals: ctime.totals(unbilled), invoices: await ctime.listInvoices(caseId) });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/time", auth1, auth2, async (req, res) => {
+    try {
+      const entry = await ctime.logTime(parseInt(req.params.id, 10), req.body || {},
+        { by: whoName(req), userId: req.user.uid });
+      res.json({ ok: true, entry });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.patch("/api/staff/civil/time/:source/:id", auth1, auth2, async (req, res) => {
+    try {
+      res.json({ ok: true, entry: await ctime.updateTime(req.params.source, parseInt(req.params.id, 10), req.body || {}) });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.delete("/api/staff/civil/time/:source/:id", auth1, auth2, async (req, res) => {
+    try {
+      res.json(await ctime.deleteTime(req.params.source, parseInt(req.params.id, 10)));
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/cases/:id/invoices", auth1, auth2, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const invoice = await ctime.createInvoice(parseInt(req.params.id, 10), {
+        from: b.from || null, to: b.to || null, notes: b.notes || null, by: whoName(req),
+      });
+      res.json({ ok: true, invoice });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  app.post("/api/staff/civil/invoices/:id/void", auth1, auth2, async (req, res) => {
+    try {
+      res.json({ ok: true, invoice: await ctime.voidInvoice(parseInt(req.params.id, 10), { by: whoName(req) }) });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // The client-facing invoice, print-ready. On the web this is reached as
+  // /admin/civil/api/invoices/:id/print through the mirror.
+  app.get("/api/staff/civil/invoices/:id/print", auth1, auth2, async (req, res) => {
+    try {
+      res.set("Content-Type", "text/html; charset=utf-8");
+      res.send(await ctime.renderInvoiceHtml(parseInt(req.params.id, 10)));
+    } catch (err) { res.status(404).send("Invoice not found: " + String(err.message).replace(/</g, "&lt;")); }
+  });
+
+  // Delete a deadline, pending or completed. Manual ones are deleted; auto-
+  // generated ones are dismissed so Regenerate cannot resurrect them. Both
+  // leave a line in the case history. See civil.deleteDeadline.
+  app.delete("/api/staff/civil/deadlines/:id", auth1, auth2, async (req, res) => {
+    try {
+      res.json(await civil.deleteDeadline(parseInt(req.params.id, 10), req.user.n || req.user.u));
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
+  // Undo a Done, or restore a dismissed auto deadline.
+  app.patch("/api/staff/civil/deadlines/:id/reopen", auth1, auth2, async (req, res) => {
+    try {
+      res.json({ ok: true, deadline: await civil.reopenDeadline(parseInt(req.params.id, 10), req.user.n || req.user.u) });
+    } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  });
+
   // Force re-generation of auto-deadlines (idempotent — safe to call anytime)
   app.post("/api/staff/civil/cases/:id/regenerate-deadlines", auth1, auth2, async (req, res) => {
     try {
@@ -9154,19 +9238,30 @@ function attachCivilPlaybookRoutes(app, phases, jur, utbms) {
       const c = await civil.getCase(caseId);
       if (!c) return res.status(404).json({ ok: false, error: "Case not found" });
 
+      // ?invoice_id= restricts the file to one invoice's lines, so the LEDES
+      // a client receives matches the printed invoice line for line.
+      await require("./civil-time").initTables();
+      const invId = req.query.invoice_id ? parseInt(req.query.invoice_id, 10) : null;
+      let invRow = null;
+      if (invId) {
+        invRow = (await db2.query(`SELECT * FROM civil_invoices WHERE id = $1 AND case_id = $2`, [invId, caseId])).rows[0];
+        if (!invRow) return res.status(404).json({ ok: false, error: "Invoice not found on this case" });
+      }
       const rows = await db2.query(
-        `SELECT event_date AS d, title, description, billable_hours, billable_rate, billable_amount,
+        `SELECT event_date AS d, title, description, billable_hours, billable_rate,
+                CASE WHEN no_charge THEN 0 ELSE billable_amount END AS billable_amount,
                 utbms_code, utbms_activity, attorney_id, paralegal_id
            FROM civil_case_events
-          WHERE case_id = $1 AND billable_hours IS NOT NULL
+          WHERE case_id = $1 AND billable_hours IS NOT NULL AND ($2::int IS NULL OR invoice_id = $2)
           UNION ALL
          SELECT created_at::date AS d, subject AS title, body AS description,
-                billable_hours, billable_rate, billable_amount,
+                billable_hours, billable_rate,
+                CASE WHEN no_charge THEN 0 ELSE billable_amount END,
                 utbms_code, utbms_activity, attorney_id, paralegal_id
            FROM civil_case_communications
-          WHERE case_id = $1 AND billable_hours IS NOT NULL
+          WHERE case_id = $1 AND billable_hours IS NOT NULL AND ($2::int IS NULL OR invoice_id = $2)
           ORDER BY d ASC`,
-        [caseId]
+        [caseId, invId]
       );
 
       const lines = rows.rows.map(r2 => ({
@@ -9186,14 +9281,14 @@ function attachCivilPlaybookRoutes(app, phases, jur, utbms) {
       }));
 
       const invoice = {
-        invoice_number: req.query.invoice || ("TEZ-" + caseId + "-" + new Date().toISOString().slice(0, 10).replace(/-/g, "")),
-        invoice_date: new Date(),
+        invoice_number: (invRow && invRow.invoice_number) || req.query.invoice || ("TEZ-" + caseId + "-" + new Date().toISOString().slice(0, 10).replace(/-/g, "")),
+        invoice_date: (invRow && invRow.invoice_date) || new Date(),
         client_id: c.client_key,
         client_matter_id: c.case_number || String(caseId),
         law_firm_matter_id: String(caseId),
         law_firm_id: process.env.LEDES_FIRM_ID || "TEZLAW",
-        billing_start: req.query.from || null,
-        billing_end: req.query.to || null,
+        billing_start: (invRow && invRow.period_from) || req.query.from || null,
+        billing_end: (invRow && invRow.period_to) || req.query.to || null,
         description: c.case_name,
       };
 
@@ -9448,6 +9543,60 @@ function attachZaraCoreRoutes(app, core) {
     } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
   });
 
+  // "Teach Zara" — the button under each of her chat answers.
+  //
+  // The attorney gives a better answer (typed, or pasted from Claude) or
+  // says what she got wrong. Zara does not store that text: a two-page memo
+  // pasted in as a "lesson" would be injected into every prompt forever.
+  // Instead reflect() distils it into ONE general rule for next time, which
+  // is what a lesson is. Alternatively `lesson` can be given verbatim.
+  //
+  // Who approves: JJ chose "only you". So when an admin teaches, that IS the
+  // approval and the lesson goes live immediately — her next answer already
+  // uses it. Anyone else's lesson waits in the queue for the Monday digest.
+  app.post("/api/staff/zara/teach", auth1, auth2, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const question = String(b.question || "").slice(0, 4000);
+      const answer = String(b.answer || "").slice(0, 6000);
+      const better = String(b.better || "").slice(0, 12000);
+      const direct = String(b.lesson || "").trim();
+      if (!better.trim() && !direct) {
+        return res.status(400).json({ ok: false, error: "Say what a better answer would have been" });
+      }
+
+      let row;
+      if (direct) {
+        row = await core.proposeLesson({
+          lesson: direct.slice(0, 500),
+          rationale: question ? `Taught in chat, on: ${question.slice(0, 200)}` : "Taught in chat",
+          scope: b.scope || "global", source: "human", by: who(req),
+        });
+      } else {
+        const r = await core.reflect({ question, answer, correction: better, scope: b.scope || "global", by: who(req) });
+        if (!r.proposed) {
+          // A one-off fact ("the hearing is on the 14th, not the 12th") has
+          // nothing to generalise. Say so, and let them write the rule
+          // themselves if they think there is one.
+          return res.json({ ok: true, saved: false, reason: r.reason });
+        }
+        row = r.lesson;
+      }
+
+      const live = isAdmin(req.user);
+      if (live) row = await core.approveLesson(row.id, { by: who(req) });
+      res.json({ ok: true, saved: true, live, lesson: row });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  });
+
+  // Undo a lesson just taught from the chat. Admin, because retiring an
+  // active lesson changes how she behaves for everyone.
+  app.post("/api/staff/zara/teach/:id/undo", auth1, auth2, adminOnly, async (req, res) => {
+    try {
+      res.json({ ok: true, lesson: await core.retireLesson(Number(req.params.id), { by: who(req) }) });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  });
+
   app.post("/api/staff/zara/lessons/:id/approve", auth1, auth2, adminOnly, async (req, res) => {
     try {
       const row = await core.approveLesson(Number(req.params.id), {
@@ -9507,4 +9656,4 @@ function attachZaraCoreRoutes(app, core) {
   console.log("[zara-core] routes registered under /api/staff/zara/* (+ /admin/zara/api/* twins)");
 }
 
-module.exports = { registerAppApi };
+module.exports = { registerAppApi, CIVIL_MIRROR_PREFIXES };
