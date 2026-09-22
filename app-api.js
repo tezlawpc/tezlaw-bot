@@ -7938,25 +7938,120 @@ ${groups.map(g => `
 
   // ── Consultant client access (assigned clients only) ────
 
-  // List clients this consultant is currently assigned to
+  // List clients this consultant is assigned to (which includes every
+  // client they entered themselves — see POST below). ?q= searches name,
+  // phone, email and A-number within that list only: a consultant never
+  // searches the firm's whole client base.
   app.get("/api/consultant/clients", requireBearer, requireConsultantRole, async (req, res) => {
     try {
+      const q = String(req.query.q || "").trim().slice(0, 100);
+      const digits = q.replace(/\D/g, "");
       const r = await db.query(
         `SELECT cc.id AS assignment_id, cc.client_key, cc.role_description, cc.assigned_at,
-                cc.notes AS assignment_notes,
+                cc.notes AS assignment_notes, (cc.assigned_by IS NULL) AS entered_by_me,
                 MAX(t.client_name) AS client_name,
                 MAX(t.client_phone) AS client_phone,
                 MAX(t.client_email) AS client_email,
-                MAX(t.matter_type) AS matter_type,
-                COUNT(DISTINCT t.id) FILTER (WHERE t.completed = false OR t.completed IS NULL) AS open_task_count
+                MAX(t.a_number) AS a_number,
+                MAX(t.matter_type) FILTER (WHERE t.matter_type IS DISTINCT FROM 'Contact') AS matter_type,
+                COUNT(DISTINCT t.id) FILTER (WHERE (t.completed = false OR t.completed IS NULL) AND t.matter_type IS DISTINCT FROM 'Contact') AS open_task_count
          FROM client_consultants cc
          LEFT JOIN tasks t ON t.client_key = cc.client_key
          WHERE cc.consultant_id = $1 AND cc.removed_at IS NULL
-         GROUP BY cc.id, cc.client_key, cc.role_description, cc.assigned_at, cc.notes
+         GROUP BY cc.id, cc.client_key, cc.role_description, cc.assigned_at, cc.notes, cc.assigned_by
+         HAVING $2 = ''
+             OR MAX(t.client_name) ILIKE '%' || $2 || '%'
+             OR MAX(t.client_email) ILIKE '%' || $2 || '%'
+             OR ($3 <> '' AND (regexp_replace(COALESCE(MAX(t.client_phone), ''), '\\D', '', 'g') LIKE '%' || $3 || '%'
+                           OR regexp_replace(COALESCE(MAX(t.a_number), ''), '\\D', '', 'g') LIKE '%' || $3 || '%'))
          ORDER BY MAX(t.updated_at) DESC NULLS LAST`,
-        [req.user.uid]
+        [req.user.uid, q, digits.length >= 3 ? digits : ""]
       );
       res.json({ ok: true, clients: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // A consultant enters a new client (a lead). Saved the way staff save a
+  // contact-only record (a 'Contact' row in tasks) and assigned to the
+  // consultant, so it shows in their list at once; the firm is told on
+  // Telegram and sees who referred it. They cannot read any other record
+  // by entering matching details — nothing about existing clients is sent back.
+  app.post("/api/consultant/clients", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const clip = (v, n) => { const t = String(v == null ? "" : v).trim(); return t ? t.slice(0, n) : null; };
+      const name = clip(b.client_name, 200);
+      if (!name) return res.status(400).json({ ok: false, error: "Client name is required" });
+      const phone = clip(b.client_phone, 40), email = clip(b.client_email, 200), anum = clip(b.a_number, 30);
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ ok: false, error: "That email address doesn't look right" });
+      const language = clip(b.language, 40), interest = clip(b.matter_interest, 80), notes = clip(b.notes, 4000);
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "client";
+      const client_key = `contact-${slug}-${Date.now().toString(36)}`;
+      const who = req.user.n || req.user.u || "Consultant";
+      const description = [
+        `Entered by consultant ${who}.`,
+        interest ? `Needs help with: ${interest}` : null,
+        language ? `Language: ${language}` : null,
+        notes ? `Notes: ${notes}` : null,
+      ].filter(Boolean).join("\n");
+      const r = await db.query(
+        `INSERT INTO tasks
+           (title, client_key, client_name, client_phone, client_email, matter_type,
+            description, referral_source, a_number, submitted_by_user_id, submitter_visible,
+            status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 'Contact', $6, $7, $8, $9, TRUE, 'completed', NOW(), NOW())
+         RETURNING id, client_key, client_name, client_phone, client_email, a_number`,
+        [`Contact: ${name}`, client_key, name, phone, email, description, `Consultant: ${who}`, anum, req.user.uid]
+      );
+      await db.query(
+        `INSERT INTO client_consultants (client_key, consultant_id, role_description, assigned_by, notes)
+         VALUES ($1, $2, 'Referred by this consultant', NULL, $3)`,
+        [client_key, req.user.uid, interest]
+      );
+      try {
+        const group = process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID;
+        const tok = process.env.TELEGRAM_BOT_TOKEN;
+        if (group && tok) {
+          const axios = require("axios");
+          await axios.post(`https://api.telegram.org/bot${tok}/sendMessage`, {
+            chat_id: group,
+            text: `🆕 New client entered by consultant ${who}\n\n${name}${phone ? "\n📞 " + phone : ""}${email ? "\n✉️ " + email : ""}${anum ? "\nA# " + anum : ""}${interest ? "\nNeeds: " + interest : ""}`,
+          }).catch(() => {});
+        }
+      } catch (e) { /* notice only */ }
+      res.json({ ok: true, client: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Correct the contact details of a client the consultant entered
+  // themselves. Clients the firm assigned to them are the firm's records:
+  // for those, changes go through a work order or a message.
+  app.patch("/api/consultant/clients/:key", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const clip = (v, n) => { const t = String(v == null ? "" : v).trim(); return t ? t.slice(0, n) : null; };
+      const own = await db.query(
+        `SELECT id FROM tasks WHERE client_key = $1 AND matter_type = 'Contact' AND submitted_by_user_id = $2 LIMIT 1`,
+        [req.params.key, req.user.uid]);
+      if (!own.rows[0]) return res.status(403).json({ ok: false, error: "Only clients you entered can be edited here — send the firm a work order for other changes." });
+      const email = clip(b.client_email, 200);
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ ok: false, error: "That email address doesn't look right" });
+      const name = clip(b.client_name, 200);
+      if (b.client_name !== undefined && !name) return res.status(400).json({ ok: false, error: "Client name is required" });
+      const r = await db.query(
+        `UPDATE tasks SET
+           client_name  = COALESCE($3, client_name),
+           client_phone = CASE WHEN $4::boolean THEN $5 ELSE client_phone END,
+           client_email = CASE WHEN $6::boolean THEN $7 ELSE client_email END,
+           a_number     = CASE WHEN $8::boolean THEN $9 ELSE a_number END,
+           updated_at = NOW()
+         WHERE client_key = $1 AND matter_type = 'Contact' AND submitted_by_user_id = $2
+         RETURNING client_key, client_name, client_phone, client_email, a_number`,
+        [req.params.key, req.user.uid, name,
+         b.client_phone !== undefined, clip(b.client_phone, 40),
+         b.client_email !== undefined, email,
+         b.a_number !== undefined, clip(b.a_number, 30)]);
+      res.json({ ok: true, client: r.rows[0] });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -7970,9 +8065,12 @@ ${groups.map(g => `
       // Get client info via first task
       const cR = await db.query(
         `SELECT DISTINCT ON (client_key)
-           client_key, client_name, client_phone, client_email, matter_type
-         FROM tasks WHERE client_key = $1 LIMIT 1`,
-        [req.params.key]
+           client_key, client_name, client_phone, client_email, matter_type, a_number,
+           EXISTS (SELECT 1 FROM tasks x WHERE x.client_key = $1 AND x.matter_type = 'Contact'
+                   AND x.submitted_by_user_id = $2) AS editable
+         FROM tasks WHERE client_key = $1
+         ORDER BY client_key, (matter_type = 'Contact') ASC, updated_at DESC NULLS LAST LIMIT 1`,
+        [req.params.key, req.user.uid]
       );
       if (!cR.rows[0]) return res.status(404).json({ ok: false, error: "client not found" });
       // Get assignment info

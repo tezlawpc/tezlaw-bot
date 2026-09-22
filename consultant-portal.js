@@ -87,6 +87,8 @@ function renderChrome({ title = "Consultant Portal", body, activeTab = "dashboar
     <nav class="tabs">
       ${tabLink("dashboard", "/consultant", "📊 My Work Orders")}
       ${tabLink("new", "/consultant/new", "＋ Submit New")}
+      ${tabLink("clients", "/consultant/clients", "👥 My Clients")}
+      ${tabLink("add-client", "/consultant/clients/new", "＋ Add Client")}
     </nav>
     <div class="who">Signed in as <strong>${esc(user.name || user.username || "Consultant")}</strong></div>
     <form method="POST" action="/logout" style="margin:0;"><button type="submit" class="signout">Sign out</button></form>
@@ -170,6 +172,22 @@ function renderDashboard({ user, tasks, stats }) {
 }
 
 // ── New work order form ─────────────────────────────────────
+// My Clients / Add Client / one client: drawn in the browser by
+// public/consultant-clients.js from /api/consultant/* (the same calls the
+// phone app makes), so phone and computer show the same thing.
+function renderClientsPage({ mode = "list", clientKey = null } = {}) {
+  const heads = {
+    list: ["My Clients", "Clients the firm assigned to you and clients you entered. Search by name, phone, email or A-number."],
+    new: ["Add a Client", "Enter a new client's details. The firm is notified and the client appears in your list right away."],
+    view: ["Client", ""],
+  };
+  const [h, sub] = heads[mode] || heads.list;
+  return `
+    <div class="page-header"><h1>${esc(h)}</h1>${sub ? `<div class="sub">${esc(sub)}</div>` : ""}</div>
+    <div data-consultant-clients="${esc(mode)}"${clientKey ? ` data-key="${esc(clientKey)}"` : ""}></div>
+    ${require("./client-script").clientScriptTag("consultant-clients.js")}`;
+}
+
 function renderNewForm() {
   return `
     <div class="page-header">
@@ -188,7 +206,7 @@ function renderNewForm() {
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
           <div>
             <label>Client Name</label>
-            <input type="text" name="client_name" placeholder="John Smith">
+            <input type="text" name="client_name" placeholder="John Smith" id="wo-client-name">
           </div>
           <div>
             <label>Matter Type *</label>
@@ -247,6 +265,14 @@ function renderNewForm() {
     </div>
 
     <script>
+      // "Work order for this client" from a client page fills the name in.
+      (function () {
+        try {
+          var c = new URLSearchParams(location.search).get("client");
+          var el = document.getElementById("wo-client-name");
+          if (c && el && !el.value) el.value = c.slice(0, 200);
+        } catch (e) { /* older browser: type it */ }
+      })();
       async function submitOrder(e) {
         e.preventDefault();
         const btn = document.getElementById("submit-btn");
@@ -408,4 +434,4 @@ function renderTaskDetail({ task, activity, milestones = [], progress = null, us
     ` : ""}`;
 }
 
-module.exports = { renderChrome, renderDashboard, renderNewForm, renderTaskDetail };
+module.exports = { renderChrome, renderDashboard, renderNewForm, renderTaskDetail, renderClientsPage };

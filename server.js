@@ -2021,6 +2021,22 @@ app.post("/consultant/tasks", requireConsultant, async (req, res) => {
   }
 });
 
+// My Clients (search), Add Client, one client — the phone app's client
+// screens on the computer. Pages only; the data comes from /api/consultant/*
+// (which accepts this same sign-in cookie).
+app.get("/consultant/clients", requireConsultant, (req, res) => {
+  const portal = require("./consultant-portal");
+  res.send(portal.renderChrome({ title: "My Clients", body: portal.renderClientsPage({ mode: "list" }), activeTab: "clients", user: req.user }));
+});
+app.get("/consultant/clients/new", requireConsultant, (req, res) => {
+  const portal = require("./consultant-portal");
+  res.send(portal.renderChrome({ title: "Add Client", body: portal.renderClientsPage({ mode: "new" }), activeTab: "add-client", user: req.user }));
+});
+app.get("/consultant/client/:key", requireConsultant, (req, res) => {
+  const portal = require("./consultant-portal");
+  res.send(portal.renderChrome({ title: "Client", body: portal.renderClientsPage({ mode: "view", clientKey: String(req.params.key).slice(0, 200) }), activeTab: "clients", user: req.user }));
+});
+
 // View a single work order + activity timeline
 app.get("/consultant/task/:id", requireConsultant, async (req, res) => {
   try {
