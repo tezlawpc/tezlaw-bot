@@ -466,7 +466,7 @@
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   });
 
-  fileInput = h("input", { type: "file", multiple: "multiple", accept: ".pdf,.docx,.txt,.md,.doc,.jpg,.jpeg,.png", style: "display:none;" });
+  fileInput = h("input", { type: "file", multiple: "multiple", accept: ".pdf,.docx,.txt,.md,.doc,.jpg,.jpeg,.png,.xlsx,.xls,.csv", style: "display:none;" });
   fileInput.addEventListener("change", function () { attach(fileInput.files); });
   var clipBtn = h("button", {
     title: "Attach documents — on a case page they are filed to the case's Dropbox folder",
