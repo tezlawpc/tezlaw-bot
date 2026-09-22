@@ -1288,6 +1288,15 @@ function registerAppApi(app) {
     console.warn("[zara-core] module load failed:", e.message);
   }
 
+  // Each person's app settings (their dashboard layout) and the iPad's
+  // one-tap "Full Admin" sign-in (app-prefs.js). On `app`, not civilApp:
+  // these are app-only and need no cookie twin.
+  try {
+    require("./app-prefs").attach(app, { requireBearer, requireFirmUser, auth });
+  } catch (e) {
+    console.warn("[app-prefs] module load failed:", e.message);
+  }
+
   // Templates and e-signature: documents made from filed ones, signed
   // online, filed back to the case folder (esign*.js).
   try {
