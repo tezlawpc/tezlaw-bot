@@ -164,10 +164,7 @@ async function renderKanban(opts = {}) {
             ${totalActive} active case${totalActive === 1 ? "" : "s"} across ${board.stages.length} stages${totalUrgent ? ` · <strong style="color:#A02818;font-style:normal;">${totalUrgent} need attention</strong>` : ""}
           </div>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;">
-          <a href="/admin/civil/templates" style="padding:10px 16px;background:#FBF3DE;color:#3E2818;border:1px solid #B8891E;border-radius:6px;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.2px;text-decoration:none;">✍ TEMPLATES</a>
-          <a href="/admin/civil/new" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;font-family:Cinzel,serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-decoration:none;">+ NEW CASE</a>
-        </div>
+        <a href="/admin/civil/new" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;font-family:Cinzel,serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-decoration:none;">+ NEW CASE</a>
       </div>
       <!--CIVIL_FILTER_BANNER-->
       <!-- Stacked, not side by side. Nine columns sharing the width meant no

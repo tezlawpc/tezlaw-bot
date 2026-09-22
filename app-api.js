@@ -56,6 +56,19 @@ async function requireBearer(req, res, next) {
   }
 }
 
+// A note saved from the phone: link the transcripts it names, and the same
+// person's recent unlinked recordings for that client (the app does not
+// send transcript ids yet).
+async function linkAppTranscripts(req, noteType, noteId, body) {
+  try {
+    const T = require("./transcripts");
+    const b = body || {};
+    const got = await T.linkToNote(b.transcript_ids || b.transcript_id, { noteType, noteId, clientName: b.client_name, aNumber: b.a_number, byUid: req.user.uid });
+    const auto = await T.autoLink({ user: req.user, noteType, noteId, clientName: b.client_name, aNumber: b.a_number });
+    return got.concat(auto);
+  } catch (e) { console.warn("[transcripts] app link:", e.message); return []; }
+}
+
 function requireFirmUser(req, res, next) {
   if (!req.user) return res.status(401).json({ ok: false, error: "Auth required" });
   const r = req.user.r;
@@ -98,6 +111,8 @@ const CIVIL_MIRROR_PREFIXES = [
   // The web admin had no way to talk to Zara at all: the chat endpoint was
   // bearer-only, so it existed for the app and for nobody sitting at a desk.
   { src: "/api/staff/chat", dest: "/admin/zara/api/chat", collapse: true },
+  // Templates and e-signature (esign-routes.js): civil and immigration alike.
+  { src: "/api/staff/esign", dest: "/admin/esign/api" },
 ];
 
 function makeCivilAdminMirror(app) {
@@ -1278,7 +1293,7 @@ function registerAppApi(app) {
   try {
     require("./esign").initTables().catch(e => console.warn("[esign] init:", e.message));
     const er = require("./esign-routes");
-    er.attachStaffRoutes(civilApp, { requireBearer, requireFirmUser });
+    er.attachStaffRoutes(civilApp, { requireBearer, requireFirmUser, canUserAccessClient });
     er.attachPublicRoutes(app);
   } catch (e) {
     console.warn("[esign] module load failed:", e.message);
@@ -2141,7 +2156,8 @@ function registerAppApi(app) {
       // master row (individual notes use their own POST below).
       body.hearing_type = body.hearing_type || "master";
       const result = await hn.saveNote(body);
-      res.json({ ok: true, id: result.id, was_duplicate: !!result.was_duplicate });
+      const transcripts = await linkAppTranscripts(req, "master", result.id, body);
+      res.json({ ok: true, id: result.id, was_duplicate: !!result.was_duplicate, transcript_ids: transcripts });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -2205,7 +2221,8 @@ function registerAppApi(app) {
           body.client_summary || null,
         ]
       );
-      res.json({ ok: true, id: r.rows[0].id });
+      const transcripts = await linkAppTranscripts(req, "individual", r.rows[0].id, body);
+      res.json({ ok: true, id: r.rows[0].id, transcript_ids: transcripts });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -2383,6 +2400,7 @@ function registerAppApi(app) {
         throw err;
       });
       if (!r.rows.length) return res.status(404).json({ ok: false, error: "Not found" });
+      if (body.transcript_ids || body.transcript_id) await linkAppTranscripts(req, "individual", id, body);
       res.json({ ok: true, id, updated_fields: sets.length });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
@@ -2424,44 +2442,74 @@ function registerAppApi(app) {
           return res.status(400).json({ ok: false, error: "No audio file uploaded" });
         }
         const voice = require("./voice-dictation");
+        const T = require("./transcripts");
         const filename = req.file.originalname || "dictation.m4a";
-        let buffer = req.file.buffer;
+        const buffer = req.file.buffer;
         console.log(`[app-dictate] user=${req.user.uid} received ${buffer.length} bytes (${filename})`);
-
-        // Whisper 25 MB cap — leave compression to whoever wrote the web helper.
-        if (buffer.length > 24 * 1024 * 1024) {
-          try {
-            const helper = require("./voice-dictation");
-            if (typeof helper.compressAudioForWhisper === "function") {
-              buffer = await helper.compressAudioForWhisper(buffer, filename);
-              console.log(`[app-dictate] compressed to ${buffer.length} bytes`);
-            }
-          } catch (e) {
-            console.warn("[app-dictate] compression skipped:", e.message);
-          }
-        }
-
-        const transcript = await voice.transcribeAudio(buffer, filename);
-        console.log(`[app-dictate] transcript: ${transcript.length} chars`);
-        if (!transcript || transcript.trim().length < 5) {
-          return res.status(400).json({
-            ok: false,
-            error: "Transcript was empty or too short. The recording may have been silent.",
-          });
-        }
         const hint = {
           client_name: String(req.body.client_name || "").trim() || null,
           a_number: String(req.body.a_number || "").trim() || null,
           hearing_type: String(req.body.hearing_type || "").trim() || null,
         };
-        const extracted = await voice.extractFieldsFromTranscript(transcript, hint);
-        res.json({ ok: true, transcript, extracted });
+        // Saved with speakers before the app sees it (transcripts.js); the
+        // note the app saves next picks it up by client (linkAppTranscripts).
+        // Long recordings are cut and compressed inside the transcriber.
+        const { row } = await T.transcribeAndSave(buffer, filename, {
+          source: "app-dictation", user: req.user, clientName: hint.client_name, aNumber: hint.a_number, nameNow: false,
+        });
+        const plain = T.toText(row);
+        console.log(`[app-dictate] transcript #${row.id}: ${plain.length} chars`);
+        if (!plain || plain.trim().length < 5) {
+          return res.status(400).json({
+            ok: false,
+            error: "Transcript was empty or too short. The recording may have been silent.",
+            transcript_id: row.id,
+          });
+        }
+        const [extracted] = await Promise.all([
+          voice.extractFieldsFromTranscript(plain, hint),
+          T.nameSpeakers(row.id, { recordedBy: req.user.n || req.user.u }).catch(() => null),
+        ]);
+        const done = (await T.finish(row.id, { extracted }).catch(() => null)) || row;
+        const transcript = T.toText(done);
+        // raw_notes is what the app saves into the note: the named transcript.
+        if (extracted && transcript) extracted.raw_notes = transcript;
+        res.json({ ok: true, transcript, transcript_id: row.id, speakers: T.summary(done).speakers, extracted });
       } catch (err) {
         console.error("[app-dictate]:", err.message);
         res.status(500).json({ ok: false, error: err.message });
       }
     }
   );
+
+  // ── Saved transcripts (transcripts.js) ─────────────────────────────
+  // A client's recordings, and one recording with its speaker blocks.
+  async function mayReadTranscript(user, t) {
+    if (!t) return false;
+    if (isManager(user)) return true;
+    if (t.client_key && await canUserAccessClient(user, t.client_key)) return true;
+    return t.created_by_uid != null && String(t.created_by_uid) === String(user.uid);
+  }
+  app.get("/api/staff/transcripts", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const T = require("./transcripts");
+      const key = String(req.query.client_key || "").trim();
+      if (!key) return res.status(400).json({ ok: false, error: "client_key required" });
+      if (!(await canUserAccessClient(req.user, key))) return res.status(403).json({ ok: false, error: "Not your client" });
+      const c = await require("./client-profiles").getClientByKey(key).catch(() => null);
+      const list = await T.listForClient({ key, clientName: c && c.client_name, aNumber: c && c.a_number });
+      res.json({ ok: true, transcripts: list });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+  app.get("/api/staff/transcripts/:id", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const T = require("./transcripts");
+      const t = await T.get(req.params.id);
+      if (!t) return res.status(404).json({ ok: false, error: "Not found" });
+      if (!(await mayReadTranscript(req.user, t))) return res.status(403).json({ ok: false, error: "Not your client" });
+      res.json({ ok: true, transcript: T.full(t) });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
 
   // assigned attorney or client_key visible to them.
   app.get("/api/staff/federal", requireBearer, requireFirmUser, async (req, res) => {

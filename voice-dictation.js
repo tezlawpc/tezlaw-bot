@@ -52,6 +52,134 @@ async function transcribeAudio(audioBuffer, filename) {
   return resp.data.text || "";
 }
 
+// ── Transcription with speakers ──────────────────────────
+//
+// gpt-4o-transcribe-diarize separates speakers ("diarized_json": segments
+// with speaker, start, end, text). It needs chunking_strategy for audio
+// over 30 seconds, takes no prompt or language hint, accepts mp3, mp4,
+// mpeg, mpga, m4a, wav, webm up to 25 MB — and long recordings are safer
+// in pieces. So audio is cut into ~20-minute mono Opus/WebM pieces first
+// (when ffmpeg is present), each piece transcribed, and the pieces joined
+// with their time offsets. Speaker labels are per piece: "0:A" is piece
+// 0's A. If the diarizing model fails, whisper-1 (one speaker, timed
+// segments) is used, so a transcript is never lost to a model problem.
+//
+// TRANSCRIBE_MODEL=whisper-1 turns speaker separation off.
+
+const DIARIZE_MODEL = () => process.env.TRANSCRIBE_MODEL || "gpt-4o-transcribe-diarize";
+const PIECE_SECONDS = () => Math.max(120, parseInt(process.env.TRANSCRIBE_PIECE_SECONDS || "1200", 10) || 1200);
+
+function mimeFor(filename) {
+  const f = String(filename || "").toLowerCase();
+  return f.endsWith(".mp4") ? "audio/mp4" : f.endsWith(".m4a") ? "audio/m4a" : f.endsWith(".wav") ? "audio/wav"
+    : f.endsWith(".ogg") || f.endsWith(".oga") ? "audio/ogg" : f.endsWith(".mp3") || f.endsWith(".mpga") || f.endsWith(".mpeg") ? "audio/mpeg"
+    : "audio/webm";
+}
+
+async function openaiTranscribe(buffer, filename, fields) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY not configured");
+  const formData = new FormData();
+  formData.append("file", buffer, { filename, contentType: mimeFor(filename) });
+  for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+  const resp = await axios.post("https://api.openai.com/v1/audio/transcriptions", formData, {
+    headers: { Authorization: `Bearer ${apiKey}`, ...formData.getHeaders() },
+    maxBodyLength: 30 * 1024 * 1024, maxContentLength: 30 * 1024 * 1024,
+    timeout: 600000,
+  });
+  return resp.data || {};
+}
+
+function run(cmd, args, { capture = false } = {}) {
+  const { spawn } = require("child_process");
+  return new Promise((resolve, reject) => {
+    let out = "", err = "";
+    let p;
+    try { p = spawn(cmd, args); } catch (e) { return reject(e); }
+    p.stdout.on("data", d => { if (capture) out += d.toString(); });
+    p.stderr.on("data", d => { err += d.toString(); if (err.length > 4000) err = err.slice(-4000); });
+    p.on("error", reject);
+    p.on("close", code => code === 0 ? resolve(out) : reject(new Error(`${cmd} exit ${code}: ${err.slice(-300)}`)));
+  });
+}
+
+// Cut into pieces the diarizing model takes. Returns [{buffer, filename, offset}].
+// Without ffmpeg (or if it fails), the original file as one piece.
+async function audioPieces(buffer, filename) {
+  const fs = require("fs"), os = require("os"), path = require("path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tx-"));
+  const ext = (path.extname(filename || "") || ".webm").toLowerCase().replace(/[^.\w]/g, "") || ".webm";
+  const inPath = path.join(dir, "in" + ext);
+  try {
+    fs.writeFileSync(inPath, buffer);
+    const secs = PIECE_SECONDS();
+    await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", inPath, "-vn", "-ac", "1", "-ar", "16000",
+      "-c:a", "libopus", "-b:a", "32k", "-f", "segment", "-segment_time", String(secs), "-reset_timestamps", "1",
+      path.join(dir, "piece-%03d.webm")]);
+    const names = fs.readdirSync(dir).filter(n => /^piece-\d+\.webm$/.test(n)).sort();
+    if (!names.length) throw new Error("ffmpeg made no pieces");
+    const pieces = [];
+    let offset = 0;
+    for (const n of names) {
+      const b = fs.readFileSync(path.join(dir, n));
+      let dur = null;
+      try { dur = parseFloat(await run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path.join(dir, n)], { capture: true })); } catch (e) { /* estimate below */ }
+      pieces.push({ buffer: b, filename: n, offset, duration: Number.isFinite(dur) ? dur : null });
+      offset += Number.isFinite(dur) ? dur : secs;
+    }
+    return pieces;
+  } catch (e) {
+    console.warn("[transcribe] could not prepare audio (" + e.message + "); sending as recorded");
+    return [{ buffer, filename, offset: 0, duration: null, raw: true }];
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* tmp */ }
+  }
+}
+
+async function transcribePiece(piece) {
+  const model = DIARIZE_MODEL();
+  const okFormat = /\.(mp3|mp4|mpeg|mpga|m4a|wav|webm)$/i.test(piece.filename);
+  if (model !== "whisper-1" && okFormat && piece.buffer.length <= 25 * 1024 * 1024) {
+    try {
+      const d = await openaiTranscribe(piece.buffer, piece.filename, { model, response_format: "diarized_json", chunking_strategy: "auto" });
+      const segments = (Array.isArray(d.segments) ? d.segments : []).map(s => ({
+        speaker: s.speaker == null ? "?" : String(s.speaker),
+        start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text || "").trim(),
+      })).filter(s => s.text);
+      const text = String(d.text || segments.map(s => s.text).join(" ")).trim();
+      if (text || segments.length) return { model, diarized: true, text, segments, duration: Number(d.duration) || null };
+    } catch (e) {
+      const msg = (e.response && e.response.data && e.response.data.error && e.response.data.error.message) || e.message;
+      console.warn("[transcribe] " + model + " failed (" + msg + "); using whisper-1");
+    }
+  }
+  const w = await openaiTranscribe(piece.buffer, piece.filename, { model: "whisper-1", response_format: "verbose_json" });
+  const segments = (Array.isArray(w.segments) ? w.segments : []).map(s => ({
+    speaker: null, start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text || "").trim(),
+  })).filter(s => s.text);
+  return { model: "whisper-1", diarized: false, text: String(w.text || "").trim(), segments, duration: Number(w.duration) || null };
+}
+
+// { model, diarized, text, segments:[{speaker,start,end,text}], duration }
+async function transcribeDetailed(audioBuffer, filename) {
+  if (!audioBuffer || !audioBuffer.length) throw new Error("No audio");
+  const pieces = await audioPieces(audioBuffer, filename || "audio.webm");
+  const results = [];
+  for (const p of pieces) results.push({ p, r: await transcribePiece(p) });
+  const segments = [];
+  let text = "", duration = 0, diarized = results.length > 0, models = new Set();
+  results.forEach(({ p, r }, i) => {
+    models.add(r.model);
+    if (!r.diarized) diarized = false;
+    for (const s of r.segments) segments.push({ ...s, speaker: s.speaker == null ? null : `${i}:${s.speaker}`, start: s.start + p.offset, end: s.end + p.offset });
+    text += (text ? " " : "") + r.text;
+    duration = p.offset + (r.duration || p.duration || (r.segments.length ? r.segments[r.segments.length - 1].end : 0));
+  });
+  // A mix (one piece fell back) keeps the speakers it has.
+  const anySpeakers = segments.some(s => s.speaker != null);
+  return { model: [...models].join("+"), diarized: diarized || anySpeakers, text: text.trim(), segments, duration: duration || null };
+}
+
 // ── Claude field extraction (tool use for guaranteed JSON) ──
 
 async function extractFieldsFromTranscript(transcript, hint = {}) {
@@ -447,6 +575,8 @@ if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
 
 module.exports = {
   transcribeAudio,
+  transcribeDetailed,
+  audioPieces,
   extractFieldsFromTranscript,
   renderDictatePage,
 };

@@ -21,7 +21,7 @@ const SKIP = new Set(["node_modules", ".git", "dist", "public/vendor"]);
 // and the failure it produced pointed at some unrelated test. This names
 // the real problem first, with the exact commands that fix it.
 {
-  const CLIENT_BUNDLES = ["civil-admin.js", "zara-admin.js", "zara-chat.js", "civil-intake.js", "civil-docs.js", "esign-admin.js", "esign-sign.js"];
+  const CLIENT_BUNDLES = ["civil-admin.js", "zara-admin.js", "zara-chat.js", "civil-intake.js", "civil-docs.js", "esign-admin.js", "esign-sign.js", "court-mail-page.js", "transcripts-page.js"];
   const strays = fs.readdirSync(ROOT).filter(f =>
     (/^check-.+\.js$/.test(f)) || CLIENT_BUNDLES.includes(f));
   if (strays.length) {

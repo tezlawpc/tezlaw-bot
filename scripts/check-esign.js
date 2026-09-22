@@ -100,7 +100,7 @@ const fakeDb = {
     }
     if (/^SELECT \* FROM esign_packets WHERE id = \$1/.test(q)) return { rows: T.pk.filter(p => p.id === v[0]).map(p => ({ ...p })) };
     if (/^SELECT \* FROM esign_signers WHERE packet_id = \$1/.test(q)) return { rows: T.sg.filter(s => s.packet_id === v[0]).sort((a, b) => a.sign_order - b.sign_order || a.id - b.id).map(s => ({ ...s })) };
-    if (/^SELECT id FROM esign_packets/.test(q)) return { rows: T.pk.filter(p => !v.length || p.case_id === v[0]).reverse().map(p => ({ id: p.id })) };
+    if (/^SELECT id FROM esign_packets/.test(q)) return { rows: T.pk.filter(p => !v.length || (/client_key = \$1/.test(q) ? p.client_key === v[0] : p.case_id === v[0])).reverse().map(p => ({ id: p.id })) };
     if (/^UPDATE esign_packets SET status = 'sent'.*AND status = 'draft' RETURNING id/.test(q)) {
       const p = T.pk.find(x => x.id === v[0] && x.status === "draft");
       if (p) Object.assign(p, { status: "sent", sent_at: now(), link_base: v[1] });
@@ -143,7 +143,7 @@ const fakeDb = {
 
 const MATTER = { id: 223, client_key: "contact-liu", case_name: "Jing Liu v. James Turco, et al.", case_number: "2:26-cv-01671",
   court: "United States District Court, Central District of California", county: null, retainer_amount: "15000" };
-const caseLog = [], uploads = [];
+const caseLog = [], uploads = [], dbxUploads = [], dbxFolders = [];
 let previewWorks = false;
 const stubs = {
   "./db": fakeDb,
@@ -151,9 +151,18 @@ const stubs = {
     getCase: async id => id === 223 ? { ...MATTER } : null,
     logEvent: async (id, e) => { caseLog.push({ id, ...e }); return {}; },
   },
-  "./client-profiles": { getClientByKey: async k => k === "contact-liu" ? { client_name: "Jing Liu", client_email: "jing@example.com", client_phone: "626-555-0100" } : null },
+  "./client-profiles": { getClientByKey: async k =>
+    k === "contact-liu" ? { key: k, client_name: "Jing Liu", client_email: "jing@example.com", client_phone: "626-555-0100" }
+    : k === "a-201555444" ? { key: k, client_name: "Mei Chen", a_number: "A201-555-444", client_language: "zh", client_email: "mei@example.com",
+        next_hearing_date: new Date(Date.now() + 40 * 86400000).toISOString().slice(0, 10), next_hearing_type: "Individual hearing",
+        judge_name: "IJ Rodriguez", court_location: "Los Angeles – Olive St" }
+    : null },
   "./civil-upload": { uploadToCase: async (id, files, o) => { uploads.push({ id, files, o }); return { ok: true, uploaded: files.map(f => ({ name: f.originalname, saved_as: f.originalname, path: "/Cases/Liu/Billing/" + f.originalname, folder_label: "Billing" })), failed: [] }; } },
-  "./dropbox-integration": { getAccessToken: async () => "t", getPathRootHeader: async () => null },
+  "./dropbox-integration": { getAccessToken: async () => "t", getPathRootHeader: async () => null, isConfigured: () => true,
+    resolveClientFolder: async ({ clientKey }) => clientKey === "a-201555444" ? "/Clients/Chen, Mei (A201555444)" : null,
+    createFolder: async (p) => { dbxFolders.push(p); return {}; },
+    uploadFile: async ({ path: p, buffer }) => { dbxUploads.push({ path: p, bytes: buffer.length }); return { path_display: p }; },
+    clearListCache: () => {} },
   "./push-notifications": { sendToUser: async () => ({}) },
 };
 const realAxios = require("axios");
@@ -431,6 +440,36 @@ const es = require("../esign");
   v = await es.signerView("x".repeat(32));
   check("an unknown link is refused plainly", () => !v.ok && v.status === 404);
 
+  console.log("\n── 3b. Immigration clients ─────────────────────");
+  const ip = await es.prefill(made.id, { clientKey: "a-201555444" }, { user: { n: "JJ Zhang" } });
+  const iv = k => (ip.fields.find(x => x.key === k) || {}).value;
+  check("on a client's profile the form fills from the profile: name", () => iv("client_name") === "Mei Chen");
+  check("…and the next hearing from their hearing notes, written out", () => /^[A-Z][a-z]+ \d{1,2}, \d{4}$/.test(iv("hearing_date")));
+  check("…the title names the client", () => /— Mei Chen$/.test(ip.title));
+  check("the A-number and language are available as sources", () => !!tpl.SOURCES.a_number && !!tpl.SOURCES.client_language);
+  const known = await es.clientValues("a-201555444");
+  check("…and filled from the profile, with the judge and court", () => known.a_number === "A201-555-444" && known.next_hearing_judge === "IJ Rodriguez" && /Olive/.test(known.next_hearing_location));
+  await throwsA("an unknown client is refused", () => es.prefill(made.id, { clientKey: "nobody" }), /Client not found/);
+  const ivals = Object.fromEntries(ip.fields.map(x => [x.key, x.value || "x"]));
+  const ipk = await es.createPacket({ templateId: made.id, clientKey: "a-201555444", values: ivals, user: { uid: 1, n: "JJ" },
+    signers: [{ ...ip.signers[0] }, { role: "witness", label: "Witness", name: "Ann Wu" }] });
+  check("a document is prepared for the client, not a civil matter", () => ipk.case_id === null && ipk.client_key === "a-201555444");
+  await es.sendPacket(ipk.id, {});
+  for (const role of ["client", "witness"]) {
+    const sg = T.sg.find(x => x.packet_id === ipk.id && x.role === role);
+    const o = await es.sign(sg.token, { typed_name: sg.name, signature: PNG_URL, consent: true });
+    if (o.finalizing) await o.finalizing;
+  }
+  const idone = T.pk.find(p => p.id === ipk.id);
+  check("once signed, it is filed in the client's own Dropbox folder, under Signed Documents", () =>
+    dbxFolders.includes("/Clients/Chen, Mei (A201555444)/Signed Documents") &&
+    dbxUploads.some(u => /^\/Clients\/Chen, Mei \(A201555444\)\/Signed Documents\/.+ - signed \d{4}-\d{2}-\d{2}\.docx$/.test(u.path)) &&
+    /Signed Documents\/.+\.pdf$/.test(idone.dropbox_pdf || ""));
+  const clientList = await es.listPackets({ clientKey: "a-201555444" });
+  check("the client's page lists it", () => clientList.length === 1 && clientList[0].id === ipk.id);
+  const liuList = await es.listPackets({ clientKey: "contact-liu" });
+  check("…and a client's page also shows documents prepared on their civil matters", () => liuList.length >= 1 && liuList.every(p => p.client_key === "contact-liu"));
+
   console.log("\n── 4. Routes ───────────────────────────────────");
   const stubAll = new Proxy({}, { get: (_t, k) => {
     if (k === "initTables") return async () => {};
@@ -448,27 +487,28 @@ const es = require("../esign");
   delete require.cache[require.resolve("../app-api")];
   const app = express();
   app.use(express.json({ limit: "5mb" }));
-  app.use((req, _res, next) => { if (/^\/admin/.test(req.path)) req.user = { uid: 1, u: "jj", n: "JJ Zhang", r: "admin" }; next(); });
+  let webRole = "admin";
+  app.use((req, _res, next) => { if (/^\/admin/.test(req.path)) req.user = { uid: webRole === "admin" ? 1 : 7, u: "u", n: webRole === "admin" ? "JJ Zhang" : "Chandler Jin", r: webRole }; next(); });
   require("../app-api").registerAppApi(app);
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
   const J = (p, o) => fetch(base + p, o).then(r => r.json().then(d => ({ status: r.status, d })));
 
-  let res = await J("/admin/civil/api/esign/templates");
+  let res = await J("/admin/esign/api/templates");
   check("the web admin lists templates", () => res.d.ok && res.d.templates.length >= 3);
-  res = await J("/api/staff/civil/esign/templates");
+  res = await J("/api/staff/esign/templates");
   check("the app has the same route, behind its own login", () => res.status === 401);
-  res = await J(`/admin/civil/api/esign/prefill?template_id=${handMade.id}&case_id=223`);
+  res = await J(`/admin/esign/api/prefill?template_id=${handMade.id}&case_id=223`);
   check("prefill works over the web", () => res.d.ok && res.d.fields[0].value === "Jing Liu");
-  res = await J("/admin/civil/api/esign/packets", { method: "POST", headers: { "Content-Type": "application/json" },
+  res = await J("/admin/esign/api/packets", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ template_id: handMade.id, case_id: 223, values: { client_name: "Jing Liu" }, signers: rp.signers, send: true }) });
   check("prepare-and-send over the web returns each link", () => res.d.ok && res.d.packet.status === "sent" && /\/sign\/e\//.test(res.d.delivered[0].url));
   const webPk = res.d.packet;
   const fd = new FormData();
   fd.append("file", new Blob([alreadyTpl]), "Another.docx");
-  res = await fetch(base + "/admin/civil/api/esign/templates", { method: "POST", body: fd }).then(r => r.json());
+  res = await fetch(base + "/admin/esign/api/templates", { method: "POST", body: fd }).then(r => r.json());
   check("a document can be uploaded as a new template over the web", () => res.ok && res.template.status === "draft");
-  const dl = await fetch(`${base}/admin/civil/api/esign/packets/${pk.id}/download/signed-pdf`);
+  const dl = await fetch(`${base}/admin/esign/api/packets/${pk.id}/download/signed-pdf`);
   check("the signed PDF downloads", () => dl.status === 200 && dl.headers.get("content-type") === "application/pdf");
 
   const ctoken = T.sg.find(x => x.packet_id === webPk.id && x.role === "client").token;
@@ -477,12 +517,41 @@ const es = require("../esign");
   res = await J("/api/public/esign/" + ctoken + "/sign", { method: "POST", headers: { "Content-Type": "application/json", "X-Forwarded-For": "1.1.1.1, 9.9.9.9" },
     body: JSON.stringify({ typed_name: "Jing Liu", signature: PNG_URL, consent: true }) });
   check("…and takes a signature, recording the IP the server saw — not one the signer made up", () => res.d.ok && T.sg.find(x => x.token === ctoken).ip === "9.9.9.9");
-  res = await J(`/admin/civil/api/esign/packets/${webPk.id}`);
+  res = await J(`/admin/esign/api/packets/${webPk.id}`);
   check("staff views of a document never carry signing tokens", () => res.d.ok && res.d.packet.signers.every(s => !s.token));
-  res = await J(`/admin/civil/api/esign/packets/${webPk.id}/links`);
+  res = await J(`/admin/esign/api/packets/${webPk.id}/links`);
   check("…the copy-link route does", () => res.d.ok && res.d.links.every(l => /\/sign\/e\/[A-Za-z0-9_-]{30,}$/.test(l.url)));
   const page = await fetch(base + "/sign/e/" + ctoken).then(r => r.text());
   check("the signing page is served, not indexed, with its script", () => /noindex/.test(page) && /\/static\/esign-sign\.js/.test(page) && page.includes(`data-token="${ctoken}"`));
+  // Templates are the admin's; everyone else only uses the active ones.
+  webRole = "attorney";
+  res = await J("/admin/esign/api/templates?all=1");
+  check("an attorney sees only ACTIVE templates", () => res.d.ok && res.d.templates.length && res.d.templates.every(t => t.status === "active"));
+  const fd2 = new FormData(); fd2.append("file", new Blob([alreadyTpl]), "Sneaky.docx");
+  res = await fetch(base + "/admin/esign/api/templates", { method: "POST", body: fd2 }).then(r => r.json().then(d => ({ status: r.status, d })));
+  check("…cannot upload a template", () => res.status === 403 && /Only an admin/.test(res.d.error));
+  for (const [m, u] of [["GET", `/admin/esign/api/templates/${made.id}`], ["PATCH", `/admin/esign/api/templates/${made.id}`],
+                        ["POST", `/admin/esign/api/templates/${made.id}/status`], ["GET", `/admin/esign/api/templates/${made.id}/download`]]) {
+    const r = await fetch(base + u, { method: m, headers: { "Content-Type": "application/json" }, body: m === "GET" ? undefined : JSON.stringify({ status: "archived" }) });
+    check(`…cannot ${m} ${u.replace(/.*templates/, "templates")}`, () => r.status === 403);
+  }
+  res = await J("/admin/esign/api/meta");
+  check("…and is not shown the Templates link", () => res.d.can_manage_templates === false);
+  res = await J(`/admin/esign/api/prefill?template_id=${handMade.id}&case_id=223`);
+  check("…but CAN prepare a document from an active template on a case", () => res.d.ok);
+  res = await J(`/admin/esign/api/prefill?template_id=${made.id}&client_key=a-201555444`);
+  check("…and is refused a client they have not been given access to", () => res.status === 403);
+  res = await J(`/admin/esign/api/packets/${ipk.id}`);
+  check("…including that client's documents", () => res.status === 403);
+  webRole = "viewer";
+  res = await J(`/admin/esign/api/prefill?template_id=${handMade.id}&case_id=223`);
+  check("a view-only account cannot prepare documents", () => res.status === 403);
+  webRole = "admin";
+  res = await J("/admin/esign/api/meta");
+  check("the admin is shown the Templates link", () => res.d.can_manage_templates === true);
+  res = await J(`/admin/esign/api/packets?client_key=a-201555444`);
+  check("the admin sees the client's documents", () => res.d.ok && res.d.packets.length === 1);
+
   const pageHead = await fetch(base + "/sign/e/" + ctoken);
   check("…with a content security policy that blocks inline script", () => /script-src 'self'/.test(pageHead.headers.get("content-security-policy") || ""));
   server.close();
@@ -558,7 +627,13 @@ const es = require("../esign");
   const ui = fs.readFileSync(path.join(REPO, "civil-litigation-ui.js"), "utf8");
   const srv = fs.readFileSync(path.join(REPO, "server.js"), "utf8");
   check("the case page has the panel and loads its script", () => /data-esign="case"/.test(ui) && /clientScriptTag\("esign-admin\.js"\)/.test(ui));
-  check("the kanban links to Templates, and the page exists", () => /href="\/admin\/civil\/templates"/.test(ui) && /app\.get\("\/admin\/civil\/templates"/.test(srv));
+  const nav = fs.readFileSync(path.join(REPO, "hearing-notes.js"), "utf8");
+  const prof = fs.readFileSync(path.join(REPO, "client-profiles.js"), "utf8");
+  check("Templates is under Admin, for admins only", () => /app\.get\("\/admin\/templates", auth\.requireRole\("admin"\)/.test(srv) &&
+    /section-admin[\s\S]*href="\/admin\/templates"[\s\S]*Document Templates/.test(nav));
+  check("…not on the Civil kanban; the old address redirects", () => !/admin\/civil\/templates"/.test(ui) && /redirect\(301, "\/admin\/templates"\)/.test(srv));
+  check("every client's profile has the signature panel", () => /data-esign="client" data-esign-client="\$\{escapeAttr\(client\.key\)\}"/.test(prof) && /clientScriptTag\("esign-admin\.js"\)/.test(prof));
+  check("the API has its own web twin, outside Civil", () => { const { CIVIL_MIRROR_PREFIXES } = require("../app-api"); return CIVIL_MIRROR_PREFIXES.some(r => r.src === "/api/staff/esign" && r.dest === "/admin/esign/api"); });
   const cs = require("../client-script");
   check("both scripts are protected against a flattened upload", () => cs.CLIENT_BUNDLES.includes("esign-admin.js") && cs.CLIENT_BUNDLES.includes("esign-sign.js"));
 

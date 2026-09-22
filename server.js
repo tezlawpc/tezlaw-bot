@@ -971,26 +971,40 @@ app.get("/admin/civil/wip", async (req, res) => {
   }
 });
 
-// ── Templates for e-signature ───────────────────────────────
-// Upload a document already filed; Zara turns it into a template with
-// fill-in fields and signature spots. Review, then activate. Drawn by
-// /static/esign-admin.js against /admin/civil/api/esign/*.
-app.get("/admin/civil/templates", async (req, res) => {
+// ── Templates for e-signature (Admin) ───────────────────────
+// Upload a document already filed — civil or immigration — and Zara turns
+// it into a template with fill-in fields and signature spots. Review, then
+// activate. Admin only (JJ); staff send documents from ACTIVE templates on
+// a case or client page. Drawn by /static/esign-admin.js against
+// /admin/esign/api/*.
+app.get("/admin/templates", auth.requireRole("admin"), async (req, res) => {
   try {
     const chrome = require("./hearing-notes");
     const body = `
       <div style="padding:24px;max-width:1200px;">
-        <a href="/admin/civil" style="color:#B8891E;text-decoration:none;font-size:12px;">← Back to Kanban</a>
-        <h1 style="margin:8px 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">✍ Document Templates</h1>
-        <div style="color:#7B5330;font-style:italic;margin-bottom:16px;">Upload a document you have filed before. Zara turns the case-specific parts into fill-in fields and finds where each person signs. Review it, activate it, then prepare it from any case page and send it for signature.</div>
+        <h1 style="margin:0 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">✍ Document Templates</h1>
+        <div style="color:#7B5330;font-style:italic;margin-bottom:16px;">Upload a document you have filed or used before — civil or immigration: a declaration, an affidavit, a retainer. Zara turns the case-specific parts into fill-in fields and finds where each person signs. Review it and activate it; staff can then prepare it from any case or client page and send it for signature.</div>
         <div data-esign="templates"></div>
       </div>
       ${require("./client-script").clientScriptTag("esign-admin.js")}`;
-    res.send(chrome.renderAdminChrome({ title: "Document Templates", body, activeItem: "civil" }));
+    res.send(chrome.renderAdminChrome({ title: "Document Templates", body, activeItem: "templates" }));
   } catch (err) {
     res.status(500).send("Templates page failed: " + err.message);
   }
 });
+// It lived under Civil for a day; keep old links working.
+app.get("/admin/civil/templates", (req, res) => res.redirect(301, "/admin/templates"));
+
+// ── Court Mail ───────────────────────────────────────────────
+// Court, EOIR and USCIS emails forwarded to the court mailbox are read,
+// matched, filed and calendared (court-mail.js). The page and its API:
+require("./court-mail-routes").attach(app, auth);
+try { require("./court-mail").start(); } catch (e) { console.warn("[court-mail] start failed:", e.message); }
+
+// ── Transcripts ──────────────────────────────────────────────
+// Every dictation and hearing recording, saved when transcribed, split by
+// speaker (transcripts.js). The pages and their API:
+require("./transcripts-routes").attach(app, auth);
 
 // ── Civil: read a new matter out of its own documents ───────
 // Upload the complaint and summons (and the retainer, if signed) and Zara
@@ -9153,6 +9167,9 @@ app.post("/admin/hearing/notes", async (req, res) => {
 
     if (action === "save") {
       const saved = await hn.saveNote(parsed, { generateSummaries: true });
+      // Transcripts dictated on this page (their ids ride in a hidden field).
+      try { await require("./transcripts").linkToNote(req.body.transcript_ids, { noteType: "master", noteId: saved.id, clientName: parsed.client_name, aNumber: parsed.a_number, byUid: req.user ? req.user.uid : "none" }); }
+      catch (e) { console.warn("[transcripts] link:", e.message); }
       // Audit log
       try {
         const audit = require("./audit-log");
@@ -9240,30 +9257,37 @@ app.post("/admin/hearing/notes/dictate/extract-only", audioUpload.single("audio"
       return res.status(400).json({ ok: false, error: "No audio file uploaded" });
     }
     const voice = require("./voice-dictation");
+    const T = require("./transcripts");
     const filename = req.file.originalname || "dictation.webm";
     let buffer = req.file.buffer;
     console.log(`[dictate-extract-only] Received ${buffer.length} bytes`);
-    // Whisper 25 MB cap — compress if oversized
-    if (buffer.length > 24 * 1024 * 1024) {
-      console.log(`[dictate-extract-only] Compressing with ffmpeg…`);
-      buffer = await compressAudioForWhisper(buffer, filename);
-      console.log(`[dictate-extract-only] Compressed to ${buffer.length} bytes`);
-    }
-    const transcript = await voice.transcribeAudio(buffer, filename);
-    console.log(`[dictate-extract-only] Transcript: ${transcript.length} chars`);
-    if (!transcript || transcript.trim().length < 5) {
-      return res.status(400).json({
-        ok: false,
-        error: "Transcript was empty or too short. Recording may have been silent.",
-      });
-    }
     const hint = {
       client_name: String(req.body.client_name || "").trim() || null,
       a_number: String(req.body.a_number || "").trim() || null,
       hearing_type: String(req.body.hearing_type || "").trim() || null,
     };
-    const extracted = await voice.extractFieldsFromTranscript(transcript, hint);
-    res.json({ ok: true, transcript, extracted });
+    const note = T.noteFrom(req.body);
+    // Saved the moment it is transcribed (transcripts.js), with speakers
+    // separated, so Apply or Discard can no longer lose it.
+    const { row } = await T.transcribeAndSave(buffer, filename, {
+      source: "master-dictation", user: req.user, clientName: hint.client_name, aNumber: hint.a_number,
+      noteType: note.noteType, noteId: note.noteId, nameNow: false,
+    });
+    const plain = T.toText(row);
+    console.log(`[dictate-extract-only] Transcript #${row.id}: ${plain.length} chars`);
+    if (!plain || plain.trim().length < 5) {
+      return res.status(400).json({
+        ok: false,
+        error: "Transcript was empty or too short. Recording may have been silent.",
+        transcript_id: row.id,
+      });
+    }
+    const [extracted] = await Promise.all([
+      voice.extractFieldsFromTranscript(plain, hint),
+      T.nameSpeakers(row.id, { recordedBy: req.user && (req.user.n || req.user.u) }).catch(() => null),
+    ]);
+    const done = (await T.finish(row.id, { extracted, ...note }).catch(() => null)) || row;
+    res.json({ ok: true, transcript: T.toText(done), transcript_id: row.id, speakers: T.summary(done).speakers, extracted });
   } catch (err) {
     console.error("[dictate-extract-only]:", err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -9279,29 +9303,30 @@ app.post("/admin/hearing/notes/dictate/transcribe-chunk", audioUpload.single("au
     if (!req.file || !req.file.buffer) {
       return res.status(400).json({ ok: false, error: "No audio file uploaded" });
     }
-    const voice = require("./voice-dictation");
+    const T = require("./transcripts");
     const filename = req.file.originalname || `chunk-${Date.now()}.webm`;
     const chunkIndex = req.body.chunk_index || "?";
-    let buffer = req.file.buffer;
+    const buffer = req.file.buffer;
     console.log(`[dictate-chunk] Chunk ${chunkIndex}: ${buffer.length} bytes`);
-
-    // Whisper API caps at 25 MB per file. If chunk is close to or over that,
-    // re-encode with ffmpeg to low-bitrate Opus before sending.
-    const WHISPER_LIMIT_BYTES = 24 * 1024 * 1024; // 24 MB safety margin
-    if (buffer.length > WHISPER_LIMIT_BYTES) {
-      console.log(`[dictate-chunk] Chunk ${chunkIndex} is ${(buffer.length / 1024 / 1024).toFixed(1)} MB — compressing with ffmpeg…`);
-      buffer = await compressAudioForWhisper(buffer, filename);
-      console.log(`[dictate-chunk] Chunk ${chunkIndex} compressed to ${(buffer.length / 1024 / 1024).toFixed(1)} MB`);
-    }
-
-    const transcript = await voice.transcribeAudio(buffer, filename);
-    console.log(`[dictate-chunk] Chunk ${chunkIndex} transcript: ${transcript.length} chars`);
-    res.json({ ok: true, chunk_index: chunkIndex, transcript });
+    // Every part of one recording goes into one saved transcript, keyed by
+    // the recorder's session id. (Audio is cut and compressed as needed
+    // inside the transcriber.)
+    const note = T.noteFrom(req.body);
+    const session = String(req.body.session_id || "").trim();
+    const { row, partText } = await T.transcribeAndSave(buffer, filename, {
+      source: "individual-recording", user: req.user,
+      sessionKey: session ? `web:${req.user ? req.user.uid : "?"}:${session}` : null,
+      index: parseInt(chunkIndex, 10) || 0,
+      clientName: String(req.body.client_name || "").trim() || null,
+      aNumber: String(req.body.a_number || "").trim() || null,
+      noteType: note.noteType, noteId: note.noteId, nameNow: false,
+    });
+    console.log(`[dictate-chunk] Chunk ${chunkIndex} → transcript #${row.id}: ${partText.length} chars`);
+    res.json({ ok: true, chunk_index: chunkIndex, transcript: partText, transcript_id: row.id });
   } catch (err) {
     console.error("[dictate-chunk]:", err.message);
-    // Friendly error for 413s
     const friendlyMsg = /413|Payload Too Large|maximum content|too large/i.test(err.message)
-      ? "Audio chunk exceeded 25 MB Whisper limit and ffmpeg compression failed. Try shorter recording sessions."
+      ? "Audio chunk was too large to transcribe. Try shorter recording sessions."
       : err.message;
     res.status(500).json({ ok: false, error: friendlyMsg });
   }
@@ -9355,7 +9380,18 @@ async function compressAudioForWhisper(inputBuffer, originalFilename) {
 // Extract fields from a plain-text transcript (post multi-chunk combine).
 app.post("/admin/hearing/notes/dictate/extract-from-text", async (req, res) => {
   try {
-    const transcript = String(req.body.transcript || "").trim();
+    const T = require("./transcripts");
+    // Only the recorder's own transcript: the id comes from the browser.
+    let tid = parseInt(req.body.transcript_id, 10) || null;
+    if (tid) {
+      const own = await T.get(tid).catch(() => null);
+      if (!own || !req.user || String(own.created_by_uid) !== String(req.user.uid)) tid = null;
+    }
+    let transcript = String(req.body.transcript || "").trim();
+    // With the saved transcript: name the speakers across every part and
+    // read the fields from the named text.
+    let named = tid ? T.nameSpeakers(tid, { recordedBy: req.user && (req.user.n || req.user.u) }).catch(() => null) : null;
+    if (named) { const row = await named; if (row) transcript = T.toText(row) || transcript; }
     if (transcript.length < 10) {
       return res.status(400).json({ ok: false, error: "Transcript is too short" });
     }
@@ -9367,7 +9403,9 @@ app.post("/admin/hearing/notes/dictate/extract-from-text", async (req, res) => {
     };
     console.log(`[dictate-extract-from-text] Transcript: ${transcript.length} chars`);
     const extracted = await voice.extractFieldsFromTranscript(transcript, hint);
-    res.json({ ok: true, extracted });
+    let done = null;
+    if (tid) done = await T.finish(tid, { extracted, ...T.noteFrom(req.body) }).catch(() => null);
+    res.json({ ok: true, extracted, transcript_id: tid, transcript: done ? T.toText(done) : transcript, speakers: done ? T.summary(done).speakers : [] });
   } catch (err) {
     console.error("[dictate-extract-from-text]:", err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -9384,10 +9422,16 @@ app.post("/admin/hearing/notes/dictate/process", audioUpload.single("audio"), as
 
     console.log(`[dictate] Received ${req.file.buffer.length} bytes, filename=${req.file.originalname}`);
 
-    // Whisper
+    // Transcribe with speakers and save it before anything else can fail.
+    const T = require("./transcripts");
     const filename = req.file.originalname || "dictation.webm";
-    const transcript = await voice.transcribeAudio(req.file.buffer, filename);
-    console.log(`[dictate] Whisper transcript: ${transcript.length} chars`);
+    const { row: trow } = await T.transcribeAndSave(req.file.buffer, filename, {
+      source: "master-dictation", user: req.user,
+      clientName: String(req.body.client_name || "").trim() || null,
+      aNumber: String(req.body.a_number || "").trim() || null, nameNow: false,
+    });
+    const transcript = T.toText(trow);
+    console.log(`[dictate] Transcript #${trow.id}: ${transcript.length} chars`);
 
     if (!transcript || transcript.trim().length < 5) {
       return res.status(400).json({
@@ -9402,14 +9446,19 @@ app.post("/admin/hearing/notes/dictate/process", audioUpload.single("audio"), as
       a_number: String(req.body.a_number || "").trim() || null,
       hearing_type: String(req.body.hearing_type || "").trim() || null,
     };
-    const extracted = await voice.extractFieldsFromTranscript(transcript, hint);
+    const [extracted] = await Promise.all([
+      voice.extractFieldsFromTranscript(transcript, hint),
+      T.nameSpeakers(trow.id, { recordedBy: req.user && (req.user.n || req.user.u) }).catch(() => null),
+    ]);
     console.log(`[dictate] Claude extracted: client=${extracted.client_name}, type=${extracted.hearing_type}`);
+    await T.finish(trow.id, { extracted }).catch(() => null);
 
     if (!extracted.client_name) {
       return res.status(400).json({
         ok: false,
-        error: "Couldn't identify a client name from the dictation. Try again and start with 'This is [client name]'s hearing.'",
+        error: "Couldn't identify a client name from the dictation. The transcript is saved under Transcripts (#" + trow.id + ") — assign it to the client there, or try again starting with 'This is [client name]'s hearing.'",
         transcript,
+        transcript_id: trow.id,
       });
     }
 
@@ -9447,6 +9496,8 @@ app.post("/admin/hearing/notes/dictate/process", audioUpload.single("audio"), as
     // extraction before triggering paralegal/client comms.
     const saved = await hn.saveNote(note, { generateSummaries: false });
     console.log(`[dictate] Created draft note #${saved.id} (was_duplicate=${saved.was_duplicate})`);
+    try { await T.linkToNote([trow.id], { noteType: "master", noteId: saved.id, clientName: note.client_name, aNumber: note.a_number, byUid: null }); }
+    catch (e) { console.warn("[dictate] transcript link:", e.message); }
 
     // Audit log
     try {
@@ -9466,6 +9517,7 @@ app.post("/admin/hearing/notes/dictate/process", audioUpload.single("audio"), as
       note_id: saved.id,
       was_duplicate: saved.was_duplicate,
       transcript,
+      transcript_id: trow.id,
       extracted_summary: {
         client_name: extracted.client_name,
         hearing_type: extracted.hearing_type,
@@ -9571,6 +9623,9 @@ app.post("/admin/hearing/notes/:id", async (req, res) => {
       }));
     }
     await hn.updateNote(id, parsed, { user: req.user });
+    // Transcripts dictated on this page (their ids ride in a hidden field).
+    try { await require("./transcripts").linkToNote(req.body.transcript_ids, { noteType: "master", noteId: id, clientName: parsed.client_name, aNumber: parsed.a_number, byUid: req.user ? req.user.uid : "none" }); }
+    catch (e) { console.warn("[transcripts] link:", e.message); }
     // Audit log
     try {
       const audit = require("./audit-log");
@@ -9674,6 +9729,9 @@ app.post("/admin/hearing/individual", async (req, res) => {
       return res.send(ih.renderForm({ error: "Client name is required.", prev: parsed }));
     }
     const saved = await ih.saveIndividualNote(parsed);
+    // Transcripts dictated on this page (their ids ride in a hidden field).
+    try { await require("./transcripts").linkToNote(req.body.transcript_ids, { noteType: "individual", noteId: saved.id, clientName: parsed.client_name, aNumber: parsed.a_number, byUid: req.user ? req.user.uid : "none" }); }
+    catch (e) { console.warn("[transcripts] link:", e.message); }
     // Audit log
     try {
       const audit = require("./audit-log");
@@ -11412,6 +11470,9 @@ app.post("/admin/hearing/individual/:id", async (req, res) => {
       return res.send(ih.renderForm({ noteId: id, error: "Client name is required.", prev: parsed, siblings }));
     }
     await ih.saveIndividualNote(parsed, id);
+    // Transcripts dictated on this page (their ids ride in a hidden field).
+    try { await require("./transcripts").linkToNote(req.body.transcript_ids, { noteType: "individual", noteId: id, clientName: parsed.client_name, aNumber: parsed.a_number, byUid: req.user ? req.user.uid : "none" }); }
+    catch (e) { console.warn("[transcripts] link:", e.message); }
     // Audit log
     try {
       const audit = require("./audit-log");
@@ -11440,6 +11501,9 @@ app.post("/admin/hearing/individual/:id/autosave", async (req, res) => {
       return res.json({ ok: false, error: "Client name required for save", skip: true });
     }
     await ih.saveIndividualNote(parsed, id);
+    // Transcripts dictated on this page (their ids ride in a hidden field).
+    try { await require("./transcripts").linkToNote(req.body.transcript_ids, { noteType: "individual", noteId: id, clientName: parsed.client_name, aNumber: parsed.a_number, byUid: req.user ? req.user.uid : "none" }); }
+    catch (e) { console.warn("[transcripts] link:", e.message); }
     res.json({ ok: true, id, saved_at: new Date().toISOString() });
   } catch (err) {
     console.error("[individual autosave]:", err.message);

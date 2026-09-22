@@ -1518,6 +1518,12 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/deadlines" class="nav-link ${isActive('deadlines')}" data-perm="deadlines.read">
         <span class="nav-icon">◔</span><span class="nav-label">Deadlines</span>
       </a>
+      <a href="/admin/court-mail" class="nav-link ${isActive('court-mail')}" data-perm="deadlines.read">
+        <span class="nav-icon">✉</span><span class="nav-label">Court Mail</span>
+      </a>
+      <a href="/admin/transcripts" class="nav-link ${isActive('transcripts')}" data-perm="clients.read">
+        <span class="nav-icon">◉</span><span class="nav-label">Transcripts</span>
+      </a>
       <a href="/admin/tasks" class="nav-link ${isActive('tasks')}" data-perm="tasks.read">
         <span class="nav-icon">▤</span><span class="nav-label">Task List</span>
       </a>
@@ -1744,6 +1750,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </div>
       <a href="/admin/matters/" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◇</span><span class="nav-label">Matter Manager</span>
+      </a>
+      <a href="/admin/templates" class="nav-link ${isActive('templates')}" data-perm="users.manage">
+        <span class="nav-icon">✍</span><span class="nav-label">Document Templates</span>
       </a>
       <a href="/admin/panel/prompt" class="nav-link" data-perm="users.manage">
         <span class="nav-icon">◘</span><span class="nav-label">System Prompt</span>
@@ -2260,6 +2269,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     </div>
   </div>
   <p style="margin-bottom:15px; color:#555;">Take notes during the hearing. Zara will clean them up and generate a paralegal summary + client-friendly summary in the client's language.</p>
+  ${isEdit ? `<div data-transcripts="note" data-note-type="master" data-note-id="${Number(noteId)}" style="margin-bottom:12px;"></div>${require("./client-script").clientScriptTag("transcripts-page.js")}` : ""}
 
   <!-- Dictation floating widget — visible ONLY while recording -->
   <div id="dictation-widget" style="display:none; position:fixed; bottom:20px; right:20px; z-index:9999; background:linear-gradient(145deg, #0C1C36, #1a2f4f); color:white; padding:14px 18px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.35); min-width:260px; border:2px solid #B79C62;">
@@ -2575,6 +2585,8 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     let dTranscript = "";
     let dExtracted = null;
     let dIsStopping = false;
+    let dTranscriptId = null;   // saved transcript (transcripts.js)
+    const D_NOTE_ID = ${isEdit ? Number(noteId) : "null"};
 
     async function openDictationModal() {
       // Immediately request mic + start recording. Show floating widget only.
@@ -2678,6 +2690,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         if (!resp.ok || !data.ok) throw new Error(data.error || "HTTP " + resp.status);
         dTranscript = data.transcript;
         dExtracted = data.extracted;
+        dTranscriptId = data.transcript_id || null;
         dShowExtractedPreview();
         document.getElementById("d-processing-panel").style.display = "none";
         document.getElementById("d-result-panel").style.display = "block";
@@ -2713,7 +2726,8 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     }
 
     function dDiscard() {
-      dTranscript = ""; dExtracted = null;
+      // The transcript itself stays saved under the client's Transcripts.
+      dTranscript = ""; dExtracted = null; dTranscriptId = null;
       closeDictationModal();
     }
 
@@ -2757,10 +2771,24 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         const prefix = rawNotes.value ? "\\n\\n[Voice dictation " + stamp + "]\\n" : "";
         rawNotes.value = rawNotes.value + prefix + dTranscript;
       }
+      if (dTranscriptId) {
+        const form = document.getElementById("hearing-form");
+        if (form) {
+          let h = form.querySelector('input[name="transcript_ids"]');
+          if (!h) { h = document.createElement("input"); h.type = "hidden"; h.name = "transcript_ids"; form.appendChild(h); }
+          h.value = h.value ? h.value + "," + dTranscriptId : String(dTranscriptId);
+        }
+        // Editing a saved note: link it now (a new note links when saved).
+        if (D_NOTE_ID) {
+          fetch("/admin/transcripts/api/" + dTranscriptId + "/link", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ note_type: "master", note_id: D_NOTE_ID }) })
+            .then(function () { if (window.TezTranscripts) window.TezTranscripts.refresh(); }).catch(function () {});
+        }
+      }
       closeDictationModal();
       const toast = document.createElement("div");
       toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2e7d32; color:white; padding:12px 20px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:10001; font-size:14px;";
-      toast.textContent = "✅ Voice dictation applied to form";
+      toast.textContent = dTranscriptId ? "✅ Voice dictation applied — transcript #" + dTranscriptId + " saved to the client's file" : "✅ Voice dictation applied to form";
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 3000);
     }

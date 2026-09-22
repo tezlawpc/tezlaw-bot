@@ -5,11 +5,15 @@
  *   [data-esign="templates"]  the Templates page: upload a filed
  *                             document, review what Zara made of it,
  *                             activate it.
- *   [data-esign="case"]       on a case page: prepare a document from
- *                             a template (filled from the matter), send
- *                             it, follow who has signed, download it.
+ *   [data-esign="case"]       on a civil case page, and
+ *   [data-esign="client"]     on any client's profile (immigration and
+ *                             every other client): prepare a document
+ *                             from an active template, filled from the
+ *                             matter or the client, send it, follow who
+ *                             has signed, download it.
  *
- * Talks to /admin/civil/api/esign/* (cookie twins of the app routes).
+ * Talks to /admin/esign/api/* (cookie twins of the app routes). Templates
+ * are managed by an admin only.
  * ──────────────────────────────────────────────────────────── */
 (function () {
   "use strict";
@@ -20,7 +24,7 @@
     walnut: "#3E2818", walnutMid: "#5A3B22", gold: "#B8891E", ember: "#F07800", red: "#A02818",
     parch: "#F5EBD3", lit: "#FBF3DE", border: "#D4C4A0", muted: "#7B5330", green: "#166534",
   };
-  var BASE = "/admin/civil/api/esign";
+  var BASE = "/admin/esign/api";
   var META = null;
 
   // ── helpers ────────────────────────────────────────────────
@@ -276,24 +280,31 @@
   // ═══════════════════════════════════════════════════════════
   //  CASE PAGE PANEL
   // ═══════════════════════════════════════════════════════════
-  function casePanel(host) {
-    var caseId = host.getAttribute("data-esign-case");
+  // `target` is { caseId } on a civil case page or { clientKey } on a
+  // client's profile. Everything else is the same.
+  function casePanel(host, target) {
+    var caseId = target.caseId || null, clientKey = target.clientKey || null;
+    var where = caseId ? "case_id=" + encodeURIComponent(caseId) : "client_key=" + encodeURIComponent(clientKey);
     var body = h("div");
     var form = h("div");
-    clear(host).appendChild(h("div", { style: "display:flex;justify-content:space-between;align-items:center;margin:22px 0 8px;" }, [
+    var tplLink = h("span");
+    clear(host).appendChild(h("div", { style: "display:flex;justify-content:space-between;align-items:center;margin:22px 0 8px;flex-wrap:wrap;gap:8px;" }, [
       h("h3", { text: "✍ DOCUMENTS FOR SIGNATURE", style: "margin:0;font-family:Cinzel,serif;font-size:14px;letter-spacing:1.5px;color:" + C.walnut + ";" }),
       h("div", { style: "display:flex;gap:8px;align-items:center;" }, [
-        h("a", { href: "/admin/civil/templates", text: "Templates →", style: "font-size:12px;color:" + C.gold + ";text-decoration:none;" }),
+        tplLink,
         btn("+ PREPARE DOCUMENT", function () { prepare(); }, "primary"),
       ]),
     ]));
     host.appendChild(form);
     host.appendChild(body);
+    meta().then(function (m) {
+      if (m.can_manage_templates) tplLink.appendChild(h("a", { href: "/admin/templates", text: "Templates →", style: "font-size:12px;color:" + C.gold + ";text-decoration:none;" }));
+    }).catch(function () {});
 
     function load() {
-      api("/packets?case_id=" + encodeURIComponent(caseId)).then(function (d) {
+      api("/packets?" + where).then(function (d) {
         clear(body);
-        if (!d.packets.length) { body.appendChild(note("Nothing sent for signature on this matter yet.")); return; }
+        if (!d.packets.length) { body.appendChild(note(caseId ? "Nothing sent for signature on this matter yet." : "Nothing sent for signature for this client yet.")); return; }
         d.packets.forEach(function (p) { body.appendChild(packetCard(p)); });
       }).catch(function (e) { clear(body).appendChild(note("Unavailable: " + e.message, C.red)); });
     }
@@ -366,7 +377,10 @@
         var active = d.templates.filter(function (t) { return t.status === "active"; });
         clear(form);
         if (!active.length) {
-          form.appendChild(box([note("No active templates yet."), h("a", { href: "/admin/civil/templates", text: "Make one from a filed document →", style: "color:" + C.gold + ";font-size:13px;" })]));
+          form.appendChild(box([note("No active templates yet."),
+            META && META.can_manage_templates
+              ? h("a", { href: "/admin/templates", text: "Make one from a filed document →", style: "color:" + C.gold + ";font-size:13px;" })
+              : note("Ask an admin to add one under Admin → Document Templates.")]));
           return;
         }
         var pick = select([["", "Choose a template…"]].concat(active.map(function (t) { return [t.id, t.name + " (" + String(t.category).replace(/_/g, " ") + ")"]; })), "");
@@ -382,8 +396,8 @@
     }
 
     function fill(templateId, area) {
-      clear(area).appendChild(note("Filling it in from the matter…"));
-      api("/prefill?template_id=" + encodeURIComponent(templateId) + "&case_id=" + encodeURIComponent(caseId)).then(function (d) {
+      clear(area).appendChild(note(caseId ? "Filling it in from the matter…" : "Filling it in from the client's profile…"));
+      api("/prefill?template_id=" + encodeURIComponent(templateId) + "&" + where).then(function (d) {
         var title = input(d.title);
         var inputs = d.fields.map(function (f) {
           var el = f.type === "multiline"
@@ -404,7 +418,7 @@
           var values = {};
           inputs.forEach(function (i) { values[i.key] = i.el.value; });
           api("/packets", { method: "POST", body: {
-            template_id: templateId, case_id: caseId, title: title.value, values: values, message: message.value, send: send,
+            template_id: templateId, case_id: caseId, client_key: clientKey, title: title.value, values: values, message: message.value, send: send,
             signers: signers.map(function (s) { return { role: s.role, label: s.label, name: s.name.value, email: s.email.value, phone: s.phone.value, sign_order: s.order.value }; }),
           } }).then(function (r) {
             clear(form);
@@ -428,7 +442,7 @@
         clear(area);
         area.appendChild(field("Document title (what the signers see)", title));
         if (inputs.length) {
-          area.appendChild(h("div", { text: "FIELDS — filled from the matter where it knows; orange ones need you", style: "font-size:11px;letter-spacing:1.2px;color:" + C.muted + ";margin:6px 0;" }));
+          area.appendChild(h("div", { text: "FIELDS — filled from the " + (caseId ? "matter" : "client's profile") + " where it knows; orange ones need you", style: "font-size:11px;letter-spacing:1.2px;color:" + C.muted + ";margin:6px 0;" }));
           area.appendChild(h("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0 14px;" },
             inputs.map(function (i) { return field(i.label, i.el, i.source && i.source !== "ask" ? "from: " + ((META && META.sources[i.source]) || i.source) : null); })));
         }
@@ -457,7 +471,9 @@
     var t = document.querySelector('[data-esign="templates"]');
     if (t) templatesPage(t);
     var c = document.querySelector('[data-esign="case"]');
-    if (c) casePanel(c);
+    if (c) casePanel(c, { caseId: c.getAttribute("data-esign-case") });
+    var cl = document.querySelector('[data-esign="client"]');
+    if (cl) casePanel(cl, { clientKey: cl.getAttribute("data-esign-client") });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();

@@ -628,6 +628,18 @@ function renderClientDetail(client, { documents = [] } = {}) {
       <div id="hn-list"></div>
     </div>
 
+    <!-- Voice transcripts (transcripts.js) — drawn by transcripts-page.js -->
+    <div style="background:white; padding:4px 20px 12px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
+      <div data-transcripts="client" data-client-key="${escapeAttr(client.key)}"></div>
+    </div>
+    ${require("./client-script").clientScriptTag("transcripts-page.js")}
+
+    <!-- Documents out for e-signature (esign.js) — drawn by /static/esign-admin.js -->
+    <div style="background:white; padding:4px 20px 12px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
+      <div data-esign="client" data-esign-client="${escapeAttr(client.key)}"></div>
+    </div>
+    ${require("./client-script").clientScriptTag("esign-admin.js")}
+
     ${require("./client-documents").renderDocumentsSection({ clientKey: client.key, documents, aNumber: client.a_number })}
 
     <!-- Dropbox Documents section (lazy-loaded via JS) -->

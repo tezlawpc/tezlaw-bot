@@ -155,15 +155,7 @@ async function matterValues(caseId) {
   if (c.hourly_rate) out.hourly_rate = c.hourly_rate;
   if (c.retainer_amount) out.retainer_amount = c.retainer_amount;
 
-  try {
-    const p = await require("./client-profiles").getClientByKey(c.client_key);
-    if (p) {
-      if (p.client_name) out.client_name = p.client_name;
-      if (p.client_email) out.client_email = p.client_email;
-      if (p.client_phone) out.client_phone = p.client_phone;
-      if (p.client_address) out.client_address = p.client_address;
-    }
-  } catch (e) { /* the form still works; the user types the name */ }
+  await clientValues(c.client_key, out, { hearings: false });
 
   try {
     const h = (await db.query(
@@ -181,11 +173,49 @@ async function matterValues(caseId) {
   return out;
 }
 
-/** The form to prepare a document: fields pre-filled from the matter, signers suggested. */
-async function prefill(templateId, caseId, { user = null } = {}) {
+/**
+ * What a client's profile knows (immigration and every other client):
+ * name, A-number, contact details, language — and, unless a civil matter
+ * already supplied it, the next hearing from their hearing notes.
+ */
+async function clientValues(clientKey, out = {}, { hearings = true } = {}) {
+  if (!clientKey) return out;
+  let p = null;
+  try { p = await require("./client-profiles").getClientByKey(clientKey); }
+  catch (e) { return out; }   // the form still works; the user types the name
+  if (!p) return out;
+  const map = { client_name: "client_name", client_email: "client_email", client_phone: "client_phone",
+    client_address: "client_address", a_number: "a_number", client_language: "client_language", date_of_birth: "date_of_birth" };
+  for (const [src, key] of Object.entries(map)) if (p[src] && out[key] === undefined) out[key] = p[src];
+  if (p.case_type && out.case_type === undefined) out.case_type = p.case_type;
+  if (hearings && out.next_hearing_date === undefined) {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    const day = v => (v instanceof Date ? v.toISOString() : String(v || "")).slice(0, 10);
+    const next = [[p.next_hearing_date, p.next_hearing_type], [p.hearing_date, p.hearing_type]]
+      .find(([d]) => d && day(d) >= today);
+    if (next) {
+      out.next_hearing_date = day(next[0]);
+      if (next[1]) out.next_hearing_type = next[1];
+      if (p.judge_name) out.next_hearing_judge = p.judge_name;
+      if (p.court_location) out.next_hearing_location = p.court_location;
+    }
+  }
+  return out;
+}
+
+/** Where a document is being prepared: a civil matter, or a client (immigration and others). */
+function targetOf(t) {
+  if (t && typeof t === "object") return { caseId: t.caseId ? Number(t.caseId) : null, clientKey: t.clientKey || null };
+  return { caseId: t ? Number(t) : null, clientKey: null };
+}
+
+/** The form to prepare a document: fields pre-filled from the matter or client, signers suggested. */
+async function prefill(templateId, target, { user = null } = {}) {
   const t = await templates.getTemplate(templateId);
   if (t.status !== "active") throw new Error("That template is still a draft. Review and activate it on the Templates page first.");
-  const known = await matterValues(caseId);
+  const { caseId, clientKey } = targetOf(target);
+  const known = caseId ? await matterValues(caseId) : await clientValues(clientKey, { today: todayPT() });
+  if (!caseId && clientKey && !known.client_name) throw new Error("Client not found");
   const fields = (t.fields || []).map(f => {
     const raw = f.source && f.source !== "ask" ? known[f.source] : undefined;
     const type = f.type === "text" && /date$/.test(f.source || "") ? "date" : f.type;
@@ -204,7 +234,7 @@ async function prefill(templateId, caseId, { user = null } = {}) {
   });
   return {
     template: { id: t.id, name: t.name, category: t.category, description: t.description },
-    title: t.name + (known.case_name ? " — " + known.case_name : ""),
+    title: t.name + (known.case_name ? " — " + known.case_name : known.client_name ? " — " + known.client_name : ""),
     fields, signers,
   };
 }
@@ -224,7 +254,7 @@ function cleanSigner(s, i) {
   };
 }
 
-async function createPacket({ templateId, caseId = null, title = null, values = {}, signers = [], message = null, user = null }) {
+async function createPacket({ templateId, caseId = null, clientKey = null, title = null, values = {}, signers = [], message = null, user = null }) {
   await initTables();
   const t = await templates.getTemplate(templateId, { withDocx: true });
   if (t.status !== "active") throw new Error("That template is still a draft");
@@ -242,11 +272,13 @@ async function createPacket({ templateId, caseId = null, title = null, values = 
     throw new Error("Fill in: " + labels.join(", "));
   }
 
-  let clientKey = null;
   if (caseId) {
     const c = await require("./civil-litigation").getCase(Number(caseId));
     if (!c) throw new Error("Matter not found");
     clientKey = c.client_key;
+  } else if (clientKey) {
+    const known = await clientValues(clientKey, {}, { hearings: false });
+    if (!known.client_name) throw new Error("Client not found");
   }
   const p = (await db.query(
     `INSERT INTO esign_packets (template_id, template_name, category, case_id, client_key, title, field_values, docx, doc_hash, status, message, created_by, created_by_uid)
@@ -290,11 +322,14 @@ function shape(p, signers, { withBytes = false, includeTokens = false } = {}) {
   return out;
 }
 
-async function listPackets({ caseId = null, limit = 50 } = {}) {
+async function listPackets({ caseId = null, clientKey = null, limit = 50 } = {}) {
   await initTables();
+  // A client's page shows everything prepared for that client, including
+  // documents prepared on any of their civil matters.
+  const where = caseId ? "WHERE case_id = $1" : clientKey ? "WHERE client_key = $1" : "";
   const r = await db.query(
-    `SELECT id FROM esign_packets ${caseId ? "WHERE case_id = $1" : ""} ORDER BY created_at DESC LIMIT ${Math.min(200, limit)}`,
-    caseId ? [Number(caseId)] : []);
+    `SELECT id FROM esign_packets ${where} ORDER BY created_at DESC LIMIT ${Math.min(200, limit)}`,
+    caseId ? [Number(caseId)] : clientKey ? [String(clientKey)] : []);
   const out = [];
   for (const row of r.rows) out.push(await getPacket(row.id));
   return out;
@@ -392,6 +427,13 @@ async function sendPacket(id, { baseUrl = null, user = null } = {}) {
   const results = [];
   for (const s of currentGroup(p.signers)) results.push(await deliver(p, s, { baseUrl }));
   return { packet: await getPacket(p.id), delivered: results };
+}
+
+async function packetIdForSigner(signerId) {
+  await initTables();
+  const r = await db.query(`SELECT * FROM esign_signers WHERE id = $1`, [Number(signerId)]);
+  if (!r.rows[0]) throw new Error("Signer not found");
+  return r.rows[0].packet_id;
 }
 
 async function remind(signerId, { baseUrl = null } = {}) {
@@ -669,6 +711,28 @@ function fileBase(p) {
   return `${String(p.title).replace(/[\/\\:?*"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 90)} - signed ${new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })}`;
 }
 
+async function fileToClientFolder(p, signed, cert) {
+  const dbx = require("./dropbox-integration");
+  const errors = [];
+  if (!dbx.isConfigured || !(await Promise.resolve(dbx.isConfigured()))) throw new Error("Dropbox is not connected; the signed copies are kept here to download");
+  const c = await require("./client-profiles").getClientByKey(p.client_key);
+  if (!c) throw new Error("Client not found; the signed copies are kept here to download");
+  const folder = await dbx.resolveClientFolder({ clientKey: c.key, clientName: c.client_name, aNumber: c.a_number });
+  if (!folder) throw new Error("This client has no Dropbox folder linked (set it on the client's profile); the signed copies are kept here to download");
+  const dir = `${folder}/Signed Documents`;
+  try { await dbx.createFolder(dir); } catch (e) { /* already there */ }
+  const base = fileBase(p);
+  const up1 = await dbx.uploadFile({ path: `${dir}/${base}.docx`, buffer: signed, mode: "add", autorename: true });
+  const docxPath = (up1 && (up1.path_display || up1.path_lower)) || `${dir}/${base}.docx`;
+  let pdf = cert;
+  try { pdf = await mergePdfs(await dropboxPdf(docxPath), cert); }
+  catch (e) { errors.push("PDF of the document could not be made (" + e.message + "); the PDF holds the signature certificate only"); }
+  const up2 = await dbx.uploadFile({ path: `${dir}/${base}.pdf`, buffer: pdf, mode: "add", autorename: true });
+  const pdfPath = (up2 && (up2.path_display || up2.path_lower)) || `${dir}/${base}.pdf`;
+  try { if (dbx.clearListCache) dbx.clearListCache(folder); } catch (e) { /* cache only */ }
+  return { docxPath, pdfPath, pdf, errors };
+}
+
 async function finalize(id) {
   const p = await getPacket(id, { withBytes: true });
   if (p.status !== "completed") throw new Error("Not every signer has signed yet");
@@ -711,6 +775,15 @@ async function finalize(id) {
       });
     } catch (e) { /* the signature record stands on its own */ }
   }
+  if (!p.case_id && p.client_key) {
+    // An immigration (or any non-civil) client: their own Dropbox folder,
+    // in a "Signed Documents" subfolder.
+    try {
+      const filed = await fileToClientFolder(p, signed, cert);
+      docxPath = filed.docxPath; pdfPath = filed.pdfPath; pdf = filed.pdf;
+      errors.push(...filed.errors);
+    } catch (e) { errors.push(e.message); }
+  }
   await db.query(`UPDATE esign_packets SET signed_pdf = $2, dropbox_docx = $3, dropbox_pdf = $4, finalize_error = $5 WHERE id = $1`,
     [p.id, pdf, docxPath, pdfPath, errors.join("; ") || null]);
   await notify(done, `✅ "${p.title}" is fully signed${pdfPath ? " and filed in Dropbox" : ""}`);
@@ -734,7 +807,7 @@ async function download(id, which) {
 }
 
 module.exports = {
-  CONSENT_TEXT, LINK_DAYS, initTables, matterValues, prefill, formatValue, longDate,
-  createPacket, getPacket, listPackets, sendPacket, remind, cancelPacket,
+  CONSENT_TEXT, LINK_DAYS, initTables, matterValues, clientValues, prefill, formatValue, longDate,
+  createPacket, getPacket, listPackets, sendPacket, remind, cancelPacket, packetIdForSigner,
   signerView, sign, decline, finalize, refinalize, download, sanitizeHtml, certificatePdf, currentGroup, signUrl, markSpots,
 };

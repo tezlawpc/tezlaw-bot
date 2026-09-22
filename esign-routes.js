@@ -2,9 +2,16 @@
 //  esign-routes.js — the staff API for templates and signing,
 //  and the public pages a signer uses.
 // ------------------------------------------------------------
-//  Staff routes are registered through the civil mirror, so each
-//  exists at /api/staff/civil/esign/* (the app, bearer token) AND
-//  /admin/civil/api/esign/* (the web admin, cookie).
+//  Staff routes are registered through the mirror, so each exists at
+//  /api/staff/esign/* (the app, bearer token) AND /admin/esign/api/*
+//  (the web admin, cookie). E-signing is not a civil feature: it serves
+//  civil matters and immigration clients alike.
+//
+//  Who can do what (JJ: "only admin can access" the templates):
+//    · templates — upload, edit, activate, archive, see drafts: ADMIN only
+//    · preparing and sending from an ACTIVE template: any firm user who
+//      is not view-only; for a client (not a civil matter), only staff
+//      who can see that client
 //
 //  Public routes (no login — the token in the link IS the access):
 //    GET  /sign/e/:token                   the signing page
@@ -30,10 +37,11 @@ function canWrite(req, res, next) {
   if (req.user && req.user.r === "viewer") return res.status(403).json({ ok: false, error: "View-only accounts cannot prepare or send documents" });
   next();
 }
-function canApprove(req, res, next) {
-  if (req.user && ["admin", "attorney"].includes(req.user.r)) return next();
-  return res.status(403).json({ ok: false, error: "Only an attorney or admin can activate or archive a template" });
+function adminOnly(req, res, next) {
+  if (req.user && req.user.r === "admin") return next();
+  return res.status(403).json({ ok: false, error: "Only an admin can manage document templates" });
 }
+const isAdminUser = req => !!(req.user && req.user.r === "admin");
 
 function sendFile(res, f) {
   res.setHeader("Content-Type", f.type);
@@ -43,63 +51,90 @@ function sendFile(res, f) {
 
 const fail = (res, e, code = 400) => res.status(e.status || code).json({ ok: false, error: e.message });
 
-function attachStaffRoutes(app, { requireBearer, requireFirmUser }) {
+const STAFF_PREFIX = "/api/staff/esign";
+
+function attachStaffRoutes(app, { requireBearer, requireFirmUser, canUserAccessClient = null }) {
   const T = () => require("./esign-templates");
   const E = () => require("./esign");
   const A = [requireBearer, requireFirmUser];
-  const P = "/api/staff/civil/esign";
+  const P = STAFF_PREFIX;
+
+  // A document for a client (not a civil matter) is visible to staff who
+  // can see that client, as everywhere else in the app.
+  async function mayUseClient(req, clientKey) {
+    if (!clientKey || isAdminUser(req) || !canUserAccessClient) return true;
+    try { return await canUserAccessClient(req.user, clientKey); } catch (e) { return false; }
+  }
+  async function packetGuard(req, res, next) {
+    try {
+      const p = await E().getPacket(req.params.id);
+      if (!p.case_id && !(await mayUseClient(req, p.client_key))) return res.status(403).json({ ok: false, error: "You do not have access to this client" });
+      next();
+    } catch (e) { fail(res, e, 404); }
+  }
 
   app.get(`${P}/meta`, ...A, (req, res) => {
     const t = T();
-    res.json({ ok: true, sources: t.SOURCES, types: t.TYPES, categories: t.CATEGORIES });
+    res.json({ ok: true, sources: t.SOURCES, types: t.TYPES, categories: t.CATEGORIES, can_manage_templates: isAdminUser(req) });
   });
 
   // ── Templates ──
+  // Everyone preparing a document needs the ACTIVE ones; drafts and
+  // archived ones are the admin's workbench.
   app.get(`${P}/templates`, ...A, async (req, res) => {
-    try { res.json({ ok: true, templates: await T().listTemplates({ includeArchived: req.query.all === "1" }) }); }
-    catch (e) { fail(res, e, 500); }
+    try {
+      const all = await T().listTemplates({ includeArchived: isAdminUser(req) && req.query.all === "1" });
+      res.json({ ok: true, templates: isAdminUser(req) ? all : all.filter(t => t.status === "active") });
+    } catch (e) { fail(res, e, 500); }
   });
-  app.post(`${P}/templates`, ...A, canWrite, upload.single("file"), async (req, res) => {
+  app.post(`${P}/templates`, ...A, adminOnly, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ ok: false, error: "Choose a document to upload" });
       res.json({ ok: true, template: await T().createFromUpload(req.file.buffer, req.file.originalname, { by: who(req) }) });
     } catch (e) { console.warn("[esign] template from upload:", e.message); fail(res, e); }
   });
-  app.get(`${P}/templates/:id`, ...A, async (req, res) => {
+  app.get(`${P}/templates/:id`, ...A, adminOnly, async (req, res) => {
     try { res.json({ ok: true, template: await T().getTemplate(req.params.id) }); } catch (e) { fail(res, e, 404); }
   });
-  app.get(`${P}/templates/:id/preview`, ...A, async (req, res) => {
+  app.get(`${P}/templates/:id/preview`, ...A, adminOnly, async (req, res) => {
     try { res.json({ ok: true, html: await T().previewHtml(req.params.id) }); } catch (e) { fail(res, e); }
   });
-  app.get(`${P}/templates/:id/download`, ...A, async (req, res) => {
+  app.get(`${P}/templates/:id/download`, ...A, adminOnly, async (req, res) => {
     try {
       const t = await T().getTemplate(req.params.id, { withDocx: true });
       sendFile(res, { buffer: t.docx, name: `${t.name} (template).docx`, type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
     } catch (e) { fail(res, e, 404); }
   });
-  app.patch(`${P}/templates/:id`, ...A, canWrite, async (req, res) => {
+  app.patch(`${P}/templates/:id`, ...A, adminOnly, async (req, res) => {
     try { res.json({ ok: true, template: await T().updateTemplate(req.params.id, req.body || {}, { by: who(req) }) }); } catch (e) { fail(res, e); }
   });
-  app.post(`${P}/templates/:id/replace`, ...A, canWrite, upload.single("file"), async (req, res) => {
+  app.post(`${P}/templates/:id/replace`, ...A, adminOnly, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ ok: false, error: "Choose the edited .docx" });
       res.json({ ok: true, template: await T().replaceDocx(req.params.id, req.file.buffer, req.file.originalname) });
     } catch (e) { fail(res, e); }
   });
-  app.post(`${P}/templates/:id/status`, ...A, canApprove, async (req, res) => {
+  app.post(`${P}/templates/:id/status`, ...A, adminOnly, async (req, res) => {
     try { res.json({ ok: true, template: await T().setStatus(req.params.id, String((req.body || {}).status || "")) }); } catch (e) { fail(res, e); }
   });
 
   // ── Preparing and sending ──
-  app.get(`${P}/prefill`, ...A, async (req, res) => {
-    try { res.json({ ok: true, ...(await E().prefill(req.query.template_id, req.query.case_id || null, { user: req.user })) }); }
-    catch (e) { fail(res, e); }
+  app.get(`${P}/prefill`, ...A, canWrite, async (req, res) => {
+    try {
+      const clientKey = req.query.case_id ? null : (req.query.client_key || null);
+      if (!req.query.case_id && !clientKey) return res.status(400).json({ ok: false, error: "Open a case or a client first" });
+      if (!(await mayUseClient(req, clientKey))) return res.status(403).json({ ok: false, error: "You do not have access to this client" });
+      res.json({ ok: true, ...(await E().prefill(req.query.template_id, { caseId: req.query.case_id || null, clientKey }, { user: req.user })) });
+    } catch (e) { fail(res, e); }
   });
   app.post(`${P}/packets`, ...A, canWrite, async (req, res) => {
     try {
       const b = req.body || {};
+      const clientKey = b.case_id ? null : (b.client_key || null);
+      if (!b.case_id && !clientKey) return res.status(400).json({ ok: false, error: "Open a case or a client first" });
+      if (!(await mayUseClient(req, clientKey))) return res.status(403).json({ ok: false, error: "You do not have access to this client" });
       let packet = await E().createPacket({
-        templateId: b.template_id, caseId: b.case_id || null, title: b.title, values: b.values || {},
+        templateId: b.template_id, caseId: b.case_id || null, clientKey, title: b.title, values: b.values || {},
         signers: b.signers || [], message: b.message || null, user: req.user,
       });
       let delivered = null;
@@ -111,32 +146,41 @@ function attachStaffRoutes(app, { requireBearer, requireFirmUser }) {
     } catch (e) { fail(res, e); }
   });
   app.get(`${P}/packets`, ...A, async (req, res) => {
-    try { res.json({ ok: true, packets: await E().listPackets({ caseId: req.query.case_id || null }) }); } catch (e) { fail(res, e, 500); }
+    try {
+      const clientKey = req.query.case_id ? null : (req.query.client_key || null);
+      if (!req.query.case_id && !clientKey && !isAdminUser(req)) return res.status(400).json({ ok: false, error: "Open a case or a client first" });
+      if (!(await mayUseClient(req, clientKey))) return res.status(403).json({ ok: false, error: "You do not have access to this client" });
+      res.json({ ok: true, packets: await E().listPackets({ caseId: req.query.case_id || null, clientKey }) });
+    } catch (e) { fail(res, e, 500); }
   });
-  app.get(`${P}/packets/:id`, ...A, async (req, res) => {
+  app.get(`${P}/packets/:id`, ...A, packetGuard, async (req, res) => {
     try { res.json({ ok: true, packet: await E().getPacket(req.params.id) }); } catch (e) { fail(res, e, 404); }
   });
-  app.post(`${P}/packets/:id/send`, ...A, canWrite, async (req, res) => {
+  app.post(`${P}/packets/:id/send`, ...A, canWrite, packetGuard, async (req, res) => {
     try { res.json({ ok: true, ...(await E().sendPacket(req.params.id, { baseUrl: baseUrl(req), user: req.user })) }); } catch (e) { fail(res, e); }
   });
-  app.post(`${P}/packets/:id/cancel`, ...A, canWrite, async (req, res) => {
+  app.post(`${P}/packets/:id/cancel`, ...A, canWrite, packetGuard, async (req, res) => {
     try { res.json({ ok: true, packet: await E().cancelPacket(req.params.id, { user: req.user, reason: (req.body || {}).reason }) }); } catch (e) { fail(res, e); }
   });
   // Links for signing in person (hand the tablet over in the office).
-  app.get(`${P}/packets/:id/links`, ...A, canWrite, async (req, res) => {
+  app.get(`${P}/packets/:id/links`, ...A, canWrite, packetGuard, async (req, res) => {
     try {
       const p = await E().getPacket(req.params.id, { includeTokens: true });
       res.json({ ok: true, links: p.signers.map(s => ({ signer_id: s.id, name: s.name, role: s.role, status: s.status, url: E().signUrl(baseUrl(req), s.token) })) });
     } catch (e) { fail(res, e, 404); }
   });
   // File a fully signed document again, after Dropbox or the PDF step failed.
-  app.post(`${P}/packets/:id/refile`, ...A, canWrite, async (req, res) => {
+  app.post(`${P}/packets/:id/refile`, ...A, canWrite, packetGuard, async (req, res) => {
     try { res.json({ ok: true, packet: await E().refinalize(req.params.id) }); } catch (e) { fail(res, e); }
   });
   app.post(`${P}/signers/:id/remind`, ...A, canWrite, async (req, res) => {
-    try { res.json({ ok: true, delivered: await E().remind(req.params.id, { baseUrl: baseUrl(req) }) }); } catch (e) { fail(res, e); }
+    try {
+      const p = await E().getPacket(await E().packetIdForSigner(req.params.id));
+      if (!p.case_id && !(await mayUseClient(req, p.client_key))) return res.status(403).json({ ok: false, error: "You do not have access to this client" });
+      res.json({ ok: true, delivered: await E().remind(req.params.id, { baseUrl: baseUrl(req) }) });
+    } catch (e) { fail(res, e); }
   });
-  app.get(`${P}/packets/:id/download/:which`, ...A, async (req, res) => {
+  app.get(`${P}/packets/:id/download/:which`, ...A, packetGuard, async (req, res) => {
     try { sendFile(res, await E().download(req.params.id, req.params.which)); } catch (e) { fail(res, e, 404); }
   });
 }
@@ -217,4 +261,4 @@ ${require("./client-script").clientScriptTag("esign-sign.js")}
   });
 }
 
-module.exports = { attachStaffRoutes, attachPublicRoutes, baseUrl };
+module.exports = { attachStaffRoutes, attachPublicRoutes, baseUrl, STAFF_PREFIX };

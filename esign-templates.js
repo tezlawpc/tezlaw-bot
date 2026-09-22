@@ -24,6 +24,9 @@ const SOURCES = {
   client_address: "Client's address",
   client_email: "Client's email",
   client_phone: "Client's phone",
+  a_number: "A-number",
+  client_language: "Client's language",
+  date_of_birth: "Client's date of birth",
   case_name: "Case name (caption)",
   case_number: "Case number",
   court: "Court",
@@ -50,7 +53,7 @@ const SOURCES = {
   ask: "Ask when preparing",
 };
 const TYPES = ["text", "date", "money", "number", "multiline"];
-const CATEGORIES = ["retainer", "declaration", "verification", "proof_of_service", "motion", "notice", "stipulation", "letter", "other"];
+const CATEGORIES = ["retainer", "declaration", "affidavit", "verification", "proof_of_service", "motion", "notice", "stipulation", "letter", "other"];
 const ROLE_RE = /^(client(_[2-9])?|witness(_[2-9])?|attorney|other(_[2-9])?)$/;
 
 let ready = null;
@@ -105,7 +108,8 @@ function buildPrompt(paras, filename) {
   return [
     `This is a document a law firm has already filed or used ("${filename}"). Turn it into a reusable template.`,
     "",
-    "Find the words that belong to THIS particular case and would change next time — names of clients, parties and witnesses, the case number, court, county, dates, hearing details, amounts, addresses — and where each person signs.",
+    "Find the words that belong to THIS particular case and would change next time — names of clients, parties and witnesses, the case number, A-number, court, county, immigration judge, dates, hearing details, amounts, addresses — and where each person signs.",
+    "It may be a civil court filing, an immigration court or USCIS document (declaration, affidavit, cover letter), or a retainer.",
     "Leave the firm's own details (attorney name, bar number, firm name, address, phone, email) as fixed text: they do not change. Leave the legal text alone.",
     "",
     "Reply with ONLY a JSON object:",

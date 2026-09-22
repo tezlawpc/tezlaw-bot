@@ -51,6 +51,8 @@ const CLIENT_BUNDLES = [
   "civil-docs.js",
   "esign-admin.js",
   "esign-sign.js",
+  "court-mail-page.js",
+  "transcripts-page.js",
 ];
 
 const healed = new Set();

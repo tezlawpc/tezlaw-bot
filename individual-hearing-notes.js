@@ -1329,6 +1329,8 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       </div>
     </div>
 
+    ${isEdit ? `<div data-transcripts="note" data-note-type="individual" data-note-id="${Number(noteId)}" style="margin:10px 0;"></div>${require("./client-script").clientScriptTag("transcripts-page.js")}` : ""}
+
     <!-- Dictation floating widget — visible ONLY while recording -->
     <div id="dictation-widget" style="display:none; position:fixed; bottom:20px; right:20px; z-index:9999; background:linear-gradient(145deg, #0C1C36, #1a2f4f); color:white; padding:14px 18px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.35); min-width:280px; border:2px solid #B79C62;">
       <div style="display:flex; align-items:center; gap:10px;">
@@ -1674,6 +1676,9 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       let dIsFinishing = false;
       let dTranscript = "";
       let dExtracted = null;
+      let dTranscriptId = null;   // saved transcript (transcripts.js)
+      let dSessionId = "";        // groups this recording's parts into one transcript
+      const D_NOTE_ID = ${isEdit ? Number(noteId) : "null"};
 
       // ── Continuation of Merits Hearing ──────────────────────
       // Creates a new individual_hearing_notes record that clones ALL fields
@@ -1728,6 +1733,8 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         dAudioMime = selectedType || "audio/webm";
         dAudioExt = dAudioMime.includes("mp4") ? "mp4" : "webm";
         dChunkIndex = 0;
+        dTranscriptId = null;
+        dSessionId = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
         dSessionsPending = [];
         dSessionTranscripts = [];
         dIsFinishing = false;
@@ -1803,12 +1810,17 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         const fd = new FormData();
         fd.append("audio", blob, "chunk-" + chunkIdx + "-" + Date.now() + "." + dAudioExt);
         fd.append("chunk_index", String(chunkIdx));
+        fd.append("session_id", dSessionId);
+        fd.append("client_name", document.querySelector('[name="client_name"]')?.value || "");
+        fd.append("a_number", document.querySelector('[name="a_number"]')?.value || "");
+
         try {
           const resp = await fetch("/admin/hearing/notes/dictate/transcribe-chunk", { method: "POST", body: fd });
           const text = await resp.text();
           let data; try { data = JSON.parse(text); } catch { throw new Error("Non-JSON: " + text.substring(0, 200)); }
           if (!resp.ok || !data.ok) throw new Error(data.error || "HTTP " + resp.status);
           dSessionTranscripts[chunkIdx] = data.transcript || "";
+          if (data.transcript_id) dTranscriptId = data.transcript_id;
         } catch (e) {
           dSessionTranscripts[chunkIdx] = "[transcription failed for session " + (chunkIdx + 1) + ": " + e.message + "]";
           console.error("[dictate] Chunk " + chunkIdx + " error:", e);
@@ -1858,6 +1870,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               transcript: combined,
+              transcript_id: dTranscriptId,
               client_name: document.querySelector('[name="client_name"]')?.value || "",
               a_number: document.querySelector('[name="a_number"]')?.value || "",
               hearing_type: "individual",
@@ -1867,6 +1880,8 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           let data; try { data = JSON.parse(text); } catch { throw new Error("Non-JSON: " + text.substring(0, 200)); }
           if (!resp.ok || !data.ok) throw new Error(data.error || "HTTP " + resp.status);
           dExtracted = data.extracted;
+          // The saved transcript, with every part's speakers named together.
+          if (data.transcript) dTranscript = data.transcript;
           dShowExtractedPreview();
           document.getElementById("d-processing-panel").style.display = "none";
           document.getElementById("d-result-panel").style.display = "block";
@@ -1909,11 +1924,12 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           '<div style="background:#e8f5e9; color:#2e7d32; padding:8px 12px; border-radius:4px; margin-bottom:10px; font-size:11px;">' +
           '📊 ' + sessionCount + ' session' + (sessionCount > 1 ? "s" : "") + ' · ~' + durationMin + ' min total · ' + dTranscript.length + ' chars transcribed' +
           '</div>' +
-          (rows.length ? '<div style="font-weight:600; margin-bottom:6px; color:#0C1C36;">Extracted fields:</div><table style="width:100%; font-size:12px;">' + html + '</table><div style="font-size:11px; color:#888; margin-top:6px;">Full transcript will append to the raw notes textarea.</div>'
-                       : '<div style="color:#c00;">⚠️ No fields extracted, but transcript will still be appended.</div>');
+          (rows.length ? '<div style="font-weight:600; margin-bottom:6px; color:#0C1C36;">Extracted fields:</div><table style="width:100%; font-size:12px;">' + html + '</table>' : '<div style="color:#c00;">⚠️ No fields extracted.</div>') +
+          '<div style="font-size:11px; color:#888; margin-top:6px;">' + (dTranscriptId ? 'The full transcript is saved (#' + dTranscriptId + ') to the client’s Transcripts, split by speaker, and is linked to this note when you apply and save.' : 'Full transcript will be kept with the note.') + '</div>';
       }
 
       function dDiscard() {
+        // The transcript itself stays saved under the client's Transcripts.
         dTranscript = ""; dExtracted = null;
         closeDictationModal();
       }
@@ -1941,10 +1957,25 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           rawNotes.value = rawNotes.value + prefix + dTranscript;
           rawNotes.dispatchEvent(new Event('input', { bubbles: true }));
         }
+        if (dTranscriptId) {
+          const form = document.querySelector('[name="client_name"]') && document.querySelector('[name="client_name"]').form;
+          if (form) {
+            let h = form.querySelector('input[name="transcript_ids"]');
+            if (!h) { h = document.createElement("input"); h.type = "hidden"; h.name = "transcript_ids"; form.appendChild(h); }
+            h.value = h.value ? h.value + "," + dTranscriptId : String(dTranscriptId);
+            h.dispatchEvent(new Event("input", { bubbles: true }));
+            try { if (typeof formDirty !== "undefined") formDirty = true; } catch (e) { /* not on this page */ }
+          }
+          if (D_NOTE_ID) {
+            fetch("/admin/transcripts/api/" + dTranscriptId + "/link", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ note_type: "individual", note_id: D_NOTE_ID }) })
+              .then(function () { if (window.TezTranscripts) window.TezTranscripts.refresh(); }).catch(function () {});
+          }
+        }
         closeDictationModal();
         const toast = document.createElement("div");
         toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2e7d32; color:white; padding:12px 20px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:10001; font-size:14px;";
-        toast.textContent = "✅ Voice dictation applied (" + (dChunkIndex + 1) + " session" + (dChunkIndex > 0 ? "s" : "") + ")";
+        toast.textContent = "✅ Voice dictation applied (" + (dChunkIndex + 1) + " session" + (dChunkIndex > 0 ? "s" : "") + ")" + (dTranscriptId ? " — transcript #" + dTranscriptId + " saved" : "");
         document.body.appendChild(toast);
         setTimeout(() => toast.remove(), 3500);
       }
