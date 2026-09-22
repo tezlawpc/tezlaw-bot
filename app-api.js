@@ -2894,7 +2894,7 @@ function registerAppApi(app) {
       // question so Zara can analyze it.
       const atts = Array.isArray(req.body?.attachments) ? req.body.attachments.slice(0, 5) : [];
       if (atts.length) {
-        let budget = 60000;
+        let budget = 100000;
         pageContext += "\n\nATTACHED DOCUMENTS (attached by the user in this chat):";
         for (const a of atts) {
           const t = String(a && a.text || "").slice(0, Math.max(0, budget));
@@ -9861,8 +9861,10 @@ function attachZaraCoreRoutes(app, core) {
         const d = { name: f.originalname, text: "", truncated: false };
         try {
           const t = String(await extract.textFromBuffer(f.buffer, f.originalname) || "").replace(/\n{3,}/g, "\n\n").trim();
-          d.truncated = t.length > 30000;
-          d.text = t.slice(0, 30000);
+          // A billing ledger is one row per entry; cutting it short would drop time.
+          const cap = /\.(xlsx|xls|csv)$/i.test(f.originalname || "") ? 90000 : 30000;
+          d.truncated = t.length > cap;
+          d.text = t.slice(0, cap);
           if (!t) d.error = "No readable text — probably a scan without OCR";
         } catch (e) { d.error = e.message; }
         docs.push(d);

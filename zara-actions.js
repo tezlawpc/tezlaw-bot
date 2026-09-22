@@ -248,6 +248,9 @@ async function applyProposal(id, { by = null, userId = null } = {}) {
         { category: payload.category || null, by: `${by || "unknown"} (memo drafted by Zara)` });
       if (!up.uploaded.length) throw new Error((up.failed[0] && up.failed[0].error) || "Upload failed");
       result = up.uploaded[0];
+    } else if (p.kind === "log_time_batch") {
+      // Reconstructed or imported time: every entry goes through civil-time.logTime.
+      result = await require("./civil-time-reconstruct").applyBatch(p, { by, userId });
     } else {
       throw new Error("Unknown proposal type: " + p.kind);
     }

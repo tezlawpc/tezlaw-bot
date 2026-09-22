@@ -100,6 +100,68 @@ const CASE_TOOLS = [
       required: ["case_id", "title", "content"],
     },
   },
+  {
+    name: "reconstruct_time",
+    description: "Rebuild the attorney's billable time on a civil matter from its Dropbox case folder, its hearings and the firm's connected email, and propose it as ONE card of time entries. Use when asked to 'run my emails and Dropbox', 'reconstruct / catch up / enter the billable hours', or 'bill this case'. It runs in the background (2-4 minutes) and does NOT save: JJ is told on Telegram when the card is ready, and then show_time_proposal displays it.",
+    input_schema: {
+      type: "object",
+      properties: {
+        case_id: { type: "number" },
+        from: { type: "string", description: "Optional start date YYYY-MM-DD. Default: the whole matter." },
+        to: { type: "string", description: "Optional end date YYYY-MM-DD. Default: today." },
+        rate: { type: "number", description: "Hourly rate in dollars if the user gave one, e.g. 650. Default: the timekeeper's / matter's rate." },
+        include_email: { type: "boolean", description: "Default true." },
+        extra_email_terms: { type: "array", items: { type: "string" }, description: "Extra words to find this matter's email by: a client's name, an address, opposing counsel's email." },
+      },
+      required: ["case_id"],
+    },
+  },
+  {
+    name: "show_time_proposal",
+    description: "Show the time reconstruction for a civil matter: whether it is still running, and when ready, the card of proposed time entries with its Apply button. Use when the user asks for the time proposal, or after reconstruct_time.",
+    input_schema: { type: "object", properties: { case_id: { type: "number" } }, required: ["case_id"] },
+  },
+  {
+    name: "import_time_ledger",
+    description: "Import a billing ledger spreadsheet (.xlsx/.xls/.csv) that is in the matter's Dropbox folder — including one the user just attached in this chat — as ONE card of time entries. The file is read in code, so every row comes through exactly. Use this instead of propose_time_entries for any spreadsheet. Get file_id from list_case_documents. Does NOT save until Apply.",
+    input_schema: {
+      type: "object",
+      properties: {
+        case_id: { type: "number" },
+        file_id: { type: "number", description: "The spreadsheet's id from list_case_documents." },
+        rate: { type: "number", description: "Only if the user names a rate different from the ledger's." },
+      },
+      required: ["case_id", "file_id"],
+    },
+  },
+  {
+    name: "propose_time_entries",
+    description: "Propose a list of time entries for a civil matter as ONE card — from an attached billing ledger (Excel/CSV) or entries the user dictates. Does NOT save until Apply. Copy dates, hours and descriptions exactly as given; do not re-estimate them.",
+    input_schema: {
+      type: "object",
+      properties: {
+        case_id: { type: "number" },
+        rate: { type: "number", description: "Hourly rate if given (the ledger's rate)." },
+        entries: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              date: { type: "string", description: "YYYY-MM-DD" },
+              hours: { type: "number" },
+              description: { type: "string" },
+              utbms_code: { type: "string" },
+              utbms_activity: { type: "string" },
+              flag: { type: "string", description: "Anything to confirm, e.g. 'estimated'." },
+            },
+            required: ["date", "hours", "description"],
+          },
+        },
+        reason: { type: "string", description: "Where the entries come from, e.g. 'Lee_v_SAL_Billable_Hours.xlsx'." },
+      },
+      required: ["case_id", "entries"],
+    },
+  },
 ];
 
 const NAMES = new Set(CASE_TOOLS.map(t => t.name));
@@ -148,6 +210,53 @@ async function run(name, args, { user = null, sink = null } = {}) {
       };
     }
     if (name === "read_case_document") return await readDocument(caseId, Number(args.file_id));
+
+    if (name === "reconstruct_time") {
+      const rec = require("./civil-time-reconstruct");
+      const job = rec.startJob(caseId, {
+        from: args.from || null, to: args.to || null, rate: Number(args.rate) || null,
+        includeEmail: args.include_email !== false, extraTerms: args.extra_email_terms || [],
+        by, timekeeper: (user && (user.n || user.u)) || null,
+      });
+      return {
+        started: true, already_running: !!job.already_running, started_at: job.started_at,
+        status: "RUNNING IN THE BACKGROUND (2-4 minutes). Nothing is saved. Tell the user they will get a Telegram message when the proposed time is ready, and can then ask you to show the time proposal to review it and press Apply.",
+      };
+    }
+    if (name === "show_time_proposal") {
+      const rec = require("./civil-time-reconstruct");
+      const job = rec.jobStatus(caseId);
+      const pending = await rec.pendingBatches(caseId);
+      if (pending.length && sink) pending.forEach(p => sink.push(actions.card(p)));
+      return {
+        job: job ? { status: job.status, started_at: job.started_at, finished_at: job.finished_at, error: job.error,
+                     stats: job.stats ? { documents: job.stats.documents, hearings: job.stats.hearings, emails: job.stats.emails,
+                                          mailboxes: job.stats.mailboxes, email_errors: job.stats.email_errors,
+                                          hours: job.stats.hours, entries: job.stats.entries, gaps: job.stats.gaps } : undefined } : null,
+        pending_cards: pending.map(p => ({ proposal_id: p.id, summary: p.summary, created_at: p.created_at })),
+        status: pending.length
+          ? "Cards are shown under your reply. Summarize the totals and the items marked to confirm, then tell the user to review and press Apply. Never say the time is logged."
+          : (job && job.status === "running" ? "Still running — ask again in a minute or two." : "No pending time proposal on this matter."),
+      };
+    }
+    if (name === "import_time_ledger") {
+      const p = await require("./civil-time-reconstruct").importLedgerFromFile(caseId, Number(args.file_id), {
+        rate: Number(args.rate) || null, by,
+      });
+      const c = actions.card(p);
+      if (sink) sink.push(c);
+      return { proposed: true, proposal_id: c.id, summary: c.summary, lines: (c.lines || []).slice(0, 3),
+               status: "NOT SAVED YET. Tell the user the totals and to review the card and press Apply." };
+    }
+    if (name === "propose_time_entries") {
+      const p = await require("./civil-time-reconstruct").proposeEntries(caseId, args.entries || [], {
+        rate: Number(args.rate) || null, reason: args.reason || null, by,
+      });
+      const c = actions.card(p);
+      if (sink) sink.push(c);
+      return { proposed: true, proposal_id: c.id, summary: c.summary,
+               status: "NOT SAVED YET. Tell the user to review the card and press Apply." };
+    }
 
     let out;
     if (name === "propose_matter_update") {

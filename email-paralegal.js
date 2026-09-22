@@ -694,6 +694,9 @@ module.exports = {
   removeAccount,
   encrypt,
   decrypt,
+  // Used by civil-time-reconstruct.js to search a matter's email.
+  connectImap,
+  findSentFolder,
 };
 
 if (require.main === module) {

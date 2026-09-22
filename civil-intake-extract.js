@@ -51,8 +51,17 @@ async function textFromBuffer(buffer, filename = "") {
     const out = await mammoth.extractRawText({ buffer });
     return String(out.value || "");
   }
-  if (name.endsWith(".txt") || name.endsWith(".md")) {
+  if (name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".csv")) {
     return buffer.toString("utf8");
+  }
+  // A spreadsheet — e.g. a billing ledger attached in the Zara chat — reads as
+  // CSV, one block per sheet, with dates as dates rather than serial numbers.
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+    const XLSX = require("xlsx");
+    const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+    return wb.SheetNames.map(s =>
+      `=== Sheet: ${s} ===\n` + XLSX.utils.sheet_to_csv(wb.Sheets[s], { dateNF: "yyyy-mm-dd", blankrows: false })
+    ).join("\n\n");
   }
   // A scan with no text layer reaches here as an empty string, which the
   // caller reports honestly rather than sending an empty prompt to the model.
