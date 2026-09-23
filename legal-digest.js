@@ -1009,6 +1009,23 @@ async function initCitationTable() {
 // ============================================================
 //  MAIN DAILY DIGEST RUNNER
 // ============================================================
+// ── Trusted legal-update emails (legal-mail.js) ──────────────
+// Folded into this digest so JJ gets one message a morning, not two.
+// Every call is wrapped: the opinions digest must go out even if the
+// mail watcher is unconfigured, broken, or absent.
+async function mailUpdatesForDigest() {
+  try { return await require("./legal-mail").pendingForDigest(12); }
+  catch (err) { console.warn("[digest] legal-mail unavailable:", err.message); return []; }
+}
+async function mailUpdatesSent(updates) {
+  try { await require("./legal-mail").markDigested(updates.map(u => u.id)); }
+  catch (err) { console.warn("[digest] could not mark updates as sent:", err.message); }
+}
+function mailUpdateLines(updates) {
+  try { return require("./legal-mail").digestLines(updates); }
+  catch (err) { return []; }
+}
+
 async function runDailyDigest(forceRun = false) {
   const now = new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" });
   console.log(`[digest] 🌅 Running daily digest — ${now}`);
@@ -1025,6 +1042,11 @@ async function runDailyDigest(forceRun = false) {
     // Both still exported for manual use if URLs recover.
     //
     console.log("[digest] Fetching new opinions...");
+
+    // Read these first: they decide whether a digest is worth sending on a
+    // day when the courts published nothing relevant.
+    const mailUpdates = await mailUpdatesForDigest();
+    if (mailUpdates.length) console.log(`[digest] ${mailUpdates.length} update email(s) waiting`);
 
     const CA_COURTS = [
       "cal",           // CA Supreme Court
@@ -1057,8 +1079,8 @@ async function runDailyDigest(forceRun = false) {
 
     console.log(`[digest] Fetched ${allOpinions.length} total items (${caOpinions.length} CA state, ${ninthCircuit.length} 9th Cir, ${biaOpinions.length} BIA, deduped)`);
 
-    if (allOpinions.length === 0 && !forceRun) {
-      console.log("[digest] No new opinions found — skipping digest");
+    if (allOpinions.length === 0 && mailUpdates.length === 0 && !forceRun) {
+      console.log("[digest] No new opinions and no update emails — skipping digest");
       return;
     }
 
@@ -1067,7 +1089,7 @@ async function runDailyDigest(forceRun = false) {
     const relevant = await scoreRelevance(allOpinions);
     console.log(`[digest] ${relevant.length} relevant opinions after scoring`);
 
-    if (relevant.length === 0 && !forceRun) {
+    if (relevant.length === 0 && mailUpdates.length === 0 && !forceRun) {
       console.log("[digest] Nothing relevant today — no digest sent");
       return;
     }
@@ -1097,8 +1119,8 @@ async function runDailyDigest(forceRun = false) {
     console.log("[digest] Generating summary...");
     const summary = await generateDigestSummary(relevant);
 
-    if (!summary) {
-      console.log("[digest] Summary generation failed");
+    if (!summary && mailUpdates.length === 0) {
+      console.log("[digest] Summary generation failed and no update emails — nothing to send");
       return;
     }
 
@@ -1113,22 +1135,32 @@ async function runDailyDigest(forceRun = false) {
       .map(o => `• <a href="${o.url}">${o.title.substring(0, 60)}${o.title.length > 60 ? "..." : ""}</a>`)
       .join("\n");
 
+    const updateLines = mailUpdates.length ? mailUpdateLines(mailUpdates) : [];
+    const total = relevant.length + mailUpdates.length;
+
     const message = [
       `🏛️ <b>Zara Legal Intelligence — ${date}</b>`,
-      `<i>${relevant.length} relevant development${relevant.length !== 1 ? "s" : ""} today</i>`,
+      `<i>${total} relevant development${total !== 1 ? "s" : ""} today</i>`,
       "━━━━━━━━━━━━━━━━━━━━",
-      summary,
+      summary || null,
       links ? "\n📎 <b>Read:</b>\n" + links : "",
+      updateLines.length
+        ? "\n📬 <b>From your subscriptions</b>\n" + updateLines.join("\n\n")
+        : "",
       "━━━━━━━━━━━━━━━━━━━━",
-      `<i>Source: CourtListener • courts.ca.gov • justice.gov/eoir</i>`,
+      `<i>Source: CourtListener • courts.ca.gov • justice.gov/eoir${mailUpdates.length ? " • subscription email" : ""}</i>`,
       `<i>Verify citations in vLex before filing</i>`,
     ].filter(Boolean).join("\n");
 
     // ── Send to JJ ───────────────────────────────────────────
     await sendTelegramDigest(message);
 
+    // Marked only after the send, so a failure leaves them for tomorrow
+    // rather than dropping them silently.
+    if (mailUpdates.length) await mailUpdatesSent(mailUpdates);
+
     console.log("[digest] ✅ Daily digest complete");
-    return { sent: true, count: relevant.length };
+    return { sent: true, count: relevant.length, updates: mailUpdates.length };
 
   } catch (err) {
     console.error("[digest] ❌ Error:", err.message);

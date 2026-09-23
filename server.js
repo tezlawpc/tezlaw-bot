@@ -1000,6 +1000,10 @@ app.get("/admin/civil/templates", (req, res) => res.redirect(301, "/admin/templa
 // matched, filed and calendared (court-mail.js). The page and its API:
 require("./court-mail-routes").attach(app, auth);
 try { require("./court-mail").start(); } catch (e) { console.warn("[court-mail] start failed:", e.message); }
+// Trusted legal-update email (AILA and the like) read from its own folder —
+// never the inbox, which belongs to court mail. What it finds is stored for
+// Zara and folded into the 6 AM digest; it never files, calendars or sends.
+try { require("./legal-mail").start(); } catch (e) { console.warn("[legal-mail] start failed:", e.message); }
 
 // ── Transcripts ──────────────────────────────────────────────
 // Every dictation and hearing recording, saved when transcribed, split by
@@ -8671,6 +8675,24 @@ app.post("/legal/digest/run", async (req, res) => {
   }
   res.json({ status: "started", message: "Legal digest running — check Telegram in ~2 minutes." });
   runDailyDigest(true).catch(err => console.error("Manual digest error:", err.message));
+});
+
+// Legal update mailbox — what it has read, and a way to check now rather
+// than waiting for the next poll.
+app.get("/legal/mail/status", async (req, res) => {
+  if (req.query.token !== process.env.ANALYTICS_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  try { res.json(await require("./legal-mail").status()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/legal/mail/run", async (req, res) => {
+  if (req.query.token !== process.env.ANALYTICS_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  try { res.json(await require("./legal-mail").runOnce()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Judge scanner status
