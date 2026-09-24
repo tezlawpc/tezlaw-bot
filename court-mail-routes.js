@@ -51,11 +51,10 @@ function attach(app, auth) {
       if (q.length < 2) return res.json({ ok: true, matters: [], clients: [] });
       let matters = [];
       try { matters = await require("./civil-snapshot").findMatters(q, 8); } catch (e) { /* none */ }
-      const digits = q.replace(/\D/g, "");
-      const all = await require("./client-profiles").aggregateClients();
-      const clients = all.filter(c => (c.client_name && c.client_name.toLowerCase().includes(q.toLowerCase())) ||
-        (digits.length >= 5 && String(c.a_number || "").replace(/\D/g, "").includes(digits)))
-        .slice(0, 8).map(c => ({ key: c.key, name: c.client_name, a_number: c.a_number }));
+      // Name in any order, with or without the comma the folder uses, or an
+      // A-number — see searchClients in client-profiles.js.
+      const found = await require("./client-profiles").searchClients(q, 8);
+      const clients = found.map(c => ({ key: c.key, name: c.client_name, a_number: c.a_number }));
       res.json({ ok: true, matters, clients });
     } catch (e) { fail(res, e, 500); }
   });

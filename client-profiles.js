@@ -1025,10 +1025,46 @@ function renderClientDetail(client, { documents = [] } = {}) {
   });
 }
 
+// ── Searching for a client ───────────────────────────────
+//
+// JJ: "i should be able to search client based on their A# and name with
+// comma or no comma."
+//
+// Folders are named "WANG, BAOHONG", so the stored name is "Wang, Baohong".
+// A plain substring search on that fails for "wang baohong" and for
+// "baohong wang" — the comma and the word order both get in the way, and
+// nobody types a client's name the way the folder spells it.
+//
+// So: split what was typed into words, and keep a client when EVERY word
+// appears at the start of one of their name's words, in any order.
+// Punctuation is ignored on both sides.
+//
+//   "baohong"       → Wang, Baohong          (one word, matches)
+//   "wang baohong"  → Wang, Baohong          (both words, any order)
+//   "baohong wang"  → Wang, Baohong          (order does not matter)
+//   "wang, baohong" → Wang, Baohong          (the comma is ignored)
+//   "bao"           → Wang, Baohong          (prefixes count)
+//   "wang b"        → Wang, Baohong          (and initials)
+//
+// Digits are read as an A-number and matched against the client's, which
+// is how a notice quoting "236-564-456" finds its client. Four digits or
+// more, so a stray "1" does not match half the firm.
+//
+// The rules themselves live in client-search.js, which touches no database,
+// so anything holding a list of clients searches it the same way.
+const CS = require("./client-search");
+
+async function searchClients(q, limit = 8) {
+  return CS.rankClients(await aggregateClients(), q, limit);
+}
+
 // ── Exports ──────────────────────────────────────────────
 
 module.exports = {
   aggregateClients,
+  searchClients,
+  nameWords: CS.nameWords,
+  matchesQuery: CS.matchesQuery,
   getClientByKey,
   clientKey,
   renderClientList,

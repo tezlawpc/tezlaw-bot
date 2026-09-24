@@ -483,6 +483,58 @@ async function fileDocuments(target, mail, row, record) {
   return { filed, errors };
 }
 
+// ── Learning the A-number ────────────────────────────────
+//
+// Most client folders are named "WANG, BAOHONG" with no A-number, so the
+// imported record has none — and a notice quoting A 236-564-456 matches
+// nobody. Assigning it by hand fixes that one email and teaches nothing.
+//
+// So when a person assigns an email to a client who has no A-number on
+// file, and the notice names exactly one, we write it to that client's
+// record. The next notice for that A-number matches on its own.
+//
+// Careful on purpose:
+//   • only on a hand assignment — never from a guess the platform made
+//   • only when the client's A-number is empty — an existing one is never
+//     touched, because a wrong A-number is worse than a missing one
+//   • only when the document names exactly one — two is ambiguous, and a
+//     family's notice naming several is exactly when not to guess
+//   • recorded in the email's actions, so it is visible and undoable
+async function learnANumber(clientKey, reading) {
+  const key = String(clientKey || "");
+  if (!key) return null;
+  const found = [...new Set((reading.a_numbers || []).map(aDigits).filter(d => d.length === 9))];
+  if (found.length !== 1) return null;
+  const digits = found[0];
+  const formatted = `A${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 9)}`;
+
+  // Does this client already have one? Read it where it is actually kept.
+  const existing = await db.query(
+    `SELECT a_number FROM client_dropbox_mapping WHERE client_key = $1
+     UNION ALL
+     SELECT a_number FROM tasks WHERE client_key = $1 AND a_number IS NOT NULL AND a_number <> ''
+     LIMIT 5`, [key]);
+  if (existing.rows.some(r => String(r.a_number || "").trim())) return null;
+
+  // Write it wherever this client came from. A Dropbox-imported client has
+  // a mapping row; one added in the app has task rows. Both are read back
+  // by aggregateClients, so either makes the next notice match.
+  const upd = await db.query(
+    `UPDATE client_dropbox_mapping SET a_number = $2, resolved_at = NOW()
+      WHERE client_key = $1 AND (a_number IS NULL OR a_number = '') RETURNING client_key`,
+    [key, formatted]);
+  let where = upd.rows[0] ? "client folder record" : null;
+  if (!where) {
+    const t = await db.query(
+      `UPDATE tasks SET a_number = $2 WHERE client_key = $1 AND (a_number IS NULL OR a_number = '') RETURNING id`,
+      [key, formatted]);
+    if (t.rows.length) where = `${t.rows.length} case record${t.rows.length === 1 ? "" : "s"}`;
+  }
+  if (!where) return null;
+  return { type: "a_number", client_key: key, a_number: formatted, where,
+    label: `Saved A-number ${formatted} to ${where} — future notices will match automatically` };
+}
+
 const VERIFY = "from court email — verify";
 const sameStart = (a, b) => norm(a).slice(0, 25) === norm(b).slice(0, 25);
 
@@ -659,6 +711,15 @@ async function processMail(id, { target = null, think = null, by = null, notify 
       await db.query(`UPDATE court_mail SET actions = $2::jsonb, case_id = $3, client_key = $4 WHERE id = $1`,
         [row.id, JSON.stringify(actions), match.caseId || null, match.clientKey || null]);
     };
+    // A person just told us who this belongs to. If that client has no
+    // A-number yet, take it from the document so the next one matches.
+    if (target && match.clientKey && !actions.some(a => a.type === "a_number")) {
+      try {
+        const learned = await learnANumber(match.clientKey, reading);
+        if (learned) await record(learned);
+      } catch (e) { /* teaching is a bonus; never fail an assignment over it */ }
+    }
+
     const alreadyFiled = actions.some(a => a.type === "file");
     const { filed, errors } = alreadyFiled
       ? { filed: actions.filter(a => a.type === "file").map(a => ({ name: a.label.replace(/^Filed | →.*$/g, ""), path: a.path })), errors: [] }
@@ -682,6 +743,7 @@ async function processMail(id, { target = null, think = null, by = null, notify 
         added.length ? "Added (verify):\n" + added.map(a => "• " + a.label).join("\n") : "Nothing to calendar.",
         reading.suggested.length ? "Suggested, NOT added:\n" + reading.suggested.map(x => `• ${x.date} ${x.description}`).join("\n") : null,
         filed.length ? `Filed ${filed.length} document(s) to Dropbox.` : (errors.length ? "Not filed: " + errors[0] : null),
+        (actions.find(a => a.type === "a_number" && !a.undone) || {}).label || null,
         reading.action_items.length ? "To do:\n" + reading.action_items.map(a => "• " + a).join("\n") : null,
         `Review / undo: ${pageUrl(row.id)}`,
       ].filter(Boolean).join("\n"));
@@ -706,6 +768,14 @@ async function undoAction(mailId, index, { by = null } = {}) {
   else if (a.type === "civil_deadline") await require("./civil-litigation").deleteDeadline(a.id, by || "court email undo");
   else if (a.type === "client_hearing") await db.query(`UPDATE client_hearing_notices SET dismissed_at = NOW(), dismiss_reason = 'Undone from Court Mail' WHERE id = $1`, [a.id]);
   else if (a.type === "client_deadline") await require("./deadline-tracker").markCancelled(a.id);
+  else if (a.type === "a_number") {
+    // Put the client back to having no A-number, and only if it is still
+    // the one we saved — an A-number corrected by hand since then stays.
+    await db.query(`UPDATE client_dropbox_mapping SET a_number = NULL WHERE client_key = $1 AND a_number = $2`,
+      [a.client_key, a.a_number]);
+    await db.query(`UPDATE tasks SET a_number = NULL WHERE client_key = $1 AND a_number = $2`,
+      [a.client_key, a.a_number]);
+  }
   else throw new Error("Filed documents are not removed from Dropbox by Undo — delete them there if needed");
   actions[Number(index)] = { ...a, undone: true, undone_by: by, undone_at: new Date().toISOString() };
   await db.query(`UPDATE court_mail SET actions = $2::jsonb WHERE id = $1`, [row.id, JSON.stringify(actions)]);
@@ -780,5 +850,5 @@ function start() {
 
 module.exports = {
   config, isCourtSender, isForwarder, senderVerified, quoteSaysDate, isDay, originalSender, initTables, collect, parseRaw, buildPrompt, cleanReading,
-  caseKey, aDigits, matchReading, processMail, undoAction, markHandled, list, status, runOnce, start,
+  caseKey, aDigits, matchReading, learnANumber, processMail, undoAction, markHandled, list, status, runOnce, start,
 };

@@ -70,13 +70,10 @@ function attach(app, auth) {
   // Clients to assign an unassigned recording to.
   app.get(`${P}/clients`, staff, async (req, res) => {
     try {
-      const q = String(req.query.q || "").trim().toLowerCase();
+      const q = String(req.query.q || "").trim();
       if (q.length < 2) return res.json({ ok: true, clients: [] });
-      const digits = q.replace(/\D/g, "");
-      const all = await require("./client-profiles").aggregateClients();
-      const clients = all.filter(c => (c.client_name && c.client_name.toLowerCase().includes(q)) ||
-        (digits.length >= 4 && String(c.a_number || "").replace(/\D/g, "").includes(digits)))
-        .slice(0, 10).map(c => ({ key: c.key, name: c.client_name, a_number: c.a_number }));
+      const found = await require("./client-profiles").searchClients(q, 10);
+      const clients = found.map(c => ({ key: c.key, name: c.client_name, a_number: c.a_number }));
       res.json({ ok: true, clients });
     } catch (e) { fail(res, e, 500); }
   });

@@ -114,7 +114,13 @@ const stubs = {
   "./dropbox-integration": { isConfigured: () => true,
     resolveClientFolder: async ({ clientKey }) => clientKey === "a-201555444" ? "/Clients/Chen, Mei (A201555444)" : null,
     createFolder: async p => { calls.folders.push(p); }, uploadFile: async ({ path: p }) => { calls.dbx.push(p); return { path_display: p }; }, clearListCache: () => {} },
-  "./client-profiles": { aggregateClients: async () => PROFILES, getClientByKey: async k => PROFILES.find(p => p.key === k) || null },
+  // searchClients is the real one, over these profiles — a stub with its own
+  // idea of matching would pass while the page found nobody.
+  "./client-profiles": {
+    aggregateClients: async () => PROFILES,
+    searchClients: async (q, n) => require("../client-search").rankClients(PROFILES, q, n),
+    getClientByKey: async k => PROFILES.find(p => p.key === k) || null,
+  },
   "./deadline-tracker": { createManual: async d => { const id = seq++; calls.clientDeadlines.push({ id, ...d }); return id; }, markCancelled: async id => { calls.cancelled.push(id); } },
   "./hearing-notices": { initTable: async () => {} },
   "./civil-snapshot": { findMatters: async q => /turco/i.test(q) ? [{ id: 223, case_name: "Jing Liu v. James Turco, et al.", case_number: "2:26-cv-01671" }] : [] },
