@@ -1005,6 +1005,13 @@ try { require("./court-mail").start(); } catch (e) { console.warn("[court-mail] 
 // Zara and folded into the 6 AM digest; it never files, calendars or sends.
 try { require("./legal-mail").start(); } catch (e) { console.warn("[legal-mail] start failed:", e.message); }
 
+// ── WeChat 公众号 publishing ──────────────────────────────────
+// The firm's clients are on WeChat and Zara is already authenticated to the
+// Official Account. This only prepares the table; nothing publishes without
+// WECHAT_PUBLISH_ENABLED, and then only after JJ taps Publish on Telegram.
+require("./wechat-publish").initTable()
+  .catch(e => console.warn("[wechat-publish] table init failed:", e.message));
+
 // ── Transcripts ──────────────────────────────────────────────
 // Every dictation and hearing recording, saved when transcribed, split by
 // speaker (transcripts.js). The pages and their API:
@@ -8036,6 +8043,23 @@ app.post("/telegram", async (req, res) => {
       return;
     }
 
+    // ── WeChat publish approval (wcpost_go_ID / wcpost_no_ID) ──
+    // Nothing reaches the 公众号 until one of these is tapped.
+    if (cb.data?.startsWith("wcpost_")) {
+      try {
+        const who = cb.from?.first_name || "JJ";
+        const result = await require("./wechat-publish")
+          .handleTelegramCallback(cb.data, cb.id, who);
+        if (result) {
+          axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
+            callback_query_id: cb.id,
+            text: result.answer,
+          }).catch(() => {});
+        }
+      } catch (e) { console.warn("[telegram] wechat publish callback:", e.message); }
+      return;
+    }
+
     // ── Task inline button callbacks (task_done_ID, task_snooze_ID_DAYS) ──
     if (cb.data?.startsWith("task_")) {
       try {
@@ -8518,6 +8542,15 @@ async function handleWeChatMsg(req, res) {
     if (type === "event" && msg.Event === "subscribe") {
       res.type("application/xml").send(wcXmlReply(from, to, WELCOME_MESSAGE)); return;
     }
+    // Tencent reports the real outcome of a published article here, minutes
+    // after freepublish/submit returned. It expects a bare "success" body.
+    if (type === "event" && msg.Event === "PUBLISHJOBFINISH") {
+      res.send("success");
+      try {
+        await require("./wechat-publish").handlePublishCallback(msg);
+      } catch (e) { console.warn("[wechat-publish] callback:", e.message); }
+      return;
+    }
     if (type === "text") {
       // Direct XML reply — no IP whitelist needed
       try {
@@ -8686,6 +8719,31 @@ app.get("/legal/mail/status", async (req, res) => {
   try { res.json(await require("./legal-mail").status()); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ── WeChat publishing: status, and a one-time cover upload ───
+app.get("/wechat/publish/status", async (req, res) => {
+  if (req.query.token !== process.env.ANALYTICS_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  try { res.json(await require("./wechat-publish").status()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Upload a cover once, keep the media_id it returns in WECHAT_COVER_MEDIA_ID.
+// Covers are permanent material; there is no reason to upload the same one
+// twice, so this is a manual endpoint rather than part of the daily run.
+app.post("/wechat/publish/cover", multer({ storage: multer.memoryStorage() }).single("image"),
+  async (req, res) => {
+    if (req.query.token !== process.env.ANALYTICS_SECRET) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+    if (!req.file) return res.status(400).json({ error: "Attach an image as 'image'" });
+    try {
+      const out = await require("./wechat-publish")
+        .uploadCover(req.file.buffer, req.file.originalname || "cover.jpg");
+      res.json({ ok: true, ...out, note: "Set WECHAT_COVER_MEDIA_ID to this media_id" });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
 
 app.post("/legal/mail/run", async (req, res) => {
   if (req.query.token !== process.env.ANALYTICS_SECRET) {

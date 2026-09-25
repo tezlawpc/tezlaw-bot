@@ -280,6 +280,24 @@ async function publishAllLanguages(post, notifyPrefix, state) {
         const p = await publishToWordPress(chPost);
         results.push({ lang: "中文", link: p.link });
         recordPublishedTitle(chPost.title, state);
+
+        // The same Chinese post goes to the 公众号, where the firm's clients
+        // actually are. It is only queued — JJ taps Publish on Telegram, and
+        // nothing reaches WeChat before he does. A failure here must never
+        // affect the blog post that already succeeded.
+        try {
+          const wechat = require("./wechat-publish");
+          const q = await wechat.queueForApproval({
+            title: chPost.title,
+            content: chPost.content,
+            digest: chPost.metaDescription,
+            sourceUrl: p.link,
+          });
+          if (q.queued) console.log(`[autoposter] 📣 WeChat post #${q.id} awaiting approval`);
+          else console.log(`[autoposter] WeChat skipped: ${q.reason}`);
+        } catch (wcErr) {
+          console.error("[autoposter] WeChat queue error:", wcErr.message);
+        }
       } catch (e) { console.error("Chinese publish failed:", e.message); }
     }
   }
