@@ -307,6 +307,7 @@ function renderClientList(clients) {
     return `
     <tr class="c-row"
         data-name="${escapeAttr((c.client_name || "").toLowerCase())}"
+        data-words="${escapeAttr(CS.nameWords(c.client_name).join(" "))}"
         data-anumber="${escapeAttr((c.a_number || "").toLowerCase().replace(/[-\s]/g, ""))}"
         data-email="${escapeAttr((c.client_email || "").toLowerCase())}"
         data-lang="${escapeAttr(c.client_language || "")}"
@@ -384,17 +385,40 @@ function renderClientList(clients) {
 
     <script>
       const TOTAL = ${clients.length};
+      // The words of what was typed, punctuation dropped. Same rule the server
+      // uses in client-search.js, so this page and the API agree on a match.
+      function queryWords(s) {
+        return String(s || "").toLowerCase()
+          .replace(/['\\u2018\\u2019\\u02bc\`]/g, "")
+          .replace(/[^\\p{L}\\p{N}]+/gu, " ")
+          .trim().split(/\\s+/).filter(Boolean);
+      }
       function filterRows() {
-        const search = document.getElementById("search-input").value.toLowerCase().replace(/[-\\s]/g, "");
+        // Folders are named "WANG, BAOHONG", so the name carries a comma and
+        // puts the surname first. Match word by word instead of as a string,
+        // and every one of these finds her: "baohong", "wang baohong",
+        // "baohong wang", "wang, baohong", "wang b".
+        const raw = document.getElementById("search-input").value.trim();
+        const digits = raw.replace(/\\D/g, "");
+        const words = queryWords(digits.length >= 4 ? raw.replace(/[\\d\\-\\s]+/g, " ") : raw);
+        const compact = raw.toLowerCase().replace(/[-\\s]/g, "");
         const upcoming = document.getElementById("filter-upcoming").value;
         const lang = document.getElementById("filter-lang").value;
         let visible = 0;
         document.querySelectorAll(".c-row").forEach(row => {
-          const name = row.dataset.name || "";
+          const nameWords = (row.dataset.words || "").split(" ").filter(Boolean);
           const anumber = row.dataset.anumber || "";
           const email = row.dataset.email || "";
           const casetypes = row.dataset.casetypes || "";
-          const matchesSearch = !search || name.includes(search) || anumber.includes(search) || email.replace(/\\s/g,"").includes(search) || casetypes.replace(/\\s/g,"").includes(search);
+          // Every word typed must begin one of the words in the name.
+          const byName = words.length > 0 && nameWords.length > 0 &&
+            words.every(w => nameWords.some(h => h.indexOf(w) === 0));
+          // Four digits or more, so a stray "1" does not match half the firm.
+          const byNumber = digits.length >= 4 && anumber.indexOf(digits) !== -1;
+          const byOther = compact.length > 0 &&
+            (email.replace(/\\s/g,"").indexOf(compact) !== -1 ||
+             casetypes.replace(/\\s/g,"").indexOf(compact) !== -1);
+          const matchesSearch = !raw || byName || byNumber || byOther;
           const matchesUpcoming = !upcoming || row.dataset.hasupcoming === upcoming;
           const matchesLang = !lang || row.dataset.lang === lang;
           const show = matchesSearch && matchesUpcoming && matchesLang;

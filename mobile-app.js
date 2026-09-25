@@ -20,9 +20,15 @@ const db = require("./db");
 async function searchClients(q, limit = 25) {
   if (!q || q.trim().length < 2) return [];
 
-  const term = "%" + q.trim().toLowerCase() + "%";
   const cp = require("./client-profiles");
+  const CS = require("./client-search");
   const all = await cp.aggregateClients();
+
+  // A name is matched word by word — "wang baohong", "baohong wang" and
+  // "wang, baohong" all find the client whose folder is "WANG, BAOHONG".
+  // The haystack below still catches everything else typed into this box:
+  // a phone number, an email, a judge, a case type.
+  const { words, digits } = CS.parseQuery(q);
 
   const results = [];
   for (const c of all) {
@@ -35,7 +41,7 @@ async function searchClients(q, limit = 25) {
       ...(c.hearings || []).map(h => h.disposition),
     ].filter(Boolean).map(x => String(x).toLowerCase()).join(" | ");
 
-    if (haystack.includes(q.trim().toLowerCase())) {
+    if (CS.matchesQuery(c, words, digits) || haystack.includes(q.trim().toLowerCase())) {
       // Get most-recent-upcoming hearing for the card preview
       const now = Date.now();
       const upcoming = (c.hearings || [])

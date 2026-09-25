@@ -839,13 +839,13 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
         };
       }
 
-      // Search
-      const searchKey = query.replace(/[-\s]/g, "");
+      // Search. Name word by word, so "wang baohong" and "baohong wang" both
+      // find the client whose folder is "WANG, BAOHONG" — see client-search.js.
+      const CS = require("./client-search");
+      const { words, digits } = CS.parseQuery(query);
       const matches = all.filter(c => {
-        const n = String(c.client_name || "").toLowerCase();
-        const a = String(c.a_number || "").toLowerCase().replace(/[-\s]/g, "");
         const e = String(c.client_email || "").toLowerCase();
-        return n.includes(query) || a.includes(searchKey) || e.includes(query);
+        return CS.matchesQuery(c, words, digits) || e.includes(query);
       });
 
       if (!matches.length) return { handled: true, message: `👥 No clients matching *"${query}"*.` };
@@ -906,12 +906,10 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
 
       // Find matching client(s)
       const all = await cp.aggregateClients();
-      const searchKey = query.replace(/[-\s]/g, "");
-      const matches = all.filter(c => {
-        const n = String(c.client_name || "").toLowerCase();
-        const a = String(c.a_number || "").toLowerCase().replace(/[-\s]/g, "");
-        return n.includes(query) || a.includes(searchKey);
-      });
+      // Same matching as everywhere else — see client-search.js.
+      const CSD = require("./client-search");
+      const dq = CSD.parseQuery(query);
+      const matches = all.filter(c => CSD.matchesQuery(c, dq.words, dq.digits));
 
       if (!matches.length) return { handled: true, message: `📁 No clients matching *"${query}"*.` };
       if (matches.length > 1) {

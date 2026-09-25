@@ -165,6 +165,80 @@ async function find(q, limit) {
   check("already taught, so not taught twice",
     (await CM.learnANumber("n-wang-baohong", { a_numbers: ["236-564-456"] })) === null);
 
+  // The Clients page filters in the browser, so the rules exist a second time
+  // as an inline script. Run that script against fake rows — this is the box
+  // that found nobody for "wang baohong" while the assign box found her.
+  console.log("\nthe Clients page search box");
+  {
+    const html = CP.renderClientList(PEOPLE.map(p => ({
+      key: p.client_key, client_name: p.client_name, a_number: p.a_number,
+      case_types: [], judges: [], hearings: [], upcoming: [], deadlines: [],
+      hearing_count: 0, sent_count: 0,
+    })));
+    const rows = [...html.matchAll(/<tr class="c-row"([\s\S]*?)>/g)].map(m => {
+      // A browser hands the script the decoded value, so decode here too.
+      const attr = n => (m[1].match(new RegExp(`data-${n}="([^"]*)"`)) || [, ""])[1]
+        .replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+        .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+      return { style: {}, dataset: {
+        words: attr("words"), anumber: attr("anumber"), name: attr("name"),
+        email: attr("email"), casetypes: attr("casetypes"),
+        lang: attr("lang"), hasupcoming: attr("hasupcoming"),
+      } };
+    });
+    check("the page renders a row per client with its name split into words",
+      rows.length === PEOPLE.length && rows[0].dataset.words === "wang baohong",
+      rows.length + " rows, first words: " + JSON.stringify(rows[0] && rows[0].dataset.words));
+
+    const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+      .map(m => m[1]).find(s => /function filterRows/.test(s)) || "";
+    const inputs = { "search-input": { value: "" }, "filter-upcoming": { value: "" },
+      "filter-lang": { value: "" }, "row-count": { textContent: "" } };
+    // Enough of a page for the script to run: the rows it filters, the inputs
+    // it reads, and a stub for everything else it decorates on load.
+    const stub = () => ({ addEventListener: () => {}, style: {}, dataset: {},
+      classList: { add: () => {}, remove: () => {}, toggle: () => {} },
+      textContent: "", value: "", appendChild: () => {}, querySelectorAll: () => [] });
+    const document = {
+      getElementById: id => inputs[id] || stub(),
+      querySelector: () => stub(),
+      querySelectorAll: sel => String(sel).includes("c-row")
+        ? { forEach: fn => rows.forEach(fn), length: rows.length }
+        : { forEach: () => {}, length: 0 },
+      addEventListener: () => {},
+      createElement: () => stub(),
+      body: stub(),
+    };
+    let filterRows;
+    try {
+      const window = { addEventListener: () => {}, location: { href: "", search: "" } };
+      filterRows = new Function("document", "window", "fetch", "alert",
+        script + "; return filterRows;")(document, window, async () => ({ json: async () => ({}) }), () => {});
+    } catch (e) { check("the page's script parses", false, e.message); }
+    const onPage = q => {
+      inputs["search-input"].value = q;
+      filterRows();
+      return rows.filter(r => r.style.display !== "none").map(r => r.dataset.name);
+    };
+    if (filterRows) {
+      check("the first name alone", onPage("baohong").includes("wang, baohong"));
+      check("surname then first name", onPage("wang baohong").includes("wang, baohong"),
+        JSON.stringify(onPage("wang baohong")));
+      check("first name then surname", onPage("baohong wang").includes("wang, baohong"));
+      check("with the comma the folder uses", onPage("wang, baohong").includes("wang, baohong"));
+      check("in capitals", onPage("WANG, BAOHONG").includes("wang, baohong"));
+      check("a prefix is enough", onPage("bao").includes("wang, baohong"));
+      check("surname and an initial", onPage("wang b").includes("wang, baohong"),
+        JSON.stringify(onPage("wang b")));
+      check("an apostrophe does not split the name", onPage("obrien").includes("o'brien, sean"));
+      check("by A-number", onPage("222333444").includes("wang, xuefeng"));
+      check("part of an A-number", onPage("333-444").includes("wang, xuefeng"));
+      check("a single digit matches nobody", onPage("2").length === 0, JSON.stringify(onPage("2")));
+      check("a name nobody has returns nobody", onPage("zzzz").length === 0);
+      check("an empty box shows everyone", onPage("").length === PEOPLE.length);
+    }
+  }
+
   console.log("\nwiring");
   const cm = require("fs").readFileSync(require("path").join(__dirname, "..", "court-mail.js"), "utf8");
   check("only a hand assignment teaches", /if \(target && match\.clientKey && !actions\.some/.test(cm));
@@ -180,6 +254,18 @@ async function find(q, limit) {
 
   // The rules sit in a module of their own so a test can check them without
   // a database, and so nothing has to keep a second copy of them.
+  // Every box that takes a typed name uses the same rules. A surface left on
+  // substring matching is the bug JJ hit: the Clients page found nobody for
+  // "wang baohong" while the assign box found her.
+  const ma = require("fs").readFileSync(require("path").join(__dirname, "..", "mobile-app.js"), "utf8");
+  check("the app's client search matches names the same way",
+    /CS\.matchesQuery\(c, words, digits\) \|\| haystack\.includes/.test(ma));
+  const jm = require("fs").readFileSync(require("path").join(__dirname, "..", "jj-mode.js"), "utf8");
+  check("/clients on Telegram does too", /CS\.matchesQuery\(c, words, digits\) \|\| e\.includes/.test(jm));
+  check("and /docs", /CSD\.matchesQuery\(c, dq\.words, dq\.digits\)/.test(jm));
+  check("no surface is left matching the raw name as a string",
+    !/n\.includes\(query\)/.test(jm), "jj-mode still has a substring name match");
+
   const cs = require("fs").readFileSync(require("path").join(__dirname, "..", "client-search.js"), "utf8");
   check("the matching rules need no database", !/require\(/.test(cs));
   const cp = require("fs").readFileSync(require("path").join(__dirname, "..", "client-profiles.js"), "utf8");
