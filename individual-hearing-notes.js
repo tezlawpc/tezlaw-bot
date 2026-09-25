@@ -1331,18 +1331,21 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
 
     ${isEdit ? `<div data-transcripts="note" data-note-type="individual" data-note-id="${Number(noteId)}" style="margin:10px 0;"></div>${require("./client-script").clientScriptTag("transcripts-page.js")}` : ""}
 
-    <!-- Dictation floating widget — visible ONLY while recording -->
-    <div id="dictation-widget" style="display:none; position:fixed; bottom:20px; right:20px; z-index:9999; background:linear-gradient(145deg, #0C1C36, #1a2f4f); color:white; padding:14px 18px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.35); min-width:280px; border:2px solid #B79C62;">
-      <div style="display:flex; align-items:center; gap:10px;">
-        <div style="width:12px; height:12px; border-radius:50%; background:#c62828; animation:d-pulse 1.2s infinite;"></div>
-        <div style="flex:1;">
-          <div id="d-widget-timer" style="font-family:monospace; font-size:20px; font-weight:600; letter-spacing:1px;">00:00</div>
-          <div id="d-widget-status" style="font-size:11px; color:#B79C62; margin-top:2px;">Session 1</div>
-        </div>
-        <button type="button" onclick="dToggleRecording()" style="background:#c62828; color:white; border:none; padding:9px 14px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">⏹️ Stop</button>
+    <!-- Dictation pill — shown while recording AND while transcribing.
+         Deliberately small and faded so the form underneath stays the thing
+         you are looking at. Hovering brings it up to full strength. -->
+    <div id="dictation-widget" style="display:none;">
+      <div style="display:flex; align-items:center; gap:9px;">
+        <div id="d-widget-dot" style="width:9px; height:9px; border-radius:50%; background:#c62828; animation:d-pulse 1.2s infinite; flex:none;"></div>
+        <div id="d-widget-timer" style="font-family:monospace; font-size:14px; font-weight:600; letter-spacing:1px;">00:00</div>
+        <div id="d-widget-status" style="font-size:11px; color:#B79C62;">Session 1</div>
+        <button type="button" id="d-widget-stop" onclick="dToggleRecording()" style="background:#c62828; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-size:12px; font-weight:600; flex:none;">Stop</button>
       </div>
-      <div id="d-widget-hint" style="font-size:10px; color:#888; margin-top:8px; text-align:center;">
-        Continue typing — auto-splits every 28 min
+      <div id="d-widget-hint" style="font-size:10px; color:#9fb0c8; margin-top:5px; text-align:center;">
+        auto-splits every 28 min
+      </div>
+      <div id="d-widget-bar" style="display:none; background:rgba(255,255,255,0.18); height:3px; border-radius:2px; overflow:hidden; margin-top:7px;">
+        <div id="d-proc-progress" style="background:linear-gradient(to right, #B79C62, #d4b979); height:100%; width:0%; transition:width 0.4s;"></div>
       </div>
     </div>
     <style>
@@ -1350,27 +1353,35 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         0%, 100% { opacity: 1; transform: scale(1); }
         50% { opacity: 0.5; transform: scale(1.3); }
       }
+      /* Out of the way until you look at it. */
+      #dictation-widget {
+        position: fixed; bottom: 16px; right: 16px; z-index: 9999;
+        background: rgba(12, 28, 54, 0.82); color: white;
+        padding: 8px 12px; border-radius: 12px;
+        border: 1px solid rgba(183, 156, 98, 0.55);
+        box-shadow: 0 4px 14px rgba(0,0,0,0.22);
+        opacity: 0.55; transition: opacity 0.18s ease;
+      }
+      #dictation-widget:hover, #dictation-widget:focus-within { opacity: 1; }
     </style>
 
-    <!-- Review modal — only shown after stop -->
-    <div id="dictation-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:10000; align-items:center; justify-content:center; padding:20px;">
-      <div style="background:white; padding:24px; border-radius:10px; max-width:520px; width:100%; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <!-- Review card — appears once the transcript is back. Docked in the
+         corner rather than over the page: no backdrop, so the form stays
+         usable and you can keep entering data while you read it. -->
+    <div id="dictation-modal" style="display:none; position:fixed; bottom:16px; right:16px; z-index:10000; width:430px; max-width:calc(100vw - 32px);">
+      <div style="background:white; padding:18px; border-radius:10px; max-height:72vh; overflow-y:auto; box-shadow:0 12px 40px rgba(0,0,0,0.28); border:1px solid #d9d2c2;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
           <div>
-            <h2 style="margin:0 0 4px 0; color:#0C1C36;">🎙️ Voice Dictation</h2>
-            <div style="font-size:12px; color:#666;">Review below before applying.</div>
+            <h2 style="margin:0 0 4px 0; color:#0C1C36; font-size:17px;">🎙️ Voice Dictation</h2>
+            <div style="font-size:12px; color:#666;">Review before applying. The form stays editable.</div>
           </div>
           <button type="button" onclick="closeDictationModal()" style="background:transparent; border:none; font-size:20px; cursor:pointer; color:#888;">✕</button>
         </div>
 
-        <div id="d-processing-panel" style="padding:20px 0; text-align:center;">
+        <!-- Kept for the error path; progress itself now lives in the pill. -->
+        <div id="d-processing-panel" style="display:none; padding:20px 0; text-align:center;">
           <div id="d-proc-icon" style="font-size:36px; margin-bottom:10px;">🎧</div>
           <div id="d-proc-status" style="font-size:14px; color:#0C1C36; font-weight:600;">Processing…</div>
-          <div style="margin-top:14px;">
-            <div style="background:#eee; height:5px; border-radius:3px; overflow:hidden;">
-              <div id="d-proc-progress" style="background:linear-gradient(to right, #B79C62, #d4b979); height:100%; width:0%; transition:width 0.4s;"></div>
-            </div>
-          </div>
         </div>
 
         <div id="d-result-panel" style="display:none;">
@@ -1753,7 +1764,54 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         if (dMediaStream) { dMediaStream.getTracks().forEach(t => t.stop()); dMediaStream = null; }
         dStopTimer();
         if (dRotationTimeout) { clearTimeout(dRotationTimeout); dRotationTimeout = null; }
-        document.getElementById("dictation-widget").style.display = "none";
+        dHideWidget();
+      }
+
+      // Progress shows in the pill, not a modal — the form must stay usable.
+      let dTranscribing = false;
+      function dProgress(pct, label) {
+        const bar = document.getElementById("d-proc-progress");
+        if (bar) bar.style.width = pct + "%";
+        const st = document.getElementById("d-widget-status");
+        if (st) st.textContent = label;
+        const st2 = document.getElementById("d-proc-status");
+        if (st2) st2.textContent = label;
+      }
+      // Turn the pill into a progress indicator, nothing covering the form.
+      function dShowTranscribing() {
+        dTranscribing = true;
+        const w = document.getElementById("dictation-widget");
+        if (!w) return;
+        w.style.display = "block";
+        const dot = document.getElementById("d-widget-dot");
+        if (dot) { dot.style.animation = "none"; dot.style.background = "#B79C62"; }
+        const stop = document.getElementById("d-widget-stop");
+        if (stop) stop.style.display = "none";
+        const timer = document.getElementById("d-widget-timer");
+        if (timer) timer.style.display = "none";
+        const hint = document.getElementById("d-widget-hint");
+        if (hint) hint.style.display = "none";
+        const bar = document.getElementById("d-widget-bar");
+        if (bar) bar.style.display = "block";
+      }
+      // Put the pill back the way it started, ready for the next recording.
+      function dHideWidget() {
+        dTranscribing = false;
+        const w = document.getElementById("dictation-widget");
+        if (!w) return;
+        w.style.display = "none";
+        const dot = document.getElementById("d-widget-dot");
+        if (dot) { dot.style.animation = ""; dot.style.background = "#c62828"; }
+        const stop = document.getElementById("d-widget-stop");
+        if (stop) stop.style.display = "";
+        const timer = document.getElementById("d-widget-timer");
+        if (timer) timer.style.display = "";
+        const hint = document.getElementById("d-widget-hint");
+        if (hint) hint.style.display = "";
+        const bar = document.getElementById("d-widget-bar");
+        if (bar) bar.style.display = "none";
+        const st = document.getElementById("d-widget-status");
+        if (st) st.textContent = "Session 1";
       }
 
       function dToggleRecording() {
@@ -1783,7 +1841,6 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           dUploadChunk(chunkIdx, blob).catch(err => console.warn("Chunk upload err:", err));
           if (wasFinal) {
             if (dMediaStream) { dMediaStream.getTracks().forEach(t => t.stop()); dMediaStream = null; }
-            document.getElementById("dictation-widget").style.display = "none";
             dWaitForTranscriptionsThenExtract();
           } else {
             dChunkIndex++;
@@ -1832,25 +1889,20 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
       }
 
       function dUpdateProcessingStatus() {
-        if (document.getElementById("d-processing-panel").style.display !== "block") return;
+        if (!dTranscribing) return;
         const total = dChunkIndex + 1;
         const done = total - dSessionsPending.length;
-        const pct = Math.round((done / total) * 100);
-        document.getElementById("d-proc-progress").style.width = pct + "%";
-        document.getElementById("d-proc-status").textContent =
-          "Transcribing session " + done + " of " + total + "…";
+        dProgress(Math.round((done / total) * 100),
+          total > 1 ? "Transcribing " + done + "/" + total : "Transcribing…");
       }
 
       async function dWaitForTranscriptionsThenExtract() {
-        // Open the modal in processing state
-        document.getElementById("dictation-modal").style.display = "flex";
-        document.getElementById("d-processing-panel").style.display = "block";
+        // The pill shows progress; nothing covers the form, so notes can still
+        // be typed while Whisper works.
+        dShowTranscribing();
         document.getElementById("d-result-panel").style.display = "none";
         document.getElementById("d-error-panel").style.display = "none";
-        document.getElementById("d-proc-icon").textContent = "🎧";
-        document.getElementById("d-proc-status").textContent =
-          "Transcribing " + (dChunkIndex + 1) + " session" + (dChunkIndex > 0 ? "s" : "") + "…";
-        document.getElementById("d-proc-progress").style.width = "10%";
+        dProgress(10, "Transcribing…");
 
         while (dSessionsPending.length > 0) {
           await new Promise(r => setTimeout(r, 500));
@@ -1861,9 +1913,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           return;
         }
         dTranscript = combined;
-        document.getElementById("d-proc-icon").textContent = "🧠";
-        document.getElementById("d-proc-status").textContent = "Claude extracting fields…";
-        document.getElementById("d-proc-progress").style.width = "85%";
+        dProgress(85, "Extracting…");
         try {
           const resp = await fetch("/admin/hearing/notes/dictate/extract-from-text", {
             method: "POST",
@@ -1883,8 +1933,10 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
           // The saved transcript, with every part's speakers named together.
           if (data.transcript) dTranscript = data.transcript;
           dShowExtractedPreview();
+          dHideWidget();
           document.getElementById("d-processing-panel").style.display = "none";
           document.getElementById("d-result-panel").style.display = "block";
+          document.getElementById("dictation-modal").style.display = "block";
         } catch (e) { dShowError(e.message); }
       }
 
@@ -1980,9 +2032,13 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
         setTimeout(() => toast.remove(), 3500);
       }
       function dShowError(msg) {
+        // An error is the one thing worth putting in front of the attorney,
+        // so the docked card opens — still without a backdrop.
+        dHideWidget();
         document.getElementById("d-error-panel").style.display = "block";
         document.getElementById("d-error-text").textContent = msg;
         document.getElementById("d-processing-panel").style.display = "none";
+        document.getElementById("dictation-modal").style.display = "block";
       }
       // ── End dictation ─────────────────────────
 
