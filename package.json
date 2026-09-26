@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node scripts/check-syntax.js && node scripts/check-inline-scripts.js && node scripts/check-civil-parity.js && node scripts/check-jurisdictions.js && node scripts/check-utbms-phases.js && node scripts/check-stage-workspace.js && node scripts/check-civil-admin-ui.js && node scripts/check-stage-page.js && node scripts/check-admin-auth.js && node scripts/check-panel-embed.js && node scripts/check-zara-core.js && node scripts/check-zara-admin-ui.js && node scripts/check-nav-highlight.js && node scripts/check-civil-intake.js && node scripts/check-kanban-layout.js && node scripts/check-civil-provision.js && node scripts/check-civil-upload.js && node scripts/check-case-tools.js && node scripts/check-civil-hearings.js && node scripts/check-zara-chat-data.js && node scripts/check-jj-lockout.js && node scripts/check-zara-empty-answer.js && node scripts/check-zara-actions.js && node scripts/check-esign.js && node scripts/check-court-mail.js && node scripts/check-transcripts.js && node scripts/check-app-prefs.js && node scripts/check-consultant-clients.js && node scripts/check-legal-mail.js && node scripts/check-client-search.js && node scripts/check-wechat-publish.js && node scripts/check-eoir-parse.js && node scripts/check-eoir-digest.js",
+    "test": "node scripts/check-repo-layout.js && node scripts/check-syntax.js && node scripts/check-inline-scripts.js && node scripts/check-civil-parity.js && node scripts/check-jurisdictions.js && node scripts/check-utbms-phases.js && node scripts/check-stage-workspace.js && node scripts/check-civil-admin-ui.js && node scripts/check-stage-page.js && node scripts/check-admin-auth.js && node scripts/check-panel-embed.js && node scripts/check-zara-core.js && node scripts/check-zara-admin-ui.js && node scripts/check-nav-highlight.js && node scripts/check-civil-intake.js && node scripts/check-kanban-layout.js && node scripts/check-civil-provision.js && node scripts/check-civil-upload.js && node scripts/check-case-tools.js && node scripts/check-civil-hearings.js && node scripts/check-zara-chat-data.js && node scripts/check-jj-lockout.js && node scripts/check-zara-empty-answer.js && node scripts/check-zara-actions.js && node scripts/check-esign.js && node scripts/check-court-mail.js && node scripts/check-transcripts.js && node scripts/check-app-prefs.js && node scripts/check-consultant-clients.js && node scripts/check-legal-mail.js && node scripts/check-client-search.js && node scripts/check-wechat-publish.js && node scripts/check-eoir-parse.js && node scripts/check-eoir-digest.js && node scripts/check-social-posts.js",
+    "check:repo-layout": "node scripts/check-repo-layout.js",
     "check:syntax": "node scripts/check-syntax.js",
     "check:inline-scripts": "node scripts/check-inline-scripts.js",
     "check:civil-parity": "node scripts/check-civil-parity.js",
@@ -21,7 +22,8 @@
     "check:client-search": "node scripts/check-client-search.js",
     "check:wechat-publish": "node scripts/check-wechat-publish.js",
     "check:eoir-parse": "node scripts/check-eoir-parse.js",
-    "check:eoir-digest": "node scripts/check-eoir-digest.js"
+    "check:eoir-digest": "node scripts/check-eoir-digest.js",
+    "check:social-posts": "node scripts/check-social-posts.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",

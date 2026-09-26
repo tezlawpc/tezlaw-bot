@@ -298,6 +298,7 @@ async function publishAllLanguages(post, notifyPrefix, state) {
         } catch (wcErr) {
           console.error("[autoposter] WeChat queue error:", wcErr.message);
         }
+
       } catch (e) { console.error("Chinese publish failed:", e.message); }
     }
   }
@@ -316,6 +317,38 @@ async function publishAllLanguages(post, notifyPrefix, state) {
         recordPublishedTitle(esPost.title, state);
       } catch (e) { console.error("Spanish publish failed:", e.message); }
     }
+  }
+
+  // ── Short-form social drafts ────────────────────────────────
+  // Drafted from the post that just went live, so every claim traces back to
+  // something the firm actually published. Each language's channels link to
+  // that language's post — an English LinkedIn draft pointing at the Chinese
+  // URL would be worse than no draft. Queued only: JJ approves each one, and
+  // a failure here must never affect the posts that already succeeded.
+  try {
+    const social = require("./social-posts");
+    const linkFor = lang => (results.find(r => r.lang === lang) || {}).link;
+
+    const en = linkFor("English");
+    if (en) {
+      const s = await social.queueForSource(
+        { title: post.title, url: en, summary: post.metaDescription || post.content },
+        { channels: ["linkedin", "facebook", "instagram"] });
+      if (s.queued) console.log(`[autoposter] 📣 ${s.queued} English social draft(s) awaiting approval`);
+      else if (s.reason) console.log(`[autoposter] social skipped: ${s.reason}`);
+      for (const r of s.rejected || []) console.log(`[autoposter] social ${r.channel} not offered: ${r.problems.join("; ")}`);
+    }
+
+    const zh = linkFor("中文");
+    if (zh && chPost) {
+      const s = await social.queueForSource(
+        { title: chPost.title, url: zh, summary: chPost.metaDescription || chPost.content },
+        { channels: ["wechat_moments"] });
+      if (s.queued) console.log(`[autoposter] 📣 ${s.queued} Chinese social draft(s) awaiting approval`);
+      for (const r of s.rejected || []) console.log(`[autoposter] social ${r.channel} not offered: ${r.problems.join("; ")}`);
+    }
+  } catch (soErr) {
+    console.error("[autoposter] social queue error:", soErr.message);
   }
 
   if (results.length > 0) {
