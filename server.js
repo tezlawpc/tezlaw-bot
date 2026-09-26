@@ -9974,6 +9974,19 @@ app.post("/admin/clients/:key/hearing-notices/scan", async (req, res) => {
   }
 });
 
+// Every court email matched to this client — hearing or not, attachment or
+// not. The profile should show the whole correspondence, not just the parts
+// that happened to carry a date.
+app.get("/admin/clients/:key/court-mail", async (req, res) => {
+  try {
+    const client = await require("./client-profiles").getClientByKey(req.params.key);
+    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    res.json({ ok: true, mail: await require("./court-mail").forClient(client.key) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get("/admin/clients/:key/hearing-notices", async (req, res) => {
   try {
     const cp = require("./client-profiles");

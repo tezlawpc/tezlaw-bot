@@ -434,7 +434,60 @@ async function matchReading(reading) {
     if (hits.length === 1) return { clientKey: hits[0].key, label: hits[0].client_name, by: `A-number ${hits[0].a_number}` };
     if (hits.length > 1) return { ambiguous: `A-number matches ${hits.length} client profiles` };
   }
+  // Client by name. An A-number only matches a client who already has one on
+  // file, and plenty do not — a folder imported from Dropbox, a contact added
+  // in the app. The notice names the respondent either way, so try that.
+  //
+  // The bar here is deliberately higher than the search box's: this assigns a
+  // court notice and files it, so only an exact name — the same words, no
+  // more and no fewer — counts. "Tang, Jie" matches the client Tang, Jie and
+  // not Tang, Jie Min. Anything short of that is left for a person, with the
+  // near misses offered as suggestions.
+  const named = await matchByName(reading.party_names);
+  if (named) return named;
   return null;
+}
+
+async function matchByName(partyNames) {
+  const names = (partyNames || []).filter(n => String(n || "").trim());
+  if (!names.length) return null;
+  const CS = require("./client-search");
+  const all = await require("./client-profiles").aggregateClients();
+
+  for (const name of names) {
+    const words = CS.nameWords(name);
+    // One word is a surname, and a surname is not a person.
+    if (words.length < 2) continue;
+    const want = [...words].sort().join(" ");
+    const hits = all.filter(c => CS.nameWords(c.client_name).sort().join(" ") === want);
+    if (hits.length === 1) {
+      return { clientKey: hits[0].key, label: hits[0].client_name, by: `name "${hits[0].client_name}"` };
+    }
+    if (hits.length > 1) return { ambiguous: `${hits.length} clients are named ${name}` };
+  }
+  return null;
+}
+
+// Clients worth offering when nothing matched outright, so an unmatched
+// notice arrives with the likely person one tap away instead of a search.
+async function suggestClients(reading, limit = 3) {
+  try {
+    const CS = require("./client-search");
+    const all = await require("./client-profiles").aggregateClients();
+    const seen = new Set();
+    const out = [];
+    for (const name of (reading.party_names || [])) {
+      for (const c of CS.rankClients(all, String(name || ""), limit)) {
+        if (seen.has(c.key)) continue;
+        seen.add(c.key);
+        out.push(c);
+        if (out.length >= limit) return out;
+      }
+    }
+    return out;
+  } catch (e) {
+    return [];
+  }
 }
 
 // ── Doing the work ──────────────────────────────────────────
@@ -699,8 +752,16 @@ async function processMail(id, { target = null, think = null, by = null, notify 
 
     const match = target ? { ...target, by: `assigned by ${by || "staff"}` } : await matchReading(reading);
     if (!match || match.ambiguous) {
-      return review(match && match.ambiguous ? `Could not tell which: ${match.ambiguous}.` :
-        `No matter or client matched (${[...reading.case_numbers, ...reading.a_numbers].join(", ") || "no case number or A-number in it"}).`);
+      // Nothing matched outright, so offer the nearest clients by name. Most
+      // of the time the person is right there and the search was the only
+      // thing standing between the notice and the file.
+      const near = await suggestClients(reading);
+      const hint = near.length
+        ? `\nClosest clients: ${near.map(c => c.client_name + (c.a_number ? ` (${c.a_number})` : "")).join(" · ")}`
+        : "";
+      const looked = [...new Set([...reading.case_numbers, ...reading.a_numbers, ...(reading.party_names || [])])];
+      return review((match && match.ambiguous ? `Could not tell which: ${match.ambiguous}.` :
+        `No matter or client matched (${looked.join(", ") || "no case number, A-number or name in it"}).`) + hint);
     }
 
     // Every action is saved the moment it is taken, so a failure halfway
@@ -798,6 +859,52 @@ async function list({ status = null, limit = 100 } = {}) {
   return r.rows;
 }
 
+// Every court email matched to one client, for their profile.
+//
+// JJ: "these notices with or without attachments should be in client profile
+// as well." Only emails carrying a hearing ever reached the profile, because
+// that is what client_hearing_notices holds. An eFiling receipt, an order with
+// no date, a transmittal — all of it landed in Dropbox and on the Court Mail
+// page and nowhere the client's own page would show it.
+//
+// This reads the mail itself rather than writing correspondence into the
+// hearing table, which drives the "notify the client" buttons: telling someone
+// their hearing is an eFiling confirmation would be worse than the gap.
+async function forClient(clientKey, { limit = 50 } = {}) {
+  await initTables();
+  if (!clientKey) return [];
+  const r = await db.query(
+    `SELECT id, received_at, subject, status, reading, actions, note, matched_by, processed_at
+       FROM court_mail
+      WHERE client_key = $1
+      ORDER BY COALESCE(received_at, created_at) DESC
+      LIMIT ${Math.min(200, Number(limit) || 50)}`,
+    [clientKey]);
+
+  return r.rows.map(m => {
+    const reading = m.reading || {};
+    const actions = Array.isArray(m.actions) ? m.actions : [];
+    const live = actions.filter(a => !a.undone);
+    return {
+      id: m.id,
+      received_at: m.received_at,
+      title: reading.title || m.subject || "(no subject)",
+      summary: reading.summary || null,
+      kind: reading.kind || null,
+      status: m.status,
+      matched_by: m.matched_by || null,
+      // What was actually filed, so the profile can link straight to Dropbox.
+      documents: live.filter(a => a.type === "file")
+        .map(a => ({ label: a.label, path: a.path })),
+      hearings: live.filter(a => a.type === "client_hearing").map(a => a.label),
+      deadlines: live.filter(a => a.type === "client_deadline").map(a => a.label),
+      action_items: Array.isArray(reading.action_items) ? reading.action_items : [],
+      note: m.note || null,
+      url: pageUrl(m.id),
+    };
+  });
+}
+
 async function status() {
   await initTables();
   const cfg = config();
@@ -850,5 +957,6 @@ function start() {
 
 module.exports = {
   config, isCourtSender, isForwarder, senderVerified, quoteSaysDate, isDay, originalSender, initTables, collect, parseRaw, buildPrompt, cleanReading,
-  caseKey, aDigits, matchReading, learnANumber, processMail, undoAction, markHandled, list, status, runOnce, start,
+  caseKey, aDigits, matchReading, matchByName, suggestClients, learnANumber,
+  processMail, undoAction, markHandled, list, forClient, status, runOnce, start,
 };

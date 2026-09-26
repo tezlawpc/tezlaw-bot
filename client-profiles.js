@@ -652,6 +652,13 @@ function renderClientDetail(client, { documents = [] } = {}) {
       <div id="hn-list"></div>
     </div>
 
+    <!-- Court email matched to this client — every one, hearing or not -->
+    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;" id="court-mail-section">
+      <h3 style="margin:0 0 12px; color:#0C1C36;">📨 Court Mail <span id="cm-count" style="color:#888; font-weight:normal; font-size:14px;"></span></h3>
+      <div id="cm-status" style="font-size:13px; color:#666;">Loading…</div>
+      <div id="cm-list"></div>
+    </div>
+
     <!-- Voice transcripts (transcripts.js) — drawn by transcripts-page.js -->
     <div style="background:white; padding:4px 20px 12px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
       <div data-transcripts="client" data-client-key="${escapeAttr(client.key)}"></div>
@@ -920,6 +927,65 @@ function renderClientDetail(client, { documents = [] } = {}) {
 
       // Load on page ready
       dbxRefresh(false);
+
+      // ── Court Mail ─────────────────────────────────────
+      // Every court email matched to this client. An eFiling receipt with no
+      // hearing and no attachment still belongs on the record.
+      async function loadCourtMail() {
+        const status = document.getElementById("cm-status");
+        const list = document.getElementById("cm-list");
+        const count = document.getElementById("cm-count");
+        try {
+          const resp = await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/court-mail");
+          const data = await resp.json();
+          if (!data.ok) { status.textContent = data.error || "Could not load court mail."; return; }
+          const mail = data.mail || [];
+          count.textContent = mail.length ? "(" + mail.length + ")" : "";
+          if (!mail.length) {
+            status.textContent = "No court email has been matched to this client yet.";
+            list.innerHTML = "";
+            return;
+          }
+          status.style.display = "none";
+          list.innerHTML = mail.map(function (m) {
+            var when = m.received_at ? new Date(m.received_at) : null;
+            var dateStr = when && !isNaN(when)
+              ? when.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+              : "";
+            var kind = m.kind
+              ? '<span style="background:#eef2f7; color:#0C1C36; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">' + dbxEscape(m.kind) + '</span>'
+              : "";
+            var docs = (m.documents || []).length
+              ? '<div style="margin-top:6px; font-size:12px; color:#555;">📎 ' +
+                (m.documents || []).map(function (d) { return dbxEscape(d.label || d.path || "document"); }).join("<br>📎 ") +
+                '</div>'
+              : '<div style="margin-top:6px; font-size:12px; color:#999;">No attachment — the email itself was filed.</div>';
+            var dated = (m.hearings || []).concat(m.deadlines || []);
+            var datedHtml = dated.length
+              ? '<div style="margin-top:6px; font-size:12px; color:#2e7d32;">🗓️ ' + dated.map(dbxEscape).join(" · ") + '</div>'
+              : "";
+            var todo = (m.action_items || []).length
+              ? '<div style="margin-top:6px; font-size:12px; color:#8a6d3b;">To do: ' +
+                (m.action_items || []).map(dbxEscape).join("; ") + '</div>'
+              : "";
+            var needs = m.status === "needs_review"
+              ? '<span style="background:#fff3e0; color:#e65100; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">needs review</span>'
+              : "";
+            return '<div style="border-left:4px solid #0C1C36; background:#f7f9fb; padding:12px; border-radius:4px; margin-bottom:8px;">' +
+              '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:flex-start;">' +
+                '<div style="font-weight:600; color:#0C1C36; flex:1; min-width:200px;">' + dbxEscape(m.title) + needs + '</div>' +
+                '<div style="font-size:12px; color:#888; white-space:nowrap;">' + dateStr + ' ' + kind + '</div>' +
+              '</div>' +
+              (m.summary ? '<div style="margin-top:6px; font-size:13px; color:#444; line-height:1.5;">' + dbxEscape(m.summary) + '</div>' : "") +
+              datedHtml + docs + todo +
+              '<div style="margin-top:8px;"><a href="' + dbxEscape(m.url) + '" style="font-size:12px; color:#B79C62; font-weight:600; text-decoration:none;">Open in Court Mail →</a></div>' +
+            '</div>';
+          }).join("");
+        } catch (e) {
+          status.textContent = "Could not load court mail.";
+        }
+      }
+      loadCourtMail();
 
       // ── Hearing Notices ────────────────────────────────
       async function loadHearingNotices() {

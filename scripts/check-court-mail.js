@@ -56,6 +56,10 @@ const fakeDb = { query: async (sql, v = []) => {
     T.mail.push(r); return { rows: [{ id: r.id }] };
   }
   if (/^SELECT \* FROM court_mail WHERE id = \$1/.test(q)) return { rows: T.mail.filter(m => m.id === v[0]).map(m => ({ ...m })) };
+  // forClient(): every email matched to one client, newest first.
+  if (/FROM court_mail WHERE client_key = \$1/.test(q)) {
+    return { rows: T.mail.filter(m => m.client_key === v[0]).map(m => ({ ...m })).reverse() };
+  }
   if (/^UPDATE court_mail SET status = 'working'/.test(q)) {
     const m = T.mail.find(x => x.id === v[0] && x.status !== "working"); if (m) m.status = "working"; return { rows: m ? [{ id: m.id }] : [] };
   }
@@ -94,6 +98,13 @@ const calls = { hearings: [], deadlines: [], notes: [], uploads: [], dbx: [], fo
 const PROFILES = [
   { key: "contact-liu", client_name: "Jing Liu" },
   { key: "a-201555444", client_name: "Mei Chen", a_number: "A201-555-444" },
+  // A real case: in the client list by name, no A-number on file, so a
+  // notice carrying only an A-number could never reach him.
+  { key: "n-tang-jie", client_name: "Tang, Jie" },
+  // Two clients one word apart, so a loose name match would pick wrongly.
+  { key: "n-tang-jie-min", client_name: "Tang, Jie Min" },
+  { key: "n-zhao-wei-a", client_name: "Zhao, Wei" },
+  { key: "n-zhao-wei-b", client_name: "Zhao, Wei" },
 ];
 const stubs = {
   "./db": fakeDb,
@@ -394,6 +405,94 @@ function fakeImap(messages, validity = 7, uidNext = null) {
   const assign = posted.find(p => /\/9\/assign$/.test(p.url));
   check("assigning posts the chosen case", () => assign && JSON.parse(assign.body).case_id === 224);
 
+  console.log("\n── Matching a client by name ───────────────────");
+  // JJ: "its not finding clients still … but i can find this client in tara."
+  // An EOIR notice for a detained respondent carried an A-number and a name.
+  // The client was in the list under his name with no A-number on file, so
+  // matching on numbers alone could never reach him.
+  const byName = await cm.matchReading({
+    case_numbers: [], a_numbers: ["246-254-704"], party_names: ["TANG, JIE"],
+  });
+  check("a client with no A-number on file is still found, by name", () =>
+    byName && byName.clientKey === "n-tang-jie", JSON.stringify(byName));
+  check("…and the reason says it was the name", () => /name/i.test(byName.by));
+
+  const reversed = await cm.matchReading({ case_numbers: [], a_numbers: [], party_names: ["jie tang"] });
+  check("the comma, the order and the capitals do not matter", () =>
+    reversed && reversed.clientKey === "n-tang-jie", JSON.stringify(reversed));
+
+  const tooLoose = await cm.matchReading({
+    case_numbers: [], a_numbers: [], party_names: ["Tang"],
+  });
+  check("a surname alone assigns nothing", () => tooLoose === null, JSON.stringify(tooLoose));
+
+  const twoPeople = await cm.matchReading({
+    case_numbers: [], a_numbers: [], party_names: ["Zhao, Wei"],
+  });
+  check("two clients with the same name is ambiguous, not a guess", () =>
+    twoPeople && /2 clients are named/.test(twoPeople.ambiguous || ""), JSON.stringify(twoPeople));
+
+  const notMin = await cm.matchReading({
+    case_numbers: [], a_numbers: [], party_names: ["Tang, Jie Min"],
+  });
+  check("an extra name word picks the other client, not the shorter one", () =>
+    notMin && notMin.clientKey === "n-tang-jie-min", JSON.stringify(notMin));
+
+  const byNumber = await cm.matchReading({
+    case_numbers: [], a_numbers: ["201-555-444"], party_names: ["Someone Else"],
+  });
+  check("an A-number still wins when the client has one", () =>
+    byNumber && byNumber.clientKey === "a-201555444", JSON.stringify(byNumber));
+
+  const near = await cm.suggestClients({ party_names: ["Tang"] });
+  check("an unmatched notice still offers the near misses", () =>
+    near.some(c => c.client_name === "Tang, Jie"), JSON.stringify(near.map(c => c.client_name)));
+
+  console.log("\n── The client's own page ───────────────────────");
+  // JJ: "these notices with or without attachments should be in client
+  // profile as well." An EOIR eFiling receipt carries no hearing and no
+  // deadline, so nothing about it ever reached the client's page.
+  // The exact case JJ reported: an EOIR eFiling confirmation. No hearing, no
+  // deadline, one filed document — and previously nothing on the profile.
+  T.mail.push({
+    id: 9001, client_key: "a-201555444", received_at: "2026-09-25T17:00:00Z",
+    subject: "EOIR eFiling Confirmation", status: "done",
+    reading: {
+      title: "EOIR eFiling Confirmation — Motion for Counsel to Appear by Webex",
+      summary: "EOIR confirms receipt and is evaluating it for the record.",
+      kind: "confirmation",
+      action_items: ["Monitor EOIR Case Portal for the evaluation outcome"],
+    },
+    actions: [{ type: "file", label: "Filed Motion.pdf → Court Notices", path: "/Clients/Chen/Court Notices/Motion.pdf" }],
+    matched_by: "A-number A201-555-444",
+  });
+
+  const mine = await cm.forClient("a-201555444");
+  check("every email matched to the client is listed", () => mine.length >= 2, String(mine.length));
+  check("newest first", () => mine[0].id === 9001, JSON.stringify(mine.map(m => m.id)));
+  check("each one carries what it was about", () => mine.every(m => m.title && m.url));
+
+  const efiling = mine.find(m => m.id === 9001);
+  check("a confirmation with no hearing and no deadline still appears", () =>
+    efiling && efiling.hearings.length === 0 && efiling.deadlines.length === 0);
+  check("…with its summary, so the page says what it was", () =>
+    /evaluating it for the record/.test(efiling.summary || ""));
+  check("…the document it filed", () =>
+    efiling.documents.length === 1 && /Motion\.pdf/.test(efiling.documents[0].label));
+  check("…and what is left to do about it", () =>
+    efiling.action_items.some(t => /Case Portal/.test(t)));
+  check("an undone action is not still listed", () => {
+    const withHearing = T.mail.find(m => (m.actions || []).some(a => a.type === "client_hearing" && a.undone));
+    if (!withHearing) return true;
+    const row = mine.find(m => m.id === withHearing.id);
+    return row && row.hearings.length === 0;
+  });
+  const theirs = await cm.forClient("contact-liu");
+  check("another client's mail is not included", () =>
+    theirs.every(m => m.id !== mine[0].id));
+  const none = await cm.forClient("");
+  check("no client key returns nothing", () => none.length === 0);
+
   console.log("\n── Wiring ──────────────────────────────────────");
   const srv = fs.readFileSync(path.join(REPO, "server.js"), "utf8");
   const nav = fs.readFileSync(path.join(REPO, "hearing-notes.js"), "utf8");
@@ -402,6 +501,11 @@ function fakeImap(messages, validity = 7, uidNext = null) {
   const cs = require("../client-script");
   check("the page script is protected against a flattened upload — and is not named like the server module", () =>
     cs.CLIENT_BUNDLES.includes("court-mail-page.js") && !cs.CLIENT_BUNDLES.includes("court-mail.js"));
+  check("the client profile asks for its court mail", () =>
+    /\/court-mail"\)[\s\S]{0,400}forClient/.test(srv));
+  const prof = fs.readFileSync(path.join(REPO, "client-profiles.js"), "utf8");
+  check("…and the profile has somewhere to show it", () =>
+    /id="court-mail-section"/.test(prof) && /loadCourtMail\(\)/.test(prof));
 
   console.log("\n" + (failures ? `${failures} FAILED` : "ALL COURT-MAIL CHECKS PASSED"));
   process.exit(failures ? 1 : 0);
