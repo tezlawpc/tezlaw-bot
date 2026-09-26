@@ -31,6 +31,7 @@
 
 const crypto = require("crypto");
 const db = require("./db");
+const EOIR = require("./eoir-parse");
 
 const FIRST_RUN_DAYS = 7;
 const MAX_ATTACHMENT_TEXT = 15000;
@@ -161,6 +162,11 @@ function initTables() {
         created_at       TIMESTAMPTZ DEFAULT NOW()
       )`);
     await db.query(`ALTER TABLE court_mail ADD COLUMN IF NOT EXISTS retries INTEGER DEFAULT 0`).catch(() => {});
+    // 'ping'   — JJ was told about this one the moment it was filed.
+    // 'digest' — a routine EOIR receipt; it waits for the daily roll-up.
+    await db.query(`ALTER TABLE court_mail ADD COLUMN IF NOT EXISTS notify_mode TEXT`).catch(() => {});
+    await db.query(`ALTER TABLE court_mail ADD COLUMN IF NOT EXISTS digest_at TIMESTAMPTZ`).catch(() => {});
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_court_mail_digest ON court_mail (notify_mode, digest_at)`).catch(() => {});
     await db.query(`CREATE INDEX IF NOT EXISTS idx_court_mail_status ON court_mail (status, created_at DESC)`);
     await db.query(`
       CREATE TABLE IF NOT EXISTS court_mail_state (
@@ -264,6 +270,10 @@ async function parseRaw(raw) {
     subject: m.subject || "",
     date: m.date || null,
     text,
+    // The HTML body, unflattened. `text` above turns every tag into a single
+    // space, which puts EOIR's whole labelled field list on one line and makes
+    // it unparseable; eoir-parse needs the real markup to find the line breaks.
+    html: m.html || "",
     attachments: (m.attachments || []).filter(a => a.content && a.content.length && !a.related)
       .map(a => ({ filename: a.filename || "attachment", contentType: a.contentType || "", content: a.content })),
   };
@@ -278,6 +288,75 @@ async function attachmentText(att) {
 
 const KINDS = ["hearing_notice", "order", "ruling", "minute_order", "filing_served", "notice_of_filing", "judgment",
   "receipt", "rfe", "interview", "biometrics", "decision", "transfer", "other"];
+
+// ── EOIR receipts: read without Zara, report in a digest ─────
+//
+// Most EOIR mail is a receipt. "Accepted" means a document the firm uploaded
+// is now in the record; "Service" means DHS uploaded something. Neither
+// carries a hearing date, a deadline or anything to do — and they arrive by
+// the dozen (25 in one evening; ~60/day across the archive). Each one used to
+// cost a Zara read plus its own Telegram message.
+//
+// eoir-parse reads DOJ's fixed template deterministically, so this path needs
+// no LLM at all. What does NOT change: the document is still matched to the
+// client and still filed to their Dropbox folder. Only the reading and the
+// notification differ.
+//
+// Deliberately narrow. A receipt is digested only when the parser is fully
+// confident (`ok`) and the status is one it classifies as not needing
+// attention (`docketable === false`). Anything else — "Entered" (the court
+// issued an order or a hearing notice), "Rejected" (a filing bounced), an
+// unrecognised status, an A-number the witnesses disagree on, a template that
+// has drifted — falls through to the normal Zara read and an immediate ping.
+// Getting this wrong in the safe direction costs one LLM call; getting it
+// wrong the other way buries a hearing date in a digest.
+function eoirReading(mail, row) {
+  let p;
+  try {
+    p = EOIR.parseEoirEmail({
+      subject: mail.subject,
+      sender: addressOf(mail.from),
+      html: mail.html,
+      text: mail.text,
+      attachments: mail.attachments,
+      receivedAt: row && row.received_at,
+    });
+  } catch (e) { return null; }
+
+  if (!p.ok || p.docketable || p.problems.length) return null;
+
+  const what = [p.category, p.sub_category].filter(Boolean).join(" · ");
+  const summary = p.status === "Accepted"
+    ? `EOIR accepted the filing into the record${what ? ` (${what})` : ""}.`
+    : `DHS uploaded a document to the record${what ? ` (${what})` : ""}.`;
+
+  return {
+    is_court_mail: true,
+    agency: "EOIR",
+    kind: "receipt",
+    title: `${p.status} — ${p.category || "filing"} — ${p.name_display || p.name_last || "client"}`,
+    summary: [summary, p.document_name ? `Document: ${p.document_name}` : null,
+      p.uploaded_on ? `Uploaded ${p.uploaded_on}` : null,
+      p.tracking_number ? `Tracking ${p.tracking_number}` : null].filter(Boolean).join("\n"),
+    case_numbers: [],
+    a_numbers: p.a_number ? [p.a_number] : [],
+    receipt_numbers: p.tracking_number ? [p.tracking_number] : [],
+    party_names: p.name_display ? [p.name_display] : [],
+    court: "",
+    action_items: [],
+    urgent: false,
+    // Nothing to calendar, by construction — these statuses never carry a date.
+    hearings: [], deadlines: [], suggested: [], dropped: [],
+    // Kept so the review page and the digest can show what the parser saw
+    // without re-parsing, and so a later change of heart is auditable.
+    eoir: {
+      status: p.status, category: p.category, sub_category: p.sub_category,
+      a_number: p.a_number, name: p.name_display, case_type: p.case_type,
+      document_name: p.document_name, tracking_number: p.tracking_number,
+      uploaded_on: p.uploaded_on, source: "eoir-parse",
+    },
+  };
+}
 
 function buildPrompt(mail, attTexts) {
   let budget = MAX_TOTAL_TEXT;
@@ -674,9 +753,12 @@ async function tellJJ(text) {
   } catch (e) { console.warn("[court-mail] telegram:", e.message); return false; }
 }
 
-function pageUrl(id) {
+function listUrl() {
   const base = (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/$/, "");
-  return base ? `${base}/admin/court-mail#mail-${id}` : `/admin/court-mail#mail-${id}`;
+  return `${base}/admin/court-mail`;
+}
+function pageUrl(id) {
+  return `${listUrl()}#mail-${id}`;
 }
 
 /**
@@ -714,6 +796,18 @@ async function processMail(id, { target = null, think = null, by = null, notify 
     const verified = senderVerified(mail.headerLines, mail.from);
 
     let reading = reread ? null : (row.reading || null);
+    // A routine EOIR receipt is read from DOJ's template instead of by Zara.
+    // Never for an assignment (`target`), where a person is asking for a real
+    // reading of something the automatic path could not place.
+    let digested = false;
+    if (!reading && !target && EOIR.isEoirSender(addressOf(mail.from))) {
+      const r = eoirReading(mail, row);
+      if (r) {
+        reading = r;
+        digested = true;
+        await db.query(`UPDATE court_mail SET reading = $2::jsonb WHERE id = $1`, [row.id, JSON.stringify(reading)]);
+      }
+    }
     if (!reading) {
       const attTexts = [];
       for (const a of mail.attachments) attTexts.push({ filename: a.filename, text: await attachmentText(a) });
@@ -740,8 +834,11 @@ async function processMail(id, { target = null, think = null, by = null, notify 
     }
 
     const review = async (why) => {
-      await db.query(`UPDATE court_mail SET status = 'needs_review', note = $2, processed_at = NOW() WHERE id = $1`, [row.id, why]);
-      if (notify) await tellJJ(`📨 Court email needs you: ${reading.title}\n${reading.summary}\n${why}\nAssign it: ${pageUrl(row.id)}`);
+      await db.query(`UPDATE court_mail SET status = 'needs_review', note = $2, notify_mode = $3, processed_at = NOW() WHERE id = $1`,
+        [row.id, why, digested ? "digest" : "ping"]);
+      // An unplaceable receipt still needs assigning eventually, but it is
+      // never urgent — it goes in the digest rather than interrupting.
+      if (notify && !digested) await tellJJ(`📨 Court email needs you: ${reading.title}\n${reading.summary}\n${why}\nAssign it: ${pageUrl(row.id)}`);
       return (await db.query(`SELECT * FROM court_mail WHERE id = $1`, [row.id])).rows[0];
     };
     // A sender the mail server could not verify might be forged: read, but
@@ -797,7 +894,11 @@ async function processMail(id, { target = null, think = null, by = null, notify 
               error = NULL, processed_at = NOW(), handled_by = $7 WHERE id = $1`,
       [row.id, match.caseId || null, match.clientKey || null, match.by, JSON.stringify(actions), note, by]);
 
-    if (notify) {
+    if (notify && digested) {
+      // Filed and recorded; it will appear as one line in the daily digest.
+      await db.query(`UPDATE court_mail SET notify_mode = 'digest' WHERE id = $1`, [row.id]);
+    } else if (notify) {
+      await db.query(`UPDATE court_mail SET notify_mode = 'ping' WHERE id = $1`, [row.id]);
       await tellJJ([
         `${reading.urgent ? "🚨" : "📨"} ${reading.title} — ${match.label || "matched"}`,
         reading.summary,
@@ -916,9 +1017,88 @@ async function status() {
   };
 }
 
+// ── The daily digest ────────────────────────────────────────
+//
+// Everything marked notify_mode = 'digest' — the EOIR receipts — is rolled
+// into one message a day instead of interrupting sixty times. Grouped by
+// client, because "what landed for Zhao today" is the question actually being
+// asked; a flat list of sixty tracking numbers is no better than sixty pings.
+//
+// Rows are stamped digest_at as they go out, so nothing is reported twice and
+// a failed send leaves them queued for the next run rather than losing them.
+
+async function pendingDigest() {
+  await initTables();
+  return (await db.query(
+    `SELECT id, received_at, subject, status, client_key, note, reading
+       FROM court_mail
+      WHERE notify_mode = 'digest' AND digest_at IS NULL
+      ORDER BY client_key NULLS LAST, received_at`)).rows;
+}
+
+/**
+ * Send the digest. `send` lets a test stand in for Telegram.
+ * Returns what it did, so a caller (or a test) can assert on it.
+ */
+async function sendDigest({ send = null, mark = true } = {}) {
+  const rows = await pendingDigest();
+  if (!rows.length) return { sent: false, items: 0, reason: "nothing queued" };
+
+  const byClient = new Map();
+  for (const r of rows) {
+    const e = (r.reading && r.reading.eoir) || {};
+    const who = e.name || r.client_key || "Unplaced";
+    if (!byClient.has(who)) byClient.set(who, []);
+    byClient.get(who).push({ row: r, e });
+  }
+
+  const unplaced = rows.filter(r => r.status !== "done");
+  const lines = [`📋 EOIR filing receipts — ${rows.length} since the last digest`];
+  for (const [who, items] of byClient) {
+    const aNum = (items.find(i => i.e.a_number) || { e: {} }).e.a_number;
+    lines.push(`\n${who}${aNum ? ` (${aNum})` : ""}`);
+    for (const { row, e } of items) {
+      const what = [e.status, e.category].filter(Boolean).join(" ") || row.subject;
+      const flag = row.status === "done" ? "" : "  ⚠ not filed — needs assigning";
+      lines.push(`• ${dayPT(row.received_at)} ${what}${e.document_name ? ` — ${e.document_name}` : ""}${flag}`);
+    }
+  }
+  lines.push(`\nAll filed to each client's Dropbox folder. Nothing here needed a calendar date.`);
+  if (unplaced.length) {
+    lines.push(`${unplaced.length} could not be matched to a client — assign them: ${listUrl()}`);
+  }
+
+  // Telegram truncates a single message, and a busy day runs well past the
+  // limit, so the digest is split on client boundaries rather than cut off
+  // mid-list. Several messages is still not sixty.
+  const LIMIT = 3500;
+  const parts = [];
+  let buf = "";
+  for (const line of lines) {
+    const piece = buf ? buf + "\n" + line : line;
+    if (piece.length > LIMIT && buf) { parts.push(buf); buf = line; }
+    else buf = piece;
+  }
+  if (buf) parts.push(buf);
+
+  let allSent = true;
+  for (let i = 0; i < parts.length; i++) {
+    const body = parts.length > 1 ? `${parts[i]}\n(${i + 1}/${parts.length})` : parts[i];
+    const ok = send ? await send(body) : await tellJJ(body);
+    if (!ok) { allSent = false; break; }
+  }
+  // Only stamp them once the message is actually out, or a Telegram outage
+  // would silently swallow a day of receipts — they stay queued instead.
+  if (allSent && mark) {
+    await db.query(`UPDATE court_mail SET digest_at = NOW() WHERE id = ANY($1::int[])`, [rows.map(r => r.id)]);
+  }
+  return { sent: allSent, items: rows.length, clients: byClient.size, unplaced: unplaced.length,
+    messages: parts.length, text: parts.join("\n") };
+}
+
 // ── The loop ────────────────────────────────────────────────
 
-let running = false, timer = null;
+let running = false, timer = null, digestTimer = null;
 async function runOnce() {
   if (running) return { skipped: true };
   running = true;
@@ -952,6 +1132,19 @@ function start() {
   timer = setInterval(() => { runOnce().catch(() => {}); }, cfg.everyMinutes * 60000);
   setTimeout(() => { runOnce().catch(() => {}); }, 45000);
   console.log(`[court-mail] checking ${cfg.user} every ${cfg.everyMinutes} min`);
+
+  // The receipt digest, once a day in Pacific time. node-cron is given the
+  // zone explicitly so the hour does not drift by one across DST.
+  if (!digestTimer && process.env.COURT_MAIL_DIGEST !== "off") {
+    const hour = Math.min(23, Math.max(0, parseInt(process.env.COURT_MAIL_DIGEST_HOUR, 10) || 8));
+    try {
+      digestTimer = require("node-cron").schedule(`0 ${hour} * * *`, () => {
+        sendDigest().then(r => { if (r.items) console.log(`[court-mail] digest: ${r.items} receipt(s)`); })
+          .catch(e => console.warn("[court-mail] digest:", e.message));
+      }, { timezone: "America/Los_Angeles" });
+      console.log(`[court-mail] receipt digest scheduled for ${hour}:00 Pacific`);
+    } catch (e) { console.warn("[court-mail] digest not scheduled:", e.message); }
+  }
   return { started: true };
 }
 
@@ -959,4 +1152,5 @@ module.exports = {
   config, isCourtSender, isForwarder, senderVerified, quoteSaysDate, isDay, originalSender, initTables, collect, parseRaw, buildPrompt, cleanReading,
   caseKey, aDigits, matchReading, matchByName, suggestClients, learnANumber,
   processMail, undoAction, markHandled, list, forClient, status, runOnce, start,
+  eoirReading, pendingDigest, sendDigest,
 };

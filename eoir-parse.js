@@ -149,6 +149,14 @@ function aNumberFromFilename(name) {
   return m ? m[1] : null;
 }
 
+// Microsoft Graph calls it `name`; the `mailparser` the mail reader uses calls
+// it `filename`. Reading only one of them makes the cross-check above look
+// present while never actually firing, so take whichever is there.
+function attachmentName(a) {
+  if (!a) return "";
+  return String(a.name || a.filename || "");
+}
+
 // The body links carry ?alien=208817329 — a third witness.
 function aNumberFromBodyLinks(html) {
   const out = new Set();
@@ -273,7 +281,7 @@ function parseEoirEmail(msg = {}) {
   const witnesses = new Set();
   if (bodyDigits) witnesses.add(bodyDigits);
   for (const a of attachments) {
-    const d = aNumberFromFilename(a && a.name);
+    const d = aNumberFromFilename(attachmentName(a));
     if (d) witnesses.add(d);
   }
   for (const d of aNumberFromBodyLinks(html)) witnesses.add(d);
@@ -332,7 +340,7 @@ function parseEoirEmail(msg = {}) {
     rejection_explanation: fields.rejection_explanation || null,
     received_at: msg.receivedAt || null,
     attachments: attachments.map((a) => ({
-      name: (a && a.name) || null,
+      name: attachmentName(a) || null,
       size: (a && a.size) || null,
       contentType: (a && a.contentType) || null,
     })),
@@ -351,6 +359,7 @@ module.exports = {
   aDigits,
   formatANumber,
   aNumberFromFilename,
+  attachmentName,
   aNumberFromBodyLinks,
   parseEoirEmail,
 };
