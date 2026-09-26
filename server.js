@@ -1012,6 +1012,14 @@ try { require("./legal-mail").start(); } catch (e) { console.warn("[legal-mail] 
 require("./wechat-publish").initTable()
   .catch(e => console.warn("[wechat-publish] table init failed:", e.message));
 
+// ── Short-form social posts ──────────────────────────────────
+// Drafted from the firm's own published material, screened against the
+// advertising rules, and held for JJ. Like WeChat, this only prepares the
+// table: nothing is drafted without SOCIAL_POSTS_ENABLED, and nothing leaves
+// the system without him tapping approve.
+require("./social-posts").initTable()
+  .catch(e => console.warn("[social-posts] table init failed:", e.message));
+
 // ── Transcripts ──────────────────────────────────────────────
 // Every dictation and hearing recording, saved when transcribed, split by
 // speaker (transcripts.js). The pages and their API:
@@ -8057,6 +8065,26 @@ app.post("/telegram", async (req, res) => {
           }).catch(() => {});
         }
       } catch (e) { console.warn("[telegram] wechat publish callback:", e.message); }
+      return;
+    }
+
+    // ── Social post approval (soc_go_ID / soc_no_ID) ──────────
+    // Approving hands the finished text back to paste; nothing is posted to a
+    // channel until an adapter is connected, and not then without this tap.
+    if (cb.data?.startsWith("soc_")) {
+      try {
+        const who = cb.from?.first_name || "JJ";
+        const r = await require("./social-posts")
+          .handleTelegramCallback(cb.data, cb.id, who);
+        if (r && r.handled) {
+          const said = r.action === "go"
+            ? (r.result && r.result.ok ? "Approved" : `Blocked: ${(r.result.problems || [r.result.error]).join("; ")}`)
+            : "Skipped";
+          axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
+            callback_query_id: cb.id, text: said,
+          }).catch(() => {});
+        }
+      } catch (e) { console.warn("[telegram] social post callback:", e.message); }
       return;
     }
 
