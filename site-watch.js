@@ -15,8 +15,14 @@
 //                silent for 2+ days; new monthly Visa Bulletin out
 //  Monday 8:30   Weekly web digest + practice pages with stale "As of" dates
 //
+//  Daily 9:20    Search Console: sitemap errors; posts 1–3 weeks old that
+//                Google still hasn't indexed
+//  Every 2 h     New Google reviews (both offices) with a suggested reply
+//                that keeps client confidentiality; rating drops
+//
 //  Env: WP_URL, WP_USER, WP_APP_PASSWORD, TELEGRAM_TOKEN, JJ_TELEGRAM_ID
-//  Optional: SITE_WATCH_DISABLED=1
+//  Optional: GSC_SERVICE_ACCOUNT_JSON, GOOGLE_PLACES_API_KEY, GOOGLE_PLACE_IDS,
+//            SITE_WATCH_DISABLED=1
 // ============================================================
 
 const axios = require("axios");
@@ -314,10 +320,216 @@ async function weeklyDigest() {
   const risky = plugins.filter(p => RISKY_PLUGINS.includes(p.name));
   if (risky.length) lines.push(`Security: ${risky.map(p => p.name).join(", ")} is installed — it has a history of serious vulnerabilities; remove it if unused.`);
 
+  try { lines.push("", ...(await searchConsoleWeekly())); } catch (e) { lines.push("", "Google Search Console: error — " + e.message); }
+  try { lines.push(...(await reviewsWeekly())); } catch (e) {}
+
   const stale = await stalePracticePages();
   if (stale.length) lines.push("", `Practice pages with facts older than ${STALE_DAYS} days (fees, rules, cutoffs may have changed):`, ...stale.slice(0, 10).map(s => "• " + s));
 
   await tell(lines.join("\n"));
+}
+
+
+// ─────────────────────────────────────────────────────────────
+//  7. Google Search Console (service account, read-only)
+//     Env: GSC_SERVICE_ACCOUNT_JSON (the key file's JSON, raw or base64)
+//     The service account's email must be added in Search Console →
+//     Settings → Users and permissions (Restricted is enough).
+// ─────────────────────────────────────────────────────────────
+const crypto = require("crypto");
+let gToken = null;
+function serviceAccount() {
+  const raw = process.env.GSC_SERVICE_ACCOUNT_JSON;
+  if (!raw) return null;
+  try { return JSON.parse(raw.trim().startsWith("{") ? raw : Buffer.from(raw, "base64").toString("utf8")); }
+  catch (e) { console.error("[site-watch] GSC_SERVICE_ACCOUNT_JSON is not valid JSON"); return null; }
+}
+async function googleToken() {
+  if (gToken && gToken.exp > Date.now() + 60000) return gToken.token;
+  const sa = serviceAccount();
+  if (!sa) return null;
+  const b64 = o => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const unsigned = b64({ alg: "RS256", typ: "JWT" }) + "." + b64({ iss: sa.client_email, scope: "https://www.googleapis.com/auth/webmasters.readonly", aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600 });
+  const sig = crypto.createSign("RSA-SHA256").update(unsigned).sign(sa.private_key, "base64url");
+  const r = await axios.post("https://oauth2.googleapis.com/token",
+    new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: unsigned + "." + sig }).toString(),
+    { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 20000 });
+  gToken = { token: r.data.access_token, exp: Date.now() + (r.data.expires_in || 3600) * 1000 };
+  return gToken.token;
+}
+async function gsc(method, url, body) {
+  const token = await googleToken();
+  if (!token) return null;
+  const r = await axios({ method, url, data: body, headers: { Authorization: `Bearer ${token}` }, timeout: 30000, validateStatus: () => true });
+  if (r.status === 403) {
+    const sa = serviceAccount();
+    await alertOnce("gsc-403", `🔍 Search Console refused access (403). Add ${sa && sa.client_email} as a user in Search Console → Settings → Users and permissions (Restricted), and make sure the Search Console API is enabled in Google Cloud.`, 72);
+    return null;
+  }
+  if (r.status >= 300) throw new Error(`GSC ${r.status}: ${JSON.stringify(r.data).substring(0, 200)}`);
+  return r.data;
+}
+async function gscSite() {
+  const cached = await getState("gsc:site");
+  if (cached) return cached;
+  const d = await gsc("get", "https://www.googleapis.com/webmasters/v3/sites");
+  if (!d) return null;
+  const sites = (d.siteEntry || []).filter(x => /tezlawfirm\.com/.test(x.siteUrl) && x.permissionLevel !== "siteUnverifiedUser");
+  const pick = sites.find(x => x.siteUrl.startsWith("sc-domain:")) || sites[0];
+  if (!pick) { await alertOnce("gsc-nosite", "🔍 The Search Console key works, but it can't see tezlawfirm.com yet. Add the service account email as a user on the tezlawfirm.com property.", 72); return null; }
+  await setState("gsc:site", pick.siteUrl);
+  return pick.siteUrl;
+}
+const ymd = d => d.toISOString().slice(0, 10);
+async function gscTotals(site, start, end, dimension) {
+  const body = { startDate: ymd(start), endDate: ymd(end), rowLimit: dimension ? 5 : 1 };
+  if (dimension) body.dimensions = [dimension];
+  const d = await gsc("post", `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(site)}/searchAnalytics/query`, body);
+  return (d && d.rows) || [];
+}
+async function inspectUrl(site, url) {
+  const d = await gsc("post", "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect", { inspectionUrl: url, siteUrl: site, languageCode: "en-US" });
+  const r = d && d.inspectionResult && d.inspectionResult.indexStatusResult;
+  return r ? { verdict: r.verdict, state: r.coverageState || "", lastCrawl: r.lastCrawlTime || null } : null;
+}
+
+// Daily: sitemap errors + are last week's new posts in Google yet?
+async function checkSearchConsole() {
+  if (!serviceAccount()) return;
+  const site = await gscSite();
+  if (!site) return;
+
+  const sm = await gsc("get", `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(site)}/sitemaps`);
+  const bad = ((sm && sm.sitemap) || []).filter(x => Number(x.errors) > 0);
+  if (bad.length) await alertOnce("gsc-sitemap", `🔍 Google reports errors in your sitemap:\n${bad.map(x => `• ${x.path}: ${x.errors} error(s), ${x.warnings || 0} warning(s)`).join("\n")}\nSearch Console → Sitemaps for details.`, 72);
+
+  // Posts published 7–21 days ago that Google still hasn't indexed (checked once each)
+  const seen = await getState("gsc:inspected", {});
+  const after = new Date(Date.now() - 21 * 86400000).toISOString(), before = new Date(Date.now() - 7 * 86400000).toISOString();
+  let posts = [];
+  try { posts = (await wpJson(`/wp/v2/posts?after=${after}&before=${before}&status=publish&per_page=50&_fields=id,link,title`)).data; } catch (e) {}
+  const notIndexed = [];
+  let n = 0;
+  for (const p of posts) {
+    if (seen[p.id] || n >= 25) continue;
+    n++;
+    const r = await inspectUrl(site, p.link);
+    if (!r) continue;
+    seen[p.id] = r.verdict;
+    if (r.verdict !== "PASS") notIndexed.push(`• ${p.title.rendered.replace(/&#8211;|&#8212;/g, "–").replace(/&#8217;|&#8216;/g, "’").replace(/&amp;/g, "&").replace(/&[^;\s]+;/g, " ").substring(0, 70)} — ${r.state || r.verdict}`);
+  }
+  await setState("gsc:inspected", Object.fromEntries(Object.entries(seen).slice(-500)));
+  if (notIndexed.length) await tell(`🔍 Posts published 1–3 weeks ago that Google has NOT indexed:\n${notIndexed.slice(0, 10).join("\n")}\n\n"Crawled/Discovered – currently not indexed" usually means Google sees the page as thin or too similar to others. Consider merging or improving these, or use Search Console → URL Inspection → Request indexing.`);
+}
+
+// Weekly: search traffic summary + practice pages index status
+async function searchConsoleWeekly() {
+  if (!serviceAccount()) return ["Google Search Console: not connected yet (add GSC_SERVICE_ACCOUNT_JSON on Render)."];
+  const site = await gscSite();
+  if (!site) return ["Google Search Console: key works but tezlawfirm.com isn't shared with it yet."];
+  const lines = [];
+  const end = new Date(Date.now() - 3 * 86400000), start = new Date(end - 6 * 86400000);
+  const pEnd = new Date(start - 86400000), pStart = new Date(pEnd - 6 * 86400000);
+  const [cur] = await gscTotals(site, start, end), [prev] = await gscTotals(site, pStart, pEnd);
+  const pct = (a, b) => b ? `${a >= b ? "+" : ""}${Math.round((a - b) / b * 100)}%` : "n/a";
+  if (cur) {
+    lines.push(`Google search (${ymd(start)} → ${ymd(end)}): ${cur.clicks} clicks (${pct(cur.clicks, prev ? prev.clicks : 0)}), ${cur.impressions} impressions (${pct(cur.impressions, prev ? prev.impressions : 0)}), avg position ${cur.position.toFixed(1)}`);
+    if (prev && prev.clicks >= 20 && cur.clicks < prev.clicks * 0.7) lines.push(`⚠️ Clicks fell ${Math.round((1 - cur.clicks / prev.clicks) * 100)}% week over week — check Search Console for a ranking or indexing drop.`);
+  } else lines.push("Google search: no data for the week yet.");
+  const q = await gscTotals(site, start, end, "query");
+  if (q.length) lines.push("Top searches: " + q.map(r => `"${r.keys[0]}" (${r.clicks}/${r.impressions})`).join(", "));
+  const pg = await gscTotals(site, start, end, "page");
+  if (pg.length) lines.push("Top pages: " + pg.map(r => `${r.keys[0].replace(/^https?:\/\/[^/]+/, "") || "/"} (${r.clicks})`).join(", "));
+
+  // Are the practice pages indexed?
+  const missing = [];
+  for (const id of [10, ...PRACTICE_PAGE_IDS]) {
+    try {
+      const link = id === 10 ? SITE + "/" : (await wpJson(`/wp/v2/pages/${id}?_fields=link`)).data.link;
+      const r = await inspectUrl(site, link);
+      if (r && r.verdict !== "PASS") missing.push(`${link.replace(/^https?:\/\/[^/]+/, "")} (${r.state})`);
+    } catch (e) {}
+  }
+  lines.push(missing.length ? `Practice pages NOT in Google: ${missing.join("; ")}` : "All practice pages are indexed in Google.");
+  return lines;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  8. Google reviews (Places API — New)
+//     Env: GOOGLE_PLACES_API_KEY; optional GOOGLE_PLACE_IDS (comma list)
+//     New review → Telegram with stars, text and a suggested reply that
+//     never confirms the reviewer was a client (Bus. & Prof. Code 6068(e),
+//     Rule 1.6 — confidentiality applies even when replying to reviews).
+// ─────────────────────────────────────────────────────────────
+async function placeIds() {
+  if (process.env.GOOGLE_PLACE_IDS) return process.env.GOOGLE_PLACE_IDS.split(",").map(x => x.trim()).filter(Boolean);
+  const cached = await getState("reviews:places");
+  if (cached && cached.length) return cached;
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  const found = [];
+  for (const q of ["Tez Law 4141 S Nogales St West Covina CA", "Tez Law 4343 Von Karman Ave Newport Beach CA"]) {
+    try {
+      const r = await axios.post("https://places.googleapis.com/v1/places:searchText", { textQuery: q, maxResultCount: 1 },
+        { headers: { "X-Goog-Api-Key": key, "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress" }, timeout: 20000 });
+      const p = r.data.places && r.data.places[0];
+      if (p && /tez/i.test(p.displayName && p.displayName.text) && !found.some(f => f.id === p.id)) found.push({ id: p.id, name: p.displayName.text, address: p.formattedAddress });
+    } catch (e) { console.error("[site-watch] place search:", e.response?.status || e.message); }
+  }
+  if (found.length) {
+    await setState("reviews:places", found.map(f => f.id));
+    await tell(`⭐ Google review alerts are on for:\n${found.map(f => `• ${f.name} — ${f.address}`).join("\n")}${found.length < 2 ? "\n\nOnly one office was found on Google Maps. If the other office has its own Business Profile, send me its link." : ""}`);
+  } else await alertOnce("reviews-noplace", "⭐ Review alerts: I couldn't find the Tez Law listings on Google Maps with the API key. Set GOOGLE_PLACE_IDS on Render.", 72);
+  return found.map(f => f.id);
+}
+async function suggestReply(review, business) {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return "";
+  let model = "claude-haiku-4-5-20251001";
+  try { model = require("./zara-core").TIERS.fast.anthropic; } catch (e) {}
+  const prompt = `Draft a short public reply from ${business} (a California law firm) to this Google review. Reply in the same language as the review.
+Rules: never confirm or deny that the reviewer is or was a client, never mention any case, matter, fact, fee or outcome (California attorney confidentiality: Bus. & Prof. Code 6068(e), Rule 1.6). Do not argue. Do not offer anything of value. 2-4 sentences. For a positive review: thank them warmly. For a negative one: say the firm takes feedback seriously and invite them to call 626-678-8677 to discuss privately. Sign "— Tez Law P.C." Return only the reply text.
+
+Stars: ${review.rating}
+Review: ${(review.text && review.text.text) || "(no text)"}`;
+  try {
+    const r = await axios.post("https://api.anthropic.com/v1/messages", { model, max_tokens: 300, messages: [{ role: "user", content: prompt }] },
+      { headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" }, timeout: 30000 });
+    return (r.data.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+  } catch (e) { return ""; }
+}
+async function checkReviews() {
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  if (!key) return;
+  for (const id of await placeIds()) {
+    try {
+      const r = await axios.get(`https://places.googleapis.com/v1/places/${id}`, {
+        headers: { "X-Goog-Api-Key": key, "X-Goog-FieldMask": "id,displayName,rating,userRatingCount,reviews,googleMapsUri" }, timeout: 20000 });
+      const p = r.data, name = (p.displayName && p.displayName.text) || "Tez Law";
+      const prev = await getState("reviews:" + id);
+      const reviews = p.reviews || [];
+      const now = { count: p.userRatingCount || 0, rating: p.rating || 0, seen: reviews.map(x => x.name) };
+      if (prev) {
+        const fresh = reviews.filter(x => !prev.seen.includes(x.name) && Date.now() - new Date(x.publishTime).getTime() < 14 * 86400000);
+        for (const rv of fresh) {
+          const stars = "★".repeat(rv.rating || 0) + "☆".repeat(5 - (rv.rating || 0));
+          const reply = await suggestReply(rv, "Tez Law P.C.");
+          await tell(`${rv.rating <= 3 ? "⚠️ " : "⭐ "}New Google review — ${name}\n${stars}  by ${(rv.authorAttribution && rv.authorAttribution.displayName) || "a reviewer"}\n\n"${((rv.text && rv.text.text) || "(no text)").substring(0, 900)}"\n${reply ? `\nSuggested reply (review before posting):\n${reply}\n` : ""}\nReply on Google: ${rv.googleMapsUri || p.googleMapsUri || "business.google.com/reviews"}`);
+        }
+        const added = now.count - prev.count;
+        if (added > fresh.length && added > 0) await tell(`⭐ ${name} received ${added - fresh.length} more Google review(s) that the API doesn't show yet. Open: ${p.googleMapsUri || "business.google.com/reviews"}`);
+        if (prev.rating && now.rating && now.rating < prev.rating - 0.05) await tell(`📉 ${name}'s Google rating dropped from ${prev.rating.toFixed(1)} to ${now.rating.toFixed(1)}.`);
+      }
+      await setState("reviews:" + id, now);
+    } catch (e) { console.error("[site-watch] reviews:", e.response?.status || e.message); }
+  }
+}
+async function reviewsWeekly() {
+  if (!process.env.GOOGLE_PLACES_API_KEY) return ["Google reviews: not connected yet (add GOOGLE_PLACES_API_KEY on Render)."];
+  const ids = (await getState("reviews:places")) || (process.env.GOOGLE_PLACE_IDS || "").split(",").filter(Boolean);
+  const out = [];
+  for (const id of ids) { const s = await getState("reviews:" + id); if (s) out.push(`${s.rating ? s.rating.toFixed(1) : "–"}★ from ${s.count} reviews`); }
+  return out.length ? ["Google reviews: " + out.join(" · ")] : [];
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -334,12 +546,14 @@ async function startSiteWatch() {
   cron.schedule("40 7 * * *", guard("daily-security", async () => { await checkSSL(); await checkSecurity(); }), tz);
   cron.schedule("0 9 * * *", guard("daily-content", async () => { await checkContent(); await checkVisaBulletin(); }), tz);
   cron.schedule("30 8 * * 1", guard("weekly", weeklyDigest), tz);
-  console.log("🛰️ Site watch scheduled: health every 15 min · security 7:40 · content 9:00 · weekly Mon 8:30 (PT)");
+  cron.schedule("20 9 * * *", guard("search-console", checkSearchConsole), tz);
+  cron.schedule("5 8-21/2 * * *", guard("reviews", checkReviews), tz);
+  console.log("🛰️ Site watch scheduled: health every 15 min · security 7:40 · content 9:00 · Search Console 9:20 · reviews every 2 h (8–9 PT) · weekly Mon 8:30");
 
   // First start: record baselines quietly (so existing admins/plugins aren't reported as "new") and say hello once
   setTimeout(guard("baseline", async () => {
     const hello = await getState("hello");
-    await checkSecurity(); await checkSSL(); await checkVisaBulletin();
+    await checkSecurity(); await checkSSL(); await checkVisaBulletin(); await checkReviews();
     if (!hello) {
       await setState("hello", { at: Date.now() });
       await tell("🛰️ Site watch is on. I'll message you only when tezlawfirm.com or the publishing pipeline needs attention, plus a short report every Monday.");
@@ -347,4 +561,4 @@ async function startSiteWatch() {
   }), 60 * 1000);
 }
 
-module.exports = { startSiteWatch, checkSiteHealth, checkSSL, checkSecurity, checkContent, checkVisaBulletin, weeklyDigest, tell };
+module.exports = { startSiteWatch, checkSiteHealth, checkSSL, checkSecurity, checkContent, checkVisaBulletin, weeklyDigest, checkSearchConsole, searchConsoleWeekly, checkReviews, tell };
