@@ -799,51 +799,32 @@ router.post("/api/post/publish", requireAuth, async (req, res) => {
 
     const results = [];
 
-    // Publish English
-    const wpResult = await publishToWordPress(post);
+    // Publish English (v3: exact categories, meta that saves, Rule 7.1 hold, lang tag)
+    const ap = require("./autoposter");
+    const wpResult = await publishToWordPress({ ...post, lang: "en", practiceArea: practiceArea || post.category });
     if (!wpResult) return res.status(500).json({ error: "WordPress publish failed" });
-    results.push({ lang: "English", id: wpResult.id, url: wpResult.url });
+    results.push({ lang: "English", langTag: "en", id: wpResult.id, url: wpResult.link, link: wpResult.link, status: wpResult.status, complianceIssues: wpResult.complianceIssues });
     audit(req, "manual_post", "wordpress", null, post.title?.substring(0, 100));
 
-    // Translate and publish if requested
+    // Translate and publish if requested — uses the autoposter's full-length translator
+    // (the old inline version cut the article at 3,000 characters and 2,000 tokens)
     if (languages && languages !== "english") {
-      const axios = require("axios");
-      const Anthropic = require("@anthropic-ai/sdk");
-      const client = new Anthropic();
-
-      const langs = languages === "all"
-        ? [{ code: "zh-TW", label: "Traditional Chinese (繁體中文)" }, { code: "es", label: "Spanish (Latin American)" }]
-        : languages === "chinese"
-        ? [{ code: "zh-TW", label: "Traditional Chinese (繁體中文)" }]
-        : [{ code: "es", label: "Spanish (Latin American)" }];
-
-      for (const lang of langs) {
+      const want = languages === "all" ? ["chinese", "spanish"] : languages === "chinese" ? ["chinese"] : ["spanish"];
+      for (const lang of want) {
         try {
-          const tx = await client.messages.create({
-            model: require("./zara-core").TIERS.fast.anthropic,
-            max_tokens: 2000,
-            messages: [{
-              role: "user",
-              content: `Translate this WordPress post to ${lang.label}. Keep HTML formatting. Return JSON only: {"title":"...","content":"...","metaDescription":"..."}
-Title: ${post.title}
-Content: ${post.content?.substring(0, 3000)}
-MetaDescription: ${post.metaDescription}`
-            }]
-          });
-          const txText = tx.content[0].text.replace(/```json|```/g, "").trim();
-          const txPost = JSON.parse(txText);
-          const txWp = await publishToWordPress({
-            ...post,
-            title: txPost.title,
-            content: txPost.content,
-            metaDescription: txPost.metaDescription,
-          });
-          if (txWp) results.push({ lang: lang.label, id: txWp.id, url: txWp.url });
-        } catch(txErr) {
+          const tx = await ap.translatePost({ ...post, category: post.category || practiceArea || "Immigration" }, lang);
+          if (!tx) continue;
+          const txWp = await publishToWordPress({ ...tx, status: wpResult.status === "publish" ? undefined : "draft" });
+          if (txWp) results.push({ lang: lang === "chinese" ? "中文" : "Español", langTag: tx.lang, id: txWp.id, url: txWp.link, link: txWp.link, status: txWp.status, complianceIssues: txWp.complianceIssues });
+        } catch (txErr) {
           console.error("Translation error:", txErr.message);
         }
       }
     }
+    try {
+      const auth = Buffer.from(`${process.env.WP_USER}:${process.env.WP_APP_PASSWORD}`).toString("base64");
+      await ap.linkTranslations(results, auth);
+    } catch (linkErr) { console.error("Link/index error:", linkErr.message); }
 
     // Log to DB
     await getPool().query(

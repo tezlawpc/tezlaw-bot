@@ -1,7 +1,12 @@
 // ============================================================
-//  TEZ LAW P.C. — WORDPRESS AUTO-POSTER v2
-//  NEW: Weekly self-updating source research
-//  Daily posts now use curated high-authority sources
+//  TEZ LAW P.C. — WORDPRESS AUTO-POSTER v3 (Sept 2026)
+//  v3: exact category matching (English posts were being filed under
+//      "Español-…"), no tag spam, Yoast meta that actually saves,
+//      linked translations (hreflang), practice-page internal links,
+//      Rule 7.1 compliance gate, complete translations, IndexNow ping
+//      (Bing / ChatGPT search / Copilot), brand footer.
+//  Requires the "Tez SEO pack" v2 snippet on WordPress (registers the
+//  meta fields this file writes).
 // ============================================================
 
 const axios = require("axios");
@@ -15,6 +20,41 @@ const WP_USER           = process.env.WP_USER;
 const WP_APP_PASSWORD   = process.env.WP_APP_PASSWORD;
 
 const STATE_FILE   = "/var/data/autoposter_state.json";
+const SITE_HOST    = "tezlawfirm.com";
+const INDEXNOW_KEY = process.env.INDEXNOW_KEY || "7f3c9a2e5b8d4e1fa6c0b9d27e4f8a13";
+// Chinese script for translations: "simplified" (mainland / WeChat readers, default) or "traditional"
+const ZH_SCRIPT    = (process.env.ZH_SCRIPT || "simplified").toLowerCase() === "traditional" ? "traditional" : "simplified";
+const ZH_LANG_TAG  = ZH_SCRIPT === "traditional" ? "zh-Hant" : "zh-Hans";
+// Optional: {"Immigration":123,"Personal Injury":456,...} WordPress media IDs used as featured images
+let FEATURED_MEDIA = {};
+try { FEATURED_MEDIA = JSON.parse(process.env.WP_FEATURED_MEDIA || "{}"); } catch (e) { FEATURED_MEDIA = {}; }
+
+// Practice pages the posts should link into (hub-and-spoke internal linking)
+const PRACTICE_LINKS = [
+  ["Immigration overview", "https://tezlawfirm.com/immigration/"],
+  ["Family-based immigration (I-130, green cards, K-1, naturalization)", "https://tezlawfirm.com/immigration/family-based-visa/"],
+  ["Removal defense, Immigration Court, bond, asylum, habeas", "https://tezlawfirm.com/immigration/removal-proceedings-immigration-court/"],
+  ["Investor visas overview", "https://tezlawfirm.com/immigration/investor-based-visa/"],
+  ["EB-5 investor green card", "https://tezlawfirm.com/immigration/investor-based-visa/eb5-visa-lawyer/"],
+  ["E-2 treaty investor visa", "https://tezlawfirm.com/immigration/investor-based-visa/e2-visa-lawyer-treaty-investor-visas-e-2/"],
+  ["E-1 treaty trader visa", "https://tezlawfirm.com/immigration/investor-based-visa/e1-visa-lawyer/"],
+  ["B-1 business visitor visa", "https://tezlawfirm.com/immigration/investor-based-visa/b1-visa-lawyer/"],
+  ["Employment visas overview", "https://tezlawfirm.com/immigration/employment-based-visa/"],
+  ["H-1B specialty occupation", "https://tezlawfirm.com/immigration/employment-based-visa/h1b-visa-lawyer/"],
+  ["H-2B seasonal workers", "https://tezlawfirm.com/immigration/employment-based-visa/h2b-visa-lawyer/"],
+  ["L-1A managers and executives", "https://tezlawfirm.com/immigration/employment-based-visa/l1a-visa-lawyer/"],
+  ["L-1B specialized knowledge", "https://tezlawfirm.com/immigration/employment-based-visa/l1b-visa-lawyer/"],
+  ["EB-1 green card", "https://tezlawfirm.com/immigration/employment-based-visa/eb1-visa-lawyer/"],
+  ["EB-2 and national interest waiver", "https://tezlawfirm.com/immigration/employment-based-visa/eb2-visa-lawyer/"],
+  ["EB-3 and PERM", "https://tezlawfirm.com/immigration/employment-based-visa/eb3-visa-lawyer/"],
+  ["Personal injury and car accidents", "https://tezlawfirm.com/home/personal-injury/"],
+  ["Business disputes, litigation, landlord-tenant and evictions", "https://tezlawfirm.com/business-litigation/"],
+  ["Real estate and construction", "https://tezlawfirm.com/real-estate-construction/"],
+  ["Estate planning, trusts, premarital agreements", "https://tezlawfirm.com/private-client/"],
+  ["Trademarks, copyrights and IP", "https://tezlawfirm.com/intellectual-property/"],
+  ["Public companies, OTC and Nasdaq uplisting", "https://tezlawfirm.com/public-companies/"],
+  ["Contact / schedule a consultation", "https://tezlawfirm.com/contact/"],
+];
 const SOURCES_FILE = "/var/data/sources.json";
 
 const JJ_VOICE = `
@@ -26,24 +66,65 @@ Gets straight to the point. Empathetic but practical. Uses contractions naturall
 Occasionally uses rhetorical questions. Never guarantees outcomes.
 JJ is an immigrant himself. Has business/real estate background. Speaks English, Mandarin, Shanghainese.`;
 
-function getStaticFooter(title) {
-  const today = new Date().toISOString().split("T")[0];
+const FOOTER_TEXT = {
+  en: { label: "About the Author", title: "Founding Attorney · Tez Law P.C.", bio: "<strong>JJ Zhang came to the United States as an immigrant</strong> and built businesses in hospitality, manufacturing, real estate and lending before practicing law. Today he and the Tez Law P.C. team represent individuals, families, investors and companies.", tagline: "Protect your rights, we’ll lead the fight.", cta1: "Schedule a consultation · 626-678-8677", cta2: "Start the intake form →", chat: "Message Zara, our digital assistant:", areas: "<strong>Immigration:</strong> nationwide · <strong>Injury, disputes and real estate:</strong> Los Angeles, Orange, San Bernardino and Riverside counties", disc: "This article is general information, not legal advice, and reading it does not create an attorney-client relationship. Laws and agency practices change; contact Tez Law P.C. at 626-678-8677 or jj@tezlawfirm.com about your situation. Prior results do not guarantee a similar outcome." },
+  zh: { label: "关于作者", title: "创始律师 · Tez Law P.C.", bio: "<strong>章律师本人也是移民</strong>，从事法律工作之前曾经营酒店、制造、房地产开发和贷款业务。如今，他与 Tez Law P.C. 团队一起为个人、家庭、投资人和企业提供法律服务。", tagline: "守护您的权益，我们为您据理力争。", cta1: "预约咨询 · 626-678-8677", cta2: "在线填写案件信息 →", chat: "联系我们的智能助理 Zara：", areas: "<strong>移民案件：</strong>全美 · <strong>人身伤害、商业纠纷与房地产：</strong>洛杉矶、橙县、圣贝纳迪诺和河滨县", disc: "本文仅为一般信息，不构成法律意见，阅读本文不建立律师与客户关系。法律和政府做法经常变化，具体情况请致电 626-678-8677 或发邮件至 jj@tezlawfirm.com 咨询 Tez Law P.C.。过往结果不保证类似结果。" },
+  es: { label: "Sobre el autor", title: "Abogado fundador · Tez Law P.C.", bio: "<strong>JJ Zhang llegó a Estados Unidos como inmigrante</strong> y dirigió negocios de hotelería, manufactura, bienes raíces y préstamos antes de ejercer la abogacía. Hoy él y el equipo de Tez Law P.C. representan a personas, familias, inversionistas y empresas.", tagline: "Proteja sus derechos, nosotros damos la pelea.", cta1: "Programe una consulta · 626-678-8677", cta2: "Llene el formulario de admisión →", chat: "Escriba a Zara, nuestra asistente digital:", areas: "<strong>Inmigración:</strong> en todo el país · <strong>Lesiones, disputas y bienes raíces:</strong> condados de Los Ángeles, Orange, San Bernardino y Riverside", disc: "Este artículo es información general, no asesoría legal, y leerlo no crea una relación abogado-cliente. Las leyes cambian; comuníquese con Tez Law P.C. al 626-678-8677 o jj@tezlawfirm.com sobre su caso. Los resultados anteriores no garantizan un resultado similar." },
+};
+const FOOTER_MARK = "<style>.tez-ab{";
+function getStaticFooter(title, lang = "en") {
+  const t = FOOTER_TEXT[lang] || FOOTER_TEXT.en;
   return `
-<style>.tez-ab{display:flex;flex-direction:column;gap:16px;padding:28px 24px;margin:40px 0 28px;background:#f9fafb;border:1px solid #e2e6ea;border-left:5px solid #1B3A5C;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;line-height:1.6}.tez-ab *{box-sizing:border-box}.tez-ab-label{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#1B3A5C;background:#e8eef4;padding:2px 10px;border-radius:3px}.tez-ab-name{font-size:1.25rem;font-weight:800;color:#1B3A5C;margin:4px 0 2px}.tez-ab-cn{font-size:.9rem;font-weight:400;color:#666;margin-left:6px}.tez-ab-title{font-size:.9rem;color:#4a5568;margin-bottom:8px}.tez-ab-creds{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.8rem;color:#555;margin-bottom:10px}.tez-ab-bio{font-size:.92rem;color:#333;margin:0 0 12px;line-height:1.7}.tez-ab-bio strong{color:#1B3A5C}.tez-ab-langs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}.tez-lang{display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid #d1d9e0;border-radius:20px;padding:3px 12px;font-size:.78rem;font-weight:600;color:#1B3A5C}.tez-dot{width:8px;height:8px;border-radius:50%;display:inline-block}.tez-dot-en{background:#1B3A5C}.tez-dot-zh{background:#DE2910}.tez-dot-sh{background:#D4A017}.tez-ab-tagline{font-size:.87rem;font-style:italic;color:#1B3A5C;font-weight:600;padding:7px 14px;background:rgba(27,58,92,.06);border-radius:6px;display:inline-block;margin-bottom:14px}.tez-ab-ctas{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}.tez-cta1{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:#1B3A5C;color:#fff!important;font-size:.9rem;font-weight:700;padding:11px 22px;border-radius:6px;text-decoration:none!important}.tez-cta1:hover{background:#0f2740}.tez-cta2{display:inline-flex;align-items:center;justify-content:center;gap:6px;color:#1B3A5C;font-size:.87rem;font-weight:600;padding:9px 18px;border:2px solid #1B3A5C;border-radius:6px;text-decoration:none!important}.tez-cta2:hover{background:#1B3A5C;color:#fff!important}.tez-ab-chat{font-size:.82rem;color:#4a5568;margin-bottom:8px}.tez-ab-chat a{color:#1B3A5C;font-weight:600;text-decoration:none}.tez-ab-areas{font-size:.78rem;color:#718096}@media(min-width:768px){.tez-ab{flex-direction:row;align-items:flex-start;gap:24px;padding:32px 28px}.tez-ab-ctas{flex-direction:row}.tez-cta1,.tez-cta2{width:auto}}</style>
-<aside class="tez-ab" aria-label="About the author"><div>
-<span class="tez-ab-label">About the Author</span>
-<div class="tez-ab-name">JJ Zhang, Esq.<span class="tez-ab-cn">章律師</span></div>
-<div class="tez-ab-title">Founding Attorney · Tez Law P.C.</div>
-<div class="tez-ab-creds"><span>⚖️ California Bar #326666</span><span>🏛️ 9th Circuit Court of Appeals</span><span>🏢 CA RE Broker #01921248</span></div>
-<p class="tez-ab-bio"><strong>JJ Zhang is an immigrant who built his American dream from the ground up</strong> — and now fights to protect yours. Before law, JJ operated businesses and developed residential and commercial real estate. Today he brings that real-world hustle and first-hand immigration experience to every client he represents at Tez Law P.C.</p>
-<div class="tez-ab-langs"><span class="tez-lang"><span class="tez-dot tez-dot-en"></span>English</span><span class="tez-lang"><span class="tez-dot tez-dot-zh"></span>中文 Mandarin</span><span class="tez-lang"><span class="tez-dot tez-dot-sh"></span>上海话 Shanghainese</span></div>
-<div class="tez-ab-tagline">"Protect your rights — we handle the rest."</div>
-<div class="tez-ab-ctas"><a href="https://tezlawfirm.com/contact/" class="tez-cta1">📞 Free Consultation — 626-678-8677</a><a href="https://link.v1ce.co/tezintake" class="tez-cta2" target="_blank">📋 Start Intake Form →</a></div>
-<div class="tez-ab-chat">💬 Chat with Zara 24/7: <a href="https://wa.me/16266788677" target="_blank">WhatsApp</a> · <a href="https://m.me/tezlawfirm" target="_blank">Messenger</a> · <a href="https://t.me/TEZJJBot" target="_blank">Telegram</a> · <a href="https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz=gh_03f700f08037" target="_blank">WeChat</a></div>
-<div class="tez-ab-areas"><strong>Immigration:</strong> Nationwide &nbsp;·&nbsp; <strong>PI &amp; Litigation:</strong> LA, Orange, San Bernardino &amp; Riverside Counties<br><em>我們也會說中文 · Puede hablar español</em></div>
+<style>.tez-ab{display:flex;flex-direction:column;gap:14px;padding:28px 24px;margin:40px 0 24px;background:#FAF8F5;border:1px solid #D6CFC6;border-left:5px solid #FF7B00;font-family:'Montserrat','Helvetica Neue',Arial,sans-serif;line-height:1.6;color:#2B2523}.tez-ab *{box-sizing:border-box}.tez-ab-label{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#A34C00}.tez-ab-name{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.5rem;font-weight:600;color:#2B2523;margin:4px 0 2px}.tez-ab-cn{font-size:.95rem;color:#5E5652;margin-left:8px}.tez-ab-title{font-size:.88rem;color:#5E5652;margin-bottom:6px}.tez-ab-creds{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.8rem;color:#5E5652;margin-bottom:8px}.tez-ab-bio{font-size:.92rem;margin:0 0 10px}.tez-ab-langs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}.tez-lang{background:#fff;border:1px solid #D6CFC6;padding:3px 12px;font-size:.78rem;font-weight:600}.tez-ab-tagline{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.1rem;font-weight:600;color:#A34C00;margin-bottom:12px}.tez-ab-ctas{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px}.tez-cta1{background:#FF7B00;color:#2B2523!important;font-size:.82rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:11px 20px;text-decoration:none!important}.tez-cta2{color:#2B2523!important;font-size:.82rem;font-weight:600;padding:9px 18px;border:1px solid #2B2523;text-decoration:none!important}.tez-ab-chat,.tez-ab-areas{font-size:.8rem;color:#5E5652}.tez-ab-chat a{color:#A34C00;font-weight:600}</style>
+<aside class="tez-ab" aria-label="${t.label}"><div>
+<span class="tez-ab-label">${t.label}</span>
+<div class="tez-ab-name">JJ Zhang, Esq.<span class="tez-ab-cn">章律师</span></div>
+<div class="tez-ab-title">${t.title}</div>
+<div class="tez-ab-creds"><span>California State Bar #326666</span><span>U.S. Court of Appeals, Ninth Circuit</span><span>CA Real Estate Broker #01921248</span></div>
+<p class="tez-ab-bio">${t.bio}</p>
+<div class="tez-ab-langs"><span class="tez-lang">English</span><span class="tez-lang">普通话 Mandarin</span><span class="tez-lang">上海话 Shanghainese</span><span class="tez-lang">Español (support)</span></div>
+<div class="tez-ab-tagline">${t.tagline}</div>
+<div class="tez-ab-ctas"><a href="https://tezlawfirm.com/contact/" class="tez-cta1">${t.cta1}</a><a href="https://link.v1ce.co/tezintake" class="tez-cta2" target="_blank" rel="noopener">${t.cta2}</a></div>
+<div class="tez-ab-chat">${t.chat} <a href="https://wa.me/16266788677" target="_blank" rel="noopener">WhatsApp</a> · <a href="https://m.me/tezlawfirm" target="_blank" rel="noopener">Messenger</a> · <a href="https://t.me/TEZJJBot" target="_blank" rel="noopener">Telegram</a> · WeChat gh_03f700f08037</div>
+<div class="tez-ab-areas">${t.areas}</div>
 </div></aside>
-<p style="font-size:12px;color:#666;margin-top:20px;"><em>Disclaimer: This article is for informational purposes only and does not constitute legal advice. Contact Tez Law P.C. at 626-678-8677 or <a href="mailto:jj@tezlawfirm.com">jj@tezlawfirm.com</a> for advice specific to your situation. Results may vary.</em></p>
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"${title.replace(/"/g, '\\"')}","author":{"@type":"Person","name":"JJ Zhang","alternateName":"章律師","jobTitle":"Founding Attorney","knowsLanguage":["English","Chinese","Shanghainese"],"worksFor":{"@type":"LegalService","name":"Tez Law P.C.","url":"https://tezlawfirm.com"}},"publisher":{"@type":"Organization","name":"Tez Law P.C.","url":"https://tezlawfirm.com"},"datePublished":"${today}","dateModified":"${today}"}</script>`;
+<p style="font-size:12px;color:#5E5652;margin-top:18px;"><em>${t.disc}</em></p>`;
+}
+function stripFooter(html) {
+  const s = String(html || "");
+  const i = s.indexOf(FOOTER_MARK);
+  const j = s.indexOf("<style>.tez-ab{display:flex;flex-direction:column;gap:16px"); // v2 footer
+  const k = [i, j].filter(x => x > 0).sort((x, y) => x - y)[0];
+  return k ? s.substring(0, k) : s;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  CA Rule 7.1 compliance gate
+//  Flags comparative / superlative claims about the firm, outcome
+//  promises and "specialist" claims. Third-party uses ("expert
+//  witnesses", "specialized knowledge", "no one can guarantee") pass.
+// ─────────────────────────────────────────────────────────────
+function complianceIssues(html) {
+  const text = String(html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  const issues = [];
+  const rules = [
+    [/\b(best|top|top-rated|leading|premier|number one|#1)\b[^.!?]{0,40}\b(lawyers?|attorneys?|law firms?|legal team|firm)\b/gi, "superlative about lawyers or the firm"],
+    [/\b(expert|experienced expert)s?\s+(lawyers?|attorneys?|legal (team|help|advice|representation|services?)|immigration (lawyers?|attorneys?|help))\b/gi, "calls the firm 'expert'"],
+    [/\bspeciali(?:sts?|[sz]es?|[sz]ing)\b/gi, "specialist / specializing claim"],
+    [/\b(we|our (team|firm|attorneys?|lawyers?))\s+(will\s+)?(win|get you|secure|obtain)\b[^.!?]{0,30}\b(case|approval|green card|visa|settlement|compensation)\b/gi, "promises a result"],
+    [/\b(our|we have an?|we have)\b[^.!?]{0,25}\b(success|approval|win) rates?\b|\b(our|we)\b[^.!?]{0,30}\d+\s*%\s*(success|approval|win)/gi, "success-rate claim"],
+    [/\b(we|our (team|firm|attorneys?|lawyers?)|tez law(?: p\.c\.)?)[^!?]{0,40}?\bguarantee[sd]?\b|\bguaranteed\s+(approval|results?|outcomes?|visas?|green cards?|wins?|settlements?|compensation)\b/gi, "guarantee"],
+  ];
+  for (const [re, why] of rules) {
+    let m;
+    while ((m = re.exec(text))) {
+      const before = text.substring(Math.max(0, m.index - 30), m.index).toLowerCase();
+      if (why === "guarantee" && (/(not|no|never|cannot|can't|doesn't|don't|won't|without|no one can)\s*(\w+\s*){0,3}$/.test(before) || /\b(not|never|cannot|can't|can not|no one can|don't|doesn't|won't)\b/i.test(m[0]))) continue;
+      if (why.startsWith("specialist") && /specialized knowledge|specialty occupation/i.test(text.substring(m.index, m.index + 30))) continue;
+      issues.push(`${why}: "${text.substring(Math.max(0, m.index - 20), m.index + m[0].length + 20).trim()}"`);
+    }
+  }
+  return issues;
 }
 
 function loadState() {
@@ -108,8 +189,8 @@ function loadSources() {
 }
 function saveSources(sources) { try { fs.writeFileSync(SOURCES_FILE, JSON.stringify(sources, null, 2)); } catch (e) {} }
 
-async function askClaude(prompt, useWebSearch = false, retries = 3) {
-  const body = { model: require("./zara-core").TIERS.balanced.anthropic, max_tokens: 4096, messages: [{ role: "user", content: prompt }] };
+async function askClaude(prompt, useWebSearch = false, retries = 3, maxTokens = 8192) {
+  const body = { model: require("./zara-core").TIERS.balanced.anthropic, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] };
   if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -175,24 +256,82 @@ function recordPublishedTitle(title, state) {
   saveState(state);
 }
 
+function countTags(html, tag) { return (String(html).match(new RegExp(`<${tag}[\\s>]`, "gi")) || []).length; }
+
 async function translatePost(post, language) {
+  const zhLabel = ZH_SCRIPT === "traditional" ? "Traditional Chinese (繁體中文)" : "Simplified Chinese (简体中文)";
   const cfgs = {
-    chinese: { label: "Traditional Chinese (繁體中文)", instruction: "Translate to Traditional Chinese. Keep all HTML tags. Only translate visible text. Keep URLs, phone numbers, emails unchanged.", categoryPrefix: "中文-", tagSuffix: " 中文" },
-    spanish: { label: "Spanish (Latin American)", instruction: "Translate to Latin American Spanish. Keep all HTML tags. Only translate visible text. Keep URLs, phone numbers, emails unchanged.", categoryPrefix: "Español-", tagSuffix: " español" }
+    chinese: { label: zhLabel, lang: "zh", langTag: ZH_LANG_TAG, categoryPrefix: "中文-" },
+    spanish: { label: "Latin American Spanish", lang: "es", langTag: "es", categoryPrefix: "Español-" },
   };
   const cfg = cfgs[language];
   if (!cfg) return null;
   console.log(`🌐 Translating to ${cfg.label}...`);
-  const footerIdx = post.content.indexOf("<style>.tez-ab{");
-  const articleBody = footerIdx > 0 ? post.content.substring(0, footerIdx) : post.content;
-  const prompt = `${cfg.instruction}\n\nORIGINAL TITLE: ${post.title}\nHTML BODY:\n${articleBody}\n\nReturn ONLY JSON:\n{"title":"translated title","content":"translated HTML body","metaDescription":"150-160 char translated meta","focusKeyword":"primary keyword in ${cfg.label}"}`;
+  const articleBody = stripFooter(post.content);
+  const prompt = `Translate this law-firm blog post into ${cfg.label} for readers in the United States.
+Rules:
+- Keep every HTML tag, attribute and URL exactly as is. Translate only visible text.
+- Keep phone numbers, emails, form numbers (I-130, H-1B…), statute and case names unchanged.
+- Natural, plain language — not word-for-word. Keep legal terms accurate${language === "chinese" ? " (e.g. green card = 绿卡, asylum = 庇护, USCIS = 美国移民局 USCIS)" : ""}.
+- Do not add claims, superlatives or promises that are not in the original.
+- Translate the WHOLE article. Do not summarize or stop early.
+
+Return exactly this format and nothing else:
+===TITLE===
+(translated title, under 60 characters if possible)
+===META===
+(translated meta description, 120-155 characters)
+===KEYWORD===
+(main search keyword in ${cfg.label})
+===CONTENT===
+(the full translated HTML)
+===END===
+
+ORIGINAL TITLE: ${post.title}
+ORIGINAL HTML:
+${articleBody}`;
   try {
     await new Promise(r => setTimeout(r, 8000));
-    const raw = await askClaude(prompt, false);
-    const cleaned = raw.replace(/```json|```/g, "").trim();
-    const translated = JSON.parse(cleaned.substring(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1));
-    return { title: translated.title, content: (translated.content || "") + getStaticFooter(translated.title || post.title), category: cfg.categoryPrefix + post.category, tags: (post.tags || []).map(t => t + cfg.tagSuffix), metaDescription: translated.metaDescription, focusKeyword: translated.focusKeyword };
+    const raw = await askClaude(prompt, false, 3, 12000);
+    const grab = (a, b) => { const i = raw.indexOf(a), j = raw.indexOf(b, i + a.length); return i >= 0 && j > i ? raw.substring(i + a.length, j).trim() : ""; };
+    if (!raw.includes("===END===")) { console.log(`Translation to ${cfg.label} incomplete (no end marker) — skipped`); return null; }
+    const title = grab("===TITLE===", "===META==="), meta = grab("===META===", "===KEYWORD==="), kw = grab("===KEYWORD===", "===CONTENT===");
+    let content = grab("===CONTENT===", "===END===").replace(/```(?:html)?/g, "").trim();
+    if (content.indexOf("<") > 0) content = content.substring(content.indexOf("<"));
+    // Completeness: same number of H2s, at least 80% of the paragraphs
+    const h2a = countTags(articleBody, "h2"), h2b = countTags(content, "h2"), pa = countTags(articleBody, "p"), pb = countTags(content, "p");
+    if (!title || !content || h2b < h2a || pb < Math.floor(pa * 0.8)) {
+      console.log(`Translation to ${cfg.label} looks incomplete (h2 ${h2b}/${h2a}, p ${pb}/${pa}) — skipped`);
+      await notifyTeam(`⚠️ ${cfg.label} translation skipped (incomplete) for: ${post.title}`);
+      return null;
+    }
+    return { title, content: content + getStaticFooter(title, cfg.lang), category: cfg.categoryPrefix + post.category, tags: [], metaDescription: meta, focusKeyword: kw, lang: cfg.langTag, practiceArea: post.practiceArea };
   } catch (e) { console.log(`Translation to ${cfg.label} failed:`, e.message); return null; }
+}
+
+// Link the language versions to each other (hreflang + language switcher on the site)
+async function linkTranslations(results, auth) {
+  const withId = results.filter(r => r.id);
+  if (withId.length < 2) return;
+  const map = {};
+  for (const r of withId) map[r.langTag] = { id: r.id, url: r.link };
+  for (const r of withId) {
+    try {
+      await axios.post(`${WP_URL}/wp-json/wp/v2/posts/${r.id}`, { meta: { tez_translations: JSON.stringify(map) } },
+        { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
+    } catch (e) { console.log(`[autoposter] translation link failed for #${r.id}:`, e.response?.status || e.message); }
+  }
+}
+
+// IndexNow: tells Bing (which feeds ChatGPT search and Copilot), Yandex, Seznam and Naver right away
+async function pingIndexNow(urls) {
+  const list = (urls || []).filter(Boolean);
+  if (!list.length) return;
+  try {
+    await axios.post("https://api.indexnow.org/indexnow", { host: SITE_HOST, key: INDEXNOW_KEY, keyLocation: `https://${SITE_HOST}/${INDEXNOW_KEY}.txt`, urlList: list },
+      { headers: { "Content-Type": "application/json; charset=utf-8" }, timeout: 15000 });
+    console.log(`[autoposter] 🔎 IndexNow notified (${list.length} URL(s))`);
+  } catch (e) { console.log("[autoposter] IndexNow ping failed:", e.response?.status || e.message); }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -209,8 +348,9 @@ async function publishAllLanguages(post, notifyPrefix, state) {
     return 0;
   }
   try {
-    const p = await publishToWordPress(post);
-    results.push({ lang: "English", link: p.link });
+    const p = await publishToWordPress({ ...post, lang: "en" });
+    results.push({ lang: "English", link: p.link, id: p.id, langTag: "en", status: p.status });
+    if (p.status !== "publish") throw { held: true };   // held for Rule 7.1 review: no cache/ingest yet
 
     // 🧠 Feed Zara's memory — seed cache + jj_memory with this post's FAQs
     // Non-blocking; failures don't affect publishing.
@@ -266,7 +406,12 @@ async function publishAllLanguages(post, notifyPrefix, state) {
       console.error("[autoposter] Blog→firm_docs error:", firmErr.message);
     }
   }
-  catch (e) { console.error("English publish failed:", e.message); }
+  catch (e) { if (!e || !e.held) console.error("English publish failed:", e && e.message); }
+
+  // If the English version was held for review, its translations are held too
+  const holdStatus = results[0] && results[0].status !== "publish" ? "draft" : undefined;
+
+  if (!results.length) { console.log("⚠️ English version did not publish — skipping translations"); return 0; }
 
   // Chinese — check both WP and local history before publishing
   const chPost = await translatePost(post, "chinese");
@@ -277,15 +422,15 @@ async function publishAllLanguages(post, notifyPrefix, state) {
       console.log("⚠️ Skipping WP duplicate Chinese:", chPost.title);
     } else {
       try {
-        const p = await publishToWordPress(chPost);
-        results.push({ lang: "中文", link: p.link });
+        const p = await publishToWordPress({ ...chPost, status: holdStatus });
+        results.push({ lang: "中文", link: p.link, id: p.id, langTag: chPost.lang, status: p.status });
         recordPublishedTitle(chPost.title, state);
 
         // The same Chinese post goes to the 公众号, where the firm's clients
         // actually are. It is only queued — JJ taps Publish on Telegram, and
         // nothing reaches WeChat before he does. A failure here must never
         // affect the blog post that already succeeded.
-        try {
+        if (p.status === "publish") try {
           const wechat = require("./wechat-publish");
           const q = await wechat.queueForApproval({
             title: chPost.title,
@@ -312,8 +457,8 @@ async function publishAllLanguages(post, notifyPrefix, state) {
       console.log("⚠️ Skipping WP duplicate Spanish:", esPost.title);
     } else {
       try {
-        const p = await publishToWordPress(esPost);
-        results.push({ lang: "Español", link: p.link });
+        const p = await publishToWordPress({ ...esPost, status: holdStatus });
+        results.push({ lang: "Español", link: p.link, id: p.id, langTag: "es", status: p.status });
         recordPublishedTitle(esPost.title, state);
       } catch (e) { console.error("Spanish publish failed:", e.message); }
     }
@@ -327,7 +472,7 @@ async function publishAllLanguages(post, notifyPrefix, state) {
   // a failure here must never affect the posts that already succeeded.
   try {
     const social = require("./social-posts");
-    const linkFor = lang => (results.find(r => r.lang === lang) || {}).link;
+    const linkFor = lang => (results.find(r => r.lang === lang && r.status === "publish") || {}).link;
 
     const en = linkFor("English");
     if (en) {
@@ -351,9 +496,18 @@ async function publishAllLanguages(post, notifyPrefix, state) {
     console.error("[autoposter] social queue error:", soErr.message);
   }
 
-  if (results.length > 0) {
-    await notifyTeam(`${notifyPrefix}\n\n📌 *${post.title}*\n\n🌐 Published in ${results.length} language(s):\n${results.map(r => `${r.lang}: ${r.link}`).join("\n")}`);
+  // 🔗 hreflang links between the language versions + instant indexing
+  try { await linkTranslations(results, auth); } catch (e) { console.log("[autoposter] linkTranslations:", e.message); }
+  // IndexNow is sent by the site itself when a post goes live (Tez SEO pack v2), including drafts approved later
+
+  if (results.some(r => r.status === "draft")) {
+    await notifyTeam(`⚖️ *Held as draft for review (Rule 7.1 check):*\n${results.filter(r => r.status === "draft").map(r => `${r.lang}: ${WP_URL}/wp-admin/post.php?post=${r.id}&action=edit`).join("\n")}`);
   }
+  if (results.length > 0) {
+    const live = results.filter(r => r.status === "publish"), held = results.length - live.length;
+    await notifyTeam(`${notifyPrefix}\n\n📌 *${post.title}*\n\n🌐 ${live.length} published${held ? `, ${held} held as draft` : ""}:\n${results.map(r => `${r.lang}${r.status === "publish" ? "" : " (draft)"}: ${r.link}`).join("\n")}`);
+  }
+  // Count drafts too, so a held topic is recorded and not regenerated tomorrow
   return results.length;
 }
 
@@ -363,47 +517,55 @@ async function notifyTeam(message) {
   catch (e) { console.error("Telegram notify failed:", e.message); }
 }
 
-async function publishToWordPress({ title, content, category, tags, metaDescription, focusKeyword }) {
+const decodeEntities = t => String(t || "").replace(/&amp;/g, "&").replace(/&#0?38;/g, "&").replace(/&#8217;/g, "’").replace(/&quot;/g, '"').replace(/&#039;/g, "'").trim();
+
+async function findOrCreateCategory(name, auth) {
+  // Exact-name match. The old search-and-take-first matched "Español-Immigration"
+  // for "Immigration", which filed most English posts under the Spanish category.
+  const res = await axios.get(`${WP_URL}/wp-json/wp/v2/categories?search=${encodeURIComponent(name)}&per_page=100`, { headers: { Authorization: `Basic ${auth}` } });
+  const hit = (res.data || []).find(c => decodeEntities(c.name).toLowerCase() === name.toLowerCase());
+  if (hit) return hit.id;
+  const created = await axios.post(`${WP_URL}/wp-json/wp/v2/categories`, { name }, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
+  return created.data.id;
+}
+
+async function publishToWordPress({ title, content, category, tags, metaDescription, focusKeyword, lang, practiceArea, status }) {
   const auth = Buffer.from(`${WP_USER}:${WP_APP_PASSWORD}`).toString("base64");
   console.log("Publishing to WordPress:", title?.substring(0, 50));
 
   let categoryId = 1;
-  try {
-    const catRes = await axios.get(`${WP_URL}/wp-json/wp/v2/categories?search=${encodeURIComponent(category)}`, { headers: { Authorization: `Basic ${auth}` } });
-    if (catRes.data.length > 0) { categoryId = catRes.data[0].id; }
-    else {
-      const newCat = await axios.post(`${WP_URL}/wp-json/wp/v2/categories`, { name: category }, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
-      categoryId = newCat.data.id;
-    }
-  } catch (e) { console.log("Category lookup failed:", e.message); }
+  try { categoryId = await findOrCreateCategory(category || "Immigration", auth); }
+  catch (e) { console.log("Category lookup failed:", e.message); }
 
-  let tagIds = [];
-  try {
-    for (const tagName of (tags || [])) {
-      await new Promise(r => setTimeout(r, 500));
-      const tagRes = await axios.get(`${WP_URL}/wp-json/wp/v2/tags?search=${encodeURIComponent(tagName)}`, { headers: { Authorization: `Basic ${auth}` } });
-      if (tagRes.data.length > 0) { tagIds.push(tagRes.data[0].id); }
-      else {
-        const newTag = await axios.post(`${WP_URL}/wp-json/wp/v2/tags`, { name: tagName }, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
-        tagIds.push(newTag.data.id);
-      }
-    }
-  } catch (e) { console.log("Tag lookup failed:", e.message); tagIds = []; }
+  // Rule 7.1 gate — anything flagged is saved as a draft for JJ instead of going live
+  const issues = complianceIssues(stripFooter(content));
+  const finalStatus = status || (issues.length ? "draft" : "publish");
+  if (issues.length) console.log(`⚖️ Compliance hold (${issues.length}):`, issues.slice(0, 3).join(" | "));
 
-  const postData = { title, content, status: "publish", categories: [categoryId], tags: tagIds, excerpt: metaDescription || "" };
-  if (metaDescription || focusKeyword) {
-    postData.meta = {};
-    if (metaDescription) {
-      postData.meta._yoast_wpseo_metadesc = metaDescription;
-      postData.meta._yoast_wpseo_opengraph_description = metaDescription;
-    }
-    if (focusKeyword) postData.meta._yoast_wpseo_focuskw = focusKeyword;
-    if (title) postData.meta._yoast_wpseo_title = title + " - Tez Law P.C.";
+  // Tags: none. 5–7 new tags per post x 3 languages created 2,600+ thin tag pages.
+  const postData = { title, content, status: finalStatus, categories: [categoryId], tags: [], excerpt: metaDescription || "" };
+  const area = practiceArea || String(category || "").replace(/^(中文-|Español-)/, "");
+  if (FEATURED_MEDIA[area]) postData.featured_media = FEATURED_MEDIA[area];
+  postData.meta = { tez_lang: lang || "en" };
+  if (metaDescription) postData.meta._yoast_wpseo_metadesc = metaDescription.substring(0, 158);
+  if (focusKeyword) postData.meta._yoast_wpseo_focuskw = focusKeyword;
+  if (title) postData.meta._yoast_wpseo_title = (title.length > 45 ? title : title + " | Tez Law P.C.");
+
+  let postRes;
+  try {
+    postRes = await axios.post(`${WP_URL}/wp-json/wp/v2/posts`, postData, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
+  } catch (e) {
+    // If the site snippet isn't active yet, the meta keys are unknown — retry without them
+    const errBody = JSON.stringify(e.response?.data || "");
+    if ((e.response?.status === 400 && /meta/i.test(errBody)) || (e.response?.status === 403 && /rest_cannot_update/.test(errBody))) {
+      console.log("⚠️ Meta rejected (is the Tez SEO pack v2 snippet active?) — publishing without meta");
+      delete postData.meta;
+      postRes = await axios.post(`${WP_URL}/wp-json/wp/v2/posts`, postData, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
+    } else throw e;
   }
-
-  const postRes = await axios.post(`${WP_URL}/wp-json/wp/v2/posts`, postData, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
-  console.log("✅ WordPress published, ID:", postRes.data.id);
-  return postRes.data;
+  console.log(`✅ WordPress ${finalStatus === "publish" ? "published" : "saved as DRAFT"}, ID:`, postRes.data.id);
+  // `url` kept for callers that read it (admin manual publish)
+  return { ...postRes.data, url: postRes.data.link, complianceIssues: issues };
 }
 
 async function generatePost({ topic, practiceArea, context, useSearch, sources }) {
@@ -415,7 +577,8 @@ async function generatePost({ topic, practiceArea, context, useSearch, sources }
   const sourceInstruction = sources && sources.length > 0
     ? `\nPRIORITY SOURCES: When researching this topic, prioritize information from these high-authority sources: ${sources.join(", ")}. Search these first, then supplement with other credible sources if needed.\n`
     : "";
-  const prompt = `You are an expert legal content writer and SEO specialist for Tez Law P.C., West Covina, California. JJ Zhang is managing attorney (California Bar #326666).
+  const linkList = PRACTICE_LINKS.map(([label, url]) => `- ${label}: ${url}`).join("\n");
+  const prompt = `You write clear, accurate legal articles for Tez Law P.C., a law firm in West Covina and Newport Beach, California. JJ Zhang is the founding attorney (California Bar #326666).
 
 IMPORTANT: Today is ${todayStr}. Current year is ${currentYear}. ALWAYS use ${currentYear} — NEVER use any past year.
 ${sourceInstruction}
@@ -433,25 +596,41 @@ REQUIREMENTS:
    - H2: Background/What This Means
    - H2: How This Affects [Specific Audience]
    - H2: What You Should Do Now (actionable steps)
-   - H2: Why Choose Tez Law P.C.
+   - H2: How Tez Law P.C. Can Help (2-3 sentences describing the services only — no claims about being better than others)
    - H2: Frequently Asked Questions
-     * 3 FAQs as <div class="faq-item"><h3>Question?</h3><p>Answer</p></div>
-   - Closing CTA paragraph
-4. INTERNAL LINKS:
-   - Immigration: <a href="https://tezlawfirm.com/immigration/">immigration services</a>
-   - PI: <a href="https://tezlawfirm.com/home/personal-injury/">personal injury attorney</a>
-   - General: <a href="https://tezlawfirm.com/contact/">free consultation</a>
-5. TAGS: 5-7 specific tags including location + practice area keywords
+     * 3-5 FAQs as <div class="faq-item"><h3>Question?</h3><p>Answer in 2-4 sentences</p></div>
+   - Closing paragraph inviting readers to schedule a consultation
+   - Cite official sources (uscis.gov, state.gov, dol.gov, courts, Federal Register, leginfo.legislature.ca.gov) with links where you rely on them, and state dates ("as of ${todayStr}") for fees, deadlines and figures that change.
+4. INTERNAL LINKS — link 2 to 4 of the MOST relevant pages below, in natural sentences, using descriptive anchor text (never "click here"). Always include the most specific matching page (e.g. an H-1B article links the H-1B page). Use only these URLs:
+${linkList}
+5. CALIFORNIA RULES OF PROFESSIONAL CONDUCT 7.1–7.5 (mandatory):
+   - Never call the firm or its lawyers best, top, leading, premier, #1, expert or specialists; never say the firm "specializes".
+   - Never promise or imply an outcome ("we will win", "guaranteed", "get your green card approved"). Use "may", "can", "generally".
+   - No success rates, case counts or client testimonials.
+   - Do not say "free consultation".
+6. Write for readers who may speak English as a second language: short sentences, plain words, define legal terms once.
 
 Return ONLY this JSON (no markdown, no backticks):
-{"title":"SEO title","metaDescription":"150-160 char meta","content":"full HTML content","category":"Immigration|Personal Injury|Business Law|Trademarks|Estate Planning","tags":["tag1","tag2","tag3","tag4","tag5"],"focusKeyword":"main SEO keyword"}`;
+{"title":"SEO title","metaDescription":"150-160 char meta","content":"full HTML content","category":"Immigration|Personal Injury|Business Law|Trademarks|Estate Planning","focusKeyword":"main SEO keyword"}`;
   const raw = await askClaude(prompt, useSearch);
   let postData;
   try {
     const cleaned = raw.replace(/```json|```/g, "").trim();
     postData = JSON.parse(cleaned.substring(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1));
   } catch (e) { console.error("Failed to parse Claude response:", e.message); return null; }
-  postData.content = (postData.content || "") + getStaticFooter(postData.title || "");
+  // One repair pass if the draft slipped a Rule 7.1 problem; publishToWordPress holds it as a draft if it persists
+  const issues = complianceIssues(postData.content || "");
+  if (issues.length) {
+    try {
+      const fixed = await askClaude(`Revise this HTML article so it complies with California Rule of Professional Conduct 7.1. Fix ONLY these problems, change nothing else, keep all HTML and links, and return ONLY the full revised HTML:\n${issues.join("\n")}\n\n${postData.content}`, false, 3, 12000);
+      let f2 = String(fixed || "").replace(/```(?:html)?/g, "").trim();
+      if (f2.indexOf("<") > 0) f2 = f2.substring(f2.indexOf("<"));
+      if (f2.includes("<h2") && f2.length > postData.content.length * 0.8) postData.content = f2;
+    } catch (e) { console.log("Compliance repair failed:", e.message); }
+  }
+  postData.tags = [];
+  postData.practiceArea = postData.category;
+  postData.content = (postData.content || "") + getStaticFooter(postData.title || "", "en");
   await new Promise(r => setTimeout(r, 5000));
   try {
     const firstParaMatch = postData.content.match(/(<p>.*?<\/p>\s*<p>.*?<\/p>)/s);
@@ -809,4 +988,4 @@ function scheduleDaily() {
   scheduleNext();
 }
 
-module.exports = { runDailyScheduler, scheduleDaily, runWeeklySourceResearch, generatePost, publishToWordPress, publishAllLanguages, loadState, saveState };
+module.exports = { runDailyScheduler, scheduleDaily, runWeeklySourceResearch, generatePost, publishToWordPress, publishAllLanguages, translatePost, linkTranslations, pingIndexNow, complianceIssues, stripFooter, getStaticFooter, loadState, saveState };
