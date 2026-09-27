@@ -471,8 +471,11 @@ function toLastCommaFirst(name) {
 // Recurses up to MAX_SCAN_DEPTH into sub-branches (e.g. broker folders like "Law Patrick").
 // Returns {path, score, reason} for the best auto-match, or null if none scored high enough.
 const MAX_SCAN_DEPTH = 2;   // branch → sub-branch → client folder
-async function findClientFolder({ clientName, aNumber }) {
-  const branches = getBranchRoots();
+async function findClientFolder({ clientName, aNumber, roots = null }) {
+  // roots lets a caller search a different tree (e.g. the civil litigation roots,
+  // which live in the DB rather than DROPBOX_BRANCH_ROOTS). Omit it and this
+  // searches the immigration branches exactly as before.
+  const branches = roots && roots.length ? roots : getBranchRoots();
   if (!branches.length) return null;
 
   const tokens = nameTokens(clientName);
@@ -532,8 +535,8 @@ async function findClientFolder({ clientName, aNumber }) {
 
 // Return a ranked list of possible matches (recursive, including lower-scoring ones)
 // so the attorney can pick from a "did you mean" list.
-async function suggestClientFolders({ clientName, aNumber, minScore = 20, limit = 12 }) {
-  const branches = getBranchRoots();
+async function suggestClientFolders({ clientName, aNumber, minScore = 20, limit = 12, roots = null }) {
+  const branches = roots && roots.length ? roots : getBranchRoots();
   if (!branches.length) return [];
   const tokens = nameTokens(clientName);
   const aDigits = aNumberDigits(aNumber);
