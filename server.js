@@ -12058,6 +12058,13 @@ app.listen(PORT, async () => {
     console.error("❌ Auto-poster failed to load:", e.message);
   }
 
+  // ── Website & publishing watchdog (Telegram alerts to JJ) ─
+  try {
+    await require("./site-watch").startSiteWatch();
+  } catch (e) {
+    console.error("❌ Site watch failed to start:", e.message);
+  }
+
   // ── Start weekly analytics ──────────────────────────────
   try {
     scheduleWeeklyAnalytics();

@@ -561,7 +561,12 @@ async function publishToWordPress({ title, content, category, tags, metaDescript
       console.log("⚠️ Meta rejected (is the Tez SEO pack v2 snippet active?) — publishing without meta");
       delete postData.meta;
       postRes = await axios.post(`${WP_URL}/wp-json/wp/v2/posts`, postData, { headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" } });
-    } else throw e;
+    } else {
+      if (e.response?.status === 401 || (e.response?.status === 403 && !/rest_cannot_update/.test(errBody))) {
+        try { await require("./site-watch").tell(`🔑 The autoposter could not publish "${String(title).substring(0, 60)}": WordPress rejected the login (HTTP ${e.response.status}). Create a new application password (WordPress → Users → Profile) and update WP_APP_PASSWORD on Render.`); } catch (x) {}
+      }
+      throw e;
+    }
   }
   console.log(`✅ WordPress ${finalStatus === "publish" ? "published" : "saved as DRAFT"}, ID:`, postRes.data.id);
   // `url` kept for callers that read it (admin manual publish)
