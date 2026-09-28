@@ -78,7 +78,15 @@ function logo(name) {
   if (!LOGO[name]) {
     const s = fs.readFileSync(path.join(ASSETS, "brand", `${name}.svg`), "utf8");
     const vb = s.match(/viewBox="([^"]+)"/)[1].split(/\s+/).map(Number);
-    LOGO[name] = { vb, inner: s.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "") };
+    // Only the drawing is kept. The exported files carry a <metadata> block
+    // (a c2pa content-credentials manifest) whose namespace is declared on the
+    // outer <svg> tag, which is dropped here; left in, the renderer rejects
+    // the whole card ("unknown namespace prefix 'c2pa'").
+    const inner = s.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "")
+      .replace(/<metadata[\s\S]*?<\/metadata>/g, "")
+      .replace(/<([a-z][\w-]*):[\w-]+[^>]*\/>/gi, "")
+      .replace(/<([a-z][\w-]*):([\w-]+)[^>]*>[\s\S]*?<\/\1:\2>/gi, "");
+    LOGO[name] = { vb, inner };
   }
   return LOGO[name];
 }

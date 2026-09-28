@@ -408,6 +408,19 @@ console.log("\n── Approval schedules through Postiz ────────
   check("approving again does not post twice", [(await S.approve(920)).alreadyDone, P.calls.length], [true, 1]);
 }
 {
+  // Approved while Postiz was not set up: only the paste text came back.
+  // Once Postiz is on, tapping Approve again schedules it — once.
+  T.rows = []; P.on = false; P.calls = []; P.uploads = [];
+  T.rows.push({ id: 925, channel: "facebook", text: "Advance parole, explained. " + URL, source_url: URL, source_title: SOURCE.title,
+    status: "pending", problems: [] });
+  check("approved with Postiz off: nothing is scheduled", [(await S.approve(925)).status, P.calls.length], ["approved", 0]);
+  check("…and re-tapping while still off does nothing", (await S.approve(925)).alreadyDone, true);
+  P.on = true;
+  const r = await S.approve(925, "JJ");
+  check("once Postiz is on, re-tapping schedules it", [r.ok, P.calls.map(c => c.channel)], [true, ["facebook"]]);
+  check("…and a third tap does not post twice", [(await S.approve(925)).alreadyDone, P.calls.length], [true, 1]);
+}
+{
   T.rows = []; P.calls = []; P.uploads = []; P.failOn = "tiktok";
   T.rows.push({ id: 930, channel: "video", text: S.videoCaption({ ...SCRIPT, lang: "en", url: URL }, "youtube"), source_url: URL,
     status: "pending", problems: [], media: { script: { ...SCRIPT, lang: "en", url: URL }, targets: ["youtube", "tiktok"] }, media_file: Buffer.alloc(500, 2) });

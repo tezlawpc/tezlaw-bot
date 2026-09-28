@@ -672,7 +672,13 @@ async function approve(id, by = "JJ", { deliver } = {}) {
   const p = (await db.query(`SELECT * FROM social_posts WHERE id = $1`, [id])).rows[0];
   if (!p) throw new Error(`No social post ${id}`);
   // 'error' can be retried: the tap is JJ saying "try again".
-  if (p.status !== "pending" && p.status !== "error") return { alreadyDone: true, status: p.status };
+  // So can a post approved while Postiz was not set up: approval then only
+  // handed the text back to paste, and nothing reached Postiz. Once Postiz is
+  // configured, tapping Approve again schedules it. A post with anything in
+  // `delivered` already went through and is never sent twice.
+  if (deliver === undefined) deliver = require("./postiz").configured() ? deliverViaPostiz : null;
+  const lateDelivery = p.status === "approved" && !p.delivered && !!deliver;
+  if (p.status !== "pending" && p.status !== "error" && !lateDelivery) return { alreadyDone: true, status: p.status };
 
   // Re-screen at approval. A post can sit for a day, and the rules are cheap
   // to re-apply; approving something that would now fail is not worth saving
@@ -685,7 +691,7 @@ async function approve(id, by = "JJ", { deliver } = {}) {
   }
 
   // Postiz connected → schedule it there. Otherwise hand JJ the text to paste.
-  if (deliver === undefined) deliver = require("./postiz").configured() ? deliverViaPostiz : null;
+  // (`deliver` was settled above.)
 
   let delivered = null;
   if (deliver) {

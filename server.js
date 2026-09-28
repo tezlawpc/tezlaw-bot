@@ -8086,7 +8086,10 @@ app.post("/telegram", async (req, res) => {
           .handleTelegramCallback(cb.data, cb.id, who);
         if (r && r.handled) {
           const said = r.action === "go"
-            ? (r.result && r.result.ok ? "Approved" : `Blocked: ${(r.result.problems || [r.result.error]).join("; ")}`)
+            ? (r.result && r.result.alreadyDone ? `Already ${r.result.status}`
+              : r.result && r.result.ok ? "Approved"
+              : r.result && r.result.status === "error" ? "Not scheduled — see the message below"
+              : `Blocked: ${(r.result.problems || [r.result.error]).join("; ")}`)
             : "Skipped";
           axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
             callback_query_id: cb.id, text: said,
