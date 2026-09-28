@@ -454,6 +454,21 @@ function renderClientList(clients) {
           +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Email</label><input id="ac_email" type="email" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;"></div>'
           +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">A-Number</label><input id="ac_anumber" type="text" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" placeholder="A200-000-000"></div>'
           +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Referral Source</label><input id="ac_referral" type="text" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" placeholder="e.g. broker name"></div>'
+          +     '<div style="grid-column:1/-1;border-top:1px solid #E2CFA2;margin-top:4px;padding-top:12px;">'
+          +       '<label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Signed retainer or fee agreement</label>'
+          +       '<div style="font-size:12px;color:#7B5330;margin-bottom:8px;">Upload the PDF and the details are read off it for you to check. Nothing is saved until you tick it.</div>'
+          +       '<input id="ac_file" type="file" accept="application/pdf" style="display:none;" onchange="acExtract(this)">'
+          +       '<button type="button" id="ac_upload_btn" onclick="document.getElementById(\'ac_file\').click()" style="width:100%;padding:10px;border:1.5px dashed #B8891E;border-radius:6px;background:rgba(184,137,30,0.07);color:#7B5810;cursor:pointer;font-size:13px;font-weight:600;">Choose a PDF</button>'
+          +       '<div id="ac_review" style="display:none;margin-top:12px;"></div>'
+          +     '</div>'
+          +     '<div style="grid-column:1/-1;">'
+          +       '<label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Practice area</label>'
+          +       '<div style="font-size:12px;color:#7B5330;margin-bottom:6px;">Decides which Dropbox root the client folder goes under. Leave it blank if you are not sure - you will be asked rather than guessed at.</div>'
+          +       '<div id="ac_branch_row">'
+          +         '<button type="button" data-branch="immigration" onclick="acSetBranch(this)" style="padding:7px 16px;border:1px solid #D4B983;border-radius:999px;background:#FFF;color:#3E2818;cursor:pointer;font-size:13px;margin-right:8px;">Immigration</button>'
+          +         '<button type="button" data-branch="civil" onclick="acSetBranch(this)" style="padding:7px 16px;border:1px solid #D4B983;border-radius:999px;background:#FFF;color:#3E2818;cursor:pointer;font-size:13px;">Civil</button>'
+          +       '</div>'
+          +     '</div>'
           +     '<div style="grid-column:1/-1;"><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Notes</label><textarea id="ac_notes" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;min-height:60px;font-family:inherit;" placeholder="Anything you want to remember about this client..."></textarea></div>'
           +   '</div>'
           +   '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">'
@@ -462,7 +477,258 @@ function renderClientList(clients) {
           +   '</div>'
           + '</div>';
         document.body.appendChild(backdrop);
+        // Reset per-client state, or the next client inherits this one's branch.
+        acBranch = null; acFileName = ""; window.__acProposal = null;
         setTimeout(() => document.getElementById("ac_name").focus(), 50);
+      }
+      // ── Reading a retainer ────────────────────────────────────────
+      // The server proposes; a person decides. Client details arrive ticked -
+      // getting one wrong is obvious and the client corrects it on the phone.
+      // Fee terms arrive UNTICKED, every one, each beside the sentence it was
+      // read from, because a wrong fee amount sitting unchallenged in a file is
+      // what fee disputes are made of. Nothing unticked is saved.
+      var AC_LABELS = {
+        client_name: "Client name", a_number: "A number", client_phone: "Phone",
+        client_email: "Email", client_address: "Address", matter_type: "Matter type",
+        opposing_party: "Opposing party", signed_date: "Signed",
+        fee_structure: "Fee structure", fee_amount: "Fee amount", hourly_rate: "Hourly rate",
+        retainer_deposit: "Retainer deposit", scope_included: "Scope - included",
+        scope_excluded: "Scope - excluded", costs_responsibility: "Costs",
+        payment_schedule: "Payment schedule"
+      };
+      var AC_UNREADABLE = {
+        NO_TEXT_LAYER: "This PDF has no text in it - it looks like a scan or a photo of the agreement. Upload the original PDF if you have it, or type the details in.",
+        IMAGE_UNSUPPORTED: "That is a photo, not a document. Upload the PDF of the agreement, or type the details in.",
+        DOCX_UNSUPPORTED: "Word files cannot be read here yet. Save it as a PDF and upload that.",
+        UNSUPPORTED: "That file type cannot be read. A PDF of the agreement works best."
+      };
+      var acBranch = null;
+      var acFileName = "";
+      function acLabel(k) { return AC_LABELS[k] || String(k).replace(/_/g, " "); }
+      function acText(v) { return Array.isArray(v) ? v.filter(Boolean).join("; ") : String(v == null ? "" : v); }
+      function acEsc(t) {
+        return String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      }
+      // Only fields that actually carry a QUOTED value are offered. A value the
+      // server could not point at in the document never appears as a value.
+      function acFilled(group) {
+        var out = [];
+        for (var k in (group || {})) {
+          var c = group[k];
+          if (!c) continue;
+          var empty = c.value == null || c.value === "" || (Array.isArray(c.value) && !c.value.length);
+          if (!empty && c.quote) out.push([k, c]);
+        }
+        return out;
+      }
+      function acSetBranch(btn) {
+        var row = document.getElementById("ac_branch_row");
+        var want = btn.getAttribute("data-branch");
+        acBranch = (acBranch === want) ? null : want;
+        Array.prototype.forEach.call(row.querySelectorAll("button"), function (b) {
+          var on = b.getAttribute("data-branch") === acBranch;
+          b.style.background = on ? "#F07800" : "#FFF";
+          b.style.color = on ? "#FFF7E4" : "#3E2818";
+          b.style.borderColor = on ? "#F07800" : "#D4B983";
+        });
+      }
+      async function acExtract(inputEl) {
+        var f = inputEl.files && inputEl.files[0];
+        if (!f) return;
+        acFileName = f.name || "agreement.pdf";
+        var btn = document.getElementById("ac_upload_btn");
+        var box = document.getElementById("ac_review");
+        btn.disabled = true;
+        btn.textContent = "Reading the agreement...";
+        box.style.display = "none";
+        try {
+          var fd = new FormData();
+          fd.append("file", f);
+          var resp = await fetch("/admin/clients/extract-agreement", { method: "POST", body: fd, credentials: "same-origin" });
+          var data = await resp.json();
+          if (!resp.ok || !data.ok) {
+            throw new Error((data.code && AC_UNREADABLE[data.code]) || data.error || ("HTTP " + resp.status));
+          }
+          acRenderReview(data.proposal);
+        } catch (err) {
+          var e = document.getElementById("addContactError");
+          e.textContent = String(err.message || "Could not read that file");
+          e.style.display = "block";
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Choose a different PDF";
+          inputEl.value = "";
+        }
+      }
+      function acRenderReview(p) {
+        var box = document.getElementById("ac_review");
+        var ids = acFilled(p.identity), fees = acFilled(p.fee_terms);
+        window.__acProposal = { identity: ids, fees: fees, file: acFileName };
+        var html = '';
+        if (p.concerns && p.concerns.length) {
+          html += '<div style="background:rgba(240,120,0,0.10);border:1px solid #F07800;border-radius:6px;padding:10px;margin-bottom:10px;font-size:12px;color:#3E2818;">'
+                + '<strong>Read this first</strong>';
+          for (var i = 0; i < p.concerns.length; i++) html += '<div style="margin-top:4px;">' + acEsc(p.concerns[i]) + '</div>';
+          html += '</div>';
+        }
+        if (p.dropped_unquoted && p.dropped_unquoted.length) {
+          var names = p.dropped_unquoted.map(acLabel).join(", ");
+          html += '<div style="background:rgba(240,120,0,0.10);border:1px solid #F07800;border-radius:6px;padding:10px;margin-bottom:10px;font-size:12px;color:#3E2818;">'
+                + '<strong>Not offered - no quote in the document</strong><div style="margin-top:4px;">' + acEsc(names) + '</div>'
+                + '<div style="margin-top:6px;color:#7B5330;">A value that cannot be pointed at in the document is not offered here. Read these off the agreement yourself.</div></div>';
+        }
+        if (!ids.length && !fees.length) {
+          html += '<div style="font-size:13px;color:#7B5330;">Nothing could be read from this file. Enter the details by hand.</div>';
+        }
+        function rows(list, checked, title, sub) {
+          if (!list.length) return '';
+          var h = '<div style="font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin:10px 0 2px;">' + title + '</div>'
+                + '<div style="font-size:12px;color:#7B5330;margin-bottom:6px;">' + sub + '</div>';
+          for (var i = 0; i < list.length; i++) {
+            var k = list[i][0], c = list[i][1];
+            h += '<label style="display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid #E2CFA2;border-radius:6px;background:#FFF;margin-bottom:6px;cursor:pointer;">'
+               +   '<input type="checkbox" data-ac-field="' + acEsc(k) + '"' + (checked ? ' checked' : '') + ' style="margin-top:3px;">'
+               +   '<span style="flex:1;">'
+               +     '<span style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#7B5330;">' + acEsc(acLabel(k)) + '</span>'
+               +     '<span style="display:block;font-size:14px;color:#3E2818;">' + acEsc(acText(c.value)) + '</span>'
+               +     '<span style="display:block;font-size:12px;font-style:italic;color:#7B5330;margin-top:3px;">' + acEsc(c.quote) + '</span>'
+               +   '</span>'
+               + '</label>';
+          }
+          return h;
+        }
+        html += rows(ids, true, "Client details", "Ticked ones fill in the form. Untick anything that looks off.");
+        html += rows(fees, false, "Fee terms", "Tick each one only after reading it against the quote. Unticked terms are not recorded.");
+        if (ids.length || fees.length) {
+          html += '<button type="button" onclick="acApply()" style="width:100%;margin-top:8px;padding:9px;background:#F07800;color:#FFF7E4;border:2px solid #A02818;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;letter-spacing:1px;text-transform:uppercase;">Use ticked details</button>';
+        }
+        box.innerHTML = html;
+        box.style.display = "block";
+        if (p.suggested_branch && !acBranch) {
+          var b = document.querySelector('#ac_branch_row button[data-branch="' + p.suggested_branch + '"]');
+          if (b) acSetBranch(b);
+        }
+      }
+      function acApply() {
+        var prop = window.__acProposal || { identity: [], fees: [] };
+        var box = document.getElementById("ac_review");
+        var ticked = {};
+        Array.prototype.forEach.call(box.querySelectorAll("input[data-ac-field]"), function (cb) {
+          ticked[cb.getAttribute("data-ac-field")] = cb.checked;
+        });
+        var map = { client_name: "ac_name", client_phone: "ac_phone", client_email: "ac_email", a_number: "ac_anumber" };
+        var extra = [], feeLines = [], skipped = 0;
+        prop.identity.forEach(function (pair) {
+          var k = pair[0], v = acText(pair[1].value);
+          if (!ticked[k]) return;
+          if (map[k]) { document.getElementById(map[k]).value = v; }
+          else { extra.push(acLabel(k) + ": " + v); }
+        });
+        prop.fees.forEach(function (pair) {
+          if (ticked[pair[0]]) feeLines.push(acLabel(pair[0]) + ": " + acText(pair[1].value));
+          else skipped++;
+        });
+        // Whatever has no field of its own goes into the notes, with the file it
+        // came from named, so the claim can be traced back to the document.
+        var lines = extra.slice();
+        if (feeLines.length) { lines.push("", "Fee terms confirmed against " + prop.file + ":"); feeLines.forEach(function (l) { lines.push("  " + l); }); }
+        if (skipped > 0) {
+          lines.push("", skipped + " of " + prop.fees.length + " fee term(s) in " + prop.file
+            + " were not confirmed and are not recorded here. Read them off the agreement.");
+        }
+        if (lines.length) {
+          var ta = document.getElementById("ac_notes");
+          ta.value = (ta.value.trim() ? ta.value.trim() + "\n\n" : "") + lines.join("\n");
+        }
+        box.innerHTML = '<div style="font-size:13px;color:#7B5330;">Read from ' + acEsc(prop.file) + '. Check the fields above before saving.</div>';
+      }
+      // Provisioning stopped short. The client exists; only the filing is open.
+      // Either nobody said immigration or civil, or folders turned up that might
+      // already BE this client - and creating a second one is how a client ends
+      // up with two folders, the empty one being the one everybody finds first.
+      function acFolderPrompt(key, name, folder) {
+        var back = document.createElement("div");
+        back.id = "acFolderBackdrop";
+        back.style.cssText = "position:fixed;inset:0;background:rgba(26,16,8,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;";
+        var cands = folder.candidates || [];
+        var branch = folder.branch || acBranch || null;
+        var html = '<div style="background:#FBF3DE;border-radius:12px;padding:24px;max-width:560px;width:100%;max-height:80vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 0 1.5px #B8891E;">'
+          + '<h2 style="margin:0 0 6px 0;font-family:Cinzel,serif;color:#3E2818;letter-spacing:2px;text-transform:uppercase;font-size:17px;">Where does ' + acEsc(name) + ' go?</h2>'
+          + '<p style="margin:0 0 14px 0;font-size:13px;color:#7B5330;">' + acEsc(name) + ' is saved. '
+          + (folder.action === "needs_branch"
+              ? 'The practice area was never set, so no folder was created yet.'
+              : 'Folders that might already be this client turned up, so nothing was created yet.')
+          + '</p>'
+          + '<div id="acf_err" style="display:none;background:rgba(160,40,24,0.10);color:#A02818;padding:9px 11px;border-radius:6px;border:1px solid #A02818;margin-bottom:10px;font-size:13px;"></div>'
+          + '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#3E2818;margin-bottom:6px;">Practice area</div>'
+          + '<div id="acf_branch">'
+          +   '<button type="button" data-branch="immigration" onclick="acfSetBranch(this)" style="padding:7px 16px;border:1px solid #D4B983;border-radius:999px;background:#FFF;cursor:pointer;font-size:13px;margin-right:8px;">Immigration</button>'
+          +   '<button type="button" data-branch="civil" onclick="acfSetBranch(this)" style="padding:7px 16px;border:1px solid #D4B983;border-radius:999px;background:#FFF;cursor:pointer;font-size:13px;">Civil</button>'
+          + '</div>';
+        if (cands.length) {
+          html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#3E2818;margin:14px 0 4px;">Is the client one of these?</div>'
+                + '<div style="font-size:12px;color:#7B5330;margin-bottom:8px;">Closest first. Picking one files the client there.</div>';
+          for (var i = 0; i < cands.length; i++) {
+            html += '<button type="button" onclick="acfAdopt(this)" data-path="' + acEsc(cands[i].path) + '" style="display:block;width:100%;text-align:left;padding:9px 11px;border:1px solid #E2CFA2;border-radius:6px;background:#FFF;margin-bottom:6px;cursor:pointer;">'
+                 +   '<span style="display:block;font-weight:600;color:#3E2818;font-size:14px;">' + acEsc(cands[i].name) + '</span>'
+                 +   '<span style="display:block;font-size:11px;color:#7B5330;">' + acEsc(cands[i].path) + '</span>'
+                 + '</button>';
+          }
+          html += '<button type="button" onclick="acfCreateNew()" style="width:100%;padding:9px;border:1px solid #D4B983;border-radius:6px;background:transparent;color:#7B5330;cursor:pointer;font-size:13px;margin-top:2px;">None of these - create a new folder</button>';
+        } else {
+          // acfResolve, NOT acfCreateNew: with no candidates on screen nobody has
+          // reviewed anything, so the duplicate check must still run.
+          html += '<button type="button" onclick="acfResolve()" style="width:100%;margin-top:14px;padding:10px;background:#F07800;color:#FFF7E4;border:2px solid #A02818;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;letter-spacing:1px;text-transform:uppercase;">Find or create the folder</button>';
+        }
+        html += '<button type="button" onclick="acfSkip()" style="width:100%;margin-top:10px;padding:8px;background:transparent;border:none;color:#7B5330;cursor:pointer;font-size:12px;">Decide later - the client is already saved</button></div>';
+        back.innerHTML = html;
+        document.body.appendChild(back);
+        window.__acf = { key: key, name: name, branch: branch };
+        if (branch) {
+          var b = back.querySelector('#acf_branch button[data-branch="' + branch + '"]');
+          if (b) acfSetBranch(b);
+        }
+      }
+      function acfSetBranch(btn) {
+        var want = btn.getAttribute("data-branch");
+        window.__acf.branch = (window.__acf.branch === want) ? null : want;
+        Array.prototype.forEach.call(document.querySelectorAll("#acf_branch button"), function (b) {
+          var on = b.getAttribute("data-branch") === window.__acf.branch;
+          b.style.background = on ? "#F07800" : "#FFF";
+          b.style.color = on ? "#FFF7E4" : "#3E2818";
+          b.style.borderColor = on ? "#F07800" : "#D4B983";
+        });
+      }
+      function acfErr(msg) {
+        var e = document.getElementById("acf_err");
+        e.textContent = msg; e.style.display = "block";
+      }
+      async function acfCall(body) {
+        if (!window.__acf.branch) return acfErr("Choose immigration or civil first.");
+        try {
+          body.branch = window.__acf.branch;
+          var r = await fetch("/admin/clients/" + encodeURIComponent(window.__acf.key) + "/provision-folder", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            credentials: "same-origin", body: JSON.stringify(body)
+          });
+          var d = await r.json();
+          if (!r.ok || !d.ok) throw new Error(d.error || ("HTTP " + r.status));
+          if (d.folder && (d.folder.action === "needs_review" || d.folder.action === "needs_branch")) {
+            return acfErr(d.folder.reason || "Still needs a decision.");
+          }
+          acfSkip();
+        } catch (err) { acfErr(String(err.message || "Could not create the folder")); }
+      }
+      function acfAdopt(btn) { acfCall({ adopt_path: btn.getAttribute("data-path") }); }
+      // Normal provisioning: adopt a confident match, else offer candidates.
+      function acfResolve() { acfCall({}); }
+      // Only after a person has seen the candidates and rejected them all.
+      function acfCreateNew() { acfCall({ create_new: true }); }
+      function acfSkip() {
+        var b = document.getElementById("acFolderBackdrop");
+        if (b) b.remove();
+        location.reload();
       }
       function closeAddContactModal() {
         const b = document.getElementById("addContactBackdrop");
@@ -479,6 +745,7 @@ function renderClientList(clients) {
           a_number: document.getElementById("ac_anumber").value.trim() || null,
           referral_source: document.getElementById("ac_referral").value.trim() || null,
           notes: document.getElementById("ac_notes").value.trim() || null,
+          branch: acBranch || undefined,
         };
         if (!body.client_name) {
           errBox.textContent = "Client name is required.";
@@ -496,6 +763,23 @@ function renderClientList(clients) {
           const data = await resp.json();
           if (!resp.ok || !data.ok) {
             throw new Error(data.error || "Save failed");
+          }
+          // The client is saved either way. Say what happened to their folder,
+          // because "saved" with no folder is how a client ends up with nowhere
+          // to put their paper and nobody noticing for a month.
+          var f = data.folder;
+          if (f && (f.action === "needs_review" || f.action === "needs_branch")) {
+            closeAddContactModal();
+            acFolderPrompt(data.client.client_key, data.client.client_name, f);
+            return;
+          }
+          if (f && f.path && (f.action === "created" || f.action === "adopted" || f.action === "already_mapped")) {
+            // Show where they landed before the list reloads under us.
+            errBox.style.cssText = "background:rgba(120,160,90,0.12);color:#3E2818;padding:10px 12px;border-radius:6px;border:1px solid #7B9A4E;margin-bottom:12px;font-size:13px;";
+            errBox.textContent = "Saved. Filed at " + f.path;
+            errBox.style.display = "block";
+            setTimeout(function () { closeAddContactModal(); location.reload(); }, 1600);
+            return;
           }
           closeAddContactModal();
           // Reload so the new client appears in the list

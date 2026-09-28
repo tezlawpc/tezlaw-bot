@@ -85,6 +85,98 @@
     load();
   }
 
+  // ── Reading an agreement ──────────────────────────────────
+  // A consultant standing in front of somebody with a signed agreement should
+  // not have to retype the name and A-number off it. What comes back here is
+  // deliberately thinner than what the firm sees: the server strips the fee
+  // terms before the response leaves, because what the firm charges a client is
+  // not an outside referrer's to read. Identity only, and still only what the
+  // extractor could quote from the document.
+  var UNREADABLE = {
+    NO_TEXT_LAYER: "This PDF has no text in it - it looks like a scan or a photo. Upload the original PDF, or type the details in.",
+    IMAGE_UNSUPPORTED: "That is a photo, not a document. Upload the PDF, or type the details in.",
+    DOCX_UNSUPPORTED: "Word files cannot be read here yet. Save it as a PDF and upload that.",
+    UNSUPPORTED: "That file type cannot be read. A PDF works best."
+  };
+  var AG_LABELS = {
+    client_name: "Client name", a_number: "A number",
+    client_phone: "Phone", client_email: "Email"
+  };
+  function agreementBlock(form) {
+    var note = h("div", { style: "font-size:12px;color:" + MUTED + ";margin-bottom:8px;" ,
+      text: "Optional. Upload a signed agreement and the client's details are read off it for you to check. Nothing is saved until you do." });
+    var review = h("div", { style: "margin-top:10px;" });
+    var file = h("input", { type: "file", accept: "application/pdf", style: "display:none;" });
+    var btn = h("button", {
+      type: "button", class: "btn-secondary",
+      style: "width:100%;padding:10px;border:1.5px dashed " + GOLD + ";border-radius:6px;background:transparent;color:" + NAVY + ";cursor:pointer;font-size:13px;font-weight:600;",
+      text: "Choose a PDF",
+      onclick: function () { file.click(); }
+    });
+    file.addEventListener("change", function () {
+      var f = file.files && file.files[0];
+      if (!f) return;
+      clear(review);
+      btn.disabled = true; btn.textContent = "Reading...";
+      var fd = new FormData();
+      fd.append("file", f);
+      fetch("/consultant/clients/extract-agreement", { method: "POST", body: fd, credentials: "same-origin" })
+        .then(function (r) { return r.json().catch(function () { return { ok: false, error: "HTTP " + r.status }; })
+          .then(function (d) {
+            if (!r.ok || d.ok === false) throw new Error((d.code && UNREADABLE[d.code]) || d.error || ("HTTP " + r.status));
+            return d;
+          }); })
+        .then(function (d) { drawReview(d.proposal, f.name || "agreement.pdf"); })
+        .catch(function (e) { review.appendChild(note2(e.message, true)); })
+        .then(function () { btn.disabled = false; btn.textContent = "Choose a different PDF"; file.value = ""; });
+    });
+    function note2(msg, bad) {
+      return h("div", { text: msg, style: "font-size:13px;color:" + (bad ? RED : MUTED) + ";margin:6px 0;" });
+    }
+    function drawReview(p, filename) {
+      clear(review);
+      var rows = [], id = p.identity || {};
+      Object.keys(id).forEach(function (k) {
+        var c = id[k];
+        if (!c || c.value == null || c.value === "" || !c.quote) return;
+        rows.push([k, c]);
+      });
+      if (!rows.length) {
+        review.appendChild(note2("Nothing could be read from this file. Enter the details by hand."));
+        return;
+      }
+      var boxes = {};
+      rows.forEach(function (pair) {
+        var k = pair[0], c = pair[1];
+        var cb = h("input", { type: "checkbox", checked: "checked", style: "margin-top:3px;" });
+        boxes[k] = cb;
+        review.appendChild(h("label", {
+          style: "display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid #ddd;border-radius:6px;background:#fff;margin-bottom:6px;cursor:pointer;"
+        }, [cb, h("span", { style: "flex:1;" }, [
+          h("span", { style: "display:block;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:" + MUTED + ";", text: AG_LABELS[k] || k }),
+          h("span", { style: "display:block;font-size:14px;color:" + NAVY + ";", text: String(c.value) }),
+          h("span", { style: "display:block;font-size:12px;font-style:italic;color:" + MUTED + ";margin-top:3px;", text: c.quote })
+        ])]));
+      });
+      review.appendChild(h("button", {
+        type: "button", class: "btn-primary", style: "width:100%;margin-top:4px;", text: "Use ticked details",
+        onclick: function () {
+          rows.forEach(function (pair) {
+            if (!boxes[pair[0]].checked) return;
+            var input = form.querySelector('[name="' + pair[0] + '"]');
+            if (input) input.value = String(pair[1].value);
+          });
+          clear(review);
+          review.appendChild(note2("Read from " + filename + ". Check the fields below before saving."));
+        }
+      }));
+    }
+    return h("div", { class: "card", style: "margin-bottom:14px;" }, [
+      h("div", { style: "font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:" + NAVY + ";margin-bottom:4px;", text: "Signed agreement" }),
+      note, file, btn, review
+    ]);
+  }
+
   // ── Add a client ──────────────────────────────────────────
   function add() {
     var status = h("span", { style: "font-size:13px;margin-left:12px;color:" + MUTED + ";" });
@@ -111,6 +203,7 @@
         location.href = "/consultant/client/" + encodeURIComponent(d.client.client_key) + "?saved=1";
       }).catch(function (e) { btn.disabled = false; status.textContent = e.message; status.style.color = RED; });
     });
+    host.appendChild(agreementBlock(form));
     host.appendChild(form);
   }
 

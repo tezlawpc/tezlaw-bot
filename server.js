@@ -9925,6 +9925,128 @@ app.get("/admin/clients/debug-contacts", async (req, res) => {
   }
 });
 
+// Read a retainer / fee agreement for the WEB add-client forms.
+//
+// The app has its own extractor at /api/staff/clients/extract-agreement, but
+// that route is bearer-only: it was built for the phone and is unreachable from
+// a browser session. Everything under /admin already runs through
+// requireAdminAuth (server.js line 97), so a sibling route here is authenticated
+// by the same cookie the page was loaded with.
+//
+// Returns a PROPOSAL. Nothing is saved. Identity fields may prefill the form;
+// fee terms must be confirmed by a person against the quote they came from.
+const agreementUploadWeb = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 32 * 1024 * 1024, files: 1 },
+});
+app.post("/admin/clients/extract-agreement", agreementUploadWeb.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "no file uploaded (field name must be 'file')" });
+    const proposal = await require("./fee-agreement").extractFromAgreement({
+      buffer: req.file.buffer,
+      filename: req.file.originalname || "",
+    });
+    let branch = null;
+    try {
+      branch = require("./client-provision").branchForMatterType(
+        proposal.identity.matter_type && proposal.identity.matter_type.value
+      );
+    } catch {}
+    res.json({ ok: true, proposal: { ...proposal, suggested_branch: branch } });
+  } catch (err) {
+    // An unreadable file is a 422 with a reason the page can show, not a 500.
+    const readable = ["NO_TEXT_LAYER", "IMAGE_UNSUPPORTED", "DOCX_UNSUPPORTED", "UNSUPPORTED"];
+    const code = readable.includes(err.code) ? 422 : 500;
+    console.error("[/admin/clients/extract-agreement]:", err.message);
+    res.status(code).json({ ok: false, error: err.message, code: err.code || null });
+  }
+});
+
+// Same for the consultant portal, with one difference that is deliberate:
+// the fee terms are stripped here, on the server, before the response leaves.
+//
+// Consultants are outside referrers working under a cooperation agreement, not
+// firm staff. Reading a client's name and A-number off an agreement saves them
+// typing; showing them what the firm charges that client is a different thing
+// entirely, and it is not theirs to see. Enforced server-side rather than by
+// hiding it in the page, because a hidden field is not a boundary.
+app.post("/consultant/clients/extract-agreement", requireConsultant, agreementUploadWeb.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: "no file uploaded (field name must be 'file')" });
+    const full = await require("./fee-agreement").extractFromAgreement({
+      buffer: req.file.buffer,
+      filename: req.file.originalname || "",
+    });
+    const { client_name, a_number, client_phone, client_email } = full.identity || {};
+    res.json({
+      ok: true,
+      proposal: {
+        document_type: full.document_type || null,
+        identity: { client_name, a_number, client_phone, client_email },
+        // No fee_terms, no concerns about fees, no branch: filing is the firm's call.
+        fee_terms: {}, concerns: [], dropped_unquoted: [],
+        suggested_branch: null, text_chars: full.text_chars, truncated: full.truncated,
+      },
+    });
+  } catch (err) {
+    const readable = ["NO_TEXT_LAYER", "IMAGE_UNSUPPORTED", "DOCX_UNSUPPORTED", "UNSUPPORTED"];
+    const code = readable.includes(err.code) ? 422 : 500;
+    console.error("[/consultant/clients/extract-agreement]:", err.message);
+    res.status(code).json({ ok: false, error: err.message, code: err.code || null });
+  }
+});
+
+// Resolve a client's folder from the web page, when provisioning stopped short.
+// The app's twin is /api/staff/clients/:key/provision-folder and is bearer-only.
+//
+// adopt_path arrives from the browser, so it is NOT trusted: it must sit under
+// one of that branch's roots, checked BEFORE anything is written, or a malformed
+// request could map this client onto another client's folder - or onto a
+// firm-wide one.
+app.post("/admin/clients/:key/provision-folder", async (req, res) => {
+  try {
+    const db = require("./db");
+    const cp = require("./client-provision");
+    const dbx = require("./dropbox-integration");
+    const key = String(req.params.key || "").trim();
+    const b = req.body || {};
+    if (!key) return res.status(400).json({ ok: false, error: "client key required" });
+
+    const row = await db.query(
+      `SELECT client_name, a_number FROM tasks WHERE client_key = $1
+        ORDER BY updated_at DESC NULLS LAST LIMIT 1`, [key]
+    );
+    if (!row.rows.length) return res.status(404).json({ ok: false, error: "no client with that key" });
+    const { client_name, a_number } = row.rows[0];
+
+    if (b.adopt_path) {
+      if (!b.branch) return res.status(400).json({ ok: false, error: "branch is required with adopt_path" });
+      const { roots, error } = await cp.rootsForBranch(b.branch);
+      if (error) return res.status(400).json({ ok: false, error });
+      const pth = String(b.adopt_path).replace(/\/+$/, "");
+      const inside = roots.some(r => {
+        const root = (String(r).startsWith("/") ? String(r) : "/" + r).replace(/\/+$/, "");
+        return pth === root || pth.startsWith(root + "/");
+      });
+      if (!inside) return res.status(400).json({ ok: false, error: `${pth} is not under a ${b.branch} root` });
+      await dbx.setClientFolderMapping({ clientKey: key, aNumber: a_number, clientName: client_name, dropboxPath: pth });
+      return res.json({ ok: true, folder: { ok: true, action: "adopted", path: pth, reason: "picked by a person" } });
+    }
+
+    if (!b.branch) return res.status(400).json({ ok: false, error: "branch required" });
+    // create_new means somebody saw the candidates and said none of them is
+    // this client. Only then may the duplicate check be skipped.
+    const folder = await cp.provisionClientFolder({
+      clientKey: key, clientName: client_name, aNumber: a_number,
+      branch: b.branch, skipSuggest: b.create_new === true,
+    });
+    res.json({ ok: folder.ok !== false, folder });
+  } catch (err) {
+    console.error("[/admin/clients/:key/provision-folder]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Add a contact-only client (name/phone/email/A#/referral/notes) directly
 // from the web /admin/clients page — bypasses the New Case Wizard for
 // simple contact records the firm hasn't opened a matter for yet.
@@ -9961,7 +10083,25 @@ app.post("/admin/clients/add-contact", async (req, res) => {
         String(b.a_number || "").trim() || null,
       ]
     );
-    res.json({ ok: true, client: r.rows[0] });
+    // Give the client a folder. This endpoint predates provisioning and did
+    // its own INSERT, so every client added from the web page landed with
+    // nowhere to put their paper. Runs after the row is written and cannot
+    // throw: a Dropbox outage must not lose a client somebody just typed in.
+    let folder = null;
+    try {
+      const cp = require("./client-provision");
+      const resolved = b.branch || cp.branchForMatterType(b.matter_type || b.practice_area);
+      folder = resolved
+        ? await cp.provisionClientFolder({
+            clientKey: client_key, clientName: name,
+            aNumber: String(b.a_number || "").trim() || null, branch: resolved,
+          })
+        : { ok: true, action: "needs_branch", reason: "practice area unknown - ask immigration or civil" };
+    } catch (e) {
+      console.error("[/admin/clients/add-contact] folder:", e.message);
+      folder = { ok: false, action: "error", reason: e.message };
+    }
+    res.json({ ok: true, client: r.rows[0], folder });
   } catch (err) {
     console.error("[/admin/clients/add-contact]:", err.message);
     res.status(500).json({ ok: false, error: err.message });
