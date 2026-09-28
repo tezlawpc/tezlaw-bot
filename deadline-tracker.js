@@ -664,7 +664,7 @@ function buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14, t15_me
 }
 
 async function sendTelegramAlert(text) {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const botToken = (process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN);
   const chatId = process.env.RECIPIENT_JJ_TELEGRAM_ID || process.env.RECIPIENT_JUE_TELEGRAM_ID;
   if (!botToken || !chatId) {
     console.warn("[deadline-tracker] Telegram not configured, skipping alert");

@@ -2024,10 +2024,10 @@ app.post("/consultant/tasks", requireConsultant, async (req, res) => {
     // Ping the firm's Telegram group so someone reviews the new submission
     try {
       const telegramGroup = process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID;
-      if (telegramGroup && process.env.TELEGRAM_BOT_TOKEN) {
+      if (telegramGroup && (process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN)) {
         const axios = require("axios");
         const msg = `🆕 *New consultant work order*\nFrom: ${req.user.name || req.user.username}\n\n*${cleaned.title}*\n${cleaned.client_name ? `Client: ${cleaned.client_name}\n` : ""}Priority: ${cleaned.priority}${cleaned.due_date ? `\nDue: ${cleaned.due_date}` : ""}\n\nView: ${process.env.RENDER_EXTERNAL_URL || ""}/admin/tasks`;
-        await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        await axios.post(`https://api.telegram.org/bot${(process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN)}/sendMessage`, {
           chat_id: telegramGroup, text: msg, parse_mode: "Markdown",
         }).catch(() => {});
       }
@@ -11934,6 +11934,54 @@ app.post("/voice/transcribe",        (req, res) => handleTranscription(req, res)
 
 app.listen(PORT, async () => {
   console.log(`🚀 Zara running on port ${PORT}`);
+
+  // ── Telegram: check the token, and claim the webhook ──────────
+  //
+  // Two things used to be done by hand and could silently drift apart:
+  // the token in the environment, and the webhook registered with Telegram
+  // against whatever token was current when somebody last ran a curl.
+  //
+  // When the token was revoked, EVERYTHING Telegram stopped - sending and
+  // receiving - and nothing said so. The only reason anybody noticed was that
+  // the hearing-notes screen happened to surface its error to a person; court
+  // mail, digests, deadline alerts and task notifications had been failing
+  // quietly for hours.
+  //
+  // So on every boot: ask Telegram who we are, say it loudly either way, and
+  // re-point the webhook at this server. A token change is then just an
+  // environment variable and a restart.
+  (async () => {
+    const token = process.env.TELEGRAM_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) { console.error("❌ TELEGRAM: no token set - Telegram is entirely disabled"); return; }
+    const axios = require("axios");
+    let me = null;
+    try {
+      const r = await axios.get(`https://api.telegram.org/bot${token}/getMe`, { timeout: 10000 });
+      me = r.data && r.data.result;
+      console.log(`✅ TELEGRAM: token valid, bot is @${me && me.username}`);
+    } catch (e) {
+      const why = e.response?.data?.description || e.message;
+      console.error(`❌ TELEGRAM: token REJECTED (${why}). Every Telegram feature is down - sending and receiving. Get a fresh token from @BotFather and set TELEGRAM_TOKEN and TELEGRAM_BOT_TOKEN.`);
+      return;
+    }
+    // Both variables should hold the same token. Saying so at boot beats
+    // discovering it when half the notifications have been dead for a day.
+    if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_TOKEN &&
+        process.env.TELEGRAM_BOT_TOKEN !== process.env.TELEGRAM_TOKEN) {
+      console.error("⚠️  TELEGRAM: TELEGRAM_TOKEN and TELEGRAM_BOT_TOKEN differ. Half the senders use each, so one of them is failing. Set both to the same value.");
+    }
+    const base = (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || "https://tezlaw-bot.onrender.com").replace(/\/$/, "");
+    try {
+      await axios.get(`https://api.telegram.org/bot${token}/setWebhook`, {
+        params: { url: `${base}/telegram` }, timeout: 10000,
+      });
+      console.log(`✅ TELEGRAM: webhook pointed at ${base}/telegram`);
+    } catch (e) {
+      console.error("❌ TELEGRAM: could not set the webhook -", e.response?.data?.description || e.message,
+        "- the bot will send but never receive.");
+    }
+  })();
+
   initDB();
   initIntakeTable();
   initComplianceTable();

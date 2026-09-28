@@ -402,7 +402,7 @@ async function runBackup({ manual = false, onProgress = null } = {}) {
 }
 
 async function sendTelegramAlert(summary) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const token = (process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN);
   const jjChatId = process.env.RECIPIENT_JJ_TELEGRAM_ID || process.env.RECIPIENT_JUE_TELEGRAM_ID;
   if (!token || !jjChatId) return;
   const msg = `📦 Daily Zara backup complete

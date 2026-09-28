@@ -429,7 +429,7 @@ async function runDailyReminders() {
 }
 
 async function sendTelegramAlert(message) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const token = (process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN);
   const jjChatId = process.env.RECIPIENT_JJ_TELEGRAM_ID || process.env.RECIPIENT_JUE_TELEGRAM_ID;
   if (!token || !jjChatId) return;
   await axios.post(

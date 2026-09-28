@@ -844,7 +844,7 @@ async function sendToTeamGroup(id) {
     process.env.HEARING_NOTES_TELEGRAM_ID ||
     process.env.RECIPIENT_JUE_TELEGRAM_ID ||
     process.env.RECIPIENT_JUE_TELEGRAM;
-  const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+  const telegramToken = (process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN);
 
   if (!rawRecipient || !telegramToken) {
     throw new Error("Telegram not configured. Set HEARING_NOTES_TELEGRAM_GROUP_ID env var.");

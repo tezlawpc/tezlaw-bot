@@ -8206,7 +8206,7 @@ ${groups.map(g => `
       );
       try {
         const group = process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID;
-        const tok = process.env.TELEGRAM_BOT_TOKEN;
+        const tok = (process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN);
         if (group && tok) {
           const axios = require("axios");
           await axios.post(`https://api.telegram.org/bot${tok}/sendMessage`, {
@@ -8762,10 +8762,10 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
         data: { screen: "client-message", clientKey },
       }).catch(() => {});
       try {
-        if (process.env.TELEGRAM_BOT_TOKEN && (process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID)) {
+        if ((process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN) && (process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID)) {
           const axios = require("axios");
           await axios.post(
-            `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+            `https://api.telegram.org/bot${(process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN)}/sendMessage`,
             {
               chat_id: process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID,
               text: `💬 *New client message* from ${req.user.n || "client"}\n\n${body.substring(0, 400)}`,
