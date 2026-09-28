@@ -132,5 +132,48 @@ else fail("adopt_path is written before it is validated — a bad path could map
 if (/is not under a \$\{b\.branch\} root/.test(api)) ok("an out-of-root adopt_path is rejected with a reason");
 else fail("rejecting an out-of-root adopt_path should say why");
 
+// ── 5. skipSuggest: the "none of these, make a new one" escape ─────
+// It exists so a person who reviewed the candidates can proceed. The danger is
+// that it grows into a general "just create it" flag, which would hand a client
+// a second, empty folder while their real one sits elsewhere. These pin it down.
+const iSkipDecl  = src.indexOf("skipSuggest = false");
+const iMapped    = src.indexOf('action: "already_mapped"');
+const iAdopted   = src.indexOf('action: "adopted"');
+const iSkipGuard = src.indexOf("if (!skipSuggest)");
+if (iSkipDecl === -1) fail("provisionClientFolder should accept skipSuggest so a reviewed client can be created");
+else ok("provisionClientFolder accepts skipSuggest");
+if (iSkipGuard === -1) fail("skipSuggest is declared but never guards the suggestion step");
+else if (iMapped !== -1 && iAdopted !== -1 && iMapped < iSkipGuard && iAdopted < iSkipGuard) {
+  ok("skipSuggest skips ONLY the weak-candidate step — already_mapped and adopted still run first");
+} else {
+  fail("skipSuggest must sit after the already_mapped and confident-adopt steps, or it could orphan a folder the client is already in");
+}
+const iCreateFolderCall = src.indexOf("dbx.createFolder(path)");
+if (iSkipGuard !== -1 && iCreateFolderCall !== -1 && iSkipGuard < iCreateFolderCall) {
+  ok("the suggestion step is still positioned before any folder is created");
+} else if (iSkipGuard !== -1) {
+  fail("the suggestion step must come before createFolder");
+}
+
+// Only the retry endpoint may forward it. At creation time nobody has looked at
+// the candidates yet, so contact-only must still stop on needs_review.
+const iContactOnly = api.indexOf('app.post("/api/staff/clients/contact-only"');
+const iProvisionEp = api.indexOf('app.post("/api/staff/clients/:key/provision-folder"');
+if (iContactOnly !== -1 && iProvisionEp !== -1) {
+  const contactBody = api.slice(iContactOnly, api.indexOf("app.post(\"/api/staff/clients/extract-agreement\""));
+  if (/skipSuggest|create_new/.test(contactBody)) {
+    fail("contact-only forwards create_new/skipSuggest — a brand new client would skip the duplicate check nobody has reviewed");
+  } else {
+    ok("contact-only does not forward create_new — creation still stops on possible duplicates");
+  }
+  if (/skipSuggest: b\.create_new === true/.test(api)) {
+    ok("create_new is honoured only as a strict boolean true, on the retry endpoint");
+  } else if (/create_new/.test(api)) {
+    fail("create_new should be compared strictly to true, so a stray truthy value cannot force creation");
+  } else {
+    fail("the provision-folder endpoint has no create_new path — a reviewer who rejects every candidate would be stuck");
+  }
+}
+
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL CLIENT PROVISION CHECKS PASSED\n");
 process.exit(failures ? 1 : 0);

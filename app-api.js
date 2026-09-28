@@ -2824,7 +2824,7 @@ function registerAppApi(app) {
   //   needs_branch - nobody said immigration or civil, so ask
   //   needs_review - existing folders might be this client; a human picks
   //   adopted / created / already_mapped / refused / error
-  async function provisionFolderSafely({ clientKey, clientName, aNumber, branch, hint }) {
+  async function provisionFolderSafely({ clientKey, clientName, aNumber, branch, hint, skipSuggest = false }) {
     let cp;
     try {
       cp = require("./client-provision");
@@ -2840,7 +2840,7 @@ function registerAppApi(app) {
       return { ok: true, action: "needs_branch", reason: "practice area unknown — ask immigration or civil" };
     }
     try {
-      return await cp.provisionClientFolder({ clientKey, clientName, aNumber, branch: resolved });
+      return await cp.provisionClientFolder({ clientKey, clientName, aNumber, branch: resolved, skipSuggest });
     } catch (e) {
       console.error("[client folder]", e.message);
       return { ok: false, action: "error", reason: e.message };
@@ -2959,9 +2959,12 @@ function registerAppApi(app) {
         return res.json({ ok: true, folder: { ok: true, action: "adopted", path: p, reason: "picked by a person" } });
       }
 
+      // create_new means a person was shown the needs_review candidates and said
+      // none of them is this client. Only this endpoint may set it: at creation
+      // time nobody has looked, so contact-only must still stop on candidates.
       const folder = await provisionFolderSafely({
         clientKey: key, clientName: client_name, aNumber: a_number,
-        branch: b.branch, hint: b.matter_type,
+        branch: b.branch, hint: b.matter_type, skipSuggest: b.create_new === true,
       });
       res.json({ ok: folder.ok !== false, folder });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }

@@ -101,7 +101,7 @@ function branchForMatterType(matterType) {
  */
 async function provisionClientFolder({
   clientKey, clientName, aNumber = null, branch,
-  subfolders = true, dryRun = false, allowCreate = true,
+  subfolders = true, dryRun = false, allowCreate = true, skipSuggest = false,
 }) {
   const out = {
     ok: false, action: null, branch, path: null, score: null,
@@ -152,7 +152,13 @@ async function provisionClientFolder({
 
   // 3. Weaker candidates -> stop. Creating now is how a client ends up with two
   //    folders, and the second one is the empty one everybody finds first.
-  try {
+  //
+  //    skipSuggest is the one way past this, and it exists for exactly one
+  //    caller: a person who was shown these candidates, looked at them, and
+  //    said none of them is this client. It skips THIS step only - an existing
+  //    mapping (1) and a confident match (2) are both still honoured above, so
+  //    it can never orphan a folder this client is already filed in.
+  if (!skipSuggest) try {
     const cands = await dbx.suggestClientFolders({ clientName, aNumber, roots, minScore: 20, limit: 8 });
     if (cands && cands.length) {
       return Object.assign(out, {
