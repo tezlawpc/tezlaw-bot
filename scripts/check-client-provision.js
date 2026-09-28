@@ -225,5 +225,69 @@ if (iInst === -1) {
   else fail("the wizard must return the folder outcome, or needs_review has nowhere to surface");
 }
 
+// ── 7. The broker level ───────────────────────────────────────
+// The tree is <branch root>/<broker>/<client>: dropbox-integration scans two
+// levels deep for exactly that reason. Creating at the root instead puts a new
+// client BESIDE the brokers, where nobody looking for them will look.
+if (/brokerFolder = null,/.test(src)) ok("provisionClientFolder accepts a broker folder");
+else fail("provisionClientFolder cannot put a client inside a broker's folder");
+
+// brokerFolder comes from a browser or a phone, so it is not trusted: a bad
+// value could drop a client anywhere in the tree, including inside another
+// client's folder.
+const iCreate = src.indexOf("let parent = String(roots[0])");
+const iMkdir = src.indexOf("dbx.createFolder(path)");
+const iValidate = src.indexOf("const okParent = roots.some");
+if (iValidate === -1) {
+  fail("brokerFolder is used without being checked against the branch roots");
+} else if (iMkdir !== -1 && iValidate < iMkdir) {
+  ok("brokerFolder is validated BEFORE the folder is created");
+} else {
+  fail("brokerFolder must be validated before anything is written");
+}
+if (/want\.slice\(rt\.length \+ 1\)\.indexOf\("\/"\) === -1/.test(src)) {
+  ok("a broker folder must be exactly one level under a root - not nested deeper");
+} else {
+  fail("a broker folder nested deeper than one level would let a client be filed inside another client");
+}
+if (/is not a broker folder directly under a/.test(src)) {
+  ok("a rejected broker folder says why");
+} else {
+  fail("rejecting a broker folder should say why");
+}
+
+// The picker's data source.
+if (/async function brokerFolders\(/.test(src)) ok("the broker folders under a branch can be listed");
+else fail("no brokerFolders - a create-client form has nothing to offer");
+if (/looks_like_client/.test(src)) {
+  ok("folders named 'Last, First' are flagged as probable clients, not brokers");
+} else {
+  fail("the listing should flag folders that look like client folders");
+}
+// The comma is a guess. Nothing may be hidden on the strength of it.
+const iBF = src.indexOf("async function brokerFolders(");
+if (iBF !== -1) {
+  const body = src.slice(iBF, src.indexOf("\nmodule.exports", iBF));
+  if (/\.filter\([^)]*looks_like_client/.test(body)) {
+    fail("brokerFolders must not drop folders on the strength of a comma - flag them, do not hide them");
+  } else {
+    ok("every folder is returned and flagged, none hidden on a guess");
+  }
+}
+
+// Every creation path must be able to pass it, or one screen files correctly
+// and another silently does not.
+const iContact = api.indexOf('app.post("/api/staff/clients/contact-only"');
+const iWizard = api.indexOf('app.post("/api/staff/matter-templates/:id/instantiate"');
+for (const [label, i] of [["contact-only", iContact], ["the New Case wizard", iWizard]]) {
+  if (i === -1) { fail(`could not find ${label}`); continue; }
+  const next = api.indexOf("\n  app.", i + 10);
+  const body = api.slice(i, next === -1 ? api.length : next);
+  if (/brokerFolder: /.test(body)) ok(`${label} passes the broker folder through`);
+  else fail(`${label} drops the broker folder - the client would be created at the root`);
+}
+if (/app\.get\("\/api\/staff\/dropbox\/brokers"/.test(api)) ok("the app can list broker folders");
+else fail("the app has no way to list broker folders");
+
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL CLIENT PROVISION CHECKS PASSED\n");
 process.exit(failures ? 1 : 0);

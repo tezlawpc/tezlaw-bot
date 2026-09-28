@@ -108,6 +108,7 @@ function branchForMatterType(matterType) {
 async function provisionClientFolder({
   clientKey, clientName, aNumber = null, branch,
   subfolders = true, dryRun = false, allowCreate = true, skipSuggest = false,
+  brokerFolder = null,
 }) {
   const out = {
     ok: false, action: null, branch, path: null, score: null,
@@ -183,9 +184,35 @@ async function provisionClientFolder({
   const folderName = dbx.toLastCommaFirst(clientName);
   if (!folderName) return Object.assign(out, { action: "refused", reason: "could not build a folder name" });
 
-  const root = String(roots[0]).replace(/\/+$/, "");
-  const path = (root.startsWith("/") ? root : "/" + root) + "/" + folderName;
+  // The tree is <branch root>/<broker>/<client>: dropbox-integration scans two
+  // levels deep precisely because clients sit inside a broker's folder. Creating
+  // at the root instead puts a new client BESIDE the brokers, where the people
+  // who look for them will not look.
+  //
+  // brokerFolder comes from the caller, so it is not trusted: it must be a
+  // direct child of one of THIS branch's roots. Otherwise a bad value could
+  // drop a client anywhere in the tree, including inside another client.
+  let parent = String(roots[0]).replace(/\/+$/, "");
+  if (parent && !parent.startsWith("/")) parent = "/" + parent;
+  if (brokerFolder) {
+    const want = ("/" + String(brokerFolder).replace(/^\/+|\/+$/g, ""));
+    const okParent = roots.some(r => {
+      const rt = ("/" + String(r).replace(/^\/+|\/+$/g, ""));
+      if (!want.startsWith(rt + "/")) return false;
+      // Exactly one level below the root - a broker folder, not a client's.
+      return want.slice(rt.length + 1).indexOf("/") === -1;
+    });
+    if (!okParent) {
+      return Object.assign(out, {
+        action: "refused",
+        reason: `${brokerFolder} is not a broker folder directly under a ${branch} root`,
+      });
+    }
+    parent = want;
+  }
+  const path = parent + "/" + folderName;
   out.path = path;
+  out.broker_folder = brokerFolder ? parent : null;
 
   if (dryRun) {
     return Object.assign(out, { ok: true, action: "created", reason: "dry run - nothing written", subfolders: subfolders ? subfoldersFor(branch) : [] });
@@ -214,10 +241,52 @@ async function provisionClientFolder({
   return Object.assign(out, { ok: true, action: "created", reason: "no existing folder matched, so a new one was created" });
 }
 
+/**
+ * The folders sitting directly under a branch root, for a create-client form to
+ * choose from.
+ *
+ * At that level a broker folder ("Law Patrick") and a client who came to the
+ * firm directly ("Kong, Xiangmin") look the same to Dropbox. The comma is the
+ * tell, because client folders are built by toLastCommaFirst. That is a guess,
+ * so nothing is hidden on the strength of it: every folder is returned, each
+ * flagged, and the caller decides what to show first.
+ */
+async function brokerFolders(branch) {
+  const { roots, error } = await rootsForBranch(branch);
+  if (error) return { folders: [], error };
+  const out = [];
+  for (const r of roots) {
+    const root = "/" + String(r).replace(/^\/+|\/+$/g, "");
+    let entries;
+    try {
+      entries = await dbx.listFolder(root);
+    } catch (e) {
+      return { folders: [], error: `could not read ${root}: ${e.message}` };
+    }
+    for (const e of entries || []) {
+      if (e[".tag"] !== "folder") continue;
+      out.push({
+        name: e.name,
+        path: e.path_display,
+        root,
+        // "Last, First" is how a client folder is named. A folder without a
+        // comma is far more likely to be a broker.
+        looks_like_client: /,/.test(e.name),
+      });
+    }
+  }
+  out.sort((a, b) =>
+    (a.looks_like_client === b.looks_like_client)
+      ? a.name.localeCompare(b.name)
+      : (a.looks_like_client ? 1 : -1));
+  return { folders: out, error: null };
+}
+
 module.exports = {
   provisionClientFolder,
   branchForMatterType,
   rootsForBranch,
+  brokerFolders,
   subfoldersFor,
   BRANCHES,
   IMMIGRATION_SUBFOLDERS,

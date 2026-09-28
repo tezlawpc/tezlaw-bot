@@ -9996,6 +9996,24 @@ app.post("/consultant/clients/extract-agreement", requireConsultant, agreementUp
   }
 });
 
+// The broker folders under a branch, for the web Add Client form.
+// A client lives at <branch root>/<broker>/<client>, so which broker is as much
+// a part of creating them as immigration or civil.
+app.get("/admin/clients/brokers", async (req, res) => {
+  try {
+    const branch = String(req.query.branch || "").trim();
+    if (branch !== "immigration" && branch !== "civil") {
+      return res.status(400).json({ ok: false, error: "branch must be immigration or civil" });
+    }
+    const { folders, error } = await require("./client-provision").brokerFolders(branch);
+    if (error) return res.status(400).json({ ok: false, error });
+    res.json({ ok: true, folders });
+  } catch (err) {
+    console.error("[/admin/clients/brokers]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Resolve a client's folder from the web page, when provisioning stopped short.
 // The app's twin is /api/staff/clients/:key/provision-folder and is bearer-only.
 //
@@ -10039,6 +10057,7 @@ app.post("/admin/clients/:key/provision-folder", async (req, res) => {
     const folder = await cp.provisionClientFolder({
       clientKey: key, clientName: client_name, aNumber: a_number,
       branch: b.branch, skipSuggest: b.create_new === true,
+      brokerFolder: b.broker_folder || null,
     });
     res.json({ ok: folder.ok !== false, folder });
   } catch (err) {
@@ -10095,6 +10114,7 @@ app.post("/admin/clients/add-contact", async (req, res) => {
         ? await cp.provisionClientFolder({
             clientKey: client_key, clientName: name,
             aNumber: String(b.a_number || "").trim() || null, branch: resolved,
+            brokerFolder: b.broker_folder || null,
           })
         : { ok: true, action: "needs_branch", reason: "practice area unknown - ask immigration or civil" };
     } catch (e) {

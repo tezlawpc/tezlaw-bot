@@ -2824,7 +2824,7 @@ function registerAppApi(app) {
   //   needs_branch - nobody said immigration or civil, so ask
   //   needs_review - existing folders might be this client; a human picks
   //   adopted / created / already_mapped / refused / error
-  async function provisionFolderSafely({ clientKey, clientName, aNumber, branch, hint, skipSuggest = false }) {
+  async function provisionFolderSafely({ clientKey, clientName, aNumber, branch, hint, skipSuggest = false, brokerFolder = null }) {
     let cp;
     try {
       cp = require("./client-provision");
@@ -2840,7 +2840,7 @@ function registerAppApi(app) {
       return { ok: true, action: "needs_branch", reason: "practice area unknown — ask immigration or civil" };
     }
     try {
-      return await cp.provisionClientFolder({ clientKey, clientName, aNumber, branch: resolved, skipSuggest });
+      return await cp.provisionClientFolder({ clientKey, clientName, aNumber, branch: resolved, skipSuggest, brokerFolder });
     } catch (e) {
       console.error("[client folder]", e.message);
       return { ok: false, action: "error", reason: e.message };
@@ -2879,8 +2879,24 @@ function registerAppApi(app) {
       const folder = await provisionFolderSafely({
         clientKey: client_key, clientName: name, aNumber: b.a_number || null,
         branch: b.branch, hint: b.matter_type || b.practice_area || b.matter_interest,
+        brokerFolder: b.broker_folder || null,
       });
       res.json({ ok: true, client: r.rows[0], folder });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // The broker folders under a branch, for a create-client form to choose from.
+  // A client lives at <branch root>/<broker>/<client>, so "which broker" is as
+  // much a part of creating them as "immigration or civil".
+  app.get("/api/staff/dropbox/brokers", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const branch = String(req.query.branch || "").trim();
+      if (branch !== "immigration" && branch !== "civil") {
+        return res.status(400).json({ ok: false, error: "branch must be immigration or civil" });
+      }
+      const { folders, error } = await require("./client-provision").brokerFolders(branch);
+      if (error) return res.status(400).json({ ok: false, error });
+      res.json({ ok: true, folders });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -2986,6 +3002,7 @@ function registerAppApi(app) {
       const folder = await provisionFolderSafely({
         clientKey: key, clientName: client_name, aNumber: a_number,
         branch: b.branch, hint: b.matter_type, skipSuggest: b.create_new === true,
+        brokerFolder: b.broker_folder || null,
       });
       res.json({ ok: folder.ok !== false, folder });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -7613,6 +7630,7 @@ function registerAppApi(app) {
       const folder = await provisionFolderSafely({
         clientKey: effectiveKey, clientName: client_name, aNumber: a_number || null,
         branch: req.body?.branch, hint: effectiveMatter,
+        brokerFolder: req.body?.broker_folder || null,
       });
 
       res.json({

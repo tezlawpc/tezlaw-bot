@@ -601,12 +601,42 @@ function dayPT(d) {
 async function brokerLine(clientKey) {
   if (!clientKey) return null;
   try {
+    // The broker IS the folder the client's folder sits in. The Dropbox tree is
+    // <branch root>/<broker>/<client> - dropbox-integration scans two levels
+    // deep for exactly that reason ("sub-branches (e.g. broker folders like
+    // 'Law Patrick')"). So read it off the mapped path rather than from a field
+    // somebody has to remember to fill in.
+    //
+    // A client filed directly under a branch root has no broker: they came to
+    // the firm directly, and saying "Broker: Law ICAN Immigration" would name a
+    // practice area as a person.
+    const dbx = require("./dropbox-integration");
+    const cp = require("./client-provision");
+    const c = await require("./client-profiles").getClientByKey(clientKey);
+    const folder = c && await dbx.resolveClientFolder({
+      clientKey: c.key, clientName: c.client_name, aNumber: c.a_number,
+    });
+    if (folder) {
+      const parent = String(folder).replace(/\/+$/, "").split("/").slice(0, -1).join("/");
+      const norm = (x) => "/" + String(x).replace(/^\/+|\/+$/g, "");
+      let roots = [];
+      for (const b of ["immigration", "civil"]) {
+        try { const r = await cp.rootsForBranch(b); if (r.roots) roots = roots.concat(r.roots); } catch (e) { /* branch not set up */ }
+      }
+      const isRoot = roots.some(r => norm(r) === norm(parent));
+      if (parent && !isRoot) {
+        const name = parent.split("/").filter(Boolean).pop();
+        if (name) return `Broker: ${name}`;
+      }
+      if (isRoot) return "Broker: direct (no broker folder)";
+    }
+    // No folder mapped yet - fall back to what somebody typed on intake.
     const r = await db.query(
       `SELECT referral_source FROM tasks
         WHERE client_key = $1 AND referral_source IS NOT NULL AND referral_source <> ''
         ORDER BY updated_at DESC NULLS LAST LIMIT 1`, [clientKey]);
     const who = r.rows[0] && String(r.rows[0].referral_source).trim();
-    return who ? `Broker: ${who}` : "Broker: not on file";
+    return who ? `Broker: ${who} (from intake)` : "Broker: not on file";
   } catch (e) {
     // Never let a lookup stop a notification going out.
     console.error("[court mail] broker lookup:", e.message);

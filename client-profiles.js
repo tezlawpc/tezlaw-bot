@@ -469,6 +469,13 @@ function renderClientList(clients) {
           +         '<button type="button" data-branch="civil" onclick="acSetBranch(this)" style="padding:7px 16px;border:1px solid #D4B983;border-radius:999px;background:#FFF;color:#3E2818;cursor:pointer;font-size:13px;">Civil</button>'
           +       '</div>'
           +     '</div>'
+          +     '<div style="grid-column:1/-1;">'
+          +       '<label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Broker</label>'
+          +       '<div style="font-size:12px;color:#7B5330;margin-bottom:6px;">The client folder is created inside the broker\'s folder. Pick the practice area first.</div>'
+          +       '<select id="ac_broker" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;background:#FFF;" disabled>'
+          +         '<option value="">— choose a practice area first —</option>'
+          +       '</select>'
+          +     '</div>'
           +     '<div style="grid-column:1/-1;"><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Notes</label><textarea id="ac_notes" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;min-height:60px;font-family:inherit;" placeholder="Anything you want to remember about this client..."></textarea></div>'
           +   '</div>'
           +   '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">'
@@ -532,6 +539,40 @@ function renderClientList(clients) {
           b.style.color = on ? "#FFF7E4" : "#3E2818";
           b.style.borderColor = on ? "#F07800" : "#D4B983";
         });
+        acLoadBrokers();
+      }
+      // The brokers are real folders under the chosen root, not a typed name:
+      // a typo would quietly create a second broker folder nobody looks in.
+      async function acLoadBrokers() {
+        var sel = document.getElementById("ac_broker");
+        if (!sel) return;
+        if (!acBranch) {
+          sel.disabled = true;
+          sel.innerHTML = '<option value="">— choose a practice area first —</option>';
+          return;
+        }
+        sel.disabled = true;
+        sel.innerHTML = '<option value="">Loading…</option>';
+        try {
+          var r = await fetch("/admin/clients/brokers?branch=" + encodeURIComponent(acBranch), { credentials: "same-origin" });
+          var d = await r.json();
+          if (!r.ok || !d.ok) throw new Error(d.error || ("HTTP " + r.status));
+          var html = '<option value="">Direct — no broker folder</option>';
+          var likely = d.folders.filter(function (f) { return !f.looks_like_client; });
+          var maybe = d.folders.filter(function (f) { return f.looks_like_client; });
+          likely.forEach(function (f) { html += '<option value="' + acEsc(f.path) + '">' + acEsc(f.name) + '</option>'; });
+          // Folders named "Last, First" are almost certainly clients filed at the
+          // root, not brokers - shown last rather than hidden, in case one is.
+          if (maybe.length) {
+            html += '<optgroup label="These look like client folders">';
+            maybe.forEach(function (f) { html += '<option value="' + acEsc(f.path) + '">' + acEsc(f.name) + '</option>'; });
+            html += '</optgroup>';
+          }
+          sel.innerHTML = html;
+          sel.disabled = false;
+        } catch (err) {
+          sel.innerHTML = '<option value="">Could not load brokers: ' + acEsc(err.message) + '</option>';
+        }
       }
       async function acExtract(inputEl) {
         var f = inputEl.files && inputEl.files[0];
@@ -746,6 +787,7 @@ function renderClientList(clients) {
           referral_source: document.getElementById("ac_referral").value.trim() || null,
           notes: document.getElementById("ac_notes").value.trim() || null,
           branch: acBranch || undefined,
+          broker_folder: (document.getElementById("ac_broker") || {}).value || undefined,
         };
         if (!body.client_name) {
           errBox.textContent = "Client name is required.";
