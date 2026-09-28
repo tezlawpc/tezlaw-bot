@@ -511,8 +511,30 @@ function fakeImap(messages, validity = 7, uidNext = null) {
   const cmSrc = fs.readFileSync(path.join(REPO, "court-mail.js"), "utf8");
   // JJ reads these on a phone: whose client this is comes before the substance.
   check("there is a broker lookup", () => /async function brokerLine\(/.test(cmSrc));
-  check("a client with no broker on file says so rather than printing nothing", () =>
-    /Broker: not on file/.test(cmSrc));
+  // The line must ALWAYS print. It returned null on failure once, null is
+  // dropped by the .filter(Boolean) that assembles the message, and the line
+  // vanished silently - which looked exactly like the feature not shipping.
+  check("brokerLine never returns null", () => {
+    const i = cmSrc.indexOf("async function brokerLine(");
+    if (i === -1) return false;
+    return !/return null/.test(cmSrc.slice(i, cmSrc.indexOf("\nasync function fileDocuments(", i)));
+  });
+  check("a lookup that cannot answer says so", () =>
+    /Broker: could not be looked up/.test(cmSrc));
+  check("an unmatched client says so", () => /Broker: client not matched/.test(cmSrc));
+  check("a client with no folder and nothing on intake says so", () =>
+    /Broker: no folder mapped, none on intake/.test(cmSrc));
+  // referral_source is absent on older installs - add-contact still runs
+  // ALTER TABLE ... IF NOT EXISTS for it. A missing column must not take the
+  // whole line down, so that query needs a catch of its own.
+  check("the intake fallback has its own catch, so a missing column cannot kill the line", () => {
+    const i = cmSrc.indexOf("async function brokerLine(");
+    if (i === -1) return false;
+    const body = cmSrc.slice(i, cmSrc.indexOf("\nasync function fileDocuments(", i));
+    return (body.match(/catch \(e\)/g) || []).length >= 3;
+  });
+  check("the broker is read from the folder tree, not just a typed field", () =>
+    /resolveClientFolder/.test(cmSrc.slice(cmSrc.indexOf("async function brokerLine("), cmSrc.indexOf("\nasync function fileDocuments("))));
   check("a failed broker lookup cannot block the notification", () => {
     const i = cmSrc.indexOf("async function brokerLine(");
     if (i === -1) return false;

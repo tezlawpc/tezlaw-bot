@@ -599,17 +599,18 @@ function dayPT(d) {
  * might mean "nobody filled it in".
  */
 async function brokerLine(clientKey) {
-  if (!clientKey) return null;
+  if (!clientKey) return "Broker: client not matched";
+
+  // Never returns null. The first version did, and a null is dropped by the
+  // .filter(Boolean) that assembles the message - so when the lookup failed,
+  // the line vanished silently and looked like the feature had not shipped.
+  // A lookup that cannot answer says so.
+
+  // 1. The folder tree is the real answer. <branch root>/<broker>/<client>:
+  //    dropbox-integration scans two levels deep for exactly that reason. A
+  //    client directly under a branch root came to the firm directly - saying
+  //    "Broker: Law ICAN Immigration" would name a practice area as a person.
   try {
-    // The broker IS the folder the client's folder sits in. The Dropbox tree is
-    // <branch root>/<broker>/<client> - dropbox-integration scans two levels
-    // deep for exactly that reason ("sub-branches (e.g. broker folders like
-    // 'Law Patrick')"). So read it off the mapped path rather than from a field
-    // somebody has to remember to fill in.
-    //
-    // A client filed directly under a branch root has no broker: they came to
-    // the firm directly, and saying "Broker: Law ICAN Immigration" would name a
-    // practice area as a person.
     const dbx = require("./dropbox-integration");
     const cp = require("./client-provision");
     const c = await require("./client-profiles").getClientByKey(clientKey);
@@ -623,25 +624,31 @@ async function brokerLine(clientKey) {
       for (const b of ["immigration", "civil"]) {
         try { const r = await cp.rootsForBranch(b); if (r.roots) roots = roots.concat(r.roots); } catch (e) { /* branch not set up */ }
       }
-      const isRoot = roots.some(r => norm(r) === norm(parent));
-      if (parent && !isRoot) {
-        const name = parent.split("/").filter(Boolean).pop();
-        if (name) return `Broker: ${name}`;
-      }
-      if (isRoot) return "Broker: direct (no broker folder)";
+      if (parent && roots.some(r => norm(r) === norm(parent))) return "Broker: direct (no broker folder)";
+      const name = parent && parent.split("/").filter(Boolean).pop();
+      if (name) return `Broker: ${name}`;
     }
-    // No folder mapped yet - fall back to what somebody typed on intake.
+  } catch (e) {
+    console.error("[court mail] broker from folder:", e.message);
+  }
+
+  // 2. No folder mapped yet - fall back to what somebody typed on intake.
+  //    Its own try: referral_source is missing on older installs (add-contact
+  //    still runs ALTER TABLE ... IF NOT EXISTS for it), and a missing column
+  //    must not take the whole line down with it.
+  try {
     const r = await db.query(
       `SELECT referral_source FROM tasks
         WHERE client_key = $1 AND referral_source IS NOT NULL AND referral_source <> ''
         ORDER BY updated_at DESC NULLS LAST LIMIT 1`, [clientKey]);
     const who = r.rows[0] && String(r.rows[0].referral_source).trim();
-    return who ? `Broker: ${who} (from intake)` : "Broker: not on file";
+    if (who) return `Broker: ${who} (from intake)`;
   } catch (e) {
-    // Never let a lookup stop a notification going out.
-    console.error("[court mail] broker lookup:", e.message);
-    return null;
+    console.error("[court mail] broker from intake:", e.message);
+    return "Broker: could not be looked up";
   }
+
+  return "Broker: no folder mapped, none on intake";
 }
 
 async function fileDocuments(target, mail, row, record) {
