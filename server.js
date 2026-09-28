@@ -5985,6 +5985,14 @@ try {
   require("./app-api").registerAppApi(app);
 } catch (e) { console.warn("[app-api] load failed:", e.message); }
 
+// Channel inbox: Zara's WhatsApp / Messenger / Telegram / WeChat / web chat
+// conversations, listed in Tara next to the client-portal threads.
+try {
+  const channelInbox = require("./channel-inbox");
+  channelInbox.registerRoutes(app);
+  channelInbox.initTable().catch(e => console.warn("[channel-inbox] init:", e.message));
+} catch (e) { console.warn("[channel-inbox] load failed:", e.message); }
+
 // Daily 8 AM Pacific: send task reminders via Telegram
 (async () => {
   try {

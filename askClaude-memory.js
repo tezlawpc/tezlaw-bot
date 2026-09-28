@@ -151,8 +151,8 @@ async function askClaudeWithMemory(platform, platformId, userMessage, systemProm
       const inbound = jj.redact
         ? "[private mode authentication — content withheld]"
         : (isPdf ? "[PDF uploaded]" : isDocx ? "[DOCX uploaded]" : isImage ? "[Image uploaded]" : userMessage);
-      await db.saveMessage(platform, platformId, "user", inbound);
-      await db.saveMessage(platform, platformId, "assistant", jj.message);
+      await db.saveMessage(platform, platformId, "user", inbound, { thread: false });
+      await db.saveMessage(platform, platformId, "assistant", jj.message, { thread: false });
       // If JJ mode returned an attachment (e.g., filled .docx from /draft),
       // pass it back to caller via a special reply object.
       if (jj.attachment) {

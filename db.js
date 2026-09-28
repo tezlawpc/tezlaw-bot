@@ -142,7 +142,9 @@ async function updateClient(platform, platformId, updates = {}) {
   }
 }
 
-async function saveMessage(platform, platformId, role, content) {
+// opts.thread === false keeps the message out of the Tara inbox. The JJ
+// private-mode path passes it; channel-inbox.js has its own guards too.
+async function saveMessage(platform, platformId, role, content, opts = {}) {
   try {
     await getPool().query(
       `INSERT INTO messages (platform, platform_id, role, content) VALUES ($1, $2, $3, $4)`,
@@ -150,7 +152,11 @@ async function saveMessage(platform, platformId, role, content) {
     );
   } catch (err) {
     console.error("saveMessage error:", err.message);
+    return;
   }
+  if (opts.thread === false) return;
+  try { await require("./channel-inbox").touchThread(platform, platformId, role); }
+  catch (err) { console.error("saveMessage thread:", err.message); }
 }
 
 async function getHistory(platform, platformId, limit = 10) {
