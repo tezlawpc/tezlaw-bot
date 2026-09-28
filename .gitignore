@@ -1,1 +1,24 @@
+# Dependencies — never committed. The M1 has node_modules and the M5 does not,
+# so a plain `git add -A` on the wrong machine used to stage tens of thousands
+# of files. One line of prevention beats one very long `git rm -r --cached`.
+node_modules/
+
+# Secrets. Nothing here should ever reach GitHub.
+.env
+.env.*
+*.pem
+*.key
+
+# Local build/run noise
+.DS_Store
+*.log
+npm-debug.log*
+.cache/
+tmp/
+
+# Left behind when a check cannot clean up after itself
+.kanban-check-stash.js
+
+# Expo bumps the build number in place on every build, which made every
+# `git pull` on the build machine fail with a local-changes conflict.
 app.json

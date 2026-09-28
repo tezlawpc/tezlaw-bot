@@ -360,7 +360,11 @@ const es = require("../esign");
   check("…a retainer goes to Billing", () => uploads.every(u => u.o.category === "billing"));
   check("…and the case history says who signed and when", () => caseLog.some(e => /^Signed: /.test(e.title) && /Client: Jing Liu/.test(e.description) && /Attorney: JJ Zhang/.test(e.description)));
   check("when Dropbox cannot make the PDF, the certificate is still filed and the reason recorded", () => /PDF of the document could not be made/.test(done.finalize_error || ""));
-  const text = (await require("pdf-parse")(done.signed_pdf)).text;
+  // Read the certificate's text from its content streams rather than through
+  // pdf-parse, whose bundled pdf.js (2018) cannot read a single-page pdf-lib
+  // document — see scripts/lib/pdf-text.js. Production is unaffected: it only
+  // ever parses PDFs made elsewhere.
+  const text = require("./lib/pdf-text").pdfText(done.signed_pdf);
   check("the certificate names each signer, with IP and time", () => /CERTIFICATE OF ELECTRONIC SIGNATURE/.test(text) && /Jing Liu/.test(text) && /1\.2\.3\.4/.test(text) && /5\.6\.7\.8/.test(text));
   check("…the document's fingerprint (SHA-256) before and after signing", () => text.replace(/\s/g, "").includes(done.doc_hash) && text.replace(/\s/g, "").includes(done.signed_hash));
   check("…and the consent each signer agreed to", () => /same legal effect/.test(text.replace(/\s+/g, " ")));
