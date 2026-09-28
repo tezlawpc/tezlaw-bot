@@ -2884,6 +2884,27 @@ function registerAppApi(app) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // Court mail for one client, for the app's client screen.
+  //
+  // The web has had this at /admin/clients/:key/court-mail since court-mail.js
+  // grew forClient(); the app never did, so an order that was read, filed and
+  // calendared showed up on Telegram and in Dropbox and nowhere on the client's
+  // own page in Tara.
+  //
+  // Read straight from court_mail rather than copied into notes: the Court Mail
+  // page can undo what an email added, and a copy would not undo with it.
+  app.get("/api/staff/clients/:key/court-mail", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const key = String(req.params.key || "").trim();
+      if (!key) return res.status(400).json({ ok: false, error: "client key required" });
+      const limit = Math.min(200, Number(req.query.limit) || 50);
+      const mail = await require("./court-mail").forClient(key, { limit });
+      res.json({ ok: true, mail });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ── Read a retainer / fee agreement and PROPOSE client fields ──
   // Returns a proposal only; nothing is saved. Identity fields may prefill the
   // create-client form, fee terms must be confirmed by a person first - each

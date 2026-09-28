@@ -507,6 +507,46 @@ function fakeImap(messages, validity = 7, uidNext = null) {
   check("…and the profile has somewhere to show it", () =>
     /id="court-mail-section"/.test(prof) && /loadCourtMail\(\)/.test(prof));
 
+  console.log("\n── Whose client, and what was not filed ────────");
+  const cmSrc = fs.readFileSync(path.join(REPO, "court-mail.js"), "utf8");
+  // JJ reads these on a phone: whose client this is comes before the substance.
+  check("there is a broker lookup", () => /async function brokerLine\(/.test(cmSrc));
+  check("a client with no broker on file says so rather than printing nothing", () =>
+    /Broker: not on file/.test(cmSrc));
+  check("a failed broker lookup cannot block the notification", () => {
+    const i = cmSrc.indexOf("async function brokerLine(");
+    if (i === -1) return false;
+    return /catch \(e\)/.test(cmSrc.slice(i, cmSrc.indexOf("\nasync function", i + 10)));
+  });
+  check("the broker is named before the summary", () => {
+    const i = cmSrc.indexOf("await tellJJ([");
+    if (i === -1) return false;
+    const alert = cmSrc.slice(i, i + 1200);
+    const b = alert.indexOf("broker,"), su = alert.indexOf("reading.summary,");
+    return b !== -1 && su !== -1 && b < su;
+  });
+  check("the daily digest names the broker too", () =>
+    /const bl = await brokerLine\(ck\)/.test(cmSrc));
+  // A court PDF a mail client marked inline is skipped by the attachment
+  // filter. That is the right default for signature images, but it must not
+  // happen silently.
+  check("attachments skipped as inline are tracked", () => /skippedAttachments/.test(cmSrc));
+  check("only PDFs are reported as skipped - nobody needs to hear about a logo", () =>
+    /skippedAttachments[\s\S]{0,400}pdf/i.test(cmSrc));
+  check("the alert says which attachment was not filed", () =>
+    /Not filed \(inline attachment\)/.test(cmSrc));
+
+  console.log("\n── Court mail on the client screen in Tara ─────");
+  const api = fs.readFileSync(path.join(REPO, "app-api.js"), "utf8");
+  check("the app can ask for a client's court mail", () =>
+    /app\.get\("\/api\/staff\/clients\/:key\/court-mail"/.test(api));
+  check("it reads court_mail rather than copying into notes, so undo still works", () => {
+    const i = api.indexOf('app.get("/api/staff/clients/:key/court-mail"');
+    if (i === -1) return false;
+    const body = api.slice(i, api.indexOf("\n  app.", i + 10));
+    return /forClient\(/.test(body) && !/INSERT INTO/.test(body);
+  });
+
   console.log("\n" + (failures ? `${failures} FAILED` : "ALL COURT-MAIL CHECKS PASSED"));
   process.exit(failures ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

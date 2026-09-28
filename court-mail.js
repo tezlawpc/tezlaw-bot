@@ -276,6 +276,15 @@ async function parseRaw(raw) {
     html: m.html || "",
     attachments: (m.attachments || []).filter(a => a.content && a.content.length && !a.related)
       .map(a => ({ filename: a.filename || "attachment", contentType: a.contentType || "", content: a.content })),
+    // What the filter above set aside. `related` parts are normally a signature
+    // image or a logo and are rightly skipped - but a court PDF that some mail
+    // client marked inline would be skipped by the same rule, and nothing would
+    // say so. Named here so a notification can mention it instead of losing it.
+    // PDFs only: nobody needs to be told about a logo.
+    skippedAttachments: (m.attachments || [])
+      .filter(a => a.content && a.content.length && a.related)
+      .filter(a => /\.pdf$/i.test(a.filename || "") || /pdf/i.test(a.contentType || ""))
+      .map(a => a.filename || "attachment"),
   };
 }
 
@@ -576,6 +585,33 @@ function safeName(s) {
 }
 function dayPT(d) {
   return new Date(d || Date.now()).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+}
+
+/**
+ * Who referred this client, for the top of a notification.
+ *
+ * JJ reads these on a phone and wants to know whose client this is before
+ * reading a word about the order. referral_source is the field the rest of the
+ * codebase surfaces as "broker" (client-profiles.js).
+ *
+ * Returns a string to print, never null: a client with no broker on file is
+ * worth saying out loud, because a blank line reads as "no broker" when it
+ * might mean "nobody filled it in".
+ */
+async function brokerLine(clientKey) {
+  if (!clientKey) return null;
+  try {
+    const r = await db.query(
+      `SELECT referral_source FROM tasks
+        WHERE client_key = $1 AND referral_source IS NOT NULL AND referral_source <> ''
+        ORDER BY updated_at DESC NULLS LAST LIMIT 1`, [clientKey]);
+    const who = r.rows[0] && String(r.rows[0].referral_source).trim();
+    return who ? `Broker: ${who}` : "Broker: not on file";
+  } catch (e) {
+    // Never let a lookup stop a notification going out.
+    console.error("[court mail] broker lookup:", e.message);
+    return null;
+  }
 }
 
 async function fileDocuments(target, mail, row, record) {
@@ -899,13 +935,20 @@ async function processMail(id, { target = null, think = null, by = null, notify 
       await db.query(`UPDATE court_mail SET notify_mode = 'digest' WHERE id = $1`, [row.id]);
     } else if (notify) {
       await db.query(`UPDATE court_mail SET notify_mode = 'ping' WHERE id = $1`, [row.id]);
+      const broker = await brokerLine(match.clientKey);
+      // Any attachment the parser set aside. Inline signature images and logos
+      // are correctly skipped; a court PDF a mail client happened to mark
+      // inline would be too, and silently. Name them rather than lose them.
+      const skipped = (mail.skippedAttachments || []).map(n => n).filter(Boolean);
       await tellJJ([
         `${reading.urgent ? "🚨" : "📨"} ${reading.title} — ${match.label || "matched"}`,
+        broker,
         reading.summary,
         added.length ? "Added (verify):\n" + added.map(a => "• " + a.label).join("\n") : "Nothing to calendar.",
         reading.suggested.length ? "Suggested, NOT added:\n" + reading.suggested.map(x => `• ${x.date} ${x.description}`).join("\n") : null,
         filed.length ? `Filed ${filed.length} document(s) to Dropbox.` : (errors.length ? "Not filed: " + errors[0] : null),
         (actions.find(a => a.type === "a_number" && !a.undone) || {}).label || null,
+        skipped.length ? `Not filed (inline attachment): ${skipped.join(", ")} — check the email if that looks like a document.` : null,
         reading.action_items.length ? "To do:\n" + reading.action_items.map(a => "• " + a).join("\n") : null,
         `Review / undo: ${pageUrl(row.id)}`,
       ].filter(Boolean).join("\n"));
@@ -1057,6 +1100,10 @@ async function sendDigest({ send = null, mark = true } = {}) {
   for (const [who, items] of byClient) {
     const aNum = (items.find(i => i.e.a_number) || { e: {} }).e.a_number;
     lines.push(`\n${who}${aNum ? ` (${aNum})` : ""}`);
+    // Whose client this is, before the list of what landed for them.
+    const ck = (items.find(i => i.row.client_key) || { row: {} }).row.client_key;
+    const bl = await brokerLine(ck);
+    if (bl) lines.push(bl);
     for (const { row, e } of items) {
       const what = [e.status, e.category].filter(Boolean).join(" ") || row.subject;
       const flag = row.status === "done" ? "" : "  ⚠ not filed — needs assigning";
