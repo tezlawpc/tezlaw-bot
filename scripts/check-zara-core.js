@@ -666,10 +666,19 @@ async function section(title, fn) {
       () => /jj\.redact/.test(caller));
     check("…and stores a marker instead of the message",
       () => /private mode authentication/.test(caller));
+    // Assert the PROPERTY, not the punctuation. This check used to match the
+    // save call as a literal string, so when it grew a db. prefix and a
+    // { thread: false } option it reported a failure that did not exist —
+    // and a check that cries wolf is worse than no check, because the next
+    // real failure gets waved through. What matters is that the first thing
+    // written to the messages table on a handled JJ turn is the redacted
+    // variable, never the raw inbound text.
     check("…before any saveMessage of the inbound text", () => {
       const i = caller.indexOf("jj.redact");
-      const j = caller.indexOf('saveMessage(platform, platformId, "user", inbound)');
-      return i > -1 && j > i;
+      if (i < 0) return "jj.redact is not read at all";
+      const save = caller.slice(i).match(/saveMessage\(\s*platform\s*,\s*platformId\s*,\s*"user"\s*,\s*([A-Za-z_$][\w$]*)/);
+      if (!save) return "no user saveMessage follows the redact branch";
+      return save[1] === "inbound" || `saves ${save[1]}, which is the raw message — the password would be stored in plaintext`;
     });
   });
 
