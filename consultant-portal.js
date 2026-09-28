@@ -89,6 +89,7 @@ function renderChrome({ title = "Consultant Portal", body, activeTab = "dashboar
       ${tabLink("new", "/consultant/new", "＋ Submit New")}
       ${tabLink("clients", "/consultant/clients", "👥 My Clients")}
       ${tabLink("add-client", "/consultant/clients/new", "＋ Add Client")}
+      ${tabLink("alerts", "/consultant/alerts", "🔔 Alerts")}
     </nav>
     <div class="who">Signed in as <strong>${esc(user.name || user.username || "Consultant")}</strong></div>
     <form method="POST" action="/logout" style="margin:0;"><button type="submit" class="signout">Sign out</button></form>
@@ -434,4 +435,104 @@ function renderTaskDetail({ task, activity, milestones = [], progress = null, us
     ` : ""}`;
 }
 
-module.exports = { renderChrome, renderDashboard, renderNewForm, renderTaskDetail, renderClientsPage };
+
+/**
+ * Alert settings for one consultant.
+ *
+ * Built as plain form POSTs with no inline JavaScript at all. That is a
+ * deliberate choice, not laziness: these pages are JS template literals,
+ * so an apostrophe or a \n inside an onclick handler is swallowed by the
+ * literal and reaches the browser as a syntax error that kills every
+ * script on the page. On 2026-09-28 exactly that took client search down
+ * for five hours. A form needs no script, so it cannot break that way.
+ *
+ * What a consultant can see here is their own contact details and their
+ * own switches. Nothing about any client appears on this page.
+ */
+function renderAlertsPage({ user = {}, me = {}, health = {}, linkCode = null, saved = false, linked = false }) {
+  const on = (v) => v ? "checked" : "";
+  const chan = (key, label, enabled, address, missing, note) => {
+    const ready = !!address;
+    return `
+    <div style="display:flex; gap:14px; align-items:flex-start; padding:16px 0; border-bottom:1px solid #f0f0f0;">
+      <input type="checkbox" name="${key}" value="1" ${on(enabled)} style="width:18px; height:18px; margin-top:2px; flex:0 0 auto;">
+      <div style="flex:1;">
+        <div style="font-weight:600; font-size:15px;">${label}</div>
+        <div style="font-size:13px; color:${ready ? "#555" : "#B45309"}; margin-top:3px;">
+          ${ready ? esc(address) : missing}
+        </div>
+        ${note ? `<div style="font-size:12px; color:#888; margin-top:4px;">${note}</div>` : ""}
+        ${enabled && !ready ? `<div style="font-size:12px; color:#B45309; margin-top:4px; font-weight:600;">Turned on, but there is nowhere to send — you will not be alerted on this channel.</div>` : ""}
+      </div>
+    </div>`;
+  };
+
+  const down = [];
+  if (!health.email) down.push("email");
+  if (!health.sms) down.push("text message");
+  if (!health.telegram) down.push("Telegram");
+
+  return `
+  <div class="page-header">
+    <h1>Alerts</h1>
+    <div class="sub">How you hear when something happens on a client you are assigned to.</div>
+  </div>
+
+  ${saved ? `<div class="card" style="border-left:4px solid #2e7d32; background:#f4faf5;">Saved.</div>` : ""}
+  ${linked ? `<div class="card" style="border-left:4px solid #2e7d32; background:#f4faf5;">Telegram is linked. Alerts will go to that chat.</div>` : ""}
+
+  <div class="card">
+    <h3 style="margin:0 0 4px; font-size:16px;">What you will be told</h3>
+    <p style="font-size:13px; color:#555; line-height:1.6; margin:0 0 14px;">
+      A new court notice, a hearing scheduled or rescheduled, a deadline coming up,
+      or a change in case status &mdash; for your clients only.
+    </p>
+    <p style="font-size:13px; color:#555; line-height:1.6; margin:0; padding:12px 14px; background:#faf9f5; border-radius:6px;">
+      <strong>The alert itself says only what happened and for which client.</strong>
+      Dates, documents, A&#8209;numbers and the substance of a notice are never sent by
+      email or text &mdash; you sign in here to read them. That is deliberate:
+      an email gets forwarded and a phone gets lost.
+    </p>
+  </div>
+
+  <form method="POST" action="/consultant/alerts">
+    <div class="card">
+      <h3 style="margin:0 0 6px; font-size:16px;">Where to reach you</h3>
+      <div style="font-size:12px; color:#888; margin-bottom:6px;">Ask the firm to change your email or phone number.</div>
+      ${chan("notify_email", "Email", me.notify_email !== false, me.email, "No email address on file &mdash; ask the firm to add one.", "")}
+      ${chan("notify_sms", "Text message", me.notify_sms === true, me.phone, "No phone number on file &mdash; ask the firm to add one.", "Standard message rates apply.")}
+      ${chan("notify_telegram", "Telegram", me.notify_telegram === true, me.telegram_chat_id ? "Linked" : "", "Not linked yet &mdash; use the box below.", "")}
+      <div style="margin-top:18px;">
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </form>
+
+  <div class="card">
+    <h3 style="margin:0 0 6px; font-size:16px;">Link Telegram</h3>
+    <p style="font-size:13px; color:#555; line-height:1.6;">
+      Telegram will not let us message you until you message the bot first.
+      ${linkCode
+        ? `Open Telegram, start a chat with <strong>@TEZJJBot</strong>, and send it this code:
+           <div style="font-family:ui-monospace,Menlo,monospace; font-size:22px; font-weight:700; letter-spacing:2px; background:#faf9f5; border:1px dashed #ccc; border-radius:6px; padding:14px; text-align:center; margin:12px 0;">${esc(linkCode)}</div>
+           The code works once. Come back to this page afterwards to confirm.`
+        : `Generate a code, then send it to <strong>@TEZJJBot</strong> on Telegram.`}
+    </p>
+    <form method="POST" action="/consultant/alerts/telegram-code" style="margin:0;">
+      <button type="submit" class="btn-secondary">${linkCode ? "Generate a new code" : "Generate a code"}</button>
+    </form>
+  </div>
+
+  ${down.length ? `
+  <div class="card" style="border-left:4px solid #B45309; background:#fffaf3;">
+    <strong style="font-size:14px;">Not available right now</strong>
+    <div style="font-size:13px; color:#555; margin-top:6px; line-height:1.6;">
+      The firm has not set up ${esc(down.join(" or "))} on the server yet, so alerts on
+      ${down.length > 1 ? "those channels" : "that channel"} will queue rather than send.
+      Nothing is lost &mdash; they go out once it is switched on.
+    </div>
+  </div>` : ""}
+  `;
+}
+
+module.exports = { renderChrome, renderDashboard, renderNewForm, renderTaskDetail, renderClientsPage, renderAlertsPage };

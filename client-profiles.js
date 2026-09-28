@@ -441,10 +441,15 @@ function renderClientList(clients) {
       function showAddContactModal() {
         const backdrop = document.createElement("div");
         backdrop.id = "addContactBackdrop";
-        backdrop.style.cssText = "position:fixed;inset:0;background:rgba(26,16,8,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;";
+        // overflow-y:auto on the backdrop AND a height cap on the panel below.
+        // Without both, uploading an agreement makes the review section tall
+        // enough to run off the top and bottom of the screen with nothing to
+        // scroll — align-items:center centres an element taller than the
+        // viewport by pushing its top out of reach.
+        backdrop.style.cssText = "position:fixed;inset:0;background:rgba(26,16,8,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;overscroll-behavior:contain;";
         backdrop.onclick = (e) => { if (e.target === backdrop) closeAddContactModal(); };
         backdrop.innerHTML = ''
-          + '<div style="background:#FBF3DE;border-radius:12px;padding:28px;max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 0 1.5px #B8891E;">'
+          + '<div style="background:#FBF3DE;border-radius:12px;padding:28px;max-width:520px;width:100%;max-height:calc(100vh - 40px);overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 0 1.5px #B8891E;">'
           +   '<h2 style="margin:0 0 6px 0;font-family:Cinzel,serif;color:#3E2818;letter-spacing:2px;text-transform:uppercase;font-size:18px;">Add Client</h2>'
           +   '<p style="margin:0 0 20px 0;font-family:Georgia,serif;font-style:italic;color:#7B5330;font-size:13px;">Quick contact record — no case or matter needed. You can attach a case later.</p>'
           +   '<div id="addContactError" style="display:none;background:rgba(160,40,24,0.10);color:#A02818;padding:10px 12px;border-radius:6px;border:1px solid #A02818;margin-bottom:12px;font-size:13px;"></div>'

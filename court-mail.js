@@ -989,6 +989,20 @@ async function processMail(id, { target = null, think = null, by = null, notify 
         reading.action_items.length ? "To do:\n" + reading.action_items.map(a => "• " + a).join("\n") : null,
         `Review / undo: ${pageUrl(row.id)}`,
       ].filter(Boolean).join("\n"));
+
+      // Tell the consultants assigned to this client that something arrived.
+      // They get the headline and a login link and nothing else — see notify.js.
+      // Wrapped because an alerting failure must not roll back a filed email:
+      // the email is done either way, and the outbox keeps the record.
+      try {
+        const n = await require("./notify").notifyAndFlush({
+          clientKey: match.clientKey, kind: "court_mail", ref: row.id,
+        });
+        if (n.unreachable.length) {
+          console.warn("[court-mail] no way to alert:",
+            n.unreachable.map(u => `${u.username} (${u.why})`).join(", "));
+        }
+      } catch (e) { console.warn("[court-mail] notify:", e.message); }
     }
     return (await db.query(`SELECT * FROM court_mail WHERE id = $1`, [row.id])).rows[0];
   } catch (e) {

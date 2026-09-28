@@ -154,5 +154,24 @@ if (/acBranch = null; acFileName = ""; window\.__acProposal = null;/.test(profil
   fail("the modal must reset acBranch/acProposal on open");
 }
 
+// ── The modal must stay reachable once it grows ────────────
+// Uploading an agreement adds a review section tall enough to run past
+// the bottom of the screen. With align-items:center and no height cap,
+// the browser centres an over-tall panel by pushing its top off-screen
+// and there is nothing to scroll — the Save button becomes unreachable.
+// Both halves are needed: the cap so the panel scrolls internally, and
+// the backdrop overflow so short screens can still scroll the whole thing.
+const acModal = profiles.slice(profiles.indexOf("function showAddContactModal"), profiles.indexOf("function showAddContactModal") + 2500);
+if (/max-height:calc\(100vh - 40px\);overflow-y:auto/.test(acModal)) {
+  ok("the Add Client panel scrolls once it is taller than the screen");
+} else {
+  fail("the Add Client panel needs max-height + overflow-y:auto, or the review section pushes Save off-screen");
+}
+if (/addContactBackdrop[\s\S]{0,400}overflow-y:auto/.test(profiles)) {
+  ok("the backdrop scrolls too, for short screens");
+} else {
+  fail("the Add Client backdrop needs overflow-y:auto");
+}
+
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL WEB ADD-CLIENT CHECKS PASSED\n");
 process.exit(failures ? 1 : 0);

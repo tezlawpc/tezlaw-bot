@@ -2056,6 +2056,112 @@ app.get("/consultant/client/:key", requireConsultant, (req, res) => {
   res.send(portal.renderChrome({ title: "Client", body: portal.renderClientsPage({ mode: "view", clientKey: String(req.params.key).slice(0, 200) }), activeTab: "clients", user: req.user }));
 });
 
+// ── Firm-side view of broker alerts ─────────────────────────
+// Behind app.use("/admin", auth.requireAdminAuth) already; the extra role
+// gate is because this page shows and edits people's contact details.
+app.use("/admin/alerts", auth.requireRole("admin", "manager"));
+
+app.get("/admin/alerts", async (req, res) => {
+  try {
+    const na = require("./notify-admin");
+    const notify = require("./notify");
+    const [consultants, outbox, totals] = await Promise.all([
+      na.loadConsultants(), na.loadOutbox(60), na.counts(),
+    ]);
+    res.send(na.renderPage({ consultants, outbox, totals, health: notify.channelHealth(), saved: req.query.saved === "1" }));
+  } catch (err) {
+    console.error("[admin alerts]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/admin/alerts/contact", async (req, res) => {
+  try {
+    const notify = require("./notify");
+    await notify.initTables();
+    const b = req.body || {};
+    const id = parseInt(b.user_id, 10);
+    if (!id) return res.redirect("/admin/alerts");
+    const clean = (v, n) => { const t = String(v == null ? "" : v).trim(); return t ? t.slice(0, n) : null; };
+    await require("./db").query(
+      `UPDATE admin_users SET email = $2, phone = $3 WHERE id = $1 AND role = 'consultant'`,
+      [id, clean(b.email, 200), clean(b.phone, 40)]
+    );
+    res.redirect("/admin/alerts?saved=1");
+  } catch (err) {
+    console.error("[admin alerts contact]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/admin/alerts/flush", async (req, res) => {
+  try {
+    await require("./notify").flush({ limit: 200 });
+    res.redirect("/admin/alerts");
+  } catch (err) {
+    console.error("[admin alerts flush]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// ── Consultant alert settings ───────────────────────────────
+// A consultant controls their own switches; only the firm can change the
+// email or phone those switches point at, so an account that is taken over
+// cannot be redirected to a new address.
+async function loadMe(uid) {
+  const notify = require("./notify");
+  await notify.initTables();
+  const r = await require("./db").query(
+    `SELECT id, username, full_name, email, phone, telegram_chat_id, telegram_link_code,
+            notify_email, notify_sms, notify_telegram
+       FROM admin_users WHERE id = $1`, [uid]);
+  return r.rows[0] || {};
+}
+
+app.get("/consultant/alerts", requireConsultant, async (req, res) => {
+  try {
+    const portal = require("./consultant-portal");
+    const notify = require("./notify");
+    const me = await loadMe(req.user.uid || req.user.id);
+    const body = portal.renderAlertsPage({
+      user: req.user, me, health: notify.channelHealth(),
+      linkCode: me.telegram_link_code || null,
+      saved: req.query.saved === "1", linked: req.query.linked === "1",
+    });
+    res.send(portal.renderChrome({ title: "Alerts", body, activeTab: "alerts", user: req.user }));
+  } catch (err) {
+    console.error("[consultant alerts]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/consultant/alerts", requireConsultant, async (req, res) => {
+  try {
+    const notify = require("./notify");
+    await notify.initTables();
+    const b = req.body || {};
+    await require("./db").query(
+      `UPDATE admin_users SET notify_email = $2, notify_sms = $3, notify_telegram = $4 WHERE id = $1`,
+      [req.user.uid || req.user.id, b.notify_email === "1", b.notify_sms === "1", b.notify_telegram === "1"]
+    );
+    res.redirect("/consultant/alerts?saved=1");
+  } catch (err) {
+    console.error("[consultant alerts save]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/consultant/alerts/telegram-code", requireConsultant, async (req, res) => {
+  try {
+    const notify = require("./notify");
+    await notify.issueLinkCode(req.user.uid || req.user.id);
+    res.redirect("/consultant/alerts");
+  } catch (err) {
+    console.error("[consultant telegram code]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 // View a single work order + activity timeline
 app.get("/consultant/task/:id", requireConsultant, async (req, res) => {
   try {
@@ -8126,6 +8232,30 @@ app.post("/telegram", async (req, res) => {
     // Works in DMs, groups, and channels. Returns the current chat's ID
     // so JJ can set env vars like HEARING_NOTES_TELEGRAM_GROUP_ID.
     const textForCmd = (msg.text || msg.caption || "").trim();
+
+    // ── Consultant linking their Telegram (TEZ-XXXXXX) ──────
+    // Checked before anything else reads the text, so a code is never
+    // mistaken for a question to Zara. The code is single-use and is
+    // cleared by linkTelegram().
+    const linkMatch = textForCmd.match(/\bTEZ-[0-9A-Fa-f]{6}\b/);
+    if (linkMatch) {
+      try {
+        const linked = await require("./notify").linkTelegram(linkMatch[0], chatId);
+        if (linked) {
+          await tgSend(chatId,
+            `✅ Linked. You will get alerts here about the clients you are assigned to.\n\n` +
+            `Alerts say what happened and for which client — sign in to the portal to read the details.\n\n` +
+            `Change or turn these off any time on the Alerts page.`);
+        } else {
+          await tgSend(chatId, `That code is not valid or has already been used. Generate a new one on the Alerts page of the portal.`);
+        }
+      } catch (e) {
+        console.warn("[telegram] link:", e.message);
+        await tgSend(chatId, `Could not link right now. Please try again in a moment.`);
+      }
+      return;
+    }
+
     if (/^\/chatid(@\w+)?\s*$/i.test(textForCmd)) {
       const chatType = msg.chat.type || "unknown"; // 'private', 'group', 'supergroup', 'channel'
       const chatTitle = msg.chat.title || "(no title)";
@@ -11985,6 +12115,56 @@ app.listen(PORT, async () => {
   initDB();
   initIntakeTable();
   initComplianceTable();
+
+  // ── Broker/consultant alerts ─────────────────────────────────
+  //
+  // Say at boot which channels can actually send. SMS in particular looks
+  // wired in three places in this repo that can never have worked: they do
+  // require("twilio"), and the twilio package is not a dependency and never
+  // has been. The working senders talk to the Twilio REST API over axios.
+  // A consultant who ticks "text message" and hears nothing has no way to
+  // tell that from "nothing happened on my case", so this has to be visible
+  // here rather than discovered later.
+  (async () => {
+    try {
+      const notify = require("./notify");
+      await notify.initTables();
+      const h = notify.channelHealth();
+      const say = (ok, name, how) => ok
+        ? console.log(`✅ ALERTS: ${name} ready`)
+        : console.warn(`⚠️  ALERTS: ${name} NOT configured (${how}) — those alerts will queue, not send`);
+      say(h.email, "email", "SMTP_HOST or GMAIL_EMAIL + GMAIL_APP_PASSWORD");
+      say(h.sms, "SMS", "TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER");
+      say(h.telegram, "Telegram", "TELEGRAM_TOKEN");
+
+      // Anything that failed while a channel was down goes out now, and
+      // every 15 minutes after. This is the half that was missing on
+      // 2026-09-28: sends were attempted once, failed, and vanished.
+      const sweep = async () => {
+        try {
+          const r = await notify.flush({ limit: 100 });
+          if (r.sent || r.gave_up) console.log(`[alerts] sent ${r.sent}, gave up on ${r.gave_up}`);
+        } catch (e) { console.warn("[alerts] flush:", e.message); }
+      };
+      await sweep();
+      setInterval(sweep, 15 * 60 * 1000);
+
+      // Upcoming hearings and deadlines, once a day at 07:15 Pacific.
+      require("node-cron").schedule("15 7 * * *", async () => {
+        try {
+          const r = await notify.sweepUpcoming();
+          console.log(`[alerts] daily sweep: ${r.hearings} hearings, ${r.deadlines} deadlines, ${r.queued} queued`);
+          if (r.unroutable.length) {
+            console.warn(`[alerts] ${r.unroutable.length} could not be matched to a client: ` +
+              r.unroutable.slice(0, 10).map(u => `${u.client_name || "?"} (${u.why})`).join(", "));
+          }
+        } catch (e) { console.warn("[alerts] daily sweep:", e.message); }
+      }, { timezone: "America/Los_Angeles" });
+      console.log("✅ ALERTS: outbox sweeping every 15 min, hearings/deadlines daily at 07:15 PT");
+    } catch (e) {
+      console.error("⚠️  ALERTS: setup failed:", e.message);
+    }
+  })();
 
   // Initialize draft template tables (Phase 4)
   try {

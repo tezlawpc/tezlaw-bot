@@ -551,12 +551,38 @@ async function updateCase(id, fields) {
       values.push(fields.incident_date);
     }
   }
+  // Read the status before writing it, so "changed" means changed rather
+  // than "was submitted again with the same value" — a broker alerted every
+  // time someone saves the form is a broker who mutes the alerts.
+  let before = null;
+  if (fields.status !== undefined) {
+    try { before = (await db.query(`SELECT status, client_name FROM pi_cases WHERE id = $1`, [id])).rows[0] || null; }
+    catch (e) { console.warn("[pi] status read:", e.message); }
+  }
+
   values.push(id);
   const r = await db.query(
     `UPDATE pi_cases SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
     values
   );
-  return r.rows[0] || null;
+  const updated = r.rows[0] || null;
+
+  if (updated && before && before.status !== updated.status) {
+    try {
+      const notify = require("./notify");
+      const res = await notify.resolveClientKey({ clientName: updated.client_name });
+      if (res.key) {
+        await notify.notifyAndFlush({
+          clientKey: res.key, kind: "status",
+          ref: `pi-${id}-${updated.status}`, clientName: updated.client_name,
+        });
+      } else {
+        console.warn(`[pi] status change on case ${id} not routed to a broker: ${res.how}`);
+      }
+    } catch (e) { console.warn("[pi] notify:", e.message); }
+  }
+
+  return updated;
 }
 
 // ─── Provider / bill / insurance helpers ────────────────
