@@ -16,6 +16,32 @@
  */
 const path = require("path");
 
+// This check renders a page, so it has to load client-profiles, which loads
+// db.js, which wants pg. None of that is used - rendering touches no database -
+// but the require chain still has to resolve, and the repo is deployed to
+// Render rather than installed locally, so node_modules is often absent on the
+// machine where somebody runs the checks. A check that only runs in one place
+// is a check that does not run.
+//
+// So: stub ONLY what cannot be resolved, and only for bare module names. Real
+// project files still load normally, which means this exercises the actual
+// rendering code rather than a mock of it.
+const Module = require("module");
+const origLoad = Module._load;
+const stubbed = new Set();
+Module._load = function (request, parent, isMain) {
+  try {
+    return origLoad.apply(this, arguments);
+  } catch (e) {
+    if (e && e.code === "MODULE_NOT_FOUND" && !request.startsWith(".") && !request.startsWith("/")) {
+      stubbed.add(request);
+      const fn = () => fn;
+      return new Proxy(fn, { get: () => fn, apply: () => fn });
+    }
+    throw e;
+  }
+};
+
 let failures = 0;
 const ok = (m) => console.log("  ok   " + m);
 const fail = (m) => { failures++; console.log("  FAIL " + m); };
@@ -66,6 +92,8 @@ if (singleEscaped.test(src)) {
 } else {
   ok("no inline handler relies on a single-backslash quote inside a template literal");
 }
+
+if (stubbed.size) console.log("\n  (stubbed missing deps, not used for rendering: " + [...stubbed].join(", ") + ")");
 
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL RENDERED-SCRIPT CHECKS PASSED\n");
 process.exit(failures ? 1 : 0);
