@@ -140,9 +140,9 @@ function screen(text, { channel = "", sourceUrl = "" } = {}) {
     if (/\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/.test(s)) problems.push(`${ch.name} posts cannot contain a phone number`);
   } else if (sourceUrl && !s.includes(sourceUrl)) problems.push("does not link back to the source");
 
-  // The firm's name, written the way the brand kit writes it.
-  if (/\bTez\s*Law\s+Firm\b|\bTezLaw\b(?!firm)|\bTez\s+Legal\b/i.test(s.replace(/https?:\/\/\S+|tezlawfirm\.com|tez\s*law\s*firm\s*(dot\s*com|\.\s*com)/gi, "")))
-    problems.push("firm name not written as Tez Law P.C.");
+  // The firm's name: TEZ Law Firm (trade name) or Tez Law P.C. (legal name), nothing else.
+  if (/\bTezLaw\b(?!firm)|\bTez\s+Legal\b|\bTez\s+Law\s+(Group|Office|Offices|LLP|LLC|Inc)\b/i.test(s.replace(/https?:\/\/\S+|tezlawfirm\.com|tez\s*law\s*firm\s*(dot\s*com|\.\s*com)/gi, "")))
+    problems.push("firm name not written as TEZ Law Firm or Tez Law P.C.");
 
   // Emoji soup is the tell of a generated post. A couple is fine.
   // The range starts at 1F000, not 1F300, so regional-indicator flags (🇺🇸 is
@@ -183,8 +183,9 @@ function buildPrompt(source, channel) {
     "material does not support an interesting post, say exactly NOTHING TO SAY",
     "and write nothing else.",
     "",
-    "Brand: the firm is \"Tez Law P.C.\" (in Chinese posts: Tez Law P.C. 律师事务所).",
-    "Never write TEZ Law Firm, TezLaw or Tez Legal. Calm, confident, plain",
+    "Brand: the firm's public name is \"TEZ Law Firm\" (legal name Tez Law P.C.; in",
+    "Chinese posts: TEZ Law Firm 律师事务所). Never write TezLaw, Tez Legal or",
+    "Tez Law Group. Calm, confident, plain",
     "language; at most two emoji; no exclamation marks.",
     "",
     "Never: guarantee or predict an outcome; call the firm the best or a",

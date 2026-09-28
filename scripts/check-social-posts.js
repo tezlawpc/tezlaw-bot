@@ -177,9 +177,11 @@ console.log("\n── The other tells of a generated post ───────�
   check("…and the same text is fine on LinkedIn", S.screen(long, { channel: "linkedin", sourceUrl: URL }).ok, true);
 }
 check("empty is refused", S.screen("", { channel: "facebook" }).ok, false);
-ok("the firm name must be Tez Law P.C.", !S.screen("Tez Law Firm explains advance parole. " + URL, { channel: "facebook", sourceUrl: URL }).ok);
+ok("a wrong firm name is refused", !S.screen("TezLaw explains advance parole. " + URL, { channel: "facebook", sourceUrl: URL }).ok);
+ok("…and so is an invented one", !S.screen("Tez Law Group explains advance parole. " + URL, { channel: "facebook", sourceUrl: URL }).ok);
+check("the trade name TEZ Law Firm is fine", S.screen("TEZ Law Firm explains advance parole. " + URL, { channel: "facebook", sourceUrl: URL }).ok, true);
 check("…while tezlawfirm.com in a link is fine", S.screen("Tez Law P.C. explains. https://tezlawfirm.com/x", { channel: "facebook", sourceUrl: "https://tezlawfirm.com/x" }).ok, true);
-ok("the prompt carries the brand rules", /Tez Law P\.C\./.test(S.buildPrompt(SOURCE, "linkedin")));
+ok("the prompt carries the brand rules", /TEZ Law Firm/.test(S.buildPrompt(SOURCE, "linkedin")) && /Tez Law P\.C\./.test(S.buildPrompt(SOURCE, "linkedin")));
 
 console.log("\n── It cannot invent ─────────────────────────────");
 await throwsA("no source at all is refused", () => S.compose(null), /real URL/);
