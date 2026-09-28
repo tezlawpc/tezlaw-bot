@@ -2814,6 +2814,39 @@ function registerAppApi(app) {
   //
   // client_key convention: 'contact-<slug>-<timestamp>' so it doesn't collide
   // with matter-based keys.
+  // ── Client Dropbox folder provisioning ───────────────────────
+  // client-provision is required lazily on purpose. A Dropbox misconfiguration
+  // must not stop the API booting, and creating the client record must never
+  // fail because Dropbox is unreachable: the client row is the record of truth,
+  // the folder is a convenience we can retry from the UI afterwards.
+  //
+  // Returns a `folder` object the client can act on rather than throwing:
+  //   needs_branch - nobody said immigration or civil, so ask
+  //   needs_review - existing folders might be this client; a human picks
+  //   adopted / created / already_mapped / refused / error
+  async function provisionFolderSafely({ clientKey, clientName, aNumber, branch, hint }) {
+    let cp;
+    try {
+      cp = require("./client-provision");
+    } catch (e) {
+      console.error("[client folder] module unavailable:", e.message);
+      return { ok: false, action: "error", reason: e.message };
+    }
+    // An explicit branch always wins. Otherwise try to read it off a matter
+    // hint, which returns null when ambiguous rather than guessing — filing a
+    // client in the wrong tree hides the file for months.
+    const resolved = branch || cp.branchForMatterType(hint);
+    if (!resolved) {
+      return { ok: true, action: "needs_branch", reason: "practice area unknown — ask immigration or civil" };
+    }
+    try {
+      return await cp.provisionClientFolder({ clientKey, clientName, aNumber, branch: resolved });
+    } catch (e) {
+      console.error("[client folder]", e.message);
+      return { ok: false, action: "error", reason: e.message };
+    }
+  }
+
   app.post("/api/staff/clients/contact-only", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const b = req.body || {};
@@ -2843,7 +2876,94 @@ function registerAppApi(app) {
           b.a_number || null,
         ]
       );
-      res.json({ ok: true, client: r.rows[0] });
+      const folder = await provisionFolderSafely({
+        clientKey: client_key, clientName: name, aNumber: b.a_number || null,
+        branch: b.branch, hint: b.matter_type || b.practice_area || b.matter_interest,
+      });
+      res.json({ ok: true, client: r.rows[0], folder });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // ── Read a retainer / fee agreement and PROPOSE client fields ──
+  // Returns a proposal only; nothing is saved. Identity fields may prefill the
+  // create-client form, fee terms must be confirmed by a person first - each
+  // one carries the verbatim sentence it was read from so confirming is a real
+  // check against the document rather than a rubber stamp.
+  const agreementUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 32 * 1024 * 1024, files: 1 },
+  });
+  app.post("/api/staff/clients/extract-agreement", requireBearer, requireFirmUser,
+    agreementUpload.single("file"), async (req, res) => {
+      try {
+        if (!req.file) return res.status(400).json({ ok: false, error: "no file uploaded (field name must be 'file')" });
+        const fa = require("./fee-agreement");
+        const proposal = await fa.extractFromAgreement({
+          buffer: req.file.buffer,
+          filename: req.file.originalname || "",
+        });
+        // A branch suggestion rides along so the form can preselect immigration
+        // or civil - null when the matter type is ambiguous, never a guess.
+        let branch = null;
+        try {
+          branch = require("./client-provision").branchForMatterType(
+            proposal.identity.matter_type && proposal.identity.matter_type.value
+          );
+        } catch (e) { /* provisioning is optional here */ }
+        res.json({ ok: true, proposal: { ...proposal, suggested_branch: branch } });
+      } catch (err) {
+        // An unreadable file is a 422 with the reason, not a 500 - the caller
+        // shows the reason to the user and they upload something readable.
+        const readable = ["NO_TEXT_LAYER", "IMAGE_UNSUPPORTED", "DOCX_UNSUPPORTED", "UNSUPPORTED"];
+        const code = readable.includes(err.code) ? 422 : 500;
+        res.status(code).json({ ok: false, error: err.message, code: err.code || null });
+      }
+    });
+
+  // Provision (or adopt) a client's Dropbox folder after the fact. Two uses:
+  //   - the client was created before anyone knew the practice area
+  //   - provisioning came back needs_review and a person picked a candidate
+  app.post("/api/staff/clients/:key/provision-folder", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const key = String(req.params.key || "").trim();
+      const b = req.body || {};
+      if (!key) return res.status(400).json({ ok: false, error: "client key required" });
+
+      const row = await db.query(
+        `SELECT client_name, a_number FROM tasks WHERE client_key = $1
+          ORDER BY updated_at DESC NULLS LAST LIMIT 1`,
+        [key]
+      );
+      if (!row.rows.length) return res.status(404).json({ ok: false, error: "no client with that key" });
+      const { client_name, a_number } = row.rows[0];
+
+      // Adopting a candidate a person picked from needs_review. adopt_path
+      // arrives from the client, so it is NOT trusted: it must sit under one of
+      // that branch's roots, or a malformed request could map this client onto
+      // another client's folder — or onto a firm-wide folder.
+      if (b.adopt_path) {
+        if (!b.branch) return res.status(400).json({ ok: false, error: "branch is required with adopt_path" });
+        const cp = require("./client-provision");
+        const dbx = require("./dropbox-integration");
+        const { roots, error } = await cp.rootsForBranch(b.branch);
+        if (error) return res.status(400).json({ ok: false, error });
+        const p = String(b.adopt_path).replace(/\/+$/, "");
+        const inside = roots.some(r => {
+          const root = (String(r).startsWith("/") ? String(r) : "/" + r).replace(/\/+$/, "");
+          return p === root || p.startsWith(root + "/");
+        });
+        if (!inside) return res.status(400).json({ ok: false, error: `${p} is not under a ${b.branch} root` });
+        await dbx.setClientFolderMapping({
+          clientKey: key, aNumber: a_number, clientName: client_name, dropboxPath: p,
+        });
+        return res.json({ ok: true, folder: { ok: true, action: "adopted", path: p, reason: "picked by a person" } });
+      }
+
+      const folder = await provisionFolderSafely({
+        clientKey: key, clientName: client_name, aNumber: a_number,
+        branch: b.branch, hint: b.matter_type,
+      });
+      res.json({ ok: folder.ok !== false, folder });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -8019,7 +8139,11 @@ ${groups.map(g => `
           }).catch(() => {});
         }
       } catch (e) { /* notice only */ }
-      res.json({ ok: true, client: r.rows[0] });
+      const folder = await provisionFolderSafely({
+        clientKey: client_key, clientName: name, aNumber: anum,
+        branch: b.branch, hint: interest,
+      });
+      res.json({ ok: true, client: r.rows[0], folder });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
