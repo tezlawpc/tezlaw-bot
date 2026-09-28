@@ -477,8 +477,8 @@ async function publishAllLanguages(post, notifyPrefix, state) {
     const en = linkFor("English");
     if (en) {
       const s = await social.queueForSource(
-        { title: post.title, url: en, summary: post.metaDescription || post.content },
-        { channels: ["linkedin", "facebook", "instagram"] });
+        { title: post.title, url: en, summary: post.metaDescription, content: post.content },
+        { channels: ["linkedin", "facebook", "instagram", "gbp"] });
       if (s.queued) console.log(`[autoposter] 📣 ${s.queued} English social draft(s) awaiting approval`);
       else if (s.reason) console.log(`[autoposter] social skipped: ${s.reason}`);
       for (const r of s.rejected || []) console.log(`[autoposter] social ${r.channel} not offered: ${r.problems.join("; ")}`);
@@ -491,6 +491,17 @@ async function publishAllLanguages(post, notifyPrefix, state) {
         { channels: ["wechat_moments"] });
       if (s.queued) console.log(`[autoposter] 📣 ${s.queued} Chinese social draft(s) awaiting approval`);
       for (const r of s.rejected || []) console.log(`[autoposter] social ${r.channel} not offered: ${r.problems.join("; ")}`);
+    }
+
+    // Explainer video (YouTube Shorts + TikTok), capped per week and rendered
+    // in the background: it takes a minute and must not hold up the rest.
+    const vsrc = {};
+    if (en) vsrc.en = { title: post.title, url: en, summary: post.metaDescription, content: post.content };
+    if (zh && chPost) vsrc.zh = { title: chPost.title, url: zh, summary: chPost.metaDescription, content: chPost.content };
+    if (vsrc.en || vsrc.zh) {
+      social.queueVideo(vsrc)
+        .then(v => console.log(v.queued ? `[autoposter] 🎬 ${v.lang} video #${v.id} awaiting approval` : `[autoposter] video skipped: ${v.reason}`))
+        .catch(e => console.error("[autoposter] video error:", e.message));
     }
   } catch (soErr) {
     console.error("[autoposter] social queue error:", soErr.message);

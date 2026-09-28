@@ -25,6 +25,12 @@
 //     hook is where a channel adapter plugs in later — so composition never
 //     has to change when a channel is finally connected.
 //
+//  Since the Postiz build: approved posts go out by themselves, through
+//  Postiz (postiz.js), at the next open time slot for that channel. The
+//  approval tap is still the only way anything leaves. Facebook, Instagram,
+//  LinkedIn and Google Business posts carry a branded image card; a weekly
+//  explainer video (social-media.js) goes to YouTube Shorts and TikTok.
+//
 //  Compliance grounding: California Rules of Professional Conduct 7.1 (no
 //  false or misleading communication about services) and 7.2 (advertising).
 //  The screen is a first line, not counsel — JJ reads every one before it goes
@@ -65,6 +71,16 @@ const CHANNELS = {
     lang: "en",
     voice: "Short. One idea. Line breaks, not paragraphs. A handful of "
       + "specific hashtags at the end, never a wall of them.",
+  },
+  gbp: {
+    name: "Google Business",
+    max: 1400,
+    lang: "en",
+    linkInText: false,
+    voice: "People who found the firm on Google Search or Maps. Two to four "
+      + "short, plain sentences on the one point worth knowing. Do NOT put a "
+      + "web address or phone number in the text: Google rejects posts that "
+      + "do, and a Learn more button carries the link.",
   },
   wechat_moments: {
     name: "WeChat 朋友圈",
@@ -119,7 +135,10 @@ function screen(text, { channel = "", sourceUrl = "" } = {}) {
 
   const ch = CHANNELS[channel];
   if (ch && s.length > ch.max) problems.push(`over ${ch.name}'s ${ch.max}-character limit (${s.length})`);
-  if (sourceUrl && !s.includes(sourceUrl)) problems.push("does not link back to the source");
+  if (ch && ch.linkInText === false) {
+    if (/https?:\/\/|www\.|\.com\b/i.test(s)) problems.push(`${ch.name} posts cannot contain a web address`);
+    if (/\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/.test(s)) problems.push(`${ch.name} posts cannot contain a phone number`);
+  } else if (sourceUrl && !s.includes(sourceUrl)) problems.push("does not link back to the source");
 
   // Emoji soup is the tell of a generated post. A couple is fine.
   // The range starts at 1F000, not 1F300, so regional-indicator flags (🇺🇸 is
@@ -135,6 +154,16 @@ function screen(text, { channel = "", sourceUrl = "" } = {}) {
 }
 
 // ── Composing ───────────────────────────────────────────────
+
+// The meta description alone is too thin to write from; the article body is
+// what the post is about.
+function material(source, max = 6000) {
+  const strip = h => String(h || "").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  const parts = [strip(source.summary), strip(source.content)].filter(Boolean);
+  if (parts.length === 2 && parts[1].startsWith(parts[0])) parts.shift();
+  return parts.join("\n\n").slice(0, max);
+}
 
 function buildPrompt(source, channel) {
   const ch = CHANNELS[channel];
@@ -154,11 +183,11 @@ function buildPrompt(source, channel) {
     "leader; manufacture urgency; tell the reader what to file or say anything",
     "about 'your case'. The reader is a stranger, not a client.",
     "",
-    `End with the link: ${source.url}`,
+    ch.linkInText === false ? "Do not include any link, web address or phone number." : `End with the link: ${source.url}`,
     "",
     "--- MATERIAL ---",
     `Title: ${source.title || ""}`,
-    String(source.summary || source.content || "").slice(0, 6000),
+    material(source),
     "--- END ---",
     "",
     "Reply with the post text only. No preamble, no quotation marks.",
@@ -208,6 +237,57 @@ async function compose(source, { channels = channelList(), think = null } = {}) 
   return out;
 }
 
+
+// ── Image cards ─────────────────────────────────────────────
+//
+// Facebook, Instagram and LinkedIn get a 1080×1350 card, Google Business a
+// 1200×900 one. The words on the card come from the same article and pass
+// the same screen as the post text.
+const CARD_FORMAT = { facebook: "portrait", instagram: "portrait", linkedin: "portrait", gbp: "landscape" };
+
+function parseJSON(raw) {
+  const m = String(raw || "").match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try { return JSON.parse(m[0]); } catch { return null; }
+}
+
+function defaultAsk(maxTokens = 1200) {
+  return message => require("./zara-core").think({
+    surface: "system", tier: "balanced", message, lessonScope: "social-posts",
+    extra: "You write for a law firm. Plain and specific beats clever. Never promise a result.",
+    maxTokens, timeout: 90000,
+  });
+}
+
+async function composeCard(source, lang = "en", { think = null } = {}) {
+  const fallback = { eyebrow: "", title: String(source.title || "").slice(0, 110), points: [], lang };
+  const zh = lang === "zh";
+  const prompt = [
+    zh ? "为下面这篇文章设计一张社交媒体图片卡的文字，简体中文。" : "Write the words for a social media image card about the article below.",
+    "Return JSON only:",
+    zh ? '{"eyebrow": "领域，2-6个字，如 投资移民", "title": "标题，最多24个字", "points": ["要点，每条最多28个字", "…"]}'
+       : '{"eyebrow": "practice area, 1-3 words", "title": "headline, at most 70 characters", "points": ["key fact, at most 90 characters", "..."]}',
+    "Two or three points. Only facts stated in the material. No advice to the reader, no promises, no superlatives, no urgency.",
+    "", "--- MATERIAL ---", `Title: ${source.title || ""}`, material(source, 5000), "--- END ---",
+  ].join("\n");
+  try {
+    const j = parseJSON((await (think || defaultAsk(600))(prompt)).text);
+    if (!j || !j.title) return fallback;
+    const spec = {
+      eyebrow: String(j.eyebrow || "").slice(0, 30),
+      title: String(j.title).slice(0, 110),
+      points: (Array.isArray(j.points) ? j.points : []).map(String).filter(Boolean).slice(0, 3).map(x => x.slice(0, 140)),
+      lang,
+    };
+    const v = screen([spec.eyebrow, spec.title, ...spec.points].join("\n"));
+    return v.ok ? spec : fallback;
+  } catch { return fallback; }
+}
+
+function renderCard(spec, channel) {
+  return require("./social-media").card({ ...spec, format: CARD_FORMAT[channel] || "portrait" });
+}
+
 // ── Storage ─────────────────────────────────────────────────
 
 let ready = null;
@@ -229,37 +309,77 @@ function initTable() {
         decided_by TEXT
       )`);
     await db.query(`CREATE INDEX IF NOT EXISTS idx_social_posts_status ON social_posts (status, created_at DESC)`);
+    // Added with Postiz: the image card or video script, the rendered video,
+    // and where each approved post was scheduled.
+    await db.query(`ALTER TABLE social_posts ADD COLUMN IF NOT EXISTS lang TEXT`);
+    await db.query(`ALTER TABLE social_posts ADD COLUMN IF NOT EXISTS media JSONB`);
+    await db.query(`ALTER TABLE social_posts ADD COLUMN IF NOT EXISTS media_file BYTEA`);
+    await db.query(`ALTER TABLE social_posts ADD COLUMN IF NOT EXISTS delivered JSONB`);
   })().catch(e => { ready = null; throw e; });
   return ready;
 }
 
+// ── Telegram ────────────────────────────────────────────────
+
+const TG = () => `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
+
 async function tellJJ(text, reply_markup = null) {
   if (!TELEGRAM_TOKEN || !JJ_TELEGRAM_ID) return false;
   try {
-    await require("axios").post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+    await require("axios").post(`${TG()}/sendMessage`,
       { chat_id: JJ_TELEGRAM_ID, text: String(text).slice(0, 3900), disable_web_page_preview: true,
         ...(reply_markup ? { reply_markup } : {}) }, { timeout: 10000 });
     return true;
   } catch (e) { console.warn("[social] telegram:", e.message); return false; }
 }
 
+// Photo or video with a caption (Telegram allows 1,024 characters there).
+async function sendMediaToJJ(kind, buffer, filename, caption, reply_markup = null) {
+  if (!TELEGRAM_TOKEN || !JJ_TELEGRAM_ID) return false;
+  try {
+    const FormData = require("form-data");
+    const form = new FormData();
+    form.append("chat_id", String(JJ_TELEGRAM_ID));
+    form.append(kind, buffer, { filename });
+    if (caption) form.append("caption", String(caption).slice(0, 1020));
+    if (kind === "video") form.append("supports_streaming", "true");
+    if (reply_markup) form.append("reply_markup", JSON.stringify(reply_markup));
+    await require("axios").post(`${TG()}/${kind === "video" ? "sendVideo" : "sendPhoto"}`, form,
+      { headers: form.getHeaders(), timeout: 120000, maxBodyLength: Infinity });
+    return true;
+  } catch (e) { console.warn(`[social] telegram ${kind}:`, e.message); return false; }
+}
+
+const nameOf = ch => ch === "video" ? "Video · YouTube Shorts + TikTok" : (CHANNELS[ch] ? CHANNELS[ch].name : ch);
+const buttonsFor = (id, label) => ({ inline_keyboard: [[
+  { text: `✅ ${label}`, callback_data: `soc_go_${id}` }, { text: "🚫 Skip", callback_data: `soc_no_${id}` }]] });
+
+// ── Queueing ────────────────────────────────────────────────
+
 /**
  * Compose for a source and queue whatever passed, asking JJ once.
  * Returns what was queued and what was rejected.
  */
-async function queueForSource(source, { channels = channelList(), think = null, notify = true } = {}) {
+async function queueForSource(source, { channels = channelList(), think = null, notify = true, lang = null } = {}) {
   if (!ENABLED) return { queued: 0, reason: "SOCIAL_POSTS_ENABLED is not true" };
   await initTable();
   const drafts = await compose(source, { channels, think });
   const queued = [], rejected = [];
+  const postLang = lang || (CHANNELS[channels[0]] || {}).lang || "en";
+
+  // One card per article, shared by every channel that shows an image.
+  const wantsCard = drafts.some(d => d.ok && CARD_FORMAT[d.channel]);
+  const card = wantsCard ? await composeCard(source, postLang, { think }) : null;
 
   for (const d of drafts) {
     if (!d.ok) { rejected.push({ channel: d.channel, problems: d.problems }); continue; }
+    const media = CARD_FORMAT[d.channel] && card ? { card } : null;
     const r = await db.query(
-      `INSERT INTO social_posts (channel, text, source_url, source_title, problems)
-       VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id`,
-      [d.channel, d.text, source.url, source.title || null, JSON.stringify(d.problems || [])]);
-    queued.push({ id: r.rows[0].id, channel: d.channel, text: d.text });
+      `INSERT INTO social_posts (channel, text, source_url, source_title, problems, media, lang)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7) RETURNING id`,
+      [d.channel, d.text, source.url, source.title || null, JSON.stringify(d.problems || []),
+        media ? JSON.stringify(media) : null, postLang]);
+    queued.push({ id: r.rows[0].id, channel: d.channel, text: d.text, media });
   }
 
   if (notify && (queued.length || rejected.length)) await askJJ(source, queued, rejected);
@@ -267,30 +387,283 @@ async function queueForSource(source, { channels = channelList(), think = null, 
 }
 
 async function askJJ(source, queued, rejected) {
-  const lines = [`📣 Social drafts — ${source.title || source.url}`, ""];
-  for (const q of queued) {
-    lines.push(`── ${CHANNELS[q.channel].name} ──`, q.text, "");
-  }
+  const head = [`📣 Social drafts — ${source.title || source.url}`];
   if (rejected.length) {
-    lines.push("Not offered:");
-    for (const r of rejected) lines.push(`• ${CHANNELS[r.channel].name}: ${r.problems.join("; ")}`);
-    lines.push("");
+    head.push("", "Not offered:");
+    for (const r of rejected) head.push(`• ${nameOf(r.channel)}: ${r.problems.join("; ")}`);
   }
-  lines.push("Approve to keep, or skip. Nothing posts on its own.");
-  const buttons = queued.map(q => ([
-    { text: `✅ ${CHANNELS[q.channel].name}`, callback_data: `soc_go_${q.id}` },
-    { text: "🚫", callback_data: `soc_no_${q.id}` },
-  ]));
-  return tellJJ(lines.join("\n"), buttons.length ? { inline_keyboard: buttons } : null);
+  head.push("", require("./postiz").configured()
+    ? "Each approved post is scheduled in Postiz for that channel's next open slot."
+    : "Postiz is not connected yet — approving gives you the text to paste.");
+  await tellJJ(head.join("\n"));
+
+  for (const q of queued) {
+    const label = nameOf(q.channel);
+    const kb = buttonsFor(q.id, `Post to ${label}`);
+    let sent = false;
+    if (q.media && q.media.card) {
+      try {
+        const img = renderCard(q.media.card, q.channel);
+        const fits = q.text.length + label.length + 6 <= 1020;
+        sent = await sendMediaToJJ("photo", img, `card-${q.id}.png`,
+          fits ? `${label}\n\n${q.text}` : `${label} — card`, fits ? kb : null);
+        if (sent && !fits) sent = await tellJJ(`── ${label} ──\n${q.text}`, kb);
+      } catch (e) { console.warn("[social] card render:", e.message); }
+    }
+    if (!sent) await tellJJ(`── ${label} ──\n${q.text}`, kb);
+  }
+  return true;
+}
+
+// ── Explainer videos ────────────────────────────────────────
+//
+// One short vertical video per article, at most SOCIAL_VIDEOS_PER_WEEK
+// (default 2), alternating English and 普通话. Branded slides, the spoken
+// line on screen, an AI voice, and a closing slide with the disclaimer that
+// also says the voice is AI-generated — an ad must not suggest a synthetic
+// voice is the lawyer's (Bus. & Prof. Code § 6157.2(c)).
+const VIDEO_ON = () => ENABLED && String(process.env.SOCIAL_VIDEO_ENABLED || "") === "true";
+const VIDEO_TARGETS = ["youtube", "tiktok"];
+
+const AI_NOTE = { en: "Narration is AI-generated. General information, not legal advice.",
+                  zh: "配音为AI合成。本视频仅供一般参考，不构成法律意见。" };
+
+function buildVideoPrompt(source, lang) {
+  const zh = lang === "zh";
+  return [
+    zh ? "为下面的文章写一段30–50秒的竖屏讲解短视频脚本，简体中文，普通话配音。"
+       : "Write the script for a 30-50 second vertical explainer video about the article below.",
+    "Return JSON only, in this shape:",
+    zh ? '{"title": "视频标题，最多30个字", "caption": "视频简介，1-2句，最多120个字，不要网址", "tags": ["3-6个关键词"], "scenes": [{"text": "屏幕上的字，最多30个字", "say": "配音读的话，最多60个字"}]}'
+       : '{"title": "at most 70 characters", "caption": "1-2 sentences, at most 280 characters, no URL", "tags": ["3-6 plain keywords"], "scenes": [{"text": "on-screen line, at most 90 characters", "say": "what the narrator says, at most 30 words"}]}',
+    zh ? "4到6个场景。第一个场景用一个问题引出主题；最后一个场景说：完整文章请见 tezlawfirm.com。"
+       : "4 to 6 scenes. Scene 1 opens with the question the article answers. The last scene says the full article is at tezlawfirm.com.",
+    zh ? "旁白是中性的讲解员，不是律师本人：不要用“我是律师”或以律师身份说话。"
+       : "The narrator is a neutral explainer, not the attorney: never speak as a lawyer or say \"I\".",
+    "Only facts in the material. No advice to the viewer about their own case, no promises, no superlatives, no urgency, no call to hire the firm.",
+    "If the material cannot support a video, reply exactly NOTHING TO SAY.",
+    "", "--- MATERIAL ---", `Title: ${source.title || ""}`, material(source, 7000), "--- END ---",
+  ].join("\n");
+}
+
+function checkScript(j, lang) {
+  const problems = [];
+  if (!j || typeof j !== "object") return { ok: false, problems: ["not valid JSON"] };
+  const scenes = Array.isArray(j.scenes) ? j.scenes.filter(x => x && x.text) : [];
+  if (scenes.length < 3 || scenes.length > 7) problems.push(`${scenes.length} scenes (want 4-6)`);
+  if (!j.title || String(j.title).length < 2) problems.push("no title");
+  const said = scenes.map(x => String(x.say || x.text)).join(" ");
+  if (lang === "zh") { if (said.replace(/\s/g, "").length > 340) problems.push("narration too long for 50 seconds"); }
+  else if (said.split(/\s+/).length > 150) problems.push("narration too long for 50 seconds");
+  if (scenes.some(x => String(x.text).length > (lang === "zh" ? 40 : 120))) problems.push("an on-screen line is too long");
+  const all = [j.title, j.caption, ...scenes.map(x => `${x.text}\n${x.say || ""}`)].join("\n");
+  if (/\b(I am|I'm|as your) (an? )?(attorney|lawyer)\b/i.test(all) || /我是律师|作为您的律师/.test(all))
+    problems.push("the AI narrator speaks as the attorney");
+  const v = screen(all);
+  return { ok: !problems.length && v.ok, problems: problems.concat(v.problems), scenes };
+}
+
+async function composeVideoScript(source, lang = "en", { think = null, tries = 2 } = {}) {
+  const ask = think || defaultAsk(1500);
+  let last = { ok: false, problems: ["not attempted"] };
+  for (let i = 0; i < tries; i++) {
+    const raw = String((await ask(buildVideoPrompt(source, lang))).text || "").trim();
+    if (/^NOTHING TO SAY/i.test(raw)) return { ok: false, skip: true, problems: ["the material does not support a video"] };
+    const j = parseJSON(raw);
+    const c = checkScript(j, lang);
+    if (c.ok) {
+      const url = source.url;
+      const caption = String(j.caption || "").replace(/https?:\/\/\S+/g, "").trim();
+      return { ok: true, attempts: i + 1, script: {
+        title: String(j.title).slice(0, 90), caption,
+        tags: (Array.isArray(j.tags) ? j.tags : []).map(String).slice(0, 6),
+        scenes: c.scenes.map(x => ({ text: String(x.text), say: String(x.say || x.text) })),
+        lang, url,
+      } };
+    }
+    last = { ok: false, problems: c.problems, attempts: i + 1 };
+  }
+  return last;
+}
+
+// The public text that goes with the video on each platform.
+function videoCaption(script, target) {
+  const note = AI_NOTE[script.lang] || AI_NOTE.en;
+  const link = target === "tiktok" ? "tezlawfirm.com" : script.url;
+  return [script.caption, link, note].filter(Boolean).join("\n\n");
+}
+
+async function videosThisWeek() {
+  const r = await db.query(`SELECT lang FROM social_posts WHERE channel = 'video' AND created_at > NOW() - INTERVAL '7 days' ORDER BY created_at DESC`);
+  return r.rows || [];
+}
+
+/**
+ * Make at most one video for an article. `sources` is { en: source, zh: source };
+ * the language is whichever was used less recently.
+ */
+async function queueVideo(sources, { think = null, notify = true, render = null } = {}) {
+  if (!VIDEO_ON()) return { queued: 0, reason: "SOCIAL_VIDEO_ENABLED is not true" };
+  await initTable();
+  const cap = Math.max(0, Number(process.env.SOCIAL_VIDEOS_PER_WEEK || 2));
+  const recent = await videosThisWeek();
+  if (recent.length >= cap) return { queued: 0, reason: `weekly limit reached (${recent.length}/${cap})` };
+
+  const langs = String(process.env.SOCIAL_VIDEO_LANGS || "en,zh").split(",").map(x => x.trim()).filter(l => sources[l] && sources[l].url);
+  if (!langs.length) return { queued: 0, reason: "no source in a video language" };
+  const last = recent[0] && recent[0].lang;
+  const lang = langs.find(l => l !== last) || langs[0];
+  const source = sources[lang];
+
+  const c = await composeVideoScript(source, lang, { think });
+  if (!c.ok) {
+    if (notify && !c.skip) await tellJJ(`🎬 No video for "${source.title}": ${c.problems.join("; ")}`);
+    return { queued: 0, reason: c.problems.join("; ") };
+  }
+  const s = c.script;
+  const out = await (render || require("./social-media").video)({ lang, eyebrow: lang === "zh" ? "法律常识" : "Know the law", scenes: s.scenes });
+  const fs = require("fs");
+  const file = fs.readFileSync(out.file);
+  try { fs.rmSync(out.dir, { recursive: true, force: true }); } catch {}
+
+  const text = videoCaption(s, "youtube");
+  const r = await db.query(
+    `INSERT INTO social_posts (channel, text, source_url, source_title, problems, media, lang, media_file)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8) RETURNING id`,
+    ["video", text, source.url, source.title || null, "[]",
+      JSON.stringify({ script: s, targets: VIDEO_TARGETS, seconds: Math.round(out.seconds || 0) }), lang, file]);
+  const id = r.rows[0].id;
+
+  if (notify) {
+    const cap1 = [`🎬 ${lang === "zh" ? "普通话" : "English"} explainer · ${Math.round(out.seconds || 0)}s`,
+      `YouTube / TikTok title: ${s.title}`, "", s.caption, "", "Goes to YouTube Shorts and TikTok at their next open slots."].join("\n");
+    const ok = await sendMediaToJJ("video", file, `tez-video-${id}.mp4`, cap1, buttonsFor(id, "Post video"));
+    if (!ok) await tellJJ(`${cap1}\n\n(The video was too large to preview here.)`, buttonsFor(id, "Post video"));
+  }
+  return { queued: 1, id, lang, seconds: out.seconds };
+}
+
+// ── When each channel posts ─────────────────────────────────
+//
+// Pacific time. One post per channel per slot, so three articles approved on
+// the same morning go out on three different days rather than all at once.
+// Override with SOCIAL_SLOTS, e.g. {"linkedin":{"days":[2,4],"time":"09:00"}}
+// (days: 0 = Sunday).
+const DEFAULT_SLOTS = {
+  linkedin:  { days: [2, 3, 4],       time: "08:30" },
+  facebook:  { days: [1, 2, 3, 4, 5], time: "12:15" },
+  instagram: { days: [1, 2, 3, 4, 5, 6], time: "18:30" },
+  gbp:       { days: [1, 3, 5],       time: "10:00" },
+  youtube:   { days: [2, 4, 6],       time: "16:00" },
+  tiktok:    { days: [2, 4, 6],       time: "19:00" },
+};
+function slots() {
+  try { return { ...DEFAULT_SLOTS, ...JSON.parse(process.env.SOCIAL_SLOTS || "{}") }; }
+  catch { return DEFAULT_SLOTS; }
+}
+
+const TZ = "America/Los_Angeles";
+function laParts(t) {
+  const f = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hourCycle: "h23",
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short" });
+  const o = {}; for (const p of f.formatToParts(new Date(t))) o[p.type] = p.value;
+  return { y: +o.year, m: +o.month, d: +o.day, h: +o.hour, mi: +o.minute,
+    dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(o.weekday), key: `${o.year}-${o.month}-${o.day}` };
+}
+// Pacific wall-clock time → the real instant (handles daylight saving).
+function laToDate(y, m, d, h, mi) {
+  let t = Date.UTC(y, m - 1, d, h, mi);
+  for (let i = 0; i < 2; i++) {
+    const p = laParts(t);
+    t += Date.UTC(y, m - 1, d, h, mi) - Date.UTC(p.y, p.m - 1, p.d, p.h, p.mi);
+  }
+  return new Date(t);
+}
+
+/** The next open slot for a channel. `taken` = dates already used on it. */
+function nextSlot(channel, taken = [], now = Date.now()) {
+  const s = slots()[channel] || { days: [1, 2, 3, 4, 5], time: "12:00" };
+  const [hh, mm] = String(s.time).split(":").map(Number);
+  const used = new Set(taken.map(t => laParts(t).key));
+  const start = laParts(now);
+  for (let i = 0; i < 60; i++) {
+    const base = new Date(Date.UTC(start.y, start.m - 1, start.d + i, 12));
+    const y = base.getUTCFullYear(), m = base.getUTCMonth() + 1, d = base.getUTCDate();
+    const when = laToDate(y, m, d, hh, mm);
+    const p = laParts(when);
+    if (!s.days.includes(p.dow) || used.has(p.key)) continue;
+    if (when.getTime() < now + 20 * 60 * 1000) continue;
+    return when;
+  }
+  return new Date(now + 24 * 3600 * 1000);
+}
+
+async function takenSlots(channel) {
+  const r = await db.query(
+    `SELECT delivered FROM social_posts WHERE delivered IS NOT NULL AND decided_at > NOW() - INTERVAL '60 days'`);
+  const out = [];
+  for (const row of r.rows || []) {
+    const d = row.delivered && row.delivered[channel];
+    if (d && d.date && new Date(d.date).getTime() > Date.now() - 24 * 3600 * 1000) out.push(new Date(d.date));
+  }
+  return out;
+}
+
+const fmtPT = d => new Date(d).toLocaleString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " PT";
+
+// ── Delivery through Postiz ─────────────────────────────────
+//
+// Card channels: render the card, upload it, schedule the post.
+// Video: upload the MP4 once, schedule it on YouTube and on TikTok.
+// What already went through is recorded as it happens, so a retry after a
+// partial failure does not post anything twice.
+async function deliverViaPostiz({ row }) {
+  const postiz = require("./postiz");
+  const done = { ...(row.delivered || {}) };
+  const save = () => db.query(`UPDATE social_posts SET delivered = $2::jsonb WHERE id = $1`, [row.id, JSON.stringify(done)]);
+
+  if (row.channel === "video") {
+    const s = row.media && row.media.script;
+    if (!s) throw new Error("video script missing");
+    let file = row.media_file;
+    if (!file && VIDEO_TARGETS.some(t => !done[t])) throw new Error("the rendered video is no longer stored");
+    let up = null;
+    for (const target of (row.media.targets || VIDEO_TARGETS)) {
+      if (done[target]) continue;
+      if (!(await postiz.integrationFor(target))) { done[target] = { skipped: "not connected in Postiz" }; await save(); continue; }
+      up = up || await postiz.upload(Buffer.from(file), `tez-video-${row.id}.mp4`, "video/mp4");
+      const date = nextSlot(target, await takenSlots(target));
+      const r = await postiz.schedule({ channel: target, content: videoCaption(s, target), media: [up], date,
+        meta: { title: s.title, url: row.source_url, tags: s.tags } });
+      done[target] = { date: r.date, postId: r.postId, account: r.account };
+      await save();
+    }
+    await db.query(`UPDATE social_posts SET media_file = NULL WHERE id = $1`, [row.id]);
+    return done;
+  }
+
+  if (done[row.channel]) return done;
+  let media = [];
+  if (row.media && row.media.card && CARD_FORMAT[row.channel]) {
+    const png = renderCard(row.media.card, row.channel);
+    media = [await postiz.upload(png, `tez-card-${row.id}.png`, "image/png")];
+  }
+  const date = nextSlot(row.channel, await takenSlots(row.channel));
+  const r = await postiz.schedule({ channel: row.channel, content: row.text, media, date,
+    meta: { title: row.source_title, url: row.source_url } });
+  done[row.channel] = { date: r.date, postId: r.postId, account: r.account };
+  await save();
+  return done;
 }
 
 // ── Decisions ───────────────────────────────────────────────
 
-async function approve(id, by = "JJ", { deliver = null } = {}) {
+async function approve(id, by = "JJ", { deliver } = {}) {
   await initTable();
   const p = (await db.query(`SELECT * FROM social_posts WHERE id = $1`, [id])).rows[0];
   if (!p) throw new Error(`No social post ${id}`);
-  if (p.status !== "pending") return { alreadyDone: true, status: p.status };
+  // 'error' can be retried: the tap is JJ saying "try again".
+  if (p.status !== "pending" && p.status !== "error") return { alreadyDone: true, status: p.status };
 
   // Re-screen at approval. A post can sit for a day, and the rules are cheap
   // to re-apply; approving something that would now fail is not worth saving
@@ -302,20 +675,29 @@ async function approve(id, by = "JJ", { deliver = null } = {}) {
     return { ok: false, status: "blocked", problems: v.problems };
   }
 
-  // No channel is connected yet, so "delivering" means handing JJ the finished
-  // text. When an adapter exists it goes here and nothing above changes.
+  // Postiz connected → schedule it there. Otherwise hand JJ the text to paste.
+  if (deliver === undefined) deliver = require("./postiz").configured() ? deliverViaPostiz : null;
+
   let delivered = null;
   if (deliver) {
-    try { delivered = await deliver({ channel: p.channel, text: p.text, sourceUrl: p.source_url }); }
+    try { delivered = await deliver({ channel: p.channel, text: p.text, sourceUrl: p.source_url, row: p }); }
     catch (e) {
       await db.query(`UPDATE social_posts SET status = 'error', error = $2 WHERE id = $1`, [id, e.message]);
+      if (deliver === deliverViaPostiz) {
+        await tellJJ(`⚠️ ${nameOf(p.channel)} was not scheduled: ${e.message}\nNothing was posted. Tap to try again once it's fixed.`,
+          { inline_keyboard: [[{ text: "🔁 Try again", callback_data: `soc_go_${id}` }, { text: "🚫 Drop it", callback_data: `soc_no_${id}` }]] });
+      }
       return { ok: false, status: "error", error: e.message };
     }
   }
 
   await db.query(`UPDATE social_posts SET status = 'approved', decided_at = NOW(), decided_by = $2 WHERE id = $1`, [id, by]);
   if (!deliver) {
-    await tellJJ([`✅ ${CHANNELS[p.channel] ? CHANNELS[p.channel].name : p.channel} — ready to paste:`, "", p.text].join("\n"));
+    await tellJJ([`✅ ${nameOf(p.channel)} — ready to paste:`, "", p.text].join("\n"));
+  } else if (deliver === deliverViaPostiz && delivered) {
+    const lines = Object.entries(delivered).map(([ch, d]) =>
+      d.skipped ? `• ${nameOf(ch)}: skipped — ${d.skipped}` : `• ${nameOf(ch)}: ${fmtPT(d.date)}${d.account ? ` (${d.account})` : ""}`);
+    await tellJJ([`🗓 Scheduled in Postiz`, ...lines].join("\n"));
   }
   return { ok: true, status: "approved", delivered };
 }
@@ -324,7 +706,8 @@ async function skip(id, by = "JJ") {
   await initTable();
   const r = await db.query(
     `UPDATE social_posts SET status = 'skipped', decided_at = NOW(), decided_by = $2
-      WHERE id = $1 AND status = 'pending' RETURNING id`, [id, by]);
+      WHERE id = $1 AND status IN ('pending', 'error') RETURNING id`, [id, by]);
+  if (r.rows.length) await db.query(`UPDATE social_posts SET media_file = NULL WHERE id = $1`, [id]);
   return { ok: !!r.rows.length };
 }
 
@@ -342,13 +725,17 @@ async function status() {
   const counts = (await db.query(`SELECT status, COUNT(*)::int AS n FROM social_posts GROUP BY status`)).rows;
   return {
     enabled: ENABLED,
+    video: VIDEO_ON(),
+    postiz: require("./postiz").configured(),
     channels: channelList(),
     counts: Object.fromEntries(counts.map(c => [c.status, c.n])),
   };
 }
 
 module.exports = {
-  CHANNELS, BANNED, channelList,
-  screen, buildPrompt, composeOne, compose,
+  CHANNELS, BANNED, channelList, CARD_FORMAT, DEFAULT_SLOTS,
+  screen, material, buildPrompt, composeOne, compose, composeCard, renderCard,
+  buildVideoPrompt, checkScript, composeVideoScript, videoCaption, queueVideo,
+  nextSlot, laToDate, deliverViaPostiz,
   initTable, queueForSource, approve, skip, handleTelegramCallback, status,
 };
