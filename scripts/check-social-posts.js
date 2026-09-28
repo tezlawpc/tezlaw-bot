@@ -97,6 +97,7 @@ const fakeDb = { query: async (sql, v = []) => {
 // Postiz, stubbed: records what would have been uploaded and scheduled.
 const P = { on: false, calls: [], uploads: [], connected: ["facebook", "instagram", "linkedin", "gbp", "youtube", "tiktok"], failOn: null };
 const fakePostiz = {
+  PROVIDERS: { facebook: ["facebook"], instagram: ["instagram"], linkedin: ["linkedin-page"], gbp: ["gmb"], youtube: ["youtube"], tiktok: ["tiktok"] },
   configured: () => P.on,
   integrationFor: async ch => P.connected.includes(ch) ? { id: "int-" + ch, identifier: ch === "gbp" ? "gmb" : ch, name: "Tez " + ch } : null,
   upload: async (buf, name, type) => { P.uploads.push({ name, type, bytes: buf.length }); return { id: "up" + P.uploads.length, path: "https://cdn/x/" + name }; },
@@ -419,6 +420,16 @@ console.log("\n── Approval schedules through Postiz ────────
   const r = await S.approve(925, "JJ");
   check("once Postiz is on, re-tapping schedules it", [r.ok, P.calls.map(c => c.channel)], [true, ["facebook"]]);
   check("…and a third tap does not post twice", [(await S.approve(925)).alreadyDone, P.calls.length], [true, 1]);
+}
+{
+  // WeChat Moments has no Postiz provider: approving hands back the text to
+  // paste rather than failing, even with Postiz switched on.
+  T.rows = []; P.on = true; P.calls = []; P.uploads = [];
+  T.rows.push({ id: 926, channel: "wechat_moments", text: "移民小知识：回美证。" + URL, source_url: URL, source_title: SOURCE.title,
+    status: "pending", problems: [] });
+  const r = await S.approve(926, "JJ");
+  check("WeChat Moments approves as paste text, not a Postiz error", [r.ok, r.status, P.calls.length], [true, "approved", 0]);
+  check("…and Postiz can't deliver WeChat, but can deliver Facebook", [S.postizCanDeliver("wechat_moments"), S.postizCanDeliver("facebook")], [false, true]);
 }
 {
   T.rows = []; P.calls = []; P.uploads = []; P.failOn = "tiktok";

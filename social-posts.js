@@ -667,6 +667,12 @@ async function deliverViaPostiz({ row }) {
 
 // ── Decisions ───────────────────────────────────────────────
 
+/** True when Postiz has a provider for this channel (video goes to YouTube/TikTok). */
+function postizCanDeliver(channel) {
+  if (channel === "video") return true;
+  return !!(require("./postiz").PROVIDERS || {})[channel];
+}
+
 async function approve(id, by = "JJ", { deliver } = {}) {
   await initTable();
   const p = (await db.query(`SELECT * FROM social_posts WHERE id = $1`, [id])).rows[0];
@@ -677,6 +683,10 @@ async function approve(id, by = "JJ", { deliver } = {}) {
   // configured, tapping Approve again schedules it. A post with anything in
   // `delivered` already went through and is never sent twice.
   if (deliver === undefined) deliver = require("./postiz").configured() ? deliverViaPostiz : null;
+  // Postiz can't post to every channel we draft for (WeChat Moments has no
+  // API at all). Those always come back to JJ as text to paste, instead of
+  // failing with "No wechat_moments account is connected in Postiz".
+  if (deliver === deliverViaPostiz && !postizCanDeliver(p.channel)) deliver = null;
   const lateDelivery = p.status === "approved" && !p.delivered && !!deliver;
   if (p.status !== "pending" && p.status !== "error" && !lateDelivery) return { alreadyDone: true, status: p.status };
 
@@ -751,6 +761,6 @@ module.exports = {
   CHANNELS, BANNED, channelList, CARD_FORMAT, DEFAULT_SLOTS,
   screen, material, buildPrompt, composeOne, compose, composeCard, renderCard,
   buildVideoPrompt, checkScript, composeVideoScript, videoCaption, queueVideo,
-  nextSlot, laToDate, deliverViaPostiz,
+  nextSlot, laToDate, deliverViaPostiz, postizCanDeliver,
   initTable, queueForSource, approve, skip, handleTelegramCallback, status,
 };
