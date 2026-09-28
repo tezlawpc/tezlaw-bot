@@ -458,7 +458,7 @@ function renderClientList(clients) {
           +       '<label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Signed retainer or fee agreement</label>'
           +       '<div style="font-size:12px;color:#7B5330;margin-bottom:8px;">Upload the PDF and the details are read off it for you to check. Nothing is saved until you tick it.</div>'
           +       '<input id="ac_file" type="file" accept="application/pdf" style="display:none;" onchange="acExtract(this)">'
-          +       '<button type="button" id="ac_upload_btn" onclick="document.getElementById(\'ac_file\').click()" style="width:100%;padding:10px;border:1.5px dashed #B8891E;border-radius:6px;background:rgba(184,137,30,0.07);color:#7B5810;cursor:pointer;font-size:13px;font-weight:600;">Choose a PDF</button>'
+          +       '<button type="button" id="ac_upload_btn" onclick="acPickFile()" style="width:100%;padding:10px;border:1.5px dashed #B8891E;border-radius:6px;background:rgba(184,137,30,0.07);color:#7B5810;cursor:pointer;font-size:13px;font-weight:600;">Choose a PDF</button>'
           +       '<div id="ac_review" style="display:none;margin-top:12px;"></div>'
           +     '</div>'
           +     '<div style="grid-column:1/-1;">'
@@ -471,7 +471,7 @@ function renderClientList(clients) {
           +     '</div>'
           +     '<div style="grid-column:1/-1;">'
           +       '<label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Broker</label>'
-          +       '<div style="font-size:12px;color:#7B5330;margin-bottom:6px;">The client folder is created inside the broker\'s folder. Pick the practice area first.</div>'
+          +       '<div style="font-size:12px;color:#7B5330;margin-bottom:6px;">The client folder is created inside the broker&rsquo;s folder. Pick the practice area first.</div>'
           +       '<select id="ac_broker" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;background:#FFF;" disabled>'
           +         '<option value="">— choose a practice area first —</option>'
           +       '</select>'
@@ -573,6 +573,13 @@ function renderClientList(clients) {
         } catch (err) {
           sel.innerHTML = '<option value="">Could not load brokers: ' + acEsc(err.message) + '</option>';
         }
+      }
+      // A named handler instead of an inline getElementById with nested quotes:
+      // this HTML is built inside a template literal, so a backslash-escaped
+      // quote here is eaten before the browser ever sees it.
+      function acPickFile() {
+        var f = document.getElementById("ac_file");
+        if (f) f.click();
       }
       async function acExtract(inputEl) {
         var f = inputEl.files && inputEl.files[0];
@@ -680,7 +687,7 @@ function renderClientList(clients) {
         }
         if (lines.length) {
           var ta = document.getElementById("ac_notes");
-          ta.value = (ta.value.trim() ? ta.value.trim() + "\n\n" : "") + lines.join("\n");
+          ta.value = (ta.value.trim() ? ta.value.trim() + "\\n\\n" : "") + lines.join("\\n");
         }
         box.innerHTML = '<div style="font-size:13px;color:#7B5330;">Read from ' + acEsc(prop.file) + '. Check the fields above before saving.</div>';
       }
