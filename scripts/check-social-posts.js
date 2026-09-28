@@ -177,6 +177,9 @@ console.log("\n── The other tells of a generated post ───────�
   check("…and the same text is fine on LinkedIn", S.screen(long, { channel: "linkedin", sourceUrl: URL }).ok, true);
 }
 check("empty is refused", S.screen("", { channel: "facebook" }).ok, false);
+ok("the firm name must be Tez Law P.C.", !S.screen("Tez Law Firm explains advance parole. " + URL, { channel: "facebook", sourceUrl: URL }).ok);
+check("…while tezlawfirm.com in a link is fine", S.screen("Tez Law P.C. explains. https://tezlawfirm.com/x", { channel: "facebook", sourceUrl: "https://tezlawfirm.com/x" }).ok, true);
+ok("the prompt carries the brand rules", /Tez Law P\.C\./.test(S.buildPrompt(SOURCE, "linkedin")));
 
 console.log("\n── It cannot invent ─────────────────────────────");
 await throwsA("no source at all is refused", () => S.compose(null), /real URL/);
@@ -344,6 +347,13 @@ const SCRIPT = {
   ok("the YouTube description links the article", yt.includes(URL));
   ok("…and both say the narration is AI-generated", /AI-generated/.test(yt) && /AI-generated/.test(tt));
   ok("the video prompt keeps the narrator from speaking as the attorney", /never speak as a lawyer/.test(S.buildVideoPrompt(SOURCE, "en")));
+  {
+    const M = require("../social-media");
+    const end = M.slide({ text: M.DISCLAIMER.en, kind: "end" });
+    ok("the closing slide renders with the logo", end.length > 40000, String(end.length));
+    ok("brand fonts measure text (Cormorant is narrower than Montserrat)",
+      M.measure("Protect your rights", { latin: "cormorant", cjk: "serifBold" }, 40) < M.measure("Protect your rights", { latin: "montserrat", cjk: "serif" }, 40));
+  }
   ok("the closing slide says the voice is AI-generated", /AI-generated/.test(require("../social-media").DISCLAIMER.en) && /AI合成/.test(require("../social-media").DISCLAIMER.zh));
 }
 
