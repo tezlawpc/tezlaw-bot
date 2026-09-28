@@ -7561,6 +7561,39 @@ function registerAppApi(app) {
         createdTasks.push(r.rows[0]);
       }
 
+      // Intake notes - what was read off a fee agreement, typically. There is no
+      // client table in this schema (a client IS their task rows), so a note
+      // about the client is a row like any other, closed so it never shows up
+      // as something somebody still has to do. Same shape contact-only uses.
+      if (req.body?.notes && String(req.body.notes).trim()) {
+        try {
+          await db.query(
+            `INSERT INTO tasks
+               (title, description, priority, matter_type, client_key, client_name,
+                client_phone, client_email, a_number, created_by, status, created_at, updated_at)
+             VALUES ($1, $2, 'low', $3, $4, $5, $6, $7, $8, $9, 'completed', NOW(), NOW())`,
+            ["Intake notes", String(req.body.notes).trim(), effectiveMatter,
+             effectiveKey, client_name, client_phone || null, client_email || null,
+             a_number || null, req.user.uid]
+          );
+        } catch (e) {
+          // Losing the note must not fail a case that is already created.
+          console.error("[new case] intake notes:", e.message);
+        }
+      }
+
+      // The case exists now; give the client somewhere to put the paper. Unlike
+      // contact-only, this path already knows the practice area - it came from
+      // the template the user picked - so there is nothing to ask. An explicit
+      // branch still wins, for the caller that wants to override it.
+      //
+      // This runs AFTER the tasks are written and cannot throw: a Dropbox
+      // outage must not lose a case somebody just spent a wizard creating.
+      const folder = await provisionFolderSafely({
+        clientKey: effectiveKey, clientName: client_name, aNumber: a_number || null,
+        branch: req.body?.branch, hint: effectiveMatter,
+      });
+
       res.json({
         ok: true,
         client_key: effectiveKey,
@@ -7569,6 +7602,7 @@ function registerAppApi(app) {
         template_used: template.name,
         tasks_created: createdTasks.length,
         tasks: createdTasks,
+        folder,
       });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });

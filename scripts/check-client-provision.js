@@ -36,6 +36,22 @@ eq(cp.branchForMatterType("I-485 Adjustment of Status"), "immigration", "adjustm
 eq(cp.branchForMatterType("EB-5"), "immigration", "EB-5 -> immigration");
 eq(cp.branchForMatterType("Writ of Mandamus - USCIS delay"), "immigration", "USCIS mandamus -> immigration");
 
+// The New Case wizard sends these exact category keys. Three of them are
+// plainly civil and used to fall through to "ask" because an underscore is a
+// word character, so \btenant\b never matched inside "ll_tenant".
+eq(cp.branchForMatterType("ll_tenant"), "civil", "wizard key ll_tenant -> civil");
+eq(cp.branchForMatterType("real_estate"), "civil", "wizard key real_estate -> civil");
+eq(cp.branchForMatterType("business"), "civil", "wizard key business -> civil");
+eq(cp.branchForMatterType("pi"), "civil", "wizard key pi -> civil");
+eq(cp.branchForMatterType("immigration"), "immigration", "wizard key immigration -> immigration");
+// Still refused: these two fit neither root, and picking one would be inventing
+// a filing convention rather than reading one.
+eq(cp.branchForMatterType("estate"), null, "wizard key estate -> null (ask)");
+eq(cp.branchForMatterType("tm"), null, "wizard key tm -> null (ask)");
+// Hyphens are NOT normalised, because these depend on them.
+eq(cp.branchForMatterType("EB-5 petition"), "immigration", "EB-5 still matches after separator handling");
+eq(cp.branchForMatterType("u-visa"), "immigration", "u-visa still matches after separator handling");
+
 // The ones that must refuse rather than pick.
 eq(cp.branchForMatterType(""), null, "empty matter type -> null (ask)");
 eq(cp.branchForMatterType(null), null, "null matter type -> null (ask)");
@@ -173,6 +189,40 @@ if (iContactOnly !== -1 && iProvisionEp !== -1) {
   } else {
     fail("the provision-folder endpoint has no create_new path — a reviewer who rejects every candidate would be stuck");
   }
+}
+
+// ── 6. The New Case wizard ────────────────────────────────────
+// This is the path a client with a signed retainer actually comes in through,
+// and it went without folder provisioning entirely until now.
+const iInst = api.indexOf('app.post("/api/staff/matter-templates/:id/instantiate"');
+if (iInst === -1) {
+  fail("could not find the matter-template instantiate endpoint");
+} else {
+  // Slice to the NEXT route registration, not a magic character count: this
+  // check already broke once when the endpoint grew past an arbitrary 4000.
+  const nextRoute = api.indexOf("\n  app.", iInst + 10);
+  const body = api.slice(iInst, nextRoute === -1 ? api.length : nextRoute);
+  if (/provisionFolderSafely\(\{/.test(body)) ok("the New Case wizard provisions a client folder");
+  else fail("the New Case wizard creates a case with no client folder - the one path a signed-retainer client uses");
+
+  // Order matters: the tasks must be written first. Provisioning reaches
+  // Dropbox, and a Dropbox outage must not cost somebody a case they just
+  // walked a three-step wizard to create.
+  const iInsert = body.indexOf("INSERT INTO tasks");
+  const iProv = body.indexOf("provisionFolderSafely({");
+  if (iInsert !== -1 && iProv !== -1 && iInsert < iProv) {
+    ok("the wizard writes the tasks BEFORE it touches Dropbox");
+  } else if (iProv !== -1) {
+    fail("the wizard provisions before it writes the tasks - a Dropbox failure could lose the case");
+  }
+
+  // The template's matter type is the branch: nobody should be asked to pick a
+  // practice area they already picked a template for.
+  if (/hint: effectiveMatter/.test(body)) ok("the wizard takes the branch from the template's matter type");
+  else fail("the wizard should use the template matter type as the branch hint rather than asking again");
+
+  if (/\n\s*folder,\n/.test(body)) ok("the wizard returns the folder outcome so the app can finish filing");
+  else fail("the wizard must return the folder outcome, or needs_review has nowhere to surface");
 }
 
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL CLIENT PROVISION CHECKS PASSED\n");

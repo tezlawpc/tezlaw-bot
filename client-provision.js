@@ -75,12 +75,18 @@ async function rootsForBranch(branch) {
  * than guessing, and the caller then asks a human. A wrong guess here files the
  * client in the wrong tree, which is the failure this module exists to prevent.
  */
-const CIVIL_HINTS = /\b(civil|litigation|unlawful detainer|eviction|landlord|tenant|real estate|contract|business dispute|breach|partition|quiet title|construction|personal injury|pi)\b/i;
+const CIVIL_HINTS = /\b(civil|litigation|unlawful detainer|eviction|landlord|tenant|real estate|contract|business|breach|partition|quiet title|construction|personal injury|pi)\b/i;
 const IMMIGRATION_HINTS = /\b(immigration|asylum|removal|deportation|eoir|bia|uscis|adjustment|aos|naturalization|citizenship|visa|eb-?5|sijs|habeas|mandamus|daca|tps|vawa|u-?visa|consular)\b/i;
 
 function branchForMatterType(matterType) {
-  const s = String(matterType || "");
-  if (!s.trim()) return null;
+  const raw = String(matterType || "");
+  if (!raw.trim()) return null;
+  // The New Case wizard sends its category keys - ll_tenant, real_estate - and
+  // an underscore is a word character, so \btenant\b never matched inside
+  // "ll_tenant" and three plainly civil categories fell through to "ask".
+  // Underscores become spaces; hyphens are left alone because eb-5 and u-visa
+  // are matched with their hyphens.
+  const s = raw.replace(/_/g, " ");
   const civil = CIVIL_HINTS.test(s);
   const imm = IMMIGRATION_HINTS.test(s);
   if (civil && !imm) return "civil";
