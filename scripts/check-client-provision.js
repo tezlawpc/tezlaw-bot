@@ -95,5 +95,42 @@ if (/roots = null \}\) \{\s*(\/\/[^\n]*\n\s*)*\/\/[^\n]*\n?\s*const branches = r
   fail("dropbox-integration.js must default to getBranchRoots() when roots is omitted");
 }
 
+// ── 4. The wiring in app-api.js ───────────────────────────────
+const api = fs.readFileSync(path.join(__dirname, "..", "app-api.js"), "utf8");
+
+// Both creation paths must provision, or a client created on one screen gets a
+// folder and the same client created on the other silently does not.
+const calls = (api.match(/provisionFolderSafely\(\{/g) || []).length;
+if (calls >= 3) ok(`provisionFolderSafely is called ${calls}x (both creation endpoints + the retry endpoint)`);
+else fail(`expected provisionFolderSafely on both creation endpoints and the retry endpoint, found ${calls} call(s)`);
+
+if (/app\.post\("\/api\/staff\/clients\/:key\/provision-folder"/.test(api)) ok("the provision-folder retry endpoint exists");
+else fail("no provision-folder endpoint — needs_review and needs_branch would have no way to be resolved");
+
+// Registering the same path twice means the second copy is dead code, which has
+// already happened 13 times elsewhere in this file.
+const dupe = (api.match(/app\.post\("\/api\/staff\/clients\/:key\/provision-folder"/g) || []).length;
+if (dupe === 1) ok("provision-folder is registered exactly once");
+else fail(`provision-folder is registered ${dupe}x — Express keeps the first, the rest are dead`);
+
+// Creating the client must not fail because Dropbox is down. The helper has to
+// swallow both a missing module and a failing call.
+const helper = api.slice(api.indexOf("async function provisionFolderSafely"), api.indexOf("app.post(\"/api/staff/clients/contact-only\""));
+if ((helper.match(/catch \(e\)/g) || []).length >= 2) ok("provisionFolderSafely catches both a missing module and a failing call");
+else fail("provisionFolderSafely must not let a Dropbox failure break client creation");
+if (/action: "needs_branch"/.test(helper)) ok("an unknown practice area returns needs_branch instead of guessing");
+else fail("provisionFolderSafely should return needs_branch rather than pick a branch");
+
+// adopt_path arrives from the client. It must be checked against the branch
+// roots BEFORE it is written, or a bad request maps a client onto any folder.
+const iInside = api.indexOf("const inside = roots.some");
+const iMap = api.indexOf("await dbx.setClientFolderMapping({\n          clientKey: key");
+if (iInside === -1) fail("adopt_path is not validated against the branch roots");
+else if (iMap === -1) fail("could not locate the adopt_path mapping write");
+else if (iInside < iMap) ok("adopt_path is validated against the branch roots BEFORE being written");
+else fail("adopt_path is written before it is validated — a bad path could map a client onto any folder");
+if (/is not under a \$\{b\.branch\} root/.test(api)) ok("an out-of-root adopt_path is rejected with a reason");
+else fail("rejecting an out-of-root adopt_path should say why");
+
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL CLIENT PROVISION CHECKS PASSED\n");
 process.exit(failures ? 1 : 0);
