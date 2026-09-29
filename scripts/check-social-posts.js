@@ -432,6 +432,19 @@ console.log("\n── Approval schedules through Postiz ────────
   check("…and Postiz can't deliver WeChat, but can deliver Facebook", [S.postizCanDeliver("wechat_moments"), S.postizCanDeliver("facebook")], [false, true]);
 }
 {
+  // WeChat gets a Chinese image card to save with the text.
+  const png = S.renderCard({ eyebrow: "法律常识", title: "美国移民局2026政策提醒：贩运不可入境规定", points: [], lang: "zh" }, "wechat_moments");
+  ok("a Chinese WeChat card renders to a PNG", Buffer.isBuffer(png) && png.length > 10000 && png.slice(1, 4).toString() === "PNG");
+  // Google Business is a Postiz channel, but not connected: paste text, no error.
+  T.rows = []; P.on = true; P.calls = []; P.uploads = [];
+  const saved = P.connected; P.connected = saved.filter(c => c !== "gbp");
+  T.rows.push({ id: 927, channel: "gbp", text: "Traveling on a pending green card? Advance parole explained, in plain terms, on our website.", source_url: URL, source_title: SOURCE.title,
+    status: "pending", problems: [] });
+  const r = await S.approve(927, "JJ");
+  check("an unconnected Postiz channel approves as paste text, not an error", [r.ok, r.status, P.calls.length], [true, "approved", 0]);
+  P.connected = saved;
+}
+{
   T.rows = []; P.calls = []; P.uploads = []; P.failOn = "tiktok";
   T.rows.push({ id: 930, channel: "video", text: S.videoCaption({ ...SCRIPT, lang: "en", url: URL }, "youtube"), source_url: URL,
     status: "pending", problems: [], media: { script: { ...SCRIPT, lang: "en", url: URL }, targets: ["youtube", "tiktok"] }, media_file: Buffer.alloc(500, 2) });

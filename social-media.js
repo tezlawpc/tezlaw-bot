@@ -95,14 +95,14 @@ function placeLogo(name, x, y, h) {
   const L = logo(name), w = h * L.vb[2] / L.vb[3];
   return { w, svg: `<svg x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${h}" viewBox="${L.vb.join(" ")}">${L.inner}</svg>` };
 }
-// Shield + "TEZ LAW P.C." wordmark, coloured like the lockup (TEZ orange, LAW marble).
+// Shield + "TEZ LAW FIRM" wordmark, coloured like the lockup (TEZ orange, LAW marble).
 function brandRow(x, y, h, size) {
   const sh = placeLogo("shield-reversed", x, y, h);
   const tx = x + sh.w + h * 0.3, ty = y + h / 2 + size * 0.36, sp = size * 0.28;
   const tez = measure("TEZ ", T.label, size, sp);
   return sh.svg +
     `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" font-family="${T.label.family}" font-weight="700" font-size="${size}" letter-spacing="${sp.toFixed(1)}" fill="${C.orange}">TEZ</text>` +
-    `<text x="${(tx + tez).toFixed(1)}" y="${ty.toFixed(1)}" font-family="${T.label.family}" font-weight="700" font-size="${size}" letter-spacing="${sp.toFixed(1)}" fill="${C.marble}">LAW P.C.</text>`;
+    `<text x="${(tx + tez).toFixed(1)}" y="${ty.toFixed(1)}" font-family="${T.label.family}" font-weight="700" font-size="${size}" letter-spacing="${sp.toFixed(1)}" fill="${C.marble}">LAW FIRM</text>`;
 }
 
 // ── Text layout ─────────────────────────────────────────────

@@ -252,7 +252,7 @@ async function compose(source, { channels = channelList(), think = null } = {}) 
 // Facebook, Instagram and LinkedIn get a 1080×1350 card, Google Business a
 // 1200×900 one. The words on the card come from the same article and pass
 // the same screen as the post text.
-const CARD_FORMAT = { facebook: "portrait", instagram: "portrait", linkedin: "portrait", gbp: "landscape" };
+const CARD_FORMAT = { facebook: "portrait", instagram: "portrait", linkedin: "portrait", gbp: "landscape", wechat_moments: "portrait" };
 
 function parseJSON(raw) {
   const m = String(raw || "").match(/\{[\s\S]*\}/);
@@ -667,6 +667,29 @@ async function deliverViaPostiz({ row }) {
 
 // ── Decisions ───────────────────────────────────────────────
 
+/**
+ * Hand an approved post back to JJ to post by hand: the image first (to
+ * save), then the text. WeChat posts are Chinese end to end, message included.
+ */
+async function pasteToJJ(p, reason = null) {
+  const zh = (CHANNELS[p.channel] || {}).lang === "zh";
+  let spec = p.media && p.media.card;
+  if (!spec && CARD_FORMAT[p.channel] && p.source_title) {
+    // Posts queued before this channel had a card: build one from the title.
+    spec = { eyebrow: zh ? "法律常识" : "Know the law", title: p.source_title, points: [], lang: zh ? "zh" : "en" };
+  }
+  if (spec) {
+    try {
+      await sendMediaToJJ("photo", renderCard(spec, p.channel), `card-${p.id}.png`,
+        zh ? `${nameOf(p.channel)} 配图（长按保存）` : `${nameOf(p.channel)} image (save it)`);
+    } catch (e) { console.warn("[social] paste card:", e.message); }
+  }
+  const head = zh
+    ? `✅ ${nameOf(p.channel)}：已批准。请复制下面的文字，连同上面的图片一起发布。`
+    : `✅ ${nameOf(p.channel)} — ready to paste${reason ? ` (${reason})` : ""}:`;
+  return tellJJ([head, "", p.text].join("\n"));
+}
+
 /** True when Postiz has a provider for this channel (video goes to YouTube/TikTok). */
 function postizCanDeliver(channel) {
   if (channel === "video") return true;
@@ -687,6 +710,14 @@ async function approve(id, by = "JJ", { deliver } = {}) {
   // API at all). Those always come back to JJ as text to paste, instead of
   // failing with "No wechat_moments account is connected in Postiz".
   if (deliver === deliverViaPostiz && !postizCanDeliver(p.channel)) deliver = null;
+  // A channel Postiz supports but that isn't connected there (Google Business
+  // today) also comes back as text to paste, not as an error.
+  let pasteReason = null;
+  if (deliver === deliverViaPostiz && p.channel !== "video") {
+    try {
+      if (!(await require("./postiz").integrationFor(p.channel))) { deliver = null; pasteReason = "not connected in Postiz"; }
+    } catch (e) { /* Postiz unreachable: let delivery fail and report it */ }
+  }
   const lateDelivery = p.status === "approved" && !p.delivered && !!deliver;
   if (p.status !== "pending" && p.status !== "error" && !lateDelivery) return { alreadyDone: true, status: p.status };
 
@@ -718,7 +749,7 @@ async function approve(id, by = "JJ", { deliver } = {}) {
 
   await db.query(`UPDATE social_posts SET status = 'approved', decided_at = NOW(), decided_by = $2 WHERE id = $1`, [id, by]);
   if (!deliver) {
-    await tellJJ([`✅ ${nameOf(p.channel)} — ready to paste:`, "", p.text].join("\n"));
+    await pasteToJJ(p, pasteReason);
   } else if (deliver === deliverViaPostiz && delivered) {
     const lines = Object.entries(delivered).map(([ch, d]) =>
       d.skipped ? `• ${nameOf(ch)}: skipped — ${d.skipped}` : `• ${nameOf(ch)}: ${fmtPT(d.date)}${d.account ? ` (${d.account})` : ""}`);
@@ -761,6 +792,6 @@ module.exports = {
   CHANNELS, BANNED, channelList, CARD_FORMAT, DEFAULT_SLOTS,
   screen, material, buildPrompt, composeOne, compose, composeCard, renderCard,
   buildVideoPrompt, checkScript, composeVideoScript, videoCaption, queueVideo,
-  nextSlot, laToDate, deliverViaPostiz, postizCanDeliver,
+  nextSlot, laToDate, deliverViaPostiz, postizCanDeliver, pasteToJJ,
   initTable, queueForSource, approve, skip, handleTelegramCallback, status,
 };
