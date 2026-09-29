@@ -11088,6 +11088,25 @@ app.post("/admin/clients/:key/dropbox/mapping", async (req, res) => {
   }
 });
 
+// Save a client's current phone and address.
+//
+// Registered BEFORE /admin/clients/:key so the literal path is matched first —
+// the same ordering trap that put /admin/clients/brokers ahead of :key.
+app.post("/admin/clients/:key/contact", async (req, res) => {
+  try {
+    const key = String(req.params.key || "").slice(0, 200);
+    const b = req.body || {};
+    await require("./client-contacts").set(key, {
+      phone: b.phone,
+      address: b.address,
+    }, { source: "manual", by: (req.user && req.user.u) || null });
+    res.redirect("/admin/clients/" + encodeURIComponent(key));
+  } catch (err) {
+    console.error("[client contact save]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 app.get("/admin/clients/:key", async (req, res) => {
   try {
     const cp = require("./client-profiles");

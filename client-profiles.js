@@ -262,6 +262,21 @@ async function aggregateClients() {
     };
   });
 
+  // Stored contact details win over whatever a hearing note happened to
+  // record. One query for the whole book, not one per client — this runs
+  // over every client in the firm.
+  try {
+    const contacts = await require("./client-contacts").all();
+    if (contacts.size) {
+      const apply = require("./client-contacts").apply;
+      for (const c of results) apply(c, contacts.get(c.key));
+    }
+  } catch (e) {
+    // A contacts failure must not take the client list down; the page then
+    // shows what the notes say, exactly as it did before this existed.
+    console.warn("[client-profiles] contacts overlay:", e.message);
+  }
+
   // Sort clients by most recent activity
   results.sort((a, b) => {
     const ad = new Date(a.most_recent_date || 0).getTime();
@@ -971,6 +986,17 @@ function renderClientDetail(client, { documents = [] } = {}) {
             <div><strong>Email:</strong> ${email ? `<a href="mailto:${escapeAttr(email)}">${escapeHtml(email)}</a>` : "-"}</div>
             <div><strong>Phone:</strong> ${phone ? escapeHtml(phone) : "-"}</div>
             <div><strong>Address:</strong> ${client.client_address ? escapeHtml(client.client_address).replace(/\n/g, "<br>") : "-"}</div>
+            ${client.contact_source && client.contact_source !== "manual" ? `
+            <div style="font-size:11px; color:#7B5330; font-style:italic;">
+              Phone and address read from ${escapeHtml(client.contact_source === "i589" ? "the client's I-589" : client.contact_source)}${client.contact_source_detail ? ` (${escapeHtml(String(client.contact_source_detail).split("/").pop())})` : ""} — not yet confirmed with the client.
+            </div>` : ""}
+            <form method="POST" action="/admin/clients/${escapeAttr(client.key)}/contact" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+              <input type="tel" name="phone" value="${escapeAttr(client.client_phone || "")}" placeholder="Phone"
+                     style="width:150px; padding:5px 7px; border:1px solid #D4B983; border-radius:4px; font-size:12px;">
+              <input type="text" name="address" value="${escapeAttr(client.client_address || "")}" placeholder="Street, City, State ZIP"
+                     style="flex:1; min-width:220px; padding:5px 7px; border:1px solid #D4B983; border-radius:4px; font-size:12px;">
+              <button type="submit" style="padding:5px 12px; background:#F07800; color:#FFF7E4; border:1px solid #A02818; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">Save</button>
+            </form>
             <div><strong>Language:</strong> ${languageLabel(client.client_language)}</div>
           </div>
         </div>
