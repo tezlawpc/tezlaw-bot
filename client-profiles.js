@@ -458,7 +458,6 @@ function renderClientList(clients) {
           +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Phone</label><input id="ac_phone" type="tel" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" placeholder="626-555-0100"></div>'
           +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Email</label><input id="ac_email" type="email" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;"></div>'
           +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">A-Number</label><input id="ac_anumber" type="text" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" placeholder="A200-000-000"></div>'
-          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Referral Source</label><input id="ac_referral" type="text" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" placeholder="e.g. broker name"></div>'
           +     '<div style="grid-column:1/-1;border-top:1px solid #E2CFA2;margin-top:4px;padding-top:12px;">'
           +       '<label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Signed retainer or fee agreement</label>'
           +       '<div style="font-size:12px;color:#7B5330;margin-bottom:8px;">Upload the PDF and the details are read off it for you to check. Nothing is saved until you tick it.</div>'
@@ -548,6 +547,17 @@ function renderClientList(clients) {
       }
       // The brokers are real folders under the chosen root, not a typed name:
       // a typo would quietly create a second broker folder nobody looks in.
+      // The broker folder IS the referral source: one question, asked once.
+      // The select carries the folder PATH as its value, so the name comes
+      // from the option text.
+      function acBrokerName() {
+        var sel = document.getElementById("ac_broker");
+        if (!sel || !sel.value) return null;        // no folder chosen = direct
+        var o = sel.options[sel.selectedIndex];
+        var t = (o && o.text || "").trim();
+        return t || null;
+      }
+
       async function acLoadBrokers() {
         var sel = document.getElementById("ac_broker");
         if (!sel) return;
@@ -796,7 +806,7 @@ function renderClientList(clients) {
           client_phone: document.getElementById("ac_phone").value.trim() || null,
           client_email: document.getElementById("ac_email").value.trim() || null,
           a_number: document.getElementById("ac_anumber").value.trim() || null,
-          referral_source: document.getElementById("ac_referral").value.trim() || null,
+          referral_source: acBrokerName(),
           notes: document.getElementById("ac_notes").value.trim() || null,
           branch: acBranch || undefined,
           broker_folder: (document.getElementById("ac_broker") || {}).value || undefined,

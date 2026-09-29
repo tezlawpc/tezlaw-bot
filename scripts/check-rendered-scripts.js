@@ -78,10 +78,23 @@ try {
   fail(`/admin/clients did not render at all: ${e.message}`);
 }
 
+// The dictation page is built the same way, and it is where a broken script
+// costs the most: a hearing note dictated into a page whose JavaScript died is
+// a recording that never reaches the server.
+try {
+  const voice = require(path.join(__dirname, "..", "voice-dictation.js"));
+  compileAll("/admin/hearing/notes/dictate", voice.renderDictatePage({}));
+} catch (e) {
+  fail(`/admin/hearing/notes/dictate did not render at all: ${e.message}`);
+}
+
 // The escape that caused it, called out by name so the fix cannot quietly
 // come back: inside a template literal, \' reaches the browser as a bare '.
 const fs = require("fs");
-const src = fs.readFileSync(path.join(__dirname, "..", "client-profiles.js"), "utf8");
+const src = [
+  fs.readFileSync(path.join(__dirname, "..", "client-profiles.js"), "utf8"),
+  fs.readFileSync(path.join(__dirname, "..", "voice-dictation.js"), "utf8"),
+].join("\n");
 // A SINGLE backslash before the quote is the bug: the template literal eats it.
 // A DOUBLE backslash is correct - it renders as \' and the browser sees a
 // properly escaped quote. The lookbehind is what tells the two apart, and

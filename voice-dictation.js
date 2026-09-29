@@ -350,6 +350,7 @@ function renderDictatePage() {
       <audio id="audio-preview" controls style="width:100%;"></audio>
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button type="button" onclick="rerecord()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">🔄 Re-record</button>
+        <button type="button" onclick="downloadAudio()" title="Keep a copy on this computer before uploading" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">💾 Save a copy</button>
         <button type="button" onclick="submitAudio()" id="submit-btn" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:3px; cursor:pointer; font-size:13px; font-weight:600; flex:1;">🎯 Transcribe + Create Draft</button>
       </div>
     </div>
@@ -377,6 +378,7 @@ function renderDictatePage() {
     <strong>❌ Error:</strong> <span id="error-text"></span>
     <div style="margin-top:10px;">
       <button type="button" onclick="resetAll()" style="background:#eee; color:#333; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:12px;">Start over</button>
+      <a id="error-login" href="/admin/login" target="_blank" rel="noopener" style="display:none; background:#0C1C36; color:white; padding:6px 12px; border-radius:3px; text-decoration:none; font-size:12px; margin-left:6px;">Log in (opens a new tab)</a>
     </div>
   </div>
 
@@ -405,6 +407,15 @@ async function toggleRecording() {
 
 async function startRecording() {
   try {
+    // Ask before the microphone is even opened. A dead session discovered
+    // here costs nothing; discovered after an hour of dictation it used to
+    // cost the recording.
+    if (!(await sessionAlive())) {
+      showError("You are signed out, so a recording could not be uploaded. "
+        + "Log in first, then come back to this tab and record.", { login: true });
+      return;
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -538,7 +549,9 @@ async function submitAudio() {
     catch (e) { throw new Error("Server returned non-JSON: " + text.substring(0, 200)); }
 
     if (!resp.ok || !data.ok) {
-      throw new Error(data.error || ("HTTP " + resp.status));
+      var err = new Error(data.error || ("HTTP " + resp.status));
+      if (resp.status === 401) err.authExpired = true;
+      throw err;
     }
 
     // Show transcript preview
@@ -552,16 +565,62 @@ async function submitAudio() {
     }, 1200);
 
   } catch (e) {
-    showError(e.message);
+    if (e && e.authExpired) {
+      showError("Your session expired while this page was open, so the upload was refused. "
+        + "Your recording is safe — log in, come back to this tab and press "
+        + "Transcribe again.", { login: true });
+    } else {
+      showError(e.message);
+    }
   }
 }
 
-function showError(msg) {
+// A failed upload used to hide the playback panel and show the record panel,
+// which meant the "Transcribe" button vanished and a perfectly good recording
+// became unreachable — the audio was still in memory, but there was no way to
+// send it again. For a recoverable failure like an expired session that turned
+// a ten-second annoyance into a lost hearing note. Now: if the audio survives,
+// the playback panel stays up and the recording can simply be resubmitted.
+function showError(msg, opts) {
+  var o = opts || {};
+  var keep = !!audioBlob;
   document.getElementById("processing-panel").style.display = "none";
-  document.getElementById("playback-panel").style.display = "none";
-  document.getElementById("record-panel").style.display = "block";
+  document.getElementById("playback-panel").style.display = keep ? "block" : "none";
+  document.getElementById("record-panel").style.display = keep ? "none" : "block";
   document.getElementById("error-panel").style.display = "block";
   document.getElementById("error-text").textContent = msg;
+  document.getElementById("error-login").style.display = o.login ? "inline-block" : "none";
+}
+
+// Keep a copy on this computer. Once a recording exists locally, nothing that
+// happens on the server can destroy it.
+function downloadAudio() {
+  if (!audioBlob) return;
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(audioBlob);
+  a.download = "dictation-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + "." + audioExt;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+}
+
+// Is the session still alive? Sessions last 24 hours, and a dictation page
+// left open overnight looks logged in while its cookie is already dead. Asked
+// BEFORE recording, when the answer costs nothing.
+async function sessionAlive() {
+  try {
+    // /admin/whoami answers 200 either way, with { authenticated: true|false }.
+    // Read that field exactly rather than guessing across several — a loose
+    // check here would report a dead session as alive, which is the one
+    // answer that costs a recording.
+    var r = await fetch("/admin/whoami", { credentials: "same-origin" });
+    if (!r.ok) return false;
+    var d = await r.json();
+    return d && d.authenticated === true;
+  } catch (e) {
+    return true;   // offline or blocked: do not stop someone recording
+  }
 }
 
 // Check mic support up front

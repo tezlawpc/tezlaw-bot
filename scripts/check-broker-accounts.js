@@ -81,5 +81,36 @@ ok("a consultant with no folder is flagged", /No Dropbox folder linked/.test(na)
 ok("a folder that produced no clients is flagged too, rather than looking fine",
   /Folder linked but no clients found in it yet/.test(na));
 
+console.log("\n── Every broker question is a dropdown ─────────");
+{
+  // JJ: "whenever any question asks for consultant or broker, always have the
+  // dropdown to select the existing broker." Free text meant the same broker
+  // was spelled three ways and none of them matched the Dropbox folder.
+  const files = {
+    "server.js (new matter)": srv,
+    "personal-injury-ui.js (case edit)": fs.readFileSync(path.join(REPO, "personal-injury-ui.js"), "utf8"),
+    "client-profiles.js (add client)": fs.readFileSync(path.join(REPO, "client-profiles.js"), "utf8"),
+  };
+  for (const [label, text] of Object.entries(files)) {
+    const freeText = /<input[^>]*name="referral_source"[^>]*type="text"|<input[^>]*type="text"[^>]*name="referral_source"|id="ac_referral"/.test(text);
+    ok(`${label} no longer asks for a broker as free text`, !freeText);
+  }
+  ok("the new-matter form uses the shared broker dropdown",
+    /selectHTML\(\{ name: "referral_source"/.test(srv));
+  ok("the PI case edit uses it too",
+    /selectHTML\(\{ name: "referral_source"/.test(files["personal-injury-ui.js (case edit)"]));
+  ok("the add-client modal derives the referral from the broker it already asked for",
+    /referral_source: acBrokerName\(\)/.test(files["client-profiles.js (add client)"]));
+
+  ok("an existing value that is not a Dropbox folder is KEPT, not silently "
+   + "dropped when an old record is edited",
+    /not a Dropbox folder<\/option>/.test(src) && /current && !known/.test(src));
+  ok("…and Dropbox being down falls back to a text box rather than an empty "
+   + "dropdown that would erase the value",
+    /if \(!folders\.length\) \{[\s\S]{0,200}<input type="text"/.test(src));
+  ok("the dropdown preserves the current selection",
+    /f\.name\.toLowerCase\(\) === current\.toLowerCase\(\) \? " selected"/.test(src));
+}
+
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL BROKER ACCOUNT CHECKS PASSED\n");
 process.exit(failures ? 1 : 0);

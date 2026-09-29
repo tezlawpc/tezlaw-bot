@@ -168,4 +168,48 @@ async function relinkAll({ by = null } = {}) {
   return out;
 }
 
-module.exports = { ensureColumn, allFolders, canonicalName, brokerOfPath, linkClients, relinkAll };
+/**
+ * A <select> of the real broker folders, for every page that asks "which
+ * broker?".
+ *
+ * Two things it does that a plain dropdown would not:
+ *
+ *  · An EXISTING value that is not a Dropbox folder is kept, as a selected
+ *    option labelled so. Years of free-text referral names are already in
+ *    the database; silently dropping one because it does not match a folder
+ *    would quietly rewrite history the first time somebody opened an old
+ *    case to change something unrelated.
+ *  · If Dropbox cannot be read, it falls back to a text input rather than an
+ *    empty dropdown, so the page still works and the value still saves.
+ */
+async function selectHTML({ name, value = "", id = null, allowNone = true, style = "" } = {}) {
+  const esc = v => String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const current = String(value || "").trim();
+
+  let folders = [], error = null;
+  try { const r = await allFolders(); folders = r.folders || []; error = r.error; }
+  catch (e) { error = e.message; }
+
+  if (!folders.length) {
+    return `<input type="text" name="${esc(name)}"${id ? ` id="${esc(id)}"` : ""} `
+      + `value="${esc(current)}" style="${esc(style)}" `
+      + `placeholder="Broker (Dropbox folders unavailable${error ? ": " + esc(error) : ""})">`;
+  }
+
+  const known = folders.some(f => f.name.toLowerCase() === current.toLowerCase());
+  const opts = [
+    allowNone ? `<option value=""${current ? "" : " selected"}>— none —</option>` : "",
+    current && !known
+      ? `<option value="${esc(current)}" selected>${esc(current)} — not a Dropbox folder</option>`
+      : "",
+    ...folders.map(f => `<option value="${esc(f.name)}"`
+      + `${f.name.toLowerCase() === current.toLowerCase() ? " selected" : ""}>`
+      + `${esc(f.name)}</option>`),
+  ].filter(Boolean).join("");
+
+  return `<select name="${esc(name)}"${id ? ` id="${esc(id)}"` : ""} style="${esc(style)}">${opts}</select>`;
+}
+
+module.exports = { ensureColumn, allFolders, canonicalName, selectHTML, brokerOfPath, linkClients, relinkAll };

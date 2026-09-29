@@ -2963,7 +2963,7 @@ app.get("/admin/federal/new", async (req, res) => {
           <div><label style="font-size:11px; color:#888;">Next Deadline Description</label><input type="text" name="next_deadline_desc" placeholder="e.g. Office action response, opposition brief" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
 
           <div><label style="font-size:11px; color:#888;">Assigned Attorney</label><input type="text" name="assigned_attorney" placeholder="e.g. JJ, Chandler" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Referral Source</label><input type="text" name="referral_source" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#888;">Referral Source (broker)</label>${await require("./broker-accounts").selectHTML({ name: "referral_source", style: "width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;" })}</div>
 
           <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Notes</label><textarea name="notes" rows="3" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit;"></textarea></div>
         </div>
