@@ -167,6 +167,22 @@ const DEFAULT_SOURCES = {
     "thettablog.blogspot.com",
     "law360.com/ip"
   ],
+  realEstate: [
+    "dre.ca.gov",
+    "hcd.ca.gov",
+    "car.org/newsroom",
+    "therealdeal.com/la",
+    "courts.ca.gov/newsroom",
+    "latimes.com/homeless-housing"
+  ],
+  landlordTenant: [
+    "hcd.ca.gov",
+    "courts.ca.gov/selfhelp-eviction",
+    "lahd.lacity.gov",
+    "caanet.org",
+    "calmatters.org/housing",
+    "courts.ca.gov/newsroom"
+  ],
   estate: [
     "irs.gov/newsroom",
     "actecfoundation.org/blog",
@@ -792,6 +808,58 @@ If nothing noteworthy or all recent news already covered: {"hasNews":false}`;
 }
 
 // ─────────────────────────────────────────────────────────────
+//  TRIGGER 1b: Legal news for every practice area, one a day
+//  JJ, 28 Sep 2026: "update on all area of laws tez do, not just
+//  immigration." Immigration keeps its daily check; the others take
+//  turns, one per weekday, so each area gets a news look every week.
+// ─────────────────────────────────────────────────────────────
+const PRACTICE_NEWS = {
+  1: { area: "Real Estate",             key: "realEstate",     evergreen: null,       ask: "California real estate law: property sales and disclosures, title and escrow, zoning and ADUs, construction and contractor law, HOA rules, and property tax" },
+  2: { area: "Landlord-Tenant",         key: "landlordTenant", evergreen: null,       ask: "California landlord-tenant law: evictions and unlawful detainer procedure, rent caps (AB 1482) and local rent control in Los Angeles and Orange County, just-cause rules, security deposits, and habitability" },
+  3: { area: "Personal Injury",         key: "personalInjury", evergreen: "pi",       ask: "California personal injury law: car, truck, rideshare and pedestrian accidents, insurance rules, premises liability, and court decisions affecting injured people" },
+  4: { area: "Estate Planning",         key: "estate",         evergreen: "estate",   ask: "California estate planning: living trusts, wills, probate, Prop 19 and property transfers, federal estate and gift tax rules, and conservatorship" },
+  5: { area: "Business Law",            key: "business",       evergreen: "business", ask: "California business law and business litigation: contracts, partnership and LLC disputes, employment rules that affect small businesses, and court decisions" },
+  6: { area: "Trademarks",              key: "trademark",      evergreen: "trademark",ask: "U.S. trademark and intellectual property law: USPTO rule changes, trademark scams, and court decisions that affect small businesses" },
+};
+
+async function checkPracticeNews(state, sources, { day = new Date().getDay() } = {}) {
+  const p = PRACTICE_NEWS[day];
+  if (!p) return 0;
+  const todayKey = new Date().toDateString();
+  state.practiceNews = state.practiceNews || {};
+  if (state.practiceNews[p.key] === todayKey) return 0;
+  console.log(`📰 Checking ${p.area} news...`);
+  const list = (sources[p.key] || DEFAULT_SOURCES[p.key] || []).join(", ");
+  const recentTitles = (state.titleHistory || []).slice(-40).join(" | ");
+  const prompt = `Search for the most significant legal news from the past 10 days in ${p.ask}. PRIORITY SOURCES: ${list}
+The readers are individuals, families and small-business owners in Los Angeles and Orange County.
+Only count real changes: a new law or regulation taking effect, a court decision, an agency announcement, or a deadline people need to know about. Not opinion pieces, not market commentary.
+AVOID these recently published topics: ${recentTitles.substring(0, 800)}
+Respond ONLY in this exact JSON:
+{"hasNews":true,"headline":"brief headline","summary":"one sentence summary","source":"which source"}
+If nothing qualifies: {"hasNews":false}`;
+  const result = await askClaude(prompt, true);
+  let news;
+  try {
+    const c = result.replace(/```json|```/g, "").trim();
+    news = JSON.parse(c.substring(c.indexOf("{"), c.lastIndexOf("}") + 1));
+  } catch (e) { console.log(`Failed to parse ${p.area} news:`, e.message); return 0; }
+  state.practiceNews[p.key] = todayKey;
+  if (!news.hasNews) { console.log(`No ${p.area} news worth a post today.`); return 0; }
+  if (isDuplicateTitle(news.headline, state)) { console.log("⚠️ Duplicate headline:", news.headline); return 0; }
+  await new Promise(r => setTimeout(r, 10000));
+  const post = await generatePost({ topic: news.headline, practiceArea: p.area, context: news.summary, useSearch: false, sources: sources[p.key] || [] });
+  if (!post || isDuplicateTitle(post.title, state)) return 0;
+  const count = await publishAllLanguages(post, `📢 *New ${p.area} Post Published!*`, state);
+  if (count > 0) {
+    recordPublishedTitle(post.title, state);
+    // One post per area per day: the evergreen slot for this area stands down.
+    if (p.evergreen) { state.weeklyEvergreen = state.weeklyEvergreen || {}; state.weeklyEvergreen[p.evergreen] = todayKey; }
+  }
+  return count > 0 ? 1 : 0;
+}
+
+// ─────────────────────────────────────────────────────────────
 //  TRIGGER 2: Weather (PI)
 //  FIX 5: Use recordPublishedTitle instead of push directly
 // ─────────────────────────────────────────────────────────────
@@ -979,6 +1047,7 @@ async function runDailyScheduler() {
   };
   await runWithDelay(() => checkUrgentTopic(state, sources),     "Urgent topic",       0);
   await runWithDelay(() => checkImmigrationNews(state, sources), "Immigration check",  45000);
+  await runWithDelay(() => checkPracticeNews(state, sources),     "Practice-area news", 30000);
   await runWithDelay(() => checkWeather(state, sources),          "Weather check",     15000);
   await runWithDelay(() => checkHolidays(state, sources),         "Holiday check",      5000);
   await runWithDelay(() => checkEvergreen(state, sources),        "Evergreen check",    5000);
@@ -992,6 +1061,8 @@ function scheduleDaily() {
   // Posts run daily at 8am PT via the scheduler below
   // Use Admin Panel → Analytics → "Run Auto-Poster Now" for manual runs
   console.log("📅 Auto-poster scheduler ready (runs daily at 8am PT / 15:00 UTC)");
+  // Safe-driving posts when the local weather turns (weather-watch.js).
+  try { require("./weather-watch").start(); } catch (e) { console.warn("[weather] not started:", e.message); }
   function scheduleNext() {
     const now = new Date();
     const next = new Date();
@@ -1004,4 +1075,4 @@ function scheduleDaily() {
   scheduleNext();
 }
 
-module.exports = { runDailyScheduler, scheduleDaily, runWeeklySourceResearch, generatePost, publishToWordPress, publishAllLanguages, translatePost, linkTranslations, pingIndexNow, complianceIssues, stripFooter, getStaticFooter, loadState, saveState };
+module.exports = { checkPracticeNews, PRACTICE_NEWS, runDailyScheduler, scheduleDaily, runWeeklySourceResearch, generatePost, publishToWordPress, publishAllLanguages, translatePost, linkTranslations, pingIndexNow, complianceIssues, stripFooter, getStaticFooter, loadState, saveState };

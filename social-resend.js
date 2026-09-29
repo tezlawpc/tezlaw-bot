@@ -115,4 +115,4 @@ async function resend({ force = false, days = 3 } = {}) {
   return { scheduled, waiting: waiting.length };
 }
 
-module.exports = { resend };
+module.exports = { resend, send, sendPhoto };

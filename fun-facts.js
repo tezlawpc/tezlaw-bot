@@ -23,7 +23,153 @@
 //  worse than no post.
 // ============================================================
 
-const FACTS = [
+// JJ, 28 Sep 2026: "fun fact posts every wednesday about american history."
+// The legal facts below are kept for later use; Wednesday draws from this bank.
+// Every entry is well documented; the cite is where to check it.
+const HISTORY_FACTS = [
+  {
+    key: "independence_july_2",
+    fact: "Congress actually voted for independence on July 2, 1776. John Adams wrote that July 2 would be celebrated for generations with parades and illuminations. The Declaration was adopted two days later, and most delegates did not sign it until August 2.",
+    cite: "National Archives, Declaration of Independence",
+  },
+  {
+    key: "adams_jefferson_july_4",
+    fact: "John Adams and Thomas Jefferson, once rivals and later friends by letter, both died on July 4, 1826, exactly fifty years after the Declaration they had worked on together. Adams died a few hours after Jefferson, not knowing Jefferson was already gone.",
+    cite: "Library of Congress",
+  },
+  {
+    key: "constitution_four_pages",
+    fact: "The original United States Constitution fits on four sheets of parchment. It is on display at the National Archives in Washington, D.C., in the same rotunda as the Declaration of Independence and the Bill of Rights.",
+    cite: "National Archives",
+  },
+  {
+    key: "liberty_turned_green",
+    fact: "The Statue of Liberty was not always green. When she was dedicated in 1886 she was the reddish-brown of new copper, and she turned green over roughly two decades as the copper weathered. The green coat now protects the metal underneath.",
+    cite: "National Park Service, Statue of Liberty",
+  },
+  {
+    key: "ellis_island",
+    fact: "Ellis Island opened in 1892, and by the time it closed in 1954 more than twelve million immigrants had passed through its halls. Today a large share of Americans can trace at least one ancestor through that single island in New York Harbor.",
+    cite: "National Park Service, Ellis Island",
+  },
+  {
+    key: "angel_island_poems",
+    fact: "At the Angel Island Immigration Station in San Francisco Bay, open from 1910 to 1940, Chinese immigrants held for weeks or months carved poems into the wooden walls of the barracks. Many of those poems can still be read there today.",
+    cite: "Angel Island Immigration Station Foundation; California State Parks",
+  },
+  {
+    key: "chinese_exclusion_act",
+    fact: "The Chinese Exclusion Act of 1882 was the first federal law to bar immigration by people of a specific nationality. It stayed in force for sixty-one years, until Congress repealed it in 1943, when China was a wartime ally.",
+    cite: "National Archives, Chinese Exclusion Act",
+  },
+  {
+    key: "railroad_workers",
+    fact: "When the transcontinental railroad was completed at Promontory Summit, Utah, on May 10, 1869, thousands of Chinese immigrants had made up most of the Central Pacific's workforce, blasting and laying track through the Sierra Nevada.",
+    cite: "Library of Congress; Stanford Chinese Railroad Workers in North America Project",
+  },
+  {
+    key: "wong_kim_ark",
+    fact: "In 1898 the Supreme Court decided United States v. Wong Kim Ark. Wong was born in San Francisco to Chinese parents, and the Court held that he was a U.S. citizen by birth under the Fourteenth Amendment.",
+    cite: "United States v. Wong Kim Ark, 169 U.S. 649 (1898)",
+  },
+  {
+    key: "california_no_territory",
+    fact: "California became the 31st state on September 9, 1850, without ever having been an organized U.S. territory. It went from land taken in the Mexican–American War straight to statehood in about two years, sped along by the Gold Rush.",
+    cite: "California State Library",
+  },
+  {
+    key: "gold_before_treaty",
+    fact: "Gold was found at Sutter's Mill on January 24, 1848, just nine days before the treaty that ended the Mexican–American War and handed California to the United States. Neither side at the treaty table knew about the discovery.",
+    cite: "Treaty of Guadalupe Hidalgo (1848); California State Parks",
+  },
+  {
+    key: "los_pobladores",
+    fact: "Los Angeles was founded in 1781 by a group of forty-four settlers, known as Los Pobladores, who walked north from Mexico. They came from a mix of Spanish, African, and Indigenous backgrounds.",
+    cite: "City of Los Angeles; El Pueblo de Los Ángeles Historical Monument",
+  },
+  {
+    key: "white_house_burned",
+    fact: "In 1814, during the War of 1812, British troops set fire to the White House. Dolley Madison is remembered for making sure the large portrait of George Washington was saved before the building burned.",
+    cite: "White House Historical Association",
+  },
+  {
+    key: "lincoln_patent",
+    fact: "Abraham Lincoln is the only U.S. president to hold a patent. In 1849 he patented a device for lifting riverboats over sandbars and shallow water. It was never built for use, but a model survives at the Smithsonian.",
+    cite: "U.S. Patent No. 6,469; Smithsonian",
+  },
+  {
+    key: "washington_teeth",
+    fact: "George Washington never had wooden teeth. His dentures were made from materials such as ivory, metal, and human and animal teeth. The wooden-teeth story is a myth that has lasted more than two centuries.",
+    cite: "George Washington's Mount Vernon",
+  },
+  {
+    key: "thanksgiving_moved",
+    fact: "Thanksgiving became a national holiday when Lincoln proclaimed it in 1863, after years of lobbying by the writer Sarah Josepha Hale. In 1939 Franklin Roosevelt moved it a week earlier, the country argued about it, and Congress fixed it on the fourth Thursday of November in 1941.",
+    cite: "National Archives",
+  },
+  {
+    key: "liberty_bell_name",
+    fact: "The Liberty Bell got its name from abolitionists in the 1830s, who adopted it as a symbol of their fight to end slavery. The inscription on it reads: Proclaim liberty throughout all the land unto all the inhabitants thereof.",
+    cite: "National Park Service, Independence National Historical Park",
+  },
+  {
+    key: "wyoming_vote",
+    fact: "Wyoming gave women the right to vote in 1869, while it was still a territory, more than fifty years before the Nineteenth Amendment guaranteed women the vote nationwide in 1920.",
+    cite: "Wyoming State Archives; National Archives",
+  },
+  {
+    key: "route_66",
+    fact: "Route 66, established in 1926, ran about 2,400 miles from Chicago to Santa Monica. Its official end is marked near the Santa Monica Pier, just a short drive from our offices.",
+    cite: "National Park Service, Route 66",
+  },
+  {
+    key: "hollywoodland",
+    fact: "The Hollywood sign first read HOLLYWOODLAND. It went up in 1923 as an advertisement for a new housing development, and the last four letters came down in 1949.",
+    cite: "Hollywood Sign Trust",
+  },
+  {
+    key: "international_orange",
+    fact: "The Golden Gate Bridge opened in 1937, and it is not gold. Its color is called International Orange, chosen partly because it stands out in the fog and blends with the hills around the bay.",
+    cite: "Golden Gate Bridge, Highway and Transportation District",
+  },
+  {
+    key: "first_coast_call",
+    fact: "In January 1915 Alexander Graham Bell, in New York, made the first transcontinental telephone call to his assistant Thomas Watson in San Francisco, repeating the famous line from their first call years earlier: Mr. Watson, come here, I want you.",
+    cite: "Library of Congress",
+  },
+  {
+    key: "anthem_1931",
+    fact: "Francis Scott Key wrote the words of The Star-Spangled Banner in 1814, after watching the British bombard Fort McHenry in Baltimore. It did not officially become the national anthem until 1931, more than a century later.",
+    cite: "Smithsonian, National Museum of American History",
+  },
+  {
+    key: "juneteenth",
+    fact: "On June 19, 1865, Union troops arrived in Galveston, Texas, and announced that enslaved people there were free, more than two years after the Emancipation Proclamation. Juneteenth became a federal holiday in 2021.",
+    cite: "National Archives",
+  },
+  {
+    key: "dalip_singh_saund",
+    fact: "The first Asian American elected to Congress was Dalip Singh Saund, an immigrant from India who represented a Southern California district that included Riverside and Imperial Counties. He took office in 1957.",
+    cite: "U.S. House of Representatives, History, Art & Archives",
+  },
+  {
+    key: "hiram_fong",
+    fact: "Hiram Fong, the son of Chinese immigrants, became one of Hawaii's first two U.S. senators when Hawaii became a state in 1959. He was the first Asian American to serve in the Senate.",
+    cite: "U.S. Senate Historical Office",
+  },
+  {
+    key: "mendez_westminster",
+    fact: "In 1947, in Mendez v. Westminster, a federal appeals court ruled against segregating Mexican American children in Orange County schools. It came seven years before Brown v. Board of Education, and California ended school segregation by law that same year.",
+    cite: "Mendez v. Westminster, 161 F.2d 774 (9th Cir. 1947)",
+  },
+  {
+    key: "alaska_two_cents",
+    fact: "The United States bought Alaska from Russia in 1867 for about two cents an acre. Critics called it Seward's Folly, after the Secretary of State who negotiated it. Gold, fish and oil later made it look like a bargain.",
+    cite: "National Archives",
+  },
+];
+
+const LEGAL_FACTS = [
   // ── Immigration ──────────────────────────────────────────
   {
     key: "green_card_color",
@@ -202,6 +348,8 @@ const FACTS = [
   },
 ];
 
+const FACTS = HISTORY_FACTS;
+
 /**
  * Pick the next fact: one never posted before, oldest first; if the bank has
  * been exhausted, the least recently used. Returns null only if the bank is
@@ -269,4 +417,4 @@ function buildFactPrompt(fact, channel, ch = null) {
   ].filter(Boolean).join("\n");
 }
 
-module.exports = { FACTS, nextFact, buildFactPrompt };
+module.exports = { FACTS, HISTORY_FACTS, LEGAL_FACTS, nextFact, buildFactPrompt };
