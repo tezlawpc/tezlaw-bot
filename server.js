@@ -1019,6 +1019,11 @@ require("./wechat-publish").initTable()
 // the system without him tapping approve.
 require("./social-posts").initTable()
   .catch(e => console.warn("[social-posts] table init failed:", e.message));
+// A minute after each deploy: schedule posts JJ already approved that never
+// reached Postiz, and re-send any still waiting for his tap (once each), so
+// he never has to scroll back through Telegram. /posts does it on demand.
+setTimeout(() => require("./social-resend").resend()
+  .catch(e => console.warn("[social-resend] after deploy:", e.message)), 60 * 1000);
 
 // Holiday posts: planned on the 1st of each month for the 30 days ahead, and
 // queued for approval like everything else. 9:07 rather than 9:00 — the top
@@ -8363,6 +8368,11 @@ app.post("/telegram", async (req, res) => {
       await tgSend(chatId, `Hi ${firstName}! ${WELCOME_MESSAGE}`); return;
     }
     if (text === "/contact") { await tgSend(chatId, CONTACT_MESSAGE); return; }
+    if (text === "/posts" && String(chatId) === String(process.env.JJ_TELEGRAM_ID)) {
+      try { await require("./social-resend").resend({ force: true }); }
+      catch (e) { await tgSend(chatId, `Couldn't load the social posts: ${e.message}`); }
+      return;
+    }
     if (text === "/reset") { await clearHistory("telegram", chatId); await tgSend(chatId, "✅ Reset! How can I help?"); return; }
 
     // ── Matter Manager commands (JJ-only) ─────────────────
