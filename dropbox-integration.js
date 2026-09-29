@@ -772,6 +772,65 @@ async function bulkImportFromDropbox({ dryRun = false } = {}) {
 const _listCache = new Map();
 const LIST_CACHE_MS = 5 * 60 * 1000;
 
+/**
+ * Every file under a folder, including subfolders.
+ *
+ * listFolder() is deliberately non-recursive, which is right for browsing but
+ * wrong for finding a document: an I-589 is very often filed in a "Forms" or
+ * "Filings" subfolder, and a non-recursive look would report the client as
+ * having no form at all. A false negative there is worse than an error,
+ * because it looks like a clean result.
+ *
+ * Dropbox recurses server-side, so this is ONE request (plus continuations)
+ * per client rather than one per subfolder.
+ */
+async function listFolderDeep(path, { limit = 2000 } = {}) {
+  try {
+    const result = await dropboxApi("files/list_folder", {
+      path: path || "",
+      recursive: true,
+      include_media_info: false,
+      include_deleted: false,
+      include_has_explicit_shared_members: false,
+    });
+    const entries = [...result.entries];
+    let cursor = result.cursor, hasMore = result.has_more;
+    while (hasMore && entries.length < limit) {
+      const more = await dropboxApi("files/list_folder/continue", { cursor });
+      entries.push(...more.entries);
+      cursor = more.cursor;
+      hasMore = more.has_more;
+    }
+    return entries;
+  } catch (e) {
+    if (e.message.includes("not_found")) return null;
+    throw e;
+  }
+}
+
+/**
+ * The bytes of one file.
+ *
+ * Nothing in this module could read a file's contents before — e-sign reaches
+ * for files/get_preview, which CONVERTS a document to PDF. For a document
+ * that is already a PDF that is the wrong call: it re-renders it and can lose
+ * the AcroForm fields, which for a fillable I-589 are the most reliable thing
+ * on the page.
+ */
+async function downloadFile(path) {
+  const token = await getAccessToken();
+  const root = await getPathRootHeader();
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Dropbox-API-Arg": JSON.stringify({ path }),
+  };
+  if (root) headers["Dropbox-API-Path-Root"] = root;
+  const r = await require("axios").post(
+    "https://content.dropboxapi.com/2/files/download", null,
+    { headers, responseType: "arraybuffer", timeout: 120000, maxContentLength: 60 * 1024 * 1024 });
+  return Buffer.from(r.data);
+}
+
 async function listClientFiles({ clientKey, clientName, aNumber, useCache = true }) {
   const path = await resolveClientFolder({ clientKey, clientName, aNumber });
   if (!path) return { folder: null, files: [], resolved: false };
@@ -816,6 +875,8 @@ module.exports = {
   resetTokenCache,
   dropboxApi,
   listFolder,
+  listFolderDeep,
+  downloadFile,
   uploadFile,
   getTemporaryLink,
   deleteFile,

@@ -11092,6 +11092,80 @@ app.post("/admin/clients/:key/dropbox/mapping", async (req, res) => {
 //
 // Registered BEFORE /admin/clients/:key so the literal path is matched first —
 // the same ordering trap that put /admin/clients/brokers ahead of :key.
+// ── I-589 address import ────────────────────────────────────
+// Read-only until you press Apply. Admin/manager only: it reads every client's
+// folder and proposes changes to their contact details.
+app.use("/admin/clients/i589", auth.requireRole("admin", "manager"));
+
+app.get("/admin/clients/i589", async (req, res) => {
+  try {
+    const sweep = require("./i589-sweep");
+    const prog = await sweep.progress();
+    const rows = (await require("./db").query(
+      `SELECT * FROM i589_proposals ORDER BY
+         CASE status WHEN 'found' THEN 0 WHEN 'unreadable' THEN 1 WHEN 'error' THEN 2 ELSE 3 END,
+         client_name LIMIT 500`)).rows;
+    res.send(require("./i589-page").render({ prog, rows, ran: req.query.ran || null }));
+  } catch (err) {
+    console.error("[i589 page]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Scan a batch. Deliberately a small number per press: Dropbox is rate
+// limited, a Render request has a time limit, and the first batch is the one
+// that tells us whether these forms are readable at all.
+app.post("/admin/clients/i589/scan", async (req, res) => {
+  try {
+    const sweep = require("./i589-sweep");
+    const limit = Math.min(Math.max(parseInt(req.body.limit, 10) || 20, 1), 100);
+    const rescan = req.body.rescan === "1";
+    const rows = await sweep.clientsToScan({ limit, rescan });
+    let done = 0;
+    for (const row of rows) {
+      const current = await sweep.currentFor(row);
+      await sweep.scanOne(row, { current });
+      done++;
+    }
+    res.redirect("/admin/clients/i589?ran=" + done);
+  } catch (err) {
+    console.error("[i589 scan]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Apply ONE proposal. One at a time, on purpose: this is the step that
+// changes a client record, and a button that applied hundreds at once would
+// make the review meaningless.
+app.post("/admin/clients/i589/apply", async (req, res) => {
+  try {
+    const key = String(req.body.client_key || "").slice(0, 200);
+    const db2 = require("./db");
+    const r = await db2.query(`SELECT * FROM i589_proposals WHERE client_key = $1`, [key]);
+    const p = r.rows[0];
+    if (!p) return res.redirect("/admin/clients/i589");
+
+    const fields = {};
+    if (req.body.take_phone === "1" && p.found_phone) fields.phone = p.found_phone;
+    if (req.body.take_address === "1" && p.found_address) fields.address = p.found_address;
+    if (Object.keys(fields).length) {
+      await require("./client-contacts").set(key, fields, {
+        source: "i589",
+        sourceDetail: p.form_path,
+        sourceDate: p.form_modified ? new Date(p.form_modified).toISOString().slice(0, 10) : null,
+        by: (req.user && req.user.u) || null,
+      });
+    }
+    await db2.query(
+      `UPDATE i589_proposals SET applied_at = NOW(), applied_by = $2 WHERE client_key = $1`,
+      [key, (req.user && req.user.u) || null]);
+    res.redirect("/admin/clients/i589");
+  } catch (err) {
+    console.error("[i589 apply]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 app.post("/admin/clients/:key/contact", async (req, res) => {
   try {
     const key = String(req.params.key || "").slice(0, 200);
