@@ -1027,6 +1027,21 @@ function mount(app) {
         `<option value="${key}">${escapeHtml(r.label)} — ${escapeHtml(r.description)}</option>`
       ).join("");
 
+      // A consultant IS a broker folder in Dropbox. Listing them here means a
+      // login cannot be created for a broker who does not exist, and means the
+      // name is spelled once rather than once per system. Wrapped because
+      // Dropbox being unreachable must not take the whole user-admin page
+      // down — it just means no consultant can be added until it is back.
+      let brokerFolders = [], brokerError = null;
+      try {
+        const r = await require("./broker-accounts").allFolders();
+        brokerFolders = r.folders || [];
+        brokerError = r.error;
+      } catch (e) { brokerError = e.message; }
+      const brokerOptionsHTML = brokerFolders.map(f =>
+        `<option value="${escapeHtml(f.name)}">${escapeHtml(f.name)} (${escapeHtml(f.branches.join(" + "))})</option>`
+      ).join("");
+
       const hearingNotes = require("./hearing-notes");
       const body = `
         <div class="page-header"><h1>👤 Admin Users</h1></div>
@@ -1060,6 +1075,25 @@ function mount(app) {
               <div>
                 <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Role</label>
                 <select name="role" id="new_role" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">${roleOptionsHTML}</select>
+              </div>
+              <div style="grid-column:1/-1;">
+                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">
+                  Broker folder in Dropbox <span style="color:#999;">— required for the Consultant role, ignored for every other role</span>
+                </label>
+                ${brokerFolders.length
+                  ? `<select name="broker_folder" id="new_broker_folder" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                       <option value="">— none —</option>
+                       ${brokerOptionsHTML}
+                     </select>
+                     <div style="font-size:11px; color:#888; margin-top:4px;">
+                       ${brokerFolders.length} broker folder${brokerFolders.length === 1 ? "" : "s"} found.
+                       Clients already filed under the chosen folder are assigned to this consultant automatically.
+                       A broker who is not listed needs a folder in Dropbox first.
+                     </div>`
+                  : `<div style="padding:9px; border:1px dashed #c60; border-radius:3px; background:#fff8f0; font-size:12px; color:#a04;">
+                       No broker folders could be read from Dropbox${brokerError ? ` (${escapeHtml(brokerError)})` : ""},
+                       so a Consultant account cannot be created right now. Every other role still works.
+                     </div>`}
               </div>
             </div>
             <div style="margin-top:14px; text-align:right;">
@@ -1139,12 +1173,40 @@ function mount(app) {
 
   app.post("/admin/users/new", requireRole("admin"), async (req, res) => {
     try {
-      await createUser({
+      const role = req.body.role || "paralegal";
+      const ba = require("./broker-accounts");
+
+      // A consultant must BE a broker folder. Checked on the server, not just
+      // offered in a dropdown — the dropdown is a convenience, this is the rule.
+      let folder = null;
+      if (role === "consultant") {
+        folder = await ba.canonicalName(req.body.broker_folder);
+        if (!folder) {
+          throw new Error(
+            `"${String(req.body.broker_folder || "").trim() || "(none chosen)"}" is not a broker folder in Dropbox. ` +
+            "A consultant account can only be created for a broker who already has a folder, " +
+            "so create the folder first and then add the login.");
+        }
+      }
+
+      const user = await createUser({
         username: req.body.username,
         password: req.body.password,
         fullName: req.body.full_name,
-        role: req.body.role || "paralegal",
+        role,
       });
+
+      if (folder && user && user.id) {
+        await ba.ensureColumn();
+        await db.query(`UPDATE admin_users SET broker_folder = $2 WHERE id = $1`, [user.id, folder]);
+        // Their clients are already known — they are the ones in the folder.
+        try {
+          const linked = await ba.linkClients(user.id, folder, { by: req.user && req.user.uid });
+          console.log(`[broker-accounts] ${req.body.username}: linked ${linked.linked.length} client(s) under ${folder}`);
+        } catch (e) {
+          console.warn("[broker-accounts] linking clients failed:", e.message);
+        }
+      }
       res.redirect("/admin/users");
     } catch (err) {
       res.status(400).send(`<h1>Error</h1><p>${escapeHtml(err.message)}</p><p><a href="/admin/users">← Back</a></p>`);

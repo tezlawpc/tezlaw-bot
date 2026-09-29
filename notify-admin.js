@@ -40,7 +40,7 @@ async function loadConsultants() {
   await notify.initTables();
   const r = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.phone, u.telegram_chat_id,
-            u.notify_email, u.notify_sms, u.notify_telegram, u.disabled,
+            u.notify_email, u.notify_sms, u.notify_telegram, u.disabled, u.broker_folder,
             (SELECT COUNT(*)::int FROM client_consultants cc
               WHERE cc.consultant_id = u.id AND cc.removed_at IS NULL) AS client_count
        FROM admin_users u
@@ -86,6 +86,12 @@ function renderPage({ consultants, outbox, totals, health, saved = false }) {
       <td style="padding:10px 8px;">
         <strong>${esc(c.full_name || c.username)}</strong>
         <div style="font-size:11px;color:#888;">@${esc(c.username)} · ${c.client_count} client${c.client_count === 1 ? "" : "s"}</div>
+        ${c.broker_folder
+          ? `<div style="font-size:11px;color:#555;margin-top:2px;">📁 ${esc(c.broker_folder)}</div>`
+          : `<div style="font-size:11px;color:#B45309;margin-top:2px;">No Dropbox folder linked — their clients cannot be worked out automatically</div>`}
+        ${c.broker_folder && c.client_count === 0
+          ? `<div style="font-size:11px;color:#B45309;margin-top:2px;">Folder linked but no clients found in it yet</div>`
+          : ""}
         ${stuck ? `<div style="font-size:11px;color:#A02818;font-weight:600;margin-top:3px;">Cannot be alerted — ${esc(notify.reasonUnreachable(c))}</div>` : ""}
       </td>
       <td style="padding:10px 8px;">
@@ -155,12 +161,17 @@ function renderPage({ consultants, outbox, totals, health, saved = false }) {
     <form method="POST" action="/admin/alerts/flush" style="display:inline;margin-left:10px;">
       <button type="submit" style="padding:6px 14px;border:1px solid #ccc;background:#fff;border-radius:5px;cursor:pointer;font-size:12px;">Try the waiting ones now</button>
     </form>
+    <form method="POST" action="/admin/alerts/relink" style="display:inline;margin-left:6px;">
+      <button type="submit" style="padding:6px 14px;border:1px solid #ccc;background:#fff;border-radius:5px;cursor:pointer;font-size:12px;"
+        title="Re-read the Dropbox folders and assign any new clients to their broker">Pick up newly filed clients</button>
+    </form>
   </div>
 
   <div class="card">
     <h3 style="margin:0 0 4px;font-size:16px;">Consultants</h3>
     <div style="font-size:12px;color:#888;margin-bottom:12px;">
-      A consultant turns their own channels on and off in the portal. Only you can change the address they point at.
+      A consultant is a broker folder in Dropbox, and their clients are the ones filed inside it.
+      They turn their own channels on and off in the portal; only you can change the address those point at.
     </div>
     <table>
       <thead><tr><th>Who</th><th>Reach them at</th><th>Email</th><th>Text</th><th>Telegram</th></tr></thead>

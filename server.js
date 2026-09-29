@@ -2134,6 +2134,17 @@ app.post("/admin/alerts/contact", async (req, res) => {
   }
 });
 
+app.post("/admin/alerts/relink", async (req, res) => {
+  try {
+    const r = await require("./broker-accounts").relinkAll({ by: req.user && req.user.uid });
+    console.log(`[broker-accounts] relink: ${r.linked} new link(s) across ${r.consultants} consultant(s)`);
+    res.redirect("/admin/alerts?saved=1");
+  } catch (err) {
+    console.error("[admin alerts relink]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 app.post("/admin/alerts/flush", async (req, res) => {
   try {
     await require("./notify").flush({ limit: 200 });
