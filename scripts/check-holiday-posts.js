@@ -118,5 +118,77 @@ ok("holiday posts wait for the same approval buttons as every other post",
 ok("nothing is drafted at all unless SOCIAL_POSTS_ENABLED is true",
   /if \(!ENABLED\) return \{ queued: 0, reason: "SOCIAL_POSTS_ENABLED is not true" \};[\s\S]{0,200}queueHolidays|async function queueHolidays[\s\S]{0,200}if \(!ENABLED\)/.test(sp));
 
+console.log("\n── American holidays, not just the lunar ones ───");
+{
+  const us = hp.HOLIDAYS.filter(h => !h.lunar);
+  ok(`the calendar carries ${us.length} American/Western holidays`, us.length >= 24, String(us.length));
+  for (const k of ["independence", "thanksgiving", "memorial", "veterans", "juneteenth",
+                   "labor_day", "mlk", "christmas", "new_year", "halloween",
+                   "valentines", "st_patricks", "tax_day", "easter", "flag_day",
+                   "patriot_day", "new_years_eve", "small_business_saturday"]) {
+    ok(`  ${k} is on the calendar`, hp.HOLIDAYS.some(h => h.key === k));
+  }
+  // West Covina is not only a Chinese-American community.
+  for (const k of ["cinco_de_mayo", "mexican_independence", "dia_de_muertos"]) {
+    ok(`  ${k} is on the calendar`, hp.HOLIDAYS.some(h => h.key === k));
+  }
+  ok("Cinco de Mayo's angle corrects the usual mistake",
+    /NOT Mexican\s+"\s*\+\s*"Independence Day|NOT Mexican Independence Day/.test(
+      hp.HOLIDAYS.find(h => h.key === "cinco_de_mayo").angle.replace(/\s+/g, " ")));
+  ok("September 11 is solemn", hp.HOLIDAYS.find(h => h.key === "patriot_day").tone === "solemn");
+}
+
+console.log("\n── Easter is computed, not tabulated ───────────");
+for (const [y, want] of [[2026, "2026-04-05"], [2027, "2027-03-28"], [2028, "2028-04-16"],
+                         [2029, "2029-04-01"], [2030, "2030-04-21"]]) {
+  ok(`Easter ${y} is ${want}`, hp.easter(y) === want, hp.easter(y));
+}
+ok("Small Business Saturday 2026 is the Saturday after Thanksgiving",
+  hp.HOLIDAYS.find(h => h.key === "small_business_saturday").date(2026) === "2026-11-28",
+  hp.HOLIDAYS.find(h => h.key === "small_business_saturday").date(2026));
+
+console.log("\n── Wednesday fun facts ─────────────────────────");
+{
+  const ff = require("../fun-facts");
+  const keys = ff.FACTS.map(f => f.key);
+  ok(`the bank holds ${ff.FACTS.length} facts (about ${(ff.FACTS.length / 4.33).toFixed(0)} months of Wednesdays)`,
+    ff.FACTS.length >= 20, String(ff.FACTS.length));
+  ok("every fact key is unique", new Set(keys).size === keys.length);
+  ok("every fact is written out in full, not a prompt for one",
+    ff.FACTS.every(f => f.fact && f.fact.length > 60));
+  ok("facts resting on a statute carry the authority to check them against",
+    ff.FACTS.filter(f => f.cite).length >= 3);
+  ok("no fact quotes a fee, a processing time or an 'as of' figure that "
+   + "would go stale", !ff.FACTS.some(f => /\$\d|as of \d{4}|currently \d/.test(f.fact)));
+
+  ok("a fresh bank starts at the first fact", ff.nextFact(new Set()).key === keys[0]);
+  ok("a used fact is skipped", ff.nextFact(new Set([keys[0]])).key === keys[1]);
+  const order = [...keys].reverse();
+  ok("once the bank is exhausted it goes round again, oldest first",
+    ff.nextFact(new Set(keys), order).key === order[0]);
+  ok("…and the one just used does not come straight back",
+    ff.nextFact(new Set(keys), [...order.slice(1), order[0]]).key !== order[0]);
+
+  const CH = { name: "Facebook", max: 1200, voice: "(voice)" };   // stub: no database needed
+  const prompt = ff.buildFactPrompt(ff.FACTS.find(f => f.cite), "facebook", CH);
+  ok("the prompt hands over the fact as the only substance",
+    /use this and nothing else as the substance/.test(prompt));
+  ok("…and forbids adding any further legal rule",
+    /may NOT add "?\s*\+?\s*"?further facts, dates, numbers, statutes/.test(prompt.replace(/\s+/g, " ")));
+  ok("…and keeps the citation out of the published post",
+    /do NOT put this in the post/.test(prompt));
+  ok("the tired openers are banned", /Fun fact:/.test(prompt) && /hump day/.test(prompt));
+
+  const i = srv.indexOf('schedule("22 9 * * 3"');
+  const j = i < 0 ? -1 : srv.indexOf("America/Los_Angeles", i);
+  ok("fun facts run on Wednesdays", i > -1);
+  ok("…in Pacific time, in that same scheduled call",
+    i > -1 && j > i && srv.slice(i, j).includes("queueFunFact"));
+  ok("a fun fact is not re-queued within the same week",
+    /created_at > NOW\(\) - INTERVAL '6 days'/.test(sp));
+  ok("fun facts wait for approval too, like every other post",
+    /queueFunFact[\s\S]{0,3000}buttonsFor\(q\.id, "Approve"\)/.test(sp));
+}
+
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL HOLIDAY POST CHECKS PASSED\n");
 process.exit(failures ? 1 : 0);

@@ -1041,6 +1041,20 @@ require("node-cron").schedule("7 9 1 * *", async () => {
   }
 }, { timezone: "America/Los_Angeles" });
 
+// Wednesday fun facts — JJ: "to lighten up the mood in the middle of the
+// week." One fact, three channels, queued for approval like everything else.
+// The bank rotates, so it will not repeat until it has been all the way
+// round (about six months at one a week).
+require("node-cron").schedule("22 9 * * 3", async () => {
+  try {
+    const r = await require("./social-posts").queueFunFact();
+    if (r.reason) { console.log("[fun-facts]", r.reason); return; }
+    console.log(`[fun-facts] ${r.fact}: queued ${r.queued.length}, rejected ${r.rejected.length}`);
+  } catch (e) {
+    console.warn("[fun-facts] weekly run failed:", e.message);
+  }
+}, { timezone: "America/Los_Angeles" });
+
 // ── Transcripts ──────────────────────────────────────────────
 // Every dictation and hearing recording, saved when transcribed, split by
 // speaker (transcripts.js). The pages and their API:

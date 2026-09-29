@@ -487,6 +487,69 @@ async function queueHolidays({ days = 30, from = new Date(), think = null, notif
   return out;
 }
 
+// ── Wednesday fun facts ─────────────────────────────────────
+
+/**
+ * One fact, a few channels, queued for approval. Meant for Wednesdays.
+ *
+ * Which fact comes next is decided from what has already been queued, so the
+ * bank rotates without repeating and a restart cannot post the same fact
+ * twice in a week.
+ */
+async function queueFunFact({ channels = ["facebook", "instagram", "linkedin"], think = null, notify = true } = {}) {
+  if (!ENABLED) return { queued: 0, reason: "SOCIAL_POSTS_ENABLED is not true" };
+  await initTable();
+  const ff = require("./fun-facts");
+
+  // What has run before, oldest first — the rotation reads this.
+  const prior = await db.query(
+    `SELECT source_url, MIN(created_at) AS first_at FROM social_posts
+      WHERE source_url LIKE 'funfact:%' GROUP BY source_url ORDER BY MIN(created_at) ASC`);
+  const order = prior.rows.map(r => String(r.source_url).slice("funfact:".length));
+  const used = new Set(order);
+
+  const fact = ff.nextFact(used, order);
+  if (!fact) return { queued: 0, reason: "the fact bank is empty" };
+
+  const tag = `funfact:${fact.key}`;
+  const out = { fact: fact.key, queued: [], rejected: [] };
+
+  for (const channel of channels) {
+    if (!CHANNELS[channel]) continue;
+    // Already queued this week for this channel? Leave it.
+    const seen = await db.query(
+      `SELECT id FROM social_posts WHERE source_url = $1 AND channel = $2
+         AND created_at > NOW() - INTERVAL '6 days' LIMIT 1`, [tag, channel]);
+    if (seen.rows.length) continue;
+
+    let d;
+    try {
+      d = await composeOne({ url: "", title: "Fun fact" }, channel,
+        { think, prompt: ff.buildFactPrompt(fact, channel) });
+    } catch (e) { out.rejected.push({ channel, problems: [e.message] }); continue; }
+    if (!d.ok) { out.rejected.push({ channel, problems: d.problems }); continue; }
+
+    const r = await db.query(
+      `INSERT INTO social_posts (channel, text, source_url, source_title, problems, lang)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6) RETURNING id`,
+      [channel, d.text, tag, `Fun fact · ${fact.key}`, JSON.stringify(d.problems || []),
+        CHANNELS[channel].lang || "en"]);
+    out.queued.push({ id: r.rows[0].id, channel, text: d.text });
+  }
+
+  if (notify && (out.queued.length || out.rejected.length)) {
+    const head = [`🧠 Wednesday fun fact — ${fact.key}`];
+    if (fact.cite) head.push(`Authority: ${fact.cite}`);
+    if (out.rejected.length) head.push("", `${out.rejected.length} draft(s) did not pass the screen: `
+      + out.rejected.map(r => `${nameOf(r.channel)} (${(r.problems || []).join("; ")})`).join(", "));
+    await tellJJ(head.join("\n"));
+    for (const q of out.queued) {
+      await tellJJ(`${nameOf(q.channel)}\n\n${q.text}`, buttonsFor(q.id, "Approve"));
+    }
+  }
+  return out;
+}
+
 // ── Queueing ────────────────────────────────────────────────
 
 /**
@@ -917,5 +980,5 @@ module.exports = {
   screen, material, buildPrompt, composeOne, compose, composeCard, renderCard,
   buildVideoPrompt, checkScript, composeVideoScript, videoCaption, queueVideo,
   nextSlot, laToDate, deliverViaPostiz, postizCanDeliver, pasteToJJ,
-  initTable, queueForSource, queueHolidays, approve, skip, handleTelegramCallback, status,
+  initTable, queueForSource, queueHolidays, queueFunFact, approve, skip, handleTelegramCallback, status,
 };

@@ -48,6 +48,33 @@ function nthWeekday(year, month, weekday, nth) {
   return iso(year, month, last - ((lastDay - weekday + 7) % 7));
 }
 
+/**
+ * Easter Sunday, by the anonymous Gregorian algorithm (Computus).
+ *
+ * Unlike the Chinese lunisolar festivals, Easter IS computable from a closed
+ * formula — it does not need an astronomical table — so it is calculated here
+ * rather than tabulated. Good Friday is two days earlier.
+ */
+function easter(year) {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const hh = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - hh - k) % 7;
+  const m = Math.floor((a + 11 * hh + 22 * l) / 451);
+  const month = Math.floor((hh + l - 7 * m + 114) / 31);
+  const day = ((hh + l - 7 * m + 114) % 31) + 1;
+  return iso(year, month, day);
+}
+
+/** N days before a date string, as a date string. */
+function daysBefore(dateStr, n) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - n);
+  return iso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
+
 // Verified Gregorian dates for the lunisolar festivals. Sources:
 // Wikipedia "List of observances set by the Chinese calendar" (2026) and
 // studycli.org/chinese-holidays/2027 (2027). ADD YEARS HERE as they are
@@ -195,6 +222,99 @@ const HOLIDAYS = [
       + "Thursday and Friday.",
   },
   {
+    key: "valentines", name: "Valentine's Day", tone: "celebratory",
+    date: y => iso(y, 2, 14),
+    channels: ["facebook", "instagram"],
+    angle: "Light and warm. If it touches the firm's work at all, it is that "
+      + "a marriage-based petition is the one immigration filing where the "
+      + "government asks for your love story in writing. Keep it charming, "
+      + "not clinical, and give no advice.",
+  },
+  {
+    key: "st_patricks", name: "St. Patrick's Day", tone: "celebratory",
+    date: y => iso(y, 3, 17),
+    channels: ["facebook", "instagram"],
+    angle: "Light. The Irish were once the immigrant group America was most "
+      + "anxious about, and now the whole country wears green for them. That "
+      + "turn is the warm, true thing worth saying. No legal content.",
+  },
+  {
+    key: "tax_day", name: "Tax Day", tone: "warm",
+    date: y => iso(y, 4, 15),
+    angle: "The federal filing deadline. The genuinely useful point for this "
+      + "firm's readers: filing taxes is how a person builds the record of a "
+      + "life lived in the United States, which matters far beyond the IRS. "
+      + "Do not give filing advice or state any threshold or amount.",
+  },
+  {
+    key: "easter", name: "Easter", tone: "warm",
+    computed: "easter",
+    channels: ["facebook", "instagram"],
+    angle: "Warm seasonal wishes, inclusive of people who do not celebrate it. "
+      + "Short. No legal content.",
+  },
+  {
+    key: "cinco_de_mayo", name: "Cinco de Mayo", tone: "celebratory",
+    date: y => iso(y, 5, 5),
+    channels: ["facebook", "instagram", "gbp"],
+    angle: "The thing almost everyone gets wrong: this is NOT Mexican "
+      + "Independence Day, which is September 16. May 5 marks the Battle of "
+      + "Puebla in 1862, and it is celebrated more widely in the United "
+      + "States than in most of Mexico. Perfect material — a real "
+      + "misconception, cheerfully corrected. No legal content.",
+  },
+  {
+    key: "flag_day", name: "Flag Day", tone: "warm",
+    date: y => iso(y, 6, 14),
+    channels: ["facebook", "gbp"],
+    angle: "Marks the 1777 adoption of the flag. Brief and plain. Many "
+      + "naturalization ceremonies are held around it.",
+  },
+  {
+    key: "patriot_day", name: "Patriot Day (September 11)", tone: "solemn",
+    date: y => iso(y, 9, 11),
+    angle: "Remembrance. One or two restrained sentences, nothing more. No "
+      + "firm promotion of any kind, no emoji, and nothing that reads as "
+      + "content marketing. If there is any doubt about the wording, post "
+      + "nothing at all.",
+  },
+  {
+    key: "mexican_independence", name: "Mexican Independence Day", tone: "celebratory",
+    date: y => iso(y, 9, 16),
+    channels: ["facebook", "instagram", "gbp"],
+    angle: "The actual Mexican Independence Day — the one Cinco de Mayo is "
+      + "mistaken for. El Grito is the night before. Warm and celebratory, "
+      + "and meaningful to a large part of West Covina. No legal content.",
+  },
+  {
+    key: "dia_de_muertos", name: "Día de los Muertos", tone: "reflective",
+    date: y => iso(y, 11, 2),
+    channels: ["facebook", "instagram", "gbp"],
+    angle: "Not a Mexican Halloween, and saying so gently is the useful part. "
+      + "A holiday about remembering people by name and keeping them "
+      + "present — ofrendas, marigolds, favourite foods. Warm rather than "
+      + "spooky. No legal content.",
+  },
+  {
+    key: "small_business_saturday", name: "Small Business Saturday", tone: "warm",
+    date: y => {
+      const t = nthWeekday(y, 11, 4, 4);          // Thanksgiving
+      return daysBefore(t, -2);                    // the Saturday after
+    },
+    channels: ["facebook", "instagram", "linkedin", "gbp"],
+    angle: "The Saturday after Thanksgiving. Relevant because a good share of "
+      + "this firm's business clients ARE the small businesses of the San "
+      + "Gabriel Valley. Encourage shopping local. No pitch for the firm.",
+  },
+  {
+    key: "new_years_eve", name: "New Year's Eve", tone: "warm",
+    date: y => iso(y, 12, 31),
+    channels: ["facebook", "instagram", "wechat_moments"],
+    angle: "A short, warm sign-off to the year. Thanks rather than "
+      + "resolutions. No legal content, no looking-ahead-to-your-goals "
+      + "cliché.",
+  },
+  {
     key: "christmas", name: "Christmas", tone: "warm",
     date: y => iso(y, 12, 25),
     angle: "Warm seasonal wishes, inclusive of people who do not celebrate it. "
@@ -226,6 +346,10 @@ function upcoming({ from = new Date(), days = 30 } = {}) {
           continue;
         }
         d = table[h.lunar];
+      } else if (h.computed === "easter") {
+        d = easter(y);
+      } else if (h.computed === "good_friday") {
+        d = daysBefore(easter(y), 2);
       } else {
         d = h.date(y);
       }
@@ -247,8 +371,9 @@ const TONE = {
     + "no exclamation marks, no emoji, and nothing that reads as marketing.",
 };
 
-function buildHolidayPrompt(holiday, channel) {
-  const ch = require("./social-posts").CHANNELS[channel];
+// `ch` (the channel spec) is injectable — see the note in fun-facts.js.
+function buildHolidayPrompt(holiday, channel, ch = null) {
+  ch = ch || require("./social-posts").CHANNELS[channel];
   return [
     `Write one ${ch.name} post for ${process.env.FIRM_NAME || "Tez Law P.C."}, `
       + `a law firm in West Covina, California, for ${holiday.name} `
@@ -288,4 +413,4 @@ function buildHolidayPrompt(holiday, channel) {
   ].join("\n");
 }
 
-module.exports = { HOLIDAYS, LUNAR, TONE, nthWeekday, upcoming, buildHolidayPrompt };
+module.exports = { HOLIDAYS, LUNAR, TONE, nthWeekday, easter, daysBefore, upcoming, buildHolidayPrompt };
