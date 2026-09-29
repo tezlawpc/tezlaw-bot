@@ -1020,6 +1020,27 @@ require("./wechat-publish").initTable()
 require("./social-posts").initTable()
   .catch(e => console.warn("[social-posts] table init failed:", e.message));
 
+// Holiday posts: planned on the 1st of each month for the 30 days ahead, and
+// queued for approval like everything else. 9:07 rather than 9:00 — the top
+// of the hour is where every scheduled job in the world already is.
+//
+// Re-running is safe (queueHolidays skips a holiday already queued), so a
+// restart on the 1st cannot produce two Thanksgiving posts.
+require("node-cron").schedule("7 9 1 * *", async () => {
+  try {
+    // 38 days, not 30. A 30-day window starting on the 1st ends before the
+    // 31st of a 31-day month, so Halloween and New Year's Eve would never be
+    // planned by any run. queueHolidays skips a holiday already queued, so
+    // overlapping into the following month costs nothing and closes the gap.
+    const r = await require("./social-posts").queueHolidays({ days: 38 });
+    if (r.reason) { console.log("[holiday-posts]", r.reason); return; }
+    console.log(`[holiday-posts] planned ${r.planned}, queued ${r.queued.length}, rejected ${r.rejected.length}`);
+    for (const w of r.warnings || []) console.warn("[holiday-posts]", w);
+  } catch (e) {
+    console.warn("[holiday-posts] monthly run failed:", e.message);
+  }
+}, { timezone: "America/Los_Angeles" });
+
 // ── Transcripts ──────────────────────────────────────────────
 // Every dictation and hearing recording, saved when transcribed, split by
 // speaker (transcripts.js). The pages and their API:

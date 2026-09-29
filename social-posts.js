@@ -55,30 +55,38 @@ const CHANNELS = {
     name: "LinkedIn",
     max: 2800,
     lang: "en",
-    voice: "Professional peers and referral sources are reading. Plain, "
-      + "specific, no hype. One concrete point worth knowing.",
+    voice: "Other lawyers, accountants and referral sources are reading, and "
+      + "they can tell the difference between insight and content. Give them "
+      + "the thing they did not already know: a procedural wrinkle, a misread "
+      + "rule, a number that surprises. No hype, no thought-leader "
+      + "throat-clearing.",
   },
   facebook: {
     name: "Facebook",
     max: 1200,
     lang: "en",
-    voice: "Community audience. Warm and plain-spoken, short paragraphs, "
-      + "no jargon. Explain the thing itself, not why to hire a lawyer.",
+    voice: "Neighbours in the San Gabriel Valley. Warm, plain-spoken, short "
+      + "paragraphs, zero jargon; if a term is unavoidable, say what it means "
+      + "in the same breath. Explain the thing itself, never why to hire a "
+      + "lawyer. Write it the way you would explain it to a friend at dinner "
+      + "who asked a real question.",
   },
   instagram: {
     name: "Instagram",
     max: 900,
     lang: "en",
-    voice: "Short. One idea. Line breaks, not paragraphs. A handful of "
-      + "specific hashtags at the end, never a wall of them.",
+    voice: "Short. One idea, landed hard. Line breaks, not paragraphs: the "
+      + "first line has to earn the second. Lead with the surprise. A handful "
+      + "of specific hashtags at the end, never a wall of them.",
   },
   gbp: {
     name: "Google Business",
     max: 1400,
     lang: "en",
     linkInText: false,
-    voice: "People who found the firm on Google Search or Maps. Two to four "
-      + "short, plain sentences on the one point worth knowing. Do NOT put a "
+    voice: "Someone who just searched for an answer and found the firm on "
+      + "Maps. Two to four short, plain sentences that actually resolve one "
+      + "question, because they arrived with one. Do NOT put a "
       + "web address or phone number in the text: Google rejects posts that "
       + "do, and a Learn more button carries the link.",
   },
@@ -86,8 +94,9 @@ const CHANNELS = {
     name: "WeChat 朋友圈",
     max: 600,
     lang: "zh",
-    voice: "简体中文。写给在美国的华人移民读者。平实、具体、不夸张，"
-      + "不用营销口号，不承诺结果。",
+    voice: "简体中文。写给在美国的华人移民读者，多半在南加州。像朋友聊天一样，"
+      + "温和、具体、有人情味。讲一件大家常常弄错的事，并说清楚为什么。"
+      + "不用营销口号，不夸张，不承诺结果。",
   },
 };
 
@@ -169,28 +178,68 @@ function material(source, max = 6000) {
   return parts.join("\n\n").slice(0, max);
 }
 
+/**
+ * What the post is FOR comes before what it must avoid.
+ *
+ * The earlier version opened with a wall of prohibitions and asked only that
+ * the post be "built from the material". Both together produced exactly one
+ * kind of post: a hedged summary of the article, opening "Navigating X can be
+ * complex" and closing "contact us to learn more". Nobody reads those,
+ * including the person who wrote them.
+ *
+ * The fix is not to loosen the rules — every compliance line below is still
+ * here, unchanged, because they are the lines that put a lawyer in front of
+ * the State Bar. The fix is to say what a good post DOES: teach one specific
+ * thing, usually the part people get wrong, in the voice of a person who
+ * finds it interesting. The prohibitions then act as a fence rather than as
+ * the brief.
+ */
 function buildPrompt(source, channel) {
   const ch = CHANNELS[channel];
   return [
     `Write one ${ch.name} post for ${FIRM}, a law firm in West Covina, California.`,
     "",
+    "THE JOB: teach the reader ONE specific thing they could repeat to a friend",
+    "tonight. Best of all is the thing people usually get wrong — a rule that",
+    "is not the rule, a deadline that is not the deadline, a form that does",
+    "something other than what its name suggests. Interesting and true beats",
+    "comprehensive. One idea, fully landed, beats four mentioned.",
+    "",
     ch.voice,
+    "",
+    "HOW IT READS: like a person who finds this genuinely interesting telling",
+    "you about it, not like a firm publishing. Open on the surprising part —",
+    "never on the topic. Contractions are good. Short sentences are good. A",
+    "concrete number, date or example from the material is what makes it stick.",
+    "",
+    "DO NOT WRITE, in any wording:",
+    "  · \"Navigating X can be complex/confusing/overwhelming\"",
+    "  · \"Understanding X is important\" or \"X can be daunting\"",
+    "  · \"At TEZ Law Firm, we...\" or any description of the firm's services",
+    "  · an opening rhetorical question (\"Did you know...?\", \"Ever wondered...?\")",
+    "  · \"Contact us today\", \"reach out to learn more\", \"we're here to help\"",
+    "  · a list of practice areas",
+    "These are the sentences that make a post feel generated. If your draft",
+    "contains one, the post is not finished.",
     "",
     `Hard limit: ${ch.max} characters, including the link.`,
     "",
-    "It must be built ONLY from the material below. Do not add statistics,",
-    "deadlines, case outcomes or legal claims that are not in it. If the",
-    "material does not support an interesting post, say exactly NOTHING TO SAY",
-    "and write nothing else.",
+    "TRUTH: build it ONLY from the material below. Do not add statistics,",
+    "deadlines, case outcomes or legal claims that are not in it — an",
+    "interesting post that invents a rule is worse than no post. If the",
+    "material does not support one, say exactly NOTHING TO SAY and write",
+    "nothing else.",
     "",
     "Brand: the firm's public name is \"TEZ Law Firm\" (legal name Tez Law P.C.; in",
     "Chinese posts: TEZ Law Firm 律师事务所). Never write TezLaw, Tez Legal or",
-    "Tez Law Group. Calm, confident, plain",
-    "language; at most two emoji; no exclamation marks.",
+    "Tez Law Group. Warmth is welcome; hype is not. At most three emoji, and",
+    "none at all is usually better. At most one exclamation mark in the whole",
+    "post, and only if something is actually worth it.",
     "",
     "Never: guarantee or predict an outcome; call the firm the best or a",
     "leader; manufacture urgency; tell the reader what to file or say anything",
-    "about 'your case'. The reader is a stranger, not a client.",
+    "about 'your case'. The reader is a stranger, not a client. Teaching what",
+    "the law says is the point; telling one person what to do is not.",
     "",
     ch.linkInText === false ? "Do not include any link, web address or phone number." : `End with the link: ${source.url}`,
     "",
@@ -208,7 +257,7 @@ function buildPrompt(source, channel) {
  * Returns { ok, text, problems, attempts } — a draft that cannot pass the
  * screen is reported, never quietly published.
  */
-async function composeOne(source, channel, { think = null, tries = 2 } = {}) {
+async function composeOne(source, channel, { think = null, tries = 2, prompt = null } = {}) {
   if (!CHANNELS[channel]) throw new Error(`Unknown channel ${channel}`);
   const ask = think || (message => require("./zara-core").think({
     surface: "system", tier: "balanced", message, lessonScope: "social-posts",
@@ -219,7 +268,7 @@ async function composeOne(source, channel, { think = null, tries = 2 } = {}) {
 
   let last = { ok: false, problems: ["not attempted"], text: "" };
   for (let i = 0; i < tries; i++) {
-    const raw = String((await ask(buildPrompt(source, channel))).text || "").trim();
+    const raw = String((await ask(prompt || buildPrompt(source, channel))).text || "").trim();
     if (/^NOTHING TO SAY/i.test(raw)) {
       return { ok: false, skip: true, text: "", problems: ["the material does not support a post"], attempts: i + 1 };
     }
@@ -362,6 +411,81 @@ async function sendMediaToJJ(kind, buffer, filename, caption, reply_markup = nul
 const nameOf = ch => ch === "video" ? "Video · YouTube Shorts + TikTok" : (CHANNELS[ch] ? CHANNELS[ch].name : ch);
 const buttonsFor = (id, label) => ({ inline_keyboard: [[
   { text: `✅ ${label}`, callback_data: `soc_go_${id}` }, { text: "🚫 Skip", callback_data: `soc_no_${id}` }]] });
+
+// ── Holiday posts ───────────────────────────────────────────
+
+/**
+ * Plan the holidays falling in the next `days` days and queue a draft for
+ * each, for JJ to approve exactly like an article post.
+ *
+ * Meant to run on the 1st of the month. Re-running it is safe: a holiday
+ * already queued or already decided is not queued again, so a restart on the
+ * 1st does not produce two Thanksgiving posts.
+ *
+ * Warnings from the calendar (a lunar festival whose year has no verified
+ * date) are passed through and told to JJ rather than swallowed — a festival
+ * that silently never posts is the failure this would otherwise have.
+ */
+async function queueHolidays({ days = 30, from = new Date(), think = null, notify = true } = {}) {
+  if (!ENABLED) return { queued: 0, reason: "SOCIAL_POSTS_ENABLED is not true" };
+  await initTable();
+  const hp = require("./holiday-posts");
+  const { holidays, warnings } = hp.upcoming({ from, days });
+  const out = { planned: holidays.length, queued: [], rejected: [], skipped: [], warnings };
+
+  for (const h of holidays) {
+    const channels = h.channels || ["facebook", "instagram", "linkedin", "gbp", "wechat_moments"];
+    for (const channel of channels) {
+      if (!CHANNELS[channel]) continue;
+
+      // Already handled? A holiday is identified by its key and its date, so
+      // the same festival next year is a different post.
+      const tag = `holiday:${h.key}:${h.date}`;
+      const seen = await db.query(
+        `SELECT id FROM social_posts WHERE source_url = $1 AND channel = $2 LIMIT 1`, [tag, channel]);
+      if (seen.rows.length) { out.skipped.push({ holiday: h.name, channel, why: "already queued" }); continue; }
+
+      let d;
+      try {
+        d = await composeOne({ url: "", title: h.name }, channel,
+          { think, prompt: hp.buildHolidayPrompt(h, channel) });
+      } catch (e) {
+        out.rejected.push({ holiday: h.name, channel, problems: [e.message] });
+        continue;
+      }
+      if (!d.ok) { out.rejected.push({ holiday: h.name, channel, problems: d.problems }); continue; }
+
+      const r = await db.query(
+        `INSERT INTO social_posts (channel, text, source_url, source_title, problems, lang)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6) RETURNING id`,
+        [channel, d.text, tag, `${h.name} — ${h.date}`, JSON.stringify(d.problems || []),
+          CHANNELS[channel].lang || "en"]);
+      out.queued.push({ id: r.rows[0].id, holiday: h.name, date: h.date, channel, text: d.text });
+    }
+  }
+
+  if (notify && (out.queued.length || warnings.length)) {
+    const lines = [`🗓 Holiday posts for the next ${days} days`];
+    if (out.queued.length) {
+      const byHoliday = {};
+      for (const q of out.queued) (byHoliday[`${q.date} · ${q.holiday}`] ||= []).push(nameOf(q.channel));
+      for (const [k, v] of Object.entries(byHoliday)) lines.push(`• ${k} — ${v.join(", ")}`);
+      lines.push("", "Each one is waiting for your approval below.");
+    } else {
+      lines.push("Nothing new to queue.");
+    }
+    if (warnings.length) lines.push("", "⚠️ " + warnings.join("\n⚠️ "));
+    if (out.rejected.length) {
+      lines.push("", `${out.rejected.length} draft(s) did not pass the screen:`);
+      for (const r of out.rejected.slice(0, 6)) lines.push(`• ${r.holiday} (${nameOf(r.channel)}): ${(r.problems || []).join("; ")}`);
+    }
+    await tellJJ(lines.join("\n"));
+    for (const q of out.queued) {
+      await tellJJ(`${q.date} · ${q.holiday} · ${nameOf(q.channel)}\n\n${q.text}`, buttonsFor(q.id, "Approve"));
+    }
+  }
+  return out;
+}
 
 // ── Queueing ────────────────────────────────────────────────
 
@@ -793,5 +917,5 @@ module.exports = {
   screen, material, buildPrompt, composeOne, compose, composeCard, renderCard,
   buildVideoPrompt, checkScript, composeVideoScript, videoCaption, queueVideo,
   nextSlot, laToDate, deliverViaPostiz, postizCanDeliver, pasteToJJ,
-  initTable, queueForSource, approve, skip, handleTelegramCallback, status,
+  initTable, queueForSource, queueHolidays, approve, skip, handleTelegramCallback, status,
 };
