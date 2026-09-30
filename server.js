@@ -1017,6 +1017,25 @@ require("./wechat-publish").initTable()
 // advertising rules, and held for JJ. Like WeChat, this only prepares the
 // table: nothing is drafted without SOCIAL_POSTS_ENABLED, and nothing leaves
 // the system without him tapping approve.
+// Transcribe whatever is waiting, every 5 minutes.
+//
+// Deliberately a small batch: each one is a Whisper pass plus a Claude
+// extraction, and the point of the inbox is that nobody is waiting on it.
+// A recording that fails keeps its audio and is retried, up to three times.
+require("./dictation-inbox").initTable()
+  .then(() => {
+    const sweep = async () => {
+      try {
+        const r = await require("./dictation-inbox").processPending({ limit: 3 });
+        if (r.tried) console.log(`[dictation-inbox] transcribed ${r.done}, failed ${r.failed}`);
+      } catch (e) { console.warn("[dictation-inbox] sweep:", e.message); }
+    };
+    setInterval(sweep, 5 * 60 * 1000);
+    setTimeout(sweep, 30 * 1000);   // and shortly after boot, for anything left over
+    console.log("✅ DICTATION: recordings are saved first and transcribed every 5 min");
+  })
+  .catch(e => console.warn("[dictation-inbox] table init failed:", e.message));
+
 require("./social-posts").initTable()
   .catch(e => console.warn("[social-posts] table init failed:", e.message));
 // A minute after each deploy: schedule posts JJ already approved that never
@@ -1587,17 +1606,37 @@ app.get("/admin/pi/brokers", async (req, res) => {
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const fmt$ = n => "$" + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+    // pi_cases has no such column, and this page asked for one — it has been
+    // failing since it was written. The settlement lives on pi_settlements,
+    // flagged is_final, exactly as personal-injury.js:getCases() already reads
+    // it.
+    //
+    // The amount is check_amount, deliberately matching that existing query
+    // rather than improving on it here: two pages reporting settlement totals
+    // by different definitions would be worse than one imperfect definition.
+    // (It means a case settled but not yet paid counts as zero — worth
+    // revisiting, in both places at once.)
+    //
+    // LIMIT 1 with an explicit order, so a case with more than one final row
+    // gives the same answer every time.
     const r = await db.query(`
       SELECT
-        COALESCE(NULLIF(referral_source, ''), '(no broker)') as broker,
+        COALESCE(NULLIF(c.referral_source, ''), '(no broker)') as broker,
         COUNT(*)::int as case_count,
-        COUNT(*) FILTER (WHERE status = 'settled')::int as settled_count,
-        COUNT(*) FILTER (WHERE status IN ('intake', 'treating', 'demand', 'negotiating', 'litigation'))::int as active_count,
-        COALESCE(SUM(final_settlement) FILTER (WHERE status = 'settled'), 0) as total_settled,
-        COALESCE(AVG(final_settlement) FILTER (WHERE status = 'settled'), 0) as avg_settlement,
-        MAX(created_at) as last_intake
-      FROM pi_cases
-      GROUP BY COALESCE(NULLIF(referral_source, ''), '(no broker)')
+        COUNT(*) FILTER (WHERE c.status = 'settled')::int as settled_count,
+        COUNT(*) FILTER (WHERE c.status IN ('intake', 'treating', 'demand', 'negotiating', 'litigation'))::int as active_count,
+        COALESCE(SUM(s.amount) FILTER (WHERE c.status = 'settled'), 0) as total_settled,
+        COALESCE(AVG(s.amount) FILTER (WHERE c.status = 'settled' AND s.amount IS NOT NULL), 0) as avg_settlement,
+        MAX(c.created_at) as last_intake
+      FROM pi_cases c
+      LEFT JOIN LATERAL (
+        SELECT ps.check_amount AS amount
+          FROM pi_settlements ps
+         WHERE ps.case_id = c.id AND ps.is_final = TRUE
+         ORDER BY COALESCE(ps.check_received_date, ps.offer_date, ps.created_at) DESC
+         LIMIT 1
+      ) s ON TRUE
+      GROUP BY COALESCE(NULLIF(c.referral_source, ''), '(no broker)')
       ORDER BY case_count DESC, broker ASC
     `);
     const brokers = r.rows;
@@ -9733,6 +9772,56 @@ app.post("/admin/hearing/notes/dictate/extract-from-text", async (req, res) => {
   }
 });
 
+// ── Save the recording, transcribe later ────────────────────
+//
+// The only thing on the critical path when an attorney walks out of court.
+// One write, then the laptop can close. Transcription happens afterwards.
+app.post("/admin/hearing/notes/dictate/save", audioUpload.single("audio"), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ ok: false, error: "No audio file uploaded" });
+    }
+    const inbox = require("./dictation-inbox");
+    const row = await inbox.save({
+      buffer: req.file.buffer,
+      filename: req.file.originalname || "dictation.webm",
+      clientName: req.body.client_name,
+      aNumber: req.body.a_number,
+      hearingType: req.body.hearing_type,
+      user: req.user,
+    });
+    console.log(`[dictate-save] #${row.id}: ${req.file.buffer.length} bytes safe`);
+    res.json({ ok: true, id: row.id, bytes: req.file.buffer.length });
+  } catch (err) {
+    console.error("[dictate-save]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// The waiting room: what has been recorded, what has been transcribed.
+app.get("/admin/hearing/notes/dictate/inbox", async (req, res) => {
+  try {
+    const inbox = require("./dictation-inbox");
+    const [rows, counts] = await Promise.all([inbox.list({ limit: 60 }), inbox.counts()]);
+    res.send(require("./dictation-inbox-page").render({ rows, counts }));
+  } catch (err) {
+    console.error("[dictate-inbox]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Transcribe one, on demand — "back in the office".
+app.post("/admin/hearing/notes/dictate/inbox/:id/transcribe", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = await require("./dictation-inbox").transcribeOne(id, { user: req.user });
+    res.redirect("/admin/hearing/notes/dictate/inbox" + (r.ok ? "?done=" + r.note_id : "?failed=1"));
+  } catch (err) {
+    console.error("[dictate-inbox transcribe]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
 app.post("/admin/hearing/notes/dictate/process", audioUpload.single("audio"), async (req, res) => {
   try {
     if (!req.file || !req.file.buffer) {
@@ -9742,6 +9831,20 @@ app.post("/admin/hearing/notes/dictate/process", audioUpload.single("audio"), as
     const hn = require("./hearing-notes");
 
     console.log(`[dictate] Received ${req.file.buffer.length} bytes, filename=${req.file.originalname}`);
+
+    // Save the audio BEFORE transcribing, even on the transcribe-now path.
+    // Transcription is the part that takes a minute and the part that can
+    // fail; the recording is the part that cannot be recreated. If anything
+    // below goes wrong — or the lid closes — the recording is in the inbox
+    // and can be transcribed later.
+    try {
+      await require("./dictation-inbox").save({
+        buffer: req.file.buffer,
+        filename: req.file.originalname || "dictation.webm",
+        clientName: req.body.client_name, aNumber: req.body.a_number,
+        hearingType: req.body.hearing_type, user: req.user,
+      });
+    } catch (e) { console.warn("[dictate] could not park the audio first:", e.message); }
 
     // Transcribe with speakers and save it before anything else can fail.
     const T = require("./transcripts");

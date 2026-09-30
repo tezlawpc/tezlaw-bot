@@ -351,8 +351,28 @@ function renderDictatePage() {
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button type="button" onclick="rerecord()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">🔄 Re-record</button>
         <button type="button" onclick="downloadAudio()" title="Keep a copy on this computer before uploading" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">💾 Save a copy</button>
-        <button type="button" onclick="submitAudio()" id="submit-btn" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:3px; cursor:pointer; font-size:13px; font-weight:600; flex:1;">🎯 Transcribe + Create Draft</button>
+        <button type="button" onclick="saveOnly()" id="save-btn" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:3px; cursor:pointer; font-size:13px; font-weight:700; flex:1;">💾 Save recording</button>
+        <button type="button" onclick="submitAudio()" id="submit-btn" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">🎯 Transcribe now</button>
       </div>
+      <div style="font-size:12px; color:#666; margin-top:8px; line-height:1.5;">
+        <strong>Save recording</strong> stores the audio and nothing else — it takes a second, and you can
+        shut the laptop as soon as it confirms. Transcribing happens afterwards, by itself or from the
+        Recordings page. <strong>Transcribe now</strong> does both and takes a minute or so.
+      </div>
+    </div>
+  </div>
+
+  <!-- Saved -->
+  <div id="saved-panel" style="display:none; padding:24px 0; text-align:center;">
+    <div style="font-size:40px; margin-bottom:10px;">💾</div>
+    <div style="font-size:18px; font-weight:700; color:#0C1C36;">Recording saved</div>
+    <div style="font-size:13px; color:#555; margin-top:6px;">
+      You can close the laptop now. It will be transcribed on its own, or you can
+      do it from <a href="/admin/hearing/notes/dictate/inbox">Recordings</a>.
+    </div>
+    <div style="margin-top:14px; display:flex; gap:8px; justify-content:center;">
+      <a href="/admin/hearing/notes/dictate/inbox" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:3px; text-decoration:none; font-size:13px;">Recordings</a>
+      <button type="button" onclick="resetAll()" style="background:#eee; color:#333; padding:8px 16px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">Record another</button>
     </div>
   </div>
 
@@ -508,6 +528,7 @@ function rerecord() {
 function resetAll() {
   document.getElementById("error-panel").style.display = "none";
   document.getElementById("processing-panel").style.display = "none";
+  document.getElementById("saved-panel").style.display = "none";
   rerecord();
 }
 
@@ -516,6 +537,44 @@ function updateProgress(status, sub, pct, icon = "🎧") {
   document.getElementById("processing-sub").textContent = sub;
   document.getElementById("processing-progress").style.width = pct + "%";
   document.getElementById("processing-icon").textContent = icon;
+}
+
+// Save only. The whole point is that this is fast and cannot be waiting on a
+// model: one upload, then the attorney is free to go.
+async function saveOnly() {
+  if (!audioBlob) return;
+  document.getElementById("playback-panel").style.display = "none";
+  document.getElementById("processing-panel").style.display = "block";
+  updateProgress("Saving the recording…", "This only takes a moment", 40, "💾");
+
+  const fd = new FormData();
+  fd.append("audio", audioBlob, "dictation-" + Date.now() + "." + audioExt);
+  fd.append("client_name", document.getElementById("hint-client-name").value.trim());
+  fd.append("a_number", document.getElementById("hint-a-number").value.trim());
+  fd.append("hearing_type", document.getElementById("hint-hearing-type").value);
+
+  try {
+    const resp = await fetch("/admin/hearing/notes/dictate/save", { method: "POST", body: fd });
+    const text = await resp.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch (e) { throw new Error("Server returned non-JSON: " + text.substring(0, 200)); }
+    if (!resp.ok || !data.ok) {
+      var err = new Error(data.error || ("HTTP " + resp.status));
+      if (resp.status === 401) err.authExpired = true;
+      throw err;
+    }
+    document.getElementById("processing-panel").style.display = "none";
+    document.getElementById("saved-panel").style.display = "block";
+  } catch (e) {
+    if (e && e.authExpired) {
+      showError("Your session expired while this page was open, so the recording could not be saved. "
+        + "Your recording is safe on this page — log in, come back to this tab and press Save again.",
+        { login: true });
+    } else {
+      showError(e.message);
+    }
+  }
 }
 
 async function submitAudio() {
@@ -585,6 +644,7 @@ function showError(msg, opts) {
   var o = opts || {};
   var keep = !!audioBlob;
   document.getElementById("processing-panel").style.display = "none";
+  document.getElementById("saved-panel").style.display = "none";
   document.getElementById("playback-panel").style.display = keep ? "block" : "none";
   document.getElementById("record-panel").style.display = keep ? "none" : "block";
   document.getElementById("error-panel").style.display = "block";

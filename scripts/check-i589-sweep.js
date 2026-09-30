@@ -92,5 +92,16 @@ ok("the page is admin or manager only",
 ok("…and that gate is registered before the routes it protects",
   srv.indexOf('app.use("/admin/clients/i589"') < srv.indexOf('app.get("/admin/clients/i589"'));
 
+console.log("\n── It can actually be found ────────────────────");
+{
+  const cp = fs.readFileSync(path.join(REPO, "client-profiles.js"), "utf8");
+  ok("the clients page links to it — it was reachable only by typing the URL",
+    /href="\/admin\/clients\/i589"/.test(cp));
+  ok("the link says what it does", /I-589 addresses/.test(cp));
+  ok("the route is registered before /admin/clients/:key, or the literal path "
+   + "would be swallowed by the wildcard",
+    srv.indexOf('app.get("/admin/clients/i589"') < srv.indexOf('app.get("/admin/clients/:key"'));
+}
+
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL I-589 SWEEP CHECKS PASSED\n");
 process.exit(failures ? 1 : 0);

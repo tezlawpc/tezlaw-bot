@@ -380,6 +380,7 @@ function renderClientList(clients) {
         </div>
         <div style="border-left:1px solid #eee; padding-left:12px;">
           <button type="button" onclick="showAddContactModal()" title="Add a new client contact record (no case yet)" style="padding:9px 14px; background:#F07800; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">➕ Add Client</button>
+          <a href="/admin/clients/i589" title="Read each client's address and phone from item 8 of their most recent I-589" style="padding:9px 14px; background:#fff; color:#0C1C36; border:1px solid #D4B983; border-radius:4px; text-decoration:none; font-size:13px; font-weight:600; display:inline-block;">📄 I-589 addresses</a>
           <button type="button" onclick="bulkImportDropbox(true)" title="Preview what would be imported (no changes)" style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">👁 Preview import</button>
           <button type="button" onclick="bulkImportDropbox(false)" title="Scan Dropbox and add all client folders as clients" style="padding:9px 14px; background:#0061FF; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">📥 Import from Dropbox</button>
         </div>
