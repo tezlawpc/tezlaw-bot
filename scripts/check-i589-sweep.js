@@ -48,8 +48,11 @@ console.log("\n── The review is a real review ──────────
     !/take_address[^>]*checked/.test(html));
   ok("the conflict shows what is already on file", /Los Angeles, CA/.test(html));
   ok("the source file is shown on the row", /I-589\.pdf/.test(html));
+  // Compared against the page's own wording rather than a copy of it: the
+  // labels gained an HTML entity and a third method (a scan, read by looking
+  // at it) the day this was hardcoded, and a copy would only have gone stale.
   ok("how it was read is shown, so a text-extracted row can be weighted",
-    /the form's own fields|the page text/.test(html));
+    Object.values(require("../i589-page").METHOD).some(w => html.includes(w)));
   ok("the page says item 9 is never used", /Item 9[\s\S]{0,80}never used/.test(html));
   ok("no inline JavaScript at all", !/onclick=|onchange=|<script/.test(html));
 
@@ -84,13 +87,37 @@ ok("a scan is limited per press, because Dropbox is rate limited and a "
  + "request has a time limit", /Math\.min\(Math\.max\(parseInt\(req\.body\.limit/.test(srv));
 ok("the limit is capped server-side", /, 100\)/.test(srv));
 ok("clients already looked at are not rescanned by default",
-  /WHERE \$2 = true OR p\.client_key IS NULL/.test(sweep));
+  /const done = new Set\(\(await db\(\)\.query\(`SELECT client_key FROM i589_proposals`\)\)/.test(sweep) &&
+  /out\.filter\(c => !done\.has\(c\.client_key\)\)/.test(sweep));
 ok("progress is recorded so a sweep can be resumed",
   /async function progress/.test(sweep) && /i589_proposals/.test(sweep));
 ok("the page is admin or manager only",
   /app\.use\("\/admin\/clients\/i589", auth\.requireRole\("admin", "manager"\)\)/.test(srv));
 ok("…and that gate is registered before the routes it protects",
   srv.indexOf('app.use("/admin/clients/i589"') < srv.indexOf('app.get("/admin/clients/i589"'));
+
+console.log("\n── The roster is the clients, not a cache ──────");
+{
+  ok("clients come from the hearing notes, the same source the client list uses",
+    /FROM hearing_notes[\s\S]{0,200}UNION ALL[\s\S]{0,200}FROM individual_hearing_notes/.test(sweep));
+  ok("NOT from client_dropbox_mapping, which is only a lazy cache",
+    !/FROM client_dropbox_mapping/.test(sweep));
+  ok("…and the comment records why, so it is not 'simplified' back",
+    /lazy CACHE/.test(sweep));
+  ok("the client key is the shared one, so rows line up with contacts",
+    /const \{ clientKey \} = require\("\.\/client-profiles"\)/.test(sweep));
+  ok("a client whose folder was never resolved gets resolved during the sweep",
+    /resolveClientFolder\(\{/.test(sweep));
+  ok("…and a client with no findable folder is recorded as such, not as an error",
+    /out\.status = "no_folder"/.test(sweep));
+  ok("progress counts real clients", /clientCount\(\)/.test(sweep));
+
+  const zero = page.render({ prog: { mapped: 10, scanned: 10, remaining: 0, byStatus: {} }, rows: [], ran: "0" });
+  ok("a scan that finds nothing says WHY rather than looking broken",
+    /Nothing to scan/.test(zero));
+  ok("…and names where clients come from, so the cause is findable",
+    /come from the hearing notes/.test(zero));
+}
 
 console.log("\n── It can actually be found ────────────────────");
 {

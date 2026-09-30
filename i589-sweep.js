@@ -37,7 +37,7 @@ async function initTable() {
         status         TEXT NOT NULL,   -- found | no_form | unreadable | error
         form_path      TEXT,
         form_modified  TIMESTAMPTZ,
-        method         TEXT,            -- fields | text
+        method         TEXT,            -- fields | text | vision
         found_phone    TEXT,
         found_address  TEXT,
         partial        TEXT,
@@ -56,30 +56,66 @@ async function initTable() {
   return ready;
 }
 
-/** Clients that have a Dropbox folder mapped, oldest-scanned first. */
+/**
+ * Clients to look at next.
+ *
+ * NOT from client_dropbox_mapping. That table is a lazy CACHE — a row appears
+ * only once somebody has already opened that client's files — so reading it as
+ * if it listed the firm's clients meant the sweep found almost nothing and
+ * said so without explaining why. The roster is the hearing notes, the same
+ * source the client list itself is built from.
+ *
+ * The folder is resolved per client as we go, and resolving caches itself, so
+ * the mapping table fills in as a side effect rather than being a prerequisite.
+ */
 async function clientsToScan({ limit = 20, rescan = false } = {}) {
   await initTable();
   const r = await db().query(
-    `SELECT m.client_key, m.client_name, m.a_number, m.dropbox_path
-       FROM client_dropbox_mapping m
-       LEFT JOIN i589_proposals p ON p.client_key = m.client_key
-      WHERE $2 = true OR p.client_key IS NULL
-      ORDER BY m.client_key
-      LIMIT $1`, [limit, !!rescan]);
-  return r.rows;
+    `SELECT t.client_name, t.a_number, MAX(t.at) AS at
+       FROM (
+         SELECT client_name, a_number, COALESCE(hearing_date, created_at) AS at
+           FROM hearing_notes WHERE client_name IS NOT NULL AND client_name <> ''
+         UNION ALL
+         SELECT client_name, a_number, COALESCE(hearing_date, created_at) AS at
+           FROM individual_hearing_notes WHERE client_name IS NOT NULL AND client_name <> ''
+       ) t
+      GROUP BY t.client_name, t.a_number
+      ORDER BY MAX(t.at) DESC NULLS LAST`);
+
+  const { clientKey } = require("./client-profiles");
+  const seen = new Set();
+  const out = [];
+  for (const row of r.rows) {
+    const key = clientKey({ aNumber: row.a_number, clientName: row.client_name });
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ client_key: key, client_name: row.client_name, a_number: row.a_number });
+  }
+
+  if (rescan) return out.slice(0, limit);
+
+  // Skip the ones already looked at.
+  const done = new Set((await db().query(`SELECT client_key FROM i589_proposals`)).rows.map(x => x.client_key));
+  return out.filter(c => !done.has(c.client_key)).slice(0, limit);
+}
+
+/** How many clients there are in total, for the progress line. */
+async function clientCount() {
+  const all = await clientsToScan({ limit: 1e9, rescan: true });
+  return all.length;
 }
 
 /** How many clients are mapped, and how many already looked at. */
 async function progress() {
   await initTable();
-  const [mapped, done] = await Promise.all([
-    db().query(`SELECT COUNT(*)::int AS n FROM client_dropbox_mapping`),
+  const [total, done] = await Promise.all([
+    clientCount(),
     db().query(`SELECT status, COUNT(*)::int AS n FROM i589_proposals GROUP BY status`),
   ]);
   const byStatus = {};
   for (const r of done.rows) byStatus[r.status] = r.n;
   const scanned = Object.values(byStatus).reduce((a, b) => a + b, 0);
-  return { mapped: mapped.rows[0].n, scanned, remaining: mapped.rows[0].n - scanned, byStatus };
+  return { mapped: total, scanned, remaining: Math.max(0, total - scanned), byStatus };
 }
 
 /**
@@ -127,7 +163,19 @@ async function scanOne(row, { current = {} } = {}) {
   const out = { client_key: row.client_key, client_name: row.client_name, status: "no_form" };
 
   try {
-    const entries = await dbx.listFolderDeep(row.dropbox_path);
+    // The folder may never have been resolved for this client. Resolving
+    // caches itself, so the first sweep also fills in the mapping table.
+    let folder = row.dropbox_path;
+    if (!folder) {
+      folder = await dbx.resolveClientFolder({
+        clientKey: row.client_key, clientName: row.client_name, aNumber: row.a_number });
+    }
+    if (!folder) {
+      out.status = "no_folder";
+      out.notes = ["no Dropbox folder could be found for this client"];
+      throw { __handled: true };
+    }
+    const entries = await dbx.listFolderDeep(folder);
     if (!entries) {
       out.status = "error";
       out.notes = ["the client's Dropbox folder could not be read"];
@@ -143,7 +191,21 @@ async function scanOne(row, { current = {} } = {}) {
         out.form_modified = pick.modified;
         const buf = await dbx.downloadFile(pick.path);
         const read = await readPdf(buf);
-        const got = x.extract(read);
+        let got = x.extract(read);
+
+        // Most of the firm's I-589s are SCANS: an image of each page, with no
+        // form fields and no text layer. Both readers above find nothing on
+        // one, which is why the first real sweep came back with a single
+        // readable row. When they come up empty, look at the page instead.
+        if (!got.ok) {
+          const seen = await require("./i589-vision").readItem8(buf);
+          // Prefer the vision read when it actually read something. If it did
+          // not, still prefer it when the earlier attempts had nothing at all
+          // to show — its note explains why, where "item 8 heading not found"
+          // only describes a scan without saying so.
+          if (seen.ok || !got.partial) got = seen;
+        }
+
         out.method = got.method;
         out.found_phone = got.phone || null;
         out.found_address = got.address || null;
@@ -153,8 +215,10 @@ async function scanOne(row, { current = {} } = {}) {
       }
     }
   } catch (e) {
-    out.status = "error";
-    out.notes = [e.message];
+    if (!(e && e.__handled)) {
+      out.status = "error";
+      out.notes = [e.message];
+    }
   }
 
   out.current_phone = current.phone || null;
@@ -181,10 +245,14 @@ async function scanOne(row, { current = {} } = {}) {
 }
 
 /**
- * Read a PDF both ways: its form fields first, its text as a fallback.
+ * Read a PDF both cheap ways: its form fields first, its text as a fallback.
  * Form fields are the trustworthy source on a fillable I-589 — they are read
- * rather than inferred — so they are tried first and the text is only there
- * for flattened or scanned files.
+ * rather than inferred — so they are tried first, and the text layer is there
+ * for a flattened file that was still produced digitally.
+ *
+ * Neither works on a scan. That case is handled by i589-vision.js, which
+ * scanOne falls back to; it is not here because it costs a model call and
+ * should only happen once these two have failed.
  */
 async function readPdf(buf) {
   const out = { fields: null, text: "" };
@@ -206,4 +274,4 @@ async function readPdf(buf) {
   return out;
 }
 
-module.exports = { initTable, clientsToScan, progress, currentFor, scanOne, readPdf };
+module.exports = { initTable, clientsToScan, clientCount, progress, currentFor, scanOne, readPdf };

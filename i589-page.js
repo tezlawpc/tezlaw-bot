@@ -19,11 +19,22 @@ function esc(s) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+// How item 8 was read, in words. A scan can only be read by looking at it, and
+// that is a model's reading rather than a value lifted out of the file, so the
+// row says so plainly — it is the one method where a second pair of eyes on
+// the form is worth it before applying.
+const METHOD = {
+  fields: "the form&rsquo;s own fields",
+  text:   "the page text",
+  vision: "looking at the scanned page",
+};
+
 const STATUS = {
-  found:      { label: "read",       color: "#2e7d32" },
-  unreadable: { label: "unreadable", color: "#B45309" },
-  no_form:    { label: "no I-589",   color: "#888"    },
-  error:      { label: "error",      color: "#A02818" },
+  found:      { label: "read",            color: "#2e7d32" },
+  unreadable: { label: "unreadable",      color: "#B45309" },
+  no_form:    { label: "no I-589",        color: "#888"    },
+  no_folder:  { label: "no Dropbox folder", color: "#888"  },
+  error:      { label: "error",           color: "#A02818" },
 };
 
 function row(p) {
@@ -60,7 +71,7 @@ function row(p) {
       <strong>${esc(p.client_name || p.client_key)}</strong>
       <div style="font-size:11px;">
         <span style="color:${st.color}; font-weight:600;">${st.label}</span>
-        ${p.method ? `<span style="color:#888;"> · read from ${p.method === "fields" ? "the form's own fields" : "the page text"}</span>` : ""}
+        ${p.method ? `<span style="color:#888;"> · read from ${METHOD[p.method] || esc(p.method)}</span>` : ""}
       </div>
       ${p.form_path ? `<div style="font-size:11px; color:#888; word-break:break-all;">${esc(p.form_path)}</div>` : ""}
       ${p.form_modified ? `<div style="font-size:11px; color:#888;">dated ${esc(String(p.form_modified).slice(0, 10))}</div>` : ""}
@@ -102,13 +113,26 @@ function render({ prog, rows, ran }) {
   <h1>I-589 addresses</h1>
   <div class="sub">Item 8 (where the client lives) from each client's most recent I-589.
     Item 9, the mailing address, is never used — it is often this firm's own office.
+    Most of these forms are scans, so where there is no text to read the page is read by looking at it &mdash;
+    those rows say so, and are worth a glance before applying.
     <a href="/admin/clients" style="margin-left:10px;">&larr; Clients</a></div>
 
-  ${ran ? `<div class="card" style="border-left:4px solid #2e7d32;background:#f4faf5;">Looked at ${esc(ran)} client folder(s).</div>` : ""}
+  ${ran !== null && ran !== undefined
+    ? (Number(ran) > 0
+        ? `<div class="card" style="border-left:4px solid #2e7d32;background:#f4faf5;">Looked at ${esc(ran)} client folder(s) &mdash; the results are below.</div>`
+        : `<div class="card" style="border-left:4px solid #B45309;background:#fffaf3;">
+             <strong>Nothing to scan.</strong>
+             <div style="font-size:13px;color:#555;margin-top:6px;line-height:1.6;">
+               Either every client has already been looked at (the counts above say how many),
+               or no clients were found at all. Clients come from the hearing notes, so a client
+               with no hearing note anywhere will not appear here.
+             </div>
+           </div>`)
+    : ""}
 
   <div class="card">
     <div style="margin-bottom:10px;">
-      ${pill(prog.mapped, "clients with a folder", "#eef2f7", "#0C1C36")}
+      ${pill(prog.mapped, "clients", "#eef2f7", "#0C1C36")}
       ${pill(prog.scanned, "looked at", "#e8f5e9", "#2e7d32")}
       ${pill(prog.remaining, "not yet", "#fff4e5", "#B45309")}
     </div>
@@ -116,6 +140,7 @@ function render({ prog, rows, ran }) {
       ${pill(s.found, "read", "#e8f5e9", "#2e7d32")}
       ${pill(s.unreadable, "unreadable", "#fff4e5", "#B45309")}
       ${pill(s.no_form, "no I-589", "#f4f4f4", "#666")}
+      ${pill(s.no_folder, "no folder", "#f4f4f4", "#666")}
       ${pill(s.error, "errors", "#fdecea", "#A02818")}
     </div>
     <form method="POST" action="/admin/clients/i589/scan" style="display:flex; gap:8px; align-items:center;">
@@ -125,7 +150,8 @@ function render({ prog, rows, ran }) {
         </select>
         more client folders</label>
       <button type="submit" style="padding:6px 14px; background:#0C1C36; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:13px;">Scan</button>
-      <span style="font-size:12px; color:#888;">Reads only. Nothing changes on a client record until you press Apply on a row.</span>
+      <span style="font-size:12px; color:#888;">Reads only &mdash; nothing changes on a client record until you press Apply on a row.
+        The first pass also has to find each client&rsquo;s Dropbox folder, so give it a minute.</span>
     </form>
   </div>
 
@@ -139,4 +165,4 @@ function render({ prog, rows, ran }) {
 </main></body></html>`;
 }
 
-module.exports = { render, row, STATUS };
+module.exports = { render, row, STATUS, METHOD };
