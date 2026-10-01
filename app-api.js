@@ -209,6 +209,33 @@ function canUserSeeTask(user, task) {
 // or null for admin (meaning: no filtering — see all).
 async function getVisibleClientKeys(user) {
   if (isManager(user)) return null;  // admin + manager see all
+
+  // A consultant is an outside referral broker, not firm staff, and the rule
+  // below does not describe them. That rule resolves visibility from
+  // tasks.assigned_to with a LIKE on the user's first name — which for a
+  // consultant is wrong in both directions at once: a consultant named David
+  // would reach every client whose task was assigned to any David on staff,
+  // while a consultant properly linked in client_consultants would be refused,
+  // because that table is never consulted here.
+  //
+  // For a consultant the link table IS the answer, and it is the only answer.
+  // linkClients() in broker-accounts.js populates it from their own Dropbox
+  // folder, so "the clients in my folder" and "the clients I can see" are the
+  // same set by construction.
+  if (user?.r === "consultant") {
+    try {
+      const r = await db.query(
+        `SELECT DISTINCT client_key FROM client_consultants
+          WHERE consultant_id = $1 AND removed_at IS NULL AND client_key IS NOT NULL`,
+        [String(user.uid)]);
+      return new Set(r.rows.map(row => row.client_key).filter(Boolean));
+    } catch (e) {
+      // Fail closed. An error here must not widen what a consultant can read.
+      console.warn("[visibility] consultant keys:", e.message);
+      return new Set();
+    }
+  }
+
   const terms = userAssignmentTerms(user);
   const params = [String(user.uid)];
   let nameClause = "";
@@ -8567,7 +8594,23 @@ ${groups.map(g => `
       };
       if (!cleaned.title) return res.status(400).json({ ok: false, error: "Title required" });
       if (cleaned.client_name) {
-        cleaned.client_key = cleaned.client_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        // The key is derived from a name the consultant typed, so typing an
+        // existing client's name would land this row on THAT client's
+        // timeline — a client the consultant may have nothing to do with.
+        // Attach the key only when the client is already one of theirs, or
+        // when no such client exists yet (a genuinely new lead). Otherwise
+        // leave it off: the name is still recorded, and matching it to the
+        // right client is exactly what the admin approval step is for.
+        const derived = cleaned.client_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        if (derived) {
+          const mine = await getConsultantClientKeys(userId);
+          if (mine.has(derived)) {
+            cleaned.client_key = derived;
+          } else {
+            const taken = await db.query(`SELECT 1 FROM tasks WHERE client_key = $1 LIMIT 1`, [derived]);
+            if (!taken.rows.length) cleaned.client_key = derived;
+          }
+        }
       }
       const task = await tasks.createTask(cleaned);
       // Notify all admins that a consultant work order needs approval

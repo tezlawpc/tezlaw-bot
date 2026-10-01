@@ -94,7 +94,7 @@ function row(p) {
   </tr>`;
 }
 
-function render({ prog, rows, ran }) {
+function render({ prog, rows, ran, mode = null }) {
   const s = prog.byStatus || {};
   const pill = (n, label, bg, fg) =>
     `<span style="display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; margin-right:6px; background:${bg}; color:${fg};">${n || 0} ${label}</span>`;
@@ -120,14 +120,25 @@ function render({ prog, rows, ran }) {
   ${ran !== null && ran !== undefined
     ? (Number(ran) > 0
         ? `<div class="card" style="border-left:4px solid #2e7d32;background:#f4faf5;">Looked at ${esc(ran)} client folder(s) &mdash; the results are below.</div>`
-        : `<div class="card" style="border-left:4px solid #B45309;background:#fffaf3;">
-             <strong>Nothing to scan.</strong>
-             <div style="font-size:13px;color:#555;margin-top:6px;line-height:1.6;">
-               Either every client has already been looked at (the counts above say how many),
-               or no clients were found at all. Clients come from the hearing notes, so a client
-               with no hearing note anywhere will not appear here.
-             </div>
-           </div>`)
+        : (mode === "retry"
+            ? `<div class="card" style="border-left:4px solid #B45309;background:#fffaf3;">
+                 <strong>Nothing left to re-read.</strong>
+                 <div style="font-size:13px;color:#555;margin-top:6px;line-height:1.6;">
+                   No rows are sitting at &ldquo;unreadable&rdquo; or &ldquo;error&rdquo;. Rows that say
+                   &ldquo;no I-589&rdquo; or &ldquo;no Dropbox folder&rdquo; are not re-read &mdash; nothing was
+                   found to read, so reading again cannot change the answer.
+                 </div>
+               </div>`
+            : `<div class="card" style="border-left:4px solid #B45309;background:#fffaf3;">
+                 <strong>Nothing to scan.</strong>
+                 <div style="font-size:13px;color:#555;margin-top:6px;line-height:1.6;">
+                   Every client has already been looked at, or no clients were found at all.
+                   Clients come from the hearing notes, so a client with no hearing note anywhere
+                   will not appear here. To read the ones that came back unreadable, use
+                   <strong>Re-read the unreadable ones</strong> below &mdash; an ordinary scan skips
+                   every client it has already seen.
+                 </div>
+               </div>`))
     : ""}
 
   <div class="card">
@@ -153,6 +164,20 @@ function render({ prog, rows, ran }) {
       <span style="font-size:12px; color:#888;">Reads only &mdash; nothing changes on a client record until you press Apply on a row.
         The first pass also has to find each client&rsquo;s Dropbox folder, so give it a minute.</span>
     </form>
+
+    ${prog.retryable
+      ? `<form method="POST" action="/admin/clients/i589/scan" style="display:flex; gap:8px; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid #eee;">
+           <input type="hidden" name="retry" value="1">
+           <label style="font-size:13px;">Re-read
+             <select name="limit" style="padding:5px 8px; border:1px solid #ccc; border-radius:4px;">
+               <option value="20">20</option><option value="50">50</option><option value="100">100</option>
+             </select>
+             of the ${prog.retryable} unreadable row(s)</label>
+           <button type="submit" style="padding:6px 14px; background:#B45309; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:13px;">Re-read</button>
+           <span style="font-size:12px; color:#888;">A normal scan skips anything already looked at, so rows that failed
+             under an older reader need this to be tried again.</span>
+         </form>`
+      : ""}
   </div>
 
   <div class="card">

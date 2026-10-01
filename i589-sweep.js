@@ -68,7 +68,21 @@ async function initTable() {
  * The folder is resolved per client as we go, and resolving caches itself, so
  * the mapping table fills in as a side effect rather than being a prerequisite.
  */
-async function clientsToScan({ limit = 20, rescan = false } = {}) {
+/**
+ * Statuses worth a second look.
+ *
+ * The sweep skips anything it has already looked at, which is right for a
+ * long job that resumes — but it means a row that failed under an old reader
+ * is never tried again under a better one. When scanned pages started being
+ * read by looking at them, every row the text reader had already given up on
+ * stayed "unreadable" forever, and pressing Scan appeared to do nothing.
+ *
+ * no_form and no_folder are NOT here: nothing was read because nothing was
+ * found, and re-reading cannot change that. Use "Start over" for those.
+ */
+const RETRY_STATUSES = new Set(["unreadable", "error"]);
+
+async function clientsToScan({ limit = 20, rescan = false, retry = false } = {}) {
   await initTable();
   const r = await db().query(
     `SELECT t.client_name, t.a_number, MAX(t.at) AS at
@@ -94,9 +108,27 @@ async function clientsToScan({ limit = 20, rescan = false } = {}) {
 
   if (rescan) return out.slice(0, limit);
 
+  const already = (await db().query(`SELECT client_key, status FROM i589_proposals`)).rows;
+
+  if (retry) {
+    // Only the ones a previous pass could not read, in roster order so the
+    // most recent clients are re-read first.
+    const again = new Set(already.filter(r => RETRY_STATUSES.has(r.status)).map(r => r.client_key));
+    return out.filter(c => again.has(c.client_key)).slice(0, limit);
+  }
+
   // Skip the ones already looked at.
-  const done = new Set((await db().query(`SELECT client_key FROM i589_proposals`)).rows.map(x => x.client_key));
+  const done = new Set(already.map(r => r.client_key));
   return out.filter(c => !done.has(c.client_key)).slice(0, limit);
+}
+
+/** How many rows a re-read could still change. Drives the retry button. */
+async function retryableCount() {
+  await initTable();
+  const r = await db().query(
+    `SELECT COUNT(*)::int AS n FROM i589_proposals WHERE status = ANY($1) AND applied_at IS NULL`,
+    [[...RETRY_STATUSES]]);
+  return r.rows[0].n;
 }
 
 /** How many clients there are in total, for the progress line. */
@@ -108,14 +140,15 @@ async function clientCount() {
 /** How many clients are mapped, and how many already looked at. */
 async function progress() {
   await initTable();
-  const [total, done] = await Promise.all([
+  const [total, done, retryable] = await Promise.all([
     clientCount(),
     db().query(`SELECT status, COUNT(*)::int AS n FROM i589_proposals GROUP BY status`),
+    retryableCount(),
   ]);
   const byStatus = {};
   for (const r of done.rows) byStatus[r.status] = r.n;
   const scanned = Object.values(byStatus).reduce((a, b) => a + b, 0);
-  return { mapped: total, scanned, remaining: Math.max(0, total - scanned), byStatus };
+  return { mapped: total, scanned, remaining: Math.max(0, total - scanned), byStatus, retryable };
 }
 
 /**
@@ -274,4 +307,7 @@ async function readPdf(buf) {
   return out;
 }
 
-module.exports = { initTable, clientsToScan, clientCount, progress, currentFor, scanOne, readPdf };
+module.exports = {
+  initTable, clientsToScan, clientCount, progress, currentFor, scanOne, readPdf,
+  retryableCount, RETRY_STATUSES,
+};

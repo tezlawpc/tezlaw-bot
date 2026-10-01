@@ -564,6 +564,76 @@ async function changePassword(userId, newPassword) {
 // enforce authentication for everything else. If no users exist yet,
 // redirect all /admin/* traffic to /admin/setup so JJ can create the
 // first admin account.
+// Auth-adjacent paths under /admin that must stay reachable without a session:
+// the login form itself, signing out, first-run setup, and the two whoami
+// endpoints client-side JS calls to ask whether it is logged in.
+//
+// Module-level because requireFirmUser below has to honour exactly the same
+// list. When it was a local const, a second guard would have needed its own
+// copy, and a copy is a thing that drifts.
+const ADMIN_WHITELIST = new Set(["/login", "/logout", "/setup", "/whoami", "/whoami-early"]);
+
+// Roles that are firm staff. Deliberately an allowlist rather than
+// "everyone except consultant": a role added later is locked out of /admin
+// until someone names it here, which is the safe direction to fail.
+const FIRM_ROLES = ["admin", "manager", "attorney", "paralegal", "viewer"];
+
+/**
+ * The /admin surface is firm staff only.
+ *
+ * requireAdminAuth proves WHO you are. It has never proved what you may see —
+ * it sets req.user and calls next(), for every role. A consultant is an outside
+ * referral broker who has a real admin_users row and signs in through the same
+ * /admin/login form, so they hold an ordinary session cookie. Until this
+ * existed, a consultant who typed /admin/clients was served the firm's entire
+ * client base, and /admin/tasks, and any client's Dropbox file list.
+ *
+ * The login handler even says the firm panel is one consultants "can't see
+ * anyway". That was a statement about where the UI links them, not a control.
+ * Navigation is not access control.
+ *
+ * The permission table already encoded the right answer — "clients.read" and
+ * "tasks.read" never included consultant. It simply was not enforced on these
+ * routes, because they are guarded by the blanket app.use("/admin") mount
+ * rather than by requireRole. This is that enforcement.
+ *
+ * Consultants belong in /consultant, where every route resolves what they may
+ * see through client_consultants — the table their Dropbox folder populates.
+ */
+function requireFirmUser(req, res, next) {
+  if (ADMIN_WHITELIST.has(req.path)) return next();
+
+  if (!req.user) {
+    // requireAdminAuth runs first and should have handled this; if we are here
+    // without a user on a non-whitelisted path, deny rather than assume.
+    if (req.method === "GET") {
+      return res.redirect(`/admin/login?next=${encodeURIComponent(req.originalUrl || req.url)}`);
+    }
+    return res.status(401).json({ ok: false, error: "Not authenticated" });
+  }
+
+  if (FIRM_ROLES.includes(req.user.r)) return next();
+
+  // Send a consultant to their own portal rather than a dead end. Anyone else
+  // (an unknown role) gets the ordinary denial page.
+  if (req.user.r === "consultant") {
+    if (req.method === "GET") return res.redirect("/consultant");
+    return res.status(403).json({
+      ok: false,
+      error: "This area is for firm staff. Your work is under /consultant.",
+    });
+  }
+
+  const roleLabel = ROLES[req.user.r]?.label || req.user.r;
+  if (req.method === "GET") {
+    return res.status(403).send(renderDeniedPage({
+      userRole: roleLabel,
+      requiredRoles: FIRM_ROLES.map(r => ROLES[r]?.label || r).join(" or "),
+    }));
+  }
+  return res.status(403).json({ ok: false, error: "Access denied. Firm staff only." });
+}
+
 async function requireAdminAuth(req, res, next) {
   try {
     // Whitelist — auth-adjacent endpoints must be reachable without auth.
@@ -571,8 +641,7 @@ async function requireAdminAuth(req, res, next) {
     // auth status; it returns { authenticated: false } when not logged in
     // instead of redirecting to login (which would break the JSON API).
     const path = req.path;
-    const WHITELIST = new Set(["/login", "/logout", "/setup", "/whoami", "/whoami-early"]);
-    if (WHITELIST.has(path)) return next();
+    if (ADMIN_WHITELIST.has(path)) return next();
 
     // Bootstrap: if no admin users exist, force setup
     const n = await countUsers();
@@ -1548,6 +1617,9 @@ function escapeHtml(s) {
 module.exports = {
   initTables,
   requireAdminAuth,
+  requireFirmUser,
+  FIRM_ROLES,
+  ADMIN_WHITELIST,
   requireRole,
   requirePermission,
   hasPermission,
