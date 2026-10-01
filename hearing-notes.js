@@ -2367,6 +2367,11 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
   ${errorSection}
   ${previewSection}
 
+  <!-- Keeps this form safe when the courthouse has no signal: fields are
+       mirrored locally as they are typed, and a submit made offline is
+       queued and filed when the connection returns. Online behaviour is
+       unchanged. It wires itself to this form by id. -->
+  ${require("./client-script").clientScriptTag("offline-notes.js")}
   <form method="POST" action="/admin/hearing/notes${isEdit ? "/" + noteId : ""}" id="hearing-form">
     <fieldset>
       <legend>Client & Hearing</legend>

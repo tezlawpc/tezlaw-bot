@@ -409,6 +409,11 @@ function renderDictatePage() {
   <a href="/admin/hearing/notes" style="color:#B79C62;">← Back to note-taking</a>
 </p>
 
+<!-- Holds audio slices and form drafts on this computer when the courthouse
+     has no signal, and sends them when it returns. A real static file, not
+     more script inside this template literal. -->
+${require("./client-script").clientScriptTag("offline-notes.js")}
+
 <script>
 let mediaRecorder = null;
 let chunks = [];
@@ -489,6 +494,9 @@ async function uploadSlices() {
       if (!data.ok) throw new Error(data.error || "the server refused the slice");
       sliceQueue.shift();
       sliceSent++;
+      if (window.offlineNotes) {
+        offlineNotes.dropSlice(sliceSessionId, item.idx).catch(function () {});
+      }
       sliceStatusLine();
     }
   } catch (e) {
@@ -498,6 +506,75 @@ async function uploadSlices() {
     sliceUploading = false;
   }
 }
+
+/**
+ * Send slices left on this computer from an earlier page life.
+ *
+ * This is the case the whole feature is for: the hearing ran with no signal,
+ * the lid closed, and the tab is long gone. The audio is still in IndexedDB.
+ * On the next page load with a connection it goes up, and any session that is
+ * not the one being recorded right now is closed out immediately rather than
+ * waiting for the server sweeper.
+ */
+async function drainStoredSlices() {
+  if (!window.offlineNotes || !navigator.onLine) return;
+  let rows;
+  try { rows = await offlineNotes.pendingSlices(); }
+  catch (e) { return; }
+  if (!rows || !rows.length) return;
+
+  const others = new Set();
+  for (const row of rows) {
+    const v = row.value;
+    // The live recording is the in-memory queue's job; two uploaders on the
+    // same slice would race.
+    if (sliceSessionId && v.sessionId === sliceSessionId) continue;
+    try {
+      const fd = new FormData();
+      fd.append("audio", v.blob, "slice-" + v.idx + "." + (v.ext || "webm"));
+      fd.append("session_id", v.sessionId);
+      fd.append("idx", String(v.idx));
+      fd.append("mime", v.mime || "audio/webm");
+      fd.append("ext", v.ext || "webm");
+      const h = v.hints || {};
+      fd.append("client_name", h.client_name || "");
+      fd.append("a_number", h.a_number || "");
+      fd.append("hearing_type", h.hearing_type || "");
+      const resp = await fetch("/admin/hearing/notes/dictate/slice",
+        { method: "POST", body: fd, credentials: "same-origin" });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      if (!data.ok) continue;
+      await offlineNotes.dropSlice(v.sessionId, v.idx);
+      others.add(v.sessionId);
+    } catch (e) {
+      return;   // still no usable connection; leave the rest for next time
+    }
+  }
+
+  for (const id of others) {
+    try {
+      await fetch("/admin/hearing/notes/dictate/slice/finish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ session_id: id }),
+      });
+    } catch (e) { /* the server sweeper will close it out */ }
+  }
+
+  if (others.size) {
+    setSliceStatus("Sent " + others.size + " recording(s) that were waiting on this computer.", "#2e7d32");
+  }
+  if (window.offlineNotes) offlineNotes.refreshStatus();
+}
+
+// Drain on load, and again the moment the signal comes back.
+window.addEventListener("load", function () { drainStoredSlices(); });
+if (window.offlineNotes) offlineNotes.whenOnline(function () {
+  drainStoredSlices();
+  uploadSlices();
+});
 
 // Stop pressed: flush, then let the server assemble what it has.
 async function finishSlices() {
@@ -604,7 +681,21 @@ async function startRecording() {
       // chunks still accumulates, because the playback panel plays the local
       // copy and the attorney should be able to hear it without a round trip.
       chunks.push(e.data);
-      sliceQueue.push({ idx: sliceNextIdx++, blob: e.data });
+      const idx = sliceNextIdx++;
+      sliceQueue.push({ idx: idx, blob: e.data });
+      // Durable copy, written before any upload is attempted. The in-memory
+      // queue is what normally does the uploading; this is what survives no
+      // signal, a crashed tab, or the lid closing on a dead network.
+      if (window.offlineNotes) {
+        offlineNotes.putSlice(sliceSessionId, idx, e.data, {
+          mime: audioMime, ext: audioExt,
+          hints: {
+            client_name: hintVal("hint-client-name"),
+            a_number: hintVal("hint-a-number"),
+            hearing_type: hintVal("hint-hearing-type"),
+          },
+        }).catch(function () { /* storage blocked; the memory queue still tries */ });
+      }
       sliceStatusLine();
       uploadSlices();
     };

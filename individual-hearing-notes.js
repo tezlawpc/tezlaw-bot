@@ -1435,6 +1435,8 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
     ${savedSection}
     ${continuationBanner}
 
+    <!-- Same offline protection as the master note form; wires itself by id. -->
+    ${require("./client-script").clientScriptTag("offline-notes.js")}
     <form method="POST" action="/admin/hearing/individual${isEdit ? "/" + noteId : ""}" id="ih-form">
       <input type="hidden" name="hearing_summary_raw" id="hearing_summary_raw" value="${escapeAttr(prev.hearing_summary_raw)}">
 

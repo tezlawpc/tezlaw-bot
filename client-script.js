@@ -54,6 +54,7 @@ const CLIENT_BUNDLES = [
   "court-mail-page.js",
   "transcripts-page.js",
   "consultant-clients.js",
+  "offline-notes.js",
 ];
 
 const healed = new Set();
