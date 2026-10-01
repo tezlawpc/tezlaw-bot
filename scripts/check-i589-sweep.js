@@ -86,8 +86,12 @@ console.log("\n── Scale and safety ─────────────�
 ok("a scan is limited per press, because Dropbox is rate limited and a "
  + "request has a time limit", /Math\.min\(Math\.max\(parseInt\(req\.body\.limit/.test(srv));
 ok("the limit is capped server-side", /, 100\)/.test(srv));
+// Checked by behaviour rather than by quoting the expression: the query moved
+// into a shared read when the retry mode was added, and a copy of the old line
+// would have failed for a change that broke nothing.
 ok("clients already looked at are not rescanned by default",
-  /const done = new Set\(\(await db\(\)\.query\(`SELECT client_key FROM i589_proposals`\)\)/.test(sweep) &&
+  /FROM i589_proposals/.test(sweep) &&
+  /const done = new Set\(/.test(sweep) &&
   /out\.filter\(c => !done\.has\(c\.client_key\)\)/.test(sweep));
 ok("progress is recorded so a sweep can be resumed",
   /async function progress/.test(sweep) && /i589_proposals/.test(sweep));
@@ -128,6 +132,54 @@ console.log("\n── It can actually be found ───────────
   ok("the route is registered before /admin/clients/:key, or the literal path "
    + "would be swallowed by the wildcard",
     srv.indexOf('app.get("/admin/clients/i589"') < srv.indexOf('app.get("/admin/clients/:key"'));
+}
+
+console.log("\n── Rows that failed can be read again ─────────");
+{
+  // The bug this guards: an ordinary scan skips every client that already has
+  // a proposal, so when the reader got better (scanned pages are now read by
+  // looking at them) every row the old reader had given up on stayed
+  // "unreadable" forever and pressing Scan appeared to do nothing at all.
+  ok("clientsToScan takes a retry mode", /clientsToScan\(\{[^}]*retry = false/.test(sweep));
+  ok("retry selects only the statuses a re-read could change",
+    /RETRY_STATUSES = new Set\(\["unreadable", "error"\]\)/.test(sweep));
+
+  const body = sweep.slice(sweep.indexOf("if (retry) {"), sweep.indexOf("// Skip the ones already looked at."));
+  ok("in retry mode it returns ONLY the failed ones, not everything",
+    /again\.has\(c\.client_key\)/.test(body));
+  ok("...and is not confused with rescan, which starts over", /if \(rescan\) return out/.test(sweep));
+
+  ok("nothing-was-found statuses are deliberately excluded",
+    !/RETRY_STATUSES[^)]*no_form/.test(sweep) && !/RETRY_STATUSES[^)]*no_folder/.test(sweep));
+  ok("an already-applied row is not offered for re-reading",
+    /retryableCount[\s\S]{0,400}applied_at IS NULL/.test(sweep));
+
+  ok("the route passes retry through", /retry = req\.body\.retry === "1"/.test(srv));
+  ok("the route reports which mode ran", /mode=retry/.test(srv));
+
+  const withRetry = page.render({
+    prog: { mapped: 10, scanned: 10, remaining: 0, byStatus: { unreadable: 7 }, retryable: 7 },
+    rows: [], ran: null });
+  ok("the button appears when there is something to re-read", /name="retry" value="1"/.test(withRetry));
+  ok("...and says how many", /7 unreadable row/.test(withRetry));
+
+  const nothingToRetry = page.render({
+    prog: { mapped: 10, scanned: 10, remaining: 0, byStatus: {}, retryable: 0 },
+    rows: [], ran: null });
+  ok("the button is hidden when nothing failed", !/name="retry"/.test(nothingToRetry));
+
+  const ranNone = page.render({
+    prog: { mapped: 10, scanned: 10, remaining: 0, byStatus: {}, retryable: 0 },
+    rows: [], ran: "0", mode: "retry" });
+  ok("a retry that found nothing says so in its own words",
+    /Nothing left to re-read/.test(ranNone));
+  ok("...and explains why no_form rows are not re-read", /nothing was\s+found to read/.test(ranNone));
+
+  const ranNoneNormal = page.render({
+    prog: { mapped: 10, scanned: 10, remaining: 0, byStatus: {}, retryable: 3 },
+    rows: [], ran: "0" });
+  ok("an ordinary scan that found nothing points at the re-read button",
+    /Re-read the unreadable ones/.test(ranNoneNormal));
 }
 
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL I-589 SWEEP CHECKS PASSED\n");

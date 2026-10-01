@@ -339,6 +339,7 @@ function renderDictatePage() {
       <div id="record-label">Tap to record</div>
     </button>
     <div id="timer" style="font-family:monospace; font-size:28px; color:#0C1C36; margin-top:20px; letter-spacing:2px;">00:00</div>
+    <div id="slice-status" style="font-size:12px; color:#2e7d32; margin-top:8px; font-weight:600; min-height:16px;"></div>
     <div id="record-hint" style="font-size:12px; color:#888; margin-top:8px;">
       Tips: mention client name, A-number, judge, DHS attorney, pleadings, applications, next hearing date, and any deadlines.
     </div>
@@ -417,6 +418,136 @@ let audioBlob = null;
 let audioMime = "audio/webm";
 let audioExt = "webm";
 
+// ── The recording is uploaded WHILE it happens ──────────────
+//
+// It used to be held in this page and sent once, after stop. A merits hearing
+// runs ninety minutes and the laptop gets shut the second it ends, so "after
+// stop" was often never. Now a slice goes up every 15 seconds and the most
+// that can ever be lost is the slice in flight.
+//
+// Written without apostrophes in strings on purpose: this whole script lives
+// inside a template literal on the server, where a backslash-escaped quote is
+// eaten by the literal and reaches the browser as a syntax error that kills
+// every function on the page. It took client search down for five hours once.
+const SLICE_MS = 15000;
+let sliceSessionId = null;
+let sliceQueue = [];
+let sliceNextIdx = 0;
+let sliceSent = 0;
+let sliceUploading = false;
+let sliceSavedId = null;
+
+function newSessionId() {
+  try { return crypto.randomUUID().replace(/-/g, ""); }
+  catch (e) { return String(Date.now()) + Math.random().toString(36).slice(2, 10); }
+}
+
+function hintVal(id) {
+  const el = document.getElementById(id);
+  return el ? String(el.value || "").trim() : "";
+}
+
+function setSliceStatus(text, color) {
+  const el = document.getElementById("slice-status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.style.color = color || "#2e7d32";
+}
+
+function sliceStatusLine() {
+  const waiting = sliceQueue.length;
+  if (!sliceSent && !waiting) return;
+  if (waiting === 0) {
+    setSliceStatus("Saved to the server up to a few seconds ago. Safe to close the laptop.", "#2e7d32");
+  } else {
+    setSliceStatus("Uploading (" + sliceSent + " saved, " + waiting + " waiting)", "#B45309");
+  }
+}
+
+// Drains the queue in order. The slice at the head stays there until the
+// server acknowledges it, so a dropped request on courthouse wifi is retried
+// on the next slice rather than leaving a hole in the middle of the audio.
+async function uploadSlices() {
+  if (sliceUploading || !sliceSessionId) return;
+  sliceUploading = true;
+  try {
+    while (sliceQueue.length) {
+      const item = sliceQueue[0];
+      const fd = new FormData();
+      fd.append("audio", item.blob, "slice-" + item.idx + "." + audioExt);
+      fd.append("session_id", sliceSessionId);
+      fd.append("idx", String(item.idx));
+      fd.append("mime", audioMime);
+      fd.append("ext", audioExt);
+      fd.append("client_name", hintVal("hint-client-name"));
+      fd.append("a_number", hintVal("hint-a-number"));
+      fd.append("hearing_type", hintVal("hint-hearing-type"));
+      const resp = await fetch("/admin/hearing/notes/dictate/slice",
+        { method: "POST", body: fd, credentials: "same-origin" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || "the server refused the slice");
+      sliceQueue.shift();
+      sliceSent++;
+      sliceStatusLine();
+    }
+  } catch (e) {
+    // Keep the slice. Say so plainly rather than looking fine while losing audio.
+    setSliceStatus("Upload is behind (" + sliceQueue.length + " waiting) — still recording, will retry: " + e.message, "#A02818");
+  } finally {
+    sliceUploading = false;
+  }
+}
+
+// Stop pressed: flush, then let the server assemble what it has.
+async function finishSlices() {
+  if (!sliceSessionId) return false;
+  await uploadSlices();
+  try {
+    const resp = await fetch("/admin/hearing/notes/dictate/slice/finish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        session_id: sliceSessionId,
+        client_name: hintVal("hint-client-name"),
+        a_number: hintVal("hint-a-number"),
+        hearing_type: hintVal("hint-hearing-type"),
+      }),
+    });
+    const data = await resp.json();
+    if (data && data.ok && data.inbox_id) {
+      sliceSavedId = data.inbox_id;
+      return true;
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Closing the lid or navigating away kills an in-flight fetch; sendBeacon is
+// the one request the browser still delivers. Best effort on the slice at the
+// head of the queue — and the server assembles abandoned sessions on its own
+// after twenty minutes regardless, so this is a bonus rather than the plan.
+window.addEventListener("pagehide", function () {
+  try {
+    if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.requestData();
+  } catch (e) { /* nothing to do while the page is going away */ }
+  try {
+    if (sliceSessionId && sliceQueue.length && navigator.sendBeacon) {
+      const item = sliceQueue[0];
+      const fd = new FormData();
+      fd.append("audio", item.blob, "slice-" + item.idx + "." + audioExt);
+      fd.append("session_id", sliceSessionId);
+      fd.append("idx", String(item.idx));
+      fd.append("mime", audioMime);
+      fd.append("ext", audioExt);
+      navigator.sendBeacon("/admin/hearing/notes/dictate/slice", fd);
+    }
+  } catch (e) { /* same */ }
+});
+
 async function toggleRecording() {
   if (mediaRecorder && mediaRecorder.state === "recording") {
     stopRecording();
@@ -461,14 +592,51 @@ async function startRecording() {
 
     mediaRecorder = new MediaRecorder(stream, selectedType ? { mimeType: selectedType } : undefined);
     chunks = [];
-    mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-    mediaRecorder.onstop = () => {
+    sliceSessionId = newSessionId();
+    sliceQueue = [];
+    sliceNextIdx = 0;
+    sliceSent = 0;
+    sliceSavedId = null;
+    setSliceStatus("Recording. The first slice goes up in a few seconds.", "#B45309");
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (!e.data || e.data.size === 0) return;
+      // chunks still accumulates, because the playback panel plays the local
+      // copy and the attorney should be able to hear it without a round trip.
+      chunks.push(e.data);
+      sliceQueue.push({ idx: sliceNextIdx++, blob: e.data });
+      sliceStatusLine();
+      uploadSlices();
+    };
+
+    mediaRecorder.onstop = async () => {
       audioBlob = new Blob(chunks, { type: audioMime });
       // Stop all tracks to release the mic
       stream.getTracks().forEach(t => t.stop());
-      showPlayback();
+
+      // The server almost certainly has everything already, so assemble it
+      // now and tell the truth either way. No button press required: the
+      // whole point is that the laptop can close the moment this returns.
+      setSliceStatus("Finishing the upload…", "#B45309");
+      const done = await finishSlices();
+      if (done) {
+        document.getElementById("record-panel").style.display = "none";
+        document.getElementById("playback-panel").style.display = "none";
+        document.getElementById("processing-panel").style.display = "none";
+        document.getElementById("saved-panel").style.display = "block";
+        setSliceStatus("Saved. Transcription happens on the server — you can close the laptop.", "#2e7d32");
+      } else {
+        // Slices did not make it. Fall back to the old whole-file upload,
+        // which is what the Save button does, and say why it is showing.
+        setSliceStatus("The server did not get the whole recording. Press Save recording below — the audio is still on this page.", "#A02818");
+        showPlayback();
+      }
     };
-    mediaRecorder.start();
+
+    // A timeslice is the entire fix. Without an argument, ondataavailable
+    // fires once, at stop, and a ninety-minute hearing exists only in this
+    // tab until then.
+    mediaRecorder.start(SLICE_MS);
     recordStart = Date.now();
     startTimer();
     document.getElementById("record-icon").textContent = "⏹️";
@@ -543,6 +711,14 @@ function updateProgress(status, sub, pct, icon = "🎧") {
 // model: one upload, then the attorney is free to go.
 async function saveOnly() {
   if (!audioBlob) return;
+  // If the slices already assembled into the inbox, this would file a second
+  // copy of the same hearing. Say it is done instead.
+  if (sliceSavedId) {
+    document.getElementById("playback-panel").style.display = "none";
+    document.getElementById("saved-panel").style.display = "block";
+    setSliceStatus("Already saved while you were recording — nothing more to do.", "#2e7d32");
+    return;
+  }
   document.getElementById("playback-panel").style.display = "none";
   document.getElementById("processing-panel").style.display = "block";
   updateProgress("Saving the recording…", "This only takes a moment", 40, "💾");

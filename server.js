@@ -96,6 +96,13 @@ app.use("/static", express.static(require("path").join(__dirname, "public"), {
 const auth = require("./auth");
 app.use("/admin", auth.requireAdminAuth);
 
+// ...and being signed in is not the same as being allowed in. requireAdminAuth
+// sets req.user for EVERY role, consultants included — they sign in through
+// this same form. Without the line below, a consultant who typed /admin/clients
+// got the firm's whole client base. Consultants are sent to /consultant, where
+// what they can see is resolved through client_consultants.
+app.use("/admin", auth.requireFirmUser);
+
 // ── Role-based access control ─────────────────────────────
 // Admin-only feature areas (JJ only): Dropbox OAuth setup, email
 // configuration, user management, system utilities. Regular hearing/client
@@ -1035,6 +1042,33 @@ require("./dictation-inbox").initTable()
     console.log("✅ DICTATION: recordings are saved first and transcribed every 5 min");
   })
   .catch(e => console.warn("[dictation-inbox] table init failed:", e.message));
+
+// ── Recordings whose laptop closed mid-hearing ─────────────
+//
+// The page uploads the audio in slices while the hearing runs, then calls
+// finish when stop is pressed. The whole problem JJ described is that stop
+// often is not pressed: the hearing ends and the laptop shuts.
+//
+// So nothing waits for the page. A session with no new slice for twenty
+// minutes is assembled from whatever arrived and handed to the inbox, which
+// then transcribes it on its own schedule. The attorney does not have to come
+// back to the tab, and does not have to know this ran.
+require("./dictation-chunks").initTables()
+  .then(() => {
+    const sweep = async () => {
+      try {
+        const r = await require("./dictation-chunks").sweepAbandoned();
+        if (r.finished || r.empty) {
+          console.log(`[dictation-chunks] finished ${r.finished} abandoned recording(s), ${r.empty} empty`);
+        }
+        if (r.errors.length) console.warn("[dictation-chunks] sweep:", r.errors.join("; "));
+      } catch (e) { console.warn("[dictation-chunks] sweep:", e.message); }
+    };
+    setInterval(sweep, 5 * 60 * 1000);
+    setTimeout(sweep, 60 * 1000);
+    console.log("✅ DICTATION SLICES: uploaded while recording; abandoned sessions assembled after 20 min");
+  })
+  .catch(e => console.warn("[dictation-chunks] table init failed:", e.message));
 
 require("./social-posts").initTable()
   .catch(e => console.warn("[social-posts] table init failed:", e.message));
@@ -9798,6 +9832,78 @@ app.post("/admin/hearing/notes/dictate/save", audioUpload.single("audio"), async
   }
 });
 
+// ── Slice upload: the recording lands while it is still happening ──
+//
+// JJ: "i need to be able to save the voice dictation asap when its stopped or
+// constantly saving every 5 minutes?"
+//
+// /dictate/save is the old path and still works, but it can only run once the
+// attorney has pressed stop and waited. These three carry the audio up in
+// pieces during the hearing, so by the time the lid closes the server already
+// has all but the last few seconds.
+//
+// Not to be confused with /dictate/transcribe-chunk above, which transcribes a
+// piece for live display and keeps no audio. This keeps the audio and
+// transcribes nothing.
+app.post("/admin/hearing/notes/dictate/slice", audioUpload.single("audio"), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ ok: false, error: "No audio slice uploaded" });
+    }
+    const chunks = require("./dictation-chunks");
+    const id = String(req.body.session_id || "");
+    // begin() is idempotent, so every slice can assert the session exists
+    // rather than depending on a separate call having succeeded first — on bad
+    // courthouse wifi the first request is the one most likely to have failed.
+    await chunks.begin({
+      id,
+      user: req.user,
+      mime: req.body.mime || "audio/webm",
+      ext: req.body.ext || "webm",
+      clientName: req.body.client_name || null,
+      aNumber: req.body.a_number || null,
+      hearingType: req.body.hearing_type || null,
+    });
+    const r = await chunks.putSlice({
+      sessionId: id, idx: req.body.idx, buffer: req.file.buffer });
+    res.json({ ok: true, idx: r.idx, stored: r.stored });
+  } catch (err) {
+    console.error("[dictate-slice]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Which slices did we actually get? Lets the page re-send only the gaps.
+app.get("/admin/hearing/notes/dictate/slice/have", async (req, res) => {
+  try {
+    const chunks = require("./dictation-chunks");
+    res.json({ ok: true, have: await chunks.have(String(req.query.session_id || "")) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Stop pressed: assemble and hand to the inbox. Safe to call twice.
+app.post("/admin/hearing/notes/dictate/slice/finish", async (req, res) => {
+  try {
+    const chunks = require("./dictation-chunks");
+    const r = await chunks.finish({
+      sessionId: String((req.body && req.body.session_id) || ""),
+      by: "user",
+      hints: {
+        clientName: req.body && req.body.client_name,
+        aNumber: req.body && req.body.a_number,
+        hearingType: req.body && req.body.hearing_type,
+      },
+    });
+    console.log(`[dictate-finish] ${req.body && req.body.session_id} → inbox #${r.inbox_id || "none"}`);
+    res.json(r);
+  } catch (err) {
+    console.error("[dictate-finish]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // The waiting room: what has been recorded, what has been transcribed.
 app.get("/admin/hearing/notes/dictate/inbox", async (req, res) => {
   try {
@@ -11208,7 +11314,8 @@ app.get("/admin/clients/i589", async (req, res) => {
       `SELECT * FROM i589_proposals ORDER BY
          CASE status WHEN 'found' THEN 0 WHEN 'unreadable' THEN 1 WHEN 'error' THEN 2 ELSE 3 END,
          client_name LIMIT 500`)).rows;
-    res.send(require("./i589-page").render({ prog, rows, ran: req.query.ran || null }));
+    res.send(require("./i589-page").render({
+      prog, rows, ran: req.query.ran || null, mode: req.query.mode || null }));
   } catch (err) {
     console.error("[i589 page]:", err.message);
     res.status(500).send("Error: " + err.message);
@@ -11223,14 +11330,18 @@ app.post("/admin/clients/i589/scan", async (req, res) => {
     const sweep = require("./i589-sweep");
     const limit = Math.min(Math.max(parseInt(req.body.limit, 10) || 20, 1), 100);
     const rescan = req.body.rescan === "1";
-    const rows = await sweep.clientsToScan({ limit, rescan });
+    // retry re-reads the rows an earlier pass could not read, which is the
+    // only way a better reader ever reaches them — the ordinary scan skips
+    // every client that already has a proposal.
+    const retry = req.body.retry === "1";
+    const rows = await sweep.clientsToScan({ limit, rescan, retry });
     let done = 0;
     for (const row of rows) {
       const current = await sweep.currentFor(row);
       await sweep.scanOne(row, { current });
       done++;
     }
-    res.redirect("/admin/clients/i589?ran=" + done);
+    res.redirect("/admin/clients/i589?ran=" + done + (retry ? "&mode=retry" : ""));
   } catch (err) {
     console.error("[i589 scan]:", err.message);
     res.status(500).send("Error: " + err.message);
