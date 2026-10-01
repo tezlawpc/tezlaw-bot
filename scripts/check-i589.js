@@ -173,5 +173,42 @@ console.log("\n── Blanks are filled; differences are flagged ──");
     JSON.stringify(same.conflicts));
 }
 
+console.log("\n── Which file in the folder is the form ───────");
+{
+  // Driven by what the vision reader reported from real folders: the newest
+  // name match was the supplement-and-statement packet, and the base form was
+  // beside it under a different name.
+  const folder = [
+    { name: "updated I-589 and Statement.pdf", modified: "2026-08-19" },
+    { name: "I-589 signed.pdf",                modified: "2025-11-02" },
+    { name: "asylum application form.pdf",     modified: "2025-10-01" },
+    { name: "I-589 draft.pdf",                 modified: "2026-09-01" },
+    { name: "medical records.pdf",             modified: "2026-09-10" },
+    { name: "I-589 translation certificate.pdf", modified: "2026-09-12" },
+  ];
+  const ranked = x.rankCandidates(folder);
+
+  ok("the plain signed form outranks the newer supplement packet",
+    ranked[0].name === "I-589 signed.pdf", ranked.map(f => f.name).join(" | "));
+  ok("the supplement packet is still a candidate, just not the first",
+    ranked.some(f => /updated I-589 and Statement/.test(f.name)));
+  ok("a folder whose form is called asylum application is no longer missed",
+    x.scoreCandidate({ name: "asylum application form.pdf" }) > 0);
+  ok("a draft never outranks a real one",
+    x.scoreCandidate({ name: "I-589 draft.pdf" }) < x.scoreCandidate({ name: "I-589 signed.pdf" }));
+  ok("unrelated documents are not offered at all",
+    !ranked.some(f => /medical records/.test(f.name)));
+  ok("a translation certificate ranks below the form",
+    x.scoreCandidate({ name: "I-589 translation certificate.pdf" }) <
+    x.scoreCandidate({ name: "I-589 signed.pdf" }));
+  ok("only PDFs are considered", x.scoreCandidate({ name: "I-589 notes.docx" }) === 0);
+  ok("the list is bounded, so a messy folder cannot cost a dozen model calls",
+    x.rankCandidates(Array.from({ length: 30 }, (_, i) => ({ name: "I-589 copy " + i + ".pdf" }))).length <= 3);
+  ok("pickMostRecent still returns one file for the callers that want one",
+    x.pickMostRecent(folder).name === "I-589 signed.pdf");
+  ok("...and still returns null for a folder with nothing matching",
+    x.pickMostRecent([{ name: "passport.pdf" }]) === null);
+}
+
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL I-589 CHECKS PASSED\n");
 process.exit(failures ? 1 : 0);

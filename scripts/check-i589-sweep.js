@@ -185,5 +185,20 @@ console.log("\n── Rows that failed can be read again ───────�
     /Re-read the unreadable ones/.test(ranNoneNormal));
 }
 
+console.log("\n── More than one file gets a try ──────────────");
+{
+  const scan = sweep.slice(sweep.indexOf("async function scanOne"), sweep.indexOf("async function readPdf"));
+  ok("the folder is ranked rather than reduced to one file", /x\.rankCandidates\(files\)/.test(scan));
+  ok("each candidate is tried in turn", /for \(const pick of picks\)/.test(scan));
+  ok("...and the loop stops the moment one works",
+    /if \(one\.ok\) break;/.test(scan), "otherwise every folder pays for every candidate");
+  ok("a row says when several files were tried and all failed",
+    /tried \$\{picks\.length\} files in this folder/.test(scan));
+  ok("an empty ranking is still no_form, not an error",
+    /if \(!picks\.length\) \{\s*\n\s*out\.status = "no_form";/.test(scan));
+  ok("the path recorded is the one actually read",
+    scan.indexOf("out.form_path = pick.path") > scan.indexOf("for (const pick of picks)"));
+}
+
 console.log(failures ? `\n${failures} CHECK(S) FAILED\n` : "\nALL I-589 SWEEP CHECKS PASSED\n");
 process.exit(failures ? 1 : 0);

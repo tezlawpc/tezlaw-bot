@@ -169,8 +169,11 @@ console.log("\nhow the sweep uses it");
 {
   const sweep = require("fs").readFileSync(require("path").join(__dirname, "..", "i589-sweep.js"), "utf8");
   const scan = sweep.slice(sweep.indexOf("async function scanOne"), sweep.indexOf("async function readPdf"));
+  // Matched on the SHAPE, not on a variable name. The name changed from got
+  // to one when candidates became a loop, and a check that fails for a rename
+  // while the behaviour is intact is a check that trains people to ignore it.
   ok("vision is only reached after the cheap readers fail",
-    /if \(!got\.ok\) \{[\s\S]*?require\("\.\/i589-vision"\)/.test(scan));
+    /if \(!\w+\.ok\) \{[\s\S]{0,600}?require\("\.\/i589-vision"\)/.test(scan));
   ok("the vision read is awaited", /await require\("\.\/i589-vision"\)\.readItem8\(buf\)/.test(scan));
   ok("a successful vision read replaces the failed one", /if \(seen\.ok/.test(scan));
   ok("the method recorded is whatever actually answered", /out\.method = got\.method;/.test(scan));

@@ -243,34 +243,51 @@ async function scanOne(row, { current = {} } = {}) {
       const files = entries
         .filter(e => e[".tag"] === "file")
         .map(e => ({ name: e.name, path: e.path_display, modified: e.server_modified }));
-      const pick = x.pickMostRecent(files);
-      if (!pick) {
+      // Several files in a folder can look like the form, and the newest match
+      // is often not it: "updated I-589 and Statement.pdf" turned out to hold
+      // the supplement and the statement while the base form sat beside it
+      // under another name. So take an ordered list and try them in turn.
+      const picks = x.rankCandidates(files);
+      if (!picks.length) {
         out.status = "no_form";
       } else {
-        out.form_path = pick.path;
-        out.form_modified = pick.modified;
-        const buf = await dbx.downloadFile(pick.path);
-        const read = await readPdf(buf);
-        let got = x.extract(read);
+        let got = null;
+        for (const pick of picks) {
+          out.form_path = pick.path;
+          out.form_modified = pick.modified;
 
-        // Most of the firm's I-589s are SCANS: an image of each page, with no
-        // form fields and no text layer. Both readers above find nothing on
-        // one, which is why the first real sweep came back with a single
-        // readable row. When they come up empty, look at the page instead.
-        if (!got.ok) {
-          const seen = await require("./i589-vision").readItem8(buf);
-          // Prefer the vision read when it actually read something. If it did
-          // not, still prefer it when the earlier attempts had nothing at all
-          // to show — its note explains why, where "item 8 heading not found"
-          // only describes a scan without saying so.
-          if (seen.ok || !got.partial) got = seen;
+          const buf = await dbx.downloadFile(pick.path);
+          const read = await readPdf(buf);
+          let one = x.extract(read);
+
+          // Most of the firm's I-589s are SCANS: an image of each page, with
+          // no form fields and no text layer. Both readers above find nothing
+          // on one, which is why the first real sweep came back with a single
+          // readable row. When they come up empty, look at the pages instead.
+          if (!one.ok) {
+            const seen = await require("./i589-vision").readItem8(buf);
+            // Prefer the vision read when it actually read something. If it
+            // did not, still prefer it when the earlier attempts had nothing
+            // at all to show — its note explains why, where "item 8 heading
+            // not found" only describes a scan without saying so.
+            if (seen.ok || !one.partial) one = seen;
+          }
+
+          got = one;
+          if (one.ok) break;        // found the form; stop paying for the rest
         }
+
+        // When more than one was tried and none worked, say so — otherwise the
+        // row reads as though a single file failed, and somebody goes looking
+        // for a file that was already checked.
+        const extra = (picks.length > 1 && got && !got.ok)
+          ? [`tried ${picks.length} files in this folder`] : [];
 
         out.method = got.method;
         out.found_phone = got.phone || null;
         out.found_address = got.address || null;
         out.partial = got.partial || null;
-        out.notes = got.notes || [];
+        out.notes = (got.notes || []).concat(extra);
         out.status = got.ok ? "found" : "unreadable";
       }
     }

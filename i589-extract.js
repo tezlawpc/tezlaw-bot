@@ -203,16 +203,64 @@ function extract({ fields = null, text = "" } = {}) {
  * treated as an I-589 — a supporting-document PDF that quotes the form would
  * otherwise win on date.
  */
+/**
+ * Rank the files in a client folder by how likely each is to BE the form.
+ *
+ * This used to return one file: the newest PDF with "i589" in its name. Two
+ * things went wrong with that, and the vision reader found both by reading
+ * the pages and saying what it saw.
+ *
+ *   · "updated I-589 and Statement.pdf" is the most recent match in several
+ *     folders, and it is not the form. The model reported "only Form I-589
+ *     Supplement B (continuation pages) and a translation certificate; the
+ *     main Form I-589 with Part A.I. Item 8 is not present". The base form
+ *     was sitting in the same folder under a different name, and there was no
+ *     way to reach it.
+ *   · A folder whose form is called "asylum application" matched nothing at
+ *     all, which is a large part of why 180 clients came back "no I-589".
+ *
+ * So: score every PDF, return an ordered list, and let the caller try the
+ * next one when a file turns out not to contain item 8. Supplements,
+ * statements and translation certificates still score above zero — they ARE
+ * usually in the right folder — they simply rank below a plain form.
+ */
+function scoreCandidate(file) {
+  const n = String(file.name || "");
+  if (!/\.pdf$/i.test(n)) return 0;
+  let s = 0;
+
+  if (/\bi[\s._-]?589\b/i.test(n)) s += 10;
+  if (/asylum[\s._-]*(application|app|form)/i.test(n)) s += 7;
+  if (/\b589\b/.test(n)) s += 3;                       // bare number, weaker
+
+  // The things that travel WITH the form rather than being it. The evidence
+  // for each of these is a row that said so in its own words.
+  if (/supplement|continuation|addend|amend/i.test(n)) s -= 6;
+  if (/statement|declaration|affidavit/i.test(n)) s -= 5;
+  if (/translat|certificat/i.test(n)) s -= 5;
+  if (/cover|index|tab\b|exhibit|evidence/i.test(n)) s -= 5;
+
+  if (/draft|sample|template|blank|unsigned/i.test(n)) s -= 8;
+  if (/sign|final|filed|complete/i.test(n)) s += 2;
+
+  return s;
+}
+
+function rankCandidates(files = [], { limit = 3 } = {}) {
+  return files
+    .map(f => ({ file: f, score: scoreCandidate(f) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) =>
+      b.score - a.score ||
+      new Date(b.file.modified || b.file.server_modified || 0) -
+      new Date(a.file.modified || a.file.server_modified || 0))
+    .slice(0, limit)
+    .map(x => x.file);
+}
+
+/** The single best guess. Kept because plenty of callers only want one. */
 function pickMostRecent(files = []) {
-  const looks = f => /\bi[\s._-]?589\b/i.test(f.name || "");
-  const drafty = f => /draft|sample|template|blank|unsigned/i.test(f.name || "");
-  const cands = files.filter(f => looks(f) && /\.pdf$/i.test(f.name || ""));
-  if (!cands.length) return null;
-  const real = cands.filter(f => !drafty(f));
-  const pool = real.length ? real : cands;
-  return [...pool].sort((a, b) =>
-    new Date(b.modified || b.server_modified || 0) - new Date(a.modified || a.server_modified || 0)
-  )[0];
+  return rankCandidates(files, { limit: 1 })[0] || null;
 }
 
 /**
@@ -238,6 +286,7 @@ function decide({ current = {}, found = {} } = {}) {
 }
 
 module.exports = {
+  rankCandidates, scoreCandidate,
   ITEM8, ITEM9, FIELD8, FIELD9,
   clean, normalizePhone, formatPhone, joinAddress,
   fromFields, fromText, extract, pickMostRecent, decide,
