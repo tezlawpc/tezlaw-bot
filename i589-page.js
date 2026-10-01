@@ -75,6 +75,7 @@ function row(p) {
       </div>
       ${p.form_path ? `<div style="font-size:11px; color:#888; word-break:break-all;">${esc(p.form_path)}</div>` : ""}
       ${p.form_modified ? `<div style="font-size:11px; color:#888;">dated ${esc(String(p.form_modified).slice(0, 10))}</div>` : ""}
+      <div style="font-size:11px; margin-top:3px;"><a href="/admin/clients/i589/files?key=${encodeURIComponent(p.client_key || "")}" style="color:#A02818;">see what is in the folder</a></div>
     </td>
     <td style="padding:10px 8px; vertical-align:top;">
       ${p.status === "found" ? `
@@ -151,7 +152,7 @@ function render({ prog, rows, ran, mode = null }) {
     <div style="margin-bottom:12px;">
       ${pill(s.found, "read", "#e8f5e9", "#2e7d32")}
       ${pill(s.unreadable, "unreadable", "#fff4e5", "#B45309")}
-      ${pill(s.no_form, "no I-589", "#f4f4f4", "#666")}
+      ${s.no_form ? `<a href="/admin/clients/i589/files?status=no_form&limit=10" style="text-decoration:none;">${pill(s.no_form, "no I-589", "#f4f4f4", "#666")}</a>` : pill(s.no_form, "no I-589", "#f4f4f4", "#666")}
       ${pill(s.no_folder, "no folder", "#f4f4f4", "#666")}
       ${pill(s.error, "errors", "#fdecea", "#A02818")}
     </div>

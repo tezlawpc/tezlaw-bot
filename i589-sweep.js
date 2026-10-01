@@ -351,7 +351,100 @@ async function readPdf(buf) {
   return out;
 }
 
+/**
+ * Every file in one client's Dropbox folder, with the score the ranker gave
+ * each name and the reason it was or was not tried.
+ *
+ * WHY THIS EXISTS, so it does not get deleted as a debugging leftover:
+ * 180 clients came back "no I-589", and twice now the matching rules have
+ * been widened by inferring the firm's naming conventions from the five or
+ * six filenames that happened to be visible. Both guesses were wrong, and
+ * the second one started reading a folder's payment receipts as the form.
+ * There is no way to tell a client who genuinely has no I-589 on file from
+ * one whose form is simply named something unrecognised without looking at
+ * the real filenames. This shows them.
+ *
+ * Read-only by design: it resolves the folder and lists names. It downloads
+ * no file, calls no model, and writes nothing to i589_proposals — so it can
+ * be run on a client whose proposal has already been applied without
+ * disturbing anything.
+ */
+async function inspectFolder(client = {}) {
+  const dbx = require("./dropbox-integration");
+  const out = {
+    client_key: client.client_key,
+    client_name: client.client_name,
+    folder: null,
+    files: [],
+    candidates: [],
+    error: null,
+  };
+
+  try {
+    const folder = client.dropbox_path || await dbx.resolveClientFolder({
+      clientKey: client.client_key,
+      clientName: client.client_name,
+      aNumber: client.a_number,
+    });
+    if (!folder) {
+      out.error = "no Dropbox folder could be found for this client";
+      return out;
+    }
+    out.folder = folder;
+
+    const entries = await dbx.listFolderDeep(folder);
+    if (!entries) {
+      out.error = "the folder could not be read";
+      return out;
+    }
+
+    // EVERY file, not just the PDFs. A form saved as .jpg or inside a .zip is
+    // a different problem from a form that is absent, and lumping the two
+    // together is what made the 180 unreadable in the first place.
+    const files = entries
+      .filter(e => e[".tag"] === "file")
+      .map(e => ({ name: e.name, path: e.path_display, modified: e.server_modified }));
+
+    out.files = files
+      .map(f => ({ ...f, score: x.scoreCandidate(f) }))
+      .sort((a, b) =>
+        b.score - a.score ||
+        new Date(b.modified || 0) - new Date(a.modified || 0) ||
+        String(a.name).localeCompare(String(b.name)));
+
+    // Recomputed through the real ranker rather than re-derived here, so this
+    // view cannot drift away from what the sweep would actually try.
+    out.candidates = x.rankCandidates(files).map(f => f.path);
+  } catch (err) {
+    out.error = err && err.message ? err.message : String(err);
+  }
+  return out;
+}
+
+/**
+ * The same listing for the first N clients in a given status — which is how
+ * you look at a bucket of 180 without clicking through 180 rows.
+ */
+async function inspectStatus({ status = "no_form", limit = 10 } = {}) {
+  await initTable();
+  const keys = (await db().query(
+    `SELECT client_key, client_name FROM i589_proposals
+      WHERE status = $1
+      ORDER BY scanned_at DESC NULLS LAST
+      LIMIT $2`, [status, Math.max(1, Math.min(50, Number(limit) || 10))])).rows;
+
+  const roster = await clientsToScan({ limit: 100000, rescan: true });
+  const byKey = new Map(roster.map(c => [c.client_key, c]));
+
+  const out = [];
+  for (const k of keys) {
+    const c = byKey.get(k.client_key) || { client_key: k.client_key, client_name: k.client_name };
+    out.push(await inspectFolder(c));
+  }
+  return out;
+}
+
 module.exports = {
   initTable, clientsToScan, clientCount, progress, currentFor, scanOne, readPdf,
-  retryableCount, RETRY_STATUSES,
+  retryableCount, RETRY_STATUSES, inspectFolder, inspectStatus,
 };

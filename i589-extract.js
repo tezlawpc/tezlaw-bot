@@ -240,6 +240,14 @@ function scoreCandidate(file) {
   if (/translat|certificat/i.test(n)) s -= 5;
   if (/cover|index|tab\b|exhibit|evidence/i.test(n)) s -= 5;
 
+  // Money, not the form. "TANG, JINGKUI Asylum Application Fee Receipts.pdf"
+  // scored +7 on "asylum application" and got read as though it were the
+  // form; the vision model duly reported two payment receipts. Weighted to
+  // cancel that match outright, while leaving a genuine form that happens to
+  // mention a receipt ("I-589 with fee receipt.pdf") a low-ranked candidate
+  // rather than an excluded one.
+  if (/receipt|fee\b|fees\b|invoice|payment|check\b|money\s*order/i.test(n)) s -= 8;
+
   if (/draft|sample|template|blank|unsigned/i.test(n)) s -= 8;
   if (/sign|final|filed|complete/i.test(n)) s += 2;
 

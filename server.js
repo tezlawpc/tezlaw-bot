@@ -11352,6 +11352,76 @@ app.post("/admin/clients/i589/scan", async (req, res) => {
   }
 });
 
+// What is ACTUALLY in a client's folder, with the score each filename got.
+//
+// This is the answer to "why did 180 clients come back with no I-589". It is
+// deliberately not a scan: it downloads nothing and calls no model, so it is
+// free to run and cannot change a single row. Read it before widening the
+// filename rules again — the last two widenings were guesses, and one of them
+// started reading a folder's payment receipts as the form.
+//
+// Server-rendered with no inline <script> on purpose. This page would
+// otherwise be the third admin page to carry a template-literal script, and
+// an escaped quote in a filename is exactly the input that broke client
+// search for five hours.
+app.get("/admin/clients/i589/files", async (req, res) => {
+  const esc = v => String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+  try {
+    const sweep = require("./i589-sweep");
+    const key = String(req.query.key || "").slice(0, 200);
+    const status = String(req.query.status || "").slice(0, 40);
+
+    let reports;
+    if (key) {
+      const roster = await sweep.clientsToScan({ limit: 100000, rescan: true });
+      const c = roster.find(r => r.client_key === key) || { client_key: key };
+      reports = [await sweep.inspectFolder(c)];
+    } else {
+      reports = await sweep.inspectStatus({
+        status: status || "no_form",
+        limit: parseInt(req.query.limit, 10) || 10,
+      });
+    }
+
+    const blocks = reports.map(r => {
+      const head = "<h2>" + esc(r.client_name || r.client_key) + "</h2>"
+        + "<p class=f>" + (r.folder ? esc(r.folder) : "<em>no folder</em>")
+        + (r.error ? " &mdash; <strong>" + esc(r.error) + "</strong>" : "") + "</p>";
+      if (!r.files.length) {
+        return head + "<p><em>the folder listing came back with no files at all</em></p>";
+      }
+      const rows = r.files.map(f => {
+        const tried = r.candidates.includes(f.path);
+        return "<tr class=" + (tried ? "t" : "n") + "><td class=s>" + esc(f.score)
+          + "</td><td>" + esc(f.name) + "</td><td class=f>"
+          + (tried ? "tried" : f.score > 0 ? "candidate, ranked too low" : "not a candidate")
+          + "</td></tr>";
+      }).join("");
+      return head + "<table><tr><th>score</th><th>file</th><th></th></tr>" + rows + "</table>";
+    }).join("");
+
+    res.send("<!doctype html><meta charset=utf-8>"
+      + "<title>I-589 &mdash; what is in the folder</title>"
+      + "<style>body{font:14px/1.5 -apple-system,system-ui,sans-serif;margin:24px;max-width:900px}"
+      + "table{border-collapse:collapse;width:100%;margin:8px 0 24px}"
+      + "td,th{border-bottom:1px solid #e5e5e5;padding:4px 8px;text-align:left;vertical-align:top}"
+      + "th{font-size:12px;color:#666;text-transform:uppercase}"
+      + ".s{text-align:right;width:4em;font-variant-numeric:tabular-nums}"
+      + ".f{color:#666;font-size:12px}.t{background:#f3f8ff}.n{color:#999}"
+      + "h2{font-size:15px;margin:24px 0 0}</style>"
+      + "<p><a href=\"/admin/clients/i589\">&larr; back to the I-589 report</a></p>"
+      + "<h1>What is actually in the folder</h1>"
+      + "<p class=f>Filenames and the score each one got. Nothing here was downloaded or read; "
+      + "this page only lists names. Highlighted rows are the files a scan would try, in order.</p>"
+      + (blocks || "<p><em>nothing to show</em></p>"));
+  } catch (err) {
+    console.error("[i589 files]:", err.message);
+    res.status(500).send("Error: " + esc(err.message));
+  }
+});
+
 // Apply ONE proposal. One at a time, on purpose: this is the step that
 // changes a client record, and a button that applied hundreds at once would
 // make the review meaningless.
