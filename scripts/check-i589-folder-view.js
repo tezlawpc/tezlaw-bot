@@ -184,8 +184,19 @@ async function main() {
   const pageSrc = fs.readFileSync(path.join(ROOT, "i589-page.js"), "utf8");
   ok("every row links to its folder listing",
      /i589\/files\?key=\$\{encodeURIComponent/.test(pageSrc));
-  ok("the no-I-589 count is itself a way in",
+  ok("there is a link into the no-I-589 bucket",
      /i589\/files\?status=no_form/.test(pageSrc));
+
+  // A link styled to look exactly like the static pill beside it is not a way
+  // in: JJ went looking for the clickable thing and reported he could not see
+  // it, because text-decoration:none made it identical to the plain pill. So
+  // the link must carry its own visible text, not be hidden behind a pill.
+  const linkBlock = pageSrc.slice(
+    Math.max(0, pageSrc.indexOf("i589/files?status=no_form") - 400),
+    pageSrc.indexOf("i589/files?status=no_form") + 200);
+  ok("…and it reads as a link rather than hiding inside a pill",
+     /Look inside/.test(linkBlock) && !/text-decoration:\s*none/.test(linkBlock),
+     linkBlock.replace(/\s+/g, " ").slice(0, 160));
 
   const note = stub.note();
   if (note) console.log(note);

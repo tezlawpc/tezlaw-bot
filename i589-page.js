@@ -152,10 +152,18 @@ function render({ prog, rows, ran, mode = null }) {
     <div style="margin-bottom:12px;">
       ${pill(s.found, "read", "#e8f5e9", "#2e7d32")}
       ${pill(s.unreadable, "unreadable", "#fff4e5", "#B45309")}
-      ${s.no_form ? `<a href="/admin/clients/i589/files?status=no_form&limit=10" style="text-decoration:none;">${pill(s.no_form, "no I-589", "#f4f4f4", "#666")}</a>` : pill(s.no_form, "no I-589", "#f4f4f4", "#666")}
+      ${pill(s.no_form, "no I-589", "#f4f4f4", "#666")}
       ${pill(s.no_folder, "no folder", "#f4f4f4", "#666")}
       ${pill(s.error, "errors", "#fdecea", "#A02818")}
     </div>
+    ${s.no_form ? `<div style="margin-bottom:12px; font-size:13px;">
+      <a href="/admin/clients/i589/files?status=no_form&limit=10" style="color:#A02818; font-weight:600;">Look inside the ${s.no_form} folders with no I-589 &rarr;</a>
+      <div style="color:#888; font-size:12px; margin-top:2px;">
+        Lists the real filenames and the folder each client was matched to. Nothing is downloaded or read.
+        A folder auto-matched on the name alone can belong to a different client &mdash; which looks
+        exactly like a missing form on this report.
+      </div>
+    </div>` : ""}
     <form method="POST" action="/admin/clients/i589/scan" style="display:flex; gap:8px; align-items:center;">
       <label style="font-size:13px;">Look at
         <select name="limit" style="padding:5px 8px; border:1px solid #ccc; border-radius:4px;">
