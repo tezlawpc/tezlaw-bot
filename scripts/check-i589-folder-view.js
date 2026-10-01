@@ -97,6 +97,9 @@ preload("dropbox-integration.js", {
 preload("db.js", {
   query: async (sql) => {
     calls.push("db:" + String(sql).trim().split(/\s+/)[0].toUpperCase());
+    if (/client_dropbox_mapping/.test(sql)) {
+      return { rows: [{ dropbox_path: FOLDER, resolved_by: "auto", resolved_at: "2026-09-20T00:00:00Z" }] };
+    }
     return { rows: [] };
   },
 });
@@ -125,6 +128,20 @@ async function main() {
      JSON.stringify(report.candidates));
   ok("the form is one a scan would try",
      report.candidates.some(p => p.indexOf(form.name) >= 0));
+  // An auto-matched folder only had to score 70/100 on the client's name, and
+  // the A-number is not required to agree. A client whose form is plainly on
+  // file can therefore come back "no I-589" because the sweep searched
+  // someone else's folder — and that row reads exactly like a missing form.
+  // The report is only trustworthy if it says where it looked and who chose.
+  ok("it reports how the folder was chosen",
+     report.resolved_by === "auto", JSON.stringify(report.resolved_by));
+
+  const serverPre = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
+  ok("the page warns when a folder was auto-matched",
+     /folder auto-matched on the name/.test(serverPre));
+  ok("and says a wrong folder and a missing form look the same",
+     /looking in someone/.test(serverPre));
+
   ok("the highest-scoring file is listed first",
      report.files.length > 1 && report.files[0].score >= report.files[1].score);
 

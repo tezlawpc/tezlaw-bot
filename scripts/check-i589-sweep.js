@@ -104,8 +104,18 @@ console.log("\n── The roster is the clients, not a cache ──────"
 {
   ok("clients come from the hearing notes, the same source the client list uses",
     /FROM hearing_notes[\s\S]{0,200}UNION ALL[\s\S]{0,200}FROM individual_hearing_notes/.test(sweep));
-  ok("NOT from client_dropbox_mapping, which is only a lazy cache",
-    !/FROM client_dropbox_mapping/.test(sweep));
+  // Scoped to clientsToScan rather than the whole file. The rule this
+  // protects is that the ROSTER must not come from the mapping cache — that
+  // bug is what produced 237 proposal rows for 94 clients. Reading one
+  // client's cached folder path elsewhere in the module is not that bug, and
+  // a file-wide grep blocked inspectFolder from reporting which folder it
+  // searched, which is the thing that tells a wrong-folder match apart from
+  // a genuinely missing form.
+  const roster = sweep.slice(sweep.indexOf("async function clientsToScan"),
+                             sweep.indexOf("async function clientCount"));
+  ok("clientsToScan does not build the roster from client_dropbox_mapping",
+    roster.length > 200 && !/client_dropbox_mapping/.test(roster),
+    "roster slice is " + roster.length + " chars");
   ok("…and the comment records why, so it is not 'simplified' back",
     /lazy CACHE/.test(sweep));
   ok("the client key is the shared one, so rows line up with contacts",

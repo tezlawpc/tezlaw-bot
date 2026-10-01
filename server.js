@@ -11386,8 +11386,16 @@ app.get("/admin/clients/i589/files", async (req, res) => {
     }
 
     const blocks = reports.map(r => {
+      // The folder it looked in, and whether a human ever confirmed that is
+      // the right folder. An auto-match only had to score 70/100 on the name.
+      const how = r.resolved_by === "manual"
+        ? "folder set by hand"
+        : r.resolved_by === "auto"
+          ? "<strong>folder auto-matched on the name</strong> &mdash; check it is the right person"
+          : "";
       const head = "<h2>" + esc(r.client_name || r.client_key) + "</h2>"
         + "<p class=f>" + (r.folder ? esc(r.folder) : "<em>no folder</em>")
+        + (how ? "<br>" + how : "")
         + (r.error ? " &mdash; <strong>" + esc(r.error) + "</strong>" : "") + "</p>";
       if (!r.files.length) {
         return head + "<p><em>the folder listing came back with no files at all</em></p>";
@@ -11415,6 +11423,10 @@ app.get("/admin/clients/i589/files", async (req, res) => {
       + "<h1>What is actually in the folder</h1>"
       + "<p class=f>Filenames and the score each one got. Nothing here was downloaded or read; "
       + "this page only lists names. Highlighted rows are the files a scan would try, in order.</p>"
+      + "<p class=f>Check the folder path first. A folder is auto-matched when its name scores "
+      + "70 out of 100 against the client's name, and the A-number is not required to agree, so "
+      + "&ldquo;no I-589&rdquo; can mean the form is missing <em>or</em> that the sweep was "
+      + "looking in someone else&rsquo;s folder. Those two read identically on the report.</p>"
       + (blocks || "<p><em>nothing to show</em></p>"));
   } catch (err) {
     console.error("[i589 files]:", err.message);

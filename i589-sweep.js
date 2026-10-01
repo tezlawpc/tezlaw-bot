@@ -377,6 +377,8 @@ async function inspectFolder(client = {}) {
     folder: null,
     files: [],
     candidates: [],
+    resolved_by: null,
+    resolved_at: null,
     error: null,
   };
 
@@ -391,6 +393,25 @@ async function inspectFolder(client = {}) {
       return out;
     }
     out.folder = folder;
+
+    // WHERE THE FOLDER CAME FROM, which matters more than what is in it.
+    // findClientFolder auto-selects any folder whose name scores 70 out of
+    // 100 against the client's name, walking two levels down from the
+    // configured branch roots. Nothing requires those folders to sit under a
+    // common parent, and nothing checks the A-number when the name alone
+    // clears the bar. So a client whose form is plainly on file can still
+    // come back "no I-589" because the sweep was looking in a folder
+    // belonging to someone with a similar name — and the row would say
+    // exactly what a genuinely missing form says. The path and how it was
+    // chosen have to be on screen or that case is invisible.
+    const map = await db().query(
+      `SELECT dropbox_path, resolved_by, resolved_at
+         FROM client_dropbox_mapping WHERE client_key = $1`, [client.client_key]
+    ).catch(() => ({ rows: [] }));
+    if (map.rows[0]) {
+      out.resolved_by = map.rows[0].resolved_by || null;
+      out.resolved_at = map.rows[0].resolved_at || null;
+    }
 
     const entries = await dbx.listFolderDeep(folder);
     if (!entries) {
