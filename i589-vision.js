@@ -29,7 +29,15 @@
 //      to ship twelve pages of it to a model to read an address.
 // ============================================================
 
-const MODEL = process.env.I589_VISION_MODEL || "claude-sonnet-4-6";
+// The same model string the working document-block call in
+// individual-hearing-notes.js uses. The first version of this sent
+// "claude-sonnet-4-6", copied from other files in this repo that send PLAIN
+// TEXT, and every scan came back "Request failed with status code 400".
+//
+// Haiku 4.5 reads a scanned page perfectly well, and for twenty-seven of them
+// it is faster and cheaper than Sonnet, which matters more here than depth:
+// the task is reading six fields off a form, not reasoning about them.
+const MODEL = process.env.I589_VISION_MODEL || "claude-haiku-4-5-20251001";
 
 const PROMPT = `This is page 1 of a Form I-589 (Application for Asylum and for Withholding of Removal).
 
@@ -116,10 +124,31 @@ async function readItem8(buffer, { ask = null } = {}) {
     const raw = await call(page1);
     got = JSON.parse(String(raw).trim());
   } catch (e) {
-    return { ok: false, method: "vision", address: "", phone: "", notes: ["could not read the page: " + e.message] };
+    return { ok: false, method: "vision", address: "", phone: "", notes: ["could not read the page: " + describe(e)] };
   }
 
   return shape(got);
+}
+
+/**
+ * Say what actually went wrong.
+ *
+ * axios throws with e.message = "Request failed with status code 400", which
+ * is true and useless — the API puts the reason in the response body. Every
+ * row on the review screen said exactly that for an afternoon, which cost a
+ * round trip to find out something the server had been told the first time.
+ *
+ * So: the API's own words when there are any, the status when there are not.
+ */
+function describe(e) {
+  const body = e && e.response && e.response.data;
+  const fromApi = body && body.error && body.error.message;
+  if (fromApi) return fromApi;
+  if (body && typeof body === "string" && body.length < 300) return body;
+  if (e && e.response && e.response.status) {
+    return "HTTP " + e.response.status + " from the API with no explanation in the body";
+  }
+  return (e && e.message) || "unknown error";
 }
 
 /**
@@ -162,4 +191,4 @@ function shape(got) {
   };
 }
 
-module.exports = { readItem8, firstPage, shape, PROMPT, MODEL };
+module.exports = { readItem8, firstPage, shape, describe, PROMPT, MODEL };

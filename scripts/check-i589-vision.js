@@ -122,6 +122,32 @@ console.log("\nwhat is sent");
 
   ok("a missing API key is an honest failure, not a silent empty read",
     /ANTHROPIC_API_KEY/.test(src) && /no ANTHROPIC_API_KEY set on the server/.test(src));
+
+  // The model string, because the wrong one cost an afternoon. The working
+  // document-block call in this repo uses a fully qualified dated id; the
+  // marketing-style names used elsewhere are for plain-text calls.
+  ok("the model is a fully qualified dated id", /^claude-[a-z]+-[\d-]+\d{8}$/.test(v.MODEL), v.MODEL);
+  ok("...the same one the working PDF call uses",
+    require("fs").readFileSync(require("path").join(__dirname, "..", "individual-hearing-notes.js"), "utf8")
+      .includes(v.MODEL));
+}
+
+console.log("\na failure says what the API actually said");
+{
+  ok("the API's own message is preferred",
+    v.describe({ response: { status: 400, data: { error: { message: "no such model" } } } }) === "no such model");
+  ok("a status with no body still names the status",
+    /HTTP 429/.test(v.describe({ response: { status: 429 }, message: "Request failed with status code 429" })));
+  ok("a connection failure falls back to the thrown message",
+    v.describe({ message: "socket hang up" }) === "socket hang up");
+  ok("the generic axios line is not what reaches the row",
+    v.describe({ response: { status: 400, data: { error: { message: "real reason" } } },
+                 message: "Request failed with status code 400" }) !== "Request failed with status code 400");
+  // src is scoped to the block above; read it here rather than reaching out.
+  const vsrc = require("fs").readFileSync(require("path").join(__dirname, "..", "i589-vision.js"), "utf8");
+  ok("and describe is what the read path uses", /describe\(e\)/.test(vsrc));
+  ok("...with the generic axios message no longer reaching a row",
+    !/notes: \["could not read the page: " \+ e\.message\]/.test(vsrc));
 }
 
 // ── 5. The sweep only pays for this when it has to ─────────────────────
