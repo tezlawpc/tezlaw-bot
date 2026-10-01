@@ -39,7 +39,18 @@
 // the task is reading six fields off a form, not reasoning about them.
 const MODEL = process.env.I589_VISION_MODEL || "claude-haiku-4-5-20251001";
 
-const PROMPT = `This is page 1 of a Form I-589 (Application for Asylum and for Withholding of Removal).
+// How far into a packet to look for the form. Eight gets past a cover sheet,
+// an index and a tab divider, which is what these actually have in front of
+// them; it is not enough to sweep up an evidence bundle.
+const PAGES = Number(process.env.I589_VISION_PAGES || 8);
+
+const PROMPT = `These are the first pages of a filing that contains a Form I-589
+(Application for Asylum and for Withholding of Removal).
+
+It is usually a packet rather than a bare form: a cover sheet, an index, a tab
+divider such as "TAB A", or a blank page may come before the form itself. Look
+through the pages you have been given and find the page carrying Part A.I. with
+Item Number 8 on it. Ignore cover pages and dividers entirely.
 
 Read ONLY Item Number 8, "Residence in the U.S." — where the applicant physically lives.
 
@@ -55,11 +66,17 @@ Return JSON with exactly these keys:
   "zip"     - ZIP code from item 8, or null
   "phone"   - telephone number from item 8, or null
   "legible" - true if you could actually read item 8; false if the scan is too
-              poor, the page is not an I-589, or item 8 is not visible
+              poor, there is no I-589 among these pages, or item 8 is not
+              visible in the pages you were given
+  "page"    - which page number of what you were given carried item 8, or null
   "note"    - one short sentence if anything was hard to read, else null
 
 Rules:
 - Handwriting counts: read it if you can read it.
+- If the form appears more than once in these pages, use the one that is filled
+  in most completely, and say so in note.
+- If the pages you were given contain no I-589 at all, set legible to false and
+  say what they do contain. Do not guess from a cover sheet.
 - If a field is empty on the form, return null for it. Do not guess.
 - If you are unsure of a character (a 3 that might be an 8), set legible to
   false and say so in note. A wrong address is worse than no address: these are
@@ -67,19 +84,38 @@ Rules:
 - Return only the JSON object.`;
 
 /**
- * Just page 1, as its own PDF.
- * Works on a scan as well as a text PDF — pdf-lib copies the page object
- * whatever it contains.
+ * The front of the document, as its own PDF.
+ *
+ * This used to take page 1 only, on the reasoning that item 8 is on page 1 of
+ * an I-589. That is true of a blank form and false of how this office files
+ * them: the PDFs are packets. The model read them correctly and said so —
+ * "This page shows only the TAB A cover page; Item 8 is not visible" — which
+ * is a cover sheet, an index, or a tab divider sitting in front of the form.
+ *
+ * So take the first few pages and let the model find the one with item 8.
+ * Still a cap, and the cap still matters: the rest of an I-589 packet is the
+ * client's account of why they fear return, often with medical and family
+ * records behind it, and none of that needs to leave the server to read an
+ * address off a form.
  */
-async function firstPage(buffer) {
+async function firstPages(buffer, n = PAGES) {
   const { PDFDocument } = require("pdf-lib");
   const src = await PDFDocument.load(buffer, { ignoreEncryption: true });
-  if (src.getPageCount() === 0) throw new Error("the PDF has no pages");
-  if (src.getPageCount() === 1) return buffer;
+  const total = src.getPageCount();
+  if (total === 0) throw new Error("the PDF has no pages");
+  if (total <= n) return { buffer, pages: total, of: total };
+
   const out = await PDFDocument.create();
-  const [page] = await out.copyPages(src, [0]);
-  out.addPage(page);
-  return Buffer.from(await out.save());
+  const idx = Array.from({ length: n }, (_, i) => i);
+  const copied = await out.copyPages(src, idx);
+  copied.forEach(pg => out.addPage(pg));
+  return { buffer: Buffer.from(await out.save()), pages: n, of: total };
+}
+
+// Kept for callers that genuinely want one page.
+async function firstPage(buffer) {
+  const r = await firstPages(buffer, 1);
+  return r.buffer;
 }
 
 /**
@@ -92,8 +128,8 @@ async function readItem8(buffer, { ask = null } = {}) {
     return { ok: false, method: "vision", address: "", phone: "", notes: ["no ANTHROPIC_API_KEY set on the server"] };
   }
 
-  let page1;
-  try { page1 = await firstPage(buffer); }
+  let front;
+  try { front = await firstPages(buffer); }
   catch (e) { return { ok: false, method: "vision", address: "", phone: "", notes: ["could not open the PDF: " + e.message] }; }
 
   const call = ask || (async (pdf) => {
@@ -121,13 +157,21 @@ async function readItem8(buffer, { ask = null } = {}) {
 
   let got;
   try {
-    const raw = await call(page1);
+    const raw = await call(front.buffer);
     got = JSON.parse(String(raw).trim());
   } catch (e) {
     return { ok: false, method: "vision", address: "", phone: "", notes: ["could not read the page: " + describe(e)] };
   }
 
-  return shape(got);
+  const out = shape(got);
+  // Say where it looked, so a row that failed can be told apart from a row
+  // whose form sits deeper in the packet than we sent.
+  if (front.of > front.pages) {
+    out.notes = (out.notes || []).concat(
+      `looked at the first ${front.pages} of ${front.of} pages`);
+  }
+  if (got && got.page) out.page = Number(got.page) || null;
+  return out;
 }
 
 /**
@@ -191,4 +235,4 @@ function shape(got) {
   };
 }
 
-module.exports = { readItem8, firstPage, shape, describe, PROMPT, MODEL };
+module.exports = { readItem8, firstPage, firstPages, shape, describe, PROMPT, MODEL, PAGES };

@@ -111,8 +111,22 @@ console.log("\nwhen item 8 is readable");
 console.log("\nwhat is sent");
 {
   const src = require("fs").readFileSync(require("path").join(__dirname, "..", "i589-vision.js"), "utf8");
-  ok("page 1 is taken before anything is sent", /firstPage\(buffer\)/.test(src));
-  ok("firstPage copies exactly one page", /copyPages\(src, \[0\]\)/.test(src));
+  // Not page 1. These filings are packets — a cover sheet, an index or a
+  // "TAB A" divider sits in front of the form, which is what the model told
+  // us when it read page 1 and found no item 8 on it.
+  ok("the front of the packet is taken before anything is sent", /firstPages\(buffer\)/.test(src));
+  ok("it is a bounded number of pages, not the whole filing",
+    /const PAGES = Number\(process\.env\.I589_VISION_PAGES \|\| \d+\)/.test(src));
+  ok("...and the bound is small enough not to ship an evidence bundle",
+    v.PAGES <= 12, "PAGES=" + v.PAGES);
+  ok("a document shorter than the bound is sent whole, not re-saved",
+    /if \(total <= n\) return \{ buffer, pages: total, of: total \}/.test(src));
+  ok("the prompt says to expect a cover page or a tab divider",
+    /TAB A/.test(v.PROMPT) && /packet/.test(v.PROMPT));
+  ok("...and to refuse rather than guess from a cover sheet",
+    /Do not guess from a cover sheet/.test(v.PROMPT));
+  ok("a row says when the form may be deeper than we looked",
+    /looked at the first \$\{front\.pages\} of \$\{front\.of\} pages/.test(src));
 
   const body = src.slice(src.indexOf("const call = ask ||"), src.indexOf("let got;"));
   ok("what is sent is the extracted page, not the original file",
