@@ -147,8 +147,35 @@ async function progress() {
   ]);
   const byStatus = {};
   for (const r of done.rows) byStatus[r.status] = r.n;
-  const scanned = Object.values(byStatus).reduce((a, b) => a + b, 0);
-  return { mapped: total, scanned, remaining: Math.max(0, total - scanned), byStatus, retryable };
+  const rows = Object.values(byStatus).reduce((a, b) => a + b, 0);
+
+  // "Looked at" used to be every row in the proposals table, which produced
+  // 237 looked at against 94 clients — impossible, and it made the remaining
+  // count zero so the page claimed the job was finished. The extra rows are
+  // real but they are leftovers from the first version of this sweep, which
+  // read the Dropbox mapping cache as if it were the client roster and
+  // produced keys no current client has.
+  //
+  // So the two populations are counted separately and both are reported. A
+  // number that cannot be reconciled with the one next to it is worse than no
+  // number at all.
+  const inRoster = await db().query(
+    `SELECT COUNT(*)::int AS n FROM i589_proposals p
+      WHERE EXISTS (SELECT 1 FROM (
+        SELECT client_name, a_number FROM hearing_notes
+        UNION ALL SELECT client_name, a_number FROM individual_hearing_notes
+      ) t WHERE p.client_name = t.client_name)`);
+  const scanned = Math.min(inRoster.rows[0].n, total);
+
+  return {
+    mapped: total,
+    scanned,
+    remaining: Math.max(0, total - scanned),
+    stale: Math.max(0, rows - scanned),   // rows from the old mapping-based sweep
+    rows,
+    byStatus,
+    retryable,
+  };
 }
 
 /**

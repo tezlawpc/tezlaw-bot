@@ -11311,9 +11311,13 @@ app.get("/admin/clients/i589", async (req, res) => {
     const sweep = require("./i589-sweep");
     const prog = await sweep.progress();
     const rows = (await require("./db").query(
-      `SELECT * FROM i589_proposals ORDER BY
-         CASE status WHEN 'found' THEN 0 WHEN 'unreadable' THEN 1 WHEN 'error' THEN 2 ELSE 3 END,
-         client_name LIMIT 500`)).rows;
+      // Most recently looked at first. Sorting by status and name meant the
+      // rows a scan had just produced were scattered alphabetically through
+      // hundreds of older ones, so pressing Scan or Re-read appeared to do
+      // nothing — the one thing the page exists to show was the one thing it
+      // did not show.
+      `SELECT * FROM i589_proposals
+        ORDER BY scanned_at DESC NULLS LAST, client_name LIMIT 500`)).rows;
     res.send(require("./i589-page").render({
       prog, rows, ran: req.query.ran || null, mode: req.query.mode || null }));
   } catch (err) {

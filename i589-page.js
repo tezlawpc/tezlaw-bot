@@ -146,6 +146,7 @@ function render({ prog, rows, ran, mode = null }) {
       ${pill(prog.mapped, "clients", "#eef2f7", "#0C1C36")}
       ${pill(prog.scanned, "looked at", "#e8f5e9", "#2e7d32")}
       ${pill(prog.remaining, "not yet", "#fff4e5", "#B45309")}
+      ${prog.stale ? `<span title="Rows from the first version of this sweep, which read the Dropbox mapping cache as if it were the client roster. They are harmless, and they are not counted above." style="display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; margin-right:6px; background:#f4f4f4; color:#888;">${prog.stale} from an earlier scan</span>` : ""}
     </div>
     <div style="margin-bottom:12px;">
       ${pill(s.found, "read", "#e8f5e9", "#2e7d32")}
@@ -172,7 +173,7 @@ function render({ prog, rows, ran, mode = null }) {
              <select name="limit" style="padding:5px 8px; border:1px solid #ccc; border-radius:4px;">
                <option value="20">20</option><option value="50">50</option><option value="100">100</option>
              </select>
-             of the ${prog.retryable} unreadable row(s)</label>
+             of the ${prog.retryable} row(s) that could not be read</label>
            <button type="submit" style="padding:6px 14px; background:#B45309; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:13px;">Re-read</button>
            <span style="font-size:12px; color:#888;">A normal scan skips anything already looked at, so rows that failed
              under an older reader need this to be tried again.</span>
@@ -182,7 +183,7 @@ function render({ prog, rows, ran, mode = null }) {
 
   <div class="card">
     <table>
-      <thead><tr><th>Client and form</th><th>What item 8 says</th></tr></thead>
+      <thead><tr><th>Client and form &mdash; most recently looked at first</th><th>What item 8 says</th></tr></thead>
       <tbody>${rows.length ? rows.map(row).join("") :
         `<tr><td colspan="2" style="padding:14px; color:#888; font-size:13px;">Nothing scanned yet. Press Scan above to look at the first batch.</td></tr>`}</tbody>
     </table>

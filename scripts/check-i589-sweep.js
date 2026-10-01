@@ -161,7 +161,10 @@ console.log("\n── Rows that failed can be read again ───────�
     prog: { mapped: 10, scanned: 10, remaining: 0, byStatus: { unreadable: 7 }, retryable: 7 },
     rows: [], ran: null });
   ok("the button appears when there is something to re-read", /name="retry" value="1"/.test(withRetry));
-  ok("...and says how many", /7 unreadable row/.test(withRetry));
+  // Asserts the COUNT reaches the label, not the sentence around it. The
+  // wording changed once already (the 36 it offered were 27 unreadable plus 9
+  // errors, which the old label called all unreadable).
+  ok("...and says how many", /\b7 row\(s\)/.test(withRetry));
 
   const nothingToRetry = page.render({
     prog: { mapped: 10, scanned: 10, remaining: 0, byStatus: {}, retryable: 0 },
