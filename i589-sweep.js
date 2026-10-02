@@ -80,7 +80,15 @@ async function initTable() {
  * no_form and no_folder are NOT here: nothing was read because nothing was
  * found, and re-reading cannot change that. Use "Start over" for those.
  */
-const RETRY_STATUSES = new Set(["unreadable", "error"]);
+// "no_form" belongs here, and its absence was hiding a stale verdict.
+// A no_form row means "none of the files in this folder scored above zero
+// UNDER THE RULES IN FORCE WHEN IT WAS SCANNED" — and those rules have
+// changed twice since. LI, Wei and CHEN, Naisui both sat in the bucket with
+// a file called "Asylum application_<name>.pdf" in the folder, which the
+// current ranker scores 7 and would read. Without this they would have
+// stayed there for good, because the ordinary scan skips any client that
+// already has a proposal.
+const RETRY_STATUSES = new Set(["unreadable", "error", "no_form"]);
 
 async function clientsToScan({ limit = 20, rescan = false, retry = false } = {}) {
   await initTable();
@@ -247,7 +255,7 @@ async function scanOne(row, { current = {} } = {}) {
       // is often not it: "updated I-589 and Statement.pdf" turned out to hold
       // the supplement and the statement while the base form sat beside it
       // under another name. So take an ordered list and try them in turn.
-      const picks = x.rankCandidates(files);
+      const picks = x.rankCandidates(files, { aNumber: row.a_number });
       if (!picks.length) {
         out.status = "no_form";
       } else {
@@ -427,7 +435,7 @@ async function inspectFolder(client = {}) {
       .map(e => ({ name: e.name, path: e.path_display, modified: e.server_modified }));
 
     out.files = files
-      .map(f => ({ ...f, score: x.scoreCandidate(f) }))
+      .map(f => ({ ...f, score: x.scoreCandidate(f, { aNumber: client.a_number }) }))
       .sort((a, b) =>
         b.score - a.score ||
         new Date(b.modified || 0) - new Date(a.modified || 0) ||
@@ -435,7 +443,7 @@ async function inspectFolder(client = {}) {
 
     // Recomputed through the real ranker rather than re-derived here, so this
     // view cannot drift away from what the sweep would actually try.
-    out.candidates = x.rankCandidates(files).map(f => f.path);
+    out.candidates = x.rankCandidates(files, { aNumber: client.a_number }).map(f => f.path);
   } catch (err) {
     out.error = err && err.message ? err.message : String(err);
   }

@@ -69,6 +69,62 @@ ok("a form that merely mentions a receipt is still reachable",
 ok("but it ranks below a form that does not",
    x.scoreCandidate(withFee) < x.scoreCandidate(form));
 
+// ── Real filenames, read off the folder listing on 2026-10-01 ──────────
+// Every name below is copied from the live page for ten clients in the
+// "no I-589" bucket. Guessing at the firm's naming conventions is what put
+// the receipts through a vision model, so the rules are now tested against
+// what is actually in Dropbox.
+console.log("real folders");
+
+// CHEN, PENG — one file in the whole folder, and the old rules made it a
+// candidate on the strength of the word "signed".
+const pengNotice = { name: "CHEN_PENG_Merits_Hearing_Notice_signed.pdf" };
+ok("a signed hearing notice is not a candidate",
+   x.scoreCandidate(pengNotice) <= 0, "scored " + x.scoreCandidate(pengNotice));
+
+// LI, Wei and CHEN, Naisui — both sat in "no I-589" with this in the folder.
+const liApp = { name: "Asylum application_Li Wei.pdf" };
+const naisuiApp = { name: "ASYLUM APPLICATION_NAISUI CHEN.pdf" };
+ok("\"Asylum application_<name>.pdf\" is a candidate",
+   x.scoreCandidate(liApp) > 0 && x.scoreCandidate(naisuiApp) > 0,
+   x.scoreCandidate(liApp) + " / " + x.scoreCandidate(naisuiApp));
+
+// The EOIR representation paperwork that fills these folders.
+for (const n of ["245573786 CHEN RUIXIANG Motion to Change Venue.pdf",
+                 "245573786 CHEN RUIXIANG Written Pleading.pdf",
+                 "E28_CHEN,SHENGSHENG.pdf",
+                 "E33 NAISUI CHEN.pdf",
+                 "IDENTITY DOCUMENT__NAISUI CHEN.pdf",
+                 "2.ChenRuixiang-Notification of Change of Legal_Representation.pdf",
+                 "MOTION_TO_SUBSTITUTE_CHEN,SHENGSHENG.pdf",
+                 "Chen, Tongmei2.pdf"]) {
+  ok("not a candidate: " + n, x.scoreCandidate({ name: n }) <= 0,
+     "scored " + x.scoreCandidate({ name: n }));
+}
+
+// ECAS exports: <timestamp>_<A-number>.pdf. The "_Supporting" ones are
+// exhibits; the bare ones are filings the form could be hiding in.
+const A = "A246-206-666";
+const ecasFiling = { name: "20260930150528 39_246206666.pdf" };
+const ecasSupport = { name: "20240924175050115_226031436_Supporting.pdf" };
+ok("an ECAS filing matching the client's A-number is worth trying",
+   x.scoreCandidate(ecasFiling, { aNumber: A }) > 0,
+   "scored " + x.scoreCandidate(ecasFiling, { aNumber: A }));
+ok("…but a _Supporting exhibit is not",
+   x.scoreCandidate(ecasSupport, { aNumber: A }) <= 0);
+ok("…and neither is one belonging to a different A-number",
+   x.scoreCandidate(ecasFiling, { aNumber: "A999-999-999" }) <= 0);
+ok("a named form still outranks a bare ECAS filing",
+   x.scoreCandidate(liApp) > x.scoreCandidate(ecasFiling, { aNumber: A }));
+
+// A no_form verdict is only as good as the rules in force when it was made,
+// and those have now changed three times. LI, Wei would have been stuck.
+const sweepSrcEarly = fs.readFileSync(path.join(ROOT, "i589-sweep.js"), "utf8");
+ok("no_form rows can be re-read after the rules change",
+   /RETRY_STATUSES = new Set\(\[[^\]]*"no_form"/.test(sweepSrcEarly));
+ok("the sweep passes the A-number to the ranker",
+   /rankCandidates\(files, \{ aNumber: row\.a_number \}\)/.test(sweepSrcEarly));
+
 const ranked = x.rankCandidates([receipts, supp, form, stmt]);
 ok("the ranker puts the form first and drops the receipts",
    ranked.length > 0 && ranked[0].name === form.name &&

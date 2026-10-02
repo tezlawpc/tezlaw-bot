@@ -151,16 +151,28 @@ console.log("\n── Rows that failed can be read again ───────�
   // looking at them) every row the old reader had given up on stayed
   // "unreadable" forever and pressing Scan appeared to do nothing at all.
   ok("clientsToScan takes a retry mode", /clientsToScan\(\{[^}]*retry = false/.test(sweep));
-  ok("retry selects only the statuses a re-read could change",
-    /RETRY_STATUSES = new Set\(\["unreadable", "error"\]\)/.test(sweep));
+  ok("retry selects the statuses a re-read could change",
+    /RETRY_STATUSES = new Set\(\[[^\]]*"unreadable"[^\]]*"error"[^\]]*\]\)/.test(sweep));
 
   const body = sweep.slice(sweep.indexOf("if (retry) {"), sweep.indexOf("// Skip the ones already looked at."));
   ok("in retry mode it returns ONLY the failed ones, not everything",
     /again\.has\(c\.client_key\)/.test(body));
   ok("...and is not confused with rescan, which starts over", /if \(rescan\) return out/.test(sweep));
 
-  ok("nothing-was-found statuses are deliberately excluded",
-    !/RETRY_STATUSES[^)]*no_form/.test(sweep) && !/RETRY_STATUSES[^)]*no_folder/.test(sweep));
+  // This used to exclude no_form too, on the reasoning that "nothing was found
+  // to read, so reading again cannot change the answer". That holds only while
+  // the rules for recognising the form are fixed, and they are not: a no_form
+  // verdict means nothing in the folder matched THE RULES IN FORCE AT THE TIME.
+  // The folder listing for ten of those clients showed LI, Wei and CHEN, Naisui
+  // each sitting in the bucket with "Asylum application_<name>.pdf" beside
+  // them. no_folder stays excluded — there is genuinely no folder to look in.
+  ok("no_form rows can be re-read, because the matching rules change",
+    /RETRY_STATUSES[^)]*"no_form"/.test(sweep));
+  ok("...but no_folder is still excluded, since there is nothing to look in",
+    !/RETRY_STATUSES[^)]*no_folder/.test(sweep));
+  ok("...and the page explains that a no-I-589 row does get re-read",
+    /A &ldquo;no I-589&rdquo; row IS re-read/.test(
+      fs.readFileSync(path.join(__dirname, "..", "i589-page.js"), "utf8")));
   ok("an already-applied row is not offered for re-reading",
     /retryableCount[\s\S]{0,400}applied_at IS NULL/.test(sweep));
 
@@ -186,7 +198,7 @@ console.log("\n── Rows that failed can be read again ───────�
     rows: [], ran: "0", mode: "retry" });
   ok("a retry that found nothing says so in its own words",
     /Nothing left to re-read/.test(ranNone));
-  ok("...and explains why no_form rows are not re-read", /nothing was\s+found to read/.test(ranNone));
+  ok("...and says which statuses are left alone", /no Dropbox folder/.test(ranNone));
 
   const ranNoneNormal = page.render({
     prog: { mapped: 10, scanned: 10, remaining: 0, byStatus: {}, retryable: 3 },
@@ -198,7 +210,7 @@ console.log("\n── Rows that failed can be read again ───────�
 console.log("\n── More than one file gets a try ──────────────");
 {
   const scan = sweep.slice(sweep.indexOf("async function scanOne"), sweep.indexOf("async function readPdf"));
-  ok("the folder is ranked rather than reduced to one file", /x\.rankCandidates\(files\)/.test(scan));
+  ok("the folder is ranked rather than reduced to one file", /x\.rankCandidates\(files/.test(scan));
   ok("each candidate is tried in turn", /for \(const pick of picks\)/.test(scan));
   ok("...and the loop stops the moment one works",
     /if \(one\.ok\) break;/.test(scan), "otherwise every folder pays for every candidate");

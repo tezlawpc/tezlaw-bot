@@ -125,9 +125,12 @@ function render({ prog, rows, ran, mode = null }) {
             ? `<div class="card" style="border-left:4px solid #B45309;background:#fffaf3;">
                  <strong>Nothing left to re-read.</strong>
                  <div style="font-size:13px;color:#555;margin-top:6px;line-height:1.6;">
-                   No rows are sitting at &ldquo;unreadable&rdquo; or &ldquo;error&rdquo;. Rows that say
-                   &ldquo;no I-589&rdquo; or &ldquo;no Dropbox folder&rdquo; are not re-read &mdash; nothing was
-                   found to read, so reading again cannot change the answer.
+                   No rows are sitting at &ldquo;unreadable&rdquo;, &ldquo;error&rdquo; or
+                   &ldquo;no I-589&rdquo;. A &ldquo;no I-589&rdquo; row IS re-read: it means nothing in
+                   the folder matched the rules for recognising the form, and those rules change
+                   &mdash; two clients were sitting in that bucket with a file called
+                   &ldquo;Asylum application&rdquo; beside them. Only &ldquo;no Dropbox folder&rdquo;
+                   is left alone, since there is no folder to look in.
                  </div>
                </div>`
             : `<div class="card" style="border-left:4px solid #B45309;background:#fffaf3;">

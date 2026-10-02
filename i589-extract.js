@@ -224,15 +224,41 @@ function extract({ fields = null, text = "" } = {}) {
  * statements and translation certificates still score above zero — they ARE
  * usually in the right folder — they simply rank below a plain form.
  */
-function scoreCandidate(file) {
+function scoreCandidate(file, { aNumber = null } = {}) {
   const n = String(file.name || "");
+  // PDFs only. Both readers below take a PDF buffer, so a .docx scored as a
+  // candidate would be downloaded and handed to a parser that cannot open it.
+  // The folder VIEW still lists .docx files — seeing them is the point there.
   if (!/\.pdf$/i.test(n)) return 0;
-  let s = 0;
 
-  if (/\bi[\s._-]?589\b/i.test(n)) s += 10;
-  if (/asylum[\s._-]*(application|app|form)/i.test(n)) s += 7;
-  if (/\b589\b/.test(n)) s += 3;                       // bare number, weaker
+  // ── Does anything here say "this is the form"? ────────────────────────
+  // Split out from the modifiers below because of CHEN, PENG, whose folder
+  // held exactly one file: "CHEN_PENG_Merits_Hearing_Notice_signed.pdf". It
+  // scored 2 — entirely from the word "signed" — and so became a candidate
+  // the sweep would download and send to a vision model, looking for Item 8
+  // on a hearing notice. "Signed" is a tiebreaker between forms, never
+  // evidence that a file IS one. No form signal, no candidate.
+  let form = 0;
+  if (/\bi[\s._-]?589\b/i.test(n)) form += 10;
+  if (/asylum[\s._-]*(application|app|form)/i.test(n)) form += 7;
+  if (/\b589\b/.test(n)) form += 3;                      // bare number, weaker
 
+  // EOIR's ECAS export names files <timestamp>_<A-number>.pdf with no words
+  // at all — "20260930150528 39_246206666.pdf" in LI, Wei's folder. Those
+  // suffixed "_Supporting" are exhibits, but the unsuffixed ones are filings
+  // and the form may well be among them. Worth trying last, when the folder
+  // offers nothing better, rather than reporting "no I-589" over a folder
+  // full of unopened filings.
+  const aDigits = String(aNumber || "").replace(/\D/g, "");
+  if (aDigits.length >= 8 && n.replace(/\D/g, "").includes(aDigits)
+      && !/supporting/i.test(n)) {
+    form += 4;
+  }
+
+  if (form <= 0) return 0;
+  let s = form;
+
+  // ── Modifiers: only ever rank one candidate against another ───────────
   // The things that travel WITH the form rather than being it. The evidence
   // for each of these is a row that said so in its own words.
   if (/supplement|continuation|addend|amend/i.test(n)) s -= 6;
@@ -241,12 +267,16 @@ function scoreCandidate(file) {
   if (/cover|index|tab\b|exhibit|evidence/i.test(n)) s -= 5;
 
   // Money, not the form. "TANG, JINGKUI Asylum Application Fee Receipts.pdf"
-  // scored +7 on "asylum application" and got read as though it were the
-  // form; the vision model duly reported two payment receipts. Weighted to
-  // cancel that match outright, while leaving a genuine form that happens to
-  // mention a receipt ("I-589 with fee receipt.pdf") a low-ranked candidate
-  // rather than an excluded one.
+  // scored +7 on "asylum application" and was read as though it were the
+  // form; the vision model duly reported two payment receipts.
   if (/receipt|fee\b|fees\b|invoice|payment|check\b|money\s*order/i.test(n)) s -= 8;
+
+  // The EOIR representation paperwork that fills most of these folders:
+  // notices, pleadings, venue motions, E-28/E-33, identity documents. None
+  // of it is an I-589, and most of it does not mention asylum at all — but
+  // when it does, it must not outrank the form.
+  if (/notice|hearing|pleading|motion|venue|substitut|withdraw/i.test(n)) s -= 7;
+  if (/\be-?(28|33)\b/i.test(n) || /identity/i.test(n)) s -= 7;
 
   if (/draft|sample|template|blank|unsigned/i.test(n)) s -= 8;
   if (/sign|final|filed|complete/i.test(n)) s += 2;
@@ -254,9 +284,9 @@ function scoreCandidate(file) {
   return s;
 }
 
-function rankCandidates(files = [], { limit = 3 } = {}) {
+function rankCandidates(files = [], { limit = 3, aNumber = null } = {}) {
   return files
-    .map(f => ({ file: f, score: scoreCandidate(f) }))
+    .map(f => ({ file: f, score: scoreCandidate(f, { aNumber }) }))
     .filter(x => x.score > 0)
     .sort((a, b) =>
       b.score - a.score ||
@@ -267,8 +297,8 @@ function rankCandidates(files = [], { limit = 3 } = {}) {
 }
 
 /** The single best guess. Kept because plenty of callers only want one. */
-function pickMostRecent(files = []) {
-  return rankCandidates(files, { limit: 1 })[0] || null;
+function pickMostRecent(files = [], { aNumber = null } = {}) {
+  return rankCandidates(files, { limit: 1, aNumber })[0] || null;
 }
 
 /**
