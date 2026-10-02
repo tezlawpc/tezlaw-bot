@@ -75,14 +75,50 @@ async function ensureConfigColumns() {
   }
 }
 
-async function getConfig() {
+/**
+ * Which company's books an operation is for.
+ *
+ * Omitted means the law firm, matching accounting.companyIdOf — every caller
+ * written before there were two entities omits it and means Tez Law.
+ */
+async function companyIdOf(company_id) {
+  return await require("./accounting").companyIdOf(company_id);
+}
+
+/**
+ * The QuickBooks connection for ONE company.
+ *
+ * This used to be `ORDER BY id DESC LIMIT 1` — a single global connection,
+ * newest wins. That is the whole of JJ's original symptom: after connecting
+ * the second QuickBooks company, the first one stopped syncing, because every
+ * read of the config returned the newer row and the older connection became
+ * unreachable without ever being disconnected. Nothing reported an error;
+ * one company simply went quiet.
+ */
+async function getConfig(company_id = null) {
   await ensureConfigColumns();
-  const r = await db.query(`SELECT * FROM accounting_qb_config ORDER BY id DESC LIMIT 1`);
+  const cid = await companyIdOf(company_id);
+  const r = await db.query(
+    `SELECT * FROM accounting_qb_config WHERE company_id = $1 ORDER BY id DESC LIMIT 1`, [cid]);
   return r.rows[0] || null;
 }
 
-async function saveConfig(fields) {
-  const existing = await getConfig();
+/** Every company that currently has a live QuickBooks connection. */
+async function connectedConfigs() {
+  await ensureConfigColumns();
+  const r = await db.query(
+    `SELECT c.*, co.name AS company_name
+       FROM accounting_qb_config c
+       JOIN accounting_companies co ON co.id = c.company_id
+      WHERE c.access_token IS NOT NULL AND c.realm_id IS NOT NULL
+      ORDER BY co.id`);
+  return r.rows;
+}
+
+async function saveConfig(fields, company_id = null) {
+  const cid = await companyIdOf(company_id);
+  const existing = await getConfig(cid);
+  fields = { ...fields, company_id: cid };
   if (existing) {
     const sets = Object.keys(fields).map((k, i) => `${k} = $${i + 1}`).join(", ");
     const values = Object.values(fields);
@@ -102,8 +138,8 @@ async function saveConfig(fields) {
   }
 }
 
-async function isConnected() {
-  const cfg = await getConfig();
+async function isConnected(company_id = null) {
+  const cfg = await getConfig(company_id);
   if (!cfg || !cfg.access_token || !cfg.realm_id) return false;
   // Check token freshness — refresh_token valid ~100 days
   if (cfg.token_expires_at && new Date(cfg.token_expires_at) < new Date(Date.now() - 100 * 24 * 60 * 60 * 1000)) {
@@ -114,7 +150,21 @@ async function isConnected() {
 
 // ─── OAuth flow ─────────────────────────────────────────
 
-function getAuthorizeUrl(state = "tez-law") {
+/**
+ * The consent URL for ONE company.
+ *
+ * The company id travels in `state` because Intuit hands that back on the
+ * callback, and the callback is otherwise unable to tell which set of books
+ * the tokens it just received belong to. Getting that wrong would attach the
+ * business's QuickBooks file to the law firm's ledger.
+ */
+async function getAuthorizeUrl(company_id = null) {
+  // Resolved here rather than taken on trust, so the state always names a
+  // real company. Built from a raw argument it could read "tez-0" or
+  // "tez-NaN", which parses back to nothing and quietly attaches the tokens
+  // to whichever company the fallback picked.
+  const cid = await companyIdOf(company_id);
+  const state = "tez-" + cid;
   const params = new URLSearchParams({
     client_id: getClientId(),
     response_type: "code",
@@ -125,7 +175,13 @@ function getAuthorizeUrl(state = "tez-law") {
   return `${OAUTH_AUTHORIZE_URL}?${params.toString()}`;
 }
 
-async function exchangeCodeForTokens(code, realmId) {
+/** Read the company id back off the OAuth state. Null if it is not ours. */
+function companyFromState(state) {
+  const m = /^tez-([1-9]\d*)$/.exec(String(state || ""));
+  return m ? Number(m[1]) : null;
+}
+
+async function exchangeCodeForTokens(code, realmId, company_id = null) {
   const clientId = getClientId();
   const clientSecret = getClientSecret();
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
@@ -150,6 +206,22 @@ async function exchangeCodeForTokens(code, realmId) {
   const { access_token, refresh_token, expires_in } = resp.data;
   const expiresAt = new Date(Date.now() + expires_in * 1000);
 
+  const cid = await companyIdOf(company_id);
+
+  // One QuickBooks file per set of books, and never the same file twice.
+  // Two companies pointed at one realm would push both ledgers into it, and
+  // the entries would interleave with no way to tell them apart afterwards.
+  const clash = await db.query(
+    `SELECT c.company_id, co.name
+       FROM accounting_qb_config c
+       JOIN accounting_companies co ON co.id = c.company_id
+      WHERE c.realm_id = $1 AND c.company_id <> $2`, [realmId, cid]);
+  if (clash.rows[0]) {
+    throw new Error(
+      `That QuickBooks company is already connected to ${clash.rows[0].name}. ` +
+      `Disconnect it there first, or pick a different QuickBooks company.`);
+  }
+
   await saveConfig({
     realm_id: realmId,
     access_token,
@@ -157,13 +229,14 @@ async function exchangeCodeForTokens(code, realmId) {
     token_expires_at: expiresAt,
     environment: getEnv(),
     last_sync_at: null,
-  });
+  }, cid);
 
-  return { realm_id: realmId, expires_at: expiresAt };
+  return { realm_id: realmId, expires_at: expiresAt, company_id: cid };
 }
 
-async function refreshAccessToken() {
-  const cfg = await getConfig();
+async function refreshAccessToken(company_id = null) {
+  const cid = await companyIdOf(company_id);
+  const cfg = await getConfig(cid);
   if (!cfg || !cfg.refresh_token) throw new Error("No refresh token — reconnect required");
 
   const clientId = getClientId();
@@ -193,25 +266,27 @@ async function refreshAccessToken() {
     access_token,
     refresh_token: refresh_token || cfg.refresh_token,
     token_expires_at: expiresAt,
-  });
+  }, cid);
 
   return access_token;
 }
 
 // Get a fresh access token — refreshes automatically if expired
-async function getValidAccessToken() {
-  const cfg = await getConfig();
+async function getValidAccessToken(company_id = null) {
+  const cid = await companyIdOf(company_id);
+  const cfg = await getConfig(cid);
   if (!cfg || !cfg.access_token) throw new Error("Not connected to QuickBooks — click Connect first");
   const expiresAt = cfg.token_expires_at ? new Date(cfg.token_expires_at) : null;
   const buffer = 60 * 1000; // refresh 60s before actual expiry
   if (expiresAt && expiresAt.getTime() - buffer <= Date.now()) {
-    return await refreshAccessToken();
+    return await refreshAccessToken(cid);
   }
   return cfg.access_token;
 }
 
-async function disconnect() {
-  const cfg = await getConfig();
+async function disconnect(company_id = null) {
+  const cid = await companyIdOf(company_id);
+  const cfg = await getConfig(cid);
   if (!cfg) return;
   const clientId = getClientId();
   const clientSecret = getClientSecret();
@@ -235,15 +310,20 @@ async function disconnect() {
     } catch (e) { console.warn("[qbo] revoke:", e.message); }
   }
 
-  // Clear stored tokens
-  await db.query(`DELETE FROM accounting_qb_config`);
+  // Clear stored tokens FOR THIS COMPANY ONLY. This was an unqualified
+  // DELETE, which with a second set of books would have signed the law firm
+  // out of QuickBooks because somebody disconnected the other business — and
+  // the only symptom would have been that one company silently stopped
+  // syncing, which is the bug this whole change exists to fix.
+  await db.query(`DELETE FROM accounting_qb_config WHERE company_id = $1`, [cid]);
 }
 
 // ─── QBO API calls ──────────────────────────────────────
 
-async function qboRequest({ method = "GET", path, data = null, params = {} }) {
-  const token = await getValidAccessToken();
-  const cfg = await getConfig();
+async function qboRequest({ method = "GET", path, data = null, params = {}, company_id = null }) {
+  const cid = await companyIdOf(company_id);
+  const token = await getValidAccessToken(cid);
+  const cfg = await getConfig(cid);
   const base = apiBase(cfg.environment || getEnv());
   const url = `${base}/${cfg.realm_id}${path}`;
 
@@ -263,18 +343,20 @@ async function qboRequest({ method = "GET", path, data = null, params = {} }) {
 }
 
 // Fetch all accounts from QBO (for mapping)
-async function fetchQBOAccounts() {
+async function fetchQBOAccounts(company_id = null) {
   const data = await qboRequest({
     path: `/query`,
     params: { query: "SELECT * FROM Account MAXRESULTS 1000" },
+    company_id,
   });
   return (data?.QueryResponse?.Account) || [];
 }
 
 // Fetch company info (used to verify connection)
-async function fetchCompanyInfo() {
-  const cfg = await getConfig();
-  const data = await qboRequest({ path: `/companyinfo/${cfg.realm_id}` });
+async function fetchCompanyInfo(company_id = null) {
+  const cid = await companyIdOf(company_id);
+  const cfg = await getConfig(cid);
+  const data = await qboRequest({ path: `/companyinfo/${cfg.realm_id}`, company_id: cid });
   return data?.CompanyInfo || null;
 }
 
@@ -283,26 +365,35 @@ async function fetchCompanyInfo() {
 // Stored in accounting_qb_config.account_mappings as JSON:
 //   { "1010": "qbAcctId1", "1020": "qbAcctId2", ... }
 
-async function getAccountMappings() {
-  const cfg = await getConfig();
+// NOTE: mappings are keyed by OUR account number, and both companies have an
+// account "1010". They are only unambiguous because each company has its own
+// config row — a single shared mapping would have pointed the law firm's 1010
+// at whichever QuickBooks account was mapped last.
+async function getAccountMappings(company_id = null) {
+  const cfg = await getConfig(company_id);
   return cfg?.account_mappings || {};
 }
 
-async function saveAccountMapping(ourAccountNumber, qbAccountId) {
-  const cfg = await getConfig();
+async function saveAccountMapping(ourAccountNumber, qbAccountId, company_id = null) {
+  const cid = await companyIdOf(company_id);
+  const cfg = await getConfig(cid);
   const mappings = cfg?.account_mappings || {};
   mappings[String(ourAccountNumber)] = String(qbAccountId);
-  await saveConfig({ account_mappings: JSON.stringify(mappings) });
+  await saveConfig({ account_mappings: JSON.stringify(mappings) }, cid);
 }
 
 // Auto-match by name — call after connecting to try automatic mapping
-async function autoMapAccounts() {
+async function autoMapAccounts(company_id = null) {
   const accounting = require("./accounting");
+  const cid = await companyIdOf(company_id);
+  // listAccounts(cid), not listAccounts(). Unscoped it returns the law firm's
+  // chart, so mapping the other business would have matched the firm's
+  // account names against the business's QuickBooks file.
   const [ourAccounts, qboAccounts] = await Promise.all([
-    accounting.listAccounts(),
-    fetchQBOAccounts(),
+    accounting.listAccounts(cid),
+    fetchQBOAccounts(cid),
   ]);
-  const mappings = await getAccountMappings();
+  const mappings = await getAccountMappings(cid);
   let matched = 0;
 
   for (const ours of ourAccounts) {
@@ -324,7 +415,7 @@ async function autoMapAccounts() {
     }
   }
 
-  await saveConfig({ account_mappings: JSON.stringify(mappings) });
+  await saveConfig({ account_mappings: JSON.stringify(mappings) }, cid);
   return { matched, our_total: ourAccounts.length, qbo_total: qboAccounts.length };
 }
 
@@ -358,7 +449,16 @@ async function pushJournalEntry(entryId) {
     return { ok: true, already_synced: true, qb_txn_id: entry.qb_txn_id };
   }
 
-  const mappings = await getAccountMappings();
+  // THE COMPANY COMES FROM THE ENTRY, never from an argument or a default.
+  // An entry is already on one company's books by the time it gets here, and
+  // the only correct destination is that company's QuickBooks file. A caller
+  // passing the wrong id, or a default quietly resolving to the law firm,
+  // would file the other business's revenue into the firm's books — in
+  // QuickBooks, where it becomes someone's tax return.
+  const cid = entry.company_id;
+  if (!cid) throw new Error(`Entry ${entryId} has no company — refusing to guess which books it belongs to`);
+
+  const mappings = await getAccountMappings(cid);
   const qboLines = [];
   const missing = [];
 
@@ -397,6 +497,7 @@ async function pushJournalEntry(entryId) {
     method: "POST",
     path: "/journalentry",
     data: payload,
+    company_id: cid,
   });
 
   const qbTxnId = resp?.JournalEntry?.Id;
@@ -413,10 +514,14 @@ async function pushJournalEntry(entryId) {
 
 // ─── Batch sync all unsynced entries ────────────────────
 
-async function pushAllUnsyncedEntries({ limit = 100, from_date = null } = {}) {
-  const conds = ["is_posted = TRUE", "qb_txn_id IS NULL"];
-  const params = [];
-  let i = 1;
+async function pushAllUnsyncedEntries({ limit = 100, from_date = null, company_id = null } = {}) {
+  const cid = await companyIdOf(company_id);
+  // Scoped to one company's entries. Unscoped, a sync of the business would
+  // sweep up the law firm's unsynced entries too and push them through
+  // whichever connection this call happened to be using.
+  const conds = ["is_posted = TRUE", "qb_txn_id IS NULL", "company_id = $1"];
+  const params = [cid];
+  let i = 2;
   if (from_date) { conds.push(`entry_date >= $${i++}`); params.push(from_date); }
   params.push(limit);
 
@@ -442,27 +547,33 @@ async function pushAllUnsyncedEntries({ limit = 100, from_date = null } = {}) {
     }
   }
 
-  await saveConfig({ last_sync_at: new Date() });
+  await saveConfig({ last_sync_at: new Date() }, cid);
   return results;
 }
 
 // ─── Sync status ────────────────────────────────────────
 
-async function getSyncStatus() {
-  const cfg = await getConfig();
+async function getSyncStatus(company_id = null) {
+  const cid = await companyIdOf(company_id);
+  const company = await require("./accounting").getCompany(cid);
+  const cfg = await getConfig(cid);
   if (!cfg) {
     return {
       connected: false,
       configured: isConfigured(),
       environment: getEnv(),
       redirect_uri: getRedirectUri(),
+      company_id: cid,
+      company_name: company ? company.name : null,
     };
   }
 
+  // Counts are per company. Shown side by side with another company's, an
+  // unscoped total would have made both look like they had the same backlog.
   const [total, synced, unsynced] = await Promise.all([
-    db.query(`SELECT COUNT(*) as n FROM accounting_journal_entries WHERE is_posted`),
-    db.query(`SELECT COUNT(*) as n FROM accounting_journal_entries WHERE is_posted AND qb_txn_id IS NOT NULL`),
-    db.query(`SELECT COUNT(*) as n FROM accounting_journal_entries WHERE is_posted AND qb_txn_id IS NULL`),
+    db.query(`SELECT COUNT(*) as n FROM accounting_journal_entries WHERE is_posted AND company_id = $1`, [cid]),
+    db.query(`SELECT COUNT(*) as n FROM accounting_journal_entries WHERE is_posted AND qb_txn_id IS NOT NULL AND company_id = $1`, [cid]),
+    db.query(`SELECT COUNT(*) as n FROM accounting_journal_entries WHERE is_posted AND qb_txn_id IS NULL AND company_id = $1`, [cid]),
   ]);
 
   const mappings = cfg.account_mappings || {};
@@ -471,6 +582,8 @@ async function getSyncStatus() {
   return {
     connected: true,
     configured: true,
+    company_id: cid,
+    company_name: company ? company.name : null,
     environment: cfg.environment,
     realm_id: cfg.realm_id,
     last_sync_at: cfg.last_sync_at,
@@ -493,28 +606,28 @@ async function getSyncStatus() {
 
 // ─── Auto-push settings ─────────────────────────────────
 
-async function isAutoPushEnabled() {
-  const cfg = await getConfig();
+async function isAutoPushEnabled(company_id = null) {
+  const cfg = await getConfig(company_id);
   return !!(cfg && cfg.auto_push_enabled);
 }
 
-async function isScheduledSyncEnabled() {
-  const cfg = await getConfig();
+async function isScheduledSyncEnabled(company_id = null) {
+  const cfg = await getConfig(company_id);
   return !!(cfg && cfg.scheduled_sync_enabled);
 }
 
-async function setAutoPush(enabled) {
+async function setAutoPush(enabled, company_id = null) {
   await ensureConfigColumns();
-  await saveConfig({ auto_push_enabled: !!enabled });
+  await saveConfig({ auto_push_enabled: !!enabled }, company_id);
 }
 
-async function setScheduledSync(enabled, intervalMinutes = null) {
+async function setScheduledSync(enabled, intervalMinutes = null, company_id = null) {
   await ensureConfigColumns();
   const patch = { scheduled_sync_enabled: !!enabled };
   if (intervalMinutes && intervalMinutes >= 5 && intervalMinutes <= 1440) {
     patch.sync_interval_minutes = intervalMinutes;
   }
-  await saveConfig(patch);
+  await saveConfig(patch, company_id);
 }
 
 // ─── Scheduled sync worker ──────────────────────────────
@@ -523,44 +636,79 @@ async function setScheduledSync(enabled, intervalMinutes = null) {
 
 let syncInProgress = false;
 
+/**
+ * Run the scheduled sync for EVERY connected company that is due.
+ *
+ * JJ asked for both sets of books syncing at the same time. This used to read
+ * one config row and sync one company, which — with the old single-row
+ * config — meant whichever connection was made most recently. The other
+ * company was never synced and nothing said so.
+ *
+ * Each company keeps its own interval and its own last-run timestamp, so one
+ * being due does not drag the other along, and one failing does not stop the
+ * rest. The in-progress flag stays global on purpose: QuickBooks rate-limits
+ * per app, not per company file, so two concurrent batches would throttle
+ * each other.
+ */
 async function runScheduledSyncIfDue() {
   if (syncInProgress) {
     console.log("[qbo-scheduler] Previous sync still running — skipping");
     return { skipped: true, reason: "in_progress" };
   }
 
-  const cfg = await getConfig();
-  if (!cfg || !cfg.scheduled_sync_enabled) return { skipped: true, reason: "disabled" };
-  if (!cfg.access_token) return { skipped: true, reason: "not_connected" };
+  const configs = await connectedConfigs();
+  if (!configs.length) return { skipped: true, reason: "not_connected" };
 
-  // Is it time to sync?
-  const intervalMs = (cfg.sync_interval_minutes || 60) * 60 * 1000;
-  const lastSync = cfg.last_scheduled_sync_at ? new Date(cfg.last_scheduled_sync_at).getTime() : 0;
-  const nowMs = Date.now();
-  if (nowMs - lastSync < intervalMs) {
-    const minsLeft = Math.ceil((intervalMs - (nowMs - lastSync)) / 60000);
-    return { skipped: true, reason: "not_due", minutes_until_next: minsLeft };
+  const due = configs.filter(cfg => {
+    if (!cfg.scheduled_sync_enabled) return false;
+    const intervalMs = (cfg.sync_interval_minutes || 60) * 60 * 1000;
+    const last = cfg.last_scheduled_sync_at ? new Date(cfg.last_scheduled_sync_at).getTime() : 0;
+    return Date.now() - last >= intervalMs;
+  });
+
+  if (!due.length) {
+    // Report the nearest one so "nothing happened" is legible.
+    let soonest = null;
+    for (const cfg of configs.filter(c => c.scheduled_sync_enabled)) {
+      const intervalMs = (cfg.sync_interval_minutes || 60) * 60 * 1000;
+      const last = cfg.last_scheduled_sync_at ? new Date(cfg.last_scheduled_sync_at).getTime() : 0;
+      const mins = Math.ceil((intervalMs - (Date.now() - last)) / 60000);
+      if (soonest === null || mins < soonest) soonest = mins;
+    }
+    return soonest === null
+      ? { skipped: true, reason: "disabled" }
+      : { skipped: true, reason: "not_due", minutes_until_next: soonest };
   }
 
   syncInProgress = true;
-  console.log("[qbo-scheduler] Starting scheduled sync…");
+  const perCompany = [];
   try {
-    const results = await pushAllUnsyncedEntries({ limit: 200 });
-    await saveConfig({
-      last_scheduled_sync_at: new Date(),
-      last_sync_pushed: results.pushed,
-      last_sync_failed: results.failed,
-      last_sync_errors: results.errors.slice(0, 10).join(" | ").substring(0, 2000) || null,
-    });
-    console.log(`[qbo-scheduler] Complete: ${results.pushed} pushed, ${results.failed} failed`);
-    return { skipped: false, results };
-  } catch (e) {
-    console.error("[qbo-scheduler] Failed:", e.message);
-    await saveConfig({
-      last_scheduled_sync_at: new Date(),
-      last_sync_errors: `Sync failed: ${e.message}`.substring(0, 2000),
-    });
-    return { skipped: false, error: e.message };
+    for (const cfg of due) {
+      const label = cfg.company_name || ("company " + cfg.company_id);
+      console.log(`[qbo-scheduler] Starting scheduled sync for ${label}…`);
+      try {
+        const results = await pushAllUnsyncedEntries({ limit: 200, company_id: cfg.company_id });
+        await saveConfig({
+          last_scheduled_sync_at: new Date(),
+          last_sync_pushed: results.pushed,
+          last_sync_failed: results.failed,
+          last_sync_errors: results.errors.slice(0, 10).join(" | ").substring(0, 2000) || null,
+        }, cfg.company_id);
+        console.log(`[qbo-scheduler] ${label}: ${results.pushed} pushed, ${results.failed} failed`);
+        perCompany.push({ company_id: cfg.company_id, company_name: cfg.company_name, results });
+      } catch (e) {
+        // One company's failure must not stop the others. The old version had
+        // a single try/catch around the whole thing, so an expired token on
+        // one connection would have silently skipped the other company too.
+        console.error(`[qbo-scheduler] ${label} failed:`, e.message);
+        await saveConfig({
+          last_scheduled_sync_at: new Date(),
+          last_sync_errors: `Sync failed: ${e.message}`.substring(0, 2000),
+        }, cfg.company_id);
+        perCompany.push({ company_id: cfg.company_id, company_name: cfg.company_name, error: e.message });
+      }
+    }
+    return { skipped: false, companies: perCompany };
   } finally {
     syncInProgress = false;
   }
@@ -589,4 +737,6 @@ module.exports = {
   isAutoPushEnabled, isScheduledSyncEnabled,
   setAutoPush, setScheduledSync,
   runScheduledSyncIfDue, startScheduler,
+  // Multi-company
+  connectedConfigs, companyFromState, companyIdOf,
 };

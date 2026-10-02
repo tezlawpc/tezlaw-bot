@@ -3761,17 +3761,18 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
     const qbo = require("./qbo-sync");
     const accounting = require("./accounting");
     const hearingNotes = require("./hearing-notes");
-    const status = await qbo.getSyncStatus();
+    const cid = qboCompany(req);
+    const status = await qbo.getSyncStatus(cid);
 
     let companyInfo = null;
     let qboAccountCount = 0;
     if (status.connected) {
-      try { companyInfo = await qbo.fetchCompanyInfo(); } catch (e) { console.warn("[qbo] companyInfo:", e.message); }
-      try { const accts = await qbo.fetchQBOAccounts(); qboAccountCount = accts.length; } catch (e) { console.warn("[qbo] accounts:", e.message); }
+      try { companyInfo = await qbo.fetchCompanyInfo(cid); } catch (e) { console.warn("[qbo] companyInfo:", e.message); }
+      try { const accts = await qbo.fetchQBOAccounts(cid); qboAccountCount = accts.length; } catch (e) { console.warn("[qbo] accounts:", e.message); }
     }
 
     const ourAccounts = await accounting.listAccounts();
-    const mappings = status.connected ? await qbo.getAccountMappings() : {};
+    const mappings = status.connected ? await qbo.getAccountMappings(cid) : {};
 
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -4006,14 +4007,27 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
   }
 });
 
+// Which set of books a QuickBooks request is about.
+//
+// Omitted means the law firm, matching accounting.companyIdOf — the same rule
+// everywhere, so a request that forgets the parameter lands on Tez Law rather
+// than on whichever company happens to be flagged default.
+function qboCompany(req) {
+  const raw = (req.body && req.body.company_id) || (req.query && req.query.company_id);
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 // Start OAuth flow
-app.get("/admin/accounting/quickbooks/connect", (req, res) => {
+app.get("/admin/accounting/quickbooks/connect", async (req, res) => {
   try {
     const qbo = require("./qbo-sync");
     if (!qbo.isConfigured()) {
       return res.status(400).send("QBO_CLIENT_ID/QBO_CLIENT_SECRET env vars not set. Complete setup first.");
     }
-    res.redirect(qbo.getAuthorizeUrl());
+    // The company id rides in the OAuth state, because Intuit's callback is
+    // otherwise unable to say which books the tokens belong to.
+    res.redirect(await qbo.getAuthorizeUrl(qboCompany(req)));
   } catch (err) { res.status(500).send("Error: " + err.message); }
 });
 
@@ -4021,11 +4035,15 @@ app.get("/admin/accounting/quickbooks/connect", (req, res) => {
 app.get("/admin/accounting/quickbooks/callback", async (req, res) => {
   try {
     const qbo = require("./qbo-sync");
-    const { code, realmId, error } = req.query;
+    const { code, realmId, error, state } = req.query;
     if (error) return res.status(400).send(`OAuth error: ${error}`);
     if (!code || !realmId) return res.status(400).send("Missing code or realmId in callback");
-    await qbo.exchangeCodeForTokens(code, realmId);
-    res.redirect("/admin/accounting/quickbooks?connected=1");
+    // Null when the state is not ours or predates multi-company, in which case
+    // exchangeCodeForTokens falls back to the law firm — the same company a
+    // connect link without a company_id would have started from.
+    const cid = qbo.companyFromState(state);
+    const out = await qbo.exchangeCodeForTokens(code, realmId, cid);
+    res.redirect("/admin/accounting/quickbooks?connected=1&company_id=" + (out.company_id || ""));
   } catch (err) {
     console.error("[qbo callback]:", err.message);
     res.status(500).send("OAuth callback failed: " + err.message);
@@ -4035,15 +4053,16 @@ app.get("/admin/accounting/quickbooks/callback", async (req, res) => {
 app.post("/admin/accounting/quickbooks/disconnect", async (req, res) => {
   try {
     const qbo = require("./qbo-sync");
-    await qbo.disconnect();
-    res.redirect("/admin/accounting/quickbooks");
+    const cid = qboCompany(req);
+    await qbo.disconnect(cid);
+    res.redirect("/admin/accounting/quickbooks" + (cid ? "?company_id=" + cid : ""));
   } catch (err) { res.status(500).send("Error: " + err.message); }
 });
 
 app.post("/admin/accounting/quickbooks/auto-map", async (req, res) => {
   try {
     const qbo = require("./qbo-sync");
-    const results = await qbo.autoMapAccounts();
+    const results = await qbo.autoMapAccounts(qboCompany(req));
     res.json({ ok: true, results });
   } catch (err) {
     console.error("[qbo auto-map]:", err.message);
@@ -4054,7 +4073,7 @@ app.post("/admin/accounting/quickbooks/auto-map", async (req, res) => {
 app.post("/admin/accounting/quickbooks/push-all", async (req, res) => {
   try {
     const qbo = require("./qbo-sync");
-    const results = await qbo.pushAllUnsyncedEntries({ limit: 500 });
+    const results = await qbo.pushAllUnsyncedEntries({ limit: 500, company_id: qboCompany(req) });
     res.json({ ok: true, results });
   } catch (err) {
     console.error("[qbo push-all]:", err.message);
@@ -4066,7 +4085,7 @@ app.post("/admin/accounting/quickbooks/push-all", async (req, res) => {
 app.post("/admin/accounting/quickbooks/auto-push", async (req, res) => {
   try {
     const qbo = require("./qbo-sync");
-    await qbo.setAutoPush(!!req.body?.enabled);
+    await qbo.setAutoPush(!!req.body?.enabled, qboCompany(req));
     res.json({ ok: true });
   } catch (err) {
     console.error("[qbo auto-push toggle]:", err.message);
@@ -4080,7 +4099,7 @@ app.post("/admin/accounting/quickbooks/scheduled-sync", async (req, res) => {
     const qbo = require("./qbo-sync");
     const enabled = !!req.body?.enabled;
     const interval = req.body?.interval_minutes ? parseInt(req.body.interval_minutes, 10) : null;
-    await qbo.setScheduledSync(enabled, interval);
+    await qbo.setScheduledSync(enabled, interval, qboCompany(req));
     res.json({ ok: true });
   } catch (err) {
     console.error("[qbo scheduled-sync toggle]:", err.message);
@@ -4092,7 +4111,7 @@ app.post("/admin/accounting/quickbooks/scheduled-sync", async (req, res) => {
 app.post("/admin/accounting/quickbooks/run-scheduled-now", async (req, res) => {
   try {
     const qbo = require("./qbo-sync");
-    const cfg = await qbo.getConfig();
+    const cfg = await qbo.getConfig(qboCompany(req));
     if (cfg) {
       // Force a run by clearing the last_scheduled_sync_at
       const db = require("./db");
@@ -4111,11 +4130,11 @@ app.get("/admin/accounting/quickbooks/mapping", async (req, res) => {
     const qbo = require("./qbo-sync");
     const accounting = require("./accounting");
     const hearingNotes = require("./hearing-notes");
-    if (!(await qbo.isConnected())) return res.redirect("/admin/accounting/quickbooks");
+    if (!(await qbo.isConnected(qboCompany(req)))) return res.redirect("/admin/accounting/quickbooks");
     const [ourAccounts, qboAccounts, mappings] = await Promise.all([
       accounting.listAccounts(),
-      qbo.fetchQBOAccounts(),
-      qbo.getAccountMappings(),
+      qbo.fetchQBOAccounts(qboCompany(req)),
+      qbo.getAccountMappings(qboCompany(req)),
     ]);
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -4186,16 +4205,16 @@ app.post("/admin/accounting/quickbooks/mapping", async (req, res) => {
     const qbo = require("./qbo-sync");
     const { our_account_number, qb_account_id } = req.body || {};
     if (qb_account_id) {
-      await qbo.saveAccountMapping(our_account_number, qb_account_id);
+      await qbo.saveAccountMapping(our_account_number, qb_account_id, qboCompany(req));
     } else {
       // Unmap
-      const cfg = await qbo.getAccountMappings();
+      const cfg = await qbo.getAccountMappings(qboCompany(req));
       delete cfg[String(our_account_number)];
       // Save it back
       const module = require("./qbo-sync");
       const accounting = require("./accounting");
       // Simpler: just save empty as null
-      await qbo.saveAccountMapping(our_account_number, ""); // will need explicit handling
+      await qbo.saveAccountMapping(our_account_number, "", qboCompany(req)); // will need explicit handling
     }
     res.json({ ok: true });
   } catch (err) {
