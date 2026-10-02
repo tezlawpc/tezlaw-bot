@@ -40,6 +40,67 @@ function ok(name, cond, detail) {
 
 const src = fs.readFileSync(path.join(ROOT, "accounting.js"), "utf8");
 
+const FIRM = { id: 1, name: "Tez Law P.C.", is_law_firm: true };
+const OTHER = { id: 2, name: "Other Business LLC", is_law_firm: false };
+const queries = [];
+
+const dbFile = require.resolve(path.join(ROOT, "db.js"));
+require.cache[dbFile] = {
+  id: dbFile, filename: dbFile, loaded: true, children: [], paths: [],
+  exports: {
+    query: async (sql, params) => {
+      queries.push(String(sql).replace(/\s+/g, " ").trim());
+      const q = String(sql);
+      if (/FROM accounting_companies/.test(q)) {
+        if (/is_law_firm/.test(q)) return { rows: [FIRM] };
+        if (params && Number(params[0]) === OTHER.id) return { rows: [OTHER] };
+        if (params && Number(params[0]) === FIRM.id) return { rows: [FIRM] };
+        return { rows: [FIRM, OTHER] };
+      }
+      if (/FROM accounting_accounts/.test(q)) {
+        // Pretend both entities somehow have the trust account, so the guard
+        // is what refuses — not a missing row.
+        return { rows: [{ id: 99, account_number: "1020", subtype: "trust_bank" }] };
+      }
+      if (/INSERT INTO accounting_journal_entries/.test(q)) return { rows: [{ id: 500 }] };
+      return { rows: [] };
+    },
+  },
+};
+
+
+// ── The module must actually export what its callers call ─────────────
+// This section exists because it did not. listCompanies, getCompany,
+// companyIdOf and the rest were added and left out of module.exports;
+// qbo-sync.js then called accounting.companyIdOf() and every QuickBooks page
+// threw TypeError in production. Reading source text would never have caught
+// it — the functions were all there, correctly written, and unreachable. So
+// this requires the module and looks at the object real callers receive.
+console.log("the module's public surface");
+{
+  const acct = require("../accounting");
+  for (const name of ["listCompanies", "getCompany", "defaultCompany", "lawFirmCompany",
+                      "companyIdOf", "createCompany", "postJournalEntry",
+                      "getStats", "getLedger", "getIncomeStatement", "getBalanceSheet",
+                      "getTrustReconciliation", "listAccounts", "getAccountByNumber"]) {
+    ok("exports " + name, typeof acct[name] === "function",
+       "callers get " + typeof acct[name]);
+  }
+  ok("exports BUSINESS_COA", Array.isArray(acct.BUSINESS_COA));
+
+  // Everything another module in this repo actually reaches for.
+  const callers = ["qbo-sync.js", "accounting-ui.js", "server.js"];
+  const wanted = new Set();
+  for (const f of callers) {
+    const text = fs.readFileSync(path.join(ROOT, f), "utf8");
+    for (const m of text.matchAll(/\baccounting\.([A-Za-z_$][\w$]*)/g)) wanted.add(m[1]);
+    for (const m of text.matchAll(/require\("\.\/accounting"\)\.([A-Za-z_$][\w$]*)/g)) wanted.add(m[1]);
+  }
+  const unexported = [...wanted].filter(n => acct[n] === undefined);
+  ok("every accounting.<fn> used elsewhere in the repo is exported",
+     unexported.length === 0, "missing: " + unexported.join(", "));
+}
+
 // ── The chart of accounts for a non-law-firm entity ────────────────────
 console.log("the business chart of accounts");
 {
@@ -135,34 +196,6 @@ console.log("callers that pass no company");
 
 // ── Behaviour: the guard refuses, against a stubbed database ───────────
 console.log("the guard, exercised");
-
-const FIRM = { id: 1, name: "Tez Law P.C.", is_law_firm: true };
-const OTHER = { id: 2, name: "Other Business LLC", is_law_firm: false };
-const queries = [];
-
-const dbFile = require.resolve(path.join(ROOT, "db.js"));
-require.cache[dbFile] = {
-  id: dbFile, filename: dbFile, loaded: true, children: [], paths: [],
-  exports: {
-    query: async (sql, params) => {
-      queries.push(String(sql).replace(/\s+/g, " ").trim());
-      const q = String(sql);
-      if (/FROM accounting_companies/.test(q)) {
-        if (/is_law_firm/.test(q)) return { rows: [FIRM] };
-        if (params && Number(params[0]) === OTHER.id) return { rows: [OTHER] };
-        if (params && Number(params[0]) === FIRM.id) return { rows: [FIRM] };
-        return { rows: [FIRM, OTHER] };
-      }
-      if (/FROM accounting_accounts/.test(q)) {
-        // Pretend both entities somehow have the trust account, so the guard
-        // is what refuses — not a missing row.
-        return { rows: [{ id: 99, account_number: "1020", subtype: "trust_bank" }] };
-      }
-      if (/INSERT INTO accounting_journal_entries/.test(q)) return { rows: [{ id: 500 }] };
-      return { rows: [] };
-    },
-  },
-};
 
 async function main() {
   const acct = require("../accounting");

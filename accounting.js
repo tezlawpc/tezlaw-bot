@@ -948,8 +948,14 @@ async function getAccountBalance(accountId, asOfDate = null) {
   return +(credit - debit).toFixed(2);
 }
 
-async function getIncomeStatement(fromDate, toDate) {
+// EVERY REPORT BELOW IS SCOPED TO ONE COMPANY. Left unscoped with two sets
+// of books, each of these would quietly merge them: the law firm's income
+// statement would include the other business's revenue, and the number would
+// look entirely plausible. These feed a tax return, so an unscoped report is
+// worse than a broken one — a broken one gets noticed.
+async function getIncomeStatement(fromDate, toDate, company_id = null) {
   await initTables();
+  const cid = await companyIdOf(company_id);
   const accounts = await db.query(
     `SELECT a.*,
             COALESCE(SUM(jl.credit) - SUM(jl.debit), 0) as revenue_balance,
@@ -959,11 +965,12 @@ async function getIncomeStatement(fromDate, toDate) {
      LEFT JOIN accounting_journal_entries je ON je.id = jl.entry_id
        AND je.is_posted = TRUE
        AND je.entry_date >= $1 AND je.entry_date <= $2
-     WHERE a.type IN ('revenue', 'expense')
+       AND je.company_id = $3
+     WHERE a.type IN ('revenue', 'expense') AND a.company_id = $3
      GROUP BY a.id
      HAVING COALESCE(SUM(jl.credit) - SUM(jl.debit), 0) != 0 OR COALESCE(SUM(jl.debit) - SUM(jl.credit), 0) != 0
      ORDER BY a.account_number`,
-    [fromDate, toDate]
+    [fromDate, toDate, cid]
   );
   const revenues = accounts.rows.filter(a => a.type === "revenue").map(a => ({
     account_number: a.account_number, name: a.name, amount: Number(a.revenue_balance),
@@ -974,6 +981,7 @@ async function getIncomeStatement(fromDate, toDate) {
   const totalRevenue = revenues.reduce((s, a) => s + a.amount, 0);
   const totalExpense = expenses.reduce((s, a) => s + a.amount, 0);
   return {
+    company_id: cid,
     from_date: fromDate, to_date: toDate,
     revenues, expenses,
     total_revenue: +totalRevenue.toFixed(2),
@@ -982,11 +990,12 @@ async function getIncomeStatement(fromDate, toDate) {
   };
 }
 
-async function getBalanceSheet(asOfDate = null) {
+async function getBalanceSheet(asOfDate = null, company_id = null) {
   await initTables();
+  const cid = await companyIdOf(company_id);
   const asOf = asOfDate || new Date().toISOString().split("T")[0];
-  const accounts = await listAccounts();
-  const result = { as_of: asOf, assets: [], liabilities: [], equity: [] };
+  const accounts = await listAccounts(cid);
+  const result = { company_id: cid, as_of: asOf, assets: [], liabilities: [], equity: [] };
   for (const acct of accounts) {
     if (!["asset", "liability", "equity"].includes(acct.type)) continue;
     const bal = await getAccountBalance(acct.id, asOf);
@@ -1001,28 +1010,44 @@ async function getBalanceSheet(asOfDate = null) {
   return result;
 }
 
+/**
+ * Trust reconciliation is ALWAYS the law firm's, whatever is passed.
+ *
+ * Only the firm may hold client trust money (RRC 1.15), and the business
+ * entity is seeded with no trust accounts at all — so asking another company
+ * for its trust reconciliation is a question with no sensible answer. The
+ * dangerous version is the one that returns zeroes: a reconciliation that
+ * says "balanced, $0.00" while looking at the wrong books is worse than one
+ * that refuses, because it is the screen somebody checks to confirm client
+ * funds are intact.
+ */
 async function getTrustReconciliation(asOfDate = null) {
   await initTables();
+  const firm = await lawFirmCompany();
+  if (!firm) throw new Error("No law firm entity on the books — cannot reconcile client trust");
+  const cid = firm.id;
   const asOf = asOfDate || new Date().toISOString().split("T")[0];
   // Trust bank account balance (from journal)
-  const trustBank = await getAccountByNumber("1020");
+  const trustBank = await getAccountByNumber("1020", cid);
+  if (!trustBank) throw new Error("No IOLTA trust account (1020) on the law firm's books");
   const bankBalance = await getAccountBalance(trustBank.id, asOf);
   // Sum of per-client trust ledger balances
   const clients = await db.query(
     `SELECT client_key, client_name,
        COALESCE(SUM(deposit_amount) - SUM(disburse_amount), 0) as balance
      FROM accounting_trust_ledger
-     WHERE transaction_date <= $1
+     WHERE transaction_date <= $1 AND company_id = $2
      GROUP BY client_key, client_name
      HAVING COALESCE(SUM(deposit_amount) - SUM(disburse_amount), 0) != 0
      ORDER BY client_name`,
-    [asOf]
+    [asOf, cid]
   );
   const clientTotals = clients.rows.map(c => ({
     client_key: c.client_key, client_name: c.client_name, balance: +Number(c.balance).toFixed(2),
   }));
   const sumOfClients = +clientTotals.reduce((s, c) => s + c.balance, 0).toFixed(2);
   return {
+    company_id: cid,
     as_of: asOf,
     bank_balance: bankBalance,
     client_balances: clientTotals,
@@ -1035,12 +1060,13 @@ async function getTrustReconciliation(asOfDate = null) {
 // General ledger listing (filterable)
 async function getLedger({
   from_date = null, to_date = null, account_number = null, client_key = null,
-  matter_type = null, limit = 500, offset = 0,
+  matter_type = null, limit = 500, offset = 0, company_id = null,
 } = {}) {
   await initTables();
-  const conds = ["je.is_posted = TRUE"];
-  const params = [];
-  let i = 1;
+  const cid = await companyIdOf(company_id);
+  const conds = ["je.is_posted = TRUE", "je.company_id = $1"];
+  const params = [cid];
+  let i = 2;
   if (from_date) { conds.push(`je.entry_date >= $${i++}`); params.push(from_date); }
   if (to_date) { conds.push(`je.entry_date <= $${i++}`); params.push(to_date); }
   if (client_key) { conds.push(`je.client_key = $${i++}`); params.push(client_key); }
@@ -1072,36 +1098,56 @@ async function getLedger({
   return r.rows;
 }
 
+// Like the reconciliation above, this is the law firm's by definition —
+// a client trust ledger cannot exist on another entity's books.
 async function getClientTrustLedger(client_key) {
   await initTables();
+  const firm = await lawFirmCompany();
+  if (!firm) throw new Error("No law firm entity on the books — cannot read a client trust ledger");
   const r = await db.query(
-    `SELECT * FROM accounting_trust_ledger WHERE client_key = $1 ORDER BY transaction_date ASC, id ASC`,
-    [client_key]
+    `SELECT * FROM accounting_trust_ledger
+      WHERE client_key = $1 AND company_id = $2
+      ORDER BY transaction_date ASC, id ASC`,
+    [client_key, firm.id]
   );
   return r.rows;
 }
 
-async function getStats() {
+async function getStats(company_id = null) {
   await initTables();
+  const cid = await companyIdOf(company_id);
+  const firm = await lawFirmCompany();
+
+  // 1010 Operating is this company's. 1020 IOLTA only exists on the law
+  // firm's books, so for any other entity the trust tile is not "zero", it is
+  // "not applicable" — a $0.00 trust balance shown for the business would
+  // read as a reconciled trust account rather than the absence of one.
+  const operatingAcct = await getAccountByNumber("1010", cid);
+  const trustAcct = firm && firm.id === cid ? await getAccountByNumber("1020", cid) : null;
+
   const [operating, trust, ytdRev, ytdExp, unrecon, invoices] = await Promise.all([
-    getAccountBalance((await getAccountByNumber("1010")).id),
-    getAccountBalance((await getAccountByNumber("1020")).id),
+    operatingAcct ? getAccountBalance(operatingAcct.id) : 0,
+    trustAcct ? getAccountBalance(trustAcct.id) : null,
     db.query(`SELECT COALESCE(SUM(jl.credit - jl.debit), 0) as total
               FROM accounting_journal_lines jl
               JOIN accounting_accounts a ON a.id = jl.account_id
               JOIN accounting_journal_entries je ON je.id = jl.entry_id
-              WHERE a.type = 'revenue' AND je.entry_date >= date_trunc('year', CURRENT_DATE)`),
+              WHERE a.type = 'revenue' AND je.entry_date >= date_trunc('year', CURRENT_DATE)
+                AND je.company_id = $1`, [cid]),
     db.query(`SELECT COALESCE(SUM(jl.debit - jl.credit), 0) as total
               FROM accounting_journal_lines jl
               JOIN accounting_accounts a ON a.id = jl.account_id
               JOIN accounting_journal_entries je ON je.id = jl.entry_id
-              WHERE a.type = 'expense' AND je.entry_date >= date_trunc('year', CURRENT_DATE)`),
-    db.query(`SELECT COUNT(*) as n FROM accounting_journal_entries WHERE is_posted AND NOT is_reconciled`),
-    db.query(`SELECT COUNT(*) as n, COALESCE(SUM(total_amount - amount_paid), 0) as balance FROM accounting_invoices WHERE status IN ('sent', 'partial')`),
+              WHERE a.type = 'expense' AND je.entry_date >= date_trunc('year', CURRENT_DATE)
+                AND je.company_id = $1`, [cid]),
+    db.query(`SELECT COUNT(*) as n FROM accounting_journal_entries WHERE is_posted AND NOT is_reconciled AND company_id = $1`, [cid]),
+    db.query(`SELECT COUNT(*) as n, COALESCE(SUM(total_amount - amount_paid), 0) as balance FROM accounting_invoices WHERE status IN ('sent', 'partial') AND company_id = $1`, [cid]),
   ]);
   return {
+    company_id: cid,
+    is_law_firm: !!(firm && firm.id === cid),
     operating_balance: operating,
-    trust_balance: trust,
+    trust_balance: trust,          // null, not 0, when this entity has no trust account
     ytd_revenue: +Number(ytdRev.rows[0].total).toFixed(2),
     ytd_expense: +Number(ytdExp.rows[0].total).toFixed(2),
     ytd_net_income: +(Number(ytdRev.rows[0].total) - Number(ytdExp.rows[0].total)).toFixed(2),
@@ -1296,7 +1342,16 @@ async function exportToCSV({ from_date, to_date } = {}) {
 
 module.exports = {
   initTables,
-  DEFAULT_COA,
+  DEFAULT_COA, BUSINESS_COA,
+  // Companies (two sets of books)
+  //
+  // These were added in 92b68a4 and left out of this list. qbo-sync.js then
+  // called accounting.companyIdOf() in 6b6a29c, which was undefined — so
+  // every QuickBooks page threw as soon as that shipped. A module's own
+  // callers do not see what it fails to export, and nothing caught it because
+  // no check had ever required the module and called through it.
+  listCompanies, getCompany, defaultCompany, lawFirmCompany,
+  companyIdOf, createCompany,
   // Chart of accounts
   getAccountByNumber, getAccountById, listAccounts, ensureAccount,
   // Journal

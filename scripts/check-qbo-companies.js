@@ -47,6 +47,35 @@ function ok(name, cond, detail) {
 const src = fs.readFileSync(path.join(ROOT, "qbo-sync.js"), "utf8");
 const srv = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
 
+// ── The module's public surface, and its callers' ─────────────────────
+// Added after accounting.js shipped companyIdOf without exporting it, which
+// made every QuickBooks page throw. Source text showed the function defined
+// and looked fine.
+console.log("the module's public surface");
+{
+  const qbo = require("../qbo-sync");
+  for (const name of ["getConfig", "connectedConfigs", "companyFromState", "companyIdOf",
+                      "disconnect", "getAuthorizeUrl", "exchangeCodeForTokens",
+                      "pushJournalEntry", "pushAllUnsyncedEntries", "getSyncStatus",
+                      "autoMapAccounts", "getAccountMappings", "saveAccountMapping",
+                      "runScheduledSyncIfDue"]) {
+    ok("exports " + name, typeof qbo[name] === "function", "callers get " + typeof qbo[name]);
+  }
+  const wanted = new Set();
+  for (const m of srv.matchAll(/\bqbo\.([A-Za-z_$][\w$]*)/g)) wanted.add(m[1]);
+  const unexported = [...wanted].filter(n => qbo[n] === undefined);
+  ok("every qbo.<fn> server.js calls is exported",
+     unexported.length === 0, "missing: " + unexported.join(", "));
+
+  // qbo-sync reaches into accounting at runtime; that edge is what broke.
+  const acct = require("../accounting");
+  const reached = new Set();
+  for (const m of src.matchAll(/require\("\.\/accounting"\)\.([A-Za-z_$][\w$]*)/g)) reached.add(m[1]);
+  const missingAcct = [...reached].filter(n => acct[n] === undefined);
+  ok("every accounting.<fn> qbo-sync reaches for is exported",
+     missingAcct.length === 0, "missing: " + missingAcct.join(", "));
+}
+
 // ── 1. Nothing reads or writes the config unscoped ─────────────────────
 console.log("the config is per company");
 {
