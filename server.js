@@ -9057,6 +9057,98 @@ app.post("/legal/digest/run", async (req, res) => {
 
 // Legal update mailbox — what it has read, and a way to check now rather
 // than waiting for the next poll.
+// ── Terms of use, for the Intuit app submission ─────────────────────
+//
+// Intuit's production-key questionnaire requires an end-user licence
+// agreement URL. This is a PRIVATE integration — the only users are Tez Law
+// staff signing in to the firm's own admin, and the only QuickBooks data it
+// touches is the firm's own, on the firm's own authorisation. So the terms
+// say that plainly rather than borrowing a consumer SaaS template that would
+// describe a product the firm does not offer.
+//
+// Hosted here rather than on tezlawfirm.com deliberately: the marketing site
+// is the subject of a live State Bar advertising matter, and this page is not
+// advertising. Nothing here solicits clients or describes legal services.
+//
+// Public by design — it sits above the /admin auth gate so Intuit's reviewer
+// can read it without signing in. No inline <script>, nothing dynamic.
+app.get("/legal/terms", (req, res) => {
+  res.set("Content-Type", "text/html; charset=utf-8").send(`<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terms of Use — Tez Law P.C. internal systems</title>
+<style>
+  body { font: 16px/1.65 -apple-system, system-ui, Segoe UI, sans-serif; margin: 0; background: #faf8f4; color: #1a1a1a; }
+  main { max-width: 720px; margin: 0 auto; padding: 48px 20px 80px; }
+  h1 { font-size: 26px; margin: 0 0 4px; color: #0C1C36; }
+  h2 { font-size: 17px; margin: 32px 0 8px; color: #0C1C36; }
+  .sub { color: #666; font-size: 14px; margin-bottom: 28px; }
+  p { margin: 0 0 12px; }
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e0ddd6; color: #666; font-size: 13px; }
+  a { color: #A02818; }
+</style>
+<main>
+  <h1>Terms of Use</h1>
+  <div class="sub">Tez Law P.C. internal practice-management system · Last updated 1 October 2026</div>
+
+  <p>These terms govern use of the internal practice-management and accounting
+  system operated by Tez Law P.C. ("the Firm"), a professional corporation with
+  offices at 4141 S Nogales Street C102, West Covina, CA 91792.</p>
+
+  <h2>1. Who may use this system</h2>
+  <p>This is private software built for the Firm's own use. Access is limited to
+  the Firm's attorneys, employees and authorised contractors, each using
+  credentials issued by the Firm. It is not offered to the public, there is no
+  sign-up, and no licence to use it is granted to anyone outside the Firm.</p>
+
+  <h2>2. What it does</h2>
+  <p>The system records matters, hearings, documents and accounting entries for
+  the Firm's practice. Where the Firm has authorised it, the system connects to
+  the Firm's own accounts with third-party services — including QuickBooks
+  Online, Dropbox and email providers — to read and write the Firm's own
+  business records.</p>
+
+  <h2>3. Accounting data and QuickBooks</h2>
+  <p>The QuickBooks integration synchronises the Firm's own bookkeeping records
+  to the Firm's own QuickBooks company files, using access granted by an
+  authorised representative of the Firm through Intuit's authorisation process.
+  No third party's accounting data is accessed, and no accounting data is sold,
+  licensed or disclosed to anyone outside the Firm except as required to deliver
+  the services above or by law.</p>
+  <p>Client funds held in trust are recorded only on the law firm's own books, in
+  accordance with California Rule of Professional Conduct 1.15. Authorisation may
+  be withdrawn at any time by disconnecting the integration, which revokes the
+  stored tokens.</p>
+
+  <h2>4. Confidentiality</h2>
+  <p>Information in this system includes material subject to the attorney-client
+  privilege and the Firm's duty of confidentiality under California Business and
+  Professions Code § 6068(e). Authorised users must treat it accordingly and may
+  not disclose it outside the Firm.</p>
+
+  <h2>5. No legal advice</h2>
+  <p>Nothing in this system or on this page is legal advice, and no attorney-client
+  relationship is created by reading it.</p>
+
+  <h2>6. Availability and changes</h2>
+  <p>The system is provided for the Firm's internal operations with no warranty of
+  uninterrupted availability. The Firm may change, suspend or withdraw it, and may
+  update these terms, at any time.</p>
+
+  <h2>7. Governing law</h2>
+  <p>These terms are governed by the laws of the State of California.</p>
+
+  <h2>8. Contact</h2>
+  <p>Attn: Office of General Counsel, Tez Law P.C., 4141 S Nogales Street C102,
+  West Covina, CA 91792, USA.</p>
+
+  <footer>
+    Privacy practices are described separately in the Firm's
+    <a href="https://tezlawfirm.com/our-privacy-policy/">Privacy Policy</a>.
+  </footer>
+</main>`);
+});
+
 app.get("/legal/mail/status", async (req, res) => {
   if (req.query.token !== process.env.ANALYTICS_SECRET) {
     return res.status(403).json({ error: "Unauthorized" });
