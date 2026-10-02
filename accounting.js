@@ -80,14 +80,183 @@ const DEFAULT_COA = [
   { number: "6900", name: "Miscellaneous Expenses",        type: "expense",   subtype: "operating" },
 ];
 
+// ─── A second set of books is not a law firm ────────────
+//
+//  JJ runs more than one business, and the second QuickBooks company is a
+//  separate entity with its own books — not a mirror of the firm's.
+//
+//  It deliberately does NOT get:
+//    · 1020 Cash - IOLTA Trust Account
+//    · 2010 Client Trust Liability
+//  Client trust money belongs to the law firm and nowhere else (RRC 1.15).
+//  Leaving those accounts off a non-law-firm entity means a trust entry
+//  cannot be posted there even by accident — there is no account to post to.
+//  It also drops the practice-area fee lines and the bar dues / malpractice
+//  expenses, which mean nothing outside the firm.
+
+const BUSINESS_COA = [
+  // ─ Assets ─
+  { number: "1010", name: "Cash - Operating Account",     type: "asset",     subtype: "bank" },
+  { number: "1100", name: "Accounts Receivable",          type: "asset",     subtype: "ar" },
+  { number: "1500", name: "Equipment",                    type: "asset",     subtype: "fixed" },
+
+  // ─ Liabilities ─
+  { number: "2100", name: "Accounts Payable",             type: "liability", subtype: "ap" },
+  { number: "2400", name: "Payroll Liabilities",          type: "liability", subtype: "payroll" },
+
+  // ─ Equity ─
+  { number: "3000", name: "Owner's Equity",               type: "equity",    subtype: "equity" },
+  { number: "3100", name: "Retained Earnings",            type: "equity",    subtype: "equity" },
+  { number: "3900", name: "Owner's Draw",                 type: "equity",    subtype: "draw" },
+
+  // ─ Revenue ─
+  { number: "4100", name: "Sales / Service Revenue",      type: "revenue",   subtype: "other_income" },
+  { number: "4200", name: "Commission Income",            type: "revenue",   subtype: "other_income" },
+  { number: "4900", name: "Miscellaneous Income",         type: "revenue",   subtype: "other_income" },
+
+  // ─ Expenses ─
+  { number: "5010", name: "Salaries & Wages",             type: "expense",   subtype: "operating" },
+  { number: "5020", name: "Payroll Taxes",                type: "expense",   subtype: "operating" },
+  { number: "5030", name: "Contractor Payments",          type: "expense",   subtype: "operating" },
+  { number: "6010", name: "Rent",                         type: "expense",   subtype: "operating" },
+  { number: "6020", name: "Utilities",                    type: "expense",   subtype: "operating" },
+  { number: "6030", name: "Office Supplies",              type: "expense",   subtype: "operating" },
+  { number: "6040", name: "Software & Subscriptions",     type: "expense",   subtype: "operating" },
+  { number: "6050", name: "Marketing & Advertising",      type: "expense",   subtype: "operating" },
+  { number: "6090", name: "Professional Services (Accounting, Legal)", type: "expense", subtype: "operating" },
+  { number: "6100", name: "Bank Fees",                    type: "expense",   subtype: "operating" },
+  { number: "6200", name: "Meals & Entertainment",        type: "expense",   subtype: "operating" },
+  { number: "6300", name: "Travel",                       type: "expense",   subtype: "operating" },
+  { number: "6900", name: "Miscellaneous Expenses",       type: "expense",   subtype: "operating" },
+];
+
+// ─── Companies (entities) ───────────────────────────────
+//
+//  Every account, entry, invoice and QuickBooks connection belongs to exactly
+//  one company. The law firm is seeded first and is the default, so anything
+//  written without naming a company lands on the firm's books — which is what
+//  every caller written before this existed intends.
+
+async function listCompanies({ includeInactive = false } = {}) {
+  const r = await db.query(
+    `SELECT * FROM accounting_companies ${includeInactive ? "" : "WHERE is_active"}
+      ORDER BY is_default DESC, name`);
+  return r.rows;
+}
+
+async function getCompany(id) {
+  if (!id) return await defaultCompany();
+  const r = await db.query(`SELECT * FROM accounting_companies WHERE id = $1`, [id]);
+  return r.rows[0] || null;
+}
+
+async function defaultCompany() {
+  const r = await db.query(
+    `SELECT * FROM accounting_companies ORDER BY is_default DESC, id ASC LIMIT 1`);
+  return r.rows[0] || null;
+}
+
+/** The entity whose books may hold client trust money. There is only ever one. */
+async function lawFirmCompany() {
+  const r = await db.query(
+    `SELECT * FROM accounting_companies WHERE is_law_firm ORDER BY id ASC LIMIT 1`);
+  return r.rows[0] || null;
+}
+
+/**
+ * Resolve whatever a caller passed into a company id.
+ * Callers that predate this feature pass nothing and get the firm.
+ */
+/**
+ * Which books an operation belongs to.
+ *
+ * AN OMITTED company_id MEANS THE LAW FIRM, deliberately — not whichever
+ * company is flagged default. Every caller in server.js, qbo-sync.js and
+ * accounting-ui.js predates there being a second entity, so each of them
+ * omits this argument and every one of them means Tez Law P.C. Resolving to
+ * the default instead would mean that the moment the business entity is
+ * marked default in the switcher, all of that existing code silently starts
+ * posting fee income and invoices to the wrong company's books. Trust lines
+ * would at least be refused by the RRC 1.15 guard; ordinary revenue would
+ * not, and nothing on screen would look wrong.
+ *
+ * So: the default company governs what the UI shows first. It does not
+ * govern where unlabelled writes land. New code that means the other entity
+ * passes company_id explicitly.
+ */
+async function companyIdOf(company_id) {
+  if (company_id) return Number(company_id);
+  const firm = await lawFirmCompany();
+  if (firm) return firm.id;
+  // No law firm on the books at all — a fresh install mid-migration. Fall
+  // back rather than throwing, so a first boot can still seed itself.
+  const d = await defaultCompany();
+  if (!d) throw new Error("No accounting company exists — run initTables()");
+  return d.id;
+}
+
+/**
+ * Add a second (or third) set of books.
+ * is_law_firm is deliberately not a parameter: there is one law firm, it is
+ * seeded at init, and a second one would mean two trust ledgers.
+ */
+async function createCompany({ name, slug = null, seed_coa = true }) {
+  await initTables();
+  const clean = String(name || "").trim();
+  if (!clean) throw new Error("A company needs a name");
+  const key = String(slug || clean).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+  if (!key) throw new Error("A company needs a usable short name");
+
+  const existing = await db.query(`SELECT * FROM accounting_companies WHERE slug = $1`, [key]);
+  if (existing.rows[0]) return existing.rows[0];
+
+  const r = await db.query(
+    `INSERT INTO accounting_companies (name, slug, is_law_firm, is_default)
+     VALUES ($1, $2, FALSE, FALSE) RETURNING *`, [clean, key]);
+  const company = r.rows[0];
+  if (seed_coa) await seedCOA(company.id, BUSINESS_COA);
+  return company;
+}
+
+async function seedCOA(companyId, coa) {
+  for (const acct of coa) {
+    await db.query(
+      `INSERT INTO accounting_accounts (company_id, account_number, name, type, subtype)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (company_id, account_number) DO NOTHING`,
+      [companyId, acct.number, acct.name, acct.type, acct.subtype]);
+  }
+}
+
 // ─── Schema ─────────────────────────────────────────────
 
 async function initTables() {
+  // The entity every other row belongs to. Created first: everything below
+  // carries a company_id that points here.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS accounting_companies (
+      id          SERIAL PRIMARY KEY,
+      name        TEXT NOT NULL,
+      slug        TEXT UNIQUE NOT NULL,
+      is_law_firm BOOLEAN DEFAULT FALSE,   -- only this one may hold client trust money
+      is_default  BOOLEAN DEFAULT FALSE,
+      is_active   BOOLEAN DEFAULT TRUE,
+      created_at  TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  const haveCompanies = await db.query(`SELECT COUNT(*)::int AS n FROM accounting_companies`);
+  if (haveCompanies.rows[0].n === 0) {
+    await db.query(
+      `INSERT INTO accounting_companies (name, slug, is_law_firm, is_default)
+       VALUES ($1, 'tez-law', TRUE, TRUE)`,
+      [process.env.FIRM_NAME || "Tez Law P.C."]);
+  }
+
   // Chart of accounts
   await db.query(`
     CREATE TABLE IF NOT EXISTS accounting_accounts (
       id             SERIAL PRIMARY KEY,
-      account_number TEXT UNIQUE NOT NULL,
+      account_number TEXT NOT NULL,          -- unique PER COMPANY, see the index below
       name           TEXT NOT NULL,
       type           TEXT NOT NULL,           -- asset | liability | equity | revenue | expense
       subtype        TEXT,                    -- bank | trust_bank | trust | fee_income | operating | etc.
@@ -160,7 +329,7 @@ async function initTables() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS accounting_invoices (
       id             SERIAL PRIMARY KEY,
-      invoice_number TEXT UNIQUE NOT NULL,
+      invoice_number TEXT NOT NULL,          -- unique PER COMPANY, see the index below
       client_key     TEXT,
       client_name    TEXT NOT NULL,
       matter_type    TEXT,
@@ -206,22 +375,69 @@ async function initTables() {
   await db.query(`CREATE INDEX IF NOT EXISTS idx_trust_ledger_client ON accounting_trust_ledger (client_key, transaction_date DESC)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_invoices_status ON accounting_invoices (status, invoice_date DESC)`);
 
-  // Seed default chart of accounts if empty
-  const existing = await db.query(`SELECT COUNT(*) as n FROM accounting_accounts`);
-  if (Number(existing.rows[0].n) === 0) {
-    for (const acct of DEFAULT_COA) {
-      await db.query(
-        `INSERT INTO accounting_accounts (account_number, name, type, subtype) VALUES ($1, $2, $3, $4) ON CONFLICT (account_number) DO NOTHING`,
-        [acct.number, acct.name, acct.type, acct.subtype]
-      );
+  // ── Entity migration ──────────────────────────────────
+  //
+  //  These tables predate companies. Every existing row is the law firm's —
+  //  there was nowhere else for it to be — so it is backfilled to the firm
+  //  and the column is then required. Idempotent: safe to run on every boot.
+  const firm = (await lawFirmCompany()) || (await defaultCompany());
+  const OWNED = [
+    "accounting_accounts",
+    "accounting_journal_entries",
+    "accounting_invoices",
+    "accounting_trust_ledger",
+    "accounting_qb_config",
+  ];
+  for (const t of OWNED) {
+    try {
+      await db.query(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS company_id INTEGER REFERENCES accounting_companies(id)`);
+      await db.query(`UPDATE ${t} SET company_id = $1 WHERE company_id IS NULL`, [firm.id]);
+      await db.query(`ALTER TABLE ${t} ALTER COLUMN company_id SET NOT NULL`);
+    } catch (e) {
+      // SET NOT NULL is the only step here that can fail on a live table, and
+      // only if a row could not be backfilled. Say so rather than boot silently
+      // with a half-migrated ledger.
+      console.warn(`[accounting] company_id migration on ${t}:`, e.message);
     }
   }
+
+  // Account and invoice numbers are unique WITHIN a company, not globally —
+  // both sets of books number their cash account 1010. The old global
+  // constraints are dropped; on a fresh install they were never created.
+  for (const drop of [
+    "ALTER TABLE accounting_accounts DROP CONSTRAINT IF EXISTS accounting_accounts_account_number_key",
+    "ALTER TABLE accounting_invoices DROP CONSTRAINT IF EXISTS accounting_invoices_invoice_number_key",
+  ]) { try { await db.query(drop); } catch (e) { console.warn("[accounting] drop constraint:", e.message); } }
+
+  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS accounting_accounts_company_number
+                    ON accounting_accounts (company_id, account_number)`);
+  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS accounting_invoices_company_number
+                    ON accounting_invoices (company_id, invoice_number)`);
+  // One QuickBooks connection per company, and one company per QuickBooks
+  // realm — otherwise two sets of books could push into the same QBO file.
+  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS accounting_qb_config_company
+                    ON accounting_qb_config (company_id)`);
+  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS accounting_qb_config_realm
+                    ON accounting_qb_config (realm_id, environment) WHERE realm_id IS NOT NULL`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_journal_company ON accounting_journal_entries (company_id, entry_date DESC)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_accounts_company ON accounting_accounts (company_id, account_number)`);
+
+  // Seed the firm's chart of accounts if it has none.
+  const existing = await db.query(
+    `SELECT COUNT(*) as n FROM accounting_accounts WHERE company_id = $1`, [firm.id]);
+  if (Number(existing.rows[0].n) === 0) await seedCOA(firm.id, DEFAULT_COA);
 }
 
 // ─── Account lookups ────────────────────────────────────
 
-async function getAccountByNumber(number) {
-  const r = await db.query(`SELECT * FROM accounting_accounts WHERE account_number = $1`, [String(number)]);
+// An account number means nothing on its own now — both sets of books have a
+// 1010. Callers that pass no company get the firm, which is what every caller
+// written before companies existed meant.
+async function getAccountByNumber(number, company_id = null) {
+  const cid = await companyIdOf(company_id);
+  const r = await db.query(
+    `SELECT * FROM accounting_accounts WHERE company_id = $1 AND account_number = $2`,
+    [cid, String(number)]);
   return r.rows[0] || null;
 }
 
@@ -230,17 +446,22 @@ async function getAccountById(id) {
   return r.rows[0] || null;
 }
 
-async function listAccounts() {
-  const r = await db.query(`SELECT * FROM accounting_accounts WHERE is_active ORDER BY account_number`);
+async function listAccounts(company_id = null) {
+  const cid = await companyIdOf(company_id);
+  const r = await db.query(
+    `SELECT * FROM accounting_accounts WHERE company_id = $1 AND is_active ORDER BY account_number`,
+    [cid]);
   return r.rows;
 }
 
-async function ensureAccount({ number, name, type, subtype = null }) {
-  const existing = await getAccountByNumber(number);
+async function ensureAccount({ number, name, type, subtype = null, company_id = null }) {
+  const cid = await companyIdOf(company_id);
+  const existing = await getAccountByNumber(number, cid);
   if (existing) return existing;
   const r = await db.query(
-    `INSERT INTO accounting_accounts (account_number, name, type, subtype) VALUES ($1, $2, $3, $4) RETURNING *`,
-    [String(number), name, type, subtype]
+    `INSERT INTO accounting_accounts (company_id, account_number, name, type, subtype)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [cid, String(number), name, type, subtype]
   );
   return r.rows[0];
 }
@@ -260,8 +481,10 @@ async function postJournalEntry({
   matter_type = null,
   lines = [],
   created_by = null,
+  company_id = null,
 }) {
   await initTables();
+  const cid = await companyIdOf(company_id);
 
   if (!lines.length || lines.length < 2) {
     throw new Error("Journal entry requires at least 2 lines (debit + credit)");
@@ -278,20 +501,38 @@ async function postJournalEntry({
   const resolvedLines = [];
   let isTrust = false;
   for (const line of lines) {
-    const acct = await getAccountByNumber(line.account_number);
-    if (!acct) throw new Error(`Account not found: ${line.account_number}`);
+    const acct = await getAccountByNumber(line.account_number, cid);
+    if (!acct) throw new Error(`Account not found on this company's books: ${line.account_number}`);
     if (acct.subtype === "trust_bank" || acct.subtype === "trust") isTrust = true;
-    resolvedLines.push({ ...line, account_id: acct.id, account });
+    // `account: acct`, not `account`. The shorthand was a typo for a variable
+    // that does not exist in this scope, so every call threw ReferenceError
+    // before inserting anything — nothing had ever posted to this ledger.
+    // Line 317 below reads l.account.subtype, which is what it was meant to be.
+    resolvedLines.push({ ...line, account_id: acct.id, account: acct });
+  }
+
+  // Client trust money belongs to the law firm's books (RRC 1.15). A second
+  // entity has no trust accounts at all, so this should be unreachable — it is
+  // here because "should be unreachable" is not a control, and commingling
+  // across entities is the kind of error that ends careers rather than
+  // producing a bad report.
+  if (isTrust) {
+    const firm = await lawFirmCompany();
+    if (!firm || firm.id !== cid) {
+      const co = await getCompany(cid);
+      throw new Error(
+        `Trust accounts belong to the law firm's books only — refusing to post a trust entry to ${co ? co.name : "company " + cid}`);
+    }
   }
 
   // Insert entry
   const entryR = await db.query(
     `INSERT INTO accounting_journal_entries
-       (entry_date, description, reference, source_module, source_id,
+       (company_id, entry_date, description, reference, source_module, source_id,
         client_key, client_name, matter_type, is_trust, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING id`,
-    [entry_date, description, reference, source_module, source_id,
+    [cid, entry_date, description, reference, source_module, source_id,
      client_key, client_name, matter_type, isTrust, created_by]
   );
   const entryId = entryR.rows[0].id;
@@ -323,19 +564,19 @@ async function postJournalEntry({
     // Calculate new running balance for this client
     const prevBal = await db.query(
       `SELECT COALESCE(running_balance, 0) as bal FROM accounting_trust_ledger
-       WHERE client_key = $1 ORDER BY id DESC LIMIT 1`,
-      [client_key]
+       WHERE company_id = $1 AND client_key = $2 ORDER BY id DESC LIMIT 1`,
+      [cid, client_key]
     );
     const prevBalance = Number(prevBal.rows[0]?.bal || 0);
     const newBalance = +(prevBalance + deposit - disburse).toFixed(2);
 
     await db.query(
       `INSERT INTO accounting_trust_ledger
-         (entry_id, client_key, client_name, matter_type,
+         (company_id, entry_id, client_key, client_name, matter_type,
           transaction_date, description, deposit_amount, disburse_amount,
           running_balance, reference)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [entryId, client_key, client_name, matter_type,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [cid, entryId, client_key, client_name, matter_type,
        entry_date, description, deposit, disburse, newBalance, reference]
     );
   }
