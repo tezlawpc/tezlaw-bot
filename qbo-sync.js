@@ -28,6 +28,7 @@
 // ============================================================
 
 const axios = require("axios");
+const crypto = require("crypto");
 const db = require("./db");
 
 // ─── Config ─────────────────────────────────────────────
@@ -69,6 +70,14 @@ async function ensureConfigColumns() {
     "ADD COLUMN IF NOT EXISTS last_sync_pushed INTEGER DEFAULT 0",
     "ADD COLUMN IF NOT EXISTS last_sync_failed INTEGER DEFAULT 0",
     "ADD COLUMN IF NOT EXISTS last_sync_errors TEXT",
+    // CSRF: the one-time value we put in the OAuth state and expect back.
+    "ADD COLUMN IF NOT EXISTS oauth_state TEXT",
+    "ADD COLUMN IF NOT EXISTS oauth_state_at TIMESTAMPTZ",
+    // Intuit's request id, for their support team to trace a call.
+    "ADD COLUMN IF NOT EXISTS last_intuit_tid TEXT",
+    // Set when Intuit tells us the grant is dead, so the UI stops claiming
+    // a connection that no longer exists.
+    "ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ",
   ];
   for (const alter of alters) {
     try { await db.query(`ALTER TABLE accounting_qb_config ${alter}`); } catch {}
@@ -141,6 +150,9 @@ async function saveConfig(fields, company_id = null) {
 async function isConnected(company_id = null) {
   const cfg = await getConfig(company_id);
   if (!cfg || !cfg.access_token || !cfg.realm_id) return false;
+  // Intuit told us the grant is dead. Reporting "connected" here is how the
+  // screen ends up lying about a connection that stopped working days ago.
+  if (cfg.revoked_at) return false;
   // Check token freshness — refresh_token valid ~100 days
   if (cfg.token_expires_at && new Date(cfg.token_expires_at) < new Date(Date.now() - 100 * 24 * 60 * 60 * 1000)) {
     return false;
@@ -164,7 +176,17 @@ async function getAuthorizeUrl(company_id = null) {
   // "tez-NaN", which parses back to nothing and quietly attaches the tokens
   // to whichever company the fallback picked.
   const cid = await companyIdOf(company_id);
-  const state = "tez-" + cid;
+
+  // THE STATE IS ALSO A CSRF TOKEN, and until now it was not one. It carried
+  // only "tez-<id>", which is guessable, never checked against anything, and
+  // therefore no protection at all: anyone could hand our callback an
+  // authorization code of their choosing and we would exchange it and store
+  // the resulting tokens against this company. A single-use random value,
+  // stored server-side and compared on return, is what makes the callback
+  // able to tell its own flow from somebody else's.
+  const nonce = crypto.randomBytes(24).toString("base64url");
+  const state = "tez-" + cid + "-" + nonce;
+  await saveConfig({ oauth_state: state, oauth_state_at: new Date() }, cid);
   const params = new URLSearchParams({
     client_id: getClientId(),
     response_type: "code",
@@ -177,8 +199,36 @@ async function getAuthorizeUrl(company_id = null) {
 
 /** Read the company id back off the OAuth state. Null if it is not ours. */
 function companyFromState(state) {
-  const m = /^tez-([1-9]\d*)$/.exec(String(state || ""));
+  const m = /^tez-([1-9]\d*)-[\w-]{16,}$/.exec(String(state || ""));
   return m ? Number(m[1]) : null;
+}
+
+/**
+ * Confirm a returned state is the one WE issued for this company, and recent.
+ *
+ * Compared with timingSafeEqual rather than ===, and cleared on use so a
+ * state cannot be replayed. Fifteen minutes is longer than any real consent
+ * flow and short enough that an abandoned one cannot be picked up later.
+ */
+async function consumeState(state, company_id) {
+  const cid = await companyIdOf(company_id);
+  const cfg = await getConfig(cid);
+  const expected = cfg && cfg.oauth_state;
+  if (!expected) throw new Error("No connection was started for this company — begin again from Connect");
+
+  const a = Buffer.from(String(state || ""));
+  const b = Buffer.from(String(expected));
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    throw new Error("This sign-in did not come from a connection started here. Press Connect and try again.");
+  }
+
+  const issued = cfg.oauth_state_at ? new Date(cfg.oauth_state_at).getTime() : 0;
+  // Single use: clear it before doing anything else with the code.
+  await saveConfig({ oauth_state: null, oauth_state_at: null }, cid);
+  if (!issued || Date.now() - issued > 15 * 60 * 1000) {
+    throw new Error("That connection attempt expired. Press Connect and try again.");
+  }
+  return cid;
 }
 
 async function exchangeCodeForTokens(code, realmId, company_id = null) {
@@ -229,6 +279,9 @@ async function exchangeCodeForTokens(code, realmId, company_id = null) {
     token_expires_at: expiresAt,
     environment: getEnv(),
     last_sync_at: null,
+    revoked_at: null,
+    oauth_state: null,
+    oauth_state_at: null,
   }, cid);
 
   return { realm_id: realmId, expires_at: expiresAt, company_id: cid };
@@ -243,21 +296,43 @@ async function refreshAccessToken(company_id = null) {
   const clientSecret = getClientSecret();
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
-  const resp = await axios.post(
-    OAUTH_TOKEN_URL,
-    new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: cfg.refresh_token,
-    }).toString(),
-    {
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
-      },
-      timeout: 30000,
+  // INVALID_GRANT IS NOT A TRANSIENT ERROR. It means the refresh token is
+  // dead — revoked from inside QuickBooks, expired after 100 days of no use,
+  // or superseded. Intuit does not tell this app when a user disconnects at
+  // their end, so without this the stored tokens sit there and the admin
+  // screen keeps reporting a live connection while every sync quietly fails.
+  // Recording it is what lets the UI say "reconnect" instead of "connected".
+  let resp;
+  try {
+    resp = await axios.post(
+      OAUTH_TOKEN_URL,
+      new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: cfg.refresh_token,
+      }).toString(),
+      {
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        timeout: 30000,
+      }
+    );
+  } catch (e) {
+    const body = e && e.response && e.response.data;
+    const code = body && (body.error || body.Fault);
+    if (String(code) === "invalid_grant" || (e.response && e.response.status === 400)) {
+      await saveConfig({
+        access_token: null,
+        refresh_token: null,
+        revoked_at: new Date(),
+        last_sync_errors: "QuickBooks rejected the saved authorisation (invalid_grant). Press Connect to reauthorise.",
+      }, cid);
+      throw new Error("QuickBooks has revoked this connection — press Connect to reauthorise.");
     }
-  );
+    throw e;
+  }
 
   const { access_token, refresh_token, expires_in } = resp.data;
   const expiresAt = new Date(Date.now() + expires_in * 1000);
@@ -266,6 +341,7 @@ async function refreshAccessToken(company_id = null) {
     access_token,
     refresh_token: refresh_token || cfg.refresh_token,
     token_expires_at: expiresAt,
+    revoked_at: null,          // a successful refresh clears any earlier doubt
   }, cid);
 
   return access_token;
@@ -327,7 +403,11 @@ async function qboRequest({ method = "GET", path, data = null, params = {}, comp
   const base = apiBase(cfg.environment || getEnv());
   const url = `${base}/${cfg.realm_id}${path}`;
 
-  const resp = await axios({
+  // intuit_tid is the id Intuit's own support uses to find a request in their
+  // logs. Keeping it turns "the sync failed" into something they can trace,
+  // and they ask for it on every ticket. Captured from success AND failure —
+  // the failing call is the one anybody ever needs to look up.
+  const opts = {
     method,
     url,
     data,
@@ -338,7 +418,25 @@ async function qboRequest({ method = "GET", path, data = null, params = {}, comp
       "Content-Type": "application/json",
     },
     timeout: 45000,
-  });
+  };
+
+  let resp;
+  try {
+    resp = await axios(opts);
+  } catch (e) {
+    const tid = e && e.response && e.response.headers && e.response.headers["intuit_tid"];
+    if (tid) {
+      console.error(`[qbo] ${method} ${path} failed — intuit_tid ${tid}`);
+      try { await saveConfig({ last_intuit_tid: String(tid).slice(0, 120) }, cid); } catch {}
+      e.message = `${e.message} (intuit_tid ${tid})`;
+    }
+    throw e;
+  }
+
+  const tid = resp.headers && resp.headers["intuit_tid"];
+  if (tid) {
+    try { await saveConfig({ last_intuit_tid: String(tid).slice(0, 120) }, cid); } catch {}
+  }
   return resp.data;
 }
 
@@ -557,6 +655,19 @@ async function getSyncStatus(company_id = null) {
   const cid = await companyIdOf(company_id);
   const company = await require("./accounting").getCompany(cid);
   const cfg = await getConfig(cid);
+  if (cfg && cfg.revoked_at) {
+    return {
+      connected: false,
+      revoked: true,
+      configured: isConfigured(),
+      environment: cfg.environment || getEnv(),
+      redirect_uri: getRedirectUri(),
+      company_id: cid,
+      company_name: company ? company.name : null,
+      last_sync_errors: cfg.last_sync_errors || null,
+      last_intuit_tid: cfg.last_intuit_tid || null,
+    };
+  }
   if (!cfg) {
     return {
       connected: false,
@@ -584,6 +695,7 @@ async function getSyncStatus(company_id = null) {
     configured: true,
     company_id: cid,
     company_name: company ? company.name : null,
+    last_intuit_tid: cfg.last_intuit_tid || null,
     environment: cfg.environment,
     realm_id: cfg.realm_id,
     last_sync_at: cfg.last_sync_at,
@@ -739,4 +851,6 @@ module.exports = {
   runScheduledSyncIfDue, startScheduler,
   // Multi-company
   connectedConfigs, companyFromState, companyIdOf,
+  // OAuth CSRF
+  consumeState,
 };

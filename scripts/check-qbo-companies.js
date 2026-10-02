@@ -163,8 +163,9 @@ console.log("the OAuth state");
 {
   ok("the consent URL resolves the company before building state",
      /async function getAuthorizeUrl[\s\S]{0,400}await companyIdOf/.test(src));
-  ok("…and the state only parses back as a real company id",
-     /\^tez-\(\[1-9\]\\d\*\)\$/.test(src));
+  // The shape of the state is now asserted in the CSRF section below, which
+  // checks the nonce too. This line pinned the old company-id-only pattern
+  // and went stale the moment the state became a real CSRF token.
   ok("the callback reads it back", /qbo\.companyFromState\(state\)/.test(srv));
   ok("the connect route awaits the URL now that it is async",
      /await qbo\.getAuthorizeUrl\(/.test(srv));
@@ -193,6 +194,61 @@ console.log("the routes");
   ok("the status page reads the company from the request",
      /const cid = qboCompany\(req\);\s*\n\s*const status = await qbo\.getSyncStatus\(cid\)/.test(srv));
   ok("disconnect is given the company", /qbo\.disconnect\(cid\)/.test(srv));
+}
+
+// ── OAuth CSRF, revoked grants, and intuit_tid ────────────────────────
+// All three were "No" answers on Intuit's app assessment. The CSRF one is
+// the only one that was also a real hole: the state carried "tez-<id>",
+// which is guessable and was never compared against anything, so the
+// callback would exchange an authorization code handed to it by anyone and
+// store the resulting tokens against the firm's books.
+console.log("OAuth state is a CSRF token");
+{
+  const auth = src.slice(src.indexOf("async function getAuthorizeUrl"),
+                         src.indexOf("async function exchangeCodeForTokens"));
+  ok("the state carries a random nonce, not just the company id",
+     /crypto\.randomBytes\(\d+\)/.test(auth));
+  ok("…and it is stored server-side when issued",
+     /saveConfig\(\{ oauth_state: state/.test(auth));
+  ok("a bare \"tez-<id>\" no longer parses as a valid state",
+     /\^tez-\(\[1-9\]\\d\*\)-\[\\w-\]\{16,\}\$/.test(src));
+
+  const consume = src.slice(src.indexOf("async function consumeState"),
+                            src.indexOf("async function exchangeCodeForTokens"));
+  ok("the returned state is compared in constant time",
+     /timingSafeEqual/.test(consume));
+  ok("…and cleared on use, so it cannot be replayed",
+     /saveConfig\(\{ oauth_state: null/.test(consume));
+  ok("…and rejected once stale", /15 \* 60 \* 1000/.test(consume));
+  ok("the callback actually calls it", /await qbo\.consumeState\(state/.test(srv));
+  ok("…and refuses a state that is not ours before doing anything else",
+     /if \(!claimed\)[\s\S]{0,160}return res\.status\(400\)/.test(srv));
+}
+
+console.log("a revoked grant stops the screen lying");
+{
+  const refresh = src.slice(src.indexOf("async function refreshAccessToken"),
+                            src.indexOf("async function getValidAccessToken"));
+  ok("invalid_grant is recognised", /invalid_grant/.test(refresh));
+  ok("…the dead tokens are cleared", /access_token: null[\s\S]{0,80}refresh_token: null/.test(refresh));
+  ok("…and it is recorded as revoked", /revoked_at: new Date\(\)/.test(refresh));
+  ok("a successful refresh clears the flag again", /revoked_at: null/.test(refresh));
+  ok("isConnected reports false once revoked",
+     /async function isConnected[\s\S]{0,400}cfg\.revoked_at\) return false/.test(src));
+  ok("…and the status says so rather than going quiet",
+     /revoked: true/.test(src));
+}
+
+console.log("intuit_tid is captured");
+{
+  const req = src.slice(src.indexOf("async function qboRequest"),
+                        src.indexOf("async function fetchQBOAccounts"));
+  ok("it is read from successful responses", /resp\.headers && resp\.headers\["intuit_tid"\]/.test(req));
+  // The failing call is the only one anyone ever looks up.
+  ok("…and from failures, which is the case that matters",
+     /e\.response\.headers\["intuit_tid"\]/.test(req));
+  ok("…and it reaches the error message a human sees",
+     /intuit_tid \$\{tid\}/.test(req));
 }
 
 const note = require("./lib/stub-missing").note();

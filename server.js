@@ -4038,10 +4038,16 @@ app.get("/admin/accounting/quickbooks/callback", async (req, res) => {
     const { code, realmId, error, state } = req.query;
     if (error) return res.status(400).send(`OAuth error: ${error}`);
     if (!code || !realmId) return res.status(400).send("Missing code or realmId in callback");
-    // Null when the state is not ours or predates multi-company, in which case
-    // exchangeCodeForTokens falls back to the law firm — the same company a
-    // connect link without a company_id would have started from.
-    const cid = qbo.companyFromState(state);
+    // The state is a CSRF token, not a label. consumeState checks that this
+    // is the single-use value WE issued for this company, that it has not
+    // expired, and clears it so it cannot be replayed. Without that check the
+    // callback would exchange an authorization code handed to it by anyone
+    // and store the resulting tokens against the firm's books.
+    const claimed = qbo.companyFromState(state);
+    if (!claimed) {
+      return res.status(400).send("This sign-in did not come from a connection started here. Press Connect and try again.");
+    }
+    const cid = await qbo.consumeState(state, claimed);
     const out = await qbo.exchangeCodeForTokens(code, realmId, cid);
     res.redirect("/admin/accounting/quickbooks?connected=1&company_id=" + (out.company_id || ""));
   } catch (err) {
