@@ -14,16 +14,69 @@ const fmt$ = n => {
 };
 const fmtDate = d => d ? new Date(d).toLocaleDateString() : "—";
 
+/**
+ * The company switcher.
+ *
+ * Every accounting screen is now scoped to one set of books, and the two
+ * render identically — same tiles, same layout, same currency. Without the
+ * company named at the top of the page, somebody reads the other business's
+ * numbers believing they are the firm's, and nothing on screen contradicts
+ * them. So this is not navigation chrome; it is the label that makes the
+ * figures below it mean anything.
+ */
+/**
+ * A hidden company_id for the GET filter forms.
+ *
+ * Without it, changing a date range on the business's income statement
+ * submits without company_id and lands back on the law firm — same layout,
+ * same headings, different company. The switcher above would correct itself,
+ * but only if somebody looked at it.
+ */
+function companyField(cid) {
+  return cid ? `<input type="hidden" name="company_id" value="${Number(cid)}">` : "";
+}
+
+async function companySwitcher(currentId, basePath = "/admin/accounting") {
+  let companies = [];
+  try { companies = await accounting.listCompanies(); } catch { return ""; }
+  if (companies.length < 2) return "";          // nothing to switch between
+  const cur = companies.find(c => Number(c.id) === Number(currentId)) || companies[0];
+  const tabs = companies.map(c => {
+    const on = Number(c.id) === Number(cur.id);
+    const sep = basePath.includes("?") ? "&" : "?";
+    return `<a href="${esc(basePath)}${sep}company_id=${c.id}"
+       style="padding:6px 14px; border-radius:6px; font-size:13px; text-decoration:none;
+              ${on ? "background:#0C1C36; color:#fff; font-weight:600;"
+                   : "background:#fff; color:#0C1C36; border:1px solid #d5d5d5;"}">
+       ${esc(c.name)}${c.is_law_firm ? " <span style=\"opacity:.65; font-weight:400;\">· law firm</span>" : ""}
+     </a>`;
+  }).join(" ");
+  return `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+      <span style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:.05em;">Books</span>
+      ${tabs}
+    </div>`;
+}
+
 // ─── Dashboard ──────────────────────────────────────────
 
-async function renderDashboard() {
-  const stats = await accounting.getStats();
-  const recent = await accounting.getLedger({ limit: 10 });
-  const trust = await accounting.getTrustReconciliation();
+async function renderDashboard(query = {}) {
+  const cid = Number(query.company_id) > 0 ? Number(query.company_id) : null;
+  const stats = await accounting.getStats(cid);
+  const recent = await accounting.getLedger({ limit: 10, company_id: cid });
+
+  // Trust reconciliation is the law firm's by definition, so it is only shown
+  // on the firm's dashboard. Rendered on the other entity it would be the
+  // firm's figures under the other company's heading.
+  const trust = stats.is_law_firm ? await accounting.getTrustReconciliation() : null;
+
+  const switcher = await companySwitcher(stats.company_id, "/admin/accounting");
+  // Every link off this page keeps the selected company. Without it, a click
+  // from the business dashboard to the ledger silently shows the law firm.
+  const qs = cid ? `?company_id=${cid}` : "";
 
   // Also fetch QBO status for prominent card
   let qboStatus = null;
-  try { qboStatus = await require("./qbo-sync").getSyncStatus(); } catch {}
+  try { qboStatus = await require("./qbo-sync").getSyncStatus(cid); } catch {}
   const qboConnected = qboStatus?.connected;
   const qboConfigured = qboStatus?.configured;
   const qboAutoOn = qboStatus?.auto_push_enabled;
@@ -62,7 +115,9 @@ async function renderDashboard() {
     </tr>
   `).join("") : `<tr><td colspan="6" style="padding:40px; text-align:center; color:#888;">No entries yet. Use the quick actions below to record fees, retainers, or expenses for any practice area.</td></tr>`;
 
-  const trustBanner = !trust.is_reconciled && trust.bank_balance > 0 ? `
+  // `trust` is null on a non-law-firm entity, which has no trust account to
+  // reconcile. Without the guard this throws on the business's dashboard.
+  const trustBanner = trust && !trust.is_reconciled && trust.bank_balance > 0 ? `
     <div style="background:#fee; padding:14px 18px; border-radius:8px; border-left:4px solid #c62828; margin-bottom:16px; font-size:13px;">
       <strong style="color:#c62828;">⚠ Trust account NOT RECONCILED</strong> — bank shows ${fmt$(trust.bank_balance)} but sum of client balances is ${fmt$(trust.sum_of_client_balances)} (variance: ${fmt$(trust.variance)})
       <a href="/admin/accounting/trust" style="color:#c62828; margin-left:10px; font-weight:600;">Investigate →</a>
@@ -76,6 +131,8 @@ async function renderDashboard() {
       </div>
     </div>
 
+    ${switcher}
+
     ${qboCard}
     ${trustBanner}
 
@@ -87,7 +144,13 @@ async function renderDashboard() {
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">IOLTA Trust</div>
-        <div style="font-size:22px; font-weight:700; color:${trust.is_reconciled ? "#2e7d32" : "#c62828"}; margin-top:4px;">${fmt$(stats.trust_balance)}</div>
+        <!-- A null balance means this entity HAS no trust account. Rendering
+             that as $0.00 would read as a trust account that is reconciled
+             and empty, which is a different and much more reassuring claim. -->
+        ${stats.trust_balance === null
+          ? `<div style="font-size:15px; font-weight:600; color:#888; margin-top:8px;">Not applicable</div>
+             <div style="font-size:11px; color:#aaa;">Client trust is on the law firm's books only</div>`
+          : `<div style="font-size:22px; font-weight:700; color:${trust && trust.is_reconciled ? "#2e7d32" : "#c62828"}; margin-top:4px;">${fmt$(stats.trust_balance)}</div>`}
         <div style="font-size:11px; color:${trust.is_reconciled ? "#2e7d32" : "#c62828"}; margin-top:2px;">${trust.is_reconciled ? "✓ Reconciled" : "⚠ Variance " + fmt$(Math.abs(trust.variance))}</div>
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
@@ -125,7 +188,7 @@ async function renderDashboard() {
           💸 Record Expense
           <div style="font-size:11px; font-weight:400; opacity:0.9; margin-top:3px;">Rent, salaries, subscriptions, etc</div>
         </a>
-        <a href="/admin/accounting/new-entry" style="background:#0C1C36; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
+        <a href="/admin/accounting/new-entry${qs}" style="background:#0C1C36; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
           📝 Advanced Entry
           <div style="font-size:11px; font-weight:400; opacity:0.9; margin-top:3px;">Custom multi-line journal entry</div>
         </a>
@@ -141,12 +204,13 @@ async function renderDashboard() {
     <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
       <h3 style="margin:0 0 12px 0; font-size:14px; color:#0C1C36;">Reports & Exports</h3>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <a href="/admin/accounting/ledger" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📖 General Ledger</a>
-        <a href="/admin/accounting/income-statement" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📊 Income Statement (P&L)</a>
-        <a href="/admin/accounting/balance-sheet" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">⚖️ Balance Sheet</a>
+        <a href="/admin/accounting/ledger${qs}" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📖 General Ledger</a>
+        <a href="/admin/accounting/income-statement${qs}" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📊 Income Statement (P&L)</a>
+        <a href="/admin/accounting/balance-sheet${qs}" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">⚖️ Balance Sheet</a>
         <a href="/admin/accounting/trust" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">🔒 Trust Reconciliation</a>
-        <a href="/admin/accounting/chart" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📋 Chart of Accounts</a>
+        <a href="/admin/accounting/chart${qs}" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📋 Chart of Accounts</a>
       </div>
+
       <h4 style="margin:16px 0 8px 0; font-size:12px; color:#666; text-transform:uppercase; letter-spacing:0.05em;">One-time Exports</h4>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <a href="/admin/accounting/export/excel" style="background:#217346; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">📗 Excel (.xlsx)</a>
@@ -159,7 +223,7 @@ async function renderDashboard() {
     <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
       <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
         <strong style="color:#0C1C36; font-size:14px;">Recent Journal Entries</strong>
-        <a href="/admin/accounting/ledger" style="color:#0061FF; font-size:12px; text-decoration:none;">View all →</a>
+        <a href="/admin/accounting/ledger${qs}" style="color:#0061FF; font-size:12px; text-decoration:none;">View all →</a>
       </div>
       <table style="width:100%; border-collapse:collapse; font-size:13px;">
         <thead>
@@ -194,6 +258,7 @@ async function renderDashboard() {
 // ─── General Ledger ─────────────────────────────────────
 
 async function renderLedger(query) {
+  const cid = Number(query.company_id) > 0 ? Number(query.company_id) : null;
   const from = query.from || "";
   const to = query.to || "";
   const client = query.client || "";
@@ -207,8 +272,9 @@ async function renderLedger(query) {
   if (matter) filters.matter_type = matter;
   if (account) filters.account_number = account;
 
-  const entries = await accounting.getLedger({ ...filters, limit: 500 });
-  const accounts = await accounting.listAccounts();
+  const entries = await accounting.getLedger({ ...filters, limit: 500, company_id: cid });
+  const accounts = await accounting.listAccounts(cid);
+  const switcher = await companySwitcher(cid, "/admin/accounting/ledger");
   const accountOpts = accounts.map(a => `<option value="${a.account_number}" ${account === a.account_number ? "selected" : ""}>${a.account_number} ${esc(a.name)}</option>`).join("");
 
   const rowsHtml = entries.length ? entries.map(e => {
@@ -247,7 +313,10 @@ async function renderLedger(query) {
       <a href="/admin/accounting" class="back-link">← Accounting</a>
     </div>
 
+    ${switcher}
+
     <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+      ${companyField(cid)}
       <div><label style="font-size:11px; color:#888; display:block;">From</label><input type="date" name="from" value="${from}" style="padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
       <div><label style="font-size:11px; color:#888; display:block;">To</label><input type="date" name="to" value="${to}" style="padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
       <div><label style="font-size:11px; color:#888; display:block;">Account</label>
@@ -274,11 +343,13 @@ async function renderLedger(query) {
 // ─── Income Statement (P&L) ─────────────────────────────
 
 async function renderIncomeStatement(query) {
+  const cid = Number(query.company_id) > 0 ? Number(query.company_id) : null;
   const today = new Date().toISOString().split("T")[0];
   const yearStart = new Date().getFullYear() + "-01-01";
   const from = query.from || yearStart;
   const to = query.to || today;
-  const is = await accounting.getIncomeStatement(from, to);
+  const is = await accounting.getIncomeStatement(from, to, cid);
+  const switcher = await companySwitcher(is.company_id, "/admin/accounting/income-statement");
 
   const revRows = is.revenues.length ? is.revenues.map(r => `
     <tr><td style="padding:8px 12px; padding-left:24px; border-bottom:1px solid #f0f0f0;">${r.account_number} — ${esc(r.name)}</td><td style="padding:8px 12px; border-bottom:1px solid #f0f0f0; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(r.amount)}</td></tr>
@@ -293,7 +364,10 @@ async function renderIncomeStatement(query) {
       <a href="/admin/accounting" class="back-link">← Accounting</a>
     </div>
 
+    ${switcher}
+
     <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+      ${companyField(cid)}
       <div><label style="font-size:11px; color:#888; display:block;">From</label><input type="date" name="from" value="${from}" style="padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
       <div><label style="font-size:11px; color:#888; display:block;">To</label><input type="date" name="to" value="${to}" style="padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
       <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Update</button>
@@ -330,9 +404,11 @@ async function renderIncomeStatement(query) {
 // ─── Balance Sheet ──────────────────────────────────────
 
 async function renderBalanceSheet(query) {
+  const cid = Number(query.company_id) > 0 ? Number(query.company_id) : null;
   const today = new Date().toISOString().split("T")[0];
   const asOf = query.as_of || today;
-  const bs = await accounting.getBalanceSheet(asOf);
+  const bs = await accounting.getBalanceSheet(asOf, cid);
+  const switcher = await companySwitcher(bs.company_id, "/admin/accounting/balance-sheet");
 
   const bucketHtml = (items, label) => {
     const rows = items.length ? items.map(a => `
@@ -347,7 +423,10 @@ async function renderBalanceSheet(query) {
       <a href="/admin/accounting" class="back-link">← Accounting</a>
     </div>
 
+    ${switcher}
+
     <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; align-items:end;">
+      ${companyField(cid)}
       <div><label style="font-size:11px; color:#888; display:block;">As of</label><input type="date" name="as_of" value="${asOf}" style="padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
       <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Update</button>
     </form>
@@ -455,8 +534,10 @@ async function renderTrustReconciliation(query) {
 
 // ─── Chart of Accounts ──────────────────────────────────
 
-async function renderChartOfAccounts() {
-  const accounts = await accounting.listAccounts();
+async function renderChartOfAccounts(query = {}) {
+  const cid = Number(query.company_id) > 0 ? Number(query.company_id) : null;
+  const accounts = await accounting.listAccounts(cid);
+  const switcher = await companySwitcher(cid, "/admin/accounting/chart");
   const typeColors = { asset: "#0C1C36", liability: "#c62828", equity: "#7c4dff", revenue: "#2e7d32", expense: "#e65100" };
   const grouped = {};
   for (const a of accounts) {
@@ -487,6 +568,8 @@ async function renderChartOfAccounts() {
       <h1>📋 Chart of Accounts</h1>
       <a href="/admin/accounting" class="back-link">← Accounting</a>
     </div>
+
+    ${switcher}
     <div style="font-size:12px; color:#666; margin-bottom:16px;">
       Standard law firm chart of accounts. ${accounts.length} accounts active. Trust accounts (2010, 1020) are governed by CA Bar RRC 1.15.
     </div>

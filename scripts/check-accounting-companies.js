@@ -194,6 +194,72 @@ console.log("callers that pass no company");
      resolve.replace(/\s+/g, " ").slice(0, 160));
 }
 
+// ── The reports must be scoped, and the UI must say which books ───────
+// The first version of this work scoped the WRITE path and left every report
+// unscoped. With two companies live, the law firm's income statement would
+// have included the other business's revenue, and the figure would have
+// looked entirely plausible. These feed a tax return.
+console.log("reports are scoped");
+{
+  const reports = {
+    getIncomeStatement: /async function getIncomeStatement\([^)]*company_id/,
+    getBalanceSheet:    /async function getBalanceSheet\([^)]*company_id/,
+    getStats:           /async function getStats\(company_id/,
+  };
+  for (const [name, re] of Object.entries(reports)) {
+    ok(name + " takes a company", re.test(src));
+  }
+  const ledger = src.slice(src.indexOf("async function getLedger"),
+                           src.indexOf("async function getClientTrustLedger"));
+  ok("getLedger filters on company_id", /je\.company_id = \$1/.test(ledger));
+
+  // Trust is the exception, in the other direction: it is ALWAYS the firm's,
+  // whatever is passed, because only the firm may hold client money. A
+  // reconciliation that reports "balanced, $0.00" off the wrong books is
+  // worse than one that refuses — it is the screen somebody checks to
+  // confirm client funds are intact.
+  const trust = src.slice(src.indexOf("async function getTrustReconciliation"),
+                          src.indexOf("// General ledger listing"));
+  ok("trust reconciliation ignores the argument and uses the law firm",
+     /lawFirmCompany\(\)/.test(trust) && !/companyIdOf/.test(trust));
+  ok("…and throws if there is no law firm rather than returning zeroes",
+     /throw new Error\("No law firm entity/.test(trust));
+  ok("the client trust ledger is law-firm-only too",
+     /async function getClientTrustLedger[\s\S]{0,400}lawFirmCompany\(\)/.test(src));
+
+  // A trust tile reading $0.00 on an entity that HAS no trust account would
+  // read as a reconciled, empty trust account.
+  ok("getStats returns null, not 0, when the entity has no trust account",
+     /trust_balance: trust,\s*\/\/ null, not 0/.test(src));
+}
+
+console.log("the UI names the books");
+{
+  const ui = fs.readFileSync(path.join(ROOT, "accounting-ui.js"), "utf8");
+  ok("there is a company switcher", /async function companySwitcher/.test(ui));
+  // Two companies render identically — same tiles, same layout, same
+  // currency. If the page does not name the company, somebody reads the
+  // other business's figures as the firm's and nothing contradicts them.
+  for (const fn of ["renderDashboard", "renderLedger", "renderIncomeStatement",
+                    "renderBalanceSheet", "renderChartOfAccounts"]) {
+    const i = ui.indexOf("async function " + fn);
+    const rest = ui.slice(i + 10);
+    const j = rest.indexOf("async function");
+    const body = rest.slice(0, j < 0 ? undefined : j);
+    const n = (body.match(/\$\{switcher\}/g) || []).length;
+    ok(fn + " renders exactly one switcher", n === 1, "found " + n);
+  }
+  ok("the filter forms carry the company", /function companyField/.test(ui));
+  const forms = (ui.match(/\$\{companyField\(cid\)\}/g) || []).length;
+  ok("…on each of the three scoped report forms", forms === 3, forms + " found");
+  ok("the dashboard's links keep the selected company",
+     /const qs = cid \? `\?company_id=\$\{cid\}` : ""/.test(ui));
+  ok("the trust tile distinguishes 'no trust account' from $0.00",
+     /Not applicable/.test(ui) && /stats\.trust_balance === null/.test(ui));
+  ok("the trust banner tolerates a null reconciliation",
+     /trust && !trust\.is_reconciled/.test(ui));
+}
+
 // ── Behaviour: the guard refuses, against a stubbed database ───────────
 console.log("the guard, exercised");
 

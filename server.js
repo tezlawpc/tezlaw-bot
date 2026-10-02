@@ -4232,7 +4232,7 @@ app.get("/admin/accounting", async (req, res) => {
   try {
     const ui = require("./accounting-ui");
     const hearingNotes = require("./hearing-notes");
-    const body = await ui.renderDashboard();
+    const body = await ui.renderDashboard(req.query || {});
     res.send(hearingNotes.renderAdminChrome({ title: "Accounting", body, activeItem: "accounting" }));
   } catch (err) {
     console.error("[accounting dashboard]:", err.message);
@@ -4304,7 +4304,7 @@ app.get("/admin/accounting/chart", async (req, res) => {
   try {
     const ui = require("./accounting-ui");
     const hearingNotes = require("./hearing-notes");
-    const body = await ui.renderChartOfAccounts();
+    const body = await ui.renderChartOfAccounts(req.query || {});
     res.send(hearingNotes.renderAdminChrome({ title: "Chart of Accounts", body, activeItem: "accounting" }));
   } catch (err) {
     console.error("[accounting COA]:", err.message);
