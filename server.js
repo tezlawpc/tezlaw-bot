@@ -4300,6 +4300,34 @@ app.get("/admin/accounting/trust/:clientKey", async (req, res) => {
   }
 });
 
+// Companies — the only way to create a second set of books.
+app.get("/admin/accounting/companies", async (req, res) => {
+  try {
+    const ui = require("./accounting-ui");
+    const hearingNotes = require("./hearing-notes");
+    const body = await ui.renderCompanies(req.query || {});
+    res.send(hearingNotes.renderAdminChrome({ title: "Companies", body, activeItem: "accounting" }));
+  } catch (err) {
+    console.error("[accounting companies]:", err.message);
+    res.status(500).send("Error: " + err.message);
+  }
+});
+
+app.post("/admin/accounting/companies/create", async (req, res) => {
+  try {
+    const accounting = require("./accounting");
+    const name = String(req.body?.name || "").trim().slice(0, 120);
+    if (!name) return res.redirect("/admin/accounting/companies?error=" + encodeURIComponent("A company needs a name."));
+    // createCompany always sets is_law_firm FALSE — a second law firm would
+    // mean a second trust ledger, and there is only ever one.
+    const company = await accounting.createCompany({ name });
+    res.redirect("/admin/accounting/companies?added=" + encodeURIComponent(company.name));
+  } catch (err) {
+    console.error("[accounting create company]:", err.message);
+    res.redirect("/admin/accounting/companies?error=" + encodeURIComponent(err.message));
+  }
+});
+
 app.get("/admin/accounting/chart", async (req, res) => {
   try {
     const ui = require("./accounting-ui");

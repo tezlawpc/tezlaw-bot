@@ -209,6 +209,7 @@ async function renderDashboard(query = {}) {
         <a href="/admin/accounting/balance-sheet${qs}" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">⚖️ Balance Sheet</a>
         <a href="/admin/accounting/trust" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">🔒 Trust Reconciliation</a>
         <a href="/admin/accounting/chart${qs}" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📋 Chart of Accounts</a>
+        <a href="/admin/accounting/companies" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">🏢 Companies</a>
       </div>
 
       <h4 style="margin:16px 0 8px 0; font-size:12px; color:#666; text-transform:uppercase; letter-spacing:0.05em;">One-time Exports</h4>
@@ -715,8 +716,90 @@ async function renderNewEntry() {
     </script>`;
 }
 
+/**
+ * The companies page — where a second set of books comes from.
+ *
+ * Without this there is no way to create one at all: createCompany existed,
+ * was exported, and had no caller anywhere in the repo, so every piece of
+ * multi-company plumbing built on top of it was unreachable.
+ *
+ * No inline <script>: this is rendered inside a template literal, and an
+ * apostrophe in a company name reaching a script block is what took client
+ * search down for five hours on 2026-09-28.
+ */
+async function renderCompanies(query = {}) {
+  const companies = await accounting.listCompanies({ includeInactive: true });
+  const added = query.added ? String(query.added) : null;
+  const failed = query.error ? String(query.error) : null;
+
+  const rows = companies.map(c => `
+    <tr style="border-bottom:1px solid #eee;">
+      <td style="padding:10px 8px;">
+        <strong>${esc(c.name)}</strong>
+        ${c.is_law_firm ? `<span style="margin-left:8px; font-size:11px; background:#e8f5e9; color:#2e7d32; padding:2px 8px; border-radius:10px; font-weight:600;">law firm</span>` : ""}
+        ${c.is_default ? `<span style="margin-left:6px; font-size:11px; background:#f0f0f0; color:#666; padding:2px 8px; border-radius:10px;">shown first</span>` : ""}
+        ${c.is_active === false ? `<span style="margin-left:6px; font-size:11px; color:#999;">inactive</span>` : ""}
+        <div style="font-size:11px; color:#888; margin-top:2px;">${esc(c.slug)}</div>
+      </td>
+      <td style="padding:10px 8px; font-size:12px; color:#666;">
+        ${c.is_law_firm
+          ? "Holds client trust (IOLTA). Only this entity may."
+          : "Business books. No trust accounts — client money cannot be posted here."}
+      </td>
+      <td style="padding:10px 8px; text-align:right; white-space:nowrap;">
+        <a href="/admin/accounting?company_id=${c.id}" style="font-size:12px; color:#A02818; font-weight:600;">Open books →</a>
+      </td>
+    </tr>`).join("");
+
+  return `
+    <div class="page-header">
+      <h1>🏢 Companies</h1>
+      <a href="/admin/accounting" class="back-link">← Accounting</a>
+    </div>
+
+    ${added ? `<div style="background:#e8f5e9; border-left:4px solid #2e7d32; padding:12px 16px; border-radius:6px; margin-bottom:16px; font-size:13px;">
+      Added <strong>${esc(added)}</strong> with its own chart of accounts. Use the Books switcher on any accounting screen to move between them.
+    </div>` : ""}
+    ${failed ? `<div style="background:#fdecea; border-left:4px solid #A02818; padding:12px 16px; border-radius:6px; margin-bottom:16px; font-size:13px;">
+      ${esc(failed)}
+    </div>` : ""}
+
+    <div style="background:#fff8e1; border-left:4px solid #f57f17; padding:12px 16px; border-radius:6px; margin-bottom:18px; font-size:13px; line-height:1.6;">
+      Each company keeps its own ledger, chart of accounts, invoices and QuickBooks connection.
+      Nothing crosses between them. <strong>Client trust money stays on the law firm's books</strong>
+      — a new company is created with no trust accounts, and the ledger refuses a trust entry on it.
+    </div>
+
+    <table style="width:100%; border-collapse:collapse; background:white; border:1px solid #eee; border-radius:8px; overflow:hidden; margin-bottom:24px;">
+      <thead><tr style="background:#faf8f4;">
+        <th style="padding:8px; text-align:left; font-size:11px; color:#888; text-transform:uppercase;">Company</th>
+        <th style="padding:8px; text-align:left; font-size:11px; color:#888; text-transform:uppercase;">Books</th>
+        <th></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+
+    <h2 style="font-size:15px; margin-bottom:8px;">Add a company</h2>
+    <form method="POST" action="/admin/accounting/companies/create"
+          style="background:white; padding:16px; border-radius:8px; border:1px solid #eee; display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+      <div style="flex:1; min-width:240px;">
+        <label style="font-size:11px; color:#888; display:block; margin-bottom:3px;">Company name</label>
+        <input type="text" name="name" required maxlength="120" placeholder="e.g. Tez Holdings LLC"
+               style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+      </div>
+      <button type="submit" style="background:#F07800; color:#FFF7E4; border:1px solid #A02818; padding:9px 18px; border-radius:4px; cursor:pointer; font-weight:600;">
+        Create books
+      </button>
+    </form>
+    <div style="font-size:12px; color:#888; margin-top:6px;">
+      Seeded with a standard business chart of accounts — cash, receivables, payables, revenue and expenses.
+      It will not be the law firm, and that cannot be changed here.
+    </div>`;
+}
+
 module.exports = {
   renderDashboard,
+  renderCompanies,
   renderLedger,
   renderIncomeStatement,
   renderBalanceSheet,

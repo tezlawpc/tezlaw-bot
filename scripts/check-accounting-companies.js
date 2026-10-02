@@ -260,6 +260,43 @@ console.log("the UI names the books");
      /trust && !trust\.is_reconciled/.test(ui));
 }
 
+// ── A second company must be creatable at all ─────────────────────────
+// createCompany was written, exported, and had no caller anywhere in the
+// repo. Every piece of multi-company plumbing built on top of it — the
+// config scoping, the switcher, the per-company reports — was unreachable,
+// because there was no way to bring a second company into existence.
+console.log("a second company can be created");
+{
+  const srv = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
+  const ui = fs.readFileSync(path.join(ROOT, "accounting-ui.js"), "utf8");
+  ok("there is a page listing the companies",
+     /app\.get\("\/admin\/accounting\/companies"/.test(srv));
+  ok("…and a route that creates one",
+     /app\.post\("\/admin\/accounting\/companies\/create"/.test(srv));
+  ok("…which actually calls createCompany",
+     /accounting\.createCompany\(/.test(srv));
+  ok("the page is rendered by accounting-ui", /async function renderCompanies/.test(ui));
+  ok("…and is exported", /renderCompanies,/.test(ui));
+  ok("…and reachable from the dashboard",
+     /href="\/admin\/accounting\/companies"/.test(ui));
+
+  // No inline <script>: this page prints company names the user typed, inside
+  // a template literal. An apostrophe reaching a script block is what took
+  // client search down for five hours on 2026-09-28.
+  const page = ui.slice(ui.indexOf("async function renderCompanies"),
+                        ui.indexOf("module.exports"));
+  ok("the companies page carries no inline script", !/<script/i.test(page));
+  ok("…and escapes the names it prints", /esc\(c\.name\)/.test(page));
+
+  // createCompany must never be able to mint a second law firm.
+  const create = src.slice(src.indexOf("async function createCompany"),
+                           src.indexOf("async function seedCOA"));
+  ok("a new company is never the law firm",
+     /is_law_firm, is_default\)\s*\n?\s*VALUES \(\$1, \$2, FALSE, FALSE\)/.test(create));
+  ok("…and it is seeded with the business chart, which has no trust accounts",
+     /seedCOA\(company\.id, BUSINESS_COA\)/.test(create));
+}
+
 // ── Behaviour: the guard refuses, against a stubbed database ───────────
 console.log("the guard, exercised");
 
