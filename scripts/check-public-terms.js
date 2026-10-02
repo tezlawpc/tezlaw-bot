@@ -64,5 +64,40 @@ if (at > 0) {
      !/free consultation|contact us today|hire us|call now/i.test(route));
 }
 
+// ── The Disconnect URL Intuit sends people to ─────────────────────────
+// Intuit requires a Disconnect URL that a browser can GET. The app's own
+// disconnect is a POST behind admin auth, so it cannot serve as one.
+{
+  const d = srv.indexOf('app.get("/legal/quickbooks-disconnected"');
+  ok("there is a GET disconnect landing page", d > 0);
+  if (d > 0) {
+    const next = srv.indexOf("\napp.", d + 10);
+    const page = srv.slice(d, next > 0 ? next : srv.length);
+
+    // The dangerous shortcut: having this public URL revoke the tokens. Anyone
+    // who learned the URL could then sign the firm out of QuickBooks.
+    ok("it does not revoke anything — it is a public URL",
+       !/disconnect\(|DELETE FROM accounting_qb_config|saveConfig\(/.test(page));
+    ok("it carries no inline <script>", !/<script/i.test(page));
+
+    // The thing that is otherwise invisible: Intuit does not tell the app.
+    ok("it says disconnecting inside QuickBooks does not notify the app",
+       /not\s+told\s+when\s+that\s+happens/i.test(page));
+    ok("…and says the admin will keep showing it as connected",
+       /keep\s+showing\s+the\s*\n?\s*connection\s+as\s+active/i.test(page));
+    ok("it says nothing in QuickBooks is deleted",
+       /Nothing\s+already\s+in\s+QuickBooks\s+is\s+changed/i.test(page));
+    ok("it explains how to reconnect", /To\s+reconnect/i.test(page));
+    const bad = (page.match(/\b(#1|No\.? ?1|best|top-rated|leading|premier)\b/gi) || []);
+    ok("no superlative claims", bad.length === 0, bad.join(", "));
+  }
+
+  // The real disconnect must stay an authenticated POST.
+  ok("the real disconnect is still a POST under /admin",
+     /app\.post\("\/admin\/accounting\/quickbooks\/disconnect"/.test(srv));
+  ok("…and there is no GET that disconnects",
+     !/app\.get\("\/admin\/accounting\/quickbooks\/disconnect"/.test(srv));
+}
+
 console.log(failures ? "\n" + failures + " failed" : "\nall good");
 process.exit(failures ? 1 : 0);

@@ -9072,6 +9072,63 @@ app.post("/legal/digest/run", async (req, res) => {
 //
 // Public by design — it sits above the /admin auth gate so Intuit's reviewer
 // can read it without signing in. No inline <script>, nothing dynamic.
+// ── Where QuickBooks sends people after they disconnect ─────────────
+//
+// Intuit's app form requires a Disconnect URL, and it must be a page a
+// browser can GET. The app's own disconnect is a POST behind admin auth, so
+// it cannot serve: Intuit would be sending users to a 404.
+//
+// Deliberately PUBLIC and deliberately INERT. The obvious shortcut — have
+// this URL revoke the firm's tokens — would mean anyone who learned the URL
+// could sign the firm out of QuickBooks by visiting it. So it explains what
+// happened and points at the admin, where disconnecting is an authenticated
+// POST.
+//
+// It also states the thing that is otherwise invisible: disconnecting inside
+// QuickBooks does not notify this app, so the admin screen will keep saying
+// "connected" until a sync actually fails.
+app.get("/legal/quickbooks-disconnected", (req, res) => {
+  res.set("Content-Type", "text/html; charset=utf-8").send(`<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuickBooks disconnected — Tez Law P.C.</title>
+<style>
+  body { font: 16px/1.65 -apple-system, system-ui, Segoe UI, sans-serif; margin: 0; background: #faf8f4; color: #1a1a1a; }
+  main { max-width: 620px; margin: 0 auto; padding: 56px 20px 80px; }
+  h1 { font-size: 24px; margin: 0 0 16px; color: #0C1C36; }
+  p { margin: 0 0 14px; }
+  .note { background: #fff8e1; border-left: 4px solid #f57f17; padding: 14px 16px; border-radius: 6px; font-size: 14px; }
+  a { color: #A02818; }
+  footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid #e0ddd6; color: #666; font-size: 13px; }
+</style>
+<main>
+  <h1>QuickBooks has been disconnected</h1>
+
+  <p>The connection between QuickBooks Online and the Tez Law P.C. internal
+  accounting system has been removed. No further bookkeeping entries will be
+  sent to QuickBooks, and the system can no longer read that company file.</p>
+
+  <p>Nothing already in QuickBooks is changed or removed by disconnecting, and
+  the firm's own ledger is unaffected.</p>
+
+  <div class="note">
+    <strong>If you disconnected from inside QuickBooks:</strong> this app is not
+    told when that happens. Its own settings screen will keep showing the
+    connection as active until the next sync fails. To clear it properly, sign
+    in to the firm's admin and press Disconnect there as well.
+  </div>
+
+  <p style="margin-top:20px;">To reconnect, sign in to the firm's admin and go to
+  Accounting → QuickBooks → Connect.</p>
+
+  <footer>
+    Tez Law P.C. · 4141 S Nogales Street C102, West Covina, CA 91792 ·
+    <a href="/legal/terms">Terms of Use</a> ·
+    <a href="https://tezlawfirm.com/our-privacy-policy/">Privacy Policy</a>
+  </footer>
+</main>`);
+});
+
 app.get("/legal/terms", (req, res) => {
   res.set("Content-Type", "text/html; charset=utf-8").send(`<!doctype html>
 <meta charset="utf-8">
