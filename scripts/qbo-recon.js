@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * scripts/qbo-recon.js
  *

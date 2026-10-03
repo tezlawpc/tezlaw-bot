@@ -481,6 +481,105 @@ async function saveAccountMapping(ourAccountNumber, qbAccountId, company_id = nu
 }
 
 // Auto-match by name — call after connecting to try automatic mapping
+// Our account types map one-to-one onto QuickBooks' Classification. A name
+// that matches across a type boundary is a different account that happens to
+// share a word, never the same account.
+const QBO_CLASSIFICATION = {
+  asset: "Asset",
+  liability: "Liability",
+  equity: "Equity",
+  revenue: "Revenue",
+  expense: "Expense",
+};
+
+// Compare names the way a person would: case, punctuation and "&" versus
+// "and" are noise. Everything else has to agree exactly.
+function normAccountName(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Decide which of our accounts map onto which QuickBooks accounts.
+ *
+ * Pure: no database, no network. autoMapAccounts() does the I/O around it,
+ * and the check script feeds it the firm's real account names.
+ *
+ * THE BUG THIS REPLACES
+ *   The previous version fell back to
+ *       shortName = ours.name.replace(/ - .+$/, "")   // "Cash - IOLTA Trust Account" -> "Cash"
+ *       qb.Name.toLowerCase().includes(shortName)     // matches "Cash on hand"
+ *   Against the firm's actual realm that mapped the IOLTA trust account to
+ *   petty cash, sent the operating account to the same target, and collapsed
+ *   all seven "Legal Fees - ..." income accounts onto whichever matched
+ *   first. A wrong trust mapping posts client money into a firm account, so
+ *   this now refuses every match it is not certain of and hands it back for a
+ *   person to make.
+ *
+ * RULES
+ *   1. Names must be equal once normalized. No substrings, no prefixes.
+ *   2. The QuickBooks Classification must agree with our account type.
+ *   3. Two candidates is not a match. It is an ambiguity, and it is reported.
+ *   4. One QuickBooks account can back only one of ours.
+ *   5. Trust accounts are never mapped automatically, however good the match.
+ */
+function planAccountMappings(ourAccounts, qboAccounts, existing = {}) {
+  const mappings = { ...existing };
+  const report = { matched: 0, mapped: [], ambiguous: [], unmatched: [], skipped_trust: [] };
+
+  // A QuickBooks account already spoken for cannot be claimed again.
+  const claimed = new Set(Object.values(mappings).map(String));
+
+  for (const ours of ourAccounts || []) {
+    if (mappings[ours.account_number]) continue;
+
+    // Rule 5. The cost of a wrong guess here is client money in a firm
+    // account, which no amount of convenience justifies.
+    if (ours.subtype === "trust_bank" || ours.subtype === "trust") {
+      report.skipped_trust.push({ account_number: ours.account_number, name: ours.name });
+      continue;
+    }
+
+    const want = normAccountName(ours.name);
+    const wantClass = QBO_CLASSIFICATION[String(ours.type || "").toLowerCase()] || null;
+
+    const candidates = (qboAccounts || []).filter(qb => {
+      if (normAccountName(qb.Name) !== want) return false;                                   // rule 1
+      if (wantClass && qb.Classification && qb.Classification !== wantClass) return false;   // rule 2
+      if (claimed.has(String(qb.Id))) return false;                                          // rule 4
+      return true;
+    });
+
+    if (candidates.length === 1) {
+      const hit = candidates[0];
+      mappings[ours.account_number] = String(hit.Id);
+      claimed.add(String(hit.Id));
+      report.matched++;
+      report.mapped.push({
+        account_number: ours.account_number,
+        name: ours.name,
+        qb_id: String(hit.Id),
+        qb_name: hit.Name,
+      });
+    } else if (candidates.length > 1) {                                                      // rule 3
+      report.ambiguous.push({
+        account_number: ours.account_number,
+        name: ours.name,
+        candidates: candidates.map(c => ({ id: String(c.Id), name: c.Name })),
+      });
+    } else {
+      report.unmatched.push({ account_number: ours.account_number, name: ours.name });
+    }
+  }
+
+  report.needs_manual =
+    report.ambiguous.length + report.unmatched.length + report.skipped_trust.length;
+  return { mappings, report };
+}
+
 async function autoMapAccounts(company_id = null) {
   const accounting = require("./accounting");
   const cid = await companyIdOf(company_id);
@@ -491,30 +590,12 @@ async function autoMapAccounts(company_id = null) {
     accounting.listAccounts(cid),
     fetchQBOAccounts(cid),
   ]);
-  const mappings = await getAccountMappings(cid);
-  let matched = 0;
+  const existing = await getAccountMappings(cid);
 
-  for (const ours of ourAccounts) {
-    if (mappings[ours.account_number]) continue; // already mapped
-    // Try exact-name match, then case-insensitive substring
-    let match = qboAccounts.find(qb =>
-      qb.Name && qb.Name.toLowerCase() === ours.name.toLowerCase()
-    );
-    if (!match) {
-      // Strip trailing qualifiers like "- Operating" for looser match
-      const shortName = ours.name.replace(/ - .+$/, "").trim();
-      match = qboAccounts.find(qb =>
-        qb.Name && qb.Name.toLowerCase().includes(shortName.toLowerCase())
-      );
-    }
-    if (match) {
-      mappings[ours.account_number] = String(match.Id);
-      matched++;
-    }
-  }
+  const { mappings, report } = planAccountMappings(ourAccounts, qboAccounts, existing);
 
   await saveConfig({ account_mappings: JSON.stringify(mappings) }, cid);
-  return { matched, our_total: ourAccounts.length, qbo_total: qboAccounts.length };
+  return { ...report, our_total: ourAccounts.length, qbo_total: qboAccounts.length };
 }
 
 // ─── Push a journal entry to QBO ────────────────────────
@@ -842,6 +923,9 @@ module.exports = {
   getAuthorizeUrl, exchangeCodeForTokens, refreshAccessToken, disconnect,
   qboRequest, fetchQBOAccounts, fetchCompanyInfo,
   getAccountMappings, saveAccountMapping, autoMapAccounts,
+  // Pure, so the check can run the real matching logic without a database
+  // or a network. The bug this guards against was invisible to a source scan.
+  planAccountMappings, normAccountName,
   pushJournalEntry, pushAllUnsyncedEntries,
   getSyncStatus, getConfig, ensureConfigColumns,
   getRedirectUri,

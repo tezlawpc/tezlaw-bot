@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * scripts/trust-ledger-audit.js
  *
