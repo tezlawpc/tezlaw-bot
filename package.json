@@ -1,7 +1,7 @@
 {
   "name": "tezlaw-bot",
   "version": "2.0.0",
-  "description": "TEZ Law PC — Zara AI Assistant (All Platforms Combined)",
+  "description": "TEZ Law PC \u2014 Zara AI Assistant (All Platforms Combined)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -48,7 +48,8 @@
     "check:dictation-slices": "node scripts/check-dictation-slices.js",
     "check:offline-notes": "node scripts/check-offline-notes.js",
     "check:consultant-scope": "node scripts/check-consultant-scope.js",
-    "check:pi-brokers": "node scripts/check-pi-brokers.js"
+    "check:pi-brokers": "node scripts/check-pi-brokers.js",
+    "audit:trust": "node scripts/trust-ledger-audit.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
