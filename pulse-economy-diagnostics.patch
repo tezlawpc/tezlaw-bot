@@ -1,0 +1,115 @@
+From: Pulse diagnostics
+Subject: [PATCH] Show what a crafter can actually reach, and unblock the advance
+
+Three changes, one build.
+
+1. PulseStatus printed only wood/ore/food, so leather, ingots and wares were
+   invisible whatever their value -- a town could be swimming in ore with no
+   ingot to its name and the readout looked the same. Now prints every kind,
+   and beside each the amount no resident has claimed, which is the only part
+   Buy can take from the town's own stores.
+
+2. "X holds 6 of it" was share.TotalValue() -- a resident's total across all
+   kinds, with the kind never named. Now names each kind, and prints the purse,
+   which is the number that decides whether a crafter can buy at all.
+
+3. Advance refused a top-up to any crafter holding a single coin. Buy only
+   reaches for an advance when the purse is already short of one unit's price,
+   so a crafter sitting on 2gp with ore at 3gp could neither buy nor be topped
+   up -- permanently. Now tops up anyone short of a unit.
+
+Plus: Thoughts.Ask passed the stockpile count with no unit attached, so "The
+town holds 220" came back from the model as "a town of 220 people" (Britain has
+57). The unit is now in the prompt.
+
+--- a/src/Pulse/Commands/PulseCommands.cs
++++ b/src/Pulse/Commands/PulseCommands.cs
+@@ -236,8 +236,27 @@
+             );
+
+-            from.SendMessage(
+-                $"    stores: wood {settlement.Stockpile[ResourceKind.Wood]} " +
+-                $"ore {settlement.Stockpile[ResourceKind.Ore]} " +
+-                $"food {settlement.Stockpile[ResourceKind.Food]}"
+-            );
++            // Every kind, not just the three that are gathered: a town can be swimming
++            // in ore and have no ingot to its name, and the old three-kind line hid
++            // exactly that. The bracketed figure is what no resident has claimed, which
++            // is the only part Buy can spend from the town's own stores.
++            var stores = string.Empty;
++
++            foreach (var kind in new[]
++                     {
++                         ResourceKind.Wood, ResourceKind.Ore, ResourceKind.Food,
++                         ResourceKind.Leather, ResourceKind.Ingot, ResourceKind.Goods
++                     })
++            {
++                var total = settlement.Stockpile[kind];
++                var unclaimed = total;
++
++                foreach (var (_, claim) in settlement.Ledger.Shares)
++                {
++                    unclaimed -= claim[kind];
++                }
++
++                stores += $"{kind.DisplayName()} {total}({unclaimed}) ";
++            }
++
++            from.SendMessage($"    stores, (unclaimed): {stores}");
+
+@@ -266,7 +285,30 @@
+
+                 if (owners <= 5)
+                 {
+-                    var who = World.FindMobile(owner)?.Name ?? "the town";
+-                    from.SendMessage(0x3B2, $"    {who} holds {share.TotalValue()} of it");
++                    var holder = World.FindMobile(owner);
++                    var who = holder?.Name ?? "the town";
++                    var what = string.Empty;
++
++                    foreach (var kind in new[]
++                             {
++                                 ResourceKind.Wood, ResourceKind.Ore, ResourceKind.Food,
++                                 ResourceKind.Leather, ResourceKind.Ingot, ResourceKind.Goods
++                             })
++                    {
++                        if (share[kind] > 0)
++                        {
++                            what += $"{share[kind]} {kind.DisplayName()}, ";
++                        }
++                    }
++
++                    // The purse is the whole question for a crafter: Buy is capped by it,
++                    // and Advance only tops one up when it is short of a single unit.
++                    var purse = holder == null ? -1 : Purse.Balance(holder);
++
++                    from.SendMessage(
++                        0x3B2,
++                        $"    {who} holds {(what.Length == 0 ? "nothing, " : what)}" +
++                        $"purse {(purse < 0 ? "n/a" : purse.ToString())}"
++                    );
+                 }
+             }
+--- a/src/Pulse/Economy/Workshop.cs
++++ b/src/Pulse/Economy/Workshop.cs
+@@ -217,6 +217,6 @@
+             Thoughts.Ask(
+                 crafter,
+                 $"Cannot get {input.DisplayName()} to work with. The town holds "
+-                + $"{_settlement.Stockpile[input]} and is "
++                + $"{_settlement.Stockpile[input]} {input.DisplayName()} and is "
+                 + (_settlement.Upkeep.Hungry ? "going hungry." : "fed for now."),
+                 _settlement.Upkeep.Hungry ? 3 : 2
+@@ -491,7 +491,11 @@
+     {
+         var advance = unitPrice * PulseConfig.OpeningStockBatches;
+
+-        if (Purse.Balance(crafter) > 0 || !_settlement.Economy.CanAfford(advance))
++        // Was "> 0", which refused an advance to any crafter holding a single coin --
++        // including one holding less than one unit's price, who could then neither buy
++        // nor be topped up, for the rest of his life. Buy only reaches for an advance
++        // when the purse is already short of a unit, so this is exactly that gap.
++        if (Purse.Balance(crafter) >= unitPrice || !_settlement.Economy.CanAfford(advance))
+         {
+             return 0;
+         }
