@@ -49,7 +49,8 @@
     "check:offline-notes": "node scripts/check-offline-notes.js",
     "check:consultant-scope": "node scripts/check-consultant-scope.js",
     "check:pi-brokers": "node scripts/check-pi-brokers.js",
-    "audit:trust": "node scripts/trust-ledger-audit.js"
+    "audit:trust": "node scripts/trust-ledger-audit.js",
+    "audit:qbo": "node scripts/qbo-recon.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
