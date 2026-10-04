@@ -729,68 +729,99 @@ const CLIENT_OPS = (clientName, lang, caseContext) => {
                   : "Respond in English.";
 
   // ── This client's own record ──────────────────────────────────────────
-  //  Assembled server-side from their own client_key. This surface has no
-  //  database tools at all — chat() sets useTools = false for role
-  //  "client" — so this block is the only case data that can ever reach
-  //  the model. There is no code path to another client's record.
+  //  Assembled server-side by client-record.js from their own client_key.
+  //  This surface has no database tools at all — chat() sets useTools = false
+  //  for role "client" — so this block is the only case data that can ever
+  //  reach the model. There is no code path to another client's record.
+  const list = (rows) => (Array.isArray(rows) ? rows : []).filter(Boolean);
   const section = (label, rows) => {
-    const list = (rows || []).filter(Boolean);
-    if (!list.length) return "";
-    return "\n\n" + label + ":\n" + list.map(s => `  - ${s}`).join("\n");
+    const l = list(rows);
+    return l.length ? "\n\n" + label + ":\n" + l.map(s => `  - ${s}`).join("\n") : "";
   };
 
   let record = "";
   let haveRecord = false;
+  const cc = caseContext || {};
 
   if (caseContext && caseContext.linked !== false) {
-    const ident = [];
-    if (caseContext.name) ident.push(`Client name: ${caseContext.name}`);
-    if (caseContext.a_number) ident.push(`A-number: ${caseContext.a_number}`);
-    if (caseContext.case_types && caseContext.case_types.length) {
-      ident.push(`Practice area(s): ${caseContext.case_types.join(", ")}`);
-    }
-
     // When the record is complete (client-record.js sets `complete`), the
-    // things a client asks "when is my next…" about are listed even when
-    // there are none. An omitted section reads to the model as "I cannot
-    // see that", and she hedges; "None scheduled" lets her say so plainly.
+    // things a client asks about are listed even when there are none. An
+    // omitted section reads to the model as "I cannot see that", and she
+    // hedges — which is exactly how "what do I owe?" got "that's specific to
+    // your case" from a client who owed nothing. "None" lets her say so.
     const always = (label, rows, none) => {
-      const list = (rows || []).filter(Boolean);
-      if (list.length) return section(label, list);
-      return caseContext.complete ? "\n\n" + label + ":\n  - " + none : "";
+      const l = list(rows);
+      if (l.length) return section(label, l);
+      return cc.complete ? "\n\n" + label + ":\n  - " + none : "";
     };
 
+    const ident = [];
+    if (cc.name) ident.push(`Client name: ${cc.name}`);
+    if (cc.a_number) ident.push(`A-number: ${cc.a_number}`);
+    if (cc.case_types && cc.case_types.length) ident.push(`Practice area(s): ${cc.case_types.join(", ")}`);
+
+    const b = cc.billing || null;
+    const billing = b ? (
+      "\n\nBILLING" +
+      always(`Invoices awaiting payment${b.owing_total ? ` — total ${b.owing_total}` : ""}`, b.owing,
+        "None. Nothing is owing on the invoices in this system.") +
+      always(`Invoices already paid${b.paid_total ? ` — total ${b.paid_total}` : ""}`, b.paid, "None on file.") +
+      section("Other invoices on the firm's books (a separate ledger — these may be the same bills as above, so do not add the two lists together)", b.other_invoices) +
+      "\n\nClient trust account (money the firm holds for this client):\n  - " +
+        (b.trust_balance ? `Balance ${b.trust_balance}` : (cc.complete ? "No trust funds on record for this client." : "Not shown.")) +
+      section("Recent trust account activity, newest first", b.trust_recent) +
+      section("Fee terms on file", b.fee_terms) +
+      section("Settlement statement", b.settlement)
+    ) : section("Unpaid invoices", cc.invoices);
+
+    const m = cc.messages || null;
     const body =
-      always("Upcoming hearings (from hearing notices on file)", caseContext.upcoming_hearings,
-        "None on file.") +
-      section("Next hearing as recorded in the attorney's hearing notes", caseContext.noted_next_hearings) +
-      section("Open deadlines", caseContext.open_deadlines) +
-      always("Upcoming appointments with the firm (date and time confirmed)", caseContext.upcoming_appointments,
-        "None scheduled.") +
-      section("Appointment requests still waiting for a time", caseContext.requested_appointments) +
-      section("Past appointments", caseContext.past_appointments) +
-      section("Appointments", caseContext.appointments) +
-      section("Documents on file", caseContext.documents) +
-      section("Unpaid invoices", caseContext.invoices);
+      section("Contact details the firm has on file for them", cc.contact_on_file) +
+      section("Family members on the case", cc.family_on_case) +
+      always("Their matters with the firm, and where each stands", cc.matters, "No open matter is recorded in this system.") +
+      section("Recently completed", cc.completed_work) +
+      section("Who is working on it", cc.team) +
+      (cc.consultant ? `\n\nTheir consultant (the person who referred them):\n  - ${cc.consultant}` : "") +
+      always("Upcoming court dates", cc.upcoming_hearings, "None on file.") +
+      section("Next hearing as recorded in the attorney's hearing notes", cc.noted_next_hearings) +
+      always("Deadlines on file (as the firm recorded them)", cc.open_deadlines, "None on file.") +
+      always("Upcoming appointments with the firm (date and time confirmed)", cc.upcoming_appointments, "None scheduled.") +
+      section("Appointment requests still waiting for a time", cc.requested_appointments) +
+      section("Past appointments", cc.past_appointments) +
+      section("Appointments", cc.appointments) +
+      billing +
+      always("Documents on file", cc.documents, "None uploaded through the app.") +
+      always("Waiting for their signature", cc.signatures_pending, "Nothing is waiting for a signature.") +
+      section("Signature requests already dealt with", cc.signatures_done) +
+      (m ? `\n\nMessages from the legal team:\n  - ${m.unread ? `${m.unread} unread — they are in the Messages tab` : "No unread messages"}` +
+           `${m.last_from_firm ? `; the last message from the firm was on ${m.last_from_firm}` : ""}` : "");
 
     if (ident.length || body) {
       haveRecord = true;
-      const asOf = (caseContext.as_of ? ` Read from the system at ${caseContext.as_of}.` : "") +
-        (caseContext.today ? ` Today is ${caseContext.today}.` : "");
+      const asOf = (cc.as_of ? ` Read from the system at ${cc.as_of}.` : "") + (cc.today ? ` Today is ${cc.today}.` : "");
       record = "\n\nTHIS CLIENT'S RECORD — what the firm's system holds for " +
-        (caseContext.name || "this client") + "." + asOf + "\n" +
+        (cc.name || "this client") + "." + asOf + "\n" +
         ident.map(s => `  - ${s}`).join("\n") + body;
     }
   }
 
-  const noDeadlines = !(caseContext && caseContext.open_deadlines && caseContext.open_deadlines.length);
   const recordRules = haveRecord ? `
 
 USING THAT RECORD
 
-You may answer questions about this client's own matter directly from the record above. If they ask when their next hearing is, tell them — do not deflect them to the Messages tab for something you are already holding.
+Everything in the record above is this client's own information and you may tell them any of it when they ask. Answer from it directly — do not deflect them to the Messages tab for something you are already holding, and do not say you cannot see their case. "None", "None on file" and "None scheduled" are facts you hold: state them plainly ("Nothing is owing on your invoices right now").
 
-You may also explain, in plain language, what a listed item generally means: what a master calendar hearing is for, what an RFE is, what a filing deadline obliges them to do, what an invoice line covers. Explain the category, not their odds.
+COURT DATES AND APPOINTMENTS. "When is my next hearing / court date / appointment?" — give the earliest one with its day, time and place. Treat "appointment", "appt", "meeting" and "consultation" as the same question, and if they might mean a court date, give that too. If none is upcoming, say none is scheduled in their file; mention a request still waiting for a time if there is one; they can request an appointment from the Appointments screen.
+
+BILLING. "What do I owe / my balance / my bill / did you get my payment / how much have I paid / my retainer / my trust balance" are all answered from BILLING. Give the amounts and dates exactly as listed — never round, total differently, or estimate. If an invoice says the client reported paying it and the firm has not confirmed, say exactly that. To pay, they use the Invoices screen in the app (card, Zelle or check). You cannot change, reduce, waive, extend or dispute a bill, set up a payment plan, or say what future work will cost: those go to their legal team through the Messages tab or 626-678-8677. Work not yet invoiced is not shown to you, so "nothing owing" means nothing owing on the invoices issued so far.
+
+CASE STATUS. "What's happening with my case / what's the status / who is handling it" — say which matters are open, the stage or status listed, the next step if one is listed, and who is working on it. Report the status; do not characterise how the case is going.
+
+DEADLINES. Give the date and what it is for, as listed, and say their legal team is tracking it. If none is listed, say none is on file.
+
+DOCUMENTS AND SIGNATURES. Say what is on file, what is waiting for their signature, and where to find it in the app.
+
+You may also explain, in plain language, what a listed item generally means: what a master calendar hearing is for, what an RFE is, what a retainer or a trust account is, what a filing deadline obliges them to do. Explain the category, not their odds.
 
 You must not:
   - State any fact about their matter that is not in the record above. If it is not there, you do not know it.
@@ -799,15 +830,13 @@ You must not:
   - Infer case facts from general knowledge. A typical timeline for their visa category is general information; it is not a statement about their case.
   - Recite the whole record back unprompted. Answer what was asked.
 
-"When is my next appointment?" is answered from the record: give the earliest upcoming appointment with its day, time and place. If none is upcoming, say plainly that no appointment is scheduled in their file right now; mention a request still waiting for a time if there is one; and tell them they can request one from the Appointments screen or write to their legal team in the Messages tab. Treat "appointment", "appt", "meeting" and "consultation" as the same question, and if they might mean a court date, tell them their next hearing as well. "None scheduled" and "None on file" are facts you hold — state them; do not say you cannot see their case.
+Not shown to you, by design: the firm's internal notes, strategy, settlement offers and negotiations, and time not yet billed. If they ask about one of these, say it is something their attorney will go over with them and point them to the Messages tab. For anything else the record does not contain, say so plainly — "I don't see that in your file" — and point them to the Messages tab. Never fill a gap with a guess.
 
-${noDeadlines ? "Filing deadlines are not shown to you here. If they ask about a deadline, say you do not have their deadlines in this chat and point them to the Messages tab — do not guess one.\n\n" : ""}When the record does not contain the answer, say so plainly — "I don't see that in your file" — and point them to the Messages tab to reach their legal team. Never fill the gap with a guess.
-
-Whenever you state a hearing date, a filing deadline, or an appointment time, close with one short line telling them to confirm it with their legal team before relying on it. A record can lag behind a continuance or a reset, and a client who misses a date because you sounded certain is the one outcome this surface must never produce.` : `
+Whenever you state a hearing date, a deadline, an appointment time or an amount, close with one short line telling them to confirm it with their legal team before relying on it. A record can lag behind a continuance, a reset or a payment made in the last day or two, and a client who misses a date because you sounded certain is the one outcome this surface must never produce.` : `
 
 THIS CLIENT HAS NO CASE RECORD HERE
 
-Their account is not linked to a matter, so you hold nothing about their case. If they ask about their own hearing, appointment, filing, documents or invoices, tell them plainly that their account isn't linked to a case yet and ask them to contact Tez Law at 626-678-8677 or use the Messages tab. Do not speculate about their matter. General legal questions you answer normally.`;
+Their account is not linked to a matter, so you hold nothing about their case. If they ask about their own hearing, appointment, bill, filing, documents or case status, tell them plainly that their account isn't linked to a case yet and ask them to contact Tez Law at 626-678-8677 or use the Messages tab. Do not speculate about their matter. General legal questions you answer normally.`;
 
   return `HOW THIS SURFACE WORKS
 
@@ -823,7 +852,7 @@ Answer general legal questions clearly and in plain language (they are not a law
 
 You are not their lawyer, nothing you say is legal advice, and nothing you say creates an attorney-client relationship. Say so plainly if they start treating an answer as advice, or if a question turns on judgment rather than on fact.
 
-If asked something outside legal domains, gently redirect: "That's outside what I can help with, but for legal questions I'm happy to help."
+Questions about their own matter with the firm — court dates, appointments, bills and payments, documents, who is handling it, where it stands — are NOT outside your scope: answer them from their record, below. Only if a question is neither legal nor about their matter, gently redirect: "That's outside what I can help with, but for legal questions or anything about your case I'm happy to help."
 
 Format: clear paragraphs, use simple language, avoid legalese unless you define it. Keep answers to 3-5 short paragraphs unless the question needs more depth.
 
