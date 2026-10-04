@@ -288,11 +288,70 @@ async function parseRaw(raw) {
   };
 }
 
+// Returns { text, error }. The error used to be swallowed and an empty string
+// returned, which meant a PDF that would not extract looked exactly like a PDF
+// with nothing in it: the model was handed an email with no document and the
+// failure surfaced later, somewhere else, as something else entirely.
 async function attachmentText(att) {
   const name = String(att.filename || "").toLowerCase();
-  if (!/\.(pdf|docx|txt)$/.test(name)) return "";
-  try { return String(await require("./civil-intake-extract").textFromBuffer(att.content, att.filename) || "").trim(); }
-  catch (e) { return ""; }
+  if (!/\.(pdf|docx|txt)$/.test(name)) return { text: "", error: null };
+  try {
+    const text = String(await require("./civil-intake-extract").textFromBuffer(att.content, att.filename) || "").trim();
+    if (!text) {
+      // A scan with no text layer. Worth saying out loud: it is the usual
+      // reason a court document reads as blank.
+      return { text: "", error: "no text layer (looks like a scan)" };
+    }
+    return { text, error: null };
+  } catch (e) {
+    console.warn(`[court-mail] could not read ${att.filename}: ${e.message}`);
+    return { text: "", error: e.message };
+  }
+}
+
+// Ask the model for the docketing JSON, and be honest about how it failed.
+//
+// think() does not throw when a model answers with nothing: it returns
+// { text: "" }. parseJson then reported "Zara did not return JSON", which is
+// true and useless -- an empty answer, a refusal and a chatty non-JSON reply
+// all arrived under the same sentence. This separates them, and escalates
+// rather than re-sending the same prompt to the same model.
+async function readWithModel(ask, prompt, parse) {
+  const attempts = [
+    { tier: "balanced", text: prompt, why: "first reading" },
+    { tier: "balanced", text: prompt + "\n\nIMPORTANT: reply with the JSON object ONLY.", why: "retry asking for JSON alone" },
+    // A judge's order is worth the better model rather than a third identical try.
+    { tier: "deep", text: prompt + "\n\nIMPORTANT: reply with the JSON object ONLY.", why: "escalated to the deep tier" },
+  ];
+
+  const failures = [];
+  for (const attempt of attempts) {
+    let out;
+    try {
+      out = await ask(attempt.text, attempt.tier);
+    } catch (e) {
+      failures.push(`${attempt.why}: the model call failed (${e.message})`);
+      continue;
+    }
+    const said = String(out && out.text || "").trim();
+    const where = out && out.provider ? ` via ${out.provider}${out.model ? "/" + out.model : ""}` : "";
+    if (!said) {
+      failures.push(`${attempt.why}: the model returned an empty answer${where}` +
+                    (out && out.stop_reason ? ` (stop reason: ${out.stop_reason})` : ""));
+      continue;
+    }
+    try {
+      return parse(said);
+    } catch (e) {
+      // Keep what it actually said: "did not return JSON" with no sample is
+      // the hardest version of this to diagnose.
+      failures.push(`${attempt.why}: answered with no JSON in it${where} — it said: ${said.slice(0, 200).replace(/\s+/g, " ")}`);
+    }
+  }
+
+  const err = new Error("Could not read this email automatically. " + failures.join(" | "));
+  err.readFailures = failures;
+  throw err;
 }
 
 const KINDS = ["hearing_notice", "order", "ruling", "minute_order", "filing_served", "notice_of_filing", "judgment",
@@ -879,19 +938,47 @@ async function processMail(id, { target = null, think = null, by = null, notify 
     }
     if (!reading) {
       const attTexts = [];
-      for (const a of mail.attachments) attTexts.push({ filename: a.filename, text: await attachmentText(a) });
+      const attProblems = [];
+      for (const a of mail.attachments) {
+        const got = await attachmentText(a);
+        attTexts.push({ filename: a.filename, text: got.text });
+        if (got.error) attProblems.push(`${a.filename}: ${got.error}`);
+      }
       const prompt = buildPrompt(mail, attTexts);
-      const ask = think || (message => require("./zara-core").think({
-        surface: "system", tier: "balanced", message, lessonScope: "court-mail",
+      const ask = think || ((message, tier) => require("./zara-core").think({
+        surface: "system", tier: tier || "balanced", message, lessonScope: "court-mail",
         extra: "You are a careful docketing clerk. Missing a date is recoverable; a wrong date on the calendar is not. Reply with one JSON object and nothing else.",
-        maxTokens: 3000, maxMessageChars: prompt.length + 100, timeout: 120000,
+        maxTokens: 3000, maxMessageChars: String(message).length + 100, timeout: 120000,
       }));
       const parse = require("./civil-intake-extract").parseJson;
+
       let raw;
-      try { raw = parse((await ask(prompt)).text); }
-      catch (e) { raw = parse((await ask(prompt + "\n\nIMPORTANT: reply with the JSON object ONLY.")).text); }
+      try {
+        raw = await readWithModel(ask, prompt, parse);
+      } catch (e) {
+        // Court mail is not something to drop on the floor. This used to throw,
+        // which marked the row 'error', retried the identical prompt three
+        // times and then sat there -- so a pre-hearing order from an
+        // immigration judge showed up as a red error and nothing else. Park it
+        // for a person instead, saying what went wrong and what was in it.
+        const why = [e.message, attProblems.length ? `Attachment trouble — ${attProblems.join("; ")}` : null]
+          .filter(Boolean).join(" | ");
+        await db.query(
+          `UPDATE court_mail SET status = 'needs_review', note = $2, notify_mode = 'ping', processed_at = NOW() WHERE id = $1`,
+          [row.id, why]
+        );
+        if (notify) {
+          await tellJJ(`📨 Court email needs you: ${mail.subject || "(no subject)"}\n` +
+                       `Zara could not read it automatically.\n${why}\nOpen it: ${pageUrl(row.id)}`);
+        }
+        return (await db.query(`SELECT * FROM court_mail WHERE id = $1`, [row.id])).rows[0];
+      }
+
       const sourceText = [mail.subject, mail.text, ...attTexts.map(a => a.text)].join("\n");
       reading = cleanReading(raw, sourceText);
+      if (attProblems.length) {
+        reading.summary = [reading.summary, `Note: ${attProblems.join("; ")}`].filter(Boolean).join("\n");
+      }
       await db.query(`UPDATE court_mail SET reading = $2::jsonb WHERE id = $1`, [row.id, JSON.stringify(reading)]);
     }
     reading.suggested = reading.suggested || [];
@@ -1247,4 +1334,5 @@ module.exports = {
   caseKey, aDigits, matchReading, matchByName, suggestClients, learnANumber,
   processMail, undoAction, markHandled, list, forClient, status, runOnce, start,
   eoirReading, pendingDigest, sendDigest,
+  readWithModel, attachmentText,
 };
