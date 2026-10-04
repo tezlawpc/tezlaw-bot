@@ -6202,17 +6202,62 @@ app.post("/admin/deadlines/sync-all", auth.requireRole("admin"), async (req, res
 // ── EOIR Calendar (unified hearings + deadlines) ─────
 
 // ── Outlook Sync ─────────────────────────────────────
-app.get("/admin/outlook-sync", async (req, res) => {
+// ── Calendars ────────────────────────────────────────────
+// Every calendar the court calendar pulls from. The old Outlook Sync page was
+// the single-feed version of this, and it edited outlook_config — which the
+// sync no longer reads. Leaving it reachable would mean pasting a URL into a
+// form that quietly changes nothing, so it comes here instead.
+app.get("/admin/outlook-sync", (req, res) => res.redirect("/admin/calendars"));
+
+app.get("/admin/calendars", async (req, res) => {
   try {
-    const outlook = require("./outlook-sync");
+    const feeds = require("./calendar-feeds");
     const hearingNotes = require("./hearing-notes");
-    const config = await outlook.getConfig();
-    const events = await outlook.listRecentEvents(100);
-    const body = outlook.renderSettingsPage(config, events);
-    res.send(hearingNotes.renderAdminChrome({ title: "Outlook Sync", body, activeItem: "calendar" }));
+    const body = feeds.renderFeedsPage(await feeds.list());
+    res.send(hearingNotes.renderAdminChrome({ title: "Calendars", body, activeItem: "calendar" }));
   } catch (err) {
-    console.error("[outlook-sync]:", err);
-    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><pre>${err.stack}</pre>`);
+    console.error("[calendars]:", err);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/calendars", express.json(), async (req, res) => {
+  try {
+    const feed = await require("./calendar-feeds").create(req.body || {});
+    res.json({ ok: true, feed });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.patch("/admin/calendars/:id(\\d+)", express.json(), async (req, res) => {
+  try {
+    const feed = await require("./calendar-feeds").update(parseInt(req.params.id, 10), req.body || {});
+    if (!feed) return res.status(404).json({ ok: false, error: "No such calendar" });
+    res.json({ ok: true, feed });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.delete("/admin/calendars/:id(\\d+)", async (req, res) => {
+  try {
+    const out = await require("./calendar-feeds").remove(parseInt(req.params.id, 10));
+    if (!out.removed) return res.status(404).json({ ok: false, error: "No such calendar" });
+    res.json({ ok: true, ...out });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Before the :id route below it in the file only by convention — the two can
+// never collide, since this path has no numeric segment.
+app.post("/admin/calendars/sync-all", async (req, res) => {
+  try {
+    res.json({ ok: true, results: await require("./calendar-feeds").syncAll() });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post("/admin/calendars/:id(\\d+)/sync", async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await require("./calendar-feeds").syncFeed(parseInt(req.params.id, 10))) });
+  } catch (err) {
+    console.error("[calendars sync]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -6744,7 +6789,11 @@ app.get("/admin/calendar", async (req, res) => {
     });
     const stats = cal.computeStats(statsEvents);
 
-    const body = cal.renderCalendarPage({ events, stats, filters, view, monthYear });
+    // Passed in rather than derived from the events, so a calendar with nothing
+    // this month still shows its colour in the legend.
+    let feeds = [];
+    try { feeds = await require("./calendar-feeds").list(); } catch (e) { /* pre-migration */ }
+    const body = cal.renderCalendarPage({ events, stats, filters, view, monthYear, feeds });
     res.send(hearingNotes.renderAdminChrome({ title: "EOIR Calendar", body, activeItem: "calendar" }));
   } catch (err) {
     console.error("[calendar]:", err);
@@ -13101,14 +13150,26 @@ app.listen(PORT, async () => {
     console.error("⚠️  Motion generator init failed:", e.message);
   }
 
-  // Initialize Outlook sync
+  // Initialize the calendar feeds
+  //
+  // Order matters: outlook-sync owns outlook_synced_events, and calendar-feeds
+  // then adds feed_id to it and swaps the unique constraint onto the pair. The
+  // single Outlook configuration migrates in as the first feed, keeping its URL
+  // and its keyword filter, so the calendar shows exactly what it showed before
+  // until somebody edits a feed.
   try {
     const outlook = require("./outlook-sync");
+    const feeds = require("./calendar-feeds");
     await outlook.init();
-    outlook.scheduleHourlySync();
-    console.log("✅ Outlook sync ready (hourly cron scheduled)");
+    await feeds.init();
+    // One scheduler over every feed. outlook.scheduleHourlySync() is left
+    // unstarted on purpose: it would fetch the first feed a second time
+    // every hour, against the same rows.
+    feeds.scheduleHourlySync();
+    const all = await feeds.list();
+    console.log(`✅ Calendars ready — ${all.length} subscribed, hourly sync scheduled`);
   } catch (e) {
-    console.error("⚠️  Outlook sync init failed:", e.message);
+    console.error("⚠️  Calendar feeds init failed:", e.message);
   }
 
   // Initialize backup system + start cron

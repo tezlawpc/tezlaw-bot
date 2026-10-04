@@ -180,6 +180,7 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
   // ──────────────────────────────────────────────
   const q6 = `
     SELECT 'outlook_event' as source, id::text as source_id,
+           feed_id,
            COALESCE(matched_client_name, subject) as client_name,
            matched_a_number as a_number,
            start_datetime as event_date,
@@ -218,6 +219,30 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
       // Table may not exist yet or other query error
       console.warn(`[eoir-calendar] ${label} query failed:`, e.message);
     }
+  }
+
+  // Name and colour each synced event by the calendar it came from, and drop
+  // the ones whose calendar is switched off. Looked up separately and
+  // defensively: if the feeds table is not there, events keep their old
+  // appearance rather than vanishing.
+  let feedsById = new Map();
+  try {
+    const { rows: feedRows } = await db.query(`SELECT id, name, color, enabled FROM calendar_feeds`);
+    feedsById = new Map(feedRows.map(f => [f.id, f]));
+  } catch (e) {
+    console.warn("[eoir-calendar] calendar feeds unavailable:", e.message);
+  }
+  if (feedsById.size) {
+    const kept = [];
+    for (const e of results) {
+      if (e.feed_id == null) { kept.push(e); continue; }
+      const feed = feedsById.get(e.feed_id);
+      if (feed && feed.enabled === false) continue;   // hidden on purpose
+      if (feed) { e.feed_name = feed.name; e.feed_color = feed.color; }
+      kept.push(e);
+    }
+    results.length = 0;
+    results.push(...kept);
   }
 
   // Post-filter for judge/court after aggregation
@@ -301,6 +326,7 @@ function dedupeEvents(events) {
       if (!existing.a_number && e.a_number) existing.a_number = e.a_number;
       if (!existing.client_name && e.client_name) existing.client_name = e.client_name;
       if (!existing.client_key && e.client_key) existing.client_key = e.client_key;
+      if (!existing.feed_name && e.feed_name) { existing.feed_name = e.feed_name; existing.feed_color = e.feed_color; }
       // Priority (higher = more authoritative source):
       //   outlook_event (4) - JJ's own Outlook calendar, source of truth
       //   hearing_notice (3) - EOIR official paperwork
@@ -384,7 +410,26 @@ function escapeHtml(s) {
   return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function renderCalendarPage({ events, stats, filters, view, monthYear }) {
+// The calendars contributing to what is on screen. Taken from the events
+// themselves so the legend always matches what is actually drawn; a caller that
+// knows the full list (the page route does) can pass it instead, so a calendar
+// with nothing this month still shows its colour.
+function feedLegend(events, feeds) {
+  if (Array.isArray(feeds) && feeds.length) {
+    return feeds.filter(f => f && f.enabled !== false).map(f => ({ name: f.name, color: f.color }));
+  }
+  const seen = new Map();
+  for (const e of events || []) {
+    if (e.feed_name && !seen.has(e.feed_name)) seen.set(e.feed_name, e.feed_color);
+  }
+  return [...seen].map(([name, color]) => ({ name, color }));
+}
+
+function swatch(color, label) {
+  return `<span><span style="display:inline-block; width:10px; height:10px; background:${color}; border-radius:2px; vertical-align:middle;"></span> ${escapeHtml(label)}</span>`;
+}
+
+function renderCalendarPage({ events, stats, filters, view, monthYear, feeds }) {
   const listBody = renderListView(groupByDate(events));
   const monthBody = renderMonthView(events, monthYear);
   const activeView = view || "list";
@@ -396,7 +441,7 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
       <div style="font-size:12px; color:#666; margin-top:4px;">Unified view of hearings, notices, individual/merits, and deadlines.</div>
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-      <a href="/admin/outlook-sync" style="background:#0078d4; color:white; border:none; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:600;">📤 Outlook Sync</a>
+      <a href="/admin/calendars" style="background:#0078d4; color:white; border:none; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:600;">🗓 Calendars</a>
       <button onclick="scanAllNotices()" id="scan-notices-btn" style="background:${brand.gold}; color:white; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600;">🔄 Update from Dropbox</button>
       <div style="background:#f0f0f0; border-radius:6px; padding:2px; display:inline-flex;">
         <button onclick="switchView('list')" id="view-list-btn" style="background:${activeView === 'list' ? brand.navy : 'transparent'}; color:${activeView === 'list' ? 'white' : '#666'}; padding:6px 14px; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">📋 List</button>
@@ -485,7 +530,12 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
 
   <!-- Legend -->
   <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px; font-size:11px; color:#666;">
-    <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.outlook_event}; border-radius:2px; vertical-align:middle;"></span> From Outlook</span>
+    ${(() => {
+      const subscribed = feedLegend(events, feeds);
+      return subscribed.length
+        ? subscribed.map(f => swatch(f.color || EVENT_COLORS.outlook_event, f.name)).join("")
+        : swatch(EVENT_COLORS.outlook_event, "From Outlook");
+    })()}
     <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.hearing_notice}; border-radius:2px; vertical-align:middle;"></span> EOIR notice</span>
     <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.hearing}; border-radius:2px; vertical-align:middle;"></span> Hearing (from notes)</span>
     <span><span style="display:inline-block; width:10px; height:10px; background:${EVENT_COLORS.individual_hearing}; border-radius:2px; vertical-align:middle;"></span> Merits/individual</span>
@@ -841,8 +891,14 @@ function dayListHref(year, month, day) {
   return `/admin/calendar?view=list&from=${key}&to=${key}`;
 }
 
+// A synced event wears its calendar's colour; everything else is coloured by
+// what kind of thing it is.
+function eventColor(event) {
+  return event.feed_color || EVENT_COLORS[event.source] || EVENT_COLORS.hearing;
+}
+
 function renderEventCard(event, isPast) {
-  const color = EVENT_COLORS[event.source] || EVENT_COLORS.hearing;
+  const color = eventColor(event);
   const dt = new Date(event.event_date);
   const timeStr = dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
   const opacity = isPast ? 0.7 : 1;
@@ -929,7 +985,7 @@ function renderMonthView(events, monthYear) {
     const dayEvents = eventsByDate.get(day) || [];
     const isToday = isCurrentMonth && day === todayDate;
     const eventsHtml = dayEvents.slice(0, 4).map(e => {
-      const color = EVENT_COLORS[e.source] || EVENT_COLORS.hearing;
+      const color = eventColor(e);
       const dt = new Date(e.event_date);
       const timeStr = dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
       const label = e.client_name ? e.client_name.split(",")[0].substring(0, 12) : "?";
@@ -1001,6 +1057,8 @@ module.exports = {
   renderMonthView,
   eventHref,
   dayListHref,
+  eventColor,
+  feedLegend,
   EVENT_COLORS,
   SOURCE_LABELS,
 };

@@ -43,8 +43,8 @@ function routePatterns(method) {
 
 function toRegExp(pattern) {
   const body = pattern
+    .replace(/(:[A-Za-z_]\w*)\([^)]*\)/g, "$1")   // ":id(\\d+)" is just ":id"
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")   // escape regex metacharacters
-    .replace(/\\\(\\\\d\\\+\\\)/g, "")      // ":id(\\d+)" → ":id"
     .replace(/:[A-Za-z_][\w]*/g, "[^/]+")   // a named param is one segment
     .replace(/\*/g, ".*");
   return new RegExp(`^${body}$`);

@@ -122,6 +122,13 @@ jobs:
       - name: Calendar links
         run: node scripts/check-calendar-links.js
 
+      # More than one calendar can be subscribed to. The unique index moved to
+      # (feed_id, ical_uid); if the insert's ON CONFLICT target drifts from it,
+      # every hourly sync re-inserts every event instead of updating it and the
+      # calendar fills with duplicates overnight.
+      - name: Calendar feeds
+        run: node scripts/check-calendar-feeds.js
+
       # Court mail that cannot be understood must still reach a person. A
       # pre-hearing order from an immigration judge became "Error: Zara did
       # not return JSON" and stopped there, because an empty model answer

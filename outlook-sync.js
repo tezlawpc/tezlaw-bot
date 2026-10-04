@@ -281,17 +281,37 @@ function escapeRegex(s) {
   return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Which feed these events belong to. The unique index is on (feed_id,
+// ical_uid), and NULLs are distinct in a unique index, so an unset feed would
+// match nothing on conflict and insert a fresh duplicate of every event on
+// every sync. The older call sites here pass no feed, so they get the first
+// one -- which is the migrated Outlook configuration they were always using.
+async function resolveFeedId(feedId) {
+  if (feedId) return feedId;
+  const { rows } = await db.query(
+    `SELECT id FROM calendar_feeds ORDER BY sort_order ASC, id ASC LIMIT 1`
+  );
+  if (rows[0]) return rows[0].id;
+  throw new Error("No calendar feed exists to file these events under — calendar-feeds init() has not run.");
+}
+
 // Determine if an event looks hearing-related. If not, mark it low-relevance
 // so it doesn't clutter the calendar (but still stored for reference).
+//
+// A feed set to 'all' contributes everything it publishes: a practice-management
+// calendar is wanted whole, where the firm's Outlook calendar is filtered down
+// to hearings so the rest of the working day stays off the court calendar.
 function isHearingRelated(event, config) {
+  if (config?.filter_mode === "all") return true;
   const keywords = (config?.keyword_filter || "hearing|merits|individual|MCH|master calendar|MTR|EOIR").split("|");
   const searchText = `${event.summary || ""} ${event.location || ""} ${event.description || ""}`.toLowerCase();
   return keywords.some(kw => searchText.includes(kw.toLowerCase().trim()));
 }
 
 // Sync a list of parsed events into the DB, matching against clients as we go.
-async function upsertEvents(events, config) {
+async function upsertEvents(events, config, feedId = null) {
   const results = { imported: 0, updated: 0, skipped: 0, errors: [] };
+  const feed_id = await resolveFeedId(feedId);
 
   for (const event of events) {
     try {
@@ -304,8 +324,8 @@ async function upsertEvents(events, config) {
       const match = await matchToClient(event);
 
       const existing = await db.query(
-        `SELECT id FROM outlook_synced_events WHERE ical_uid = $1`,
-        [event.uid]
+        `SELECT id FROM outlook_synced_events WHERE ical_uid = $1 AND feed_id = $2`,
+        [event.uid, feed_id]
       );
       const isNew = !existing.rows.length;
 
@@ -313,9 +333,10 @@ async function upsertEvents(events, config) {
         `INSERT INTO outlook_synced_events
            (ical_uid, subject, start_datetime, end_datetime, all_day, location,
             body_text, organizer_name, organizer_email, matched_client_name,
-            matched_a_number, matched_hearing_type, is_hearing_related, raw_ical)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-         ON CONFLICT (ical_uid) DO UPDATE SET
+            matched_a_number, matched_hearing_type, is_hearing_related, raw_ical,
+            feed_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         ON CONFLICT (feed_id, ical_uid) DO UPDATE SET
            subject = EXCLUDED.subject,
            start_datetime = EXCLUDED.start_datetime,
            end_datetime = EXCLUDED.end_datetime,
@@ -344,6 +365,7 @@ async function upsertEvents(events, config) {
           match.hearing_type,
           isRelated,
           event._raw_lines?.join("\n").substring(0, 5000),
+          feed_id,
         ]
       );
 
@@ -651,6 +673,7 @@ module.exports = {
   init,
   parseIcal,
   fetchIcalUrl,
+  upsertEvents,
   syncFromUrl,
   importFromBuffer,
   matchToClient,

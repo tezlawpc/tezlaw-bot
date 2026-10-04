@@ -55,6 +55,7 @@ const CLIENT_BUNDLES = [
   "transcripts-page.js",
   "consultant-clients.js",
   "offline-notes.js",
+  "calendar-feeds.js",
 ];
 
 const healed = new Set();
