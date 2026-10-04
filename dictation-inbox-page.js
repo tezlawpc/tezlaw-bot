@@ -28,7 +28,7 @@ const STATE = {
   saved:   { label: "waiting to be transcribed", color: "#B45309" },
   working: { label: "transcribing now",          color: "#0061FF" },
   done:    { label: "transcribed",               color: "#2e7d32" },
-  failed:  { label: "did not transcribe",        color: "#A02818" },
+  failed:  { label: "did not transcribe",        color: "#9C2B1E" },
 };
 
 function row(r) {
@@ -46,7 +46,7 @@ function row(r) {
     <td style="padding:10px 8px; vertical-align:top;">
       <span style="color:${st.color}; font-weight:600; font-size:12px;">${st.label}</span>
       ${r.attempts > 1 ? `<span style="color:#888; font-size:11px;"> (${r.attempts} tries)</span>` : ""}
-      ${r.error ? `<div style="font-size:11px; color:#A02818; margin-top:3px;">${esc(r.error)}</div>` : ""}
+      ${r.error ? `<div style="font-size:11px; color:#9C2B1E; margin-top:3px;">${esc(r.error)}</div>` : ""}
       ${r.status === "done" && r.note_id
         ? `<div style="font-size:12px; margin-top:4px;"><a href="/admin/hearing/notes/${r.note_id}">Open the draft note &rarr;</a></div>` : ""}
       ${r.transcript_id
@@ -55,7 +55,7 @@ function row(r) {
     <td style="padding:10px 8px; vertical-align:top; text-align:right;">
       ${r.status === "saved" || r.status === "failed"
         ? `<form method="POST" action="/admin/hearing/notes/dictate/inbox/${r.id}/transcribe" style="margin:0;">
-             <button type="submit" style="padding:6px 14px; background:#0C1C36; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:12px;">
+             <button type="submit" style="padding:6px 14px; background:#2B2523; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:12px;">
                ${r.status === "failed" ? "Try again" : "Transcribe now"}</button>
            </form>`
         : r.status === "working"
@@ -73,7 +73,7 @@ function render({ rows, counts, done, failed }) {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Recordings — Tez Law</title>
 <style>
- body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#faf9f5;color:#0C1C36;margin:0;}
+ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#FAF8F5;color:#2B2523;margin:0;}
  main{max-width:960px;margin:24px auto;padding:0 20px;}
  h1{font-size:24px;margin:0 0 4px;} .sub{color:#666;font-size:13px;margin-bottom:18px;}
  .card{background:#fff;border:1px solid #eee;border-radius:8px;padding:18px;margin-bottom:18px;}
@@ -86,13 +86,13 @@ function render({ rows, counts, done, failed }) {
     <a href="/admin/hearing/notes/dictate" style="margin-left:10px;">&larr; Record</a></div>
 
   ${done ? `<div class="card" style="border-left:4px solid #2e7d32;background:#f4faf5;">Transcribed. <a href="/admin/hearing/notes/${esc(done)}">Open the draft note &rarr;</a></div>` : ""}
-  ${failed ? `<div class="card" style="border-left:4px solid #A02818;background:#fdf3f2;">That one did not transcribe — the reason is on the row. The recording is still here and can be tried again.</div>` : ""}
+  ${failed ? `<div class="card" style="border-left:4px solid #9C2B1E;background:#fdf3f2;">That one did not transcribe — the reason is on the row. The recording is still here and can be tried again.</div>` : ""}
 
   <div class="card">
     ${pill(counts.saved, "waiting", "#fff4e5", "#B45309")}
     ${pill(counts.working, "in progress", "#e7f0ff", "#0061FF")}
     ${pill(counts.done, "transcribed", "#e8f5e9", "#2e7d32")}
-    ${pill(counts.failed, "failed", "#fdecea", "#A02818")}
+    ${pill(counts.failed, "failed", "#fdecea", "#9C2B1E")}
     <div style="font-size:12px; color:#888; margin-top:8px;">
       Waiting recordings are transcribed automatically every few minutes. The button is for when you want one now.
     </div>

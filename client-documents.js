@@ -202,15 +202,15 @@ function renderDocumentsSection({ clientKey, documents, aNumber }) {
       <td style="width:30px; text-align:center; font-size:18px;">${iconFor(d.mime_type, d.filename)}</td>
       <td>
         <div style="font-weight:600;">
-          <a href="/admin/clients/${encodeURIComponent(clientKey)}/documents/${d.id}/download" style="color:#0C1C36; text-decoration:none;">${escapeHtml(d.filename)}</a>
+          <a href="/admin/clients/${encodeURIComponent(clientKey)}/documents/${d.id}/download" style="color:#2B2523; text-decoration:none;">${escapeHtml(d.filename)}</a>
         </div>
         ${d.description ? `<div style="font-size:12px; color:#666; margin-top:2px;">${escapeHtml(d.description)}</div>` : ""}
       </td>
-      <td style="font-size:12px;">${d.category ? `<span style="background:#fdf7f0; color:#B79C62; padding:2px 8px; border-radius:10px; font-size:11px; white-space:nowrap;">${escapeHtml(d.category)}</span>` : "—"}</td>
+      <td style="font-size:12px;">${d.category ? `<span style="background:#FAF8F5; color:#A34C00; padding:2px 8px; border-radius:10px; font-size:11px; white-space:nowrap;">${escapeHtml(d.category)}</span>` : "—"}</td>
       <td style="font-size:12px; color:#666; white-space:nowrap;">${formatBytes(d.size_bytes)}</td>
       <td style="font-size:12px; color:#666; white-space:nowrap;">${new Date(d.uploaded_at).toLocaleDateString()}</td>
       <td style="white-space:nowrap;">
-        <a href="/admin/clients/${encodeURIComponent(clientKey)}/documents/${d.id}/download" style="color:#B79C62; font-size:13px;">📥</a>
+        <a href="/admin/clients/${encodeURIComponent(clientKey)}/documents/${d.id}/download" style="color:#A34C00; font-size:13px;">📥</a>
         &nbsp;
         <a href="#" onclick="deleteDoc(${d.id}, ${JSON.stringify(d.filename).replace(/"/g, '&quot;')}); return false;" style="color:#c00; font-size:13px;">🗑️</a>
       </td>
@@ -222,20 +222,20 @@ function renderDocumentsSection({ clientKey, documents, aNumber }) {
   return `
     <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-        <h3 style="margin:0; color:#0C1C36;">📁 Documents (${documents.length})</h3>
-        <button type="button" onclick="toggleUploadForm()" style="background:#B79C62; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">+ Upload Document</button>
+        <h3 style="margin:0; color:#2B2523;">📁 Documents (${documents.length})</h3>
+        <button type="button" onclick="toggleUploadForm()" style="background:#A34C00; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">+ Upload Document</button>
       </div>
 
       <!-- Upload form (hidden by default) -->
-      <div id="doc-upload-form" style="display:none; background:#fdf7f0; padding:15px; border-radius:4px; margin-bottom:12px; border:1px dashed #B79C62;">
+      <div id="doc-upload-form" style="display:none; background:#FAF8F5; padding:15px; border-radius:4px; margin-bottom:12px; border:1px dashed #FF7B00;">
         <div id="doc-dropzone" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event)"
-             style="border:2px dashed #B79C62; padding:20px; border-radius:6px; text-align:center; background:white; margin-bottom:12px; cursor:pointer;"
+             style="border:2px dashed #FF7B00; padding:20px; border-radius:6px; text-align:center; background:white; margin-bottom:12px; cursor:pointer;"
              onclick="document.getElementById('doc-file-input').click()">
           <div style="font-size:36px; margin-bottom:8px;">📄</div>
           <div><strong>Drop a file here or click to browse</strong></div>
           <div style="font-size:12px; color:#666; margin-top:4px;">PDF, images, Word docs, etc. Max 25 MB.</div>
           <input type="file" id="doc-file-input" style="display:none;" onchange="handleFileSelected(this.files[0])">
-          <div id="doc-selected" style="margin-top:8px; font-size:13px; color:#0C1C36;"></div>
+          <div id="doc-selected" style="margin-top:8px; font-size:13px; color:#2B2523;"></div>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
           <div style="flex:1; min-width:200px;">
@@ -249,7 +249,7 @@ function renderDocumentsSection({ clientKey, documents, aNumber }) {
           <textarea id="doc-description" rows="2" placeholder="e.g. Valid until 2028, filed with I-589" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; font-family:inherit;"></textarea>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
-          <button type="button" onclick="uploadDoc()" id="doc-upload-btn" style="background:#B79C62; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">📤 Upload</button>
+          <button type="button" onclick="uploadDoc()" id="doc-upload-btn" style="background:#A34C00; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">📤 Upload</button>
           <button type="button" onclick="toggleUploadForm()" style="background:#eee; color:#333; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Cancel</button>
           <span id="doc-upload-status" style="font-size:13px;"></span>
         </div>

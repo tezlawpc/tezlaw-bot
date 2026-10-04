@@ -47,30 +47,36 @@ const axios = require("axios");
 // string built at a call site.
 
 const KINDS = {
-  court_mail:    { emoji: "📨", label: "New court notice" },
-  hearing_set:   { emoji: "📅", label: "Hearing scheduled" },
-  hearing_moved: { emoji: "📅", label: "Hearing rescheduled" },
-  deadline:      { emoji: "⏰", label: "Deadline approaching" },
-  status:        { emoji: "🔄", label: "Case status changed" },
+  court_mail:    { emoji: "📨", label: "New court notice", zh: "新的法院通知" },
+  hearing_set:   { emoji: "📅", label: "Hearing scheduled", zh: "开庭已排期" },
+  hearing_moved: { emoji: "📅", label: "Hearing rescheduled", zh: "开庭已改期" },
+  deadline:      { emoji: "⏰", label: "Deadline approaching", zh: "期限临近" },
+  status:        { emoji: "🔄", label: "Case status changed", zh: "案件状态有变化" },
   // Sent by hand from the firm's alerts page, when something happened that
   // no sweep would notice. Still a fixed headline: the person sending it
   // picks from this list, they do not type the message.
-  document:      { emoji: "📄", label: "New document on file" },
-  update:        { emoji: "🔔", label: "Case update" },
-  action:        { emoji: "❗", label: "Action needed" },
+  document:      { emoji: "📄", label: "New document on file", zh: "有新文件" },
+  update:        { emoji: "🔔", label: "Case update", zh: "案件有更新" },
+  action:        { emoji: "❗", label: "Action needed", zh: "需要您处理" },
 };
 
 // Events about a consultant's OWN work order, sent to that consultant only.
 // JJ: work orders "will need attorney or manager's approval" — so the person
 // who submitted one has to hear which way it went, and why.
 const USER_KINDS = {
-  wo_approved: { emoji: "✅", label: "Task approved" },
-  wo_rejected: { emoji: "↩️", label: "Task not accepted" },
-  wo_update:   { emoji: "📝", label: "Update on your task" },
-  wo_done:     { emoji: "✅", label: "Task completed" },
+  wo_approved: { emoji: "✅", label: "Task approved", zh: "任务已批准" },
+  wo_rejected: { emoji: "↩️", label: "Task not accepted", zh: "任务未受理" },
+  wo_update:   { emoji: "📝", label: "Update on your task", zh: "您的任务有更新" },
+  wo_done:     { emoji: "✅", label: "Task completed", zh: "任务已完成" },
 };
 
-const labelOf = (kind) => (KINDS[kind] || USER_KINDS[kind] || {}).label || kind;
+// Alerts go out in the language the consultant chose in the portal
+// (admin_users.preferred_lang): English, or Simplified Chinese.
+const isZh = (lang) => lang === "zh" || lang === "zh-CN";
+const labelOf = (kind, lang = "en") => {
+  const k = KINDS[kind] || USER_KINDS[kind];
+  return k ? ((isZh(lang) && k.zh) || k.label) : kind;
+};
 
 // "app" is a push to the Tara app on the consultant's phone. JJ: "should be
 // able to push case notification to brokers/consultants as well."
@@ -95,25 +101,31 @@ function loginLink(clientKey) {
  * did not know; the substance is the part that must not travel, because
  * an email gets forwarded and a phone gets lost.
  */
-function renderMessage(kind, clientName, clientKey) {
+function renderMessage(kind, clientName, clientKey, lang = "en") {
   const k = KINDS[kind];
   if (!k) throw new Error(`notify: unknown kind "${kind}"`);
-  const who = String(clientName || "a client you are assigned to").trim();
+  const zh = isZh(lang);
+  const who = String(clientName || (zh ? "您的一位客户" : "a client you are assigned to")).trim();
   const link = loginLink(clientKey);
-  const subject = `${k.label} — ${who}`;
-  const body = [`${k.emoji} ${k.label} — ${who}`, link ? `Log in to view: ${link}` : "Log in to view."].join("\n");
+  const label = labelOf(kind, lang);
+  const subject = `${label} — ${who}`;
+  const body = [`${k.emoji} ${label} — ${who}`,
+    zh ? (link ? `登录查看：${link}` : "请登录查看。") : (link ? `Log in to view: ${link}` : "Log in to view.")].join("\n");
   return { subject, body };
 }
 
 /** The same, for a work order. Names the client if the order named one. */
-function renderUserMessage(kind, task) {
+function renderUserMessage(kind, task, lang = "en") {
   const k = USER_KINDS[kind];
   if (!k) throw new Error(`notify: unknown kind "${kind}"`);
-  const what = String((task && task.client_name) || "").trim() || `task #${task.id}`;
+  const zh = isZh(lang);
+  const what = String((task && task.client_name) || "").trim() || (zh ? `任务 #${task.id}` : `task #${task.id}`);
   const b = baseUrl();
   const link = b ? `${b}/consultant/task/${task.id}` : "";
-  const subject = `${k.label} — ${what}`;
-  const body = [`${k.emoji} ${k.label} — ${what}`, link ? `Log in to view: ${link}` : "Log in to view."].join("\n");
+  const label = labelOf(kind, lang);
+  const subject = `${label} — ${what}`;
+  const body = [`${k.emoji} ${label} — ${what}`,
+    zh ? (link ? `登录查看：${link}` : "请登录查看。") : (link ? `Log in to view: ${link}` : "Log in to view.")].join("\n");
   return { subject, body };
 }
 
@@ -133,6 +145,7 @@ async function initTables() {
     `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS notify_telegram BOOLEAN DEFAULT FALSE`,
     `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS notify_paused_until TIMESTAMPTZ`,
     `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS notify_app BOOLEAN DEFAULT TRUE`,
+    `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS preferred_lang TEXT DEFAULT 'en'`,
   ]) {
     try { await db.query(sql); } catch (e) { console.warn("[notify] schema:", e.message); }
   }
@@ -194,7 +207,8 @@ async function initTables() {
 async function consultantsForClient(clientKey) {
   const r = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.phone, u.telegram_chat_id,
-            u.notify_email, u.notify_sms, u.notify_telegram, u.notify_app, u.notify_paused_until, u.disabled
+            u.notify_email, u.notify_sms, u.notify_telegram, u.notify_app, u.notify_paused_until, u.disabled,
+            u.preferred_lang
        FROM client_consultants cc
        JOIN admin_users u ON u.id = cc.consultant_id
       WHERE cc.client_key = $1 AND cc.removed_at IS NULL
@@ -315,11 +329,10 @@ async function notifyClientEvent({ clientKey, kind, ref = null, clientName = nul
       name = r.rows[0] && r.rows[0].name;
     } catch { /* name is optional; the alert still goes */ }
   }
-  const { subject, body } = renderMessage(kind, name, clientKey);
-
   const users = await consultantsForClient(clientKey);
   result.recipients = users.length;
   for (const u of users) {
+    const { subject, body } = renderMessage(kind, name, clientKey, u.preferred_lang);
     await addToFeed({ userId: u.id, clientKey, kind, who: name || null,
       dedupe: `${kind}:${ref == null ? "-" : ref}:${clientKey}:${u.id}` });
     const chans = await reachable(u);
@@ -364,12 +377,12 @@ async function notifyUserEvent({ userId, kind, taskId, ref = null }) {
   if (!t) return result;
   const u = (await db.query(
     `SELECT id, username, full_name, email, phone, telegram_chat_id,
-            notify_email, notify_sms, notify_telegram, notify_app, notify_paused_until, disabled
+            notify_email, notify_sms, notify_telegram, notify_app, notify_paused_until, disabled, preferred_lang
        FROM admin_users WHERE id = $1`, [uid])).rows[0];
   if (!u || u.disabled) return result;
   result.recipients = 1;
 
-  const { subject, body } = renderUserMessage(kind, t);
+  const { subject, body } = renderUserMessage(kind, t, u.preferred_lang);
   const base = `${kind}:${ref == null ? "-" : ref}:task${tid}:${uid}`;
   await addToFeed({ userId: uid, clientKey: t.client_key || null, taskId: tid, kind, who: t.client_name || null, dedupe: base });
 
@@ -400,7 +413,20 @@ async function feedFor(userId, { clientKey = null, limit = 30 } = {}) {
       WHERE user_id = $1 AND ($2::text IS NULL OR client_key = $2)
       ORDER BY created_at DESC LIMIT $3`,
     [userId, clientKey, Math.min(Math.max(parseInt(limit, 10) || 30, 1), 100)]);
-  return r.rows.map(x => ({ ...x, label: labelOf(x.kind) }));
+  return r.rows.map(x => ({ ...x, label: labelOf(x.kind) }));   // English; a page in another language calls labelOf(kind, lang)
+}
+
+/** The consultant's chosen language: "en" or "zh". */
+async function langFor(userId) {
+  try {
+    await initTables();
+    const r = await db.query(`SELECT preferred_lang FROM admin_users WHERE id = $1`, [userId]);
+    return isZh(r.rows[0] && r.rows[0].preferred_lang) ? "zh" : "en";
+  } catch { return "en"; }
+}
+async function setLang(userId, lang) {
+  await initTables();
+  await db.query(`UPDATE admin_users SET preferred_lang = $2 WHERE id = $1`, [userId, isZh(lang) ? "zh" : "en"]);
 }
 
 async function unseenCount(userId) {
@@ -503,7 +529,8 @@ async function sendApp(row) {
     : { screen: "consultant-client", type: "consultant_client_update", clientKey: row.client_key, client_key: row.client_key };
   const r = await push.sendToUser("consultant", row.address, {
     title: row.subject || "Update on your client",
-    body: "Open Tara to view.",
+    // The row was written in the consultant's language; say this line in it too.
+    body: /[\u4e00-\u9fff]/.test(String(row.subject || "")) ? "请打开 Tara 查看。" : "Open Tara to view.",
     data,
   });
   if (r && r.error) throw new Error(`app push: ${r.error}`);
@@ -698,7 +725,7 @@ module.exports = {
   notifyClientEvent, notifyAndFlush, notifyUserEvent, flush, sweepUpcoming,
   consultantsForClient, channelsFor, reachable, reasonUnreachable, resolveClientKey,
   renderMessage, renderUserMessage, loginLink,
-  feedFor, unseenCount, markSeen,
+  feedFor, unseenCount, markSeen, mailTransport, langFor, setLang, isZh,
   issueLinkCode, linkTelegram,
   channelHealth,
 };

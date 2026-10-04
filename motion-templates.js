@@ -27,7 +27,7 @@
 const db = require("./db");
 const PizZip = require("pizzip");
 
-const brand = { gold: "#B79C62", navy: "#0C1C36" };
+const brand = { gold: "#A34C00", navy: "#2B2523" };
 
 const KNOWN_PLACEHOLDERS = [
   "CONTENT", "TITLE", "CLIENT_NAME", "A_NUMBER", "COURT_NAME", "JUDGE_NAME",
@@ -417,7 +417,7 @@ function renderTemplatesPage(templates, motionTypes) {
   return `
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
-      <h1 style="margin:0;">📋 Motion Templates</h1>
+      <h1 style="margin:0;">Motion Templates</h1>
       <div style="font-size:12px; color:#666; margin-top:4px;">Pleading paper templates that Claude uses when drafting motions.</div>
     </div>
     <a href="/admin/motions" class="back-link">← Back to motions</a>

@@ -1080,7 +1080,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
 
 <!-- ── PWA / iOS Install Support ── -->
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#3E2818">
+<meta name="theme-color" content="#2B2523">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Tara">
@@ -1090,38 +1090,47 @@ function renderAdminChrome({ title, body, activeItem = null }) {
 <title>${escapeHtml(title)} — Tara</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;700&family=IM+Fell+English:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    /* Britannia palette — walnut sidebar, sandstone canvas, gold accents */
-    --sidebar-bg: #3E2818;         /* walnut */
-    --sidebar-bg-elev: #5A3B22;    /* walnut-mid */
+    /* TEZ brand (Brand Guidelines v1.1): charcoal, marble, travertine,
+       Seal Orange for marks, Ember for orange text on a light ground. */
+    --orange: #FF7B00;
+    --ember: #A34C00;
+    --charcoal: #2B2523;
+    --ink: #1E1B1A;
+    --stone: #5E5854;
+    --travertine: #E8E3DC;
+    --marble: #FAF8F5;
+    --serif: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+    --sans: Montserrat, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    --sidebar-bg: #2B2523;
+    --sidebar-bg-elev: #3A3330;
     --sidebar-width: 244px;
     --sidebar-width-mobile: 60px;
-    --brand-gold: #E0B44E;         /* gold-bright */
-    --brand-gold-light: #F0DDB4;   /* sandstone-lit */
-    --brand-navy: #3E2818;         /* walnut (kept name for compat) */
-    --text-primary: rgba(240,221,180,.94);
-    --text-secondary: rgba(240,221,180,.72);
-    --text-tertiary: rgba(240,221,180,.48);
-    --section-header: rgba(224,180,78,.65);
-    --hover-bg: rgba(224,180,78,.08);
-    --active-bg: rgba(224,180,78,.16);
-    --active-color: #FFA544;       /* ember-bright */
-    --divider: rgba(224,180,78,.14);
-    --canvas: #E4CC94;             /* sandstone */
+    /* Older names, kept because pages written before the rebrand use them. */
+    --brand-gold: #FF7B00;
+    --brand-gold-light: #FAF8F5;
+    --brand-navy: #2B2523;
+    --text-primary: rgba(250,248,245,.96);
+    --text-secondary: rgba(250,248,245,.74);
+    --text-tertiary: rgba(250,248,245,.52);
+    --section-header: rgba(232,227,220,.56);
+    --hover-bg: rgba(250,248,245,.06);
+    --active-bg: rgba(250,248,245,.09);
+    --active-color: #FFFFFF;
+    --divider: rgba(232,227,220,.14);
+    --canvas: #FAF8F5;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text",
-                 "Segoe UI", Roboto, Arial, sans-serif;
+    font-family: var(--sans);
     background: var(--canvas);
-    color: #2A1810;                /* ink */
+    color: var(--charcoal);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    letter-spacing: -0.005em;
   }
 
   /* ── Sidebar ─────────────────────────────────── */
@@ -1156,8 +1165,8 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   .user-avatar {
     width: 34px; height: 34px;
     border-radius: 50%;
-    background: var(--brand-gold);
-    color: white;
+    background: var(--orange);
+    color: var(--ink);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1222,26 +1231,28 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     padding: 14px 12px 16px;
     margin-bottom: 4px;
   }
-  .sidebar-brand img {
-    width: 40px;
+  .sidebar-brand .tez-shield {
+    width: 34px;
     height: auto;
-    border-radius: 10px;
+    display: block;
     flex-shrink: 0;
   }
   .brand-text { display: flex; flex-direction: column; overflow: hidden; }
   .brand-name {
-    color: var(--brand-gold);
-    font-size: 17px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
+    color: var(--marble);
+    font-family: var(--serif);
+    font-size: 23px;
+    font-weight: 600;
+    letter-spacing: .01em;
+    line-height: 1.05;
   }
   .brand-role {
     color: var(--text-tertiary);
-    font-size: 11px;
-    font-weight: 500;
-    margin-top: 2px;
-    letter-spacing: 0.01em;
+    font-size: 9px;
+    font-weight: 600;
+    margin-top: 3px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
   }
 
   .nav-section {
@@ -1249,11 +1260,11 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   }
   .nav-section-header {
     color: var(--section-header);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.09em;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
-    padding: 12px 12px 6px;
+    padding: 14px 12px 6px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1275,10 +1286,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     margin-bottom: 1px;
     color: var(--text-secondary);
     text-decoration: none;
-    border-radius: 8px;
-    font-size: 14px;
+    border-radius: 4px;
+    font-size: 13px;
     font-weight: 500;
-    letter-spacing: -0.005em;
     transition: background-color .12s ease, color .12s ease;
     position: relative;
   }
@@ -1299,8 +1309,8 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     transform: translateY(-50%);
     width: 3px;
     height: 18px;
-    background: var(--brand-gold);
-    border-radius: 0 3px 3px 0;
+    background: var(--orange);
+    border-radius: 0 2px 2px 0;
   }
   .nav-icon {
     font-size: 16px;
@@ -1316,8 +1326,8 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     text-overflow: ellipsis;
   }
   .nav-badge {
-    background: var(--brand-gold);
-    color: white;
+    background: var(--orange);
+    color: var(--ink);
     font-size: 10px;
     font-weight: 700;
     padding: 2px 6px;
@@ -1341,21 +1351,22 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     gap: 12px;
   }
   .page-header h1 {
-    color: var(--brand-navy);
-    font-size: 26px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    color: var(--charcoal);
+    font-family: var(--serif);
+    font-size: 34px;
+    font-weight: 600;
+    line-height: 1.1;
   }
   .back-link {
-    color: var(--brand-gold);
+    color: var(--ember);
     text-decoration: none;
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 600;
     padding: 6px 12px;
     border-radius: 6px;
     transition: background .15s;
   }
-  .back-link:hover { background: rgba(183,156,98,.1); }
+  .back-link:hover { background: rgba(255,123,0,.1); }
 
   /* ── Mobile ────────────────────────────────── */
   /* ── Mobile hamburger drawer (< 768px) ─────────
@@ -1390,7 +1401,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       flex: 1; font-size: 15px; font-weight: 600;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .mobile-topbar .mt-brand-gold { color: var(--brand-gold); font-weight: 700; }
+    .mobile-topbar .mt-brand-gold { color: var(--orange); font-weight: 700; letter-spacing: .12em; }
 
     /* Sidebar: hidden off-screen, slides in when .open toggled */
     .sidebar {
@@ -1402,7 +1413,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     }
     .sidebar.open { transform: translateX(0); }
     .sidebar-brand { padding: 14px 8px 16px; justify-content: flex-start; gap: 10px; }
-    .sidebar-brand img { width: 34px; }
+    .sidebar-brand .tez-shield { width: 30px; }
     .brand-text { display: block; }
     .nav-section-header { display: block; }
     .nav-link { justify-content: flex-start; padding: 12px 14px; gap: 12px; }
@@ -1425,7 +1436,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       margin-left: 0;
       padding: 14px 12px 24px;
     }
-    .page-header h1 { font-size: 20px; }
+    .page-header h1 { font-size: 26px; }
 
     /* Sidebar user footer visible in drawer */
     .sidebar-user { padding: 12px 14px; justify-content: flex-start; gap: 10px; }
@@ -1460,14 +1471,14 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 14px; }
   input[type="text"], input[type="datetime-local"], input[type="date"], select, textarea {
     width: 100%; padding: 8px; margin: 3px 0; box-sizing: border-box;
-    border: 1px solid #ccc; border-radius: 6px; font-size: 14px; font-family: inherit;
+    border: 1px solid #CFC8BE; border-radius: 4px; font-size: 14px; font-family: inherit; background: #fff; color: var(--charcoal);
   }
   textarea { min-height: 60px; }
   input[type="checkbox"] { margin-right: 6px; transform: scale(1.15); }
   .row { display: flex; gap: 12px; margin: 6px 0; }
   .row > div { flex: 1; }
-  fieldset { border: 1px solid #ddd; padding: 15px; margin: 15px 0; border-radius: 8px; background: white; }
-  legend { font-weight: 600; color: #0C1C36; padding: 0 8px; }
+  fieldset { border: 1px solid var(--travertine); padding: 15px; margin: 15px 0; border-radius: 4px; background: white; }
+  legend { font-weight: 600; color: var(--charcoal); padding: 0 8px; }
   .button-row { margin-top: 25px; display: flex; gap: 10px; flex-wrap: wrap; }
   button {
     padding: 12px 24px; font-size: 14px; border-radius: 6px; cursor: pointer;
@@ -1475,8 +1486,8 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     transition: opacity .15s;
   }
   button:hover { opacity: 0.9; }
-  button[type="submit"] { background: #B79C62; color: white; }
-  button.secondary { background: #eee; color: #333; }
+  button[type="submit"] { background: var(--charcoal); color: var(--marble); }
+  button.secondary { background: #fff; color: var(--charcoal); border: 1px solid var(--charcoal); }
   #raw_notes { min-height: 200px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
   .deadlines-container { margin: 8px 0; }
   .deadline-row { display: flex; gap: 8px; margin: 6px 0; }
@@ -1485,17 +1496,20 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   .deadline-row button { flex: 0 0 auto; padding: 4px 10px; background: #eee; border: none; cursor: pointer; border-radius: 4px; }
   .add-deadline { background: #eee; padding: 6px 12px; border: none; cursor: pointer; border-radius: 4px; font-size: 13px; }
   .hint { color: #666; font-size: 12px; font-style: italic; margin: 2px 0; }
-  table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px; background: white; border-radius: 8px; overflow: hidden; }
-  th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
-  th { background: #f8f7f2; color: #0C1C36; font-weight: 600; font-size: 12px; letter-spacing: 0.02em; text-transform: uppercase; }
-  tr:hover { background: #fafaf7; }
+  table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px; background: white; border-radius: 4px; overflow: hidden; }
+  th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--travertine); }
+  th { background: #F3EFE9; color: var(--charcoal); font-weight: 600; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+  tr:hover { background: var(--marble); }
+  h1 { font-family: var(--serif); font-weight: 600; }
+  a { color: var(--ember); }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--orange); outline-offset: 1px; }
 </style>
 </head>
 <body>
 
 <aside class="sidebar">
   <div class="sidebar-brand">
-    <img src="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png" alt="TEZ Law">
+    ${require("./tez-theme").SHIELD}
     <div class="brand-text">
       <span class="brand-name">Tara</span>
       <span class="brand-role" id="brand-role">Admin Panel</span>
@@ -1529,6 +1543,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/tasks" class="nav-link ${isActive('tasks')}" data-perm="tasks.read">
         <span class="nav-icon">▤</span><span class="nav-label">Task List</span>
       </a>
+      <a href="/admin/consultant-tasks" class="nav-link" data-perm="tasks.approve">
+        <span class="nav-icon">◧</span><span class="nav-label">Consultant Tasks</span>
+      </a>
       <a href="/admin/panel/analytics" class="nav-link" data-perm="analytics.read">
         <span class="nav-icon">◵</span><span class="nav-label">Analytics</span>
       </a>
@@ -1560,7 +1577,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     <div class="nav-section" id="section-civil">
       <div class="nav-section-header">Civil Litigation</div>
       <a href="/admin/civil" class="nav-link ${isActive('civil')}" data-perm="civil.read">
-        <span class="nav-icon">⚖️</span><span class="nav-label">All Cases</span>
+        <span class="nav-icon">◆</span><span class="nav-label">All Cases</span>
       </a>
       <a href="/admin/civil/stage/intake" class="nav-link" data-perm="civil.read">
         <span class="nav-icon">◐</span><span class="nav-label">Intake / Assessment</span>
@@ -1590,13 +1607,13 @@ function renderAdminChrome({ title, body, activeItem = null }) {
         <span class="nav-icon">✓</span><span class="nav-label">Closed</span>
       </a>
       <a href="/admin/civil/triage" class="nav-link" data-perm="civil.read">
-        <span class="nav-icon">🧭</span><span class="nav-label">Stage Triage</span>
+        <span class="nav-icon">◇</span><span class="nav-label">Stage Triage</span>
       </a>
       <a href="/admin/civil/wip" class="nav-link" data-perm="civil.read">
-        <span class="nav-icon">💰</span><span class="nav-label">Work in Progress</span>
+        <span class="nav-icon">◒</span><span class="nav-label">Work in Progress</span>
       </a>
       <a href="/admin/civil/dropbox" class="nav-link" data-perm="civil.read">
-        <span class="nav-icon">📁</span><span class="nav-label">Document Sync</span>
+        <span class="nav-icon">▲</span><span class="nav-label">Document Sync</span>
       </a>
     </div>
 
@@ -1610,7 +1627,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
         <span class="nav-icon">™</span><span class="nav-label">Trademarks</span>
       </a>
       <a href="/admin/federal?group=federal_court" class="nav-link" data-perm="federal.read">
-        <span class="nav-icon">🏛</span><span class="nav-label">Federal Court</span>
+        <span class="nav-icon">▣</span><span class="nav-label">Federal Court</span>
       </a>
       <a href="/admin/federal?overdue=1" class="nav-link" data-perm="federal.read">
         <span class="nav-icon">⚠</span><span class="nav-label">Overdue Deadlines</span>
@@ -1621,7 +1638,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     <div class="nav-section" id="section-pi">
       <div class="nav-section-header">Personal Injury</div>
       <a href="/admin/pi" class="nav-link ${isActive('pi-dashboard')}" data-perm="pi.read">
-        <span class="nav-icon">🚑</span><span class="nav-label">PI Dashboard</span>
+        <span class="nav-icon">◱</span><span class="nav-label">PI Dashboard</span>
       </a>
       <a href="/admin/pi/cases" class="nav-link ${isActive('pi-cases')}" data-perm="pi.read">
         <span class="nav-icon">◈</span><span class="nav-label">All PI Cases</span>
@@ -1647,22 +1664,22 @@ function renderAdminChrome({ title, body, activeItem = null }) {
     <div class="nav-section" id="section-accounting">
       <div class="nav-section-header">Accounting</div>
       <a href="/admin/accounting" class="nav-link ${isActive('accounting')}" data-perm="accounting.read">
-        <span class="nav-icon">💼</span><span class="nav-label">Dashboard</span>
+        <span class="nav-icon">◱</span><span class="nav-label">Dashboard</span>
       </a>
       <a href="/admin/accounting/ledger" class="nav-link ${isActive('accounting-ledger')}" data-perm="accounting.read">
-        <span class="nav-icon">📖</span><span class="nav-label">General Ledger</span>
+        <span class="nav-icon">≡</span><span class="nav-label">General Ledger</span>
       </a>
       <a href="/admin/accounting/trust" class="nav-link ${isActive('accounting-trust')}" data-perm="accounting.read">
-        <span class="nav-icon">🔒</span><span class="nav-label">Trust (IOLTA)</span>
+        <span class="nav-icon">◙</span><span class="nav-label">Trust (IOLTA)</span>
       </a>
       <a href="/admin/accounting/income-statement" class="nav-link" data-perm="accounting.read">
-        <span class="nav-icon">📊</span><span class="nav-label">Income Statement</span>
+        <span class="nav-icon">◵</span><span class="nav-label">Income Statement</span>
       </a>
       <a href="/admin/accounting/balance-sheet" class="nav-link" data-perm="accounting.read">
         <span class="nav-icon">⚖</span><span class="nav-label">Balance Sheet</span>
       </a>
       <a href="/admin/accounting/quickbooks" class="nav-link ${isActive('accounting-qbo')}" data-perm="accounting.read">
-        <span class="nav-icon">🔗</span><span class="nav-label">QuickBooks Sync</span>
+        <span class="nav-icon">◆</span><span class="nav-label">QuickBooks Sync</span>
       </a>
     </div>
 
@@ -1931,7 +1948,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
           ? (parts[0][0] + parts[1][0]).toUpperCase()
           : displayName.substring(0, 2).toUpperCase();
         avatar.textContent = initials;
-        if (d.role_color) avatar.style.background = d.role_color;
+        // The avatar stays the brand orange with dark initials; the role is
+        // named in words right beside it, and a role colour under dark text
+        // made the initials unreadable.
       }
       // Also update sidebar brand role tagline
       const brandRole = document.getElementById("brand-role");
@@ -2024,7 +2043,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
             <input type="checkbox" id="tpm-task-\${i}" checked style="width:16px; height:16px; margin-top:3px; flex-shrink:0;">
             <div style="flex:1;">
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                <strong style="color:#0C1C36;">\${esc(t.title)}</strong>
+                <strong style="color:#2B2523;">\${esc(t.title)}</strong>
                 <span style="background:\${priColor[t.priority] || '#666'}; color:white; padding:1px 8px; border-radius:8px; font-size:10px;">\${(t.priority || 'normal').toUpperCase()}</span>
               </div>
               <div style="font-size:11px; color:#666; margin-top:4px;">
@@ -2043,12 +2062,12 @@ function renderAdminChrome({ title, body, activeItem = null }) {
         <div style="background:white; border-radius:8px; max-width:720px; width:100%; max-height:calc(100vh - 80px); display:flex; flex-direction:column;">
           <div style="padding:16px 20px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
             <div>
-              <h2 style="margin:0; font-size:18px; color:#0C1C36;">🤖 Suggested Tasks from Note</h2>
+              <h2 style="margin:0; font-size:18px; color:#2B2523;">🤖 Suggested Tasks from Note</h2>
               <div style="font-size:12px; color:#666; margin-top:2px;">\${source && source.client_name ? esc(source.client_name) + ' · ' : ''}Uncheck any you don't want, then Create.</div>
             </div>
             <button type="button" onclick="document.getElementById('task-preview-modal').remove()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#666;">✕</button>
           </div>
-          <div style="padding:16px 20px; overflow-y:auto; flex:1; background:#fafaf7;">
+          <div style="padding:16px 20px; overflow-y:auto; flex:1; background:#FAF8F5;">
             <div style="background:#e8f5e9; padding:10px 14px; border-radius:6px; border-left:4px solid #2e7d32; margin-bottom:12px; font-size:12px;">
               <strong style="color:#2e7d32;">Claude extracted \${tasks.length} task\${tasks.length === 1 ? '' : 's'}.</strong> Each will be added to your Task List and fire Telegram reminders if urgent or approaching its due date.
             </div>
@@ -2076,7 +2095,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
         const d = await r.json();
         if (d.ok) {
           const modal = document.getElementById("task-preview-modal");
-          if (modal) modal.innerHTML = '<div style="background:white; border-radius:8px; padding:40px; text-align:center; max-width:400px;"><h2 style="color:#2e7d32;">✓ Created ' + d.created_count + ' task' + (d.created_count === 1 ? '' : 's') + '</h2><p><a href="/admin/tasks" style="color:#0061FF;">View task list →</a></p><button onclick="this.closest(\\'#task-preview-modal\\').remove()" style="margin-top:10px; background:#0C1C36; color:white; padding:8px 20px; border:none; border-radius:6px; cursor:pointer;">Close</button></div>';
+          if (modal) modal.innerHTML = '<div style="background:white; border-radius:8px; padding:40px; text-align:center; max-width:400px;"><h2 style="color:#2e7d32;">✓ Created ' + d.created_count + ' task' + (d.created_count === 1 ? '' : 's') + '</h2><p><a href="/admin/tasks" style="color:#0061FF;">View task list →</a></p><button onclick="this.closest(\\'#task-preview-modal\\').remove()" style="margin-top:10px; background:#2B2523; color:white; padding:8px 20px; border:none; border-radius:6px; cursor:pointer;">Close</button></div>';
         } else {
           alert("Error: " + d.error);
           if (btn) { btn.disabled = false; btn.textContent = "✓ Create Selected"; }
@@ -2200,24 +2219,24 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     </div>` : "";
 
   const previewSection = generated ? `
-    <div style="background:#f5f9ff; padding:20px; margin:20px 0; border-left:4px solid #0C1C36; border-radius:4px;">
+    <div style="background:#f5f9ff; padding:20px; margin:20px 0; border-left:4px solid #2B2523; border-radius:4px;">
       <h2 style="margin-top:0;">📋 Paralegal Summary (English, detailed)</h2>
       <pre id="paralegal-content" style="white-space:pre-wrap; font-family:inherit; margin:0; background:white; padding:15px; border-radius:4px;">${escapeHtml(generated.paralegal_summary || "")}</pre>
       <div style="margin-top:12px;">
-        <button type="button" onclick="copyContent('paralegal-content')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Paralegal Summary</button>
+        <button type="button" onclick="copyContent('paralegal-content')" style="background:#2B2523; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Paralegal Summary</button>
         ${generated.id ? `
         <button type="button" onclick="sendParalegal(${generated.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 Send to team group</button>
-        <button type="button" onclick="generateTasksFromNote('master', ${generated.id}, this)" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">🤖 Create Tasks</button>
+        <button type="button" onclick="generateTasksFromNote('master', ${generated.id}, this)" style="background:#A34C00; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">🤖 Create Tasks</button>
         <span id="send-status" style="margin-left:12px; font-weight:bold;"></span>
         ` : ""}
       </div>
     </div>
 
-    <div style="background:#fdf7f0; padding:20px; margin:20px 0; border-left:4px solid #B79C62; border-radius:4px;">
+    <div style="background:#FAF8F5; padding:20px; margin:20px 0; border-left:4px solid #FF7B00; border-radius:4px;">
       <h2 style="margin-top:0;">👤 Client Summary (in client's language)</h2>
       <pre id="client-content" style="white-space:pre-wrap; font-family:inherit; margin:0; background:white; padding:15px; border-radius:4px;">${escapeHtml(generated.client_summary || "")}</pre>
       <div style="margin-top:12px;">
-        <button type="button" onclick="copyContent('client-content')" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Client Summary</button>
+        <button type="button" onclick="copyContent('client-content')" style="background:#A34C00; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Client Summary</button>
         <span style="margin-left:12px; color:#666; font-size:13px;">Paste into WhatsApp, Telegram, or email to send to client</span>
       </div>
     </div>
@@ -2230,7 +2249,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
   // Revision history panel — only on edit mode
   const revisionsHtml = isEdit && revisions && revisions.length ? `
     <details style="margin:20px 0; background:white; border:1px solid #eee; border-radius:6px;" ${revisions.length > 1 ? "" : "open"}>
-      <summary style="cursor:pointer; padding:12px 16px; background:#f8f8f8; border-radius:6px 6px 0 0; font-weight:600; color:#0C1C36; display:flex; align-items:center; justify-content:space-between;">
+      <summary style="cursor:pointer; padding:12px 16px; background:#f8f8f8; border-radius:6px 6px 0 0; font-weight:600; color:#2B2523; display:flex; align-items:center; justify-content:space-between;">
         <span>📜 Revision History (${revisions.length})</span>
         <span style="font-size:11px; color:#888; font-weight:normal;">Click to ${revisions.length > 1 ? "expand" : "collapse"}</span>
       </summary>
@@ -2249,7 +2268,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
           return `
             <div style="padding:10px 16px; border-bottom:1px solid #f0f0f0; font-size:12px;">
               <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span><strong>${typeLabel}</strong> ${r.username ? `by <span style="color:#0C1C36;">${escapeHtml(r.username)}</span>` : ""}</span>
+                <span><strong>${typeLabel}</strong> ${r.username ? `by <span style="color:#2B2523;">${escapeHtml(r.username)}</span>` : ""}</span>
                 <span style="color:#888;">${dt}</span>
               </div>
               ${fields}
@@ -2261,12 +2280,12 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
 
   const body = `
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
-    <h1 style="margin:0;">📝 Hearing Notes${isEdit ? ` — Editing #${noteId}` : ""}</h1>
+    <h1 style="margin:0;">Hearing Notes${isEdit ? ` — Editing #${noteId}` : ""}</h1>
     <div style="display:flex; gap:8px;">
-      <button type="button" onclick="openDictationModal()" style="background:linear-gradient(135deg, #B79C62, #d4b979); color:white; padding:10px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; box-shadow:0 2px 6px rgba(183,156,98,0.3); display:flex; align-items:center; gap:6px;">
+      <button type="button" onclick="openDictationModal()" style="background:linear-gradient(135deg, #A34C00, #E8E3DC); color:white; padding:10px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; box-shadow:0 2px 6px rgba(255,123,0,0.3); display:flex; align-items:center; gap:6px;">
         🎙️ <span>Voice dictate ${isEdit ? "additional notes" : "this hearing"}</span>
       </button>
-      ${isEdit ? `<a href="/admin/motions/new?hearing_note_id=${noteId}" style="text-decoration:none; background:#0C1C36; color:white; padding:10px 16px; border-radius:6px; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:6px;">📜 Draft motion</a>` : ""}
+      ${isEdit ? `<a href="/admin/motions/new?hearing_note_id=${noteId}" style="text-decoration:none; background:#2B2523; color:white; padding:10px 16px; border-radius:6px; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:6px;">📜 Draft motion</a>` : ""}
       ${!isEdit ? `<a href="/admin/hearing/notes/bulk-upload" style="text-decoration:none; background:#0061FF; color:white; padding:10px 16px; border-radius:6px; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:6px;">📚 Bulk upload</a>` : ""}
     </div>
   </div>
@@ -2280,11 +2299,11 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     <div style="display:flex; align-items:center; gap:9px;">
       <div id="d-widget-dot" style="width:9px; height:9px; border-radius:50%; background:#c62828; animation:d-pulse 1.2s infinite; flex:none;"></div>
       <div id="d-widget-timer" style="font-family:monospace; font-size:14px; font-weight:600; letter-spacing:1px;">00:00</div>
-      <div id="d-widget-status" style="font-size:11px; color:#B79C62;">Recording</div>
+      <div id="d-widget-status" style="font-size:11px; color:#A34C00;">Recording</div>
       <button type="button" id="d-widget-stop" onclick="dToggleRecording()" style="background:#c62828; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-size:12px; font-weight:600; flex:none;">Stop</button>
     </div>
     <div id="d-widget-bar" style="display:none; background:rgba(255,255,255,0.18); height:3px; border-radius:2px; overflow:hidden; margin-top:7px;">
-      <div id="d-proc-progress" style="background:linear-gradient(to right, #B79C62, #d4b979); height:100%; width:0%; transition:width 0.4s;"></div>
+      <div id="d-proc-progress" style="background:linear-gradient(to right, #A34C00, #E8E3DC); height:100%; width:0%; transition:width 0.4s;"></div>
     </div>
   </div>
   <style>
@@ -2295,9 +2314,9 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     /* Out of the way until you look at it. */
     #dictation-widget {
       position: fixed; bottom: 16px; right: 16px; z-index: 9999;
-      background: rgba(12, 28, 54, 0.82); color: white;
+      background: rgba(43,37,35, 0.82); color: white;
       padding: 8px 12px; border-radius: 999px;
-      border: 1px solid rgba(183, 156, 98, 0.55);
+      border: 1px solid rgba(255,123,0, 0.55);
       box-shadow: 0 4px 14px rgba(0,0,0,0.22);
       opacity: 0.55; transition: opacity 0.18s ease;
     }
@@ -2312,7 +2331,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     <div style="background:white; padding:18px; border-radius:10px; max-height:72vh; overflow-y:auto; box-shadow:0 12px 40px rgba(0,0,0,0.28); border:1px solid #d9d2c2;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
         <div>
-          <h2 style="margin:0 0 4px 0; color:#0C1C36; font-size:17px;">🎙️ Voice Dictation</h2>
+          <h2 style="margin:0 0 4px 0; color:#2B2523; font-size:17px;">🎙️ Voice Dictation</h2>
           <div style="font-size:12px; color:#666;">Review before applying. The form stays editable.</div>
         </div>
         <button type="button" onclick="closeDictationModal()" style="background:transparent; border:none; font-size:20px; cursor:pointer; color:#888;">✕</button>
@@ -2321,7 +2340,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       <!-- Kept for the error path; progress itself now lives in the pill. -->
       <div id="d-processing-panel" style="display:none; padding:20px 0; text-align:center;">
         <div id="d-proc-icon" style="font-size:36px; margin-bottom:10px;">🎧</div>
-        <div id="d-proc-status" style="font-size:14px; color:#0C1C36; font-weight:600;">Processing…</div>
+        <div id="d-proc-status" style="font-size:14px; color:#2B2523; font-weight:600;">Processing…</div>
       </div>
 
       <!-- Result / apply preview -->
@@ -2336,7 +2355,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         <div id="d-extracted-preview" style="font-size:12px; margin-bottom:14px;"></div>
         <div style="display:flex; gap:8px;">
           <button type="button" onclick="dDiscard()" style="background:#eee; color:#333; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; flex:1;">🗑️ Discard</button>
-          <button type="button" onclick="dApplyToForm()" style="background:#0C1C36; color:white; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600; flex:1;">✓ Apply to form</button>
+          <button type="button" onclick="dApplyToForm()" style="background:#2B2523; color:white; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600; flex:1;">✓ Apply to form</button>
         </div>
       </div>
 
@@ -2350,10 +2369,10 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
        ondragover="handleDragOver(event)"
        ondragleave="handleDragLeave(event)"
        ondrop="handleDrop(event)"
-       style="background:#fdf7f0; border:2px dashed #B79C62; padding:25px; border-radius:8px; margin-bottom:20px; text-align:center; transition:all .2s;">
+       style="background:#FAF8F5; border:2px dashed #FF7B00; padding:25px; border-radius:8px; margin-bottom:20px; text-align:center; transition:all .2s;">
     <div style="font-size:14px; margin-bottom:12px;">
       <strong style="font-size:16px;">📄 Drop a document here</strong> — or —
-      <button type="button" onclick="document.getElementById('doc-upload').click()" style="background:#B79C62; color:white; padding:8px 18px; border:none; border-radius:4px; cursor:pointer; font-size:14px; margin-left:8px;">Choose file</button>
+      <button type="button" onclick="document.getElementById('doc-upload').click()" style="background:#A34C00; color:white; padding:8px 18px; border:none; border-radius:4px; cursor:pointer; font-size:14px; margin-left:8px;">Choose file</button>
       <input type="file" id="doc-upload" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*" style="display:none;" onchange="uploadDocument(this.files[0])">
     </div>
     <div style="font-size:12px; color:#666; margin-bottom:4px;">
@@ -2564,8 +2583,8 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
 
     <div class="button-row">
       ${isEdit ? `
-        <button type="submit" name="action" value="update" style="background:#B79C62; color:white;">💾 Update</button>
-        <button type="submit" name="action" value="update_and_regenerate" style="background:#0C1C36; color:white;">💾 Update + Regenerate Summaries</button>
+        <button type="submit" name="action" value="update" style="background:#A34C00; color:white;">💾 Update</button>
+        <button type="submit" name="action" value="update_and_regenerate" style="background:#2B2523; color:white;">💾 Update + Regenerate Summaries</button>
         <a href="/admin/hearing/notes" style="background:#eee; color:#333; padding:12px 24px; border-radius:4px; text-decoration:none; font-size:15px;">+ New note</a>
         <button type="button" onclick="deleteThisNote(${noteId}, ${JSON.stringify(prev.client_name || "").replace(/"/g, "&quot;")})" style="background:#c00; color:white; padding:12px 20px; border:none; border-radius:4px; cursor:pointer; font-size:14px; margin-left:auto;">🗑️ Delete note</button>
       ` : `
@@ -2581,7 +2600,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
   <p style="margin-top:30px; color:#888; font-size:13px;">
     <a href="/admin/hearing/history" class="back-link">View all hearing notes →</a>
     &nbsp;·&nbsp;
-    <a href="/admin/hearing/notes/dictate" class="back-link" style="color:#B79C62;">🎙️ Voice dictate a hearing →</a>
+    <a href="/admin/hearing/notes/dictate" class="back-link" style="color:#A34C00;">🎙️ Voice dictate a hearing →</a>
     &nbsp;·&nbsp;
     <a href="/admin/hearing/notes/bulk-upload" class="back-link" style="color:#0061FF;">📚 Bulk upload multiple documents →</a>
   </p>
@@ -2690,7 +2709,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       w.style.display = "block";
       w.classList.add("d-transcribing");
       document.getElementById("d-widget-dot").style.animation = "none";
-      document.getElementById("d-widget-dot").style.background = "#B79C62";
+      document.getElementById("d-widget-dot").style.background = "#A34C00";
       document.getElementById("d-widget-stop").style.display = "none";
       document.getElementById("d-widget-timer").style.display = "none";
       document.getElementById("d-widget-bar").style.display = "block";
@@ -2766,10 +2785,10 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       if (e.next_hearing_date) rows.push(["Next hearing", new Date(e.next_hearing_date).toLocaleString()]);
       if (e.deadlines?.length) rows.push(["Deadlines", e.deadlines.length + " item(s)"]);
       const html = rows.map(([k, v]) =>
-        '<tr><td style="padding:3px 8px 3px 0; color:#666; white-space:nowrap; vertical-align:top;">' + k + '</td><td style="padding:3px 0; font-weight:500; color:#0C1C36;">' + String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</td></tr>'
+        '<tr><td style="padding:3px 8px 3px 0; color:#666; white-space:nowrap; vertical-align:top;">' + k + '</td><td style="padding:3px 0; font-weight:500; color:#2B2523;">' + String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</td></tr>'
       ).join("");
       document.getElementById("d-extracted-preview").innerHTML =
-        rows.length ? '<div style="font-weight:600; margin-bottom:6px; color:#0C1C36;">Extracted fields (will fill empty form fields):</div><table style="width:100%; font-size:12px;">' + html + '</table>'
+        rows.length ? '<div style="font-weight:600; margin-bottom:6px; color:#2B2523;">Extracted fields (will fill empty form fields):</div><table style="width:100%; font-size:12px;">' + html + '</table>'
                     : '<div style="color:#c00;">⚠️ No fields extracted. Only transcript will be appended to raw notes.</div>';
     }
 
@@ -2916,17 +2935,17 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     function handleDragOver(e) {
       e.preventDefault(); e.stopPropagation();
       document.getElementById("upload-area").style.background = "#faedd5";
-      document.getElementById("upload-area").style.borderColor = "#8f7a4c";
+      document.getElementById("upload-area").style.borderColor = "#7A3900";
     }
     function handleDragLeave(e) {
       e.preventDefault(); e.stopPropagation();
-      document.getElementById("upload-area").style.background = "#fdf7f0";
-      document.getElementById("upload-area").style.borderColor = "#B79C62";
+      document.getElementById("upload-area").style.background = "#FAF8F5";
+      document.getElementById("upload-area").style.borderColor = "#A34C00";
     }
     function handleDrop(e) {
       e.preventDefault(); e.stopPropagation();
-      document.getElementById("upload-area").style.background = "#fdf7f0";
-      document.getElementById("upload-area").style.borderColor = "#B79C62";
+      document.getElementById("upload-area").style.background = "#FAF8F5";
+      document.getElementById("upload-area").style.borderColor = "#A34C00";
       const files = e.dataTransfer.files;
       if (files.length > 0) uploadDocument(files[0]);
     }
@@ -3157,7 +3176,7 @@ function renderHistoryPage(notes) {
       <td>#${n.id}</td>
       <td>${escapeHtml(n.client_name)}</td>
       <td>${escapeHtml(n.a_number || "")}</td>
-      <td>${escapeHtml(n.hearing_type || "-")}${n.sequence_total && n.sequence_total > 1 ? ` <span style="background:#B79C62; color:white; padding:1px 6px; border-radius:8px; font-size:11px;">#${n.sequence}/${n.sequence_total}</span>` : ""}</td>
+      <td>${escapeHtml(n.hearing_type || "-")}${n.sequence_total && n.sequence_total > 1 ? ` <span style="background:#A34C00; color:white; padding:1px 6px; border-radius:8px; font-size:11px;">#${n.sequence}/${n.sequence_total}</span>` : ""}</td>
       <td>${n.hearing_date ? new Date(n.hearing_date).toLocaleDateString() : "-"}</td>
       <td>${n.next_hearing_date ? new Date(n.next_hearing_date).toLocaleDateString() : "-"}</td>
       <td>${escapeHtml(n.next_hearing_type || "-")}</td>
@@ -3165,7 +3184,7 @@ function renderHistoryPage(notes) {
       <td>${n.sent_to_paralegal_at ? "✅" : "—"}</td>
       <td>${new Date(n.created_at).toLocaleDateString()}</td>
       <td>
-        <a href="/admin/hearing/notes/${n.id}" style="color:#B79C62;">view</a>
+        <a href="/admin/hearing/notes/${n.id}" style="color:#A34C00;">view</a>
         &nbsp;·&nbsp;
         <a href="#" onclick="deleteRow(${n.id}, ${JSON.stringify(n.client_name).replace(/"/g, "&quot;")}); return false;" style="color:#c00; font-size:12px;">🗑️</a>
       </td>
@@ -3174,7 +3193,7 @@ function renderHistoryPage(notes) {
 
   const body = `
     <div class="page-header">
-      <h1>📚 Hearing Notes History</h1>
+      <h1>Hearing Notes History</h1>
       <a href="/admin/hearing/notes" class="back-link">← Back to note-taking</a>
       &nbsp;·&nbsp;
       <a href="/admin/hearing/notes/duplicates" class="back-link" style="color:#c62828;">🧹 Find duplicates</a>
@@ -3320,7 +3339,7 @@ function renderDetailPage(note) {
       </div>
     </div>
 
-    <div style="background: white; padding: 20px; border-radius: 4px; margin: 15px 0; border-left: 4px solid #B79C62;">
+    <div style="background: white; padding: 20px; border-radius: 4px; margin: 15px 0; border-left: 4px solid #FF7B00;">
       <div style="margin:4px 0;"><strong>Client:</strong> ${escapeHtml(note.client_name)}</div>
       <div style="margin:4px 0;"><strong>A-Number:</strong> ${escapeHtml(note.a_number || "-")}</div>
       <div style="margin:4px 0;"><strong>Client contact:</strong> ${escapeHtml([note.client_email, note.client_phone].filter(Boolean).join(" / ") || "-")}</div>
@@ -3339,20 +3358,20 @@ function renderDetailPage(note) {
       <div style="margin:4px 0;"><strong>Created:</strong> ${new Date(note.created_at).toLocaleString()}</div>
     </div>
 
-    <h2 style="color:#B79C62; margin-top:30px;">Paralegal Summary</h2>
+    <h2 style="color:#A34C00; margin-top:30px;">Paralegal Summary</h2>
     <div style="margin-bottom:8px;">
-      <button type="button" onclick="copyEl('paralegal-detail')" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy</button>
+      <button type="button" onclick="copyEl('paralegal-detail')" style="background:#2B2523; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy</button>
       <button type="button" onclick="sendParalegalDetail(${note.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 ${note.sent_to_paralegal_at ? "Re-send" : "Send"} to team group</button>
-      <button type="button" onclick="generateTasksFromNote('master', ${note.id}, this)" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">🤖 Create Tasks</button>
+      <button type="button" onclick="generateTasksFromNote('master', ${note.id}, this)" style="background:#A34C00; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">🤖 Create Tasks</button>
       <span id="send-detail-status" style="margin-left:12px; font-weight:bold;"></span>
     </div>
     <pre id="paralegal-detail" style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.paralegal_summary || "(none)")}</pre>
 
-    <h2 style="color:#B79C62; margin-top:30px;">Client Summary (${note.client_language})</h2>
-    <button type="button" onclick="copyEl('client-detail')" style="background:#B79C62; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-bottom:8px;">📋 Copy</button>
+    <h2 style="color:#A34C00; margin-top:30px;">Client Summary (${note.client_language})</h2>
+    <button type="button" onclick="copyEl('client-detail')" style="background:#A34C00; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-bottom:8px;">📋 Copy</button>
     <pre id="client-detail" style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.client_summary || "(none)")}</pre>
 
-    <h2 style="color:#B79C62; margin-top:30px;">Original Raw Notes</h2>
+    <h2 style="color:#A34C00; margin-top:30px;">Original Raw Notes</h2>
     <pre style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.raw_notes || "(none)")}</pre>
 
     <script>
@@ -3593,7 +3612,7 @@ function renderDuplicatesPage(groups) {
 
   const body = `
     <div class="page-header">
-      <h1>🧹 Duplicate Hearing Notes</h1>
+      <h1>Duplicate Hearing Notes</h1>
       <div style="font-size:13px; color:#666;">
         Zara found <strong>${dupCount}</strong> duplicate hearing note(s) across <strong>${groups.length}</strong> group(s).
         Each group shows notes that share the same client + hearing time + type.
@@ -3630,7 +3649,7 @@ function renderDuplicatesPage(groups) {
 function renderBulkUploadPage() {
   const body = `
 <div class="page-header">
-  <h1>📚 Bulk Upload Master Hearing Notes</h1>
+  <h1>Bulk Upload Master Hearing Notes</h1>
   <div style="font-size:13px; color:#666;">
     Drop or select multiple photos/PDFs from a day of court. Zara extracts fields for each in parallel, then you review + create the drafts.
   </div>
@@ -3640,7 +3659,7 @@ function renderBulkUploadPage() {
      ondragover="handleBulkDrag(event, true)"
      ondragleave="handleBulkDrag(event, false)"
      ondrop="handleBulkDrop(event)"
-     style="border:3px dashed #B79C62; padding:32px 20px; text-align:center; border-radius:8px; background:#fdf7f0; cursor:pointer; margin-bottom:20px;"
+     style="border:3px dashed #FF7B00; padding:32px 20px; text-align:center; border-radius:8px; background:#FAF8F5; cursor:pointer; margin-bottom:20px;"
      onclick="document.getElementById('bulk-file-input').click()">
   <div style="font-size:40px; margin-bottom:8px;">📚</div>
   <strong style="font-size:16px;">Drop multiple documents here — or click to select</strong>
@@ -3652,11 +3671,11 @@ function renderBulkUploadPage() {
 
 <div id="bulk-progress-bar" style="display:none; background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee;">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-    <strong id="bulk-progress-label" style="color:#0C1C36;">Processing…</strong>
+    <strong id="bulk-progress-label" style="color:#2B2523;">Processing…</strong>
     <span id="bulk-progress-count" style="font-size:13px; color:#666;">0 of 0</span>
   </div>
   <div style="background:#eee; height:8px; border-radius:4px; overflow:hidden;">
-    <div id="bulk-progress-fill" style="background:linear-gradient(to right, #B79C62, #d4b979); height:100%; width:0%; transition:width 0.3s;"></div>
+    <div id="bulk-progress-fill" style="background:linear-gradient(to right, #A34C00, #E8E3DC); height:100%; width:0%; transition:width 0.3s;"></div>
   </div>
 </div>
 
@@ -3669,7 +3688,7 @@ function renderBulkUploadPage() {
     </div>
     <div style="display:flex; gap:8px;">
       <button type="button" onclick="discardAllPending()" style="background:#eee; color:#333; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Discard all pending</button>
-      <button type="button" onclick="createAllAsDrafts()" id="bulk-create-all-btn" style="background:#0C1C36; color:white; padding:9px 16px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">Create all as drafts</button>
+      <button type="button" onclick="createAllAsDrafts()" id="bulk-create-all-btn" style="background:#2B2523; color:white; padding:9px 16px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">Create all as drafts</button>
     </div>
   </div>
 </div>
@@ -3683,8 +3702,8 @@ let inFlight = 0;
 function handleBulkDrag(e, on) {
   e.preventDefault(); e.stopPropagation();
   const el = document.getElementById("bulk-upload-area");
-  el.style.background = on ? "#faedd5" : "#fdf7f0";
-  el.style.borderColor = on ? "#8f7a4c" : "#B79C62";
+  el.style.background = on ? "#faedd5" : "#FAF8F5";
+  el.style.borderColor = on ? "#7A3900" : "#A34C00";
 }
 function handleBulkDrop(e) {
   handleBulkDrag(e, false);
@@ -3779,9 +3798,9 @@ function renderCard(cardId) {
   const statusMap = {
     queued:     { emoji: "⏳", text: "Queued",           color: "#888" },
     uploading:  { emoji: "📤", text: "Uploading…",       color: "#0061FF" },
-    extracting: { emoji: "🤖", text: "Claude extracting…",color: "#B79C62" },
+    extracting: { emoji: "🤖", text: "Claude extracting…",color: "#A34C00" },
     ready:      { emoji: "✓",  text: "Ready to create",  color: "#2e7d32" },
-    creating:   { emoji: "💾", text: "Creating draft…",  color: "#B79C62" },
+    creating:   { emoji: "💾", text: "Creating draft…",  color: "#A34C00" },
     created:    { emoji: "✅", text: "Draft created",    color: "#2e7d32" },
     error:      { emoji: "❌", text: "Error",            color: "#c00" },
     discarded:  { emoji: "🗑️", text: "Discarded",        color: "#888" },
@@ -3811,7 +3830,7 @@ function renderCard(cardId) {
       const nhd = new Date(e.next_hearing_date);
       const nhdStr = isNaN(nhd) ? escapeHTMLLocal2(e.next_hearing_date) : escapeHTMLLocal2(nhd.toLocaleString());
       const nhtLabel = e.next_hearing_type ? ' (' + escapeHTMLLocal2(e.next_hearing_type) + ')' : '';
-      content += '<div style="color:#B79C62;"><strong>➡️ Next hearing:</strong> ' + nhdStr + nhtLabel + '</div>';
+      content += '<div style="color:#A34C00;"><strong>➡️ Next hearing:</strong> ' + nhdStr + nhtLabel + '</div>';
     }
     if (e.judge_name) content += '<div><strong>Judge:</strong> ' + escapeHTMLLocal2(e.judge_name) + '</div>';
     if (e.case_type) content += '<div style="font-size:12px; color:#666;"><strong>Type:</strong> ' + escapeHTMLLocal2(e.case_type) + '</div>';
@@ -3822,14 +3841,14 @@ function renderCard(cardId) {
     }
     content += '</div>';
     content += '<div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">';
-    content +=   '<button type="button" onclick="createDraft(\\'' + cardId + '\\')" style="background:#0C1C36; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:11px; font-weight:600;">💾 Create draft</button>';
+    content +=   '<button type="button" onclick="createDraft(\\'' + cardId + '\\')" style="background:#2B2523; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:11px; font-weight:600;">💾 Create draft</button>';
     content +=   '<button type="button" onclick="discardCard(\\'' + cardId + '\\')" style="background:#eee; color:#666; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:11px;">Discard</button>';
     content += '</div>';
   } else if (c.status === "created") {
     content += '<div style="background:#e8f5e9; color:#2e7d32; padding:8px; border-radius:3px; font-size:12px;">';
     content +=   '<strong>Draft created!</strong> ' + (c.extraction?.client_name ? escapeHTMLLocal2(c.extraction.client_name) : "");
     content += '</div>';
-    content += '<a href="/admin/hearing/notes/' + c.noteId + '" target="_blank" style="display:inline-block; margin-top:8px; background:#0C1C36; color:white; padding:6px 12px; text-decoration:none; border-radius:3px; font-size:11px; font-weight:600;">Open to edit →</a>';
+    content += '<a href="/admin/hearing/notes/' + c.noteId + '" target="_blank" style="display:inline-block; margin-top:8px; background:#2B2523; color:white; padding:6px 12px; text-decoration:none; border-radius:3px; font-size:11px; font-weight:600;">Open to edit →</a>';
   } else if (c.status === "discarded") {
     content += '<div style="color:#888; font-size:12px; font-style:italic;">Discarded</div>';
   } else {

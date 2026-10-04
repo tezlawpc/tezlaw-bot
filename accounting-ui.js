@@ -46,8 +46,8 @@ async function companySwitcher(currentId, basePath = "/admin/accounting") {
     const sep = basePath.includes("?") ? "&" : "?";
     return `<a href="${esc(basePath)}${sep}company_id=${c.id}"
        style="padding:6px 14px; border-radius:6px; font-size:13px; text-decoration:none;
-              ${on ? "background:#0C1C36; color:#fff; font-weight:600;"
-                   : "background:#fff; color:#0C1C36; border:1px solid #d5d5d5;"}">
+              ${on ? "background:#2B2523; color:#fff; font-weight:600;"
+                   : "background:#fff; color:#2B2523; border:1px solid #d5d5d5;"}">
        ${esc(c.name)}${c.is_law_firm ? " <span style=\"opacity:.65; font-weight:400;\">· law firm</span>" : ""}
      </a>`;
   }).join(" ");
@@ -86,7 +86,7 @@ async function renderDashboard(query = {}) {
     <div style="background:${qboConnected ? "linear-gradient(135deg, #e8f5e9, #c8e6c9)" : "linear-gradient(135deg, #fff8e1, #ffe082)"}; padding:20px 24px; border-radius:8px; border-left:4px solid ${qboConnected ? "#2e7d32" : "#f57f17"}; margin-bottom:16px;">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
         <div>
-          <div style="font-size:15px; font-weight:700; color:#0C1C36;">
+          <div style="font-size:15px; font-weight:700; color:#2B2523;">
             🔗 QuickBooks Online ${qboConnected ? `<span style="color:#2e7d32;">✓ Connected</span>` : `<span style="color:#f57f17;">— Not connected</span>`}
           </div>
           <div style="font-size:12px; color:#555; margin-top:4px;">
@@ -97,7 +97,7 @@ async function renderDashboard(query = {}) {
                   : "Setup takes ~10 minutes — get your Client ID from Intuit Developer Portal")}
           </div>
         </div>
-        <a href="/admin/accounting/quickbooks" style="background:${qboConnected ? "#0C1C36" : "#2CA01C"}; color:white; padding:12px 24px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px; white-space:nowrap;">
+        <a href="/admin/accounting/quickbooks" style="background:${qboConnected ? "#2B2523" : "#2CA01C"}; color:white; padding:12px 24px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px; white-space:nowrap;">
           ${qboConnected ? "⚙ Manage Sync" : "🔗 Connect QuickBooks →"}
         </a>
       </div>
@@ -126,7 +126,7 @@ async function renderDashboard(query = {}) {
   return `
     <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
       <div>
-        <h1>💼 Accounting</h1>
+        <h1>Accounting</h1>
         <div style="font-size:12px; color:#666; margin-top:4px;">Double-entry ledger for ALL practice areas with IOLTA trust compliance.</div>
       </div>
     </div>
@@ -140,7 +140,7 @@ async function renderDashboard(query = {}) {
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:20px;">
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Operating Cash</div>
-        <div style="font-size:22px; font-weight:700; color:#0C1C36; margin-top:4px;">${fmt$(stats.operating_balance)}</div>
+        <div style="font-size:22px; font-weight:700; color:#2B2523; margin-top:4px;">${fmt$(stats.operating_balance)}</div>
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">IOLTA Trust</div>
@@ -159,7 +159,7 @@ async function renderDashboard(query = {}) {
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">YTD Expenses</div>
-        <div style="font-size:22px; font-weight:700; color:#0C1C36; margin-top:4px;">${fmt$(stats.ytd_expense)}</div>
+        <div style="font-size:22px; font-weight:700; color:#2B2523; margin-top:4px;">${fmt$(stats.ytd_expense)}</div>
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">YTD Net Income</div>
@@ -167,20 +167,20 @@ async function renderDashboard(query = {}) {
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Open Invoices</div>
-        <div style="font-size:22px; font-weight:700; color:#0C1C36; margin-top:4px;">${stats.open_invoices_count}</div>
+        <div style="font-size:22px; font-weight:700; color:#2B2523; margin-top:4px;">${stats.open_invoices_count}</div>
         <div style="font-size:11px; color:#666; margin-top:2px;">${fmt$(stats.open_invoices_balance)} outstanding</div>
       </div>
     </div>
 
     <!-- Quick entry actions (all practice areas) -->
     <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-      <h3 style="margin:0 0 12px 0; font-size:14px; color:#0C1C36;">⚡ Quick Entry (Any Practice Area)</h3>
+      <h3 style="margin:0 0 12px 0; font-size:14px; color:#2B2523;">⚡ Quick Entry (Any Practice Area)</h3>
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px;">
         <a href="/admin/accounting/record-fee" style="background:#2e7d32; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
           💰 Record Legal Fee
           <div style="font-size:11px; font-weight:400; opacity:0.9; margin-top:3px;">Immigration, PI, Business, LL/T, Estate, TM, Real Estate</div>
         </a>
-        <a href="/admin/accounting/record-retainer" style="background:#B79C62; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
+        <a href="/admin/accounting/record-retainer" style="background:#A34C00; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
           🏦 Record Retainer
           <div style="font-size:11px; font-weight:400; opacity:0.9; margin-top:3px;">Money into IOLTA trust from client</div>
         </a>
@@ -188,7 +188,7 @@ async function renderDashboard(query = {}) {
           💸 Record Expense
           <div style="font-size:11px; font-weight:400; opacity:0.9; margin-top:3px;">Rent, salaries, subscriptions, etc</div>
         </a>
-        <a href="/admin/accounting/new-entry${qs}" style="background:#0C1C36; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
+        <a href="/admin/accounting/new-entry${qs}" style="background:#2B2523; color:white; padding:14px 18px; border-radius:6px; text-decoration:none; font-weight:600; display:block;">
           📝 Advanced Entry
           <div style="font-size:11px; font-weight:400; opacity:0.9; margin-top:3px;">Custom multi-line journal entry</div>
         </a>
@@ -202,14 +202,14 @@ async function renderDashboard(query = {}) {
 
     <!-- Reports & Exports -->
     <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-      <h3 style="margin:0 0 12px 0; font-size:14px; color:#0C1C36;">Reports & Exports</h3>
+      <h3 style="margin:0 0 12px 0; font-size:14px; color:#2B2523;">Reports & Exports</h3>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <a href="/admin/accounting/ledger${qs}" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📖 General Ledger</a>
-        <a href="/admin/accounting/income-statement${qs}" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📊 Income Statement (P&L)</a>
-        <a href="/admin/accounting/balance-sheet${qs}" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">⚖️ Balance Sheet</a>
-        <a href="/admin/accounting/trust" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">🔒 Trust Reconciliation</a>
-        <a href="/admin/accounting/chart${qs}" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📋 Chart of Accounts</a>
-        <a href="/admin/accounting/companies" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">🏢 Companies</a>
+        <a href="/admin/accounting/ledger${qs}" style="background:#F3EFE9; color:#2B2523; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📖 General Ledger</a>
+        <a href="/admin/accounting/income-statement${qs}" style="background:#F3EFE9; color:#2B2523; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📊 Income Statement (P&L)</a>
+        <a href="/admin/accounting/balance-sheet${qs}" style="background:#F3EFE9; color:#2B2523; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">⚖️ Balance Sheet</a>
+        <a href="/admin/accounting/trust" style="background:#F3EFE9; color:#2B2523; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">🔒 Trust Reconciliation</a>
+        <a href="/admin/accounting/chart${qs}" style="background:#F3EFE9; color:#2B2523; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📋 Chart of Accounts</a>
+        <a href="/admin/accounting/companies" style="background:#F3EFE9; color:#2B2523; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">🏢 Companies</a>
       </div>
 
       <h4 style="margin:16px 0 8px 0; font-size:12px; color:#666; text-transform:uppercase; letter-spacing:0.05em;">One-time Exports</h4>
@@ -222,13 +222,13 @@ async function renderDashboard(query = {}) {
 
     <!-- Recent entries -->
     <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-      <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
-        <strong style="color:#0C1C36; font-size:14px;">Recent Journal Entries</strong>
+      <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+        <strong style="color:#2B2523; font-size:14px;">Recent Journal Entries</strong>
         <a href="/admin/accounting/ledger${qs}" style="color:#0061FF; font-size:12px; text-decoration:none;">View all →</a>
       </div>
       <table style="width:100%; border-collapse:collapse; font-size:13px;">
         <thead>
-          <tr style="background:#fafaf7;">
+          <tr style="background:#FAF8F5;">
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Date</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Description</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Client</th>
@@ -282,17 +282,17 @@ async function renderLedger(query) {
     const linesHtml = (e.lines || []).map(l => `
       <div style="display:grid; grid-template-columns:1fr 100px 100px; gap:8px; padding:2px 0; font-size:12px;">
         <div style="color:#555;">${l.account_number} ${esc(l.account_name)}${l.memo ? ' <span style="color:#888;">— ' + esc(l.memo) + '</span>' : ''}</div>
-        <div style="text-align:right; color:${Number(l.debit) > 0 ? "#0C1C36" : "#ccc"};">${Number(l.debit) > 0 ? fmt$(l.debit) : ""}</div>
-        <div style="text-align:right; color:${Number(l.credit) > 0 ? "#0C1C36" : "#ccc"};">${Number(l.credit) > 0 ? fmt$(l.credit) : ""}</div>
+        <div style="text-align:right; color:${Number(l.debit) > 0 ? "#2B2523" : "#ccc"};">${Number(l.debit) > 0 ? fmt$(l.debit) : ""}</div>
+        <div style="text-align:right; color:${Number(l.credit) > 0 ? "#2B2523" : "#ccc"};">${Number(l.credit) > 0 ? fmt$(l.credit) : ""}</div>
       </div>`).join("");
     return `
       <div style="background:white; padding:14px 16px; border:1px solid #eee; border-radius:6px; margin-bottom:8px;">
         <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
           <div>
-            <strong style="color:#0C1C36; font-size:13px;">${fmtDate(e.entry_date)}</strong>
+            <strong style="color:#2B2523; font-size:13px;">${fmtDate(e.entry_date)}</strong>
             <span style="margin-left:10px; color:#555; font-size:13px;">${esc(e.description)}</span>
             ${e.reference ? `<span style="margin-left:8px; font-size:11px; color:#888;">[${esc(e.reference)}]</span>` : ""}
-            ${e.is_trust ? '<span style="margin-left:8px; background:#B79C62; color:white; padding:1px 8px; border-radius:8px; font-size:10px;">TRUST</span>' : ""}
+            ${e.is_trust ? '<span style="margin-left:8px; background:#A34C00; color:white; padding:1px 8px; border-radius:8px; font-size:10px;">TRUST</span>' : ""}
           </div>
           <div style="font-size:11px; color:#888;">
             ${esc(e.client_name || "")} ${e.matter_type ? "· " + esc(e.matter_type) : ""}
@@ -310,7 +310,7 @@ async function renderLedger(query) {
 
   return `
     <div class="page-header">
-      <h1>📖 General Ledger</h1>
+      <h1>General Ledger</h1>
       <a href="/admin/accounting" class="back-link">← Accounting</a>
     </div>
 
@@ -333,7 +333,7 @@ async function renderLedger(query) {
           <option value="estate" ${matter==="estate"?"selected":""}>Estate</option>
         </select>
       </div>
-      <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
+      <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
       <a href="/admin/accounting/ledger" style="padding:8px 16px; color:#666; text-decoration:none;">Clear</a>
     </form>
 
@@ -361,7 +361,7 @@ async function renderIncomeStatement(query) {
 
   return `
     <div class="page-header">
-      <h1>📊 Income Statement (P&L)</h1>
+      <h1>Income Statement (P&L)</h1>
       <a href="/admin/accounting" class="back-link">← Accounting</a>
     </div>
 
@@ -371,25 +371,25 @@ async function renderIncomeStatement(query) {
       ${companyField(cid)}
       <div><label style="font-size:11px; color:#888; display:block;">From</label><input type="date" name="from" value="${from}" style="padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
       <div><label style="font-size:11px; color:#888; display:block;">To</label><input type="date" name="to" value="${to}" style="padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
-      <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Update</button>
+      <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Update</button>
     </form>
 
     <div style="background:white; padding:24px 32px; border-radius:8px; border:1px solid #eee; max-width:720px;">
       <div style="text-align:center; margin-bottom:20px;">
-        <div style="font-size:20px; font-weight:700; color:#0C1C36;">Tez Law P.C.</div>
-        <div style="font-size:15px; color:#0C1C36;">Income Statement</div>
+        <div style="font-size:20px; font-weight:700; color:#2B2523;">Tez Law P.C.</div>
+        <div style="font-size:15px; color:#2B2523;">Income Statement</div>
         <div style="font-size:12px; color:#666;">${fmtDate(from)} to ${fmtDate(to)}</div>
       </div>
       <table style="width:100%; border-collapse:collapse; font-size:13px;">
-        <tr><td colspan="2" style="padding:12px 0 6px 0; border-top:2px solid #0C1C36;"><strong style="color:#0C1C36;">REVENUE</strong></td></tr>
+        <tr><td colspan="2" style="padding:12px 0 6px 0; border-top:2px solid #2B2523;"><strong style="color:#2B2523;">REVENUE</strong></td></tr>
         ${revRows}
-        <tr style="font-weight:700; background:#fafaf7;"><td style="padding:8px 12px;">Total Revenue</td><td style="padding:8px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(is.total_revenue)}</td></tr>
+        <tr style="font-weight:700; background:#FAF8F5;"><td style="padding:8px 12px;">Total Revenue</td><td style="padding:8px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(is.total_revenue)}</td></tr>
 
-        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:1px solid #eee;"><strong style="color:#0C1C36;">EXPENSES</strong></td></tr>
+        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:1px solid #eee;"><strong style="color:#2B2523;">EXPENSES</strong></td></tr>
         ${expRows}
-        <tr style="font-weight:700; background:#fafaf7;"><td style="padding:8px 12px;">Total Expenses</td><td style="padding:8px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(is.total_expense)}</td></tr>
+        <tr style="font-weight:700; background:#FAF8F5;"><td style="padding:8px 12px;">Total Expenses</td><td style="padding:8px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(is.total_expense)}</td></tr>
 
-        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:2px solid #0C1C36;"></td></tr>
+        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:2px solid #2B2523;"></td></tr>
         <tr style="background:${is.net_income >= 0 ? "#e8f5e9" : "#fee"}; font-weight:700; font-size:16px;">
           <td style="padding:14px 12px;">NET INCOME</td>
           <td style="padding:14px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace; color:${is.net_income >= 0 ? "#2e7d32" : "#c62828"};">${fmt$(is.net_income)}</td>
@@ -398,7 +398,7 @@ async function renderIncomeStatement(query) {
     </div>
 
     <div style="margin-top:16px;">
-      <button onclick="window.print()" style="background:#0C1C36; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
+      <button onclick="window.print()" style="background:#2B2523; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
     </div>`;
 }
 
@@ -420,7 +420,7 @@ async function renderBalanceSheet(query) {
 
   return `
     <div class="page-header">
-      <h1>⚖️ Balance Sheet</h1>
+      <h1>Balance Sheet</h1>
       <a href="/admin/accounting" class="back-link">← Accounting</a>
     </div>
 
@@ -429,30 +429,30 @@ async function renderBalanceSheet(query) {
     <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; align-items:end;">
       ${companyField(cid)}
       <div><label style="font-size:11px; color:#888; display:block;">As of</label><input type="date" name="as_of" value="${asOf}" style="padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
-      <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Update</button>
+      <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Update</button>
     </form>
 
     <div style="background:white; padding:24px 32px; border-radius:8px; border:1px solid #eee; max-width:720px;">
       <div style="text-align:center; margin-bottom:20px;">
-        <div style="font-size:20px; font-weight:700; color:#0C1C36;">Tez Law P.C.</div>
-        <div style="font-size:15px; color:#0C1C36;">Balance Sheet</div>
+        <div style="font-size:20px; font-weight:700; color:#2B2523;">Tez Law P.C.</div>
+        <div style="font-size:15px; color:#2B2523;">Balance Sheet</div>
         <div style="font-size:12px; color:#666;">As of ${fmtDate(asOf)}</div>
       </div>
       <table style="width:100%; border-collapse:collapse; font-size:13px;">
-        <tr><td colspan="2" style="padding:12px 0 6px 0; border-top:2px solid #0C1C36;"><strong style="color:#0C1C36;">ASSETS</strong></td></tr>
+        <tr><td colspan="2" style="padding:12px 0 6px 0; border-top:2px solid #2B2523;"><strong style="color:#2B2523;">ASSETS</strong></td></tr>
         ${bucketHtml(bs.assets, "assets")}
-        <tr style="font-weight:700; background:#fafaf7;"><td style="padding:8px 12px;">Total Assets</td><td style="padding:8px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(bs.total_assets)}</td></tr>
+        <tr style="font-weight:700; background:#FAF8F5;"><td style="padding:8px 12px;">Total Assets</td><td style="padding:8px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(bs.total_assets)}</td></tr>
 
-        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:1px solid #eee;"><strong style="color:#0C1C36;">LIABILITIES</strong></td></tr>
+        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:1px solid #eee;"><strong style="color:#2B2523;">LIABILITIES</strong></td></tr>
         ${bucketHtml(bs.liabilities, "liabilities")}
-        <tr style="font-weight:700; background:#fafaf7;"><td style="padding:8px 12px;">Total Liabilities</td><td style="padding:8px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(bs.total_liabilities)}</td></tr>
+        <tr style="font-weight:700; background:#FAF8F5;"><td style="padding:8px 12px;">Total Liabilities</td><td style="padding:8px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(bs.total_liabilities)}</td></tr>
 
-        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:1px solid #eee;"><strong style="color:#0C1C36;">EQUITY</strong></td></tr>
+        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:1px solid #eee;"><strong style="color:#2B2523;">EQUITY</strong></td></tr>
         ${bucketHtml(bs.equity, "equity")}
-        <tr style="font-weight:700; background:#fafaf7;"><td style="padding:8px 12px;">Total Equity</td><td style="padding:8px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(bs.total_equity)}</td></tr>
+        <tr style="font-weight:700; background:#FAF8F5;"><td style="padding:8px 12px;">Total Equity</td><td style="padding:8px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(bs.total_equity)}</td></tr>
 
-        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:2px solid #0C1C36;"></td></tr>
-        <tr style="background:#fafaf7; font-weight:700; font-size:14px;">
+        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:2px solid #2B2523;"></td></tr>
+        <tr style="background:#FAF8F5; font-weight:700; font-size:14px;">
           <td style="padding:10px 12px;">Total Liabilities + Equity</td>
           <td style="padding:10px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(bs.total_liabilities + bs.total_equity)}</td>
         </tr>
@@ -463,7 +463,7 @@ async function renderBalanceSheet(query) {
     </div>
 
     <div style="margin-top:16px;">
-      <button onclick="window.print()" style="background:#0C1C36; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
+      <button onclick="window.print()" style="background:#2B2523; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
     </div>`;
 }
 
@@ -476,14 +476,14 @@ async function renderTrustReconciliation(query) {
 
   const clientRows = trust.client_balances.length ? trust.client_balances.map(c => `
     <tr>
-      <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:13px;"><a href="/admin/accounting/trust/${encodeURIComponent(c.client_key)}" style="color:#0C1C36; text-decoration:none; font-weight:500;">${esc(c.client_name || c.client_key)}</a></td>
+      <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:13px;"><a href="/admin/accounting/trust/${encodeURIComponent(c.client_key)}" style="color:#2B2523; text-decoration:none; font-weight:500;">${esc(c.client_name || c.client_key)}</a></td>
       <td style="padding:10px 12px; border-bottom:1px solid #eee; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(c.balance)}</td>
     </tr>
   `).join("") : `<tr><td colspan="2" style="padding:20px; text-align:center; color:#888; font-style:italic;">No client trust balances</td></tr>`;
 
   return `
     <div class="page-header">
-      <h1>🔒 Trust Reconciliation</h1>
+      <h1>Trust Reconciliation</h1>
       <a href="/admin/accounting" class="back-link">← Accounting</a>
     </div>
 
@@ -495,11 +495,11 @@ async function renderTrustReconciliation(query) {
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:20px;">
         <div>
           <div style="font-size:11px; color:#666; text-transform:uppercase;">Bank Balance (1020)</div>
-          <div style="font-size:22px; font-weight:700; color:#0C1C36; margin-top:4px;">${fmt$(trust.bank_balance)}</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523; margin-top:4px;">${fmt$(trust.bank_balance)}</div>
         </div>
         <div>
           <div style="font-size:11px; color:#666; text-transform:uppercase;">Sum of Client Ledgers</div>
-          <div style="font-size:22px; font-weight:700; color:#0C1C36; margin-top:4px;">${fmt$(trust.sum_of_client_balances)}</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523; margin-top:4px;">${fmt$(trust.sum_of_client_balances)}</div>
         </div>
         <div>
           <div style="font-size:11px; color:#666; text-transform:uppercase;">Variance</div>
@@ -516,15 +516,15 @@ async function renderTrustReconciliation(query) {
 
     <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; align-items:end;">
       <div><label style="font-size:11px; color:#888; display:block;">As of</label><input type="date" name="as_of" value="${asOf}" style="padding:6px; border:1px solid #ccc; border-radius:4px;"></div>
-      <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Update</button>
+      <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Update</button>
     </form>
 
     <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-      <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee;">
-        <strong style="color:#0C1C36;">Per-Client Trust Balances (${trust.client_balances.length})</strong>
+      <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee;">
+        <strong style="color:#2B2523;">Per-Client Trust Balances (${trust.client_balances.length})</strong>
       </div>
       <table style="width:100%; border-collapse:collapse;">
-        <thead><tr style="background:#fafaf7;">
+        <thead><tr style="background:#FAF8F5;">
           <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Client</th>
           <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Balance</th>
         </tr></thead>
@@ -539,7 +539,7 @@ async function renderChartOfAccounts(query = {}) {
   const cid = Number(query.company_id) > 0 ? Number(query.company_id) : null;
   const accounts = await accounting.listAccounts(cid);
   const switcher = await companySwitcher(cid, "/admin/accounting/chart");
-  const typeColors = { asset: "#0C1C36", liability: "#c62828", equity: "#7c4dff", revenue: "#2e7d32", expense: "#e65100" };
+  const typeColors = { asset: "#2B2523", liability: "#c62828", equity: "#7c4dff", revenue: "#2e7d32", expense: "#e65100" };
   const grouped = {};
   for (const a of accounts) {
     if (!grouped[a.type]) grouped[a.type] = [];
@@ -566,7 +566,7 @@ async function renderChartOfAccounts(query = {}) {
 
   return `
     <div class="page-header">
-      <h1>📋 Chart of Accounts</h1>
+      <h1>Chart of Accounts</h1>
       <a href="/admin/accounting" class="back-link">← Accounting</a>
     </div>
 
@@ -597,19 +597,19 @@ async function renderClientTrustLedger(clientKey) {
 
   return `
     <div class="page-header">
-      <h1>🔒 Trust Ledger — ${esc(clientName)}</h1>
+      <h1>Trust Ledger — ${esc(clientName)}</h1>
       <a href="/admin/accounting/trust" class="back-link">← All trust balances</a>
     </div>
 
     <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
       <div style="font-size:11px; color:#888; text-transform:uppercase;">Current Trust Balance</div>
-      <div style="font-size:32px; font-weight:700; color:${currentBalance > 0 ? "#2e7d32" : "#0C1C36"}; margin-top:4px;">${fmt$(currentBalance)}</div>
+      <div style="font-size:32px; font-weight:700; color:${currentBalance > 0 ? "#2e7d32" : "#2B2523"}; margin-top:4px;">${fmt$(currentBalance)}</div>
       <div style="font-size:12px; color:#666; margin-top:4px;">${entries.length} transactions</div>
     </div>
 
     <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
       <table style="width:100%; border-collapse:collapse;">
-        <thead><tr style="background:#fafaf7;">
+        <thead><tr style="background:#FAF8F5;">
           <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Date</th>
           <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Description</th>
           <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Deposit</th>
@@ -650,7 +650,7 @@ async function renderNewEntry() {
         </div>
       </div>
 
-      <h3 style="font-size:14px; color:#0C1C36; margin:20px 0 8px 0;">Lines (must balance: debits = credits)</h3>
+      <h3 style="font-size:14px; color:#2B2523; margin:20px 0 8px 0;">Lines (must balance: debits = credits)</h3>
       <div id="lines-container">
         <div class="line-row" style="display:grid; grid-template-columns:2fr 1fr 1fr 2fr auto; gap:8px; margin-bottom:8px;">
           <select name="account_0" required style="padding:8px; border:1px solid #ccc; border-radius:4px;"><option value="">— account —</option>${acctOpts}</select>
@@ -667,10 +667,10 @@ async function renderNewEntry() {
           <button type="button" onclick="removeLine(this)" style="background:none; border:none; color:#c62828; cursor:pointer;">×</button>
         </div>
       </div>
-      <button type="button" onclick="addLine()" style="background:#f5f2ea; color:#0C1C36; border:none; padding:8px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add Line</button>
+      <button type="button" onclick="addLine()" style="background:#F3EFE9; color:#2B2523; border:none; padding:8px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add Line</button>
 
       <div style="margin-top:20px; padding-top:16px; border-top:1px solid #eee;">
-        <button type="submit" style="background:#0C1C36; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Post Entry</button>
+        <button type="submit" style="background:#2B2523; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Post Entry</button>
       </div>
     </form>
 
@@ -747,20 +747,20 @@ async function renderCompanies(query = {}) {
           : "Business books. No trust accounts — client money cannot be posted here."}
       </td>
       <td style="padding:10px 8px; text-align:right; white-space:nowrap;">
-        <a href="/admin/accounting?company_id=${c.id}" style="font-size:12px; color:#A02818; font-weight:600;">Open books →</a>
+        <a href="/admin/accounting?company_id=${c.id}" style="font-size:12px; color:#9C2B1E; font-weight:600;">Open books →</a>
       </td>
     </tr>`).join("");
 
   return `
     <div class="page-header">
-      <h1>🏢 Companies</h1>
+      <h1>Companies</h1>
       <a href="/admin/accounting" class="back-link">← Accounting</a>
     </div>
 
     ${added ? `<div style="background:#e8f5e9; border-left:4px solid #2e7d32; padding:12px 16px; border-radius:6px; margin-bottom:16px; font-size:13px;">
       Added <strong>${esc(added)}</strong> with its own chart of accounts. Use the Books switcher on any accounting screen to move between them.
     </div>` : ""}
-    ${failed ? `<div style="background:#fdecea; border-left:4px solid #A02818; padding:12px 16px; border-radius:6px; margin-bottom:16px; font-size:13px;">
+    ${failed ? `<div style="background:#fdecea; border-left:4px solid #9C2B1E; padding:12px 16px; border-radius:6px; margin-bottom:16px; font-size:13px;">
       ${esc(failed)}
     </div>` : ""}
 
@@ -771,7 +771,7 @@ async function renderCompanies(query = {}) {
     </div>
 
     <table style="width:100%; border-collapse:collapse; background:white; border:1px solid #eee; border-radius:8px; overflow:hidden; margin-bottom:24px;">
-      <thead><tr style="background:#faf8f4;">
+      <thead><tr style="background:#FAF8F5;">
         <th style="padding:8px; text-align:left; font-size:11px; color:#888; text-transform:uppercase;">Company</th>
         <th style="padding:8px; text-align:left; font-size:11px; color:#888; text-transform:uppercase;">Books</th>
         <th></th>
@@ -787,7 +787,7 @@ async function renderCompanies(query = {}) {
         <input type="text" name="name" required maxlength="120" placeholder="e.g. Tez Holdings LLC"
                style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
       </div>
-      <button type="submit" style="background:#F07800; color:#FFF7E4; border:1px solid #A02818; padding:9px 18px; border-radius:4px; cursor:pointer; font-weight:600;">
+      <button type="submit" style="background:#FF7B00;color:#1E1B1A; border:1px solid #9C2B1E; padding:9px 18px; border-radius:4px; cursor:pointer; font-weight:600;">
         Create books
       </button>
     </form>

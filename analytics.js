@@ -202,43 +202,43 @@ function buildEmailHtml(analysis, stats, intakes, weekLabel) {
 
   // Convert markdown-style ## headers in analysis to styled HTML
   const analysisHtml = analysis
-    .replace(/## (.+)/g, '<h3 style="color:#0C1C36;border-bottom:2px solid #B79C62;padding-bottom:4px;margin-top:24px">$1</h3>')
+    .replace(/## (.+)/g, '<h3 style="color:#2B2523;border-bottom:2px solid #FF7B00;padding-bottom:4px;margin-top:24px">$1</h3>')
     .replace(/\n/g, "<br>");
 
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="font-family:Arial,sans-serif;max-width:720px;margin:0 auto;color:#0C1C36;background:#fff">
+<body style="font-family:Arial,sans-serif;max-width:720px;margin:0 auto;color:#2B2523;background:#fff">
 
   <!-- Header -->
-  <div style="background:#0C1C36;padding:24px 28px">
-    <h1 style="color:#B79C62;margin:0;font-size:22px">⚡ Zara Weekly Intelligence Report</h1>
-    <p style="color:#B79C62;opacity:.7;margin:6px 0 0;font-size:13px">${weekLabel} &nbsp;·&nbsp; Generated ${new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"})}</p>
+  <div style="background:#2B2523;padding:24px 28px">
+    <h1 style="color:#FF7B00;margin:0;font-size:22px">Zara Weekly Intelligence Report</h1>
+    <p style="color:#E8E3DC;opacity:.85;margin:6px 0 0;font-size:13px">${weekLabel} &nbsp;·&nbsp; Generated ${new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"})}</p>
   </div>
 
   <div style="padding:24px 28px">
 
     <!-- Stats -->
-    <h2 style="color:#0C1C36;margin-top:0">📈 This Week at a Glance</h2>
+    <h2 style="color:#2B2523;margin-top:0">📈 This Week at a Glance</h2>
     <table style="width:100%;border-collapse:collapse">
       <tr>
         <td style="text-align:center;padding:16px;background:#f5f0e8;border-radius:6px;width:25%">
-          <div style="font-size:32px;font-weight:bold;color:#B79C62">${stats.totalConversations}</div>
+          <div style="font-size:32px;font-weight:bold;color:#A34C00">${stats.totalConversations}</div>
           <div style="font-size:12px;color:#666;margin-top:4px">Conversations</div>
         </td>
         <td style="width:12px"></td>
         <td style="text-align:center;padding:16px;background:#f5f0e8;border-radius:6px;width:25%">
-          <div style="font-size:32px;font-weight:bold;color:#B79C62">${stats.totalMessages}</div>
+          <div style="font-size:32px;font-weight:bold;color:#A34C00">${stats.totalMessages}</div>
           <div style="font-size:12px;color:#666;margin-top:4px">Messages</div>
         </td>
         <td style="width:12px"></td>
         <td style="text-align:center;padding:16px;background:#f5f0e8;border-radius:6px;width:25%">
-          <div style="font-size:32px;font-weight:bold;color:#B79C62">${stats.completedIntakes}</div>
+          <div style="font-size:32px;font-weight:bold;color:#A34C00">${stats.completedIntakes}</div>
           <div style="font-size:12px;color:#666;margin-top:4px">Completed Intakes</div>
         </td>
         <td style="width:12px"></td>
         <td style="text-align:center;padding:16px;background:#f5f0e8;border-radius:6px;width:25%">
-          <div style="font-size:32px;font-weight:bold;color:#B79C62">${stats.activePlatforms}</div>
+          <div style="font-size:32px;font-weight:bold;color:#A34C00">${stats.activePlatforms}</div>
           <div style="font-size:12px;color:#666;margin-top:4px">Platforms Active</div>
         </td>
       </tr>
@@ -248,7 +248,7 @@ function buildEmailHtml(analysis, stats, intakes, weekLabel) {
     <h2 style="margin-top:32px">📋 New Intakes This Week</h2>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead>
-        <tr style="background:#0C1C36;color:#B79C62">
+        <tr style="background:#2B2523;color:#FF7B00">
           <th style="padding:10px;text-align:left">Name</th>
           <th style="padding:10px;text-align:left">Case Type</th>
           <th style="padding:10px;text-align:left">Contact</th>
@@ -277,8 +277,8 @@ function buildEmailHtml(analysis, stats, intakes, weekLabel) {
   </div>
 
   <!-- Footer -->
-  <div style="background:#0C1C36;padding:16px 28px;text-align:center">
-    <p style="color:#B79C62;margin:0;font-size:12px">TEZ Law P.C. &nbsp;·&nbsp; Zara Analytics Engine &nbsp;·&nbsp; Every Sunday 9:00 AM</p>
+  <div style="background:#2B2523;padding:16px 28px;text-align:center">
+    <p style="color:#E8E3DC;margin:0;font-size:12px">TEZ Law P.C. &nbsp;·&nbsp; Zara Analytics Engine &nbsp;·&nbsp; Every Sunday 9:00 AM</p>
   </div>
 
 </body>

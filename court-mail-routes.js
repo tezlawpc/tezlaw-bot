@@ -21,8 +21,8 @@ function attach(app, auth) {
       const chrome = require("./hearing-notes");
       const body = `
         <div style="padding:24px;max-width:1200px;">
-          <h1 style="margin:0 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">📨 Court Mail</h1>
-          <div style="color:#7B5330;font-style:italic;margin-bottom:16px;">Court, EOIR and USCIS emails forwarded to the firm's court mailbox. Each one is read, matched to a case (by case number) or a client (by A-number), filed to Dropbox, and its hearings and deadlines added — marked "verify". Anything it could not match waits here for you.</div>
+          <h1 style="margin:0 0 4px 0;font-family:Cormorant Garamond,Georgia,serif;color:#2B2523;">Court Mail</h1>
+          <div style="color:#5E5854;font-style:italic;margin-bottom:16px;">Court, EOIR and USCIS emails forwarded to the firm's court mailbox. Each one is read, matched to a case (by case number) or a client (by A-number), filed to Dropbox, and its hearings and deadlines added — marked "verify". Anything it could not match waits here for you.</div>
           <div data-court-mail></div>
         </div>
         ${require("./client-script").clientScriptTag("court-mail-page.js")}`;

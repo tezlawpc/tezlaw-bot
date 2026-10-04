@@ -382,8 +382,24 @@ console.log("\n── Wiring ──");
   check("hearings and deadlines are swept daily", /sweepUpcoming\(\)/.test(srv));
   check("the alerts admin page is role-gated", /app\.use\("\/admin\/alerts", auth\.requireRole\("admin", "manager"\)\)/.test(srv));
   const send = (srv.match(/app\.post\("\/admin\/alerts\/send"[\s\S]*?\n\}\);/) || [""])[0];
+  // The sending moved into notify-admin.sendByHand so that an attorney's page
+  // (/admin/consultant-tasks/alert) and this one cannot drift apart. The rule
+  // is the same and is checked where it now lives: a client and a kind from a
+  // fixed list go in; nothing the sender typed can become the message.
+  const adminSrc = fs.readFileSync(path.join(__dirname, "..", "notify-admin.js"), "utf8");
+  const byHand = (adminSrc.match(/async function sendByHand\([\s\S]*?\n\}/) || [""])[0];
   check("an alert sent by hand takes a client and a kind, and no text",
-    /notify\.KINDS\[kind\]/.test(send) && /notifyAndFlush\(\{ clientKey, kind, ref:/.test(send) && !/b\.(message|text|body|note|subject)/.test(send));
+    /sendByHand\(\{ clientKey: b\.client_key, kind: b\.kind, user: req\.user \}\)/.test(send) && !/b\.(message|text|body|note|subject)/.test(send) &&
+    /HAND_KINDS\.includes\(k\)/.test(byHand) && /notify\.KINDS\[k\]/.test(byHand) &&
+    /notifyAndFlush\(\{ clientKey: key, kind: k, ref:/.test(byHand) && !/message|subject|body:/.test(byHand.replace(/text:/g, "")));
+  {
+    // …and by trying it: an unknown kind, or free text in its place, is refused
+    // before anything is queued.
+    const admin = require("../notify-admin");
+    const out1 = await admin.sendByHand({ clientKey: "a-1", kind: "Call me at 555-1234", user: { uid: 1 } }).catch(e => ({ ok: null, text: e.message }));
+    const out2 = await admin.sendByHand({ clientKey: "", kind: "update", user: { uid: 1 } }).catch(e => ({ ok: null, text: e.message }));
+    check("free text in place of a kind is refused", out1.ok === false && out2.ok === false, [out1, out2]);
+  }
   check("a consultant cannot change the address they are alerted at",
     !/UPDATE admin_users SET email[\s\S]{0,200}req\.user\.uid/.test(srv));
   check("the Telegram link code is read before the text reaches Zara",

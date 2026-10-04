@@ -206,7 +206,7 @@
     var when = new Date(draft.at);
     var bar = document.createElement("div");
     bar.style.cssText = "margin:0 0 16px;padding:12px 14px;border:1px solid #B45309;border-left:4px solid #B45309;"
-      + "background:#fffaf3;border-radius:6px;font-size:13px;color:#3E2818;line-height:1.6;";
+      + "background:#fffaf3;border-radius:6px;font-size:13px;color:#2B2523;line-height:1.6;";
     var msg = document.createElement("div");
     msg.textContent = "There is an unsent draft of this form from "
       + when.toLocaleString() + ", saved on this computer.";
@@ -216,13 +216,13 @@
     var use = document.createElement("button");
     use.type = "button";
     use.textContent = "Restore it";
-    use.style.cssText = "padding:6px 14px;background:#0C1C36;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;";
+    use.style.cssText = "padding:6px 14px;background:#2B2523;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;";
     use.onclick = function () { applyDraft(form, draft.data); bar.remove(); };
 
     var drop = document.createElement("button");
     drop.type = "button";
     drop.textContent = "Discard it";
-    drop.style.cssText = "padding:6px 14px;background:#fff;color:#A02818;border:1px solid #A02818;border-radius:4px;cursor:pointer;font-size:13px;";
+    drop.style.cssText = "padding:6px 14px;background:#fff;color:#9C2B1E;border:1px solid #9C2B1E;border-radius:4px;cursor:pointer;font-size:13px;";
     drop.onclick = function () { clearDraft(key); bar.remove(); };
 
     row.appendChild(use);
@@ -320,8 +320,8 @@
     pendingCount().then(function (slices) {
       if (!navigator.onLine) {
         el.style.display = "block";
-        el.style.background = "#A02818";
-        el.style.color = "#FFF7E4";
+        el.style.background = "#9C2B1E";
+        el.style.color = "#FAF8F5";
         el.textContent = "No internet — still recording and saving on this computer."
           + (slices ? " " + slices + " audio piece(s) held." : "")
           + (queued.length ? " " + queued.length + " note(s) waiting to file." : "");
@@ -330,7 +330,7 @@
       if (stuck.length) {
         el.style.display = "block";
         el.style.background = "#B45309";
-        el.style.color = "#FFF7E4";
+        el.style.color = "#FAF8F5";
         el.textContent = stuck.length + " note(s) were refused by the server and need looking at: "
           + (stuck[0].error || "unknown reason");
         return;
@@ -338,7 +338,7 @@
       if (queued.length || slices) {
         el.style.display = "block";
         el.style.background = "#B45309";
-        el.style.color = "#FFF7E4";
+        el.style.color = "#FAF8F5";
         el.textContent = "Back online — sending "
           + (slices ? slices + " audio piece(s) " : "")
           + (queued.length ? queued.length + " note(s) " : "") + "now.";
@@ -386,10 +386,10 @@
   function saidQueued(form, label) {
     var box = document.createElement("div");
     box.style.cssText = "margin:16px 0;padding:16px 18px;border:1px solid #2e7d32;border-left:4px solid #2e7d32;"
-      + "background:#f4faf5;border-radius:6px;font-size:14px;color:#0C1C36;line-height:1.7;";
+      + "background:#f4faf5;border-radius:6px;font-size:14px;color:#2B2523;line-height:1.7;";
     box.innerHTML = "<strong>Saved on this computer.</strong>";
     var p = document.createElement("div");
-    p.style.cssText = "margin-top:6px;font-size:13px;color:#3E2818;";
+    p.style.cssText = "margin-top:6px;font-size:13px;color:#2B2523;";
     p.textContent = "There is no internet right now, so this " + label
       + " has not reached the firm yet. It will file itself as soon as you are back online"
       + " — leave this tab open if you can, and do not retype it.";

@@ -57,10 +57,9 @@ END with this author box exactly:
 <strong>About the Author: JJ Zhang, Esq.</strong><br>
 JJ Zhang is the managing attorney at Tez Law P.C. Licensed to practice in California (Bar #326666), JJ represents clients in immigration courts, federal courts, and California state courts.<br><br>
 📞 <strong>626-678-8677</strong><br>
-💬 Chat with Zara: <a href="https://wa.me/16266788677" target="_blank">WhatsApp</a> · <a href="https://m.me/tezlawfirm" target="_blank">Messenger</a> · <a href="https://t.me/TEZJJBot" target="_blank">Telegram</a> · <a href="https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz=gh_03f700f08037" target="_blank">WeChat</a> (24/7)<br>
-📋 Intake: <a href="https://link.v1ce.co/tezintake">https://link.v1ce.co/tezintake</a><br>
+💬 WhatsApp · WeChat · Telegram: <a href="https://tezlawfirm.com/jj">tezlawfirm.com/jj</a><br>
 🌐 <a href="https://tezlawfirm.com">www.tezlawfirm.com</a><br><br>
-<em>我們也會說中文 · Puede hablar español</em><br><br>
+<em>我们也说中文 · Puede hablar español</em><br><br>
 <strong>Protect your rights — we handle the rest.</strong>
 </div>
 

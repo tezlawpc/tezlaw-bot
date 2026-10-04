@@ -523,24 +523,24 @@ app.get("/sign/:token", (req, res) => {
 <title>Sign Document — Tez Law P.C.</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f0; color: #0C1C36; line-height: 1.5; }
-  .header { background: #0C1C36; color: #fff; padding: 16px 20px; border-bottom: 4px solid #B79C62; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f0; color: #2B2523; line-height: 1.5; }
+  .header { background: #2B2523; color: #fff; padding: 16px 20px; border-bottom: 4px solid #FF7B00; }
   .header h1 { margin: 0; font-size: 18px; }
-  .header p { margin: 4px 0 0; font-size: 13px; color: #B79C62; opacity: 0.9; }
+  .header p { margin: 4px 0 0; font-size: 13px; color: #E8E3DC; opacity: 0.9; }
   main { max-width: 720px; margin: 20px auto; padding: 0 16px; }
   .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
   .doc-title { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
   .doc-meta { font-size: 13px; color: #666; margin: 0 0 16px; }
-  .doc-body { background: #fafaf7; padding: 20px; border-radius: 6px; white-space: pre-wrap; word-wrap: break-word; font-family: ui-serif, Georgia, serif; font-size: 14px; line-height: 1.6; max-height: 60vh; overflow-y: auto; border: 1px solid #eee; }
-  h2 { font-size: 16px; margin: 0 0 12px; color: #0C1C36; }
+  .doc-body { background: #FAF8F5; padding: 20px; border-radius: 6px; white-space: pre-wrap; word-wrap: break-word; font-family: ui-serif, Georgia, serif; font-size: 14px; line-height: 1.6; max-height: 60vh; overflow-y: auto; border: 1px solid #eee; }
+  h2 { font-size: 16px; margin: 0 0 12px; color: #2B2523; }
   label { display: block; font-size: 13px; font-weight: 600; color: #666; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.5px; }
   input[type=text] { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd; border-radius: 6px; }
-  .sig-canvas-wrap { border: 2px dashed #B79C62; border-radius: 6px; background: #fff; height: 200px; position: relative; touch-action: none; }
+  .sig-canvas-wrap { border: 2px dashed #FF7B00; border-radius: 6px; background: #fff; height: 200px; position: relative; touch-action: none; }
   .sig-canvas-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .sig-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #B79C62; font-style: italic; pointer-events: none; opacity: 0.7; }
+  .sig-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #A34C00; font-style: italic; pointer-events: none; opacity: 0.7; }
   .sig-actions { display: flex; gap: 8px; margin-top: 8px; }
   .sig-actions button { flex: 1; padding: 10px; border: 1px solid #ddd; background: #fff; border-radius: 6px; font-size: 14px; cursor: pointer; }
-  .primary { background: #B79C62 !important; color: #0C1C36 !important; border: none !important; font-weight: 700 !important; padding: 16px !important; font-size: 16px !important; }
+  .primary { background: #FF7B00 !important; color: #2B2523 !important; border: none !important; font-weight: 700 !important; padding: 16px !important; font-size: 16px !important; }
   .primary:disabled { opacity: 0.5; cursor: not-allowed; }
   .success { background: #d4edda; color: #155724; padding: 20px; border-radius: 8px; text-align: center; }
   .success h2 { color: #155724; margin: 0 0 8px; }
@@ -598,7 +598,7 @@ app.get("/sign/:token", (req, res) => {
       canvas.height = rect.height * dpr;
       ctx.scale(dpr, dpr);
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = '#0C1C36';
+      ctx.strokeStyle = '#2B2523';
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
     }
@@ -725,8 +725,8 @@ app.get("/admin/civil/new", async (req, res) => {
       clients = all.filter(c => c && c.key).map(c => ({ key: c.key, name: c.client_name || c.key }));
     } catch (e) { console.warn("[civil new] client list unavailable:", e.message); }
 
-    const L = "font-family:Cinzel,serif;font-size:10px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:4px;";
-    const I = "width:100%;padding:8px;border:1px solid #D4C4A0;border-radius:5px;background:#FBF3DE;color:#3E2818;font-size:13px;box-sizing:border-box;font-family:inherit;";
+    const L = "font-family:Montserrat,sans-serif;font-size:10px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:4px;";
+    const I = "width:100%;padding:8px;border:1px solid #E8E3DC;border-radius:5px;background:#FAF8F5;color:#2B2523;font-size:13px;box-sizing:border-box;font-family:inherit;";
     const field = (label, html, span) =>
       `<div${span ? ` style="grid-column:1/-1;"` : ""}><label style="${L}">${label}</label>${html}</div>`;
     const sel = (name, opts, placeholder) =>
@@ -736,19 +736,19 @@ app.get("/admin/civil/new", async (req, res) => {
     const body = `
       <div style="padding:24px;max-width:960px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
-          <h1 style="margin:0;font-family:'Cinzel',serif;color:#3E2818;">⚖️ New Civil Case</h1>
+          <h1 style="margin:0;font-family:Cormorant Garamond,Georgia,serif;color:#2B2523;">New Civil Case</h1>
           <a href="/admin/civil" style="color:#B84200;text-decoration:none;font-size:13px;">← Back to board</a>
         </div>
 
-        <form onsubmit="submitCivil(event)" style="background:#F5EBD3;border:1px solid #D4C4A0;border-radius:8px;padding:20px;">
+        <form onsubmit="submitCivil(event)" style="background:#F3EFE9;border:1px solid #E8E3DC;border-radius:8px;padding:20px;">
 
           <!-- Open the matter from its own papers. Zara reads the complaint,
                summons and retainer and PROPOSES fields; every one is quoted
                from the document and ticked off by the attorney before it goes
                anywhere near this form. Nothing here saves anything. -->
-          <div style="margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid #D4C4A0;">
-            <div style="font-family:Cinzel,serif;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;margin-bottom:8px;">
-              ◎ START FROM THE DOCUMENTS <span style="font-weight:400;color:#7B5330;text-transform:none;letter-spacing:0;font-style:italic;font-size:11px;">— optional, and you confirm every field</span>
+          <div style="margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid #E8E3DC;">
+            <div style="font-family:Montserrat,sans-serif;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;margin-bottom:8px;">
+              ◎ START FROM THE DOCUMENTS <span style="font-weight:400;color:#5E5854;text-transform:none;letter-spacing:0;font-style:italic;font-size:11px;">— optional, and you confirm every field</span>
             </div>
             <div data-civil-intake></div>
           </div>
@@ -757,10 +757,10 @@ app.get("/admin/civil/new", async (req, res) => {
 
             ${field("Client (required)", `<input list="civil-clients" name="client_key" required placeholder="start typing a client…" style="${I}">
               <datalist id="civil-clients">${clients.map(c => `<option value="${esc(c.key)}">${esc(c.name)}</option>`).join("")}</datalist>
-              <div style="font-size:10px;color:#7B5330;margin-top:3px;font-style:italic;">Pick an existing client, or type a new key (lowercase-with-dashes). A new key gets a client profile automatically.</div>`, true)}
+              <div style="font-size:10px;color:#5E5854;margin-top:3px;font-style:italic;">Pick an existing client, or type a new key (lowercase-with-dashes). A new key gets a client profile automatically.</div>`, true)}
 
             ${field("Client Name (for a new client)", `<input type="text" name="client_name" placeholder="e.g. Ana Ruiz — leave blank for an existing client" style="${I}">
-              <div style="font-size:10px;color:#7B5330;margin-top:3px;font-style:italic;">Only used when the key above is new. Left blank, the name is taken from the caption.</div>`, true)}
+              <div style="font-size:10px;color:#5E5854;margin-top:3px;font-style:italic;">Only used when the key above is new. Left blank, the name is taken from the caption.</div>`, true)}
 
             ${field("Case Name (required)", `<input type="text" name="case_name" required placeholder="e.g. Nguyen v. Pacific Holdings LLC" style="${I}">`, true)}
 
@@ -776,8 +776,8 @@ app.get("/admin/civil/new", async (req, res) => {
             ${field("Opposing Party", `<input type="text" name="opposing_party" style="${I}">`)}
             ${field("Amount in Controversy", `<input type="number" step="0.01" name="amount_in_controversy" placeholder="75000" style="${I}">`)}
 
-            <div style="grid-column:1/-1;padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">
-              <div style="font-family:Cinzel,serif;font-size:11px;font-weight:600;color:#A02818;letter-spacing:1px;margin-bottom:10px;">
+            <div style="grid-column:1/-1;padding:12px;background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;">
+              <div style="font-family:Montserrat,sans-serif;font-size:11px;font-weight:600;color:#9C2B1E;letter-spacing:1px;margin-bottom:10px;">
                 ⚠ KEY DATES — these drive the automatic CCP deadline chain
               </div>
               <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
@@ -787,7 +787,7 @@ app.get("/admin/civil/new", async (req, res) => {
                 ${field("CMC Date", `<input type="date" name="cmc_date" style="${I}">`)}
                 ${field("Trial Date", `<input type="date" name="trial_date" style="${I}">`)}
               </div>
-              <div style="font-size:10px;color:#7B5330;margin-top:8px;font-style:italic;">
+              <div style="font-size:10px;color:#5E5854;margin-top:8px;font-style:italic;">
                 Leave blank if unknown — deadlines regenerate automatically whenever you fill one in later.
               </div>
             </div>
@@ -807,12 +807,12 @@ app.get("/admin/civil/new", async (req, res) => {
           </div>
 
           <div style="margin-top:18px;display:flex;align-items:center;gap:12px;">
-            <button type="submit" id="civil-submit" style="padding:11px 22px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;font-weight:600;letter-spacing:1.5px;">CREATE CASE</button>
-            <a href="/admin/civil" style="color:#7B5330;text-decoration:none;font-size:13px;">Cancel</a>
-            <span id="civil-err" style="color:#A02818;font-size:12px;"></span>
+            <button type="submit" id="civil-submit" style="padding:11px 22px;background:#FF7B00;color:#1E1B1A;border:1px solid #D96800;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:12px;font-weight:600;letter-spacing:1.5px;">CREATE CASE</button>
+            <a href="/admin/civil" style="color:#5E5854;text-decoration:none;font-size:13px;">Cancel</a>
+            <span id="civil-err" style="color:#9C2B1E;font-size:12px;"></span>
           </div>
           <div id="civil-setup" style="margin-top:10px;font-size:12px;line-height:1.5;"></div>
-          <div style="margin-top:8px;font-size:10.5px;color:#7B5330;font-style:italic;">
+          <div style="margin-top:8px;font-size:10.5px;color:#5E5854;font-style:italic;">
             Creating the case also creates the client profile (if the client is new) and the matter's
             Dropbox folder with the standard subfolders, linked and synced.
           </div>
@@ -843,7 +843,7 @@ app.get("/admin/civil/new", async (req, res) => {
               var folderOk = p.dropbox && (p.dropbox.created || p.dropbox.adopted || p.dropbox.linked);
               var msg = document.getElementById("civil-setup");
               if (msg && p.summary) {
-                msg.style.color = folderOk || p.pending ? "#166534" : "#A02818";
+                msg.style.color = folderOk || p.pending ? "#166534" : "#9C2B1E";
                 msg.textContent = "Case created — " + p.summary + ".";
               }
 
@@ -861,7 +861,7 @@ app.get("/admin/civil/new", async (req, res) => {
                 filedOk = !!up.ok && !bad;
                 if (msg) {
                   var line = document.createElement("div");
-                  line.style.color = filedOk ? "#166534" : "#A02818";
+                  line.style.color = filedOk ? "#166534" : "#9C2B1E";
                   line.textContent = n
                     ? n + " document" + (n === 1 ? "" : "s") + " filed to Dropbox: " +
                       (up.uploaded || []).map(function (u) { return u.saved_as + " → " + u.folder_label; }).join("; ") +
@@ -902,9 +902,9 @@ app.get("/admin/civil/triage", async (req, res) => {
     const chrome = require("./hearing-notes");
     const body = `
       <div style="padding:24px;max-width:1400px;">
-        <a href="/admin/civil" style="color:#B8891E;text-decoration:none;font-size:12px;">← Back to Kanban</a>
-        <h1 style="margin:8px 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">🧭 Stage Triage</h1>
-        <div style="color:#7B5330;font-style:italic;margin-bottom:16px;">Put every matter in the stage its own record says it is in.</div>
+        <a href="/admin/civil" style="color:#A34C00;text-decoration:none;font-size:12px;">← Back to Kanban</a>
+        <h1 style="margin:8px 0 4px 0;font-family:Cormorant Garamond,Georgia,serif;color:#2B2523;">Stage Triage</h1>
+        <div style="color:#5E5854;font-style:italic;margin-bottom:16px;">Put every matter in the stage its own record says it is in.</div>
         <div data-civil-panel="triage"></div>
       </div>
       ${ui.civilAdminScriptTag()}`;
@@ -933,7 +933,7 @@ app.get("/admin/civil/stage/:key", async (req, res) => {
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
     const tabs = civil.STAGES.map(s => `
-      <a href="/admin/civil/stage/${s.key}" style="padding:6px 11px;border-radius:13px;text-decoration:none;font-size:11px;font-family:Cinzel,serif;letter-spacing:.6px;white-space:nowrap;border:1px solid ${s.key === key ? s.color : "#D4C4A0"};background:${s.key === key ? s.color : "#FBF3DE"};color:${s.key === key ? "#FBF3DE" : "#3E2818"};">${esc(s.label)}</a>`).join("");
+      <a href="/admin/civil/stage/${s.key}" style="padding:6px 11px;border-radius:13px;text-decoration:none;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:.6px;white-space:nowrap;border:1px solid ${s.key === key ? s.color : "#E8E3DC"};background:${s.key === key ? s.color : "#FAF8F5"};color:${s.key === key ? "#FAF8F5" : "#2B2523"};">${esc(s.label)}</a>`).join("");
 
     // The mount point is an EMPTY div inside the wrapper, never the wrapper
     // itself: renderStage() clears its host before drawing, which would
@@ -941,11 +941,11 @@ app.get("/admin/civil/stage/:key", async (req, res) => {
     const body = `
       <div style="padding:24px;max-width:1400px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-          <a href="/admin/civil" style="color:#B8891E;text-decoration:none;font-size:12px;">← Back to Kanban</a>
-          <a href="/admin/civil/wip" style="color:#B8891E;text-decoration:none;font-size:12px;">Work in Progress →</a>
+          <a href="/admin/civil" style="color:#A34C00;text-decoration:none;font-size:12px;">← Back to Kanban</a>
+          <a href="/admin/civil/wip" style="color:#A34C00;text-decoration:none;font-size:12px;">Work in Progress →</a>
         </div>
-        <h1 style="margin:8px 0 4px 0;font-family:Cinzel,serif;color:${stage.color};">${esc(stage.label)}</h1>
-        <div style="color:#7B5330;font-style:italic;margin-bottom:14px;">${esc(playbook.headline || "")}</div>
+        <h1 style="margin:8px 0 4px 0;font-family:Cormorant Garamond,Georgia,serif;color:${stage.color};">${esc(stage.label)}</h1>
+        <div style="color:#5E5854;font-style:italic;margin-bottom:14px;">${esc(playbook.headline || "")}</div>
         <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:18px;">${tabs}</div>
         <div data-civil-panel="stage" data-stage-key="${esc(key)}"></div>
       </div>
@@ -967,9 +967,9 @@ app.get("/admin/civil/wip", async (req, res) => {
     const chrome = require("./hearing-notes");
     const body = `
       <div data-civil-panel="wip" style="padding:24px;max-width:1400px;">
-        <a href="/admin/civil" style="color:#B8891E;text-decoration:none;font-size:12px;">← Back to Kanban</a>
-        <h1 style="margin:8px 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">💰 Work in Progress</h1>
-        <div style="color:#7B5330;font-style:italic;margin-bottom:16px;">Unbilled time across every active civil matter, highest first.</div>
+        <a href="/admin/civil" style="color:#A34C00;text-decoration:none;font-size:12px;">← Back to Kanban</a>
+        <h1 style="margin:8px 0 4px 0;font-family:Cormorant Garamond,Georgia,serif;color:#2B2523;">Work in Progress</h1>
+        <div style="color:#5E5854;font-style:italic;margin-bottom:16px;">Unbilled time across every active civil matter, highest first.</div>
       </div>
       ${ui.civilAdminScriptTag()}`;
     res.send(chrome.renderAdminChrome({ title: "Civil WIP", body, activeItem: "civil" }));
@@ -989,8 +989,8 @@ app.get("/admin/templates", auth.requireRole("admin"), async (req, res) => {
     const chrome = require("./hearing-notes");
     const body = `
       <div style="padding:24px;max-width:1200px;">
-        <h1 style="margin:0 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">✍ Document Templates</h1>
-        <div style="color:#7B5330;font-style:italic;margin-bottom:16px;">Upload a document you have filed or used before — civil or immigration: a declaration, an affidavit, a retainer. Zara turns the case-specific parts into fill-in fields and finds where each person signs. Review it and activate it; staff can then prepare it from any case or client page and send it for signature.</div>
+        <h1 style="margin:0 0 4px 0;font-family:Cormorant Garamond,Georgia,serif;color:#2B2523;">Document Templates</h1>
+        <div style="color:#5E5854;font-style:italic;margin-bottom:16px;">Upload a document you have filed or used before — civil or immigration: a declaration, an affidavit, a retainer. Zara turns the case-specific parts into fill-in fields and finds where each person signs. Review it and activate it; staff can then prepare it from any case or client page and send it for signature.</div>
         <div data-esign="templates"></div>
       </div>
       ${require("./client-script").clientScriptTag("esign-admin.js")}`;
@@ -1153,15 +1153,15 @@ app.get("/admin/zara", async (req, res) => {
     // still works. Progressive enhancement, so a script failure degrades to
     // "long page" rather than "dead buttons".
     const tab = (id, icon, text, sub) => `
-      <a href="#${id}" data-zara-tab="${id}" style="flex:1;min-width:190px;text-decoration:none;border:1px solid #D4C4A0;border-radius:6px;padding:12px 14px;background:#FBF3DE;">
-        <div style="font-family:Cinzel,serif;font-size:12px;letter-spacing:1.4px;color:#3E2818;">${icon} ${text}</div>
-        <div style="font-size:11px;color:#7B5330;font-style:italic;margin-top:3px;">${sub}</div>
+      <a href="#${id}" data-zara-tab="${id}" style="flex:1;min-width:190px;text-decoration:none;border:1px solid #E8E3DC;border-radius:6px;padding:12px 14px;background:#FAF8F5;">
+        <div style="font-family:Montserrat,sans-serif;font-size:12px;letter-spacing:1.4px;color:#2B2523;">${icon} ${text}</div>
+        <div style="font-size:11px;color:#5E5854;font-style:italic;margin-top:3px;">${sub}</div>
       </a>`;
 
     const body = `
       <div style="padding:24px;max-width:1100px;">
-        <h1 style="margin:0 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">◎ Zara</h1>
-        <div style="color:#7B5330;font-style:italic;margin-bottom:18px;">
+        <h1 style="margin:0 0 4px 0;font-family:Cormorant Garamond,Georgia,serif;color:#2B2523;">◎ Zara</h1>
+        <div style="color:#5E5854;font-style:italic;margin-bottom:18px;">
           One definition of who she is, used by every surface: the app, the web admin, the voice line and the background jobs.
         </div>
 
@@ -1323,61 +1323,61 @@ app.get("/admin/civil/dropbox", async (req, res) => {
     const body = `
       <div style="padding:24px;max-width:1000px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <h1 style="margin:0;font-family:'Cinzel',serif;color:#3E2818;">📁 Civil Document Sync</h1>
+          <h1 style="margin:0;font-family:Cormorant Garamond,Georgia,serif;color:#2B2523;">Civil Document Sync</h1>
           <a href="/admin/civil" style="color:#B84200;text-decoration:none;font-size:13px;">← Back to board</a>
         </div>
-        <p style="color:#7B5330;font-style:italic;margin:0 0 18px 0;font-size:13px;">
+        <p style="color:#5E5854;font-style:italic;margin:0 0 18px 0;font-size:13px;">
           <strong>Preview import</strong> reads every folder under your civil root and proposes a case
           (and a client) for each one. <strong>Match existing</strong> is the other direction — for cases
           already in the system that just need their folder attached. Both change nothing until you apply.
         </p>
 
-        <div id="rootbox" style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;margin-bottom:14px;">
-          <div style="font-family:Cinzel,serif;font-size:12px;color:#3E2818;letter-spacing:1px;margin-bottom:6px;">CIVIL DROPBOX ROOT</div>
-          <div id="rootstate" style="font-size:12px;color:#7B5330;margin-bottom:8px;">Loading…</div>
+        <div id="rootbox" style="padding:12px;background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;margin-bottom:14px;">
+          <div style="font-family:Montserrat,sans-serif;font-size:12px;color:#2B2523;letter-spacing:1px;margin-bottom:6px;">CIVIL DROPBOX ROOT</div>
+          <div id="rootstate" style="font-size:12px;color:#5E5854;margin-bottom:8px;">Loading…</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-            <input id="rootpath" placeholder="/Civil Litigation" style="flex:1;min-width:240px;padding:7px;border:1px solid #D4C4A0;border-radius:5px;background:#FFF;color:#3E2818;font-size:12px;">
-            <button onclick="saveRoots()" style="padding:7px 14px;background:#3E2818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">SAVE ROOT</button>
-            <button onclick="browse('')" style="padding:7px 14px;background:#FFF;color:#3E2818;border:1px solid #D4C4A0;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">BROWSE…</button>
-            <button onclick="unlinkAll()" style="padding:7px 14px;background:#A02818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">UNLINK ALL</button>
-            <button onclick="resetImport()" style="padding:7px 14px;background:#7B1010;color:#FBF3DE;border:1px solid #5A3B22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;">DELETE IMPORTED CASES</button>
+            <input id="rootpath" placeholder="/Civil Litigation" style="flex:1;min-width:240px;padding:7px;border:1px solid #E8E3DC;border-radius:5px;background:#FFF;color:#2B2523;font-size:12px;">
+            <button onclick="saveRoots()" style="padding:7px 14px;background:#2B2523;color:#FAF8F5;border:1px solid #3A3330;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">SAVE ROOT</button>
+            <button onclick="browse('')" style="padding:7px 14px;background:#FFF;color:#2B2523;border:1px solid #E8E3DC;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">BROWSE…</button>
+            <button onclick="unlinkAll()" style="padding:7px 14px;background:#9C2B1E;color:#FAF8F5;border:1px solid #3A3330;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">UNLINK ALL</button>
+            <button onclick="resetImport()" style="padding:7px 14px;background:#7B1010;color:#FAF8F5;border:1px solid #3A3330;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">DELETE IMPORTED CASES</button>
           </div>
           <div id="browser" style="margin-top:10px;"></div>
         </div>
 
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;">
-          <button onclick="imp(false)" style="padding:10px 18px;background:#3E2818;color:#FBF3DE;border:1px solid #5A3B22;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">PREVIEW IMPORT</button>
-          <button onclick="imp(true)" style="padding:10px 18px;background:#F07800;color:#FBF3DE;border:1px solid #A02818;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">CREATE CASES + CLIENTS</button>
-          <span style="width:1px;height:26px;background:#D4C4A0;"></span>
-          <button onclick="bulk(false)" style="padding:10px 14px;background:#FBF3DE;color:#3E2818;border:1px solid #D4C4A0;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:11px;letter-spacing:1px;">MATCH EXISTING</button>
-          <button onclick="syncAll()" style="padding:10px 18px;background:#FBF3DE;color:#3E2818;border:1px solid #D4C4A0;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-size:12px;letter-spacing:1.5px;">SYNC ALL LINKED</button>
-          <label style="font-size:12px;color:#7B5330;">min score
-            <input id="minscore" type="number" value="60" style="width:60px;padding:5px;border:1px solid #D4C4A0;border-radius:4px;background:#FBF3DE;">
+          <button onclick="imp(false)" style="padding:10px 18px;background:#2B2523;color:#FAF8F5;border:1px solid #3A3330;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:12px;letter-spacing:1.5px;">PREVIEW IMPORT</button>
+          <button onclick="imp(true)" style="padding:10px 18px;background:#FF7B00;color:#1E1B1A;border:1px solid #D96800;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:12px;letter-spacing:1.5px;">CREATE CASES + CLIENTS</button>
+          <span style="width:1px;height:26px;background:#E8E3DC;"></span>
+          <button onclick="bulk(false)" style="padding:10px 14px;background:#FAF8F5;color:#2B2523;border:1px solid #E8E3DC;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1px;">MATCH EXISTING</button>
+          <button onclick="syncAll()" style="padding:10px 18px;background:#FAF8F5;color:#2B2523;border:1px solid #E8E3DC;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:12px;letter-spacing:1.5px;">SYNC ALL LINKED</button>
+          <label style="font-size:12px;color:#5E5854;">min score
+            <input id="minscore" type="number" value="60" style="width:60px;padding:5px;border:1px solid #E8E3DC;border-radius:4px;background:#FAF8F5;">
           </label>
         </div>
 
-        <div id="out" style="font-size:13px;color:#3E2818;"></div>
+        <div id="out" style="font-size:13px;color:#2B2523;"></div>
       </div>
 
       <script>
         function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
         function card(title, colour, rows) {
           if (!rows.length) return "";
-          return '<h3 style="font-family:Cinzel,serif;color:' + colour + ';margin:18px 0 8px 0;font-size:14px;letter-spacing:1px;">' + title + ' (' + rows.length + ')</h3>'
-            + '<div style="background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;overflow:hidden;">' + rows.join("") + '</div>';
+          return '<h3 style="font-family:Cormorant Garamond,Georgia,serif;color:' + colour + ';margin:18px 0 8px 0;font-size:14px;letter-spacing:1px;">' + title + ' (' + rows.length + ')</h3>'
+            + '<div style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;overflow:hidden;">' + rows.join("") + '</div>';
         }
         async function bulk(apply) {
           var out = document.getElementById("out");
           if (apply && !confirm("Link every confident match and sync their documents? Ambiguous matches are skipped \u2014 you link those by hand.")) return;
-          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Scanning Dropbox…</div>';
+          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#5E5854;">Scanning Dropbox…</div>';
           try {
             var r = await fetch("/admin/civil/dropbox/bulk-import", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ apply: apply, sync: apply, min_score: Number(document.getElementById("minscore").value) || 60 })
             });
             var d = await r.json();
-            if (!d.ok) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(d.error) + '</div>'; return; }
-            var head = '<div style="padding:12px;background:' + (d.dry_run ? "#FBF3DE" : "#E8F0E4") + ';border:1px solid #D4C4A0;border-radius:6px;">'
+            if (!d.ok) { out.innerHTML = '<div style="color:#9C2B1E;padding:12px;">' + esc(d.error) + '</div>'; return; }
+            var head = '<div style="padding:12px;background:' + (d.dry_run ? "#FAF8F5" : "#E8F0E4") + ';border:1px solid #E8E3DC;border-radius:6px;">'
               + '<strong>' + (d.dry_run ? "DRY RUN — nothing was changed" : "APPLIED") + '</strong> · '
               + d.linked_count + ' matched · ' + d.ambiguous_count + ' ambiguous · ' + d.unmatched_count + ' unmatched</div>';
             // A bare "0 matched" hides whether the problem is no cases, no
@@ -1387,39 +1387,39 @@ app.get("/admin/civil/dropbox", async (req, res) => {
               var roots = (g.roots_scanned || []).map(function (r) {
                 return '<li>' + esc(r.root) + ' — ' + (r.ok ? r.folders + ' folders' : 'unreadable' + (r.error ? ' (' + esc(r.error) + ')' : '')) + '</li>';
               }).join("");
-              head += '<div style="margin-top:8px;padding:10px 12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;font-size:12px;color:#3E2818;">'
+              head += '<div style="margin-top:8px;padding:10px 12px;background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;font-size:12px;color:#2B2523;">'
                 + '<strong>Scan details</strong>'
                 + '<div style="margin-top:4px;">' + g.total_civil_cases + ' civil case(s) in total · '
                 + g.cases_needing_a_folder + ' still need a folder · ' + g.folders_visible + ' Dropbox folder(s) visible</div>'
                 + (roots ? '<ul style="margin:6px 0 0 18px;padding:0;">' + roots + '</ul>' : '')
-                + (g.hint ? '<div style="margin-top:8px;padding:8px;background:#F5E4B4;border-left:3px solid #F07800;border-radius:4px;">' + esc(g.hint) + '</div>' : '')
+                + (g.hint ? '<div style="margin-top:8px;padding:8px;background:#F5E4B4;border-left:3px solid #FF7B00;border-radius:4px;">' + esc(g.hint) + '</div>' : '')
                 + '</div>';
             }
             var linked = d.linked.map(function (x) {
-              return '<div style="padding:8px 10px;border-bottom:1px solid #E8DCC0;display:flex;justify-content:space-between;gap:10px;">'
-                + '<a href="/admin/civil/case/' + x.case_id + '" style="color:#3E2818;text-decoration:none;font-weight:600;">' + esc(x.case_name) + '</a>'
-                + '<span style="color:#7B5330;font-size:12px;">' + esc(x.folder) + ' <em>(' + x.score + ')</em></span></div>';
+              return '<div style="padding:8px 10px;border-bottom:1px solid #E8E3DC;display:flex;justify-content:space-between;gap:10px;">'
+                + '<a href="/admin/civil/case/' + x.case_id + '" style="color:#2B2523;text-decoration:none;font-weight:600;">' + esc(x.case_name) + '</a>'
+                + '<span style="color:#5E5854;font-size:12px;">' + esc(x.folder) + ' <em>(' + x.score + ')</em></span></div>';
             });
             var amb = d.ambiguous.map(function (x) {
-              return '<div style="padding:8px 10px;border-bottom:1px solid #E8DCC0;">'
-                + '<a href="/admin/civil/case/' + x.id + '" style="color:#3E2818;font-weight:600;text-decoration:none;">' + esc(x.case_name) + '</a>'
-                + '<div style="font-size:11px;color:#7B5330;margin-top:3px;">' + x.candidates.map(function (c) { return esc(c.path) + " (" + c.score + ")"; }).join(" · ") + '</div></div>';
+              return '<div style="padding:8px 10px;border-bottom:1px solid #E8E3DC;">'
+                + '<a href="/admin/civil/case/' + x.id + '" style="color:#2B2523;font-weight:600;text-decoration:none;">' + esc(x.case_name) + '</a>'
+                + '<div style="font-size:11px;color:#5E5854;margin-top:3px;">' + x.candidates.map(function (c) { return esc(c.path) + " (" + c.score + ")"; }).join(" · ") + '</div></div>';
             });
             var un = d.unmatched.map(function (x) {
-              return '<div style="padding:8px 10px;border-bottom:1px solid #E8DCC0;">'
-                + '<a href="/admin/civil/case/' + x.id + '" style="color:#3E2818;text-decoration:none;">' + esc(x.case_name) + '</a>'
-                + (x.best ? '<span style="font-size:11px;color:#8B7355;"> — closest: ' + esc(x.best.path) + ' (' + x.best.score + ')</span>' : '') + '</div>';
+              return '<div style="padding:8px 10px;border-bottom:1px solid #E8E3DC;">'
+                + '<a href="/admin/civil/case/' + x.id + '" style="color:#2B2523;text-decoration:none;">' + esc(x.case_name) + '</a>'
+                + (x.best ? '<span style="font-size:11px;color:#5E5854;"> — closest: ' + esc(x.best.path) + ' (' + x.best.score + ')</span>' : '') + '</div>';
             });
             out.innerHTML = head
               + card("✅ Matched", "#166534", linked)
-              + card("⚠ Ambiguous — link these by hand", "#F07800", amb)
-              + card("○ No match found", "#7B5330", un);
-          } catch (e) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(e.message) + '</div>'; }
+              + card("⚠ Ambiguous — link these by hand", "#FF7B00", amb)
+              + card("○ No match found", "#5E5854", un);
+          } catch (e) { out.innerHTML = '<div style="color:#9C2B1E;padding:12px;">' + esc(e.message) + '</div>'; }
         }
         async function imp(apply) {
           var out = document.getElementById("out");
           if (apply && !confirm("Create a civil case for every matter folder, plus a client record where one does not already exist? Folders already linked are skipped, so running this twice is safe.")) return;
-          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Reading folders…</div>';
+          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#5E5854;">Reading folders…</div>';
           try {
             var r = await fetch("/admin/civil/dropbox/import-cases", {
               method: "POST", headers: { "Content-Type": "application/json" },
@@ -1427,18 +1427,18 @@ app.get("/admin/civil/dropbox", async (req, res) => {
             });
             var d = await r.json();
             if (!d.ok) {
-              out.innerHTML = '<div style="padding:12px;background:#F5E4B4;border-left:3px solid #F07800;border-radius:4px;">'
+              out.innerHTML = '<div style="padding:12px;background:#F5E4B4;border-left:3px solid #FF7B00;border-radius:4px;">'
                 + esc(d.hint || d.error || d.reason) + '</div>';
               return;
             }
-            var conf = { high: "#166534", medium: "#B8891E", low: "#A02818" };
+            var conf = { high: "#166534", medium: "#A34C00", low: "#9C2B1E" };
             var madeRows = d.created.map(function (c) {
-              return '<div style="padding:8px 10px;border-bottom:1px solid #E8DCC0;">'
+              return '<div style="padding:8px 10px;border-bottom:1px solid #E8E3DC;">'
                 + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">'
-                + (c.case_id ? '<a href="/admin/civil/case/' + c.case_id + '" style="color:#3E2818;font-weight:600;text-decoration:none;">' + esc(c.case_name) + '</a>'
-                             : '<span style="color:#3E2818;font-weight:600;">' + esc(c.case_name) + '</span>')
-                + '<span style="font-size:10px;font-weight:700;color:' + (conf[c.confidence] || "#7B5330") + ';">' + esc(c.confidence.toUpperCase()) + '</span></div>'
-                + '<div style="font-size:11px;color:#7B5330;margin-top:2px;">client: ' + esc(c.client_name)
+                + (c.case_id ? '<a href="/admin/civil/case/' + c.case_id + '" style="color:#2B2523;font-weight:600;text-decoration:none;">' + esc(c.case_name) + '</a>'
+                             : '<span style="color:#2B2523;font-weight:600;">' + esc(c.case_name) + '</span>')
+                + '<span style="font-size:10px;font-weight:700;color:' + (conf[c.confidence] || "#5E5854") + ';">' + esc(c.confidence.toUpperCase()) + '</span></div>'
+                + '<div style="font-size:11px;color:#5E5854;margin-top:2px;">client: ' + esc(c.client_name)
                 + (c.client_created ? ' <em>(new)</em>' : ' <em>(existing)</em>')
                 + (c.nested ? ' · <span style="color:#B84200;">matter under client folder</span>' : '')
                 + (c.opposing_party ? ' · v. ' + esc(c.opposing_party) : '')
@@ -1447,38 +1447,38 @@ app.get("/admin/civil/dropbox", async (req, res) => {
                 + '<br>' + esc(c.path) + '</div></div>';
             });
             var skipRows = d.skipped.map(function (x) {
-              return '<div style="padding:6px 10px;border-bottom:1px solid #E8DCC0;font-size:12px;color:#7B5330;">'
+              return '<div style="padding:6px 10px;border-bottom:1px solid #E8E3DC;font-size:12px;color:#5E5854;">'
                 + esc(x.folder) + ' — ' + esc(x.reason) + '</div>';
             });
             var failRows = d.failed.map(function (x) {
-              return '<div style="padding:6px 10px;border-bottom:1px solid #E8DCC0;font-size:12px;color:#A02818;">'
+              return '<div style="padding:6px 10px;border-bottom:1px solid #E8E3DC;font-size:12px;color:#9C2B1E;">'
                 + esc(x.folder || x.path) + ' — ' + esc(x.error) + '</div>';
             });
-            out.innerHTML = '<div style="padding:12px;background:' + (d.dry_run ? "#FBF3DE" : "#E8F0E4") + ';border:1px solid #D4C4A0;border-radius:6px;">'
+            out.innerHTML = '<div style="padding:12px;background:' + (d.dry_run ? "#FAF8F5" : "#E8F0E4") + ';border:1px solid #E8E3DC;border-radius:6px;">'
               + '<strong>' + (d.dry_run ? "PREVIEW — nothing was created" : "IMPORTED") + '</strong> · '
               + d.created_count + ' case(s) · ' + d.clients_created + ' new client(s) · '
               + d.skipped_count + ' skipped · ' + d.failed_count + ' failed'
               + '<div style="font-size:11px;margin-top:4px;">root: ' + d.roots.map(esc).join(", ") + '</div></div>'
               + card(d.dry_run ? "Cases that would be created" : "Cases created", "#166534", madeRows)
-              + card("Skipped", "#7B5330", skipRows)
-              + card("Failed", "#A02818", failRows)
-              + (d.dry_run && d.created_count ? '<div style="margin-top:10px;padding:10px;background:#F5E4B4;border-left:3px solid #F07800;border-radius:4px;font-size:12px;">Check the LOW-confidence rows above — those folder names did not match a familiar pattern, so the case and client names are the folder name verbatim. Everything is editable afterwards.</div>' : '');
-          } catch (e) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(e.message) + '</div>'; }
+              + card("Skipped", "#5E5854", skipRows)
+              + card("Failed", "#9C2B1E", failRows)
+              + (d.dry_run && d.created_count ? '<div style="margin-top:10px;padding:10px;background:#F5E4B4;border-left:3px solid #FF7B00;border-radius:4px;font-size:12px;">Check the LOW-confidence rows above — those folder names did not match a familiar pattern, so the case and client names are the folder name verbatim. Everything is editable afterwards.</div>' : '');
+          } catch (e) { out.innerHTML = '<div style="color:#9C2B1E;padding:12px;">' + esc(e.message) + '</div>'; }
         }
         async function resetImport() {
           var out = document.getElementById("out");
-          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Counting imported cases…</div>';
+          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#5E5854;">Counting imported cases…</div>';
           var r = await fetch("/admin/civil/dropbox/delete-imported", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
           var d = await r.json();
-          if (!d.ok) { out.innerHTML = '<div style="color:#A02818;padding:12px;">' + esc(d.error) + '</div>'; return; }
-          if (!d.count) { out.innerHTML = '<div style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">No imported cases to remove.</div>'; return; }
+          if (!d.ok) { out.innerHTML = '<div style="color:#9C2B1E;padding:12px;">' + esc(d.error) + '</div>'; return; }
+          if (!d.count) { out.innerHTML = '<div style="padding:12px;background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;">No imported cases to remove.</div>'; return; }
           if (!confirm("Delete " + d.count + " case(s) created by the Dropbox import, so the import can be re-run cleanly? Cases you created by hand are not touched, and nothing in Dropbox is changed.")) return;
-          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Deleting…</div>';
+          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#5E5854;">Deleting…</div>';
           var r2 = await fetch("/admin/civil/dropbox/delete-imported", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apply: true }) });
           var d2 = await r2.json();
           out.innerHTML = d2.ok
-            ? '<div style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">Deleted ' + d2.deleted + ' of ' + d2.count + ' imported case(s). Run PREVIEW IMPORT to rebuild them.</div>'
-            : '<div style="color:#A02818;padding:12px;">' + esc(d2.error) + '</div>';
+            ? '<div style="padding:12px;background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;">Deleted ' + d2.deleted + ' of ' + d2.count + ' imported case(s). Run PREVIEW IMPORT to rebuild them.</div>'
+            : '<div style="color:#9C2B1E;padding:12px;">' + esc(d2.error) + '</div>';
         }
         async function loadRoots() {
           var r = await fetch("/admin/civil/dropbox/roots");
@@ -1490,10 +1490,10 @@ app.get("/admin/civil/dropbox", async (req, res) => {
             el.style.color = "#166534";
             if (!document.getElementById("rootpath").value) document.getElementById("rootpath").value = d.roots[0] || "";
           } else {
-            el.innerHTML = '<span style="color:#A02818;font-weight:700;">No civil root set.</span> '
+            el.innerHTML = '<span style="color:#9C2B1E;font-weight:700;">No civil root set.</span> '
               + 'Falling back to the shared immigration branches (' + d.roots.map(esc).join(", ") + '), '
               + 'which is why matches land in the wrong practice area. Pick your civil folder below.';
-            el.style.color = "#A02818";
+            el.style.color = "#9C2B1E";
           }
         }
         async function saveRoots() {
@@ -1515,7 +1515,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
           box.innerHTML = "";
           if (!d.ok) { box.textContent = d.error; return; }
           var head = document.createElement("div");
-          head.style.cssText = "font-size:12px;color:#3E2818;margin-bottom:6px;";
+          head.style.cssText = "font-size:12px;color:#2B2523;margin-bottom:6px;";
           head.textContent = (d.path || "(Dropbox root)") + " — " + d.folders.length + " folder(s), " + d.file_count + " file(s)";
           box.appendChild(head);
           if (d.parent !== null) {
@@ -1527,10 +1527,10 @@ app.get("/admin/civil/dropbox", async (req, res) => {
           }
           d.folders.forEach(function (f) {
             var row = document.createElement("div");
-            row.style.cssText = "display:flex;justify-content:space-between;gap:10px;align-items:center;padding:5px 8px;border-bottom:1px solid #E8DCC0;";
+            row.style.cssText = "display:flex;justify-content:space-between;gap:10px;align-items:center;padding:5px 8px;border-bottom:1px solid #E8E3DC;";
             var open = document.createElement("a");
             open.href = "#"; open.textContent = "📁 " + f.name;
-            open.style.cssText = "font-size:12px;color:#3E2818;text-decoration:none;";
+            open.style.cssText = "font-size:12px;color:#2B2523;text-decoration:none;";
             open.onclick = function (e) { e.preventDefault(); browse(f.path); };
             var pick = document.createElement("a");
             pick.href = "#"; pick.textContent = "USE THIS";
@@ -1549,18 +1549,18 @@ app.get("/admin/civil/dropbox", async (req, res) => {
           var r = await fetch("/admin/civil/dropbox/unlink-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
           var d = await r.json();
           document.getElementById("out").innerHTML = d.ok
-            ? '<div style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">Unlinked ' + d.unlinked + ' case(s). Set the right root, then run a dry run.</div>'
-            : '<div style="color:#A02818;padding:12px;">' + esc(d.error) + '</div>';
+            ? '<div style="padding:12px;background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;">Unlinked ' + d.unlinked + ' case(s). Set the right root, then run a dry run.</div>'
+            : '<div style="color:#9C2B1E;padding:12px;">' + esc(d.error) + '</div>';
         }
         loadRoots();
         async function syncAll() {
           var out = document.getElementById("out");
-          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#7B5330;">Syncing every linked matter…</div>';
+          out.innerHTML = '<div style="padding:16px;font-style:italic;color:#5E5854;">Syncing every linked matter…</div>';
           var r = await fetch("/admin/civil/dropbox/sync-all", { method: "POST" });
           var d = await r.json();
           out.innerHTML = d.ok
-            ? '<div style="padding:12px;background:#FBF3DE;border:1px solid #D4C4A0;border-radius:6px;">Synced ' + d.cases + ' matters · +' + d.added + ' new documents · ' + d.removed + ' removed · ' + d.failed + ' failed</div>'
-            : '<div style="color:#A02818;padding:12px;">' + esc(d.error || d.reason) + '</div>';
+            ? '<div style="padding:12px;background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;">Synced ' + d.cases + ' matters · +' + d.added + ' new documents · ' + d.removed + ' removed · ' + d.failed + ' failed</div>'
+            : '<div style="color:#9C2B1E;padding:12px;">' + esc(d.error || d.reason) + '</div>';
         }
       </script>`;
     res.send(hearingNotes.renderAdminChrome({ title: "Civil Document Sync", body, activeItem: "civil" }));
@@ -1680,7 +1680,7 @@ app.get("/admin/pi/brokers", async (req, res) => {
       const pct = totalCases > 0 ? Math.round(b.case_count / totalCases * 100) : 0;
       const brokerLink = b.broker === "(no broker)"
         ? `<span style="color:#999; font-style:italic;">${esc(b.broker)}</span>`
-        : `<a href="/admin/pi/cases?broker=${encodeURIComponent(b.broker)}" style="color:#0C1C36; font-weight:600; text-decoration:none;">🤝 ${esc(b.broker)}</a>`;
+        : `<a href="/admin/pi/cases?broker=${encodeURIComponent(b.broker)}" style="color:#2B2523; font-weight:600; text-decoration:none;">🤝 ${esc(b.broker)}</a>`;
       return `
         <tr>
           <td style="padding:12px; border-bottom:1px solid #eee;">${brokerLink}</td>
@@ -1694,7 +1694,7 @@ app.get("/admin/pi/brokers", async (req, res) => {
 
     const body = `
       <div class="page-header">
-        <h1>🤝 Brokers / Referral Sources</h1>
+        <h1>Brokers / Referral Sources</h1>
         <a href="/admin/pi/cases" class="back-link">← PI Cases</a>
       </div>
 
@@ -1703,11 +1703,11 @@ app.get("/admin/pi/brokers", async (req, res) => {
       </div>
 
       <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-        <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee; font-size:12px; color:#666;">
+        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee; font-size:12px; color:#666;">
           ${brokers.length} broker${brokers.length === 1 ? "" : "s"} · ${totalCases} total case${totalCases === 1 ? "" : "s"}
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
-          <thead><tr style="background:#fafaf7;">
+          <thead><tr style="background:#FAF8F5;">
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Broker</th>
             <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Total Cases</th>
             <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Active</th>
@@ -1792,7 +1792,7 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
         <tr>
           <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:13px;">${esc(c.name)}</td>
           <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:13px; color:#2e7d32; font-weight:600;">${esc(clientName)}</td>
-          <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:12px; color:#B79C62; font-weight:600;">${c.broker ? esc(c.broker) : '<span style="color:#999; font-weight:400;">—</span>'}</td>
+          <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:12px; color:#A34C00; font-weight:600;">${c.broker ? esc(c.broker) : '<span style="color:#999; font-weight:400;">—</span>'}</td>
           <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:11px; color:#666; font-family:ui-monospace, Menlo, monospace;">${esc(c.path)}</td>
         </tr>`;
     }).join("") : `<tr><td colspan="4" style="padding:20px; text-align:center; color:#888;">No PI folders matched.</td></tr>`;
@@ -1818,7 +1818,7 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
                   ${matchesPI ? '<span style="background:#2e7d32; color:white; padding:1px 6px; border-radius:8px; font-size:10px; margin-left:6px;">PI</span>' : ""}
                 </td>
                 <td style="padding:6px 12px; border-bottom:1px solid #f0f0f0; font-size:11px; color:#666; text-align:right;">
-                  <a href="/admin/pi/discover/preview?path=${encodeURIComponent(e.path_display)}" style="color:#B79C62; text-decoration:none;">Scan here →</a>
+                  <a href="/admin/pi/discover/preview?path=${encodeURIComponent(e.path_display)}" style="color:#A34C00; text-decoration:none;">Scan here →</a>
                 </td>
               </tr>`;
           }).join("") : `<tr><td colspan="2" style="padding:14px; color:#888;">(no subfolders)</td></tr>`);
@@ -1833,14 +1833,14 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
       browserHtml = `
         <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden; margin-bottom:16px;">
           <div style="padding:12px 16px; background:#fff8e1; border-bottom:1px solid #eee;">
-            <strong style="color:#0C1C36;">📂 Folder Browser</strong>
+            <strong style="color:#2B2523;">📂 Folder Browser</strong>
             <div style="font-size:12px; color:#666; margin-top:4px;">
               <a href="/admin/pi/discover/preview?browse=" style="color:#0061FF; text-decoration:none;">🏠 Dropbox root</a>
               ${crumbs ? " / " + crumbs : ""}
             </div>
           </div>
           <table style="width:100%; border-collapse:collapse;">${browserRows}</table>
-          <div style="padding:8px 16px; background:#fafaf7; font-size:11px; color:#666;">
+          <div style="padding:8px 16px; background:#FAF8F5; font-size:11px; color:#666;">
             <strong>Green folders</strong> match the PI pattern. Click a folder to drill in, or "Scan here" to run the PI matcher against everything inside that folder.
           </div>
         </div>`;
@@ -1848,7 +1848,7 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
 
     const body = `
       <div class="page-header">
-        <h1>🔍 PI Discovery Preview</h1>
+        <h1>PI Discovery Preview</h1>
         <a href="/admin/pi/cases" class="back-link">← PI Cases</a>
       </div>
 
@@ -1864,7 +1864,7 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
             <input type="text" name="path" value="${esc(customPath)}" placeholder="/Path/To/PI/Cases" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:ui-monospace, Menlo, monospace;">
           </div>
           <input type="hidden" name="browse" value="${esc(browsePath)}">
-          <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">🔍 Scan This Path</button>
+          <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">🔍 Scan This Path</button>
           ${customPath ? `<a href="/admin/pi/discover/preview" style="padding:8px 16px; color:#666; text-decoration:none;">Clear</a>` : ""}
         </form>
       </div>
@@ -1874,7 +1874,7 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:16px;">
         <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">Folders Scanned</div>
-          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${results.considered.length}</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523;">${results.considered.length}</div>
         </div>
         <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">Would Import</div>
@@ -1889,11 +1889,11 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
       ${results.errors.length ? `<div style="background:#fee; padding:12px 16px; border-radius:8px; border-left:4px solid #c62828; margin-bottom:16px; font-size:13px;"><strong>Errors:</strong><ul style="margin:6px 0 0 20px;">${results.errors.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
 
       <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden; margin-bottom:16px;">
-        <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee;">
-          <strong style="color:#0C1C36;">${customPath ? "Path Scanned" : "Branches Scanned"}</strong>
+        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee;">
+          <strong style="color:#2B2523;">${customPath ? "Path Scanned" : "Branches Scanned"}</strong>
         </div>
         <table style="width:100%; border-collapse:collapse;">
-          <thead><tr style="background:#fafaf7;">
+          <thead><tr style="background:#FAF8F5;">
             <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Path</th>
             <th style="padding:8px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase;">Folders</th>
             <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Status</th>
@@ -1908,7 +1908,7 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
           <button onclick="runSync(${customPath ? `'${esc(customPath).replace(/'/g, "\\'")}'` : "null"})" ${matched.length === 0 ? "disabled" : ""} style="background:#2e7d32; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:12px;">Import All →</button>
         </div>
         <table style="width:100%; border-collapse:collapse;">
-          <thead><tr style="background:#fafaf7;">
+          <thead><tr style="background:#FAF8F5;">
             <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Folder Name</th>
             <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Extracted Client</th>
             <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Broker / Referral</th>
@@ -1920,7 +1920,7 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
 
       ${notMatched.length ? `
       <details style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-        <summary style="padding:12px 16px; background:#fafaf7; cursor:pointer; user-select:none;">
+        <summary style="padding:12px 16px; background:#FAF8F5; cursor:pointer; user-select:none;">
           <strong style="color:#666;">— Not matched (${notMatched.length}) — click to expand</strong>
         </summary>
         <table style="width:100%; border-collapse:collapse;">
@@ -2059,6 +2059,8 @@ function requireConsultant(req, res, next) {
         // The number beside "Alerts" in the portal's navigation. Best-effort:
         // a count that cannot be read must not keep anyone out of the portal.
         try { req.user.alerts = await require("./notify").unseenCount(req.user.uid || req.user.id); } catch { req.user.alerts = 0; }
+        // …and the language they chose for the portal (English or 简体中文).
+        try { req.user.lang = await require("./notify").langFor(req.user.uid || req.user.id); } catch { req.user.lang = "en"; }
         return next();
       }
       // Non-consultants who somehow land here go back to the firm dashboard.
@@ -2102,7 +2104,7 @@ app.get("/consultant", requireConsultant, async (req, res) => {
 // New work order form
 app.get("/consultant/new", requireConsultant, async (req, res) => {
   const portal = require("./consultant-portal");
-  const body = portal.renderNewForm();
+  const body = portal.renderNewForm({ user: req.user });
   res.send(portal.renderChrome({ title: "New task", body, activeTab: "new", user: req.user }));
 });
 
@@ -2158,15 +2160,15 @@ app.post("/consultant/tasks", requireConsultant, async (req, res) => {
 // (which accepts this same sign-in cookie).
 app.get("/consultant/clients", requireConsultant, (req, res) => {
   const portal = require("./consultant-portal");
-  res.send(portal.renderChrome({ title: "My Clients", body: portal.renderClientsPage({ mode: "list" }), activeTab: "clients", user: req.user }));
+  res.send(portal.renderChrome({ title: "My Clients", body: portal.renderClientsPage({ mode: "list", user: req.user }), activeTab: "clients", user: req.user }));
 });
 app.get("/consultant/clients/new", requireConsultant, (req, res) => {
   const portal = require("./consultant-portal");
-  res.send(portal.renderChrome({ title: "Add Client", body: portal.renderClientsPage({ mode: "new" }), activeTab: "add-client", user: req.user }));
+  res.send(portal.renderChrome({ title: "Add Client", body: portal.renderClientsPage({ mode: "new", user: req.user }), activeTab: "add-client", user: req.user }));
 });
 app.get("/consultant/client/:key", requireConsultant, (req, res) => {
   const portal = require("./consultant-portal");
-  res.send(portal.renderChrome({ title: "Client", body: portal.renderClientsPage({ mode: "view", clientKey: String(req.params.key).slice(0, 200) }), activeTab: "clients", user: req.user }));
+  res.send(portal.renderChrome({ title: "Client", body: portal.renderClientsPage({ mode: "view", clientKey: String(req.params.key).slice(0, 200), user: req.user }), activeTab: "clients", user: req.user }));
 });
 
 // ── Firm-side view of broker alerts ─────────────────────────
@@ -2220,18 +2222,9 @@ app.post("/admin/alerts/contact", async (req, res) => {
 // one place, not by whoever is sending it today.
 app.post("/admin/alerts/send", async (req, res) => {
   try {
-    const notify = require("./notify");
     const b = req.body || {};
-    const clientKey = String(b.client_key || "").trim().slice(0, 200);
-    const kind = String(b.kind || "").trim();
-    if (!clientKey || !notify.KINDS[kind]) return res.redirect("/admin/alerts?problem=" + encodeURIComponent("Choose a client and what happened."));
-    const q = await notify.notifyAndFlush({ clientKey, kind, ref: `manual-${req.user && req.user.uid || 0}-${Date.now()}` });
-    try { await require("./db").logAudit(String(req.user && (req.user.u || req.user.uid) || "firm"), "consultant_alert_sent", clientKey, null, `${kind} · ${q.recipients} recipient(s)`); } catch { /* audit is best-effort */ }
-    if (!q.recipients) return res.redirect("/admin/alerts?problem=" + encodeURIComponent("No consultant is assigned to that client, so nobody was told."));
-    const missed = q.unreachable.length
-      ? ` ${q.unreachable.length} could not be reached outside the portal (${q.unreachable.map(u => `${u.username}: ${u.why}`).join("; ")}) — they will still see it when they sign in.`
-      : "";
-    res.redirect("/admin/alerts?sent=" + encodeURIComponent(`${notify.KINDS[kind].label}: ${q.recipients} consultant${q.recipients === 1 ? "" : "s"} told.${missed}`));
+    const out = await require("./notify-admin").sendByHand({ clientKey: b.client_key, kind: b.kind, user: req.user });
+    res.redirect("/admin/alerts?" + (out.ok ? "sent=" : "problem=") + encodeURIComponent(out.text));
   } catch (err) {
     console.error("[admin alerts send]:", err.message);
     res.redirect("/admin/alerts?problem=" + encodeURIComponent(err.message));
@@ -2309,11 +2302,23 @@ app.post("/consultant/alerts", requireConsultant, async (req, res) => {
       `UPDATE admin_users SET notify_email = $2, notify_sms = $3, notify_telegram = $4, notify_app = $5 WHERE id = $1`,
       [req.user.uid || req.user.id, b.notify_email === "1", b.notify_sms === "1", b.notify_telegram === "1", b.notify_app === "1"]
     );
+    if (b.lang) await notify.setLang(req.user.uid || req.user.id, b.lang);
     res.redirect("/consultant/alerts?saved=1");
   } catch (err) {
     console.error("[consultant alerts save]:", err.message);
     res.status(500).send("Error: " + err.message);
   }
+});
+
+// The language button in the portal's header: English or 简体中文. Saved on
+// the account, so it follows them to another computer and sets the language
+// of the alerts they are sent.
+app.post("/consultant/lang", requireConsultant, async (req, res) => {
+  try { await require("./notify").setLang(req.user.uid || req.user.id, (req.body || {}).lang); }
+  catch (err) { console.error("[consultant lang]:", err.message); }
+  const back = String(req.get("referer") || "");
+  const m = back.match(/^https?:\/\/[^/]+(\/consultant[^?#]*)/);
+  res.redirect(m ? m[1] : "/consultant");
 });
 
 app.post("/consultant/alerts/telegram-code", requireConsultant, async (req, res) => {
@@ -2338,12 +2343,16 @@ app.get("/consultant/task/:id", requireConsultant, async (req, res) => {
     if (!task || task.submitted_by_user_id !== userId) {
       return res.status(404).send("Task not found");
     }
-    const [activity, mList, mProgress] = await Promise.all([
+    const [activity, mList, mProgress, attachments] = await Promise.all([
       tasks.listActivity(task.id, { filterVisibleOnly: true }),
       milestones.listMilestones(task.id),
       milestones.getProgress(task.id),
+      require("./task-attachments").listMine(task.id, userId).catch(() => []),
     ]);
-    const body = portal.renderTaskDetail({ task, activity, milestones: mList, progress: mProgress, user: req.user, justSent: req.query.sent === "1" });
+    const body = portal.renderTaskDetail({
+      task, activity, milestones: mList, progress: mProgress, user: req.user, attachments,
+      justSent: req.query.sent === "1", fileProblems: req.query.files ? String(req.query.files).slice(0, 400) : "",
+    });
     res.send(portal.renderChrome({ title: task.title, body, activeTab: "dashboard", user: req.user }));
   } catch (err) {
     console.error("[consultant task view]:", err.message);
@@ -2414,7 +2423,7 @@ app.get("/admin/tasks/:id/edit", async (req, res, next) => {
 
     const body = `
       <div class="page-header">
-        <h1>✎ Edit Task</h1>
+        <h1>Edit Task</h1>
         <a href="/admin/tasks/${id}" class="back-link">← Back to task</a>
       </div>
 
@@ -2487,7 +2496,7 @@ app.get("/admin/tasks/:id/edit", async (req, res, next) => {
         </div>
 
         <div style="margin-top:20px; display:flex; gap:10px; align-items:center;">
-          <button type="submit" id="save-btn" style="background:#0C1C36; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💾 Save Changes</button>
+          <button type="submit" id="save-btn" style="background:#2B2523; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💾 Save Changes</button>
           <a href="/admin/tasks/${id}" style="color:#666; text-decoration:none;">Cancel</a>
           <button type="button" onclick="deleteTaskConfirm()" style="background:#c62828; color:white; padding:10px 20px; border:none; border-radius:6px; cursor:pointer; margin-left:auto;">🗑️ Delete Task</button>
         </div>
@@ -2711,7 +2720,20 @@ app.get("/admin/tasks/:id", async (req, res, next) => {
     }
 
     const priColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" };
-    const statusColor = { pending: "#B79C62", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" }[task.status] || "#666";
+    const statusColor = { pending: "#A34C00", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" }[task.status] || "#666";
+
+    // Documents a consultant attached to this task (task-attachments.js).
+    // Links are downloads, never opened in the page.
+    const taskFiles = await require("./task-attachments").listForTask(task.id).catch(() => []);
+    const filesHtml = taskFiles.length ? `
+      <div style="background:white; border-radius:8px; border:1px solid #eee; padding:20px; margin-bottom:16px;">
+        <h3 style="margin:0 0 10px; font-size:16px; color:#2B2523;">Documents (${taskFiles.length})</h3>
+        ${taskFiles.map(f => `<div style="display:flex; justify-content:space-between; gap:12px; align-items:center; padding:8px 0; border-top:1px solid #f0f0f0; font-size:13px;">
+          <div style="overflow-wrap:anywhere;"><strong>${esc(f.filename)}</strong>
+            <div style="font-size:11px; color:#888;">${Math.max(1, Math.round(f.bytes / 1024))} KB · ${esc(f.uploaded_by_name || "")} · ${new Date(f.created_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}</div></div>
+          <a href="/api/staff/task-attachments/${f.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px; white-space:nowrap;">Download</a>
+        </div>`).join("")}
+      </div>` : "";
 
     const mHtml = mList.length ? mList.map(m => {
       const isDone = m.status === "completed";
@@ -2723,7 +2745,7 @@ app.get("/admin/tasks/:id", async (req, res, next) => {
         <div style="background:${bg}; padding:12px 14px; border-radius:6px; border:1px solid #eee; margin-bottom:6px; display:flex; align-items:center; gap:12px;">
           <div style="width:26px; height:26px; border-radius:13px; background:${isDone ? "#2e7d32" : isActive ? "#0061FF" : "#ddd"}; color:white; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0;">${isDone ? "✓" : isSkipped ? "⊘" : m.order_num}</div>
           <div style="flex:1;">
-            <div style="font-size:14px; color:#0C1C36; ${strike}">${esc(m.title)}</div>
+            <div style="font-size:14px; color:#2B2523; ${strike}">${esc(m.title)}</div>
             ${m.due_date ? `<div style="font-size:11px; color:#666; margin-top:2px;">Due: ${new Date(m.due_date).toLocaleDateString()}</div>` : ""}
             ${m.completed_at ? `<div style="font-size:11px; color:#2e7d32; margin-top:2px;">Completed ${new Date(m.completed_at).toLocaleDateString()}</div>` : ""}
           </div>
@@ -2747,10 +2769,10 @@ app.get("/admin/tasks/:id", async (req, res, next) => {
       else if (a.action === "created") text = "Task created";
       return `
         <div style="display:flex; gap:10px; padding:10px 0; border-bottom:1px solid #f0f0f0;">
-          <div style="width:24px; height:24px; border-radius:12px; background:#f5f2ea; display:flex; align-items:center; justify-content:center; font-size:11px; color:#B79C62; flex-shrink:0;">${icon}</div>
+          <div style="width:24px; height:24px; border-radius:12px; background:#F3EFE9; display:flex; align-items:center; justify-content:center; font-size:11px; color:#A34C00; flex-shrink:0;">${icon}</div>
           <div style="flex:1; font-size:12px;">
-            <div style="color:#0C1C36;">${text}${a.actor_name ? ` — <span style="color:#666;">by ${esc(a.actor_name)}</span>` : ""}${!a.visible_to_submitter ? ' <span style="background:#666; color:white; padding:0 6px; border-radius:8px; font-size:9px;">INTERNAL</span>' : ""}</div>
-            ${a.note ? `<div style="background:#fafaf7; padding:6px 8px; border-radius:4px; margin-top:4px; color:#333; white-space:pre-wrap;">${esc(a.note)}</div>` : ""}
+            <div style="color:#2B2523;">${text}${a.actor_name ? ` — <span style="color:#666;">by ${esc(a.actor_name)}</span>` : ""}${!a.visible_to_submitter ? ' <span style="background:#666; color:white; padding:0 6px; border-radius:8px; font-size:9px;">INTERNAL</span>' : ""}</div>
+            ${a.note ? `<div style="background:#FAF8F5; padding:6px 8px; border-radius:4px; margin-top:4px; color:#333; white-space:pre-wrap;">${esc(a.note)}</div>` : ""}
             <div style="color:#999; font-size:10px; margin-top:2px;">${new Date(a.created_at).toLocaleString()}</div>
           </div>
         </div>`;
@@ -2768,7 +2790,7 @@ app.get("/admin/tasks/:id", async (req, res, next) => {
           </div>
         </div>
         <div style="display:flex; gap:8px;">
-          <a href="/admin/tasks/${id}/edit" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600; font-size:13px;">✎ Edit</a>
+          <a href="/admin/tasks/${id}/edit" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600; font-size:13px;">✎ Edit</a>
           ${task.status !== "completed" ? `<button onclick="markComplete()" style="background:#2e7d32; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600; font-size:13px;">✓ Mark Complete</button>` : ""}
         </div>
       </div>
@@ -2786,23 +2808,25 @@ app.get("/admin/tasks/:id", async (req, res, next) => {
         ${task.description ? `<div style="margin-top:14px; padding-top:14px; border-top:1px solid #eee;"><div style="font-size:10px; color:#888; text-transform:uppercase; margin-bottom:6px;">Description</div><div style="white-space:pre-wrap; font-size:13px; color:#333;">${esc(task.description)}</div></div>` : ""}
       </div>
 
+      ${filesHtml}
+
       <div style="background:white; border-radius:8px; border:1px solid #eee; padding:20px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0; font-size:16px; color:#0C1C36;">✅ Milestones (${mProgress.completed + mProgress.skipped}/${mProgress.total} — ${mProgress.percent}%)</h3>
+          <h3 style="margin:0; font-size:16px; color:#2B2523;">✅ Milestones (${mProgress.completed + mProgress.skipped}/${mProgress.total} — ${mProgress.percent}%)</h3>
         </div>
         <div style="background:#eee; border-radius:4px; height:8px; margin-bottom:14px; overflow:hidden;">
-          <div style="background:linear-gradient(90deg, #B79C62, #2e7d32); height:100%; width:${mProgress.percent}%; transition:width 0.3s;"></div>
+          <div style="background:linear-gradient(90deg, #A34C00, #2e7d32); height:100%; width:${mProgress.percent}%; transition:width 0.3s;"></div>
         </div>
         <div id="milestone-list">${mHtml}</div>
         <div style="margin-top:14px; padding-top:14px; border-top:1px solid #eee; display:flex; gap:8px; flex-wrap:wrap;">
           <input type="text" id="new-milestone" placeholder="Add custom milestone…" style="flex:1; min-width:200px; padding:8px 10px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
           <input type="date" id="new-milestone-due" style="padding:8px; border:1px solid #ccc; border-radius:4px;">
-          <button onclick="addMilestone()" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">+ Add</button>
+          <button onclick="addMilestone()" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">+ Add</button>
         </div>
       </div>
 
       <div style="background:white; border-radius:8px; border:1px solid #eee; padding:20px; margin-bottom:16px;">
-        <h3 style="margin:0 0 10px; font-size:16px; color:#0C1C36;">📋 Activity Timeline</h3>
+        <h3 style="margin:0 0 10px; font-size:16px; color:#2B2523;">📋 Activity Timeline</h3>
         ${timelineHtml}
       </div>
 
@@ -2899,7 +2923,7 @@ app.get("/admin/federal", async (req, res) => {
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
             <div style="display:flex; align-items:center; gap:6px;">
               <span style="background:${isTM ? "#7c4dff" : "#0061FF"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${isTM ? "™ TM" : "⚖ FED"}</span>
-              <a href="/admin/federal/${m.id}" style="color:#0C1C36; font-weight:600; text-decoration:none;">${esc(m.client_name)}</a>
+              <a href="/admin/federal/${m.id}" style="color:#2B2523; font-weight:600; text-decoration:none;">${esc(m.client_name)}</a>
             </div>
             <div style="font-size:11px; color:#666; margin-top:3px;">${esc(typeLabel)}</div>
             ${m.tm_mark ? `<div style="font-size:11px; color:#7c4dff; margin-top:2px;">✦ ${esc(m.tm_mark)}</div>` : ""}
@@ -2921,7 +2945,7 @@ app.get("/admin/federal", async (req, res) => {
             ${m.assigned_attorney ? esc(m.assigned_attorney) : "—"}
           </td>
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
-            <a href="/admin/federal/${m.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+            <a href="/admin/federal/${m.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
           </td>
         </tr>`;
     }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#888;">No matters yet. Click <a href="/admin/federal/new" style="color:#0061FF;">+ New Matter</a> to add one.</td></tr>`;
@@ -2935,17 +2959,17 @@ app.get("/admin/federal", async (req, res) => {
     const body = `
       <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
         <div>
-          <h1>⚖ Federal Matters & Trademarks</h1>
+          <h1>Federal Matters & Trademarks</h1>
           <div style="font-size:12px; color:#666; margin-top:4px;">Unified tracking for USPTO/TTAB filings and federal court cases (District Court, Circuit Appeals, Habeas, Mandamus).</div>
         </div>
-        <a href="/admin/federal/new" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Matter</a>
+        <a href="/admin/federal/new" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Matter</a>
       </div>
 
       <!-- Stats tiles -->
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">
         <a href="/admin/federal" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">Active</div>
-          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${stats.active || 0}</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523;">${stats.active || 0}</div>
           <div style="font-size:10px; color:#666;">${stats.total || 0} total</div>
         </a>
         <a href="/admin/federal?group=trademarks" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
@@ -2958,21 +2982,21 @@ app.get("/admin/federal", async (req, res) => {
         </a>
         <a href="/admin/federal?overdue=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">Overdue</div>
-          <div style="font-size:22px; font-weight:700; color:${stats.overdue > 0 ? "#c62828" : "#0C1C36"};">${stats.overdue || 0}</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.overdue > 0 ? "#c62828" : "#2B2523"};">${stats.overdue || 0}</div>
         </a>
         <a href="/admin/federal?deadline_within_days=30" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">Due in 30d</div>
-          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${stats.due_this_month || 0}</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523;">${stats.due_this_month || 0}</div>
         </a>
       </div>
 
       <!-- Group tabs -->
       <div style="display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;">
-        <a href="/admin/federal" style="background:${!q.group ? "#0C1C36" : "#f5f2ea"}; color:${!q.group ? "white" : "#0C1C36"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">All Matters</a>
-        <a href="/admin/federal?group=trademarks" style="background:${q.group === "trademarks" ? "#7c4dff" : "#f5f2ea"}; color:${q.group === "trademarks" ? "white" : "#7c4dff"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">™ Trademarks Only</a>
-        <a href="/admin/federal?group=federal_court" style="background:${q.group === "federal_court" ? "#0061FF" : "#f5f2ea"}; color:${q.group === "federal_court" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">⚖ Federal Court</a>
-        <a href="/admin/federal?group=federal_appeal" style="background:${q.group === "federal_appeal" ? "#0061FF" : "#f5f2ea"}; color:${q.group === "federal_appeal" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Appeals</a>
-        <a href="/admin/federal?group=federal_writ" style="background:${q.group === "federal_writ" ? "#0061FF" : "#f5f2ea"}; color:${q.group === "federal_writ" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Writs (Habeas/Mandamus)</a>
+        <a href="/admin/federal" style="background:${!q.group ? "#2B2523" : "#F3EFE9"}; color:${!q.group ? "white" : "#2B2523"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">All Matters</a>
+        <a href="/admin/federal?group=trademarks" style="background:${q.group === "trademarks" ? "#7c4dff" : "#F3EFE9"}; color:${q.group === "trademarks" ? "white" : "#7c4dff"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">™ Trademarks Only</a>
+        <a href="/admin/federal?group=federal_court" style="background:${q.group === "federal_court" ? "#0061FF" : "#F3EFE9"}; color:${q.group === "federal_court" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">⚖ Federal Court</a>
+        <a href="/admin/federal?group=federal_appeal" style="background:${q.group === "federal_appeal" ? "#0061FF" : "#F3EFE9"}; color:${q.group === "federal_appeal" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Appeals</a>
+        <a href="/admin/federal?group=federal_writ" style="background:${q.group === "federal_writ" ? "#0061FF" : "#F3EFE9"}; color:${q.group === "federal_writ" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Writs (Habeas/Mandamus)</a>
       </div>
 
       <!-- Filters -->
@@ -2992,14 +3016,14 @@ app.get("/admin/federal", async (req, res) => {
         <div><label style="font-size:11px; color:#888; display:block;">
           <input type="checkbox" name="overdue" value="1" ${q.overdue ? "checked" : ""}> Overdue only
         </label></div>
-        <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
+        <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
         <a href="/admin/federal${q.group ? "?group=" + q.group : ""}" style="padding:8px 16px; color:#666; text-decoration:none;">Clear</a>
       </form>
 
       <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-        <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee; font-size:12px; color:#666;">${rows.length} matter${rows.length === 1 ? "" : "s"}</div>
+        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee; font-size:12px; color:#666;">${rows.length} matter${rows.length === 1 ? "" : "s"}</div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
-          <thead><tr style="background:#fafaf7;">
+          <thead><tr style="background:#FAF8F5;">
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Matter</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Serial / Case #</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Next Deadline</th>
@@ -3083,7 +3107,7 @@ app.get("/admin/federal/new", async (req, res) => {
         </div>
 
         <div style="margin-top:20px;">
-          <button type="submit" style="background:#0C1C36; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create Matter</button>
+          <button type="submit" style="background:#2B2523; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create Matter</button>
           <a href="/admin/federal" style="margin-left:10px; color:#666; text-decoration:none;">Cancel</a>
         </div>
       </form>
@@ -3167,13 +3191,13 @@ app.get("/admin/federal/:id", async (req, res) => {
       ${m.next_deadline_date ? `
       <div style="background:${new Date(m.next_deadline_date) < new Date() ? "#fee" : "#fff8e1"}; padding:16px 20px; border-radius:8px; border-left:4px solid ${new Date(m.next_deadline_date) < new Date() ? "#c62828" : "#f57f17"}; margin-bottom:16px;">
         <div style="font-size:11px; text-transform:uppercase; color:#666;">Next Deadline</div>
-        <div style="font-size:20px; font-weight:700; color:#0C1C36; margin-top:4px;">${new Date(m.next_deadline_date).toLocaleDateString()}${m.next_deadline_desc ? " — " + esc(m.next_deadline_desc) : ""}</div>
+        <div style="font-size:20px; font-weight:700; color:#2B2523; margin-top:4px;">${new Date(m.next_deadline_date).toLocaleDateString()}${m.next_deadline_desc ? " — " + esc(m.next_deadline_desc) : ""}</div>
       </div>` : ""}
 
       ${m.notes ? `<div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; white-space:pre-wrap; font-size:13px; line-height:1.6;">${esc(m.notes)}</div>` : ""}
 
       <div style="display:flex; gap:8px;">
-        <a href="/admin/tasks/new?client_name=${encodeURIComponent(m.client_name)}&matter_type=${encodeURIComponent(fm.TYPE_GROUPS[m.matter_type] === 'trademarks' ? 'tm' : 'immigration')}${m.a_number ? '&a_number=' + encodeURIComponent(m.a_number) : ''}${m.matter_number ? '&case_number=' + encodeURIComponent(m.matter_number) : ''}${m.agency ? '&court=' + encodeURIComponent(m.agency) : ''}" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ Add Task</a>
+        <a href="/admin/tasks/new?client_name=${encodeURIComponent(m.client_name)}&matter_type=${encodeURIComponent(fm.TYPE_GROUPS[m.matter_type] === 'trademarks' ? 'tm' : 'immigration')}${m.a_number ? '&a_number=' + encodeURIComponent(m.a_number) : ''}${m.matter_number ? '&case_number=' + encodeURIComponent(m.matter_number) : ''}${m.agency ? '&court=' + encodeURIComponent(m.agency) : ''}" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ Add Task</a>
         <button onclick="deleteMatter()" style="background:#c62828; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🗑️ Delete</button>
       </div>
 
@@ -3225,7 +3249,7 @@ app.get("/admin/tasks", async (req, res) => {
     const fmtDate = d => d ? new Date(d).toLocaleDateString() : "—";
 
     const priorityColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" };
-    const statusColor = { pending: "#B79C62", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" };
+    const statusColor = { pending: "#A34C00", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" };
 
     const rowsHtml = rows.length ? rows.map(t => {
       const days = t.days_until_due;
@@ -3247,7 +3271,7 @@ app.get("/admin/tasks", async (req, res) => {
             <input type="checkbox" ${t.status === "completed" ? "checked disabled" : ""} onclick="completeTask(${t.id})" style="width:18px; height:18px; cursor:pointer; margin-top:2px;">
           </td>
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
-            <div style="font-weight:600; ${t.status === "completed" ? "text-decoration:line-through; opacity:0.6;" : ""}"><a href="/admin/tasks/${t.id}" style="color:#0C1C36; text-decoration:none;">${esc(t.title)}</a></div>
+            <div style="font-weight:600; ${t.status === "completed" ? "text-decoration:line-through; opacity:0.6;" : ""}"><a href="/admin/tasks/${t.id}" style="color:#2B2523; text-decoration:none;">${esc(t.title)}</a></div>
             ${categoryLabel ? `<div style="font-size:11px; color:#888; margin-top:2px;">${esc(categoryLabel)}${t.matter_type ? " · " + esc(t.matter_type) : ""}</div>` : (t.matter_type ? `<div style="font-size:11px; color:#888; margin-top:2px;">${esc(t.matter_type)}</div>` : "")}
             ${t.description ? `<div style="font-size:12px; color:#555; margin-top:4px; white-space:pre-wrap;">${esc(t.description).substring(0, 200)}${t.description.length > 200 ? "…" : ""}</div>` : ""}
           </td>
@@ -3264,7 +3288,7 @@ app.get("/admin/tasks", async (req, res) => {
             <span style="background:${priorityColor[t.priority] || "#666"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${t.priority.toUpperCase()}</span>
           </td>
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
-            <a href="/admin/tasks/${t.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+            <a href="/admin/tasks/${t.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
           </td>
         </tr>`;
     }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#888;">No tasks match. Click <a href="/admin/tasks/new" style="color:#0061FF;">+ New Task</a> to create one.</td></tr>`;
@@ -3276,10 +3300,10 @@ app.get("/admin/tasks", async (req, res) => {
     const body = `
       <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
         <div>
-          <h1>📋 Task List</h1>
+          <h1>Task List</h1>
           <div style="font-size:12px; color:#666; margin-top:4px;">Filing deadlines, motions, habeas corpus, writs, appeals, and more.</div>
         </div>
-        <a href="/admin/tasks/new" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Task</a>
+        <a href="/admin/tasks/new" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Task</a>
       </div>
 
       ${awaitingApproval ? `<a href="/admin/consultant-tasks" style="display:block; background:#FFF6EC; border:1px solid #F0C89A; border-left:4px solid #FF7B00; border-radius:6px; padding:12px 16px; margin-bottom:14px; color:#2B2523; text-decoration:none; font-size:14px;"><strong>${awaitingApproval} task${awaitingApproval === 1 ? "" : "s"} from consultants waiting for approval</strong> — not in this list until an attorney or manager approves. Review &rarr;</a>` : ""}
@@ -3288,23 +3312,23 @@ app.get("/admin/tasks", async (req, res) => {
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">
         <a href="/admin/tasks" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">All Open</div>
-          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${stats.open_count || 0}</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523;">${stats.open_count || 0}</div>
         </a>
         <a href="/admin/tasks?overdue=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">Overdue</div>
-          <div style="font-size:22px; font-weight:700; color:${stats.overdue_count > 0 ? "#c62828" : "#0C1C36"};">${stats.overdue_count || 0}</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.overdue_count > 0 ? "#c62828" : "#2B2523"};">${stats.overdue_count || 0}</div>
         </a>
         <a href="/admin/tasks?due_within_days=0" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">Due Today</div>
-          <div style="font-size:22px; font-weight:700; color:${stats.due_today > 0 ? "#e65100" : "#0C1C36"};">${stats.due_today || 0}</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.due_today > 0 ? "#e65100" : "#2B2523"};">${stats.due_today || 0}</div>
         </a>
         <a href="/admin/tasks?due_within_days=7" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">This Week</div>
-          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${stats.due_this_week || 0}</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523;">${stats.due_this_week || 0}</div>
         </a>
         <a href="/admin/tasks?priority=urgent" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">Urgent</div>
-          <div style="font-size:22px; font-weight:700; color:${stats.urgent_count > 0 ? "#c62828" : "#0C1C36"};">${stats.urgent_count || 0}</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.urgent_count > 0 ? "#c62828" : "#2B2523"};">${stats.urgent_count || 0}</div>
         </a>
         <a href="/admin/tasks?completed=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
           <div style="font-size:10px; color:#888; text-transform:uppercase;">Done This Week</div>
@@ -3338,14 +3362,14 @@ app.get("/admin/tasks", async (req, res) => {
         <div><label style="font-size:11px; color:#888; display:block;">
           <input type="checkbox" name="overdue" value="1" ${q.overdue ? "checked" : ""}> Overdue only
         </label></div>
-        <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
+        <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
         <a href="/admin/tasks" style="padding:8px 16px; color:#666; text-decoration:none;">Clear</a>
       </form>
 
       <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-        <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee; font-size:12px; color:#666;">${rows.length} task${rows.length === 1 ? "" : "s"}</div>
+        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee; font-size:12px; color:#666;">${rows.length} task${rows.length === 1 ? "" : "s"}</div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
-          <thead><tr style="background:#fafaf7;">
+          <thead><tr style="background:#FAF8F5;">
             <th style="padding:10px 12px; width:40px; border-bottom:1px solid #eee;"></th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Task</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Client</th>
@@ -3399,10 +3423,10 @@ app.get("/admin/tasks/new", async (req, res) => {
       </div>
 
       <!-- ── AI Assist: upload doc or type a brief summary ─────────────── -->
-      <div style="background:linear-gradient(135deg, #fff8e1, #fef3c7); padding:20px 24px; border-radius:8px; border-left:4px solid #B79C62; margin-bottom:16px;">
+      <div style="background:linear-gradient(135deg, #fff8e1, #fef3c7); padding:20px 24px; border-radius:8px; border-left:4px solid #FF7B00; margin-bottom:16px;">
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
           <span style="font-size:20px;">✨</span>
-          <strong style="color:#0C1C36; font-size:15px;">AI Quick Create</strong>
+          <strong style="color:#2B2523; font-size:15px;">AI Quick Create</strong>
           <span style="font-size:11px; color:#666; margin-left:auto;">Upload a doc OR type a brief summary — Claude fills in the rest</span>
         </div>
 
@@ -3411,7 +3435,7 @@ app.get("/admin/tasks/new", async (req, res) => {
           <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
             <div style="font-size:12px; color:#666; margin-bottom:6px;"><strong>📝 Type a brief summary</strong></div>
             <textarea id="ai-text" rows="4" placeholder="Examples:&#10;• File I-589 for Chen Wei by Friday, detained in Adelanto&#10;• Response to RFE from USCIS for Rodriguez family — 87 days from today&#10;• Rent payment due 1st of every month" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit; font-size:13px;"></textarea>
-            <button type="button" onclick="analyzeText()" id="ai-text-btn" style="margin-top:8px; background:#B79C62; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:13px;">✨ Extract Task(s) →</button>
+            <button type="button" onclick="analyzeText()" id="ai-text-btn" style="margin-top:8px; background:#A34C00; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:13px;">✨ Extract Task(s) →</button>
           </div>
 
           <!-- Doc upload mode -->
@@ -3419,7 +3443,7 @@ app.get("/admin/tasks/new", async (req, res) => {
             <div style="font-size:12px; color:#666; margin-bottom:6px;"><strong>📎 Or upload a document</strong></div>
             <div style="font-size:11px; color:#888; margin-bottom:8px;">NTA, hearing notice, RFE, NOID, IJ decision, court order, PDF or image (PNG/JPG). Claude reads it and creates tasks with dates.</div>
             <input type="file" id="ai-file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.doc,.docx" style="width:100%; font-size:13px;">
-            <button type="button" onclick="analyzeDoc()" id="ai-file-btn" style="margin-top:8px; background:#0C1C36; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:13px;">✨ Analyze & Create →</button>
+            <button type="button" onclick="analyzeDoc()" id="ai-file-btn" style="margin-top:8px; background:#2B2523; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:13px;">✨ Analyze & Create →</button>
           </div>
         </div>
 
@@ -3431,7 +3455,7 @@ app.get("/admin/tasks/new", async (req, res) => {
 
       <!-- ── Manual entry form (fallback / for direct control) ─────────── -->
       <details style="background:white; padding:0; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-        <summary style="padding:14px 20px; cursor:pointer; font-weight:600; color:#0C1C36;">✏️ Or enter task manually</summary>
+        <summary style="padding:14px 20px; cursor:pointer; font-weight:600; color:#2B2523;">✏️ Or enter task manually</summary>
       <form onsubmit="createTaskManual(event)" style="background:white; padding:24px; border-radius:8px; max-width:800px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
           <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Task Title (required)</label><input type="text" name="title" required placeholder="e.g. File motion to reopen for Chen Wei" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-size:14px;"></div>
@@ -3492,7 +3516,7 @@ app.get("/admin/tasks/new", async (req, res) => {
         </div>
 
         <div style="margin-top:20px;">
-          <button type="submit" style="background:#0C1C36; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create Task</button>
+          <button type="submit" style="background:#2B2523; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create Task</button>
           <a href="/admin/tasks" style="margin-left:10px; color:#666; text-decoration:none;">Cancel</a>
         </div>
       </form>
@@ -3608,7 +3632,7 @@ app.get("/admin/tasks/new", async (req, res) => {
                 <div style="flex:1;">
                   <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
                     <input type="checkbox" id="task-\${i}" checked style="width:16px; height:16px;">
-                    <strong style="color:#0C1C36;">\${escHtml(t.title)}</strong>
+                    <strong style="color:#2B2523;">\${escHtml(t.title)}</strong>
                     <span style="background:\${priColor[t.priority] || '#666'}; color:white; padding:1px 8px; border-radius:8px; font-size:10px;">\${t.priority.toUpperCase()}</span>
                   </div>
                   <div style="font-size:11px; color:#666; margin-left:24px;">
@@ -3830,9 +3854,9 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
           <li>Click <strong>"+ Create an app"</strong> → select <strong>"QuickBooks Online and Payments"</strong></li>
           <li>Give it a name (e.g., "Tez Law Accounting Sync")</li>
           <li>Go to <strong>Keys & OAuth</strong> tab → copy your <strong>Client ID</strong> and <strong>Client Secret</strong></li>
-          <li>Under <strong>Redirect URIs</strong>, add:<br><code style="background:#fafaf7; padding:4px 8px; border-radius:4px; font-size:12px;">${esc(status.redirect_uri)}</code></li>
+          <li>Under <strong>Redirect URIs</strong>, add:<br><code style="background:#FAF8F5; padding:4px 8px; border-radius:4px; font-size:12px;">${esc(status.redirect_uri)}</code></li>
           <li>In Render environment variables, add:
-            <div style="background:#0C1C36; color:#B79C62; padding:12px; border-radius:6px; font-family:ui-monospace, Menlo, monospace; font-size:12px; margin-top:6px;">
+            <div style="background:#2B2523; color:#FF7B00; padding:12px; border-radius:6px; font-family:ui-monospace, Menlo, monospace; font-size:12px; margin-top:6px;">
               QBO_CLIENT_ID=your_client_id_here<br>
               QBO_CLIENT_SECRET=your_client_secret_here<br>
               QBO_ENVIRONMENT=sandbox
@@ -3866,7 +3890,7 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
         </div>
       </div>` : (status.configured ? `
       <div style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; text-align:center;">
-        <h3 style="margin:0 0 10px 0; color:#0C1C36;">Ready to Connect</h3>
+        <h3 style="margin:0 0 10px 0; color:#2B2523;">Ready to Connect</h3>
         <p style="font-size:13px; color:#666; margin-bottom:16px;">Click below to authorize Tez Law's access to your QuickBooks Online account. You'll be redirected to Intuit's sign-in page.</p>
         <a href="/admin/accounting/quickbooks/connect" style="background:#2CA01C; color:white; padding:14px 28px; border-radius:6px; text-decoration:none; font-weight:600; display:inline-block; font-size:15px;">
           🔗 Connect to QuickBooks (${esc(status.environment)})
@@ -3878,7 +3902,7 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:16px;">
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase;">Total Entries</div>
-          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${status.total_entries}</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523;">${status.total_entries}</div>
         </div>
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase;">Synced to QBO</div>
@@ -3886,11 +3910,11 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
         </div>
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase;">Pending Sync</div>
-          <div style="font-size:22px; font-weight:700; color:${status.unsynced_entries > 0 ? "#e65100" : "#0C1C36"};">${status.unsynced_entries}</div>
+          <div style="font-size:22px; font-weight:700; color:${status.unsynced_entries > 0 ? "#e65100" : "#2B2523"};">${status.unsynced_entries}</div>
         </div>
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase;">QBO Accounts</div>
-          <div style="font-size:22px; font-weight:700; color:#0C1C36;">${qboAccountCount}</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523;">${qboAccountCount}</div>
         </div>
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase;">Mapped</div>
@@ -3900,14 +3924,14 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
 
       <!-- Automation toggles -->
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-        <h3 style="margin:0 0 12px 0; color:#0C1C36; font-size:15px;">⚡ Automation</h3>
+        <h3 style="margin:0 0 12px 0; color:#2B2523; font-size:15px;">⚡ Automation</h3>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
 
           <!-- Auto-Push -->
           <div style="border:1px solid ${status.auto_push_enabled ? "#2e7d32" : "#eee"}; padding:16px; border-radius:6px; background:${status.auto_push_enabled ? "#e8f5e9" : "white"};">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
               <div>
-                <strong style="color:#0C1C36;">Auto-Push</strong>
+                <strong style="color:#2B2523;">Auto-Push</strong>
                 <span style="background:${status.auto_push_enabled ? "#2e7d32" : "#999"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; margin-left:6px;">${status.auto_push_enabled ? "ON" : "OFF"}</span>
               </div>
               <label class="toggle" style="display:inline-block; position:relative; width:44px; height:24px; cursor:pointer;">
@@ -3926,7 +3950,7 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
           <div style="border:1px solid ${status.scheduled_sync_enabled ? "#2e7d32" : "#eee"}; padding:16px; border-radius:6px; background:${status.scheduled_sync_enabled ? "#e8f5e9" : "white"};">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
               <div>
-                <strong style="color:#0C1C36;">Scheduled Sync</strong>
+                <strong style="color:#2B2523;">Scheduled Sync</strong>
                 <span style="background:${status.scheduled_sync_enabled ? "#2e7d32" : "#999"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; margin-left:6px;">${status.scheduled_sync_enabled ? "ON" : "OFF"}</span>
               </div>
               <label class="toggle" style="display:inline-block; position:relative; width:44px; height:24px; cursor:pointer;">
@@ -3962,17 +3986,17 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
       </div>
 
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-        <h3 style="margin:0 0 12px 0; color:#0C1C36; font-size:15px;">Manual Actions</h3>
+        <h3 style="margin:0 0 12px 0; color:#2B2523; font-size:15px;">Manual Actions</h3>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button onclick="autoMap()" style="background:#B79C62; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;">🔗 Auto-map Accounts</button>
+          <button onclick="autoMap()" style="background:#A34C00; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;">🔗 Auto-map Accounts</button>
           <button onclick="pushAll()" style="background:#2CA01C; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;" ${status.mapped_accounts < ourAccounts.length ? 'disabled title="Map all accounts first"' : ""}>⬆ Push ${status.unsynced_entries} Unsynced Now</button>
-          <a href="/admin/accounting/quickbooks/mapping" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">📋 Account Mapping</a>
+          <a href="/admin/accounting/quickbooks/mapping" style="background:#2B2523; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">📋 Account Mapping</a>
         </div>
       </div>` : "";
 
     const body = `
       <div class="page-header">
-        <h1>🔗 QuickBooks Online Sync</h1>
+        <h1>QuickBooks Online Sync</h1>
         <a href="/admin/accounting" class="back-link">← Accounting</a>
       </div>
 
@@ -4195,7 +4219,7 @@ app.get("/admin/accounting/quickbooks/mapping", async (req, res) => {
       ).join("");
       return `
         <tr>
-          <td style="padding:10px 12px; border-bottom:1px solid #eee; font-family:ui-monospace, Menlo, monospace; font-size:12px; color:#0C1C36;">${a.account_number}</td>
+          <td style="padding:10px 12px; border-bottom:1px solid #eee; font-family:ui-monospace, Menlo, monospace; font-size:12px; color:#2B2523;">${a.account_number}</td>
           <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:13px;">${esc(a.name)}<div style="font-size:11px; color:#888;">${a.type}${a.subtype ? " · " + a.subtype : ""}</div></td>
           <td style="padding:10px 12px; border-bottom:1px solid #eee;">
             <select data-acct="${a.account_number}" onchange="updateMapping('${a.account_number}', this.value)" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:12px;">
@@ -4210,7 +4234,7 @@ app.get("/admin/accounting/quickbooks/mapping", async (req, res) => {
 
     const body = `
       <div class="page-header">
-        <h1>📋 Account Mapping</h1>
+        <h1>Account Mapping</h1>
         <a href="/admin/accounting/quickbooks" class="back-link">← QuickBooks Sync</a>
       </div>
 
@@ -4220,7 +4244,7 @@ app.get("/admin/accounting/quickbooks/mapping", async (req, res) => {
 
       <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
         <table style="width:100%; border-collapse:collapse;">
-          <thead><tr style="background:#fafaf7;">
+          <thead><tr style="background:#FAF8F5;">
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Our #</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Our Account</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">QBO Account</th>
@@ -4409,7 +4433,7 @@ app.get("/admin/accounting/record-fee", async (req, res) => {
     const hearingNotes = require("./hearing-notes");
     const body = `
       <div class="page-header">
-        <h1>💰 Record Legal Fee</h1>
+        <h1>Record Legal Fee</h1>
         <a href="/admin/accounting" class="back-link">← Accounting</a>
       </div>
       <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
@@ -4497,7 +4521,7 @@ app.get("/admin/accounting/record-retainer", async (req, res) => {
     const hearingNotes = require("./hearing-notes");
     const body = `
       <div class="page-header">
-        <h1>🏦 Record Retainer / Trust Deposit</h1>
+        <h1>Record Retainer / Trust Deposit</h1>
         <a href="/admin/accounting" class="back-link">← Accounting</a>
       </div>
       <div style="background:#fff8e1; padding:14px 16px; border-radius:8px; border-left:4px solid #f57f17; margin-bottom:16px; font-size:13px;">
@@ -4523,7 +4547,7 @@ app.get("/admin/accounting/record-retainer", async (req, res) => {
           <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Description / Notes</label><input type="text" name="description" placeholder="Initial retainer, replenishment, etc" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
         </div>
         <div style="margin-top:20px;">
-          <button type="submit" style="background:#B79C62; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Deposit to Trust</button>
+          <button type="submit" style="background:#A34C00; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Deposit to Trust</button>
         </div>
       </form>
       <script>
@@ -4573,7 +4597,7 @@ app.get("/admin/accounting/record-expense", async (req, res) => {
     const opts = expenseAccounts.map(a => `<option value="${a.account_number}">${a.account_number} — ${a.name.replace(/</g, "&lt;")}</option>`).join("");
     const body = `
       <div class="page-header">
-        <h1>💸 Record Expense</h1>
+        <h1>Record Expense</h1>
         <a href="/admin/accounting" class="back-link">← Accounting</a>
       </div>
       <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
@@ -4670,7 +4694,7 @@ app.get("/admin/accounting/entry/:id", async (req, res) => {
       </div>
       <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
-          <thead><tr style="background:#fafaf7;">
+          <thead><tr style="background:#FAF8F5;">
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Acct #</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Account</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Memo</th>
@@ -4678,7 +4702,7 @@ app.get("/admin/accounting/entry/:id", async (req, res) => {
             <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase;">Credit</th>
           </tr></thead>
           <tbody>${linesHtml}
-            <tr style="background:#fafaf7; font-weight:700;">
+            <tr style="background:#FAF8F5; font-weight:700;">
               <td colspan="3" style="padding:10px 12px;">TOTALS</td>
               <td style="padding:10px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(totalD)}</td>
               <td style="padding:10px 12px; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(totalC)}</td>
@@ -4799,7 +4823,7 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
 
     // Existing letters
     const statusColors = {
-      draft: "#B79C62", sent: "#0061FF", carrier_responded: "#7c4dff",
+      draft: "#A34C00", sent: "#0061FF", carrier_responded: "#7c4dff",
       limits_disclosed: "#00838f", tendered: "#2e7d32", rejected: "#c62828",
       bad_faith_flagged: "#c62828", superseded: "#999",
     };
@@ -4820,7 +4844,7 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;">
             <div style="flex:1;">
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                <strong style="color:#0C1C36; font-size:15px;">Version ${l.version || 1}</strong>
+                <strong style="color:#2B2523; font-size:15px;">Version ${l.version || 1}</strong>
                 <span style="background:${color}; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">${status.toUpperCase().replace(/_/g, " ")}</span>
                 ${l.bad_faith_flagged ? '<span style="background:#c62828; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">🚩 BAD FAITH</span>' : ""}
                 <span style="font-size:11px; color:#888;">#${l.id}</span>
@@ -4838,9 +4862,9 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
                 ${l.carrier_tendered_limits ? " · ✓ TENDERED " + fmt$(l.tendered_amount) : ""}
               </div>
             </div>
-            <a href="/admin/pi/case/${caseId}/demand/${l.id}" style="background:#0C1C36; color:white; padding:6px 14px; border-radius:4px; text-decoration:none; font-size:12px; align-self:flex-start;">Open →</a>
+            <a href="/admin/pi/case/${caseId}/demand/${l.id}" style="background:#2B2523; color:white; padding:6px 14px; border-radius:4px; text-decoration:none; font-size:12px; align-self:flex-start;">Open →</a>
           </div>
-          <div style="font-size:12px; color:#555; padding:10px; background:#fafaf7; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${l.letter_text && l.letter_text.length > 300 ? "…" : ""}</div>
+          <div style="font-size:12px; color:#555; padding:10px; background:#FAF8F5; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${l.letter_text && l.letter_text.length > 300 ? "…" : ""}</div>
         </div>`;
     }).join("") : `<div style="text-align:center; padding:40px; color:#888;">No demand letters generated yet.</div>`;
 
@@ -4853,7 +4877,7 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
 
     const body = `
       <div class="page-header">
-        <h1>📝 Demand Letters — ${esc(c.client_name)}</h1>
+        <h1>Demand Letters — ${esc(c.client_name)}</h1>
         <a href="/admin/pi/case/${caseId}" class="back-link">← Back to case</a>
       </div>
 
@@ -4864,7 +4888,7 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
       ${warnHtml}
 
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-        <h2 style="font-size:16px; margin:0 0 12px 0; color:#0C1C36;">✨ Generate New Demand Letter</h2>
+        <h2 style="font-size:16px; margin:0 0 12px 0; color:#2B2523;">✨ Generate New Demand Letter</h2>
         <p style="font-size:13px; color:#666; margin-bottom:12px;">
           Time-limited policy limits demand compliant with CCP §§ 999-999.5. Auto-calculates the deadline (33 days if policy limits ≤ $250K, 60 days if > $250K, or 60 days if undisclosed). Uses only verified case law.
         </p>
@@ -4880,7 +4904,7 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
             <textarea id="additional-context" placeholder="e.g., 'stress permanent impairment', 'emphasize clear liability from police report', 'address argument that treatment was excessive'..." style="width:100%; min-height:80px; padding:10px; border:1px solid #ccc; border-radius:6px; font-size:13px; box-sizing:border-box;" ${!canGenerate ? "disabled" : ""}></textarea>
           </div>
           <div>
-            <button onclick="generateDemand()" id="gen-btn" ${!canGenerate ? "disabled" : ""} style="background:${canGenerate ? "#B79C62" : "#ccc"}; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:${canGenerate ? "pointer" : "not-allowed"}; font-weight:600; font-size:14px;">
+            <button onclick="generateDemand()" id="gen-btn" ${!canGenerate ? "disabled" : ""} style="background:${canGenerate ? "#A34C00" : "#ccc"}; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:${canGenerate ? "pointer" : "not-allowed"}; font-weight:600; font-size:14px;">
               📝 Generate Demand Letter
             </button>
             <div id="gen-status" style="margin-top:10px; font-size:12px; color:#666;"></div>
@@ -4960,7 +4984,7 @@ app.get("/admin/pi/case/:caseId/demand/:demandId", async (req, res) => {
     const daysToDeadline = letter.deadline_date ? Math.ceil((new Date(letter.deadline_date) - new Date()) / 86400000) : null;
 
     const statusColors = {
-      draft: "#B79C62", sent: "#0061FF", carrier_responded: "#7c4dff",
+      draft: "#A34C00", sent: "#0061FF", carrier_responded: "#7c4dff",
       limits_disclosed: "#00838f", tendered: "#2e7d32", rejected: "#c62828",
       bad_faith_flagged: "#c62828", superseded: "#999",
     };
@@ -4968,7 +4992,7 @@ app.get("/admin/pi/case/:caseId/demand/:demandId", async (req, res) => {
 
     const body = `
       <div class="page-header">
-        <h1>📝 Demand Letter — Version ${letter.version || 1}</h1>
+        <h1>Demand Letter — Version ${letter.version || 1}</h1>
         <a href="/admin/pi/case/${req.params.caseId}/demand" class="back-link">← All demand letters</a>
       </div>
 
@@ -5003,18 +5027,18 @@ app.get("/admin/pi/case/:caseId/demand/:demandId", async (req, res) => {
       </div>` : ""}
 
       <!-- Letter body -->
-      <div style="background:white; padding:40px 50px; border-radius:8px; border:1px solid #eee; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:14px; line-height:1.7; color:#0C1C36; white-space:pre-wrap;" id="letter-text">${esc(displayText)}</div>
+      <div style="background:white; padding:40px 50px; border-radius:8px; border:1px solid #eee; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:14px; line-height:1.7; color:#2B2523; white-space:pre-wrap;" id="letter-text">${esc(displayText)}</div>
 
       <!-- Certificate of Service -->
       <details style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-top:16px;">
-        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">📋 Certificate of Service (attach to sent letter)</summary>
-        <pre style="margin-top:12px; padding:16px; background:#fafaf7; border-radius:6px; white-space:pre-wrap; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6;">${esc(letter.certificate_of_service || "")}</pre>
+        <summary style="cursor:pointer; font-weight:600; color:#2B2523;">📋 Certificate of Service (attach to sent letter)</summary>
+        <pre style="margin-top:12px; padding:16px; background:#FAF8F5; border-radius:6px; white-space:pre-wrap; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6;">${esc(letter.certificate_of_service || "")}</pre>
       </details>
 
       <!-- Action buttons -->
       <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
-        <button onclick="copyText()" style="background:#0C1C36; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy letter</button>
-        <button onclick="printLetter()" style="background:#B79C62; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
+        <button onclick="copyText()" style="background:#2B2523; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy letter</button>
+        <button onclick="printLetter()" style="background:#A34C00; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
         <button onclick="regenerate()" style="background:#7c4dff; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate</button>
         <button onclick="markSent()" style="background:#0061FF; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📬 Mark Sent</button>
         <button onclick="recordResponse()" style="background:#00838f; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📨 Record Response</button>
@@ -5022,7 +5046,7 @@ app.get("/admin/pi/case/:caseId/demand/:demandId", async (req, res) => {
 
       ${(letter.cases_cited || []).length > 0 ? `
       <details style="margin-top:20px; background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
-        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">📚 Cases cited (${letter.cases_cited.length})</summary>
+        <summary style="cursor:pointer; font-weight:600; color:#2B2523;">📚 Cases cited (${letter.cases_cited.length})</summary>
         <ul style="margin-top:10px; font-size:12px; color:#555; line-height:1.7;">
           ${letter.cases_cited.map(c => `<li>${esc(c)}</li>`).join("")}
         </ul>
@@ -5212,7 +5236,7 @@ app.get("/admin/audit-trail", async (req, res) => {
     ).join("");
 
     const statusColors = {
-      unreviewed: "#B79C62",
+      unreviewed: "#A34C00",
       reviewed: "#0061FF",
       approved: "#2e7d32",
       delivered: "#00695c",
@@ -5232,13 +5256,13 @@ app.get("/admin/audit-trail", async (req, res) => {
         <tr>
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
             <div style="display:flex; align-items:center; gap:6px;">
-              ${flagIcon}<strong style="color:#0C1C36;">#${r.id}</strong>
+              ${flagIcon}<strong style="color:#2B2523;">#${r.id}</strong>
               <span style="background:${color}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${r.status.toUpperCase()}</span>
             </div>
             <div style="font-size:11px; color:#888; margin-top:2px;">${dt}</div>
           </td>
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
-            <div style="font-weight:500; color:#0C1C36;">${r.feature_type.replace(/_/g, " ")}</div>
+            <div style="font-weight:500; color:#2B2523;">${r.feature_type.replace(/_/g, " ")}</div>
             <div style="font-size:11px; color:#888;">${(r.source_module || "").replace(".js", "")}</div>
           </td>
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:13px;">
@@ -5254,7 +5278,7 @@ app.get("/admin/audit-trail", async (req, res) => {
             <div style="font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${(r.output_length || 0) > 200 ? "…" : ""}</div>
           </td>
           <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
-            <a href="/admin/audit-trail/${r.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+            <a href="/admin/audit-trail/${r.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
           </td>
         </tr>`;
     }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#888;">No audit records match these filters.</td></tr>`;
@@ -5264,7 +5288,7 @@ app.get("/admin/audit-trail", async (req, res) => {
 
     const body = `
       <div class="page-header">
-        <h1>🛡️ AI Audit Trail</h1>
+        <h1>AI Audit Trail</h1>
         <div style="font-size:12px; color:#666; margin-top:4px;">Immutable log of every AI output — malpractice + bar complaint defense</div>
       </div>
 
@@ -5272,7 +5296,7 @@ app.get("/admin/audit-trail", async (req, res) => {
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:20px;">
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Pending review</div>
-          <div style="font-size:24px; font-weight:700; color:${(stats.pending_review || 0) > 0 ? "#B79C62" : "#0C1C36"}; margin-top:4px;">${stats.pending_review || 0}</div>
+          <div style="font-size:24px; font-weight:700; color:${(stats.pending_review || 0) > 0 ? "#A34C00" : "#2B2523"}; margin-top:4px;">${stats.pending_review || 0}</div>
         </div>
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Approved</div>
@@ -5284,16 +5308,16 @@ app.get("/admin/audit-trail", async (req, res) => {
         </div>
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Flagged</div>
-          <div style="font-size:24px; font-weight:700; color:${(stats.flagged || 0) > 0 ? "#c62828" : "#0C1C36"}; margin-top:4px;">${stats.flagged || 0}</div>
+          <div style="font-size:24px; font-weight:700; color:${(stats.flagged || 0) > 0 ? "#c62828" : "#2B2523"}; margin-top:4px;">${stats.flagged || 0}</div>
         </div>
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Last 30 days</div>
-          <div style="font-size:24px; font-weight:700; color:#0C1C36; margin-top:4px;">${stats.last_30_days || 0}</div>
+          <div style="font-size:24px; font-weight:700; color:#2B2523; margin-top:4px;">${stats.last_30_days || 0}</div>
           <div style="font-size:11px; color:#2e7d32; margin-top:2px;">$${Number(stats.cost_last_30_days || 0).toFixed(2)}</div>
         </div>
         <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Total all time</div>
-          <div style="font-size:24px; font-weight:700; color:#0C1C36; margin-top:4px;">${stats.total_all_time || 0}</div>
+          <div style="font-size:24px; font-weight:700; color:#2B2523; margin-top:4px;">${stats.total_all_time || 0}</div>
           <div style="font-size:11px; color:#2e7d32; margin-top:2px;">$${Number(stats.total_cost_all_time || 0).toFixed(2)}</div>
         </div>
       </div>
@@ -5323,18 +5347,18 @@ app.get("/admin/audit-trail", async (req, res) => {
             <input type="checkbox" name="flagged" value="1" ${filters.flagged_only ? "checked" : ""}> Flagged only
           </label>
         </div>
-        <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Filter</button>
+        <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Filter</button>
         <a href="/admin/audit-trail" style="padding:8px 16px; color:#666; text-decoration:none; font-size:13px;">Clear</a>
       </form>
 
       <!-- Results table -->
       <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-        <div style="padding:12px 16px; background:#fafaf7; border-bottom:1px solid #eee; font-size:12px; color:#666;">
+        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee; font-size:12px; color:#666;">
           Showing ${rows.length} of ${totalCount} records
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
           <thead>
-            <tr style="background:#fafaf7;">
+            <tr style="background:#FAF8F5;">
               <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">ID / Status</th>
               <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Feature</th>
               <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Client</th>
@@ -5365,13 +5389,13 @@ app.get("/admin/audit-trail/:id", async (req, res) => {
 
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const statusColors = {
-      unreviewed: "#B79C62", reviewed: "#0061FF", approved: "#2e7d32",
+      unreviewed: "#A34C00", reviewed: "#0061FF", approved: "#2e7d32",
       delivered: "#00695c", withdrawn: "#999", flagged: "#c62828",
     };
 
     const body = `
       <div class="page-header">
-        <h1>🛡️ Audit Record #${row.id}</h1>
+        <h1>Audit Record #${row.id}</h1>
         <a href="/admin/audit-trail" class="back-link">← All audit records</a>
       </div>
 
@@ -5401,19 +5425,19 @@ app.get("/admin/audit-trail/:id", async (req, res) => {
 
       <!-- Original AI output (immutable) -->
       <details open style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">📄 Original AI Output (${row.original_output ? row.original_output.length : 0} chars) — IMMUTABLE</summary>
-        <pre style="margin-top:14px; padding:16px; background:#fafaf7; border-radius:6px; white-space:pre-wrap; word-wrap:break-word; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6; max-height:600px; overflow-y:auto;">${esc(row.original_output)}</pre>
+        <summary style="cursor:pointer; font-weight:600; color:#2B2523;">📄 Original AI Output (${row.original_output ? row.original_output.length : 0} chars) — IMMUTABLE</summary>
+        <pre style="margin-top:14px; padding:16px; background:#FAF8F5; border-radius:6px; white-space:pre-wrap; word-wrap:break-word; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6; max-height:600px; overflow-y:auto;">${esc(row.original_output)}</pre>
       </details>
 
       ${row.final_version ? `
       <details style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">✏️ Final Version (after attorney edits)</summary>
-        <pre style="margin-top:14px; padding:16px; background:#fafaf7; border-radius:6px; white-space:pre-wrap; word-wrap:break-word; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6; max-height:600px; overflow-y:auto;">${esc(row.final_version)}</pre>
+        <summary style="cursor:pointer; font-weight:600; color:#2B2523;">✏️ Final Version (after attorney edits)</summary>
+        <pre style="margin-top:14px; padding:16px; background:#FAF8F5; border-radius:6px; white-space:pre-wrap; word-wrap:break-word; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6; max-height:600px; overflow-y:auto;">${esc(row.final_version)}</pre>
         ${row.edit_diff ? `<div style="margin-top:10px; font-size:12px; color:#666;"><strong>Edit summary:</strong> ${esc((JSON.parse(row.edit_diff) || {}).summary || "")}</div>` : ""}
       </details>` : ""}
 
       ${row.reviewer_notes ? `
-      <div style="background:#fff8ec; padding:14px 16px; border-radius:8px; border-left:3px solid #B79C62; margin-bottom:16px; font-size:13px;">
+      <div style="background:#fff8ec; padding:14px 16px; border-radius:8px; border-left:3px solid #FF7B00; margin-bottom:16px; font-size:13px;">
         <strong>📝 Reviewer notes:</strong><br>
         <div style="white-space:pre-wrap; margin-top:6px;">${esc(row.reviewer_notes)}</div>
       </div>` : ""}
@@ -5434,7 +5458,7 @@ app.get("/admin/audit-trail/:id", async (req, res) => {
           ${(row.status === "approved" || row.status === "reviewed") ? `<button onclick="markDelivered()" style="background:#00695c; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📬 Mark Delivered</button>` : ""}
           <button onclick="flagRecord()" style="background:#c62828; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🚩 Flag</button>
           <button onclick="withdrawRecord()" style="background:#999; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">↩️ Withdraw</button>
-          ${row.client_key ? `<a href="/admin/audit-trail/export/client/${encodeURIComponent(row.client_key)}" style="background:#0C1C36; color:white; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600; text-decoration:none; margin-left:auto;">📥 Export full client trail</a>` : ""}
+          ${row.client_key ? `<a href="/admin/audit-trail/export/client/${encodeURIComponent(row.client_key)}" style="background:#2B2523; color:white; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600; text-decoration:none; margin-left:auto;">📥 Export full client trail</a>` : ""}
         </div>
       </div>
 
@@ -5610,7 +5634,7 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
     const hasRawNotes = (noteRow.hearing_summary_raw || "").trim().length > 0;
 
     const sourcesBlock = `
-      <div style="background:#fff8ec; padding:14px 16px; border-radius:8px; border-left:4px solid #B79C62; margin-bottom:16px; font-size:13px;">
+      <div style="background:#fff8ec; padding:14px 16px; border-radius:8px; border-left:4px solid #FF7B00; margin-bottom:16px; font-size:13px;">
         <strong>Sources that will feed into this closing:</strong>
         <ul style="margin:8px 0 0 0; padding-left:20px; color:#555;">
           ${examCount > 0
@@ -5626,7 +5650,7 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
       const dt = new Date(a.generated_at).toLocaleString();
       const preview = (a.argument_text || "").substring(0, 300).replace(/</g, "&lt;");
       const status = a.status || "draft";
-      const statusColor = { draft: "#B79C62", finalized: "#0061FF", delivered: "#2e7d32", superseded: "#999" }[status] || "#666";
+      const statusColor = { draft: "#A34C00", finalized: "#0061FF", delivered: "#2e7d32", superseded: "#999" }[status] || "#666";
       const parentLabel = a.parent_id ? ` · regenerated from #${a.parent_id}` : "";
       const witnessLabel = a.testimony_witness_count ? ` · ${a.testimony_witness_count} witness${a.testimony_witness_count === 1 ? "" : "es"} in record` : "";
       const ctxLabel = a.additional_context ? ` · custom context` : "";
@@ -5635,23 +5659,23 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;">
             <div style="flex:1;">
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                <strong style="color:#0C1C36; font-size:15px;">Version ${a.version || 1}</strong>
+                <strong style="color:#2B2523; font-size:15px;">Version ${a.version || 1}</strong>
                 <span style="background:${statusColor}; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">${status.toUpperCase()}</span>
                 <span style="font-size:11px; color:#888;">#${a.id}</span>
               </div>
               <div style="font-size:11px; color:#888; margin-top:4px;">${dt} · ${a.model} · $${Number(a.estimated_cost_usd || 0).toFixed(3)} · ${(a.cases_cited || []).length} cases${witnessLabel}${parentLabel}${ctxLabel}</div>
             </div>
             <div style="display:flex; gap:6px; flex-shrink:0;">
-              <a href="/admin/hearing/individual/${noteId}/closing/${a.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+              <a href="/admin/hearing/individual/${noteId}/closing/${a.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
             </div>
           </div>
-          <div style="font-size:12px; color:#555; padding:10px; background:#fafaf7; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${a.argument_text && a.argument_text.length > 300 ? "…" : ""}</div>
+          <div style="font-size:12px; color:#555; padding:10px; background:#FAF8F5; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${a.argument_text && a.argument_text.length > 300 ? "…" : ""}</div>
         </div>`;
     }).join("") : `<div style="text-align:center; padding:40px; color:#888;">No closing arguments generated yet.</div>`;
 
     const body = `
       <div class="page-header">
-        <h1>🏛️ Closing Arguments — Individual Hearing #${noteId}</h1>
+        <h1>Closing Arguments — Individual Hearing #${noteId}</h1>
         <a href="/admin/hearing/individual/${noteId}" class="back-link">← Back to hearing note</a>
       </div>
 
@@ -5663,13 +5687,13 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
       ${sourcesBlock}
 
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-        <h2 style="font-size:16px; margin:0 0 12px 0; color:#0C1C36;">✨ Generate New Closing Argument</h2>
+        <h2 style="font-size:16px; margin:0 0 12px 0; color:#2B2523;">✨ Generate New Closing Argument</h2>
         <p style="font-size:13px; color:#666; margin-bottom:10px;">
           This will draft a closing oral argument covering REAL ID Act, credibility, past persecution (including single-incident doctrine), and well-founded fear (subjective + objective prongs). Only cases from your verified pool will be cited.
         </p>
         <label style="font-size:12px; color:#666; display:block; margin-bottom:4px;">Additional context for the AI (optional)</label>
         <textarea id="additional-context" placeholder="e.g., 'emphasize country conditions evidence from Exhibit 12', 'address government's argument that harm was localized', 'client has minor inconsistencies about dates — explain via trauma'..." style="width:100%; min-height:80px; padding:10px; border:1px solid #ccc; border-radius:6px; font-family:inherit; font-size:13px; box-sizing:border-box;"></textarea>
-        <button onclick="generateClosing()" id="gen-btn" ${verifiedPool.length < 5 ? "disabled" : ""} style="margin-top:10px; background:${verifiedPool.length < 5 ? "#ccc" : "#B79C62"}; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:${verifiedPool.length < 5 ? "not-allowed" : "pointer"}; font-weight:600; font-size:14px;">
+        <button onclick="generateClosing()" id="gen-btn" ${verifiedPool.length < 5 ? "disabled" : ""} style="margin-top:10px; background:${verifiedPool.length < 5 ? "#ccc" : "#A34C00"}; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:${verifiedPool.length < 5 ? "not-allowed" : "pointer"}; font-weight:600; font-size:14px;">
           🏛️ Generate Closing Argument
         </button>
         <div id="gen-status" style="margin-top:10px; font-size:12px; color:#666;"></div>
@@ -5770,7 +5794,7 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
 
     const body = `
       <div class="page-header">
-        <h1>🏛️ Closing Argument — Version ${closing.version || 1}</h1>
+        <h1>Closing Argument — Version ${closing.version || 1}</h1>
         <a href="/admin/hearing/individual/${req.params.noteId}/closing" class="back-link">← All versions</a>
       </div>
 
@@ -5786,16 +5810,16 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
       </div>
 
       ${closing.additional_context ? `
-      <details style="background:#fff8ec; padding:12px 16px; border-radius:8px; border-left:3px solid #B79C62; margin-bottom:16px; font-size:12px;">
-        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">📝 Attorney's context for this version</summary>
+      <details style="background:#fff8ec; padding:12px 16px; border-radius:8px; border-left:3px solid #FF7B00; margin-bottom:16px; font-size:12px;">
+        <summary style="cursor:pointer; font-weight:600; color:#2B2523;">📝 Attorney's context for this version</summary>
         <div style="margin-top:8px; color:#555; white-space:pre-wrap;">${String(closing.additional_context).replace(/</g, "&lt;")}</div>
       </details>` : ""}
 
-      <div style="background:white; padding:32px 40px; border-radius:8px; border:1px solid #eee; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:15px; line-height:1.75; color:#0C1C36; white-space:pre-wrap;" id="argument-text">${escaped}</div>
+      <div style="background:white; padding:32px 40px; border-radius:8px; border:1px solid #eee; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:15px; line-height:1.75; color:#2B2523; white-space:pre-wrap;" id="argument-text">${escaped}</div>
 
       <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
-        <button onclick="copyText()" style="background:#0C1C36; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy to clipboard</button>
-        <button onclick="printArgument()" style="background:#B79C62; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
+        <button onclick="copyText()" style="background:#2B2523; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy to clipboard</button>
+        <button onclick="printArgument()" style="background:#A34C00; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
         <button onclick="regenerate()" style="background:#7c4dff; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate (new version)</button>
         <button onclick="markStatus('finalized')" style="background:#0061FF; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Mark finalized</button>
         <button onclick="markStatus('delivered')" style="background:#2e7d32; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Mark delivered</button>
@@ -5803,7 +5827,7 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
 
       ${(closing.cases_cited || []).length > 0 ? `
       <details style="margin-top:20px; background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
-        <summary style="cursor:pointer; font-weight:600; color:#0C1C36;">📚 Cases cited in this closing (${closing.cases_cited.length})</summary>
+        <summary style="cursor:pointer; font-weight:600; color:#2B2523;">📚 Cases cited in this closing (${closing.cases_cited.length})</summary>
         <ul style="margin-top:10px; font-size:12px; color:#555; line-height:1.7;">
           ${closing.cases_cited.map(c => `<li>${String(c).replace(/</g, "&lt;")}</li>`).join("")}
         </ul>
@@ -5812,7 +5836,7 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
       <!-- Regenerate modal -->
       <div id="regen-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; padding:20px;">
         <div style="background:white; padding:24px; border-radius:12px; max-width:520px; width:100%;">
-          <h3 style="margin:0 0 12px 0; color:#0C1C36;">🔄 Regenerate Closing</h3>
+          <h3 style="margin:0 0 12px 0; color:#2B2523;">🔄 Regenerate Closing</h3>
           <p style="font-size:13px; color:#666; margin-bottom:12px;">
             A new version will be created using the same hearing notes and testimony, plus any additional direction you provide below. The previous version stays saved.
           </p>
@@ -5947,7 +5971,7 @@ app.get("/admin/panel/:tab", async (req, res) => {
         title: "Access Denied",
         activeItem: null,
         body: `
-          <div class="page-header"><h1 style="color:#c00;">🔒 Not Available</h1></div>
+          <div class="page-header"><h1 style="color:#c00;">Not Available</h1></div>
           <div style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:520px;">
             <p style="margin-bottom:16px; font-size:14px; line-height:1.5;">
               This section is only available to Admin users. Your role
@@ -5955,9 +5979,9 @@ app.get("/admin/panel/:tab", async (req, res) => {
             </p>
             <p style="margin-bottom:20px; font-size:13px; color:#666;">
               If you think this is wrong, ask JJ to update your role via
-              <a href="/admin/users" style="color:#B79C62;">Admin Users</a>.
+              <a href="/admin/users" style="color:#A34C00;">Admin Users</a>.
             </p>
-            <a href="/admin/dashboard" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px;">← Dashboard</a>
+            <a href="/admin/dashboard" style="background:#2B2523; color:white; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px;">← Dashboard</a>
           </div>`,
       }));
     }
@@ -7107,14 +7131,14 @@ app.get("/admin/audit-log", auth.requireRole("admin"), async (req, res) => {
       res.status(500).send(hearingNotes.renderAdminChrome({
         title: "Audit Log Error",
         body: `
-          <div class="page-header"><h1 style="color:#c00;">⚠️ Audit Log Error</h1></div>
+          <div class="page-header"><h1 style="color:#c00;">Audit Log Error</h1></div>
           <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:900px;">
             <p>The audit log page failed to render. Details below (also logged server-side):</p>
             <pre style="background:#fef3f0; padding:14px; border-radius:6px; overflow-x:auto; font-size:12px; border-left:3px solid #c00; color:#c00;">${String(err.message || err).replace(/</g, '&lt;')}</pre>
             <details style="margin-top:12px;"><summary style="cursor:pointer; color:#666; font-size:13px;">Stack trace</summary>
               <pre style="background:#f8f8f8; padding:12px; border-radius:6px; overflow-x:auto; font-size:11px; margin-top:8px;">${String(err.stack || '').replace(/</g, '&lt;')}</pre>
             </details>
-            <p style="margin-top:20px;"><a href="/admin/dashboard" style="color:#B79C62;">← Back to dashboard</a></p>
+            <p style="margin-top:20px;"><a href="/admin/dashboard" style="color:#A34C00;">← Back to dashboard</a></p>
           </div>`,
         activeItem: null,
       }));
@@ -7163,15 +7187,15 @@ app.get("/admin/reminders", auth.requireRole("admin"), async (req, res) => {
       </tr>`;
     }).join("");
     const body = `
-      <div class="page-header"><h1>📣 Hearing Reminders</h1><div style="font-size:13px; color:#666;">Automated reminders sent to clients before hearings. Runs daily at 7 AM Pacific.</div></div>
+      <div class="page-header"><h1>Hearing Reminders</h1><div style="font-size:13px; color:#666;">Automated reminders sent to clients before hearings. Runs daily at 7 AM Pacific.</div></div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:15px;">
         <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase;">Sent (all-time)</div>
-          <div style="font-size:22px; font-weight:600; color:#0C1C36;">${stats.sent}</div>
+          <div style="font-size:22px; font-weight:600; color:#2B2523;">${stats.sent}</div>
         </div>
         <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase;">Last 7 days</div>
-          <div style="font-size:22px; font-weight:600; color:#0C1C36;">${stats.last_7_days}</div>
+          <div style="font-size:22px; font-weight:600; color:#2B2523;">${stats.last_7_days}</div>
         </div>
         <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase;">WhatsApp</div>
@@ -7187,12 +7211,12 @@ app.get("/admin/reminders", auth.requireRole("admin"), async (req, res) => {
         </div>
         <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
           <div style="font-size:11px; color:#888; text-transform:uppercase;">Failed</div>
-          <div style="font-size:22px; font-weight:600; color:${stats.failed ? "#c00" : "#0C1C36"};">${stats.failed}</div>
+          <div style="font-size:22px; font-weight:600; color:${stats.failed ? "#c00" : "#2B2523"};">${stats.failed}</div>
         </div>
       </div>
       <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee;">
         <strong>Manual trigger:</strong>
-        <button type="button" onclick="runNow()" style="background:#0C1C36; color:white; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; margin-left:10px;">🚀 Run reminders now</button>
+        <button type="button" onclick="runNow()" style="background:#2B2523; color:white; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; margin-left:10px;">🚀 Run reminders now</button>
         <span style="font-size:12px; color:#666; margin-left:10px;">Sends any pending 7-day or 1-day reminders immediately.</span>
         <div id="run-status" style="margin-top:10px; font-size:13px;"></div>
       </div>
@@ -9195,12 +9219,12 @@ app.get("/legal/quickbooks-disconnected", (req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>QuickBooks disconnected — Tez Law P.C.</title>
 <style>
-  body { font: 16px/1.65 -apple-system, system-ui, Segoe UI, sans-serif; margin: 0; background: #faf8f4; color: #1a1a1a; }
+  body { font: 16px/1.65 -apple-system, system-ui, Segoe UI, sans-serif; margin: 0; background: #FAF8F5; color: #1a1a1a; }
   main { max-width: 620px; margin: 0 auto; padding: 56px 20px 80px; }
-  h1 { font-size: 24px; margin: 0 0 16px; color: #0C1C36; }
+  h1 { font-size: 24px; margin: 0 0 16px; color: #2B2523; }
   p { margin: 0 0 14px; }
   .note { background: #fff8e1; border-left: 4px solid #f57f17; padding: 14px 16px; border-radius: 6px; font-size: 14px; }
-  a { color: #A02818; }
+  a { color: #9C2B1E; }
   footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid #e0ddd6; color: #666; font-size: 13px; }
 </style>
 <main>
@@ -9237,14 +9261,14 @@ app.get("/legal/terms", (req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Terms of Use — Tez Law P.C. internal systems</title>
 <style>
-  body { font: 16px/1.65 -apple-system, system-ui, Segoe UI, sans-serif; margin: 0; background: #faf8f4; color: #1a1a1a; }
+  body { font: 16px/1.65 -apple-system, system-ui, Segoe UI, sans-serif; margin: 0; background: #FAF8F5; color: #1a1a1a; }
   main { max-width: 720px; margin: 0 auto; padding: 48px 20px 80px; }
-  h1 { font-size: 26px; margin: 0 0 4px; color: #0C1C36; }
-  h2 { font-size: 17px; margin: 32px 0 8px; color: #0C1C36; }
+  h1 { font-size: 26px; margin: 0 0 4px; color: #2B2523; }
+  h2 { font-size: 17px; margin: 32px 0 8px; color: #2B2523; }
   .sub { color: #666; font-size: 14px; margin-bottom: 28px; }
   p { margin: 0 0 12px; }
   footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e0ddd6; color: #666; font-size: 13px; }
-  a { color: #A02818; }
+  a { color: #9C2B1E; }
 </style>
 <main>
   <h1>Terms of Use</h1>
@@ -9472,8 +9496,8 @@ app.get("/manifest.json", (req, res) => {
     scope: "/admin/",
     display: "standalone",
     orientation: "portrait-primary",
-    background_color: "#0C1C36",
-    theme_color: "#0C1C36",
+    background_color: "#2B2523",
+    theme_color: "#2B2523",
     icons: [
       {
         src: "https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png",
@@ -9586,7 +9610,7 @@ app.get("/admin/email-setup", async (req, res) => {
       <div style="background:white; padding:14px 16px; margin:8px 0; border-radius:8px; border:1px solid #eee; border-left: 4px solid ${a.active ? "#4CAF50" : "#999"};">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
           <div>
-            <strong style="color:#0C1C36;">${a.email}</strong>
+            <strong style="color:#2B2523;">${a.email}</strong>
             <div style="color:#666; font-size:12px; margin-top:2px;">${a.imap_host}:${a.imap_port}</div>
             <div style="color:#888; font-size:11px; margin-top:4px;">Last scan: ${a.last_scan_at ? new Date(a.last_scan_at).toLocaleString() : "never"}</div>
             ${a.last_error ? `<div style="color:#c00; font-size:11px; margin-top:4px;">Error: ${a.last_error}</div>` : ""}
@@ -9597,7 +9621,7 @@ app.get("/admin/email-setup", async (req, res) => {
 
     const body = `
       <div class="page-header">
-        <h1>📬 Email Setup</h1>
+        <h1>Email Setup</h1>
         <div style="font-size:13px; color:#666;">Configure IMAP credentials for accounts you want Zara to monitor.</div>
       </div>
 
@@ -9605,12 +9629,12 @@ app.get("/admin/email-setup", async (req, res) => {
         <!-- Left: Linked Accounts + Remove -->
         <div>
           <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
-            <h2 style="margin:0 0 12px 0; font-size:15px; color:#0C1C36;">Linked Accounts</h2>
+            <h2 style="margin:0 0 12px 0; font-size:15px; color:#2B2523;">Linked Accounts</h2>
             ${accountsHtml}
           </div>
 
           <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
-            <h2 style="margin:0 0 12px 0; font-size:15px; color:#0C1C36;">Remove Account</h2>
+            <h2 style="margin:0 0 12px 0; font-size:15px; color:#2B2523;">Remove Account</h2>
             <form method="POST" action="/admin/email-setup">
               <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Email to remove</label>
               <input type="email" name="email" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
@@ -9621,7 +9645,7 @@ app.get("/admin/email-setup", async (req, res) => {
 
         <!-- Right: Add/Update Account -->
         <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
-          <h2 style="margin:0 0 12px 0; font-size:15px; color:#0C1C36;">Add / Update Account</h2>
+          <h2 style="margin:0 0 12px 0; font-size:15px; color:#2B2523;">Add / Update Account</h2>
 
           <div style="background:#fff3cd; padding:12px; border-left:4px solid #ffc107; margin-bottom:16px; border-radius:4px; font-size:12px; line-height:1.5;">
             <strong>⚠️ App passwords:</strong> For Gmail, Hotmail, and Google Workspace accounts with 2FA, use an <em>app-specific password</em> (not your login password).
@@ -9663,7 +9687,7 @@ app.get("/admin/email-setup", async (req, res) => {
 
             <div style="display:flex; gap:8px;">
               <button type="submit" name="action" value="test" style="background:#eee; color:#333; border:none; padding:10px 16px; border-radius:4px; cursor:pointer; font-weight:600; flex:1;">Test connection</button>
-              <button type="submit" name="action" value="save" style="background:#B79C62; color:white; border:none; padding:10px 16px; border-radius:4px; cursor:pointer; font-weight:600; flex:1;">Test + Save</button>
+              <button type="submit" name="action" value="save" style="background:#A34C00; color:white; border:none; padding:10px 16px; border-radius:4px; cursor:pointer; font-weight:600; flex:1;">Test + Save</button>
             </div>
           </form>
         </div>
@@ -9700,7 +9724,7 @@ app.post("/admin/email-setup", async (req, res) => {
           ${removed
             ? `<p>Account <strong>${email}</strong> has been removed.</p>`
             : `<p><em>${email} was not in the account list.</em></p>`}
-          <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Back to setup</a></p>
+          <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#2B2523; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Back to setup</a></p>
         </div>
       `));
     }
@@ -9713,7 +9737,7 @@ app.post("/admin/email-setup", async (req, res) => {
 
     if (!testResult.ok) {
       return res.send(wrap("Email Setup — Failed", `
-        <div class="page-header"><h1 style="color:#c00;">❌ Connection Failed</h1></div>
+        <div class="page-header"><h1 style="color:#c00;">Connection Failed</h1></div>
         <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:700px;">
           <div style="background:#fef3f0; padding:12px 16px; border-left:4px solid #c62828; border-radius:4px; margin-bottom:16px; font-family:monospace; font-size:12px;">
             ${testResult.error}
@@ -9729,19 +9753,19 @@ app.post("/admin/email-setup", async (req, res) => {
             <li>Confirm the host and port match your provider's docs</li>
             <li>Some providers block IMAP for OAuth-only accounts (e.g., Microsoft may require Modern Auth)</li>
           </ul>
-          <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Try again</a></p>
+          <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#2B2523; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Try again</a></p>
         </div>
       `));
     }
 
     if (action === "test") {
       return res.send(wrap("Email Setup — Test OK", `
-        <div class="page-header"><h1 style="color:#4CAF50;">✅ Connection Works</h1></div>
+        <div class="page-header"><h1 style="color:#4CAF50;">Connection Works</h1></div>
         <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:600px;">
           <p>Successfully connected to <strong>${imap_host}:${imap_port}</strong> as <strong>${imap_user}</strong>.</p>
           <p>INBOX contains <strong>${testResult.messageCount}</strong> messages.</p>
           <p style="color:#666; font-size:13px;">Click "Test + Save" if you're ready to store this account.</p>
-          <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Back to setup</a></p>
+          <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#2B2523; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Back to setup</a></p>
         </div>
       `));
     }
@@ -9754,11 +9778,11 @@ app.post("/admin/email-setup", async (req, res) => {
     });
 
     res.send(wrap("Email Setup — Saved", `
-      <div class="page-header"><h1 style="color:#4CAF50;">✅ Saved</h1></div>
+      <div class="page-header"><h1 style="color:#4CAF50;">Saved</h1></div>
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:600px;">
         <p>Account <strong>${account.email}</strong> is now linked to Zara (id: ${account.id}).</p>
         <p>${testResult.messageCount} messages in INBOX. Zara will scan every 30 min.</p>
-        <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Add another account</a></p>
+        <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#2B2523; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Add another account</a></p>
       </div>
     `));
   } catch (err) {
@@ -10999,7 +11023,7 @@ app.get("/admin/clients/:key/dropbox/debug", async (req, res) => {
 
     const body = `
       <div class="page-header">
-        <h1>🔍 Dropbox Debug: ${escapeHtml(client.client_name || client.key)}</h1>
+        <h1>Dropbox Debug: ${escapeHtml(client.client_name || client.key)}</h1>
         <a href="/admin/clients/${client.key}" class="back-link">← Back to client</a>
       </div>
 
@@ -11059,7 +11083,7 @@ app.get("/admin/clients/:key/dropbox/debug", async (req, res) => {
           </div>`).join("")}
       </div>
 
-      <div style="background:#fdf7f0; padding:15px; border-radius:4px; border-left:4px solid #B79C62; margin-top:15px;">
+      <div style="background:#FAF8F5; padding:15px; border-radius:4px; border-left:4px solid #FF7B00; margin-top:15px;">
         <h3 style="margin-top:0;">How to fix</h3>
         <ul style="line-height:1.8;">
           <li>Score ≥70 = auto-selected. Below that = shown as suggestion only.</li>
@@ -11169,7 +11193,7 @@ app.get("/admin/dropbox/browse", async (req, res) => {
 
     const body = `
       <div class="page-header">
-        <h1>📦 Dropbox Browser</h1>
+        <h1>Dropbox Browser</h1>
         <a href="/admin/dropbox/setup" class="back-link">← Setup</a>
       </div>
       <p style="color:#666;">This shows what Zara can actually see in your Dropbox. Use it to verify branch folder names and paths.</p>
@@ -11318,7 +11342,7 @@ app.get("/admin/dropbox/setup", async (req, res) => {
 
     const body = `
       <div class="page-header">
-        <h1>📦 Dropbox Integration</h1>
+        <h1>Dropbox Integration</h1>
         <a href="/admin/clients" class="back-link">← Clients</a>
       </div>
 
@@ -11931,11 +11955,11 @@ function renderUnifiedHistory(rows) {
 
   const tbody = rows.length ? rows.map(r => {
     const seqBadge = r.sequence_total && r.sequence_total > 1
-      ? ` <span style="background:#B79C62; color:white; padding:1px 6px; border-radius:8px; font-size:11px;">#${r.sequence}/${r.sequence_total}</span>`
+      ? ` <span style="background:#A34C00; color:white; padding:1px 6px; border-radius:8px; font-size:11px;">#${r.sequence}/${r.sequence_total}</span>`
       : "";
     const kindBadge = r.kind === "individual"
-      ? `<span style="background:#0C1C36; color:#B79C62; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">INDIV</span>`
-      : `<span style="background:#B79C62; color:white; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">MASTER</span>`;
+      ? `<span style="background:#2B2523; color:#FF7B00; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">INDIV</span>`
+      : `<span style="background:#A34C00; color:white; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">MASTER</span>`;
     const deleteUrl = r.kind === "master" ? `/admin/hearing/notes/${r.id}` : `/admin/hearing/individual/${r.id}`;
     return `
     <tr class="h-row"
@@ -11956,7 +11980,7 @@ function renderUnifiedHistory(rows) {
       <td>${r.sent_to_paralegal_at ? "✅" : "—"}</td>
       <td>${new Date(r.created_at).toLocaleDateString()}</td>
       <td>
-        <a href="${r.edit_url}" style="color:#B79C62;">edit</a>
+        <a href="${r.edit_url}" style="color:#A34C00;">edit</a>
         &nbsp;·&nbsp;
         <a href="#" onclick="delRow('${r.kind}', ${r.id}, ${JSON.stringify(r.client_name).replace(/"/g, '&quot;')}); return false;" style="color:#c00; font-size:12px;">🗑️</a>
       </td>
@@ -11965,7 +11989,7 @@ function renderUnifiedHistory(rows) {
 
   const body = `
     <div class="page-header">
-      <h1>📚 All Hearing Notes</h1>
+      <h1>All Hearing Notes</h1>
       <div>
         <a href="/admin/hearing/notes" class="back-link">+ New master hearing</a>
         &nbsp;·&nbsp;

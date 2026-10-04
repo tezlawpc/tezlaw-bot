@@ -11,8 +11,8 @@
   var host = document.querySelector("[data-court-mail]");
   if (!host) return;
   var API = "/admin/court-mail/api";
-  var C = { walnut: "#3E2818", mid: "#5A3B22", gold: "#B8891E", ember: "#F07800", red: "#A02818",
-    lit: "#FBF3DE", border: "#D4C4A0", muted: "#7B5330", green: "#166534" };
+  var C = { walnut: "#2B2523", mid: "#3A3330", gold: "#A34C00", ember: "#FF7B00", red: "#9C2B1E",
+    lit: "#FAF8F5", border: "#E8E3DC", muted: "#5E5854", green: "#166534" };
 
   function h(tag, attrs, kids) {
     var e = document.createElement(tag);
@@ -40,7 +40,7 @@
   function btn(label, fn, kind) {
     var dark = kind === "primary" || kind === "go";
     return h("button", { type: "button", text: label, onclick: fn,
-      style: "padding:6px 12px;border-radius:5px;cursor:pointer;font-size:11.5px;font-family:Cinzel,Georgia,serif;letter-spacing:.6px;" +
+      style: "padding:6px 12px;border-radius:5px;cursor:pointer;font-size:11.5px;font-family:Montserrat,sans-serif;letter-spacing:.6px;" +
              "background:" + (kind === "go" ? C.ember : dark ? C.mid : C.lit) + ";color:" + (dark ? C.lit : C.walnut) + ";border:1px solid " + (dark ? C.gold : C.border) + ";" });
   }
   function chip(text, color) { return h("span", { text: text, style: "display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:#fff;background:" + color + ";" }); }

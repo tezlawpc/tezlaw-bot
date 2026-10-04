@@ -1,0 +1,26 @@
+{
+  "about": "Schema errors that already existed when scripts/dbcheck.js was introduced. The check fails on any error NOT listed here. Fix one, delete its entry, and it can never come back unnoticed. Do not add to this list to make the check pass.",
+  "known": [
+    {
+      "code": "42703",
+      "message": "column \"a_number\" does not exist",
+      "file": "client-documents.js",
+      "sql": "CREATE INDEX IF NOT EXISTS idx_client_documents_a_number ON client_documents (a_number)",
+      "why": "Two features create a table called client_documents with different columns (the firm's Documents tab in client-documents.js; the client app's uploads in app-api.js). Whichever was created first on a given database wins and the other feature's queries fail. Not fixed blind: merging them would show a client the firm's internal uploads. Needs a look at the live table before choosing which side gets its own table."
+    },
+    {
+      "code": "42703",
+      "message": "column dc.client_name does not exist",
+      "file": "dashboard.js",
+      "sql": "SELECT dc.id, dc.platform, dc.client_name, dc.case_type, dc.status, dc.started_at, (SELECT COUNT(*)::int FROM drip_messages WHERE campaign_id = dc.id) AS msg_to",
+      "why": "drip_campaigns is defined twice with different columns (db.js at start-up; the one-time /admin/api/migrate-wave2 endpoint in admin.js). The drip code expects the second shape. Which one the live database has decides the fix."
+    },
+    {
+      "code": "42703",
+      "message": "column dc.client_name does not exist",
+      "file": "drip.js",
+      "sql": "SELECT dm.*, dc.platform, dc.platform_id, dc.client_name, dc.status as campaign_status FROM drip_messages dm JOIN drip_campaigns dc ON dm.campaign_id = dc.id WH",
+      "why": "Same cause as the dashboard.js entry: drip_campaigns has two definitions and the drip queue reads columns only one of them has."
+    }
+  ]
+}

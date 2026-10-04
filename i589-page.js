@@ -34,7 +34,7 @@ const STATUS = {
   unreadable: { label: "unreadable",      color: "#B45309" },
   no_form:    { label: "no I-589",        color: "#888"    },
   no_folder:  { label: "no Dropbox folder", color: "#888"  },
-  error:      { label: "error",           color: "#A02818" },
+  error:      { label: "error",           color: "#9C2B1E" },
 };
 
 function row(p) {
@@ -75,7 +75,7 @@ function row(p) {
       </div>
       ${p.form_path ? `<div style="font-size:11px; color:#888; word-break:break-all;">${esc(p.form_path)}</div>` : ""}
       ${p.form_modified ? `<div style="font-size:11px; color:#888;">dated ${esc(String(p.form_modified).slice(0, 10))}</div>` : ""}
-      <div style="font-size:11px; margin-top:3px;"><a href="/admin/clients/i589/files?key=${encodeURIComponent(p.client_key || "")}" style="color:#A02818;">see what is in the folder</a></div>
+      <div style="font-size:11px; margin-top:3px;"><a href="/admin/clients/i589/files?key=${encodeURIComponent(p.client_key || "")}" style="color:#9C2B1E;">see what is in the folder</a></div>
     </td>
     <td style="padding:10px 8px; vertical-align:top;">
       ${p.status === "found" ? `
@@ -85,7 +85,7 @@ function row(p) {
           ${cell("Address", p.current_address, p.found_address, "take_address", addrConflict)}
           ${applied
             ? `<div style="font-size:11px; color:#2e7d32; margin-top:4px;">Applied ${esc(String(p.applied_at).slice(0, 10))}${p.applied_by ? " by " + esc(p.applied_by) : ""}</div>`
-            : `<button type="submit" style="margin-top:6px; padding:5px 12px; background:#F07800; color:#FFF7E4; border:1px solid #A02818; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">Apply to profile</button>`}
+            : `<button type="submit" style="margin-top:6px; padding:5px 12px; background:#FF7B00;color:#1E1B1A; border:1px solid #9C2B1E; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">Apply to profile</button>`}
         </form>`
         : `<div style="font-size:12px; color:#888;">
              ${p.partial ? `Partly read: ${esc(p.partial)}<br>` : ""}
@@ -104,7 +104,7 @@ function render({ prog, rows, ran, mode = null }) {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>I-589 addresses — Tez Law</title>
 <style>
- body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#faf9f5;color:#0C1C36;margin:0;}
+ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#FAF8F5;color:#2B2523;margin:0;}
  main{max-width:1100px;margin:24px auto;padding:0 20px;}
  h1{font-size:24px;margin:0 0 4px;} .sub{color:#666;font-size:13px;margin-bottom:18px;}
  .card{background:#fff;border:1px solid #eee;border-radius:8px;padding:18px;margin-bottom:18px;}
@@ -147,7 +147,7 @@ function render({ prog, rows, ran, mode = null }) {
 
   <div class="card">
     <div style="margin-bottom:10px;">
-      ${pill(prog.mapped, "clients", "#eef2f7", "#0C1C36")}
+      ${pill(prog.mapped, "clients", "#eef2f7", "#2B2523")}
       ${pill(prog.scanned, "looked at", "#e8f5e9", "#2e7d32")}
       ${pill(prog.remaining, "not yet", "#fff4e5", "#B45309")}
       ${prog.stale ? `<span title="Rows from the first version of this sweep, which read the Dropbox mapping cache as if it were the client roster. They are harmless, and they are not counted above." style="display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; margin-right:6px; background:#f4f4f4; color:#888;">${prog.stale} from an earlier scan</span>` : ""}
@@ -157,10 +157,10 @@ function render({ prog, rows, ran, mode = null }) {
       ${pill(s.unreadable, "unreadable", "#fff4e5", "#B45309")}
       ${pill(s.no_form, "no I-589", "#f4f4f4", "#666")}
       ${pill(s.no_folder, "no folder", "#f4f4f4", "#666")}
-      ${pill(s.error, "errors", "#fdecea", "#A02818")}
+      ${pill(s.error, "errors", "#fdecea", "#9C2B1E")}
     </div>
     ${s.no_form ? `<div style="margin-bottom:12px; font-size:13px;">
-      <a href="/admin/clients/i589/files?status=no_form&limit=10" style="color:#A02818; font-weight:600;">Look inside the ${s.no_form} folders with no I-589 &rarr;</a>
+      <a href="/admin/clients/i589/files?status=no_form&limit=10" style="color:#9C2B1E; font-weight:600;">Look inside the ${s.no_form} folders with no I-589 &rarr;</a>
       <div style="color:#888; font-size:12px; margin-top:2px;">
         Lists the real filenames and the folder each client was matched to. Nothing is downloaded or read.
         A folder auto-matched on the name alone can belong to a different client &mdash; which looks
@@ -173,7 +173,7 @@ function render({ prog, rows, ran, mode = null }) {
           <option value="20">20</option><option value="50">50</option><option value="100">100</option>
         </select>
         more client folders</label>
-      <button type="submit" style="padding:6px 14px; background:#0C1C36; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:13px;">Scan</button>
+      <button type="submit" style="padding:6px 14px; background:#2B2523; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:13px;">Scan</button>
       <span style="font-size:12px; color:#888;">Reads only &mdash; nothing changes on a client record until you press Apply on a row.
         The first pass also has to find each client&rsquo;s Dropbox folder, so give it a minute.</span>
     </form>

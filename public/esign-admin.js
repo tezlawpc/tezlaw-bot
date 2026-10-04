@@ -21,8 +21,8 @@
   window.__esignAdminLoaded = true;
 
   var C = {
-    walnut: "#3E2818", walnutMid: "#5A3B22", gold: "#B8891E", ember: "#F07800", red: "#A02818",
-    parch: "#F5EBD3", lit: "#FBF3DE", border: "#D4C4A0", muted: "#7B5330", green: "#166534",
+    walnut: "#2B2523", walnutMid: "#3A3330", gold: "#A34C00", ember: "#FF7B00", red: "#9C2B1E",
+    parch: "#F3EFE9", lit: "#FAF8F5", border: "#E8E3DC", muted: "#5E5854", green: "#166534",
   };
   var BASE = "/admin/esign/api";
   var META = null;
@@ -65,7 +65,7 @@
     var fg = kind === "primary" || kind === "danger" || kind === "go" ? C.lit : C.walnut;
     return h("button", { type: "button", onclick: onclick, text: label,
       style: "padding:7px 13px;background:" + bg + ";color:" + fg + ";border:1px solid " + (kind ? C.gold : C.border) +
-             ";border-radius:5px;cursor:pointer;font-size:11.5px;font-family:Cinzel,Georgia,serif;letter-spacing:.8px;" });
+             ";border-radius:5px;cursor:pointer;font-size:11.5px;font-family:Montserrat,sans-serif;letter-spacing:.8px;" });
   }
   function chip(text, color) {
     return h("span", { text: text, style: "display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:#fff;background:" + color + ";" });
@@ -134,7 +134,7 @@
         style: "border:2px dashed " + C.gold + ";border-radius:8px;padding:22px;text-align:center;cursor:pointer;background:#fff;",
         onclick: function () { fileIn.click(); },
       }, [
-        h("div", { text: "⬆ Upload a filed document", style: "font-family:Cinzel,serif;letter-spacing:1px;color:" + C.walnut + ";font-size:14px;" }),
+        h("div", { text: "⬆ Upload a filed document", style: "font-family:Cormorant Garamond,Georgia,serif;letter-spacing:1px;color:" + C.walnut + ";font-size:14px;" }),
         h("div", { text: "Word (.docx) keeps the caption, pleading paper and fonts exactly. A PDF works too, but loses its formatting.", style: "font-size:12px;color:" + C.muted + ";margin-top:4px;" }),
       ]);
       function go(f) {
@@ -157,7 +157,7 @@
       clear(list).appendChild(note("Loading templates…"));
       api("/templates?all=1").then(function (d) {
         clear(list);
-        list.appendChild(h("h3", { text: "Templates", style: "font-family:Cinzel,serif;color:" + C.walnut + ";letter-spacing:1px;margin:18px 0 8px;" }));
+        list.appendChild(h("h3", { text: "Templates", style: "font-family:Cormorant Garamond,Georgia,serif;color:" + C.walnut + ";letter-spacing:1px;margin:18px 0 8px;" }));
         if (!d.templates.length) { list.appendChild(note("No templates yet. Upload a document you have filed before to make the first one.")); return; }
         var table = h("table", { style: "width:100%;border-collapse:collapse;background:" + C.lit + ";border:1px solid " + C.border + ";" });
         table.appendChild(h("tr", { style: "background:" + C.walnut + ";color:" + C.lit + ";font-size:11px;letter-spacing:1px;text-align:left;" },
@@ -238,7 +238,7 @@
 
       clear(detail).appendChild(box([
         h("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;" }, [
-          h("div", {}, [h("span", { text: t.name, style: "font-family:Cinzel,serif;font-size:16px;color:" + C.walnut + ";margin-right:8px;" }), statusChip(t.status)]),
+          h("div", {}, [h("span", { text: t.name, style: "font-family:Cormorant Garamond,Georgia,serif;font-size:16px;color:" + C.walnut + ";margin-right:8px;" }), statusChip(t.status)]),
           btn("Close", function () { clear(detail); }),
         ]),
         (t.notes || []).length ? h("div", { style: "background:#FFF6DB;border:1px solid " + C.gold + ";border-radius:5px;padding:8px 10px;margin-bottom:12px;font-size:12.5px;" },
@@ -289,7 +289,7 @@
     var form = h("div");
     var tplLink = h("span");
     clear(host).appendChild(h("div", { style: "display:flex;justify-content:space-between;align-items:center;margin:22px 0 8px;flex-wrap:wrap;gap:8px;" }, [
-      h("h3", { text: "✍ DOCUMENTS FOR SIGNATURE", style: "margin:0;font-family:Cinzel,serif;font-size:14px;letter-spacing:1.5px;color:" + C.walnut + ";" }),
+      h("h3", { text: "✍ DOCUMENTS FOR SIGNATURE", style: "margin:0;font-family:Cormorant Garamond,Georgia,serif;font-size:14px;letter-spacing:1.5px;color:" + C.walnut + ";" }),
       h("div", { style: "display:flex;gap:8px;align-items:center;" }, [
         tplLink,
         btn("+ PREPARE DOCUMENT", function () { prepare(); }, "primary"),

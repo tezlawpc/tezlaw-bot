@@ -18,7 +18,7 @@
 const db = require("./db");
 const axios = require("axios");
 
-const brand = { gold: "#B79C62", navy: "#0C1C36" };
+const brand = { gold: "#A34C00", navy: "#2B2523" };
 
 // ─── Schema ──────────────────────────────────────────
 
@@ -506,7 +506,7 @@ function renderSettingsPage(config, recentEvents) {
   return `
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
-      <h1 style="margin:0;">📤 Outlook Sync</h1>
+      <h1 style="margin:0;">Outlook Sync</h1>
       <div style="font-size:12px; color:#666; margin-top:4px;">Pull merits hearings and other events from your Outlook calendar into Zara.</div>
     </div>
     <a href="/admin/calendar" class="back-link">← Back to calendar</a>

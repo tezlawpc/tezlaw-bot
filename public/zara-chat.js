@@ -27,10 +27,10 @@
   window.__zaraChatLoaded = true;
 
   var C = {
-    walnut: "#3E2818", walnutMid: "#5A3B22",
-    gold: "#B8891E", ember: "#F07800", waxRed: "#A02818",
-    parchment: "#F5EBD3", parchmentLit: "#FBF3DE", border: "#D4C4A0",
-    muted: "#7B5330",
+    walnut: "#2B2523", walnutMid: "#3A3330",
+    gold: "#A34C00", ember: "#FF7B00", waxRed: "#9C2B1E",
+    parchment: "#F3EFE9", parchmentLit: "#FAF8F5", border: "#E8E3DC",
+    muted: "#5E5854",
   };
 
   var OPEN_KEY = "tez_zara_chat_open";
@@ -495,7 +495,7 @@
              "background:" + C.walnut + ";color:" + C.parchmentLit + ";flex-shrink:0;",
     }, [
       h("div", { style: "display:flex;align-items:baseline;gap:8px;min-width:0;" }, [
-        h("span", { text: "◎ Zara", style: "font-family:Cinzel,serif;font-size:13px;letter-spacing:1.4px;" }),
+        h("span", { text: "◎ Zara", style: "font-family:Montserrat,sans-serif;font-size:13px;letter-spacing:1.4px;" }),
         h("span", {
           text: "sees this page",
           style: "font-size:10.5px;color:" + C.parchment + ";opacity:.75;font-style:italic;",

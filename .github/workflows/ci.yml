@@ -15,7 +15,7 @@ jobs:
   checks:
     name: Syntax + regression checks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -99,3 +99,41 @@ jobs:
       # save button must post the exact shape the PUT handler destructures.
       - name: Zara admin UI
         run: node scripts/check-zara-admin-ui.js
+
+      # ── The real server against a real database ──────────────────────
+      # Every check above stubs Postgres. That is how "column t.completed
+      # does not exist" reached a consultant's screen: the query had never
+      # been sent to a database before it shipped. This starts the runner's
+      # own Postgres, boots server.js on it twice, signs in as each kind of
+      # user, walks every page and API route it can reach, and fails on any
+      # query the database rejects that is not already listed in
+      # scripts/dbcheck-known.json.
+      #
+      # If the database cannot be started, or the server will not boot here,
+      # the check says "did not run" as a warning on the run and does NOT
+      # block the deploy — only a real, new schema error does.
+      - name: Start a scratch Postgres
+        continue-on-error: true
+        run: |
+          sudo systemctl start postgresql.service
+          pg_isready --timeout=30
+          sudo -u postgres psql -v ON_ERROR_STOP=1 \
+            -c "CREATE USER tez WITH PASSWORD 'tez'" \
+            -c "CREATE DATABASE tez_dbcheck OWNER tez"
+          # server.js always asks Postgres for SSL (Render requires it), so
+          # the scratch database has to offer it.
+          if [ "$(sudo -u postgres psql -Atc 'SHOW ssl')" != "on" ]; then
+            sudo apt-get install -y ssl-cert > /dev/null
+            sudo make-ssl-cert generate-default-snakeoil || true
+            sudo usermod -aG ssl-cert postgres
+            sudo -u postgres psql \
+              -c "ALTER SYSTEM SET ssl = on" \
+              -c "ALTER SYSTEM SET ssl_cert_file = '/etc/ssl/certs/ssl-cert-snakeoil.pem'" \
+              -c "ALTER SYSTEM SET ssl_key_file = '/etc/ssl/private/ssl-cert-snakeoil.key'"
+            sudo systemctl restart postgresql.service
+            pg_isready --timeout=30
+          fi
+
+      - name: Database check
+        timeout-minutes: 10
+        run: node scripts/dbcheck.js

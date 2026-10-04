@@ -26,11 +26,11 @@
   "use strict";
 
   var C = {
-    walnut: "#3E2818", walnutMid: "#5A3B22", walnutLight: "#8B7355",
-    gold: "#B8891E", goldBright: "#E0B44E",
-    ember: "#F07800", waxRed: "#A02818",
-    parchment: "#F5EBD3", parchmentLit: "#FBF3DE", border: "#D4C4A0",
-    green: "#166534", muted: "#7B5330",
+    walnut: "#2B2523", walnutMid: "#3A3330", walnutLight: "#5E5854",
+    gold: "#A34C00", goldBright: "#FF7B00",
+    ember: "#FF7B00", waxRed: "#9C2B1E",
+    parchment: "#F3EFE9", parchmentLit: "#FAF8F5", border: "#E8E3DC",
+    green: "#166534", muted: "#5E5854",
   };
 
   function api(path, opts) {
@@ -80,7 +80,7 @@
     return h("div", { style: "margin-bottom:6px;" }, [
       h("div", {
         text: text,
-        style: "font-family:Cinzel,serif;font-size:11px;letter-spacing:1.4px;color:" +
+        style: "font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1.4px;color:" +
                C.walnut + ";text-transform:uppercase;",
       }),
       hint ? h("div", {
@@ -116,7 +116,7 @@
       text: text, onclick: onClick,
       style: "padding:8px 15px;border:1px solid " + (kind === "quiet" ? C.border : "transparent") +
              ";border-radius:4px;background:" + bg + ";color:" + fg +
-             ";font-family:Cinzel,serif;font-size:11px;letter-spacing:1.1px;cursor:pointer;",
+             ";font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1.1px;cursor:pointer;",
     });
   }
 
@@ -132,7 +132,7 @@
     return h("div", { style: "margin:26px 0 12px 0;" }, [
       h("h2", {
         text: text,
-        style: "margin:0;font-family:Cinzel,serif;font-size:15px;letter-spacing:1.6px;color:" + C.walnut + ";",
+        style: "margin:0;font-family:Cormorant Garamond,Georgia,serif;font-size:15px;letter-spacing:1.6px;color:" + C.walnut + ";",
       }),
       sub ? h("div", {
         text: sub,
@@ -298,7 +298,7 @@
           }, [
             h("span", {
               text: "v" + v.version + (v.active ? " · live" : ""),
-              style: "font-family:Cinzel,serif;min-width:80px;color:" +
+              style: "font-family:Cormorant Garamond,Georgia,serif;min-width:80px;color:" +
                      (v.active ? C.green : C.muted) + ";",
             }),
             h("span", { text: v.note || "(no note)", style: "flex:1;color:" + C.walnut + ";" }),
@@ -346,7 +346,7 @@
       h("div", { style: "display:flex;gap:10px;align-items:center;margin-bottom:10px;" }, [
         h("span", {
           text: "Prompt for surface:",
-          style: "font-family:Cinzel,serif;font-size:11px;letter-spacing:1.3px;color:" + C.walnut + ";",
+          style: "font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1.3px;color:" + C.walnut + ";",
         }),
         picker,
       ]),
@@ -531,7 +531,7 @@
           return h("th", {
             text: t,
             style: "text-align:left;padding:7px 9px;border-bottom:1px solid " + C.border +
-                   ";font-family:Cinzel,serif;font-size:10.5px;letter-spacing:1.1px;color:" + C.muted + ";",
+                   ";font-family:Montserrat,sans-serif;font-size:10.5px;letter-spacing:1.1px;color:" + C.muted + ";",
           });
         }))]),
         h("tbody", {}, rows.map(function (r) {

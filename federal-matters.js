@@ -62,7 +62,7 @@ const STATUSES = [
   { key: "active",           label: "Active",           color: "#0061FF" },
   { key: "pending_response", label: "Pending Response", color: "#e65100" },
   { key: "briefing",         label: "Briefing",         color: "#7c4dff" },
-  { key: "under_advisement", label: "Under Advisement", color: "#B79C62" },
+  { key: "under_advisement", label: "Under Advisement", color: "#A34C00" },
   { key: "granted",          label: "Granted",          color: "#2e7d32" },
   { key: "denied",           label: "Denied",           color: "#c62828" },
   { key: "settled",          label: "Settled",          color: "#2e7d32" },

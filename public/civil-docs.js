@@ -20,9 +20,9 @@
   "use strict";
 
   var C = {
-    walnut: "#3E2818", walnutMid: "#5A3B22", gold: "#B8891E",
-    parchment: "#F5EBD3", parchmentLit: "#FBF3DE", border: "#D4C4A0",
-    muted: "#7B5330", waxRed: "#A02818", green: "#166534",
+    walnut: "#2B2523", walnutMid: "#3A3330", gold: "#A34C00",
+    parchment: "#F3EFE9", parchmentLit: "#FAF8F5", border: "#E8E3DC",
+    muted: "#5E5854", waxRed: "#9C2B1E", green: "#166534",
   };
   var MAX = 20;
 
@@ -95,7 +95,7 @@
     }, [
       h("div", {
         text: "⇪ Drop documents here to file them in Dropbox",
-        style: "font-family:Cinzel,serif;font-size:12px;letter-spacing:1px;color:" + C.walnut + ";",
+        style: "font-family:Montserrat,sans-serif;font-size:12px;letter-spacing:1px;color:" + C.walnut + ";",
       }),
       h("div", {
         text: "Sorted into the matter's subfolders · up to " + MAX + " at a time · nothing is overwritten",

@@ -15,7 +15,7 @@ const fmtDate = d => d ? new Date(d).toLocaleDateString() : "—";
 const daysBetween = (a, b) => Math.floor((new Date(a) - new Date(b)) / 86400000);
 
 const STATUSES = [
-  { key: "intake",         label: "New Intake",       color: "#B79C62" },
+  { key: "intake",         label: "New Intake",       color: "#A34C00" },
   { key: "investigating",  label: "Investigating",    color: "#0061FF" },
   { key: "treating",       label: "Under Treatment",  color: "#7c4dff" },
   { key: "demand_prep",    label: "Preparing Demand", color: "#00838f" },
@@ -74,11 +74,11 @@ async function renderDashboard() {
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:20px;">
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Active Cases</div>
-        <div style="font-size:28px; font-weight:700; color:#0C1C36; margin-top:4px;">${stats.active_cases || 0}</div>
+        <div style="font-size:28px; font-weight:700; color:#2B2523; margin-top:4px;">${stats.active_cases || 0}</div>
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">New Intake</div>
-        <div style="font-size:28px; font-weight:700; color:#B79C62; margin-top:4px;">${stats.new_intake || 0}</div>
+        <div style="font-size:28px; font-weight:700; color:#A34C00; margin-top:4px;">${stats.new_intake || 0}</div>
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Under Treatment</div>
@@ -94,7 +94,7 @@ async function renderDashboard() {
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">SOL &lt; 60 days</div>
-        <div style="font-size:28px; font-weight:700; color:${sol60 > 0 ? "#c62828" : "#0C1C36"}; margin-top:4px;">${sol60}</div>
+        <div style="font-size:28px; font-weight:700; color:${sol60 > 0 ? "#c62828" : "#2B2523"}; margin-top:4px;">${sol60}</div>
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Annual Gross Recovery</div>
@@ -109,13 +109,13 @@ async function renderDashboard() {
   return `
     <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
       <div>
-        <h1>🚑 Personal Injury Dashboard</h1>
+        <h1>Personal Injury Dashboard</h1>
         <div style="font-size:12px; color:#666; margin-top:4px;">Case management for auto, slip & fall, dog bite, premises, product, medical malpractice</div>
       </div>
       <div style="display:flex; gap:8px;">
-        <a href="/admin/pi/cases" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">All Cases →</a>
-        <a href="/admin/pi/discover/preview" style="background:#0C1C36; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">🔍 Preview Match</a>
-        <button onclick="discoverFromDropbox()" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🔄 Sync from Dropbox</button>
+        <a href="/admin/pi/cases" style="background:#2B2523; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">All Cases →</a>
+        <a href="/admin/pi/discover/preview" style="background:#2B2523; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">🔍 Preview Match</a>
+        <button onclick="discoverFromDropbox()" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🔄 Sync from Dropbox</button>
       </div>
     </div>
 
@@ -123,11 +123,11 @@ async function renderDashboard() {
     ${statsGrid}
 
     <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
-      <h3 style="margin:0 0 12px 0; font-size:14px; color:#0C1C36;">Quick Actions</h3>
+      <h3 style="margin:0 0 12px 0; font-size:14px; color:#2B2523;">Quick Actions</h3>
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <a href="/admin/pi/cases?status=intake" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📋 New intakes needing details</a>
-        <a href="/admin/pi/cases?status=treating" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">🏥 Cases under treatment</a>
-        <a href="/admin/pi/cases?status=settled" style="background:#f5f2ea; color:#0C1C36; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">💰 Settled, needs disbursement</a>
+        <a href="/admin/pi/cases?status=intake" style="background:#F3EFE9; color:#2B2523; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">📋 New intakes needing details</a>
+        <a href="/admin/pi/cases?status=treating" style="background:#F3EFE9; color:#2B2523; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">🏥 Cases under treatment</a>
+        <a href="/admin/pi/cases?status=settled" style="background:#F3EFE9; color:#2B2523; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">💰 Settled, needs disbursement</a>
         <a href="/admin/pi/cases?sol_soon=1" style="background:#fee; color:#c62828; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">⚠️ SOL approaching</a>
       </div>
     </div>
@@ -186,10 +186,10 @@ async function renderCaseList(query) {
     return `
       <tr>
         <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
-          <a href="/admin/pi/case/${c.id}" style="color:#0C1C36; font-weight:600; text-decoration:none;">${esc(c.client_name)}</a>
+          <a href="/admin/pi/case/${c.id}" style="color:#2B2523; font-weight:600; text-decoration:none;">${esc(c.client_name)}</a>
           ${c.incident_type ? `<div style="font-size:11px; color:#888;">${esc(INCIDENT_TYPES.find(i => i.key === c.incident_type)?.label || c.incident_type)}</div>` : ""}
           <div style="font-size:11px; color:#888;">${c.incident_date ? "Incident: " + fmtDate(c.incident_date) : "No incident date"}</div>
-          ${c.referral_source ? `<div style="font-size:11px; color:#B79C62; margin-top:2px;">🤝 ${esc(c.referral_source)}</div>` : ""}
+          ${c.referral_source ? `<div style="font-size:11px; color:#A34C00; margin-top:2px;">🤝 ${esc(c.referral_source)}</div>` : ""}
         </td>
         <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
           <span style="background:${status.color}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600;">${status.label}</span>
@@ -206,18 +206,18 @@ async function renderCaseList(query) {
           <strong style="color:#2e7d32;">Settled: ${finalSet}</strong>
         </td>
         <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
-          <a href="/admin/pi/case/${c.id}" style="background:#0C1C36; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
+          <a href="/admin/pi/case/${c.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
         </td>
       </tr>`;
   }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#888;">No cases match these filters. Try <a href="/admin/pi">syncing from Dropbox</a>.</td></tr>`;
 
   return `
     <div class="page-header">
-      <h1>🚑 PI Cases (${cases.length})</h1>
+      <h1>PI Cases (${cases.length})</h1>
       <a href="/admin/pi" class="back-link">← Dashboard</a>
     </div>
 
-    ${query.broker ? `<div style="background:#fff8e1; padding:12px 16px; border-radius:8px; border-left:4px solid #B79C62; margin-bottom:16px; font-size:13px;">🤝 Filtered by broker: <strong>${esc(query.broker)}</strong> · <a href="/admin/pi/cases" style="color:#0061FF; text-decoration:none;">Show all</a> · <a href="/admin/pi/brokers" style="color:#0061FF; text-decoration:none;">All brokers →</a></div>` : ""}
+    ${query.broker ? `<div style="background:#fff8e1; padding:12px 16px; border-radius:8px; border-left:4px solid #FF7B00; margin-bottom:16px; font-size:13px;">🤝 Filtered by broker: <strong>${esc(query.broker)}</strong> · <a href="/admin/pi/cases" style="color:#0061FF; text-decoration:none;">Show all</a> · <a href="/admin/pi/brokers" style="color:#0061FF; text-decoration:none;">All brokers →</a></div>` : ""}
     <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
       <div>
         <label style="font-size:11px; color:#888; display:block; margin-bottom:2px;">Status</label>
@@ -230,14 +230,14 @@ async function renderCaseList(query) {
           <input type="checkbox" name="sol_soon" value="1" ${query.sol_soon ? "checked" : ""}> SOL within 60 days
         </label>
       </div>
-      <button type="submit" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
+      <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
       <a href="/admin/pi/cases" style="padding:8px 16px; color:#666; text-decoration:none; font-size:13px;">Clear</a>
     </form>
 
     <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
       <table style="width:100%; border-collapse:collapse; font-size:13px;">
         <thead>
-          <tr style="background:#fafaf7;">
+          <tr style="background:#FAF8F5;">
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Client / Incident</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Status</th>
             <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">SOL Date</th>
@@ -286,7 +286,7 @@ async function renderCaseDetail(caseId) {
       <td style="padding:10px; border-bottom:1px solid #eee;"><strong>${esc(p.provider_name)}</strong>${p.provider_type ? `<div style="font-size:11px; color:#888;">${esc(p.provider_type)}</div>` : ""}</td>
       <td style="padding:10px; border-bottom:1px solid #eee; font-size:12px;">${p.phone ? esc(p.phone) : ""}${p.billing_email ? `<br>${esc(p.billing_email)}` : ""}</td>
       <td style="padding:10px; border-bottom:1px solid #eee; font-size:12px;">${fmtDate(p.first_visit_date)} → ${fmtDate(p.last_visit_date)}</td>
-      <td style="padding:10px; border-bottom:1px solid #eee; font-size:12px;">${p.visits_count || 0} visits${p.is_lop ? ' <span style="background:#B79C62; color:white; padding:1px 6px; border-radius:6px; font-size:10px;">LOP</span>' : ""}</td>
+      <td style="padding:10px; border-bottom:1px solid #eee; font-size:12px;">${p.visits_count || 0} visits${p.is_lop ? ' <span style="background:#A34C00; color:white; padding:1px 6px; border-radius:6px; font-size:10px;">LOP</span>' : ""}</td>
       <td style="padding:10px; border-bottom:1px solid #eee; font-size:11px; color:#888;">${p.records_received ? "✓ records" : "⌛ records"} · ${p.bills_received ? "✓ bills" : "⌛ bills"}</td>
       <td style="padding:10px; border-bottom:1px solid #eee;"><button onclick="deleteProvider(${p.id})" style="background:none; border:none; color:#c62828; cursor:pointer;">×</button></td>
     </tr>
@@ -296,7 +296,7 @@ async function renderCaseDetail(caseId) {
     const flags = [];
     if (b.is_medi_cal) flags.push('<span style="background:#c62828; color:white; padding:1px 6px; border-radius:6px; font-size:10px;">MEDI-CAL</span>');
     if (b.is_medicare) flags.push('<span style="background:#c62828; color:white; padding:1px 6px; border-radius:6px; font-size:10px;">MEDICARE</span>');
-    if (b.is_lien) flags.push('<span style="background:#B79C62; color:white; padding:1px 6px; border-radius:6px; font-size:10px;">LIEN</span>');
+    if (b.is_lien) flags.push('<span style="background:#A34C00; color:white; padding:1px 6px; border-radius:6px; font-size:10px;">LIEN</span>');
     return `
       <tr>
         <td style="padding:10px; border-bottom:1px solid #eee;"><strong>${esc(b.provider_name)}</strong> ${flags.join(" ")}<div style="font-size:11px; color:#888;">${fmtDate(b.date_of_service_from)} → ${fmtDate(b.date_of_service_to)}</div></td>
@@ -310,7 +310,7 @@ async function renderCaseDetail(caseId) {
   }).join("") : `<tr><td colspan="7" style="padding:20px; text-align:center; color:#888; font-size:13px;">No bills added yet.</td></tr>`;
 
   const totalBillsRow = data.bills.length > 0 ? `
-    <tr style="background:#fafaf7; font-weight:700;">
+    <tr style="background:#FAF8F5; font-weight:700;">
       <td style="padding:10px;">TOTALS</td>
       <td style="padding:10px; text-align:right;">${fmt$(totalBilled)}</td>
       <td style="padding:10px; text-align:right; color:#0061FF;">${fmt$(data.bills.reduce((s, b) => s + Number(b.paid_by_insurance || 0), 0))}</td>
@@ -355,14 +355,14 @@ async function renderCaseDetail(caseId) {
   return `
     <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
       <div>
-        <h1>🚑 ${esc(c.client_name)}</h1>
+        <h1>${esc(c.client_name)}</h1>
         <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
           <span style="background:${status.color}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600;">${status.label}</span>
           ${c.dropbox_folder_path ? `<span style="font-size:11px; color:#888;">📁 ${esc(c.dropbox_folder_path)}</span>` : ""}
         </div>
       </div>
       <div style="display:flex; gap:8px;">
-        <a href="/admin/pi/case/${c.id}/demand" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">📝 Demand Letters</a>
+        <a href="/admin/pi/case/${c.id}/demand" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">📝 Demand Letters</a>
         <a href="/admin/pi/case/${c.id}/disbursement" style="background:#2e7d32; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">💰 Disbursement</a>
         <a href="/admin/pi/cases" class="back-link" style="padding:10px 16px;">← All Cases</a>
       </div>
@@ -374,19 +374,19 @@ async function renderCaseDetail(caseId) {
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:16px;">
       <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:10px; color:#888; text-transform:uppercase;">Total Medical Billed</div>
-        <div style="font-size:18px; font-weight:700; color:#0C1C36; margin-top:2px;">${fmt$(totalBilled)}</div>
+        <div style="font-size:18px; font-weight:700; color:#2B2523; margin-top:2px;">${fmt$(totalBilled)}</div>
       </div>
       <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:10px; color:#888; text-transform:uppercase;">Outstanding</div>
-        <div style="font-size:18px; font-weight:700; color:${totalOutstanding > 0 ? "#c62828" : "#0C1C36"}; margin-top:2px;">${fmt$(totalOutstanding)}</div>
+        <div style="font-size:18px; font-weight:700; color:${totalOutstanding > 0 ? "#c62828" : "#2B2523"}; margin-top:2px;">${fmt$(totalOutstanding)}</div>
       </div>
       <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:10px; color:#888; text-transform:uppercase;">Case Costs Advanced</div>
-        <div style="font-size:18px; font-weight:700; color:#0C1C36; margin-top:2px;">${fmt$(totalCosts)}</div>
+        <div style="font-size:18px; font-weight:700; color:#2B2523; margin-top:2px;">${fmt$(totalCosts)}</div>
       </div>
       <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:10px; color:#888; text-transform:uppercase;">Lost Wages</div>
-        <div style="font-size:18px; font-weight:700; color:#0C1C36; margin-top:2px;">${fmt$(c.lost_wages)}</div>
+        <div style="font-size:18px; font-weight:700; color:#2B2523; margin-top:2px;">${fmt$(c.lost_wages)}</div>
       </div>
       <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
         <div style="font-size:10px; color:#888; text-transform:uppercase;">${finalSet ? "Final Settlement" : "Best Offer"}</div>
@@ -400,7 +400,7 @@ async function renderCaseDetail(caseId) {
       <!-- Case info form -->
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
         <details>
-          <summary style="cursor:pointer; font-weight:600; color:#0C1C36; font-size:15px;">📋 Case Details</summary>
+          <summary style="cursor:pointer; font-weight:600; color:#2B2523; font-size:15px;">📋 Case Details</summary>
           <form onsubmit="saveCase(event)" style="margin-top:16px; display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px;">
             <div><label style="font-size:11px; color:#888;">Client Name</label><input name="client_name" value="${esc(c.client_name)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;"></div>
             <div><label style="font-size:11px; color:#888;">Phone</label><input name="client_phone" value="${esc(c.client_phone)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;"></div>
@@ -423,7 +423,7 @@ async function renderCaseDetail(caseId) {
             <div><label style="font-size:11px; color:#888;">Status</label><select name="status" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">${statusOptsHtml}</select></div>
             <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Injuries Description</label><textarea name="injuries_description" rows="2" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">${esc(c.injuries_description)}</textarea></div>
             <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Incident Description</label><textarea name="incident_description" rows="2" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">${esc(c.incident_description)}</textarea></div>
-            <div style="grid-column:1/-1;"><button type="submit" style="background:#0C1C36; color:white; padding:10px 20px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Save Details</button></div>
+            <div style="grid-column:1/-1;"><button type="submit" style="background:#2B2523; color:white; padding:10px 20px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Save Details</button></div>
           </form>
         </details>
       </div>
@@ -431,11 +431,11 @@ async function renderCaseDetail(caseId) {
       <!-- Insurance -->
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0; font-size:15px; color:#0C1C36;">🏢 Insurance Carriers</h3>
-          <button onclick="addInsurance()" style="background:#B79C62; color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add</button>
+          <h3 style="margin:0; font-size:15px; color:#2B2523;">🏢 Insurance Carriers</h3>
+          <button onclick="addInsurance()" style="background:#A34C00; color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add</button>
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
-          <thead><tr style="background:#fafaf7;"><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Carrier / Role</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Claim #</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Adjuster</th><th style="padding:8px 10px; text-align:right; font-size:11px; color:#666;">Limits</th><th></th></tr></thead>
+          <thead><tr style="background:#FAF8F5;"><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Carrier / Role</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Claim #</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Adjuster</th><th style="padding:8px 10px; text-align:right; font-size:11px; color:#666;">Limits</th><th></th></tr></thead>
           <tbody>${insuranceHtml}</tbody>
         </table>
       </div>
@@ -443,11 +443,11 @@ async function renderCaseDetail(caseId) {
       <!-- Providers -->
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0; font-size:15px; color:#0C1C36;">🏥 Medical Providers (${data.providers.length})</h3>
-          <button onclick="addProvider()" style="background:#B79C62; color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add</button>
+          <h3 style="margin:0; font-size:15px; color:#2B2523;">🏥 Medical Providers (${data.providers.length})</h3>
+          <button onclick="addProvider()" style="background:#A34C00; color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add</button>
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
-          <thead><tr style="background:#fafaf7;"><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Provider</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Contact</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Treatment Period</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Visits</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Status</th><th></th></tr></thead>
+          <thead><tr style="background:#FAF8F5;"><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Provider</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Contact</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Treatment Period</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Visits</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Status</th><th></th></tr></thead>
           <tbody>${providersHtml}</tbody>
         </table>
       </div>
@@ -455,11 +455,11 @@ async function renderCaseDetail(caseId) {
       <!-- Bills -->
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0; font-size:15px; color:#0C1C36;">💵 Medical Bills (${data.bills.length})</h3>
-          <button onclick="addBill()" style="background:#B79C62; color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add</button>
+          <h3 style="margin:0; font-size:15px; color:#2B2523;">💵 Medical Bills (${data.bills.length})</h3>
+          <button onclick="addBill()" style="background:#A34C00; color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add</button>
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
-          <thead><tr style="background:#fafaf7;">
+          <thead><tr style="background:#FAF8F5;">
             <th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Provider / Dates</th>
             <th style="padding:8px 10px; text-align:right; font-size:11px; color:#666;">Billed</th>
             <th style="padding:8px 10px; text-align:right; font-size:11px; color:#666;">Ins Paid</th>
@@ -475,11 +475,11 @@ async function renderCaseDetail(caseId) {
       <!-- Settlement offers -->
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0; font-size:15px; color:#0C1C36;">💰 Settlement Offers (${data.settlements.length})</h3>
-          <button onclick="addSettlement()" style="background:#B79C62; color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add Offer</button>
+          <h3 style="margin:0; font-size:15px; color:#2B2523;">💰 Settlement Offers (${data.settlements.length})</h3>
+          <button onclick="addSettlement()" style="background:#A34C00; color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add Offer</button>
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
-          <thead><tr style="background:#fafaf7;"><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Date</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">From</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Offer</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Counter</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Response</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Notes</th></tr></thead>
+          <thead><tr style="background:#FAF8F5;"><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Date</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">From</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Offer</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Counter</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Response</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Notes</th></tr></thead>
           <tbody>${settlementsHtml}</tbody>
         </table>
       </div>
@@ -487,11 +487,11 @@ async function renderCaseDetail(caseId) {
       <!-- Case costs -->
       <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <h3 style="margin:0; font-size:15px; color:#0C1C36;">📎 Case Costs Advanced (${data.costs.length})</h3>
-          <button onclick="addCost()" style="background:#B79C62; color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add Cost</button>
+          <h3 style="margin:0; font-size:15px; color:#2B2523;">📎 Case Costs Advanced (${data.costs.length})</h3>
+          <button onclick="addCost()" style="background:#A34C00; color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px;">+ Add Cost</button>
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
-          <thead><tr style="background:#fafaf7;"><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Date</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Description</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Category</th><th style="padding:8px 10px; text-align:right; font-size:11px; color:#666;">Amount</th></tr></thead>
+          <thead><tr style="background:#FAF8F5;"><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Date</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Description</th><th style="padding:8px 10px; text-align:left; font-size:11px; color:#666;">Category</th><th style="padding:8px 10px; text-align:right; font-size:11px; color:#666;">Amount</th></tr></thead>
           <tbody>${costsHtml}</tbody>
         </table>
       </div>
@@ -601,12 +601,12 @@ async function renderDisbursement(caseId) {
 
   return `
     <div class="page-header">
-      <h1>💰 Settlement Disbursement — ${esc(c.client_name)}</h1>
+      <h1>Settlement Disbursement — ${esc(c.client_name)}</h1>
       <a href="/admin/pi/case/${c.id}" class="back-link">← Back to case</a>
     </div>
 
     <div style="background:white; padding:24px 32px; border-radius:8px; border:1px solid #eee; max-width:820px; font-family:ui-serif, Georgia, serif;" id="statement">
-      <h2 style="margin:0 0 4px 0; font-size:20px; color:#0C1C36;">SETTLEMENT DISBURSEMENT STATEMENT</h2>
+      <h2 style="margin:0 0 4px 0; font-size:20px; color:#2B2523;">SETTLEMENT DISBURSEMENT STATEMENT</h2>
       <div style="font-size:13px; color:#666; margin-bottom:24px;">Tez Law P.C. — ${new Date().toLocaleDateString()}</div>
 
       <table style="width:100%; border-collapse:collapse; font-size:14px;">
@@ -614,10 +614,10 @@ async function renderDisbursement(caseId) {
         <tr><td style="padding:10px 4px;"><strong>Incident Date:</strong></td><td style="padding:10px 4px; text-align:right;">${fmtDate(c.incident_date)}</td></tr>
         <tr><td style="padding:10px 4px;"><strong>Case Type:</strong></td><td style="padding:10px 4px; text-align:right;">${esc(INCIDENT_TYPES.find(i => i.key === c.incident_type)?.label || c.incident_type)}</td></tr>
 
-        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:2px solid #0C1C36;"><h3 style="margin:0; font-size:16px; color:#0C1C36;">Gross Recovery</h3></td></tr>
+        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:2px solid #2B2523;"><h3 style="margin:0; font-size:16px; color:#2B2523;">Gross Recovery</h3></td></tr>
         <tr><td style="padding:8px 4px;">Total Settlement</td><td style="padding:8px 4px; text-align:right; font-weight:600;">${fmt$(calc.gross_settlement)}</td></tr>
 
-        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:1px solid #eee;"><h3 style="margin:0; font-size:16px; color:#0C1C36;">Deductions</h3></td></tr>
+        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:1px solid #eee;"><h3 style="margin:0; font-size:16px; color:#2B2523;">Deductions</h3></td></tr>
         <tr><td style="padding:8px 4px;">Attorney Fee (${feePct}%)</td><td style="padding:8px 4px; text-align:right;">− ${fmt$(calc.attorney_fee_amount)}</td></tr>
         ${calc.referral_fee_amount > 0 ? `<tr><td style="padding:4px 4px 4px 20px; font-size:12px; color:#666;">— Referral fee (${calc.referral_fee_pct}% of attorney fee, paid from attorney's portion)</td><td style="padding:4px 4px; text-align:right; font-size:12px; color:#666;">${fmt$(calc.referral_fee_amount)}</td></tr>` : ""}
         <tr><td style="padding:8px 4px;">Case Costs Advanced</td><td style="padding:8px 4px; text-align:right;">− ${fmt$(calc.case_costs_total)}</td></tr>
@@ -626,7 +626,7 @@ async function renderDisbursement(caseId) {
         ${calc.medical_bills_breakdown.length ? calc.medical_bills_breakdown.map(b => `<tr><td style="padding:4px 4px 4px 20px; font-size:12px; color:#666;">— ${esc(b.provider_name)}${b.is_lien ? " (LIEN)" : ""}${b.reduction_negotiated > 0 ? ` (reduced by ${fmt$(b.reduction_negotiated)})` : ""}</td><td style="padding:4px 4px; text-align:right; font-size:12px; color:#666;">${fmt$(b.final_paid)}</td></tr>`).join("") : ""}
         ${calc.other_deductions > 0 ? `<tr><td style="padding:8px 4px;">Other Deductions</td><td style="padding:8px 4px; text-align:right;">− ${fmt$(calc.other_deductions)}</td></tr>` : ""}
 
-        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:2px solid #0C1C36;">
+        <tr><td colspan="2" style="padding:20px 0 6px 0; border-top:2px solid #2B2523;">
           <h3 style="margin:0; font-size:16px; color:#2e7d32;">CLIENT NET RECOVERY</h3>
         </td></tr>
         <tr style="background:#e8f5e9;">
@@ -652,7 +652,7 @@ async function renderDisbursement(caseId) {
     </div>
 
     <div style="margin-top:16px; display:flex; gap:8px;">
-      <button onclick="window.print()" style="background:#0C1C36; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print Statement</button>
+      <button onclick="window.print()" style="background:#2B2523; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print Statement</button>
       <button onclick="finalizeDisbursement()" style="background:#2e7d32; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Finalize & Save</button>
     </div>
 

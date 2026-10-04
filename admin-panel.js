@@ -162,7 +162,7 @@
           <tbody>${data.map(r => `<tr>
             <td style="white-space:nowrap;font-size:11px">${new Date(r.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
             <td>${platBadge(r.platform)}</td>
-            <td><span style="font-size:11px;font-weight:bold;color:${r.role==='assistant'?'#B79C62':'#0C1C36'}">${r.role==='assistant'?'TARA':'CLIENT'}</span></td>
+            <td><span style="font-size:11px;font-weight:bold;color:${r.role==='assistant'?'#A34C00':'#2B2523'}">${r.role==='assistant'?'TARA':'CLIENT'}</span></td>
             <td style="max-width:400px;font-size:13px">${r.content.substring(0,200)}${r.content.length>200?'…':''}</td>
           </tr>`).join('')}</tbody>
         </table>`
@@ -390,7 +390,7 @@ async function loadQuestions() {
     var wr = '';
     weekly.forEach(function(r){
       wr += '<tr><td style="font-size:13px">'+r.question.substring(0,120)+(r.question.length>120?'...':'')+'</td>'
-          + '<td style="text-align:center;font-weight:bold;color:#B79C62">'+r.n+'</td>'
+          + '<td style="text-align:center;font-weight:bold;color:#A34C00">'+r.n+'</td>'
           + '<td style="font-size:11px">'+new Date(r.last_seen).toLocaleDateString('en-US')+'</td></tr>';
     });
     we.innerHTML = '<table><thead><tr><th>Question</th><th>Count</th><th>Last Seen</th></tr></thead><tbody>'+wr+'</tbody></table>';
@@ -1011,11 +1011,11 @@ function renderCaseCard(r) {
   var snippet  = esc((r.snippet || '').replace(/<[^>]+>/g, ' ').substring(0, 250));
   var url      = r.absolute_url ? 'https://www.courtlistener.com' + r.absolute_url : '#';
 
-  return '<div style="background:#fff;border:1px solid #e8d8b0;border-radius:8px;padding:14px;margin-bottom:12px">'
-    + '<div style="font-weight:bold;color:#0C1C36;font-size:14px;margin-bottom:4px">' + name + '</div>'
+  return '<div style="background:#fff;border:1px solid #E8E3DC;border-radius:8px;padding:14px;margin-bottom:12px">'
+    + '<div style="font-weight:bold;color:#2B2523;font-size:14px;margin-bottom:4px">' + name + '</div>'
     + '<div style="font-size:12px;color:#666;margin-bottom:6px">' + citation + ' • ' + court + ' • ' + (date ? new Date(date).toLocaleDateString('en-US') : '') + '</div>'
     + (snippet ? '<div style="font-size:13px;color:#333;margin-bottom:8px;line-height:1.4">' + snippet + '...</div>' : '')
-    + '<a href="' + url + '" target="_blank" style="color:#B79C62;font-size:12px;font-weight:bold;text-decoration:none">📄 Read full opinion →</a>'
+    + '<a href="' + url + '" target="_blank" style="color:#A34C00;font-size:12px;font-weight:bold;text-decoration:none">📄 Read full opinion →</a>'
     + '</div>';
 }
 
@@ -1039,10 +1039,10 @@ async function runStatuteSearch() {
     var res = await api('/api/research/statute?code=' + encodeURIComponent(code) + '&section=' + encodeURIComponent(section));
     if (resultsEl) {
       if (res && res.text) {
-        resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #e8d8b0;border-radius:8px;padding:16px">'
-          + '<div style="font-weight:bold;color:#0C1C36;font-size:15px;margin-bottom:8px">' + esc(code) + ' § ' + esc(section) + '</div>'
+        resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #E8E3DC;border-radius:8px;padding:16px">'
+          + '<div style="font-weight:bold;color:#2B2523;font-size:15px;margin-bottom:8px">' + esc(code) + ' § ' + esc(section) + '</div>'
           + '<div style="font-size:13px;color:#333;line-height:1.5;white-space:pre-wrap">' + esc(res.text) + '</div>'
-          + (res.url ? '<a href="' + esc(res.url) + '" target="_blank" style="display:inline-block;margin-top:10px;color:#B79C62;font-size:12px;font-weight:bold;text-decoration:none">📄 View on leginfo.ca.gov →</a>' : '')
+          + (res.url ? '<a href="' + esc(res.url) + '" target="_blank" style="display:inline-block;margin-top:10px;color:#A34C00;font-size:12px;font-weight:bold;text-decoration:none">📄 View on leginfo.ca.gov →</a>' : '')
           + '</div>';
       } else {
         resultsEl.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Statute not found. Verify the code and section number.</p>';
@@ -1077,13 +1077,13 @@ async function verifyCitation() {
       if (res && res.found) {
         var statusColor = res.valid ? '#006600' : '#cc6600';
         var statusIcon = res.valid ? '✅' : '⚠️';
-        resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #e8d8b0;border-radius:8px;padding:16px">'
+        resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #E8E3DC;border-radius:8px;padding:16px">'
           + '<div style="font-size:15px;font-weight:bold;color:' + statusColor + ';margin-bottom:8px">' + statusIcon + ' ' + esc(res.status || 'Found') + '</div>'
-          + '<div style="font-size:14px;color:#0C1C36;font-weight:bold;margin-bottom:6px">' + esc(res.caseName || citation) + '</div>'
+          + '<div style="font-size:14px;color:#2B2523;font-weight:bold;margin-bottom:6px">' + esc(res.caseName || citation) + '</div>'
           + (res.court ? '<div style="font-size:12px;color:#666;margin-bottom:4px">Court: ' + esc(res.court) + '</div>' : '')
           + (res.date ? '<div style="font-size:12px;color:#666;margin-bottom:4px">Decided: ' + esc(res.date) + '</div>' : '')
           + (res.treatment ? '<div style="font-size:12px;color:#666;margin-bottom:8px">Subsequent treatment: ' + esc(res.treatment) + '</div>' : '')
-          + (res.url ? '<a href="' + esc(res.url) + '" target="_blank" style="color:#B79C62;font-size:12px;font-weight:bold">📄 Read opinion →</a>' : '')
+          + (res.url ? '<a href="' + esc(res.url) + '" target="_blank" style="color:#A34C00;font-size:12px;font-weight:bold">📄 Read opinion →</a>' : '')
           + '</div>';
       } else {
         resultsEl.innerHTML = '<div style="background:#fff5f5;border:1px solid #ffcccc;border-radius:8px;padding:16px"><span style="color:#cc0000;font-weight:bold">⚠️ Citation not found</span><br><span style="font-size:13px;color:#666">Verify the citation manually before relying on it.</span></div>';
@@ -1115,9 +1115,9 @@ async function loadCacheStats() {
     +   '<div class="stat-card"><div class="stat-num">' + (data.cacheHits || 0) + '</div><div class="stat-label">Cache Hits</div></div>'
     +   '<div class="stat-card"><div class="stat-num">' + hitRate + '%</div><div class="stat-label">Hit Rate</div></div>'
     + '</div>'
-    + (data.estimatedSavings ? '<div style="background:#fffbf0;border:1px solid #e8d8b0;border-radius:8px;padding:12px;margin-top:14px"><strong>💰 Estimated savings:</strong> $' + data.estimatedSavings.toFixed(2) + ' this month</div>' : '')
+    + (data.estimatedSavings ? '<div style="background:#fffbf0;border:1px solid #E8E3DC;border-radius:8px;padding:12px;margin-top:14px"><strong>💰 Estimated savings:</strong> $' + data.estimatedSavings.toFixed(2) + ' this month</div>' : '')
     + (data.recentEntries && data.recentEntries.length
-        ? '<h3 style="margin-top:16px;font-size:14px;color:#0C1C36">Recent Cache Entries</h3>'
+        ? '<h3 style="margin-top:16px;font-size:14px;color:#2B2523">Recent Cache Entries</h3>'
           + '<table style="margin-top:8px"><thead><tr><th>Question</th><th>Practice Area</th><th>Hits</th><th>Last Used</th></tr></thead><tbody>'
           + data.recentEntries.slice(0,15).map(function(r) {
               return '<tr><td style="font-size:12px;max-width:300px">' + esc((r.question||'').substring(0,80)) + '</td>'
@@ -1156,13 +1156,13 @@ async function loadJudgesIndex() {
   html += '<div id="judge-search-results" style="margin-top:14px"></div>';
 
   if (data.topJudges && data.topJudges.length) {
-    html += '<h3 style="margin-top:20px;font-size:14px;color:#0C1C36">Most-Indexed Judges</h3>';
+    html += '<h3 style="margin-top:20px;font-size:14px;color:#2B2523">Most-Indexed Judges</h3>';
     html += '<table style="margin-top:8px"><thead><tr><th>Judge</th><th>Court</th><th>Rulings</th><th>Last Updated</th></tr></thead><tbody>';
     data.topJudges.slice(0, 25).forEach(function(j) {
       html += '<tr style="cursor:pointer" onclick="lookupJudgeFromTable(\'' + esc(j.judge_name).replace(/'/g, "\\'") + '\')">';
-      html += '<td style="font-weight:bold;color:#0C1C36">' + esc(j.judge_name) + '</td>';
+      html += '<td style="font-weight:bold;color:#2B2523">' + esc(j.judge_name) + '</td>';
       html += '<td style="font-size:12px">' + esc(j.court) + '</td>';
-      html += '<td style="text-align:center;font-weight:bold;color:#B79C62">' + (j.total_rulings || 0) + '</td>';
+      html += '<td style="text-align:center;font-weight:bold;color:#A34C00">' + (j.total_rulings || 0) + '</td>';
       html += '<td style="font-size:11px;color:#666">' + (j.last_updated ? new Date(j.last_updated).toLocaleDateString('en-US') : '—') + '</td>';
       html += '</tr>';
     });
@@ -1189,7 +1189,7 @@ async function searchJudge() {
   }
 
   var profile = data.profile || '';
-  resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #e8d8b0;border-radius:8px;padding:16px;font-family:monospace;white-space:pre-wrap;font-size:12px;line-height:1.5">' + esc(profile) + '</div>';
+  resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #E8E3DC;border-radius:8px;padding:16px;font-family:monospace;white-space:pre-wrap;font-size:12px;line-height:1.5">' + esc(profile) + '</div>';
 }
 
 function lookupJudgeFromTable(name) {

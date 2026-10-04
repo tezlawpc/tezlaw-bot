@@ -27,13 +27,13 @@
 const db = require("./db");
 
 const TEAM_ROLES = [
-  { key: "lead_attorney",     label: "Lead Attorney",     color: "#3E2818", access: "full" },
-  { key: "second_chair",      label: "Second Chair",      color: "#7B5330", access: "full" },
-  { key: "of_counsel",        label: "Of Counsel",        color: "#8B7355", access: "full" },
-  { key: "associate",         label: "Associate",         color: "#B8891E", access: "write" },
+  { key: "lead_attorney",     label: "Lead Attorney",     color: "#2B2523", access: "full" },
+  { key: "second_chair",      label: "Second Chair",      color: "#5E5854", access: "full" },
+  { key: "of_counsel",        label: "Of Counsel",        color: "#5E5854", access: "full" },
+  { key: "associate",         label: "Associate",         color: "#A34C00", access: "write" },
   { key: "contract_attorney", label: "Contract Attorney", color: "#A0803A", access: "write" },
   { key: "case_manager",      label: "Case Manager",      color: "#D97706", access: "write" },
-  { key: "paralegal",         label: "Paralegal",         color: "#E0B44E", access: "write" },
+  { key: "paralegal",         label: "Paralegal",         color: "#FF7B00", access: "write" },
   { key: "sales_intake",      label: "Sales / Intake",    color: "#0284C7", access: "read" },
   { key: "expert",            label: "Expert Witness",    color: "#7C3AED", access: "read" },
   { key: "investigator",      label: "Investigator",      color: "#4B5563", access: "read" },

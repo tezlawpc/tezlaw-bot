@@ -94,7 +94,7 @@ async function getRecentHearings(limit = 10) {
     );
     for (const row of master.rows) combined.push(row);
     const indiv = await db.query(
-      `SELECT id, client_name, a_number, hearing_date AS hearing_datetime, hearing_type, case_type,
+      `SELECT id, client_name, a_number, hearing_date AS hearing_datetime, 'Individual' AS hearing_type, case_type,
               sent_to_paralegal_at, created_at, 'individual' AS source
        FROM individual_hearing_notes
        WHERE hearing_date IS NOT NULL AND hearing_date < NOW()
@@ -281,10 +281,25 @@ async function getSystemHealth() {
   return health;
 }
 
+// Two tiles read tables that only come into being the first time their
+// feature runs (a post is published; the weekly research update fires). Ask
+// Postgres whether the table is there instead of sending a query that fails —
+// a failed query is noise in the log, and it hides real ones.
+const _tableSeen = new Set();
+async function tableExists(name) {
+  if (_tableSeen.has(name)) return true;
+  try {
+    const r = await db.query(`SELECT to_regclass($1) IS NOT NULL AS there`, ["public." + name]);
+    if (r.rows[0] && r.rows[0].there) { _tableSeen.add(name); return true; }
+  } catch (e) { /* fall through */ }
+  return false;
+}
+
 // ─── Blog posts ─────────────────────────────────────
 
 async function getRecentPosts(limit = 10) {
   try {
+    if (!(await tableExists("manual_posts"))) return [];
     const r = await db.query(
       `SELECT id, title, practice_area, topic, published_by, wp_post_ids, created_at
        FROM manual_posts ORDER BY created_at DESC LIMIT $1`,
@@ -296,6 +311,7 @@ async function getRecentPosts(limit = 10) {
 
 async function getPostStats() {
   try {
+    if (!(await tableExists("manual_posts"))) return { total: 0, this_week: 0, this_month: 0, auto_total: 0, manual_total: 0 };
     const r = await db.query(
       `SELECT
          COUNT(*)::int AS total,
@@ -454,6 +470,7 @@ async function getUsptoStats() {
 
 async function getMoatStats() {
   try {
+    if (!(await tableExists("moat_update_history"))) return null;
     const r = await db.query(
       `SELECT started_at, completed_at, status, delta, cost_usd, duration_sec
        FROM moat_update_history
@@ -474,7 +491,7 @@ function renderDashboard(data) {
     pendingResearch, citations, researchStats, usptoMatches, usptoStats, moat,
   } = data;
 
-  const brand = { gold: "#B79C62", navy: "#0C1C36" };
+  const brand = { gold: "#A34C00", navy: "#2B2523" };
 
   const bucketize = (hearings) => {
     const now = new Date();
@@ -507,7 +524,7 @@ function renderDashboard(data) {
                        h.source === "individual" ? `/admin/hearing/individual/${h.id}` :
                        `/admin/clients/${clientKey}`;
     return `
-      <div style="border-left:3px solid ${brand.gold}; padding:8px 12px; margin-bottom:6px; background:#fdf7f0; border-radius:4px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <div style="border-left:3px solid ${brand.gold}; padding:8px 12px; margin-bottom:6px; background:#FAF8F5; border-radius:4px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <div style="flex:1; min-width:200px;">
           <div style="font-weight:600; color:${brand.navy}; font-size:13px;">
             <a href="/admin/clients/${clientKey}" style="color:${brand.navy}; text-decoration:none;">${escapeHtml(h.client_name || "(unnamed)")}</a>
@@ -592,7 +609,7 @@ function renderDashboard(data) {
     const isDue = m.filing_deadline && new Date(m.filing_deadline) < new Date(Date.now() + 7 * 86400000);
     const isOverdue = m.filing_deadline && new Date(m.filing_deadline) < new Date();
     const dueColor = isOverdue ? "#c62828" : isDue ? "#f9a825" : "#666";
-    const statusBadge = m.status === "reviewed" ? '<span style="background:#0061FF; color:white; padding:1px 6px; border-radius:8px; font-size:9px;">REVIEWED</span>' : '<span style="background:#B79C62; color:white; padding:1px 6px; border-radius:8px; font-size:9px;">DRAFT</span>';
+    const statusBadge = m.status === "reviewed" ? '<span style="background:#0061FF; color:white; padding:1px 6px; border-radius:8px; font-size:9px;">REVIEWED</span>' : '<span style="background:#A34C00; color:white; padding:1px 6px; border-radius:8px; font-size:9px;">DRAFT</span>';
     return `
       <div style="padding:8px 12px; background:#fdfaf3; border-left:3px solid ${isOverdue ? '#c62828' : brand.gold}; border-radius:4px; margin-bottom:6px;">
         <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
@@ -656,7 +673,7 @@ function renderDashboard(data) {
       <div style="padding:8px 12px; background:#fdfaf3; border-left:3px solid ${isAuto ? "#2e7d32" : brand.gold}; border-radius:4px; margin-bottom:6px;">
         <div style="font-weight:600; font-size:12px; color:${brand.navy}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           ${escapeHtml(p.title || p.topic || "(untitled)")}
-          ${isAuto ? '<span style="background:#2e7d32; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">AUTO</span>' : '<span style="background:#B79C62; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">MANUAL</span>'}
+          ${isAuto ? '<span style="background:#2e7d32; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">AUTO</span>' : '<span style="background:#A34C00; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">MANUAL</span>'}
         </div>
         <div style="font-size:11px; color:#666; margin-top:2px;">
           ${p.practice_area ? `<span style="color:${brand.gold}; font-weight:600;">${escapeHtml(p.practice_area)}</span> · ` : ""}
@@ -709,7 +726,7 @@ function renderDashboard(data) {
   // ── Legal research block ──
   const researchHtml = pendingResearch.length ? pendingResearch.slice(0, 5).map(r => {
     return `
-      <div style="padding:8px 12px; background:#fdf7f0; border-left:3px solid #f9a825; border-radius:4px; margin-bottom:6px;">
+      <div style="padding:8px 12px; background:#FAF8F5; border-left:3px solid #f9a825; border-radius:4px; margin-bottom:6px;">
         <div style="font-weight:600; font-size:12px; color:${brand.navy}; overflow:hidden; text-overflow:ellipsis;">
           ${escapeHtml(r.question ? r.question.substring(0, 80) + (r.question.length > 80 ? "…" : "") : "(no question)")}
         </div>
@@ -735,7 +752,7 @@ function renderDashboard(data) {
   const usptoHtml = usptoMatches.length ? usptoMatches.slice(0, 6).map(m => {
     const dt = new Date(m.first_seen_at);
     return `
-      <div style="padding:8px 12px; background:#fdf7f0; border-left:3px solid ${brand.gold}; border-radius:4px; margin-bottom:6px;">
+      <div style="padding:8px 12px; background:#FAF8F5; border-left:3px solid ${brand.gold}; border-radius:4px; margin-bottom:6px;">
         <div style="font-weight:600; font-size:12px; color:${brand.navy};">
           ${escapeHtml(m.mark_text || m.serial_number || "(no mark)")}
           <span style="background:#f9a825; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">NEW</span>
@@ -781,7 +798,7 @@ function renderDashboard(data) {
     </div>
 
     <!-- ── Section 1: LEGAL PRACTICE ── -->
-    <div style="font-size:11px; color:${brand.gold}; text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid rgba(183,156,98,.2);">
+    <div style="font-size:11px; color:${brand.gold}; text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid rgba(255,123,0,.2);">
       Legal Practice
     </div>
 
@@ -860,7 +877,7 @@ function renderDashboard(data) {
     </div>
 
     <!-- ── Section 2: CONTENT, MARKETING & RESEARCH ── -->
-    <div style="font-size:11px; color:${brand.gold}; text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid rgba(183,156,98,.2);">
+    <div style="font-size:11px; color:${brand.gold}; text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid rgba(255,123,0,.2);">
       Content, Marketing & Research
     </div>
 
@@ -952,7 +969,7 @@ function renderDashboard(data) {
 function statCard(label, value, sublabel, color, url) {
   return `<a href="${url}" style="display:block; background:white; padding:14px; border-radius:8px; border:1px solid #eee; border-top:3px solid ${color}; text-decoration:none; color:inherit; transition:transform .1s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
     <div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600; letter-spacing:0.03em;">${label}</div>
-    <div style="font-size:28px; font-weight:700; color:#0C1C36; margin-top:4px; line-height:1;">${value}</div>
+    <div style="font-size:28px; font-weight:700; color:#2B2523; margin-top:4px; line-height:1;">${value}</div>
     ${sublabel ? `<div style="font-size:10px; color:#666; margin-top:6px;">${sublabel}</div>` : ""}
   </a>`;
 }

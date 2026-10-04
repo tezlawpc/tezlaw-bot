@@ -176,7 +176,7 @@ function renderAuditLogPage({ entries, filters, users, actions }) {
   const rows = entries.length ? entries.map(e => {
     try {
       const ts = e.created_at ? new Date(e.created_at).toLocaleString() : "";
-      const roleColor = { admin: "#0C1C36", attorney: "#B79C62", paralegal: "#0061FF", viewer: "#666" }[e.user_role] || "#999";
+      const roleColor = { admin: "#2B2523", attorney: "#A34C00", paralegal: "#0061FF", viewer: "#666" }[e.user_role] || "#999";
       const changesPreview = shortenJson(e.changes);
       return `
         <tr>
@@ -208,7 +208,7 @@ function renderAuditLogPage({ entries, filters, users, actions }) {
 
   const body = `
     <div class="page-header">
-      <h1>📜 Audit Log</h1>
+      <h1>Audit Log</h1>
       <div style="font-size:13px; color:#666;">Every change made through Zara — who did what, when, and to which record.</div>
     </div>
 
@@ -227,10 +227,10 @@ function renderAuditLogPage({ entries, filters, users, actions }) {
           </select>
         </div>
         <div>
-          <button type="submit" style="background:#0C1C36; color:white; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">Filter</button>
+          <button type="submit" style="background:#2B2523; color:white; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">Filter</button>
         </div>
         <div>
-          <a href="/admin/audit-log" style="color:#B79C62; font-size:12px;">Clear</a>
+          <a href="/admin/audit-log" style="color:#A34C00; font-size:12px;">Clear</a>
         </div>
         <div style="margin-left:auto; font-size:12px; color:#666;">
           Showing latest <strong>${entries.length}</strong> ${entries.length === 200 ? "(limit)" : ""}

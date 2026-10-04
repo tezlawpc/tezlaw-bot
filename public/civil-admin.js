@@ -19,11 +19,11 @@
   "use strict";
 
   var C = {
-    walnut: "#3E2818", walnutMid: "#5A3B22", walnutLight: "#8B7355",
-    gold: "#B8891E", goldBright: "#E0B44E",
-    ember: "#F07800", emberDeep: "#B84200", waxRed: "#A02818",
-    parchment: "#F5EBD3", parchmentLit: "#FBF3DE", border: "#D4C4A0",
-    green: "#166534", ink: "#3E2818", muted: "#7B5330",
+    walnut: "#2B2523", walnutMid: "#3A3330", walnutLight: "#5E5854",
+    gold: "#A34C00", goldBright: "#FF7B00",
+    ember: "#FF7B00", emberDeep: "#B84200", waxRed: "#9C2B1E",
+    parchment: "#F3EFE9", parchmentLit: "#FAF8F5", border: "#E8E3DC",
+    green: "#166534", ink: "#2B2523", muted: "#5E5854",
   };
 
   // ── HTTP ───────────────────────────────────────────────────
@@ -72,7 +72,7 @@
     var row = h("div", { style: "display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px 0;gap:10px;flex-wrap:wrap;" }, [
       h("h2", {
         text: txt,
-        style: "margin:0;font-family:Cinzel,serif;color:" + C.ink + ";font-size:16px;letter-spacing:1.5px;",
+        style: "margin:0;font-family:Cormorant Garamond,Georgia,serif;color:" + C.ink + ";font-size:16px;letter-spacing:1.5px;",
       }),
     ]);
     if (right) row.appendChild(right);
@@ -85,7 +85,7 @@
       type: "button", text: label, onclick: onClick,
       style: "padding:7px 13px;background:" + bg + ";color:" + fg + ";border:1px solid " +
              (kind === "quiet" ? C.border : C.gold) +
-             ";border-radius:5px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;",
+             ";border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;",
     });
   }
   function chip(label, color, title) {
@@ -182,7 +182,7 @@
         h("label", {
           text: f.label + (f.required ? " *" : ""),
           style: "display:block;font-size:10px;letter-spacing:1px;text-transform:uppercase;" +
-                 "color:" + C.muted + ";font-family:Cinzel,serif;margin-bottom:4px;",
+                 "color:" + C.muted + ";font-family:Cormorant Garamond,Georgia,serif;margin-bottom:4px;",
         }),
         ctl,
         f.hint ? h("div", { text: f.hint, style: "font-size:11px;font-style:italic;color:" + C.walnutLight + ";margin-top:3px;" }) : null,
@@ -220,7 +220,7 @@
     }, [
       h("div", {
         text: title,
-        style: "font-family:Cinzel,serif;font-size:14px;letter-spacing:1.5px;text-transform:uppercase;" +
+        style: "font-family:Montserrat,sans-serif;font-size:14px;letter-spacing:1.5px;text-transform:uppercase;" +
                "color:" + C.walnut + ";margin-bottom:14px;",
       }),
       grid,
@@ -406,7 +406,7 @@
         if (!group.length) return;
         root.appendChild(h("div", {
           text: pair[1] + " (" + group.length + ")",
-          style: "font-family:Cinzel,serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin:14px 0 8px 0;",
+          style: "font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin:14px 0 8px 0;",
         }));
         group.forEach(function (r) { root.appendChild(discoveryCard(r)); });
       });
@@ -425,7 +425,7 @@
     return card([
       h("div", { style: "display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;" }, [
         h("div", {}, [
-          h("div", { style: "font-family:Cinzel,serif;font-weight:600;color:" + C.ink + ";" },
+          h("div", { style: "font-family:Cormorant Garamond,Georgia,serif;font-weight:600;color:" + C.ink + ";" },
             [kindLabel(r.kind) + (r.set_number ? " — Set " + r.set_number : "")]),
           r.title ? kv("Title", r.title) : null,
           r.to_party ? kv("Party", r.to_party) : null,
@@ -556,7 +556,7 @@
         root.appendChild(card([
           h("div", { style: "display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;" }, [
             h("div", {}, [
-              h("div", { style: "font-family:Cinzel,serif;font-weight:600;color:" + C.ink + ";" },
+              h("div", { style: "font-family:Cormorant Garamond,Georgia,serif;font-weight:600;color:" + C.ink + ";" },
                 [r.deponent_name + (r.deponent_role ? " — " + r.deponent_role : "")]),
               r.scheduled_date ? kv("Scheduled", fmtDate(r.scheduled_date) + (r.scheduled_time ? " at " + r.scheduled_time : "")) : null,
               r.location ? kv("Location", r.location + (r.remote_platform ? " (" + r.remote_platform + ")" : "")) : null,
@@ -670,7 +670,7 @@
       if (!checks.length) return;
       hist.appendChild(h("div", {
         text: "CHECK HISTORY",
-        style: "font-family:Cinzel,serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin:14px 0 8px 0;",
+        style: "font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin:14px 0 8px 0;",
       }));
       checks.forEach(function (k) {
         hist.appendChild(card([
@@ -848,7 +848,7 @@
         h("div", { style: "min-width:0;" }, [
           h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;" }, [
             h("strong", { text: fmtDate(hr.hearing_date), style: "font-size:14px;color:" + C.ink + ";" }),
-            h("span", { text: hr.hearing_type, style: "font-family:Cinzel,serif;font-size:12.5px;color:" + C.walnut + ";letter-spacing:.5px;" }),
+            h("span", { text: hr.hearing_type, style: "font-family:Montserrat,sans-serif;font-size:12.5px;color:" + C.walnut + ";letter-spacing:.5px;" }),
             chip(st.label, st.color),
             upcoming && days !== null && days >= 0 && days <= 14
               ? chip(days === 0 ? "TODAY" : "in " + days + "d", days <= 3 ? C.waxRed : C.ember) : null,
@@ -883,7 +883,7 @@
       if (past.length) {
         var det = h("details", { style: "margin-top:6px;" }, [
           h("summary", { text: "PAST HEARINGS & NOTES (" + past.length + ")",
-            style: "cursor:pointer;font-family:Cinzel,serif;font-size:11.5px;letter-spacing:1.2px;color:" + C.muted + ";padding:6px 0;" }),
+            style: "cursor:pointer;font-family:Montserrat,sans-serif;font-size:11.5px;letter-spacing:1.2px;color:" + C.muted + ";padding:6px 0;" }),
         ]);
         if (!upcoming.length) det.open = true;
         past.forEach(function (hr) { det.appendChild(hearingCard(hr)); });
@@ -1099,7 +1099,7 @@
       if (invs.length) {
         root.appendChild(h("div", {
           text: "INVOICES",
-          style: "font-family:Cinzel,serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin:16px 0 8px 0;",
+          style: "font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin:16px 0 8px 0;",
         }));
         invs.forEach(function (inv) {
           var isVoid = inv.status === "void";
@@ -1169,7 +1169,7 @@
       if (rows.length) {
         root.appendChild(h("div", {
           text: "BY TIMEKEEPER",
-          style: "font-family:Cinzel,serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin:14px 0 8px 0;",
+          style: "font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin:14px 0 8px 0;",
         }));
         var max = Math.max.apply(null, rows.map(function (r) { return Number(r.total_amount) || 0; })) || 1;
         rows.forEach(function (r) {
@@ -1191,7 +1191,7 @@
       }
 
       root.appendChild(card([
-        h("div", { text: "WHERE THE HOURS CAME FROM", style: "font-family:Cinzel,serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin-bottom:6px;" }),
+        h("div", { text: "WHERE THE HOURS CAME FROM", style: "font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1.5px;color:" + C.muted + ";margin-bottom:6px;" }),
         kv("Events", Number(s.event_hours || 0).toFixed(2) + "h · " + money(s.event_amount)),
         kv("Communications", Number(s.communication_hours || 0).toFixed(2) + "h · " + money(s.communication_amount)),
         kv("Depositions", Number(s.deposition_hours || 0).toFixed(2) + "h · " + money(s.deposition_amount)),
@@ -1203,7 +1203,7 @@
     return h("div", {
       style: "background:" + C.parchmentLit + ";border:1px solid " + C.border + ";border-radius:6px;padding:14px;",
     }, [
-      h("div", { text: label, style: "font-size:10px;color:" + C.muted + ";letter-spacing:1.5px;text-transform:uppercase;font-family:Cinzel,serif;" }),
+      h("div", { text: label, style: "font-size:10px;color:" + C.muted + ";letter-spacing:1.5px;text-transform:uppercase;font-family:Montserrat,sans-serif;" }),
       h("div", { text: value, style: "font-size:22px;font-weight:700;color:" + C.ink + ";margin-top:4px;" }),
       sub ? h("div", { text: sub, style: "font-size:11px;font-style:italic;color:" + C.walnutLight + ";margin-top:4px;" }) : null,
     ]);
@@ -1489,7 +1489,7 @@
   // ═══════════════════════════════════════════════════════════
   var ALERT_COLOR = { danger: C.waxRed, warn: C.ember, info: C.walnutLight };
   var ROLE_COLOR = {
-    sales: "#0284C7", attorney: "#3E2818", case_manager: "#E0B44E",
+    sales: "#0284C7", attorney: "#2B2523", case_manager: "#FF7B00",
     docketing: "#7C3AED", billing: "#166534",
   };
   var ROLE_LABEL = {
@@ -1526,7 +1526,7 @@
              ";border:1px solid " + C.border + ";border-left-width:4px;border-radius:6px;padding:14px;margin-bottom:12px;",
     }, [
       h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline;" }, [
-        h("div", { text: pb.headline || "", style: "font-family:Cinzel,serif;font-size:14px;color:" + C.ink + ";" }),
+        h("div", { text: pb.headline || "", style: "font-family:Cormorant Garamond,Georgia,serif;font-size:14px;color:" + C.ink + ";" }),
         pb.utbms_phase ? chip("UTBMS " + pb.utbms_phase, C.walnutMid, "Time logged here bills to this UTBMS phase") : null,
       ]),
       pb.caution ? h("div", {
@@ -1560,7 +1560,7 @@
         return h("button", {
           type: "button", text: v[1],
           onclick: function () { STAGE_VIEW = v[0]; drawStage(host, key, STAGE_DATA); },
-          style: "padding:7px 14px;border-radius:14px;cursor:pointer;font-size:11px;font-family:Cinzel,serif;letter-spacing:1px;" +
+          style: "padding:7px 14px;border-radius:14px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;" +
                  "border:1px solid " + (active ? C.gold : C.border) + ";background:" + (active ? C.walnut : C.parchmentLit) +
                  ";color:" + (active ? C.goldBright : C.walnut) + ";",
         });
@@ -1586,7 +1586,7 @@
       root.appendChild(card([
         h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;" }, [
           h("div", {}, [
-            h("div", { text: "NEXT UP IN THIS STAGE", style: "font-family:Cinzel,serif;font-size:10px;letter-spacing:1.5px;color:" + C.muted + ";" }),
+            h("div", { text: "NEXT UP IN THIS STAGE", style: "font-family:Montserrat,sans-serif;font-size:10px;letter-spacing:1.5px;color:" + C.muted + ";" }),
             h("div", { text: nd.description, style: "font-size:13px;color:" + C.ink + ";margin-top:3px;" }),
             h("div", { text: nd.case_name + (nd.ccp_rule ? " · " + nd.ccp_rule : ""), style: "font-size:11px;color:" + C.muted + ";font-style:italic;" }),
           ]),
@@ -1625,7 +1625,7 @@
         h("div", { style: "min-width:220px;" }, [
           h("a", {
             href: "/admin/civil/case/" + c.id, text: c.case_name,
-            style: "font-family:Cinzel,serif;font-size:14px;font-weight:600;color:" + C.ink + ";text-decoration:none;",
+            style: "font-family:Cormorant Garamond,Georgia,serif;font-size:14px;font-weight:600;color:" + C.ink + ";text-decoration:none;",
           }),
           h("div", {
             text: [c.client_key, c.case_type, c.case_number ? "#" + c.case_number : "", (c.our_role || "").toUpperCase()]
@@ -1666,7 +1666,7 @@
       c.gates && c.gates.length ? h("div", { style: "margin-top:10px;" }, [
         h("div", {
           text: c.gate_ready ? "✓ GATE READY — all criteria met" : "GATE: " + c.gates_open + " of " + c.gates.length + " criteria outstanding",
-          style: "font-family:Cinzel,serif;font-size:10px;letter-spacing:1.2px;color:" +
+          style: "font-family:Montserrat,sans-serif;font-size:10px;letter-spacing:1.2px;color:" +
                  (c.gate_ready ? C.green : C.ember) + ";margin-bottom:5px;",
         }),
         h("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" },
@@ -1704,7 +1704,7 @@
       (c.unresolved_deadlines || []).length ? h("div", {
         style: "margin-top:8px;padding:7px 9px;background:" + C.parchment + ";border-radius:4px;border-left:3px solid " + C.ember + ";",
       }, [
-        h("div", { text: "NEEDS A DATE", style: "font-family:Cinzel,serif;font-size:9px;letter-spacing:1.2px;color:" + C.emberDeep + ";" }),
+        h("div", { text: "NEEDS A DATE", style: "font-family:Montserrat,sans-serif;font-size:9px;letter-spacing:1.2px;color:" + C.emberDeep + ";" }),
       ].concat(c.unresolved_deadlines.slice(0, 3).map(function (u) {
         return h("div", { text: u.label + " — " + u.reason, style: "font-size:11px;color:" + C.muted + ";margin-top:2px;" });
       }))) : null,
@@ -1729,7 +1729,7 @@
   function drawChecklist(root, key, d) {
     var roles = [null, "attorney", "case_manager", "sales", "docketing", "billing"];
     root.appendChild(h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center;" },
-      [h("span", { text: "WHOSE WORK:", style: "font-family:Cinzel,serif;font-size:10px;letter-spacing:1.2px;color:" + C.muted + ";" })]
+      [h("span", { text: "WHOSE WORK:", style: "font-family:Montserrat,sans-serif;font-size:10px;letter-spacing:1.2px;color:" + C.muted + ";" })]
       .concat(roles.map(function (r2) {
         var active = STAGE_ROLE === r2;
         return h("button", {
@@ -1765,7 +1765,7 @@
         holder.appendChild(card([
           h("a", {
             href: "/admin/civil/case/" + cid, text: first.case_name,
-            style: "font-family:Cinzel,serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;",
+            style: "font-family:Montserrat,sans-serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;",
           }),
           h("div", { style: "margin-top:8px;display:flex;flex-direction:column;gap:5px;" },
             list.map(function (t2) { return taskRow(t2, key); })),
@@ -1835,7 +1835,7 @@
       style: "background:" + C.parchment + ";border:1px solid " + C.gold + ";border-radius:8px;padding:18px;max-width:820px;width:100%;",
     }, [
       h("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;" }, [
-        h("div", { text: c.case_name, style: "font-family:Cinzel,serif;font-size:14px;color:" + C.walnut + ";" }),
+        h("div", { text: c.case_name, style: "font-family:Cormorant Garamond,Georgia,serif;font-size:14px;color:" + C.walnut + ";" }),
         btn("CLOSE", function () { document.body.removeChild(back); }, "quiet"),
       ]),
     ]);
@@ -1880,7 +1880,7 @@
       var box = card([
         h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;" }, [
           h("a", { href: "/admin/civil/case/" + c.id, text: c.case_name,
-                   style: "font-family:Cinzel,serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;" }),
+                   style: "font-family:Montserrat,sans-serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;" }),
           btn("RE-SORT FILES", function () {
             api("/cases/" + c.id + "/files/rephase", { method: "POST" })
               .then(function (r2) { toast(r2.phased + " of " + r2.files + " files sorted into phases"); return renderStage(); })
@@ -1939,7 +1939,7 @@
       var box = card([
         h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;" }, [
           h("a", { href: "/admin/civil/case/" + c.id, text: c.case_name,
-                   style: "font-family:Cinzel,serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;" }),
+                   style: "font-family:Montserrat,sans-serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;" }),
           h("div", { style: "display:flex;gap:6px;" }, [
             btn("SET PHASE BUDGET", function () { openPhaseBudget(c, d.playbook && d.playbook.utbms_phase); }, "quiet"),
             btn("LEDES", function () { openLedes(c); }, "quiet"),
@@ -1987,7 +1987,7 @@
           text: "TOTAL " + money(tot.actual_amount) + (tot.budget_amount ? " of " + money(tot.budget_amount) : "") +
                 (tot.pct_consumed != null ? " · " + tot.pct_consumed + "%" : "") +
                 (tot.over_phases ? " · " + tot.over_phases + " phase(s) over budget" : ""),
-          style: "margin-top:8px;font-family:Cinzel,serif;font-size:12px;color:" +
+          style: "margin-top:8px;font-family:Montserrat,sans-serif;font-size:12px;color:" +
                  (tot.over_phases ? C.waxRed : C.ink) + ";",
         }));
       }).catch(function (e) { clear(rowsBox).appendChild(note(e.message)); });
@@ -2022,7 +2022,7 @@
         style: "background:" + C.parchment + ";border:1px solid " + C.gold + ";border-radius:8px;padding:18px;max-width:820px;width:100%;",
       }, [
         h("div", { text: "LEDES 1998B — " + c.case_name,
-                   style: "font-family:Cinzel,serif;font-size:14px;letter-spacing:1.2px;text-transform:uppercase;color:" + C.walnut + ";margin-bottom:10px;" }),
+                   style: "font-family:Montserrat,sans-serif;font-size:14px;letter-spacing:1.2px;text-transform:uppercase;color:" + C.walnut + ";margin-bottom:10px;" }),
         h("div", { text: d.line_count + " billable line(s) · invoice " + (d.invoice || {}).invoice_number,
                    style: "font-size:12px;color:" + C.muted + ";margin-bottom:10px;" }),
         probs.length
@@ -2095,7 +2095,7 @@
       style: "background:" + C.parchmentLit + ";border:1px solid " + C.border +
              ";border-left:4px solid " + C.gold + ";border-radius:6px;padding:14px;margin-bottom:14px;",
     }, [
-      h("div", { text: "Where does each matter actually belong?", style: "font-family:Cinzel,serif;font-size:14px;color:" + C.ink + ";" }),
+      h("div", { text: "Where does each matter actually belong?", style: "font-family:Cormorant Garamond,Georgia,serif;font-size:14px;color:" + C.ink + ";" }),
       h("div", {
         text: "A folder import files every matter as Intake. This reads the matter's own dates — filed, served, answered, trial, judgment — " +
               "and the lifecycle phase of its mirrored documents, and proposes a stage for each. High confidence means two or more " +
@@ -2179,7 +2179,7 @@
             h("div", { style: "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;" }, [
               h("div", { style: "flex:1;min-width:200px;" }, [
                 h("a", { href: "/admin/civil/case/" + p.case_id, text: p.case_name,
-                         style: "font-family:Cinzel,serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;" }),
+                         style: "font-family:Montserrat,sans-serif;font-size:13px;font-weight:600;color:" + C.ink + ";text-decoration:none;" }),
                 h("div", { text: p.reasons.join(" · "), style: "font-size:11px;color:" + C.muted + ";margin-top:3px;" }),
                 p.error ? h("div", { text: "⚠ " + p.error, style: "font-size:11px;color:" + C.waxRed + ";" }) : null,
               ]),

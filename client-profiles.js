@@ -311,13 +311,13 @@ function languageLabel(code) {
 function renderClientList(clients) {
   const rows = clients.length ? clients.map(c => {
     const nextUp = c.upcoming[0]
-      ? `<span style="background:#B79C62; color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Next: ${escapeHtml(c.upcoming[0].type)} ${new Date(c.upcoming[0].date).toLocaleDateString()}</span>`
+      ? `<span style="background:#A34C00; color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Next: ${escapeHtml(c.upcoming[0].type)} ${new Date(c.upcoming[0].date).toLocaleDateString()}</span>`
       : "";
     const sourceTag = c.dropbox_only
       ? `<span style="background:#0061FF; color:white; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;" title="Imported from Dropbox — no hearings recorded yet">📦 Dropbox</span>`
       : "";
     const brokerCell = c.broker
-      ? `<span style="color:#B79C62; font-weight:600; font-size:12px;">🤝 ${escapeHtml(c.broker)}</span>`
+      ? `<span style="color:#A34C00; font-weight:600; font-size:12px;">🤝 ${escapeHtml(c.broker)}</span>`
       : `<span style="color:#ccc;">—</span>`;
     return `
     <tr class="c-row"
@@ -330,7 +330,7 @@ function renderClientList(clients) {
         data-casetypes="${escapeAttr(c.case_types.join(" | ").toLowerCase())}"
         data-broker="${escapeAttr((c.broker || "").toLowerCase())}"
         data-source="${c.dropbox_only ? "dropbox" : "hearings"}">
-      <td><a href="/admin/clients/${c.key}" style="color:#B79C62; font-weight:600;">${escapeHtml(c.client_name || "(unnamed)")}</a>${sourceTag}</td>
+      <td><a href="/admin/clients/${c.key}" style="color:#A34C00; font-weight:600;">${escapeHtml(c.client_name || "(unnamed)")}</a>${sourceTag}</td>
       <td>${escapeHtml(c.a_number || "")}</td>
       <td>${escapeHtml(c.case_types.slice(0, 2).join(", ") || "-")}${c.case_types.length > 2 ? " +" + (c.case_types.length - 2) : ""}</td>
       <td>${c.hearing_count}</td>
@@ -338,7 +338,7 @@ function renderClientList(clients) {
       <td>${languageLabel(c.client_language)}</td>
       <td>${nextUp}</td>
       <td>${brokerCell}</td>
-      <td><a href="/admin/clients/${c.key}" style="color:#0C1C36;">view →</a></td>
+      <td><a href="/admin/clients/${c.key}" style="color:#2B2523;">view →</a></td>
     </tr>`;
   }).join("") : `<tr><td colspan="9" style="text-align:center; color:#888;">No clients yet. Create a hearing note or bulk import from Dropbox to populate this list.</td></tr>`;
 
@@ -347,7 +347,7 @@ function renderClientList(clients) {
 
   const body = `
     <div class="page-header">
-      <h1>👥 Client Profiles</h1>
+      <h1>Client Profiles</h1>
       <div style="font-size:13px; color:#666;">${clients.length} clients · ${totalUpcoming} with upcoming hearings${totalDropboxOnly ? ` · ${totalDropboxOnly} from Dropbox` : ""}</div>
     </div>
 
@@ -379,8 +379,8 @@ function renderClientList(clients) {
           <button type="button" onclick="clearFilters()" style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Clear</button>
         </div>
         <div style="border-left:1px solid #eee; padding-left:12px;">
-          <button type="button" onclick="showAddContactModal()" title="Add a new client contact record (no case yet)" style="padding:9px 14px; background:#F07800; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">➕ Add Client</button>
-          <a href="/admin/clients/i589" title="Read each client's address and phone from item 8 of their most recent I-589" style="padding:9px 14px; background:#fff; color:#0C1C36; border:1px solid #D4B983; border-radius:4px; text-decoration:none; font-size:13px; font-weight:600; display:inline-block;">📄 I-589 addresses</a>
+          <button type="button" onclick="showAddContactModal()" title="Add a new client contact record (no case yet)" style="padding:9px 14px; background:#FF7B00;color:#1E1B1A; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">➕ Add Client</button>
+          <a href="/admin/clients/i589" title="Read each client's address and phone from item 8 of their most recent I-589" style="padding:9px 14px; background:#fff; color:#2B2523; border:1px solid #E8E3DC; border-radius:4px; text-decoration:none; font-size:13px; font-weight:600; display:inline-block;">📄 I-589 addresses</a>
           <button type="button" onclick="bulkImportDropbox(true)" title="Preview what would be imported (no changes)" style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">👁 Preview import</button>
           <button type="button" onclick="bulkImportDropbox(false)" title="Scan Dropbox and add all client folders as clients" style="padding:9px 14px; background:#0061FF; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">📥 Import from Dropbox</button>
         </div>
@@ -465,42 +465,42 @@ function renderClientList(clients) {
         backdrop.style.cssText = "position:fixed;inset:0;background:rgba(26,16,8,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;overscroll-behavior:contain;";
         backdrop.onclick = (e) => { if (e.target === backdrop) closeAddContactModal(); };
         backdrop.innerHTML = ''
-          + '<div style="background:#FBF3DE;border-radius:12px;padding:28px;max-width:520px;width:100%;max-height:calc(100vh - 40px);overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 0 1.5px #B8891E;">'
-          +   '<h2 style="margin:0 0 6px 0;font-family:Cinzel,serif;color:#3E2818;letter-spacing:2px;text-transform:uppercase;font-size:18px;">Add Client</h2>'
-          +   '<p style="margin:0 0 20px 0;font-family:Georgia,serif;font-style:italic;color:#7B5330;font-size:13px;">Quick contact record — no case or matter needed. You can attach a case later.</p>'
-          +   '<div id="addContactError" style="display:none;background:rgba(160,40,24,0.10);color:#A02818;padding:10px 12px;border-radius:6px;border:1px solid #A02818;margin-bottom:12px;font-size:13px;"></div>'
+          + '<div style="background:#FAF8F5;border-radius:12px;padding:28px;max-width:520px;width:100%;max-height:calc(100vh - 40px);overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 0 1.5px #A34C00;">'
+          +   '<h2 style="margin:0 0 6px 0;font-family:Montserrat,sans-serif;color:#2B2523;letter-spacing:2px;text-transform:uppercase;font-size:18px;">Add Client</h2>'
+          +   '<p style="margin:0 0 20px 0;font-family:Georgia,serif;font-style:italic;color:#5E5854;font-size:13px;">Quick contact record — no case or matter needed. You can attach a case later.</p>'
+          +   '<div id="addContactError" style="display:none;background:rgba(160,40,24,0.10);color:#9C2B1E;padding:10px 12px;border-radius:6px;border:1px solid #9C2B1E;margin-bottom:12px;font-size:13px;"></div>'
           +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">'
-          +     '<div style="grid-column:1/-1;"><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Client Name *</label><input id="ac_name" type="text" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" autofocus></div>'
-          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Phone</label><input id="ac_phone" type="tel" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" placeholder="626-555-0100"></div>'
-          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Email</label><input id="ac_email" type="email" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;"></div>'
-          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">A-Number</label><input id="ac_anumber" type="text" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;" placeholder="A200-000-000"></div>'
+          +     '<div style="grid-column:1/-1;"><label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Client Name *</label><input id="ac_name" type="text" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:14px;" autofocus></div>'
+          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Phone</label><input id="ac_phone" type="tel" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:14px;" placeholder="626-555-0100"></div>'
+          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Email</label><input id="ac_email" type="email" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:14px;"></div>'
+          +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">A-Number</label><input id="ac_anumber" type="text" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:14px;" placeholder="A200-000-000"></div>'
           +     '<div style="grid-column:1/-1;border-top:1px solid #E2CFA2;margin-top:4px;padding-top:12px;">'
-          +       '<label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Signed retainer or fee agreement</label>'
-          +       '<div style="font-size:12px;color:#7B5330;margin-bottom:8px;">Upload the PDF and the details are read off it for you to check. Nothing is saved until you tick it.</div>'
+          +       '<label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Signed retainer or fee agreement</label>'
+          +       '<div style="font-size:12px;color:#5E5854;margin-bottom:8px;">Upload the PDF and the details are read off it for you to check. Nothing is saved until you tick it.</div>'
           +       '<input id="ac_file" type="file" accept="application/pdf" style="display:none;" onchange="acExtract(this)">'
-          +       '<button type="button" id="ac_upload_btn" onclick="acPickFile()" style="width:100%;padding:10px;border:1.5px dashed #B8891E;border-radius:6px;background:rgba(184,137,30,0.07);color:#7B5810;cursor:pointer;font-size:13px;font-weight:600;">Choose a PDF</button>'
+          +       '<button type="button" id="ac_upload_btn" onclick="acPickFile()" style="width:100%;padding:10px;border:1.5px dashed #A34C00;border-radius:6px;background:rgba(184,137,30,0.07);color:#7B5810;cursor:pointer;font-size:13px;font-weight:600;">Choose a PDF</button>'
           +       '<div id="ac_review" style="display:none;margin-top:12px;"></div>'
           +     '</div>'
           +     '<div style="grid-column:1/-1;">'
-          +       '<label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Practice area</label>'
-          +       '<div style="font-size:12px;color:#7B5330;margin-bottom:6px;">Decides which Dropbox root the client folder goes under. Leave it blank if you are not sure - you will be asked rather than guessed at.</div>'
+          +       '<label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Practice area</label>'
+          +       '<div style="font-size:12px;color:#5E5854;margin-bottom:6px;">Decides which Dropbox root the client folder goes under. Leave it blank if you are not sure - you will be asked rather than guessed at.</div>'
           +       '<div id="ac_branch_row">'
-          +         '<button type="button" data-branch="immigration" onclick="acSetBranch(this)" style="padding:7px 16px;border:1px solid #D4B983;border-radius:999px;background:#FFF;color:#3E2818;cursor:pointer;font-size:13px;margin-right:8px;">Immigration</button>'
-          +         '<button type="button" data-branch="civil" onclick="acSetBranch(this)" style="padding:7px 16px;border:1px solid #D4B983;border-radius:999px;background:#FFF;color:#3E2818;cursor:pointer;font-size:13px;">Civil</button>'
+          +         '<button type="button" data-branch="immigration" onclick="acSetBranch(this)" style="padding:7px 16px;border:1px solid #E8E3DC;border-radius:999px;background:#FFF;color:#2B2523;cursor:pointer;font-size:13px;margin-right:8px;">Immigration</button>'
+          +         '<button type="button" data-branch="civil" onclick="acSetBranch(this)" style="padding:7px 16px;border:1px solid #E8E3DC;border-radius:999px;background:#FFF;color:#2B2523;cursor:pointer;font-size:13px;">Civil</button>'
           +       '</div>'
           +     '</div>'
           +     '<div style="grid-column:1/-1;">'
-          +       '<label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Broker</label>'
-          +       '<div style="font-size:12px;color:#7B5330;margin-bottom:6px;">The client folder is created inside the broker&rsquo;s folder. Pick the practice area first.</div>'
-          +       '<select id="ac_broker" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;background:#FFF;" disabled>'
+          +       '<label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Broker</label>'
+          +       '<div style="font-size:12px;color:#5E5854;margin-bottom:6px;">The client folder is created inside the broker&rsquo;s folder. Pick the practice area first.</div>'
+          +       '<select id="ac_broker" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:14px;background:#FFF;" disabled>'
           +         '<option value="">— choose a practice area first —</option>'
           +       '</select>'
           +     '</div>'
-          +     '<div style="grid-column:1/-1;"><label style="display:block;font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Notes</label><textarea id="ac_notes" style="width:100%;padding:9px 12px;border:1px solid #D4B983;border-radius:6px;font-size:14px;min-height:60px;font-family:inherit;" placeholder="Anything you want to remember about this client..."></textarea></div>'
+          +     '<div style="grid-column:1/-1;"><label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Notes</label><textarea id="ac_notes" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:14px;min-height:60px;font-family:inherit;" placeholder="Anything you want to remember about this client..."></textarea></div>'
           +   '</div>'
           +   '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">'
-          +     '<button type="button" onclick="closeAddContactModal()" style="padding:10px 20px;background:transparent;border:1.5px solid #B8891E;color:#7B5810;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-weight:500;letter-spacing:1px;text-transform:uppercase;font-size:12px;">Cancel</button>'
-          +     '<button type="button" id="ac_submit" onclick="submitAddContact()" style="padding:10px 24px;background:#F07800;color:#FFF7E4;border:2px solid #A02818;border-radius:6px;cursor:pointer;font-family:Cinzel,serif;font-weight:700;letter-spacing:2px;text-transform:uppercase;font-size:12px;box-shadow:0 3px 10px rgba(184,66,0,0.3);">Save Client</button>'
+          +     '<button type="button" onclick="closeAddContactModal()" style="padding:10px 20px;background:transparent;border:1.5px solid #A34C00;color:#7B5810;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-weight:500;letter-spacing:1px;text-transform:uppercase;font-size:12px;">Cancel</button>'
+          +     '<button type="button" id="ac_submit" onclick="submitAddContact()" style="padding:10px 24px;background:#FF7B00;color:#1E1B1A;border:2px solid #9C2B1E;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-weight:700;letter-spacing:2px;text-transform:uppercase;font-size:12px;box-shadow:0 3px 10px rgba(184,66,0,0.3);">Save Client</button>'
           +   '</div>'
           + '</div>';
         document.body.appendChild(backdrop);
@@ -555,9 +555,9 @@ function renderClientList(clients) {
         acBranch = (acBranch === want) ? null : want;
         Array.prototype.forEach.call(row.querySelectorAll("button"), function (b) {
           var on = b.getAttribute("data-branch") === acBranch;
-          b.style.background = on ? "#F07800" : "#FFF";
-          b.style.color = on ? "#FFF7E4" : "#3E2818";
-          b.style.borderColor = on ? "#F07800" : "#D4B983";
+          b.style.background = on ? "#FF7B00" : "#FFF";
+          b.style.color = on ? "#FAF8F5" : "#2B2523";
+          b.style.borderColor = on ? "#FF7B00" : "#E8E3DC";
         });
         acLoadBrokers();
       }
@@ -646,32 +646,32 @@ function renderClientList(clients) {
         window.__acProposal = { identity: ids, fees: fees, file: acFileName };
         var html = '';
         if (p.concerns && p.concerns.length) {
-          html += '<div style="background:rgba(240,120,0,0.10);border:1px solid #F07800;border-radius:6px;padding:10px;margin-bottom:10px;font-size:12px;color:#3E2818;">'
+          html += '<div style="background:rgba(240,120,0,0.10);border:1px solid #FF7B00;border-radius:6px;padding:10px;margin-bottom:10px;font-size:12px;color:#2B2523;">'
                 + '<strong>Read this first</strong>';
           for (var i = 0; i < p.concerns.length; i++) html += '<div style="margin-top:4px;">' + acEsc(p.concerns[i]) + '</div>';
           html += '</div>';
         }
         if (p.dropped_unquoted && p.dropped_unquoted.length) {
           var names = p.dropped_unquoted.map(acLabel).join(", ");
-          html += '<div style="background:rgba(240,120,0,0.10);border:1px solid #F07800;border-radius:6px;padding:10px;margin-bottom:10px;font-size:12px;color:#3E2818;">'
+          html += '<div style="background:rgba(240,120,0,0.10);border:1px solid #FF7B00;border-radius:6px;padding:10px;margin-bottom:10px;font-size:12px;color:#2B2523;">'
                 + '<strong>Not offered - no quote in the document</strong><div style="margin-top:4px;">' + acEsc(names) + '</div>'
-                + '<div style="margin-top:6px;color:#7B5330;">A value that cannot be pointed at in the document is not offered here. Read these off the agreement yourself.</div></div>';
+                + '<div style="margin-top:6px;color:#5E5854;">A value that cannot be pointed at in the document is not offered here. Read these off the agreement yourself.</div></div>';
         }
         if (!ids.length && !fees.length) {
-          html += '<div style="font-size:13px;color:#7B5330;">Nothing could be read from this file. Enter the details by hand.</div>';
+          html += '<div style="font-size:13px;color:#5E5854;">Nothing could be read from this file. Enter the details by hand.</div>';
         }
         function rows(list, checked, title, sub) {
           if (!list.length) return '';
-          var h = '<div style="font-size:11px;font-weight:600;color:#3E2818;letter-spacing:1px;text-transform:uppercase;margin:10px 0 2px;">' + title + '</div>'
-                + '<div style="font-size:12px;color:#7B5330;margin-bottom:6px;">' + sub + '</div>';
+          var h = '<div style="font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin:10px 0 2px;">' + title + '</div>'
+                + '<div style="font-size:12px;color:#5E5854;margin-bottom:6px;">' + sub + '</div>';
           for (var i = 0; i < list.length; i++) {
             var k = list[i][0], c = list[i][1];
             h += '<label style="display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid #E2CFA2;border-radius:6px;background:#FFF;margin-bottom:6px;cursor:pointer;">'
                +   '<input type="checkbox" data-ac-field="' + acEsc(k) + '"' + (checked ? ' checked' : '') + ' style="margin-top:3px;">'
                +   '<span style="flex:1;">'
-               +     '<span style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#7B5330;">' + acEsc(acLabel(k)) + '</span>'
-               +     '<span style="display:block;font-size:14px;color:#3E2818;">' + acEsc(acText(c.value)) + '</span>'
-               +     '<span style="display:block;font-size:12px;font-style:italic;color:#7B5330;margin-top:3px;">' + acEsc(c.quote) + '</span>'
+               +     '<span style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#5E5854;">' + acEsc(acLabel(k)) + '</span>'
+               +     '<span style="display:block;font-size:14px;color:#2B2523;">' + acEsc(acText(c.value)) + '</span>'
+               +     '<span style="display:block;font-size:12px;font-style:italic;color:#5E5854;margin-top:3px;">' + acEsc(c.quote) + '</span>'
                +   '</span>'
                + '</label>';
           }
@@ -680,7 +680,7 @@ function renderClientList(clients) {
         html += rows(ids, true, "Client details", "Ticked ones fill in the form. Untick anything that looks off.");
         html += rows(fees, false, "Fee terms", "Tick each one only after reading it against the quote. Unticked terms are not recorded.");
         if (ids.length || fees.length) {
-          html += '<button type="button" onclick="acApply()" style="width:100%;margin-top:8px;padding:9px;background:#F07800;color:#FFF7E4;border:2px solid #A02818;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;letter-spacing:1px;text-transform:uppercase;">Use ticked details</button>';
+          html += '<button type="button" onclick="acApply()" style="width:100%;margin-top:8px;padding:9px;background:#FF7B00;color:#1E1B1A;border:2px solid #9C2B1E;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;letter-spacing:1px;text-transform:uppercase;">Use ticked details</button>';
         }
         box.innerHTML = html;
         box.style.display = "block";
@@ -720,7 +720,7 @@ function renderClientList(clients) {
           var ta = document.getElementById("ac_notes");
           ta.value = (ta.value.trim() ? ta.value.trim() + "\\n\\n" : "") + lines.join("\\n");
         }
-        box.innerHTML = '<div style="font-size:13px;color:#7B5330;">Read from ' + acEsc(prop.file) + '. Check the fields above before saving.</div>';
+        box.innerHTML = '<div style="font-size:13px;color:#5E5854;">Read from ' + acEsc(prop.file) + '. Check the fields above before saving.</div>';
       }
       // Provisioning stopped short. The client exists; only the filing is open.
       // Either nobody said immigration or civil, or folders turned up that might
@@ -732,35 +732,35 @@ function renderClientList(clients) {
         back.style.cssText = "position:fixed;inset:0;background:rgba(26,16,8,0.55);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px;";
         var cands = folder.candidates || [];
         var branch = folder.branch || acBranch || null;
-        var html = '<div style="background:#FBF3DE;border-radius:12px;padding:24px;max-width:560px;width:100%;max-height:80vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 0 1.5px #B8891E;">'
-          + '<h2 style="margin:0 0 6px 0;font-family:Cinzel,serif;color:#3E2818;letter-spacing:2px;text-transform:uppercase;font-size:17px;">Where does ' + acEsc(name) + ' go?</h2>'
-          + '<p style="margin:0 0 14px 0;font-size:13px;color:#7B5330;">' + acEsc(name) + ' is saved. '
+        var html = '<div style="background:#FAF8F5;border-radius:12px;padding:24px;max-width:560px;width:100%;max-height:80vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 0 1.5px #A34C00;">'
+          + '<h2 style="margin:0 0 6px 0;font-family:Montserrat,sans-serif;color:#2B2523;letter-spacing:2px;text-transform:uppercase;font-size:17px;">Where does ' + acEsc(name) + ' go?</h2>'
+          + '<p style="margin:0 0 14px 0;font-size:13px;color:#5E5854;">' + acEsc(name) + ' is saved. '
           + (folder.action === "needs_branch"
               ? 'The practice area was never set, so no folder was created yet.'
               : 'Folders that might already be this client turned up, so nothing was created yet.')
           + '</p>'
-          + '<div id="acf_err" style="display:none;background:rgba(160,40,24,0.10);color:#A02818;padding:9px 11px;border-radius:6px;border:1px solid #A02818;margin-bottom:10px;font-size:13px;"></div>'
-          + '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#3E2818;margin-bottom:6px;">Practice area</div>'
+          + '<div id="acf_err" style="display:none;background:rgba(160,40,24,0.10);color:#9C2B1E;padding:9px 11px;border-radius:6px;border:1px solid #9C2B1E;margin-bottom:10px;font-size:13px;"></div>'
+          + '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#2B2523;margin-bottom:6px;">Practice area</div>'
           + '<div id="acf_branch">'
-          +   '<button type="button" data-branch="immigration" onclick="acfSetBranch(this)" style="padding:7px 16px;border:1px solid #D4B983;border-radius:999px;background:#FFF;cursor:pointer;font-size:13px;margin-right:8px;">Immigration</button>'
-          +   '<button type="button" data-branch="civil" onclick="acfSetBranch(this)" style="padding:7px 16px;border:1px solid #D4B983;border-radius:999px;background:#FFF;cursor:pointer;font-size:13px;">Civil</button>'
+          +   '<button type="button" data-branch="immigration" onclick="acfSetBranch(this)" style="padding:7px 16px;border:1px solid #E8E3DC;border-radius:999px;background:#FFF;cursor:pointer;font-size:13px;margin-right:8px;">Immigration</button>'
+          +   '<button type="button" data-branch="civil" onclick="acfSetBranch(this)" style="padding:7px 16px;border:1px solid #E8E3DC;border-radius:999px;background:#FFF;cursor:pointer;font-size:13px;">Civil</button>'
           + '</div>';
         if (cands.length) {
-          html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#3E2818;margin:14px 0 4px;">Is the client one of these?</div>'
-                + '<div style="font-size:12px;color:#7B5330;margin-bottom:8px;">Closest first. Picking one files the client there.</div>';
+          html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#2B2523;margin:14px 0 4px;">Is the client one of these?</div>'
+                + '<div style="font-size:12px;color:#5E5854;margin-bottom:8px;">Closest first. Picking one files the client there.</div>';
           for (var i = 0; i < cands.length; i++) {
             html += '<button type="button" onclick="acfAdopt(this)" data-path="' + acEsc(cands[i].path) + '" style="display:block;width:100%;text-align:left;padding:9px 11px;border:1px solid #E2CFA2;border-radius:6px;background:#FFF;margin-bottom:6px;cursor:pointer;">'
-                 +   '<span style="display:block;font-weight:600;color:#3E2818;font-size:14px;">' + acEsc(cands[i].name) + '</span>'
-                 +   '<span style="display:block;font-size:11px;color:#7B5330;">' + acEsc(cands[i].path) + '</span>'
+                 +   '<span style="display:block;font-weight:600;color:#2B2523;font-size:14px;">' + acEsc(cands[i].name) + '</span>'
+                 +   '<span style="display:block;font-size:11px;color:#5E5854;">' + acEsc(cands[i].path) + '</span>'
                  + '</button>';
           }
-          html += '<button type="button" onclick="acfCreateNew()" style="width:100%;padding:9px;border:1px solid #D4B983;border-radius:6px;background:transparent;color:#7B5330;cursor:pointer;font-size:13px;margin-top:2px;">None of these - create a new folder</button>';
+          html += '<button type="button" onclick="acfCreateNew()" style="width:100%;padding:9px;border:1px solid #E8E3DC;border-radius:6px;background:transparent;color:#5E5854;cursor:pointer;font-size:13px;margin-top:2px;">None of these - create a new folder</button>';
         } else {
           // acfResolve, NOT acfCreateNew: with no candidates on screen nobody has
           // reviewed anything, so the duplicate check must still run.
-          html += '<button type="button" onclick="acfResolve()" style="width:100%;margin-top:14px;padding:10px;background:#F07800;color:#FFF7E4;border:2px solid #A02818;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;letter-spacing:1px;text-transform:uppercase;">Find or create the folder</button>';
+          html += '<button type="button" onclick="acfResolve()" style="width:100%;margin-top:14px;padding:10px;background:#FF7B00;color:#1E1B1A;border:2px solid #9C2B1E;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;letter-spacing:1px;text-transform:uppercase;">Find or create the folder</button>';
         }
-        html += '<button type="button" onclick="acfSkip()" style="width:100%;margin-top:10px;padding:8px;background:transparent;border:none;color:#7B5330;cursor:pointer;font-size:12px;">Decide later - the client is already saved</button></div>';
+        html += '<button type="button" onclick="acfSkip()" style="width:100%;margin-top:10px;padding:8px;background:transparent;border:none;color:#5E5854;cursor:pointer;font-size:12px;">Decide later - the client is already saved</button></div>';
         back.innerHTML = html;
         document.body.appendChild(back);
         window.__acf = { key: key, name: name, branch: branch };
@@ -774,9 +774,9 @@ function renderClientList(clients) {
         window.__acf.branch = (window.__acf.branch === want) ? null : want;
         Array.prototype.forEach.call(document.querySelectorAll("#acf_branch button"), function (b) {
           var on = b.getAttribute("data-branch") === window.__acf.branch;
-          b.style.background = on ? "#F07800" : "#FFF";
-          b.style.color = on ? "#FFF7E4" : "#3E2818";
-          b.style.borderColor = on ? "#F07800" : "#D4B983";
+          b.style.background = on ? "#FF7B00" : "#FFF";
+          b.style.color = on ? "#FAF8F5" : "#2B2523";
+          b.style.borderColor = on ? "#FF7B00" : "#E8E3DC";
         });
       }
       function acfErr(msg) {
@@ -855,7 +855,7 @@ function renderClientList(clients) {
           }
           if (f && f.path && (f.action === "created" || f.action === "adopted" || f.action === "already_mapped")) {
             // Show where they landed before the list reloads under us.
-            errBox.style.cssText = "background:rgba(120,160,90,0.12);color:#3E2818;padding:10px 12px;border-radius:6px;border:1px solid #7B9A4E;margin-bottom:12px;font-size:13px;";
+            errBox.style.cssText = "background:rgba(120,160,90,0.12);color:#2B2523;padding:10px 12px;border-radius:6px;border:1px solid #7B9A4E;margin-bottom:12px;font-size:13px;";
             errBox.textContent = "Saved. Filed at " + f.path;
             errBox.style.display = "block";
             setTimeout(function () { closeAddContactModal(); location.reload(); }, 1600);
@@ -928,18 +928,18 @@ function renderClientDetail(client, { documents = [] } = {}) {
   const email = client.client_email || "";
   const contactActions = [];
   if (email) {
-    contactActions.push(`<a href="mailto:${escapeAttr(email)}" style="background:#0C1C36; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">✉️ Email</a>`);
+    contactActions.push(`<a href="mailto:${escapeAttr(email)}" style="background:#2B2523; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">✉️ Email</a>`);
   }
   if (phoneDigits) {
-    contactActions.push(`<a href="tel:+${phoneDigits}" style="background:#0C1C36; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">📞 Call</a>`);
+    contactActions.push(`<a href="tel:+${phoneDigits}" style="background:#2B2523; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">📞 Call</a>`);
     contactActions.push(`<a href="https://wa.me/${phoneDigits}" target="_blank" rel="noopener" style="background:#25D366; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">💬 WhatsApp</a>`);
   }
 
   // Hearing rows
   const hearingRows = client.hearings.length ? client.hearings.map(h => {
     const kindBadge = h.kind === "individual"
-      ? `<span style="background:#0C1C36; color:#B79C62; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">INDIV</span>`
-      : `<span style="background:#B79C62; color:white; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">MASTER</span>`;
+      ? `<span style="background:#2B2523; color:#FF7B00; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">INDIV</span>`
+      : `<span style="background:#A34C00; color:white; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">MASTER</span>`;
     return `
       <tr>
         <td>${kindBadge}</td>
@@ -948,14 +948,14 @@ function renderClientDetail(client, { documents = [] } = {}) {
         <td>${escapeHtml(h.judge_name || "-")}</td>
         <td>${escapeHtml(h.disposition || "-")}</td>
         <td>${h.sent ? "✅" : "—"}</td>
-        <td><a href="${h.edit_url}" style="color:#B79C62;">edit</a></td>
+        <td><a href="${h.edit_url}" style="color:#A34C00;">edit</a></td>
       </tr>`;
   }).join("") : `<tr><td colspan="7" style="text-align:center; color:#888;">No hearings recorded.</td></tr>`;
 
   // Upcoming hearings section
   const upcomingSection = client.upcoming.length ? `
-    <div style="background:#fef8e7; border-left:4px solid #B79C62; padding:15px; border-radius:4px; margin:15px 0;">
-      <h3 style="margin:0 0 8px 0; color:#0C1C36;">🗓️ Upcoming Hearings</h3>
+    <div style="background:#fef8e7; border-left:4px solid #FF7B00; padding:15px; border-radius:4px; margin:15px 0;">
+      <h3 style="margin:0 0 8px 0; color:#2B2523;">🗓️ Upcoming Hearings</h3>
       <ul style="margin:0; padding-left:20px;">
         ${client.upcoming.map(u => `<li><strong>${escapeHtml(u.type)}</strong> — ${new Date(u.date).toLocaleString()} <span style="color:#666; font-size:12px;">(from ${u.from_kind} note #${u.from_id})</span></li>`).join("")}
       </ul>
@@ -964,11 +964,11 @@ function renderClientDetail(client, { documents = [] } = {}) {
   // Quick-create new hearing links (pre-filled)
   const createLinks = client.a_number
     ? `
-      <a href="/admin/hearing/notes?prefill_a=${encodeURIComponent(client.a_number)}&prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#B79C62; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Master Hearing</a>
-      <a href="/admin/hearing/individual?prefill_a=${encodeURIComponent(client.a_number)}&prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#B79C62; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Individual Hearing</a>`
+      <a href="/admin/hearing/notes?prefill_a=${encodeURIComponent(client.a_number)}&prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#A34C00; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Master Hearing</a>
+      <a href="/admin/hearing/individual?prefill_a=${encodeURIComponent(client.a_number)}&prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#A34C00; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Individual Hearing</a>`
     : `
-      <a href="/admin/hearing/notes?prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#B79C62; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Master Hearing</a>
-      <a href="/admin/hearing/individual?prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#B79C62; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Individual Hearing</a>`;
+      <a href="/admin/hearing/notes?prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#A34C00; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Master Hearing</a>
+      <a href="/admin/hearing/individual?prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#A34C00; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Individual Hearing</a>`;
 
   const body = `
     <div class="page-header">
@@ -980,7 +980,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
     <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
       <div style="display:flex; gap:30px; flex-wrap:wrap;">
         <div style="flex:1; min-width:280px;">
-          <h3 style="margin:0 0 12px 0; color:#B79C62; font-size:14px; text-transform:uppercase; letter-spacing:0.5px;">Client Info</h3>
+          <h3 style="margin:0 0 12px 0; color:#A34C00; font-size:14px; text-transform:uppercase; letter-spacing:0.5px;">Client Info</h3>
           <div style="line-height:1.9;">
             <div><strong>Name:</strong> ${escapeHtml(client.client_name || "-")}</div>
             <div><strong>A-Number:</strong> ${escapeHtml(client.a_number || "-")}</div>
@@ -988,21 +988,21 @@ function renderClientDetail(client, { documents = [] } = {}) {
             <div><strong>Phone:</strong> ${phone ? escapeHtml(phone) : "-"}</div>
             <div><strong>Address:</strong> ${client.client_address ? escapeHtml(client.client_address).replace(/\n/g, "<br>") : "-"}</div>
             ${client.contact_source && client.contact_source !== "manual" ? `
-            <div style="font-size:11px; color:#7B5330; font-style:italic;">
+            <div style="font-size:11px; color:#5E5854; font-style:italic;">
               Phone and address read from ${escapeHtml(client.contact_source === "i589" ? "the client's I-589" : client.contact_source)}${client.contact_source_detail ? ` (${escapeHtml(String(client.contact_source_detail).split("/").pop())})` : ""} — not yet confirmed with the client.
             </div>` : ""}
             <form method="POST" action="/admin/clients/${escapeAttr(client.key)}/contact" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
               <input type="tel" name="phone" value="${escapeAttr(client.client_phone || "")}" placeholder="Phone"
-                     style="width:150px; padding:5px 7px; border:1px solid #D4B983; border-radius:4px; font-size:12px;">
+                     style="width:150px; padding:5px 7px; border:1px solid #E8E3DC; border-radius:4px; font-size:12px;">
               <input type="text" name="address" value="${escapeAttr(client.client_address || "")}" placeholder="Street, City, State ZIP"
-                     style="flex:1; min-width:220px; padding:5px 7px; border:1px solid #D4B983; border-radius:4px; font-size:12px;">
-              <button type="submit" style="padding:5px 12px; background:#F07800; color:#FFF7E4; border:1px solid #A02818; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">Save</button>
+                     style="flex:1; min-width:220px; padding:5px 7px; border:1px solid #E8E3DC; border-radius:4px; font-size:12px;">
+              <button type="submit" style="padding:5px 12px; background:#FF7B00;color:#1E1B1A; border:1px solid #9C2B1E; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">Save</button>
             </form>
             <div><strong>Language:</strong> ${languageLabel(client.client_language)}</div>
           </div>
         </div>
         <div style="flex:1; min-width:280px;">
-          <h3 style="margin:0 0 12px 0; color:#B79C62; font-size:14px; text-transform:uppercase; letter-spacing:0.5px;">Case Info</h3>
+          <h3 style="margin:0 0 12px 0; color:#A34C00; font-size:14px; text-transform:uppercase; letter-spacing:0.5px;">Case Info</h3>
           <div style="line-height:1.9;">
             <div><strong>Case type(s):</strong> ${client.case_types.length ? client.case_types.map(escapeHtml).join(", ") : "-"}</div>
             <div><strong>Judge(s):</strong> ${client.judges.length ? client.judges.map(escapeHtml).join(", ") : "-"}</div>
@@ -1020,8 +1020,8 @@ function renderClientDetail(client, { documents = [] } = {}) {
     <!-- Detected hearing notices from Dropbox scan -->
     <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;" id="hearing-notices-section">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-        <h3 style="margin:0; color:#0C1C36;">🗓️ Hearing Notices <span id="hn-count" style="color:#888; font-weight:normal; font-size:14px;"></span></h3>
-        <button type="button" onclick="scanForNotices()" id="hn-scan-btn" style="background:#0C1C36; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🔍 Scan Dropbox for notices</button>
+        <h3 style="margin:0; color:#2B2523;">🗓️ Hearing Notices <span id="hn-count" style="color:#888; font-weight:normal; font-size:14px;"></span></h3>
+        <button type="button" onclick="scanForNotices()" id="hn-scan-btn" style="background:#2B2523; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🔍 Scan Dropbox for notices</button>
       </div>
       <div id="hn-status" style="font-size:13px; color:#666; margin-bottom:10px;">Click "Scan Dropbox" to detect hearing notices in this client's folder.</div>
       <div id="hn-list"></div>
@@ -1029,7 +1029,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
 
     <!-- Court email matched to this client — every one, hearing or not -->
     <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;" id="court-mail-section">
-      <h3 style="margin:0 0 12px; color:#0C1C36;">📨 Court Mail <span id="cm-count" style="color:#888; font-weight:normal; font-size:14px;"></span></h3>
+      <h3 style="margin:0 0 12px; color:#2B2523;">📨 Court Mail <span id="cm-count" style="color:#888; font-weight:normal; font-size:14px;"></span></h3>
       <div id="cm-status" style="font-size:13px; color:#666;">Loading…</div>
       <div id="cm-list"></div>
     </div>
@@ -1051,7 +1051,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
     <!-- Dropbox Documents section (lazy-loaded via JS) -->
     <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;" id="dropbox-section">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-        <h3 style="margin:0; color:#0C1C36;">📦 Dropbox <span id="dbx-count" style="color:#888; font-weight:normal;"></span></h3>
+        <h3 style="margin:0; color:#2B2523;">📦 Dropbox <span id="dbx-count" style="color:#888; font-weight:normal;"></span></h3>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button type="button" onclick="dbxToggleUpload()" id="dbx-upload-btn" style="background:#0061FF; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; display:none;">+ Upload to Dropbox</button>
           <button type="button" onclick="dbxChangeFolder()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">📁 Change folder</button>
@@ -1071,7 +1071,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
           <div><strong>Drop a file here or click to browse</strong></div>
           <div style="font-size:12px; color:#666; margin-top:4px;">Uploads directly to this client's Dropbox folder. Max 25 MB.</div>
           <input type="file" id="dbx-file-input" style="display:none;" onchange="dbxHandleFileSelected(this.files[0])">
-          <div id="dbx-selected" style="margin-top:8px; font-size:13px; color:#0C1C36;"></div>
+          <div id="dbx-selected" style="margin-top:8px; font-size:13px; color:#2B2523;"></div>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
           <button type="button" onclick="dbxUpload()" id="dbx-upload-do-btn" style="background:#0061FF; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">📤 Upload to Dropbox</button>
@@ -1141,7 +1141,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
             const suggestions = data.suggestions || [];
             if (suggestions.length) {
               suggHtml = '<div style="margin-top:15px; text-align:left; max-width:520px; margin-left:auto; margin-right:auto;">' +
-                '<div style="font-weight:600; margin-bottom:8px; color:#0C1C36;">💡 Did you mean one of these?</div>' +
+                '<div style="font-weight:600; margin-bottom:8px; color:#2B2523;">💡 Did you mean one of these?</div>' +
                 suggestions.map(function(s) {
                   const reason = s.reason ? '<span style="color:#888; font-size:11px; margin-left:6px;">(' + dbxEscape(s.reason) + ')</span>' : '';
                   const escapedPath = JSON.stringify(s.path).replace(/"/g,"&quot;");
@@ -1181,7 +1181,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
           tbody.innerHTML = files.map(f =>
             '<tr>' +
               '<td style="width:30px; text-align:center; font-size:18px;">' + dbxIconFor(f.name) + '</td>' +
-              '<td><a href="/admin/clients/' + encodeURIComponent(DBX_CLIENT_KEY) + '/dropbox/download?path=' + encodeURIComponent(f.path) + '" target="_blank" style="color:#0C1C36; text-decoration:none; font-weight:600;">' + dbxEscape(f.name) + '</a></td>' +
+              '<td><a href="/admin/clients/' + encodeURIComponent(DBX_CLIENT_KEY) + '/dropbox/download?path=' + encodeURIComponent(f.path) + '" target="_blank" style="color:#2B2523; text-decoration:none; font-weight:600;">' + dbxEscape(f.name) + '</a></td>' +
               '<td style="font-size:12px; color:#666; white-space:nowrap;">' + dbxFmtSize(f.size) + '</td>' +
               '<td style="font-size:12px; color:#666; white-space:nowrap;">' + (f.server_modified ? new Date(f.server_modified).toLocaleDateString() : "-") + '</td>' +
               '<td style="white-space:nowrap;">' +
@@ -1328,7 +1328,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
               ? when.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
               : "";
             var kind = m.kind
-              ? '<span style="background:#eef2f7; color:#0C1C36; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">' + dbxEscape(m.kind) + '</span>'
+              ? '<span style="background:#eef2f7; color:#2B2523; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">' + dbxEscape(m.kind) + '</span>'
               : "";
             var docs = (m.documents || []).length
               ? '<div style="margin-top:6px; font-size:12px; color:#555;">📎 ' +
@@ -1346,14 +1346,14 @@ function renderClientDetail(client, { documents = [] } = {}) {
             var needs = m.status === "needs_review"
               ? '<span style="background:#fff3e0; color:#e65100; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">needs review</span>'
               : "";
-            return '<div style="border-left:4px solid #0C1C36; background:#f7f9fb; padding:12px; border-radius:4px; margin-bottom:8px;">' +
+            return '<div style="border-left:4px solid #2B2523; background:#f7f9fb; padding:12px; border-radius:4px; margin-bottom:8px;">' +
               '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:flex-start;">' +
-                '<div style="font-weight:600; color:#0C1C36; flex:1; min-width:200px;">' + dbxEscape(m.title) + needs + '</div>' +
+                '<div style="font-weight:600; color:#2B2523; flex:1; min-width:200px;">' + dbxEscape(m.title) + needs + '</div>' +
                 '<div style="font-size:12px; color:#888; white-space:nowrap;">' + dateStr + ' ' + kind + '</div>' +
               '</div>' +
               (m.summary ? '<div style="margin-top:6px; font-size:13px; color:#444; line-height:1.5;">' + dbxEscape(m.summary) + '</div>' : "") +
               datedHtml + docs + todo +
-              '<div style="margin-top:8px;"><a href="' + dbxEscape(m.url) + '" style="font-size:12px; color:#B79C62; font-weight:600; text-decoration:none;">Open in Court Mail →</a></div>' +
+              '<div style="margin-top:8px;"><a href="' + dbxEscape(m.url) + '" style="font-size:12px; color:#A34C00; font-weight:600; text-decoration:none;">Open in Court Mail →</a></div>' +
             '</div>';
           }).join("");
         } catch (e) {
@@ -1385,7 +1385,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
           const dt = n.hearing_date ? new Date(n.hearing_date) : null;
           const dateStr = dt && !isNaN(dt) ? dt.toLocaleString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "(date not confirmed)";
           const noticeTypeBadge = n.notice_type
-            ? '<span style="background:#fdf7f0; color:#B79C62; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">' + dbxEscape(n.notice_type) + '</span>'
+            ? '<span style="background:#FAF8F5; color:#A34C00; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">' + dbxEscape(n.notice_type) + '</span>'
             : "";
           const confidenceBadge = n.confidence === "low"
             ? '<span style="background:#fff3e0; color:#e65100; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">low confidence — verify</span>'
@@ -1397,17 +1397,17 @@ function renderClientDetail(client, { documents = [] } = {}) {
           const btn = (href, channel, label, color) => href
             ? '<a href="' + href + '" target="_blank" rel="noopener" onclick="markNotified(' + n.id + ', \\'' + channel + '\\')" style="background:' + color + '; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px; margin-right:4px;">' + label + '</a>'
             : '<span style="background:#eee; color:#999; padding:6px 12px; border-radius:4px; font-size:12px; margin-right:4px;">' + label + ' (no contact)</span>';
-          return '<div style="border-left:4px solid #B79C62; background:#fdf7f0; padding:12px; border-radius:4px; margin-bottom:8px;">' +
+          return '<div style="border-left:4px solid #FF7B00; background:#FAF8F5; padding:12px; border-radius:4px; margin-bottom:8px;">' +
             '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">' +
               '<div style="flex:1; min-width:250px;">' +
-                '<div style="font-size:15px; font-weight:600; color:#0C1C36;">' + dbxEscape(dateStr) + '</div>' +
+                '<div style="font-size:15px; font-weight:600; color:#2B2523;">' + dbxEscape(dateStr) + '</div>' +
                 '<div style="margin-top:4px; font-size:13px; color:#333;">' + noticeTypeBadge + confidenceBadge + notifiedBadge + '</div>' +
                 (n.court_name ? '<div style="font-size:12px; color:#666; margin-top:4px;">📍 ' + dbxEscape(n.court_name) + '</div>' : "") +
                 (n.court_address ? '<div style="font-size:12px; color:#666;">📌 ' + dbxEscape(n.court_address) + '</div>' : "") +
                 (n.judge_name ? '<div style="font-size:12px; color:#666;">⚖️ ' + dbxEscape(n.judge_name) + '</div>' : "") +
               '</div>' +
               '<div style="display:flex; gap:4px; flex-wrap:wrap;">' +
-                btn(links.email,     "email",    "✉️ Email",      "#0C1C36") +
+                btn(links.email,     "email",    "✉️ Email",      "#2B2523") +
                 btn(links.whatsapp,  "whatsapp", "💬 WhatsApp",    "#25D366") +
                 btn(links.sms,       "sms",      "📱 SMS",         "#0061FF") +
                 '<button type="button" onclick="dismissNotice(' + n.id + ')" title="Dismiss (hide this notice)" style="background:#eee; color:#666; padding:6px 10px; border:none; border-radius:4px; cursor:pointer; font-size:12px;">✕</button>' +
@@ -1464,7 +1464,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
     <!-- Hearings history -->
     <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-        <h3 style="margin:0; color:#0C1C36;">📚 All Hearings (${client.hearing_count})</h3>
+        <h3 style="margin:0; color:#2B2523;">📚 All Hearings (${client.hearing_count})</h3>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">${createLinks}</div>
       </div>
       <table style="width:100%;">

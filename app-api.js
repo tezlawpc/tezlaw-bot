@@ -1347,6 +1347,13 @@ function registerAppApi(app) {
     console.warn("[app-prefs] module load failed:", e.message);
   }
 
+  // Documents a consultant attaches to a task they send the firm.
+  try {
+    require("./task-attachments").attach(app, { requireBearer, requireConsultantRole, requireFirmUser });
+  } catch (e) {
+    console.warn("[task-attachments] module load failed:", e.message);
+  }
+
   // Templates and e-signature: documents made from filed ones, signed
   // online, filed back to the case folder (esign*.js).
   try {
@@ -1465,26 +1472,87 @@ function registerAppApi(app) {
       if (user.disabled === true) return res.status(403).json({ ok: false, error: "Account disabled" });
       const ok = await auth.verifyPasswordHash(password, user.password_hash);
       if (!ok) return res.status(401).json({ ok: false, error: "Invalid credentials" });
-      const token = await auth.makeToken({
-        uid: user.id, u: user.username, n: user.full_name, r: user.role,
-        exp: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      // The password is right. Is a code needed as well? (signin-code.js)
+      // An app build that cannot show the code step does not send
+      // supports_code, and is let through on the password until the firm
+      // turns on "require it in the phone app".
+      const signin = require("./signin-code");
+      const gate = await signin.gate(user, {
+        surface: "app", device: req.body.device_token || null, supportsCode: req.body.supports_code === true,
       });
-      await auth.updateLastLogin(user.id);
-      const perms = typeof auth.getEffectivePermissions === "function"
-        ? await auth.getEffectivePermissions(user)
-        : (typeof auth.getPermissions === "function" ? auth.getPermissions(user) : {});
-      res.json({
-        ok: true,
-        token,
-        user: {
-          id: user.id, username: user.username, name: user.full_name, role: user.role,
-          role_label: (auth.ROLES?.[user.role]?.label) || user.role,
-          permissions: perms,
-          is_admin: user.role === "admin",
-        },
-      });
+      if (gate.required && gate.updateApp) {
+        return res.status(426).json({ ok: false, code: "UPDATE_REQUIRED",
+          error: "Please update the Tara app to sign in. This account now uses a sign-in code." });
+      }
+      if (gate.required) {
+        const sent = await signin.send(user);
+        if (sent.ok) {
+          return res.json({
+            ok: true, needs_code: true,
+            pending: await signin.pendingToken(user),
+            channel: sent.channel, sent_to: sent.masked,
+            other_channels: sent.others.map(o => o.channel),
+          });
+        }
+        if (sent.limited) return res.status(429).json({ ok: false, error: sent.error });
+        await signin.reportUnsendable(user, sent, "app");
+      }
+      res.json(await staffSession(user));
     } catch (err) {
       console.error("[api staff login]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // What a successful staff sign-in returns, from either step.
+  async function staffSession(user, { trustDevice = false } = {}) {
+    const token = await auth.makeToken({
+      uid: user.id, u: user.username, n: user.full_name, r: user.role,
+      exp: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    });
+    await auth.updateLastLogin(user.id);
+    const perms = typeof auth.getEffectivePermissions === "function"
+      ? await auth.getEffectivePermissions(user)
+      : (typeof auth.getPermissions === "function" ? auth.getPermissions(user) : {});
+    return {
+      ok: true,
+      token,
+      ...(trustDevice ? { device_token: await require("./signin-code").deviceToken(user) } : {}),
+      user: {
+        id: user.id, username: user.username, name: user.full_name, role: user.role,
+        role_label: (auth.ROLES?.[user.role]?.label) || user.role,
+        permissions: perms,
+        is_admin: user.role === "admin",
+      },
+    };
+  }
+
+  // Step two for the app: the code. `pending` is what step one returned.
+  app.post("/api/auth/staff/verify-code", async (req, res) => {
+    try {
+      const signin = require("./signin-code");
+      const found = await signin.userFromPending(String(req.body?.pending || ""));
+      if (!found) return res.status(401).json({ ok: false, code: "EXPIRED", error: "That sign-in took too long. Please start again." });
+      const out = await signin.check(found.user, req.body?.code);
+      if (!out.ok) return res.status(401).json({ ok: false, code: out.expired ? "NEW_CODE" : "WRONG_CODE", error: out.error });
+      res.json(await staffSession(found.user, { trustDevice: req.body?.trust_device !== false }));
+    } catch (err) {
+      console.error("[api staff verify-code]:", err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  app.post("/api/auth/staff/resend-code", async (req, res) => {
+    try {
+      const signin = require("./signin-code");
+      const found = await signin.userFromPending(String(req.body?.pending || ""));
+      if (!found) return res.status(401).json({ ok: false, code: "EXPIRED", error: "That sign-in took too long. Please start again." });
+      const prefer = ["sms", "email"].includes(req.body?.channel) ? req.body.channel : null;
+      const sent = await signin.send(found.user, { prefer });
+      if (!sent.ok) return res.status(sent.limited ? 429 : 502).json({ ok: false, error: sent.limited ? sent.error : "The code could not be sent just now. Try the other option, or call the firm." });
+      res.json({ ok: true, channel: sent.channel, sent_to: sent.masked, other_channels: sent.others.map(o => o.channel) });
+    } catch (err) {
+      console.error("[api staff resend-code]:", err.message);
       res.status(500).json({ ok: false, error: err.message });
     }
   });
@@ -1754,7 +1822,7 @@ function registerAppApi(app) {
            ORDER BY hearing_date ASC LIMIT 200`, [today, nextWeek]
         ).then(r => r.rows).catch(() => []),
         db.query(
-          `SELECT id, description, due_date, priority, client_key, client_name, source_type
+          `SELECT id, description, due_date, priority, ${require("./client-record").KEY_SQL} AS client_key, client_name, source_type
            FROM deadlines WHERE status = 'pending' AND due_date <= CURRENT_DATE + INTERVAL '14 days'
            ORDER BY due_date ASC LIMIT 200`
         ).then(r => r.rows).catch(() => []),
@@ -2007,7 +2075,7 @@ function registerAppApi(app) {
            ORDER BY hearing_date ASC`, [today, end]
         ).then(r => r.rows).catch(() => []),
         db.query(
-          `SELECT id, description, due_date, priority, client_key, client_name, source_type
+          `SELECT id, description, due_date, priority, ${require("./client-record").KEY_SQL} AS client_key, client_name, source_type
            FROM deadlines WHERE status = 'pending' AND due_date <= $1
            ORDER BY due_date ASC`, [end]
         ).then(r => r.rows).catch(() => []),
@@ -2574,7 +2642,7 @@ function registerAppApi(app) {
   app.get("/api/staff/federal", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const r = await db.query(
-        `SELECT * FROM federal_matters ORDER BY next_deadline ASC NULLS LAST, created_at DESC LIMIT 500`
+        `SELECT * FROM federal_matters ORDER BY next_deadline_date ASC NULLS LAST, created_at DESC LIMIT 500`
       ).catch(() => ({ rows: [] }));
       let matters = r.rows;
       if (!isAdmin(req.user)) {
@@ -2584,7 +2652,7 @@ function registerAppApi(app) {
           // Match by client_key
           if (m.client_key && visibleKeys.has(m.client_key)) return true;
           // Match by assigned attorney field (if the table has one)
-          const assigned = String(m.assigned_to || m.attorney || "").toLowerCase();
+          const assigned = String(m.assigned_attorney || m.assigned_to || m.attorney || "").toLowerCase();
           if (assigned && terms.some(t => assigned.includes(t))) return true;
           return false;
         }).slice(0, 200);
@@ -3449,7 +3517,7 @@ function registerAppApi(app) {
       if (!phone) return res.status(400).json({ ok: false, error: "Valid phone required" });
       const clientKey = req.body?.client_key ? String(req.body.client_key).trim() : null;
       const fullName = req.body?.full_name ? String(req.body.full_name).trim() : null;
-      const preferredLang = ["en", "zh-TW", "es"].includes(req.body?.preferred_lang)
+      const preferredLang = ["en", "zh-CN", "zh-TW", "es"].includes(req.body?.preferred_lang)
         ? req.body.preferred_lang : "en";
       // Upsert on phone
       const r = await db.query(
@@ -3544,6 +3612,11 @@ function registerAppApi(app) {
   app.get("/api/staff/admin/tasks/pending", requireBearer, requireFirmUser, requireApprover, async (req, res) => {
     try {
       const rows = (await require("./work-orders").listPending()).map(row => ({ ...row, proposed_assignee: row.assigned_to }));
+      // The documents the consultant attached, so nobody approves blind.
+      const files = await require("./task-attachments").listForTasks(rows.map(r => r.id));
+      for (const row of rows) {
+        row.attachments = (files[row.id] || []).map(a => ({ id: a.id, filename: a.filename, bytes: a.bytes, created_at: a.created_at }));
+      }
       res.json({ ok: true, tasks: rows, count: rows.length });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -5973,7 +6046,7 @@ function registerAppApi(app) {
         `SELECT m.*, a.full_name AS added_by_name
          FROM case_members m LEFT JOIN admin_users a ON a.id = m.added_by
          WHERE m.client_key = $1
-         ORDER BY (is_primary DESC), relationship, full_name`,
+         ORDER BY is_primary DESC NULLS LAST, relationship, full_name`,
         [req.params.key]
       );
       res.json({ ok: true, members: r.rows });
@@ -6307,7 +6380,7 @@ function registerAppApi(app) {
       const key = req.params.key;
       const [messages, docs, invoices, notes, timeEntries, tasks] = await Promise.all([
         db.query(
-          `SELECT id, body, from_who, created_at
+          `SELECT id, body, sender_kind AS from_who, created_at
            FROM client_messages WHERE client_key = $1 ORDER BY created_at DESC LIMIT 50`, [key]
         ).catch(() => ({ rows: [] })),
         db.query(
@@ -7842,15 +7915,15 @@ function registerAppApi(app) {
 <html><head><meta charset="utf-8"><title>Tez Law — Receivables Report</title>
 <style>
   @page { size: letter; margin: 0.5in; }
-  body { font: 12px -apple-system, BlinkMacSystemFont, sans-serif; color: #0C1C36; margin: 0; padding: 20px; }
-  h1 { font-size: 20px; margin: 0 0 4px; color: #0C1C36; }
+  body { font: 12px -apple-system, BlinkMacSystemFont, sans-serif; color: #2B2523; margin: 0; padding: 20px; }
+  h1 { font-size: 20px; margin: 0 0 4px; color: #2B2523; }
   .subtitle { color: #555; font-size: 12px; margin-bottom: 24px; }
-  .summary { background: #0C1C36; color: white; padding: 16px; border-radius: 6px; margin-bottom: 24px; }
-  .summary .total { font-size: 28px; font-weight: 700; color: #B79C62; }
-  .summary .label { text-transform: uppercase; font-size: 11px; letter-spacing: 2px; color: #B79C62; }
+  .summary { background: #2B2523; color: white; padding: 16px; border-radius: 6px; margin-bottom: 24px; }
+  .summary .total { font-size: 28px; font-weight: 700; color: #FF7B00; }
+  .summary .label { text-transform: uppercase; font-size: 11px; letter-spacing: 2px; color: #FF7B00; }
   .summary .sub { font-size: 12px; opacity: 0.8; margin-top: 4px; }
-  h2 { font-size: 15px; margin: 20px 0 6px; padding: 6px 10px; background: #f0f0f0; border-left: 4px solid #B79C62; }
-  h2 .amt { float: right; color: #0C1C36; font-weight: 700; }
+  h2 { font-size: 15px; margin: 20px 0 6px; padding: 6px 10px; background: #f0f0f0; border-left: 4px solid #FF7B00; }
+  h2 .amt { float: right; color: #2B2523; font-weight: 700; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
   th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #eee; font-size: 11px; }
   th { background: #fafafa; font-weight: 700; color: #555; }
@@ -7858,7 +7931,7 @@ function registerAppApi(app) {
   .days-hot { color: #c00; font-weight: 700; }
   .footer { margin-top: 40px; padding-top: 10px; border-top: 1px solid #ddd; color: #888; font-size: 10px; text-align: center; }
   @media print { body { padding: 0; } .print-btn { display: none; } }
-  .print-btn { position: fixed; top: 20px; right: 20px; background: #B79C62; color: #0C1C36; padding: 12px 20px; border-radius: 6px; text-decoration: none; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+  .print-btn { position: fixed; top: 20px; right: 20px; background: #FF7B00; color: #1E1B1A; padding: 12px 20px; border-radius: 6px; text-decoration: none; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
 </style></head><body>
 <a href="javascript:window.print()" class="print-btn">Print / Save as PDF</a>
 <h1>Tez Law P.C. — Receivables Report</h1>
@@ -8399,15 +8472,31 @@ ${groups.map(g => `
         require("./notify").feedFor(req.user.uid, { clientKey: key, limit: 20 }).catch(() => []),
       ]);
       const seen = new Set();
+      // The calendar day as stored (UTC), so the page can word it in its own language.
+      const ymd = (v) => { const d = new Date(v); return isNaN(d) ? null : d.toISOString().slice(0, 10); };
       const court_dates = [
-        ...notices.map(h => ({ day: rec.hearingDay(h.hearing_date), time: h.hearing_time_text || null, type: h.hearing_type || null, court: h.court_name || null })),
-        ...noted.map(n => ({ day: rec.hearingDay(n.next_hearing_date), time: null, type: n.next_hearing_type || null, court: null })),
+        ...notices.map(h => ({ day: rec.hearingDay(h.hearing_date), ymd: ymd(h.hearing_date), time: h.hearing_time_text || null, type: h.hearing_type || null, court: h.court_name || null })),
+        ...noted.map(n => ({ day: rec.hearingDay(n.next_hearing_date), ymd: ymd(n.next_hearing_date), time: null, type: n.next_hearing_type || null, court: null })),
       ].filter(d => d.day && !seen.has(d.day) && seen.add(d.day));
       res.json({
         ok: true,
         court_dates,
-        alerts: feed.map(f => ({ id: f.id, kind: f.kind, label: f.label, at: f.created_at, task_id: f.task_id || null })),
+        alerts: feed.map(f => ({ id: f.id, kind: f.kind, label: f.label, label_zh: require("./notify").labelOf(f.kind, "zh"), at: f.created_at, task_id: f.task_id || null })),
       });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // The consultant's language — the one their alerts and Zara's replies use.
+  // The web portal has its own switch; this is the same setting from the app.
+  app.get("/api/consultant/lang", requireBearer, requireConsultantRole, async (req, res) => {
+    try { res.json({ ok: true, lang: await require("./notify").langFor(req.user.uid) }); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+  app.post("/api/consultant/lang", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const notify = require("./notify");
+      await notify.setLang(req.user.uid, notify.isZh(String((req.body || {}).lang || "")) ? "zh" : "en");
+      res.json({ ok: true, lang: await notify.langFor(req.user.uid) });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -8758,9 +8847,18 @@ Format: clear paragraphs, plain language. No excessive markdown.
 
 Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
 
+      // Answer in the language the consultant chose for the portal.
+      // The phone app says which language its screens are in; the web portal
+      // leaves it to the saved setting.
+      const askedLang = String((req.body || {}).lang || "");
+      const consultantLang = askedLang
+        ? (require("./notify").isZh(askedLang) ? "zh" : "en")
+        : await require("./notify").langFor(req.user.uid).catch(() => "en");
       const answer = await zaraChat.chat({
         surface: "consultant",
-        extra: consultantOps,
+        extra: consultantOps + (consultantLang === "zh"
+          ? "\n\nRespond in Simplified Chinese (简体中文), unless they write to you in another language."
+          : ""),
         message: String(message),
         history: history || [],
         // No db/user — consultant chat doesn't get firm-data tools
@@ -8806,28 +8904,69 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
           message: "Your account isn't linked to a case yet. Please contact Tez Law at 626-678-8677.",
         });
       }
-      const [hearings, deadlines, unread] = await Promise.all([
+      // Three things were wrong on this screen, all quietly:
+      //
+      //  · Deadlines were always empty. The query filtered on
+      //    deadlines.client_key, a column that table does not have (it is
+      //    keyed by name and A-number), and the .catch turned the error into
+      //    "no deadlines". Matched now the way client-record.js matches them.
+      //  · A date-only hearing showed a day early. The notice's date is
+      //    stored as midnight UTC; a phone in California reads that as the
+      //    evening before. Same for a deadline's due date.
+      //  · A hearing TODAY was not "next": midnight UTC had already passed.
+      //
+      // Dates therefore leave here as wall-clock strings with no zone
+      // ("2026-11-12T12:00:00"), which every phone — including app builds
+      // already installed — reads as that calendar day. hearing_day and
+      // hearing_time carry the wording for builds that use them.
+      const rec = require("./client-record");
+      const [hearingRows, deadlineRows, unread] = await Promise.all([
         db.query(
-          `SELECT id, hearing_date, hearing_type, court_name, judge_name
+          `SELECT id, hearing_date, hearing_time_text, hearing_type, court_name, judge_name
            FROM client_hearing_notices
            WHERE client_key = $1 AND dismissed_at IS NULL AND hearing_date >= CURRENT_DATE - INTERVAL '30 days'
            ORDER BY hearing_date ASC LIMIT 20`,
           [clientKey]
-        ).then(r => r.rows).catch(() => []),
+        ).then(r => r.rows).catch(e => { console.warn("[client overview hearings]:", e.message); return []; }),
         db.query(
           `SELECT id, description, due_date, priority
            FROM deadlines
-           WHERE client_key = $1 AND status = 'pending'
+           WHERE status = 'pending' AND ${rec.KEY_SQL} = $1
            ORDER BY due_date ASC LIMIT 20`,
           [clientKey]
-        ).then(r => r.rows).catch(() => []),
+        ).then(r => r.rows).catch(e => { console.warn("[client overview deadlines]:", e.message); return []; }),
         db.query(
           `SELECT COUNT(*)::int AS n FROM client_messages
            WHERE client_key = $1 AND sender_kind = 'firm' AND read_at IS NULL`,
           [clientKey]
         ).then(r => r.rows[0]?.n || 0).catch(() => 0),
       ]);
-      const nextHearing = hearings.find(h => new Date(h.hearing_date) >= new Date());
+      const pad = (n) => String(n).padStart(2, "0");
+      // The notice's own calendar day: stored in UTC, so read in UTC.
+      const noticeDay = (v) => { const d = new Date(v); return isNaN(d) ? null : d.toISOString().slice(0, 10); };
+      // A DATE column: node-pg builds it at local midnight, so read it locally.
+      const dateDay = (v) => {
+        if (!v) return null;
+        if (typeof v === "string") return v.slice(0, 10);
+        return isNaN(v) ? null : `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
+      };
+      const todayPT = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });   // YYYY-MM-DD
+      const hearings = hearingRows.map(h => {
+        const day = noticeDay(h.hearing_date);
+        return {
+          id: h.id,
+          hearing_date: day ? `${day}T12:00:00` : null,
+          hearing_ymd: day,
+          hearing_day: rec.hearingDay(h.hearing_date),
+          hearing_time: h.hearing_time_text || null,
+          hearing_type: h.hearing_type, court_name: h.court_name, judge_name: h.judge_name,
+        };
+      });
+      const deadlines = deadlineRows.map(d => {
+        const day = dateDay(d.due_date);
+        return { id: d.id, description: d.description, priority: d.priority, due_date: day ? `${day}T12:00:00` : null, due_ymd: day };
+      });
+      const nextHearing = hearings.find(h => h.hearing_ymd && h.hearing_ymd >= todayPT);
 
       // Who their consultant is, if they came in through one.
       //
@@ -8889,7 +9028,7 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
         ok: true,
         linked_to_case: true,
         client_name: req.user.n,
-        next_hearing: nextHearing,
+        next_hearing: nextHearing || null,
         upcoming_hearings: hearings,
         deadlines,
         unread_messages: unread,

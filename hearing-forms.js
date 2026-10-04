@@ -639,7 +639,7 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
   ];
 
   const previewSection = generated ? `
-    <div style="background:#f9f9f9; padding:20px; margin:20px 0; border-left:4px solid #B79C62;">
+    <div style="background:#f9f9f9; padding:20px; margin:20px 0; border-left:4px solid #FF7B00;">
       <h2 style="margin-top:0;">📧 Generated Email Preview</h2>
       <div style="background:white; padding:15px; border-radius:4px;">
         <strong>Subject:</strong> ${escapeHtml(generated.subject)}
@@ -647,7 +647,7 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
         <pre id="email-body" style="white-space:pre-wrap; font-family:inherit; margin:0;">${escapeHtml(generated.body)}</pre>
       </div>
       <div style="margin-top:15px;">
-        <button type="button" onclick="copyToClipboard()" style="background:#0C1C36; color:white; padding:12px 30px; border:none; border-radius:4px; font-size:16px; cursor:pointer;">📋 Copy Email To Clipboard</button>
+        <button type="button" onclick="copyToClipboard()" style="background:#2B2523; color:white; padding:12px 30px; border:none; border-radius:4px; font-size:16px; cursor:pointer;">📋 Copy Email To Clipboard</button>
         <span id="copy-status" style="margin-left:15px; color:#4CAF50; font-weight:bold;"></span>
       </div>
       ${saved ? '<p style="color:#4CAF50; margin-top:10px;">✅ Record saved to database.</p>' : ""}
@@ -679,8 +679,8 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 800px; margin: 30px auto; padding: 20px; color: #333; }
-    h1 { color: #0C1C36; border-bottom: 3px solid #B79C62; padding-bottom: 10px; }
-    h2 { color: #B79C62; }
+    h1 { color: #2B2523; border-bottom: 3px solid #FF7B00; padding-bottom: 10px; }
+    h2 { color: #A34C00; }
     label { display: block; margin: 12px 0 4px; font-weight: 600; }
     input[type="text"], input[type="datetime-local"], select, textarea {
       width: 100%; padding: 10px; margin: 4px 0; box-sizing: border-box;
@@ -695,8 +695,8 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
       padding: 12px 24px; font-size: 15px; border-radius: 4px; cursor: pointer;
       border: none; font-family: inherit;
     }
-    button[type="submit"] { background: #B79C62; color: white; }
-    button[type="submit"]:hover { background: #8f7a4c; }
+    button[type="submit"] { background: #A34C00; color: white; }
+    button[type="submit"]:hover { background: #7A3900; }
     button.secondary { background: #eee; color: #333; }
     .warn {
       background: #fff3cd; padding: 12px; border-left: 4px solid #ffc107;
@@ -704,11 +704,11 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
     }
     .hint { color: #666; font-size: 13px; font-style: italic; margin: 2px 0; }
     fieldset { border: 1px solid #ddd; padding: 15px; margin: 15px 0; border-radius: 4px; }
-    legend { font-weight: 600; color: #0C1C36; padding: 0 8px; }
+    legend { font-weight: 600; color: #2B2523; padding: 0 8px; }
   </style>
 </head>
 <body>
-  <h1>📅 Master Calendar Hearing — Client Email</h1>
+  <h1>Master Calendar Hearing — Client Email</h1>
   <p>Fill out the form below. Zara will generate a professional email in the client's preferred language. You'll copy it to your clipboard, paste into Outlook, address it to the client, and send.</p>
 
   ${errorSection}
@@ -836,16 +836,16 @@ function renderHistoryPage(hearings) {
   <title>Master Hearing History — Tez Law Zara</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 1100px; margin: 30px auto; padding: 20px; }
-    h1 { color: #0C1C36; border-bottom: 3px solid #B79C62; padding-bottom: 10px; }
+    h1 { color: #2B2523; border-bottom: 3px solid #FF7B00; padding-bottom: 10px; }
     table { width: 100%; border-collapse: collapse; margin: 20px 0; }
     th, td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; }
-    th { background: #f5f5f5; color: #0C1C36; }
+    th { background: #f5f5f5; color: #2B2523; }
     tr:hover { background: #fafafa; }
-    a.button { display: inline-block; padding: 10px 20px; background: #B79C62; color: white; text-decoration: none; border-radius: 4px; }
+    a.button { display: inline-block; padding: 10px 20px; background: #A34C00; color: white; text-decoration: none; border-radius: 4px; }
   </style>
 </head>
 <body>
-  <h1>📅 Master Hearing History</h1>
+  <h1>Master Hearing History</h1>
   <p><a href="/admin/hearing/master" class="button">← Back to form</a></p>
   <table>
     <thead>
@@ -874,13 +874,13 @@ function renderDetailPage(hearing) {
   <title>Hearing #${hearing.id} — Tez Law Zara</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 800px; margin: 30px auto; padding: 20px; }
-    h1 { color: #0C1C36; border-bottom: 3px solid #B79C62; padding-bottom: 10px; }
+    h1 { color: #2B2523; border-bottom: 3px solid #FF7B00; padding-bottom: 10px; }
     .meta { background: #f5f5f5; padding: 15px; border-radius: 4px; margin: 15px 0; }
     .meta div { margin: 4px 0; }
     pre { background: white; padding: 15px; border: 1px solid #ddd; border-radius: 4px;
           white-space: pre-wrap; font-family: inherit; }
-    a { color: #B79C62; }
-    button { background: #0C1C36; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+    a { color: #A34C00; }
+    button { background: #2B2523; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
   </style>
 </head>
 <body>

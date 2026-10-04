@@ -16,7 +16,7 @@
 
 const db = require("./db");
 
-const brand = { gold: "#B79C62", navy: "#0C1C36" };
+const brand = { gold: "#A34C00", navy: "#2B2523" };
 
 // Colors for different event types
 const EVENT_COLORS = {
@@ -390,7 +390,7 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
   return `
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
-      <h1 style="margin:0;">🗓️ EOIR Calendar</h1>
+      <h1 style="margin:0;">EOIR Calendar</h1>
       <div style="font-size:12px; color:#666; margin-top:4px;">Unified view of hearings, notices, individual/merits, and deadlines.</div>
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -412,7 +412,7 @@ function renderCalendarPage({ events, stats, filters, view, monthYear }) {
         <div id="scan-status-detail" style="font-size:12px; color:#666; margin-top:6px;">This scans every client's Dropbox folder. Please wait — may take 1-5 minutes.</div>
       </div>
       <div style="background:#eee; height:6px; border-radius:3px; overflow:hidden;">
-        <div id="scan-bar" style="background:linear-gradient(to right, ${brand.gold}, #d4b979); height:100%; width:5%; transition:width 0.5s;"></div>
+        <div id="scan-bar" style="background:linear-gradient(to right, ${brand.gold}, #E8E3DC); height:100%; width:5%; transition:width 0.5s;"></div>
       </div>
       <div id="scan-results" style="margin-top:20px; display:none; font-size:13px;"></div>
       <div id="scan-cancel-wrap" style="margin-top:20px; text-align:center; display:none;">

@@ -14,8 +14,8 @@
   "use strict";
   if (window.TezTranscripts) { window.TezTranscripts.mount(); return; }
   var API = "/admin/transcripts/api";
-  var C = { walnut: "#3E2818", mid: "#5A3B22", gold: "#B8891E", ember: "#F07800", red: "#A02818",
-    lit: "#FBF3DE", border: "#D4C4A0", muted: "#7B5330", green: "#166534" };
+  var C = { walnut: "#2B2523", mid: "#3A3330", gold: "#A34C00", ember: "#FF7B00", red: "#9C2B1E",
+    lit: "#FAF8F5", border: "#E8E3DC", muted: "#5E5854", green: "#166534" };
   var PALETTE = ["#1d4ed8", "#b45309", "#047857", "#7c3aed", "#be123c", "#0e7490", "#4d7c0f", "#9d174d"];
 
   function h(tag, attrs, kids) {
@@ -44,7 +44,7 @@
   function btn(label, fn, kind) {
     var dark = kind === "primary";
     return h("button", { type: "button", text: label, onclick: fn,
-      style: "padding:6px 12px;border-radius:5px;cursor:pointer;font-size:12px;font-family:Cinzel,Georgia,serif;letter-spacing:.5px;" +
+      style: "padding:6px 12px;border-radius:5px;cursor:pointer;font-size:12px;font-family:Montserrat,sans-serif;letter-spacing:.5px;" +
              "background:" + (kind === "danger" ? "#fff" : dark ? C.mid : C.lit) + ";color:" + (kind === "danger" ? C.red : dark ? C.lit : C.walnut) +
              ";border:1px solid " + (kind === "danger" ? C.red : dark ? C.gold : C.border) + ";" });
   }
@@ -86,7 +86,7 @@
         var list = d.transcripts || [];
         if (kind === "note" && !list.length) return;   // nothing to show on a note with no recordings
         host.appendChild(h("h3", { text: "🎙️ Transcripts" + (list.length ? " (" + list.length + ")" : ""),
-          style: "font-family:Cinzel,serif;color:" + C.walnut + ";margin:12px 0 4px;font-size:15px;" }));
+          style: "font-family:Cormorant Garamond,Georgia,serif;color:" + C.walnut + ";margin:12px 0 4px;font-size:15px;" }));
         if (!list.length) host.appendChild(note("No voice recordings for this client yet. Dictations and hearing recordings are saved here automatically."));
         list.forEach(function (t) { host.appendChild(row(t, false)); });
       }).catch(function (e) { clear(host); if (kind !== "note") host.appendChild(note("Transcripts could not be loaded: " + e.message, true)); });
@@ -139,7 +139,7 @@
     function draw() {
       var t = state.t;
       clear(head);
-      var title = h("h1", { text: t.title || ("Transcript #" + t.id), style: "font-family:Cinzel,serif;color:" + C.walnut + ";margin:0 0 4px;font-size:22px;" });
+      var title = h("h1", { text: t.title || ("Transcript #" + t.id), style: "font-family:Cormorant Garamond,Georgia,serif;color:" + C.walnut + ";margin:0 0 4px;font-size:22px;" });
       var rename = h("a", { href: "#", text: "rename", style: "font-size:11.5px;color:" + C.muted + ";margin-left:8px;", onclick: function (ev) {
         ev.preventDefault();
         var v = window.prompt("Title for this transcript:", t.title || "");
@@ -160,9 +160,9 @@
       clear(tools);
       var word = h("a", { href: API + "/" + id + "/download.docx", text: "⬇ Word" });
       tools.appendChild(word);
-      word.style.cssText = "padding:6px 12px;border-radius:5px;font-size:12px;font-family:Cinzel,Georgia,serif;background:" + C.mid + ";color:" + C.lit + ";border:1px solid " + C.gold + ";text-decoration:none;";
+      word.style.cssText = "padding:6px 12px;border-radius:5px;font-size:12px;font-family:Montserrat,sans-serif;background:" + C.mid + ";color:" + C.lit + ";border:1px solid " + C.gold + ";text-decoration:none;";
       var txt = h("a", { href: API + "/" + id + "/download.txt", text: "⬇ Text" });
-      txt.style.cssText = "padding:6px 12px;border-radius:5px;font-size:12px;font-family:Cinzel,Georgia,serif;background:" + C.lit + ";color:" + C.walnut + ";border:1px solid " + C.border + ";text-decoration:none;";
+      txt.style.cssText = "padding:6px 12px;border-radius:5px;font-size:12px;font-family:Montserrat,sans-serif;background:" + C.lit + ";color:" + C.walnut + ";border:1px solid " + C.border + ";text-decoration:none;";
       tools.appendChild(txt);
       if (state.canEdit && (t.client_key || t.client_name)) tools.appendChild(btn(t.dropbox_path ? "↻ Update Dropbox copy" : "Save to client's Dropbox", function () {
         say("Saving to Dropbox…");

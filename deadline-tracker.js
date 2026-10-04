@@ -698,7 +698,7 @@ function scheduleDailyAlerts() {
 // ─── UI rendering ────────────────────────────────────
 
 function renderDeadlinesPage(user, filters = {}) {
-  const brand = { gold: '#B79C62', navy: '#0C1C36' };
+  const brand = { gold: '#A34C00', navy: '#2B2523' };
   return async function(deadlines, allUsers) {
     const buckets = bucketDeadlines(deadlines);
 
@@ -726,7 +726,7 @@ function renderDeadlinesPage(user, filters = {}) {
 
     return `
     <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
-      <h1 style="margin:0;">⏰ Deadline Tracker</h1>
+      <h1 style="margin:0;">Deadline Tracker</h1>
       <div style="display:flex; gap:8px;">
         <button type="button" onclick="openManualDeadlineModal()" style="background:${brand.gold}; color:white; padding:9px 16px; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">+ Add deadline</button>
         <button type="button" onclick="resyncAll()" style="background:#eee; color:#333; padding:9px 16px; border:none; border-radius:6px; cursor:pointer; font-size:13px;">🔄 Re-sync from hearing notes</button>
@@ -977,9 +977,9 @@ function renderDeadlineRow(d, allUsers) {
     <div style="display:flex; padding:12px 16px; border-bottom:1px solid #f0f0f0; gap:16px; align-items:center; ${strike}">
       <div style="flex:0 0 auto; font-size:20px;" title="${d.source_type}">${sourceIcon}</div>
       <div style="flex:1;">
-        <div style="font-weight:600; color:#0C1C36; margin-bottom:2px;">${escapeHtml(d.description)}</div>
+        <div style="font-weight:600; color:#2B2523; margin-bottom:2px;">${escapeHtml(d.description)}</div>
         <div style="font-size:12px; color:#666;">
-          ${sourceLink ? `<a href="${sourceLink}" style="color:#B79C62; text-decoration:none;">${escapeHtml(clientDisplay)}</a>` : escapeHtml(clientDisplay)}${anum}
+          ${sourceLink ? `<a href="${sourceLink}" style="color:#A34C00; text-decoration:none;">${escapeHtml(clientDisplay)}</a>` : escapeHtml(clientDisplay)}${anum}
         </div>
       </div>
       <div style="flex:0 0 100px; text-align:center;">

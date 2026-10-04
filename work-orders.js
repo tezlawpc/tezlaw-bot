@@ -211,9 +211,16 @@ const isoDay = (v) => {
 };
 const PRI_DOT = { urgent: "var(--bad)", high: "var(--orange)", normal: "var(--stone)", low: "var(--travertine)" };
 
-function renderPage({ user, pending = [], recent = [], staff = [], flash = null, error = null }) {
+function renderPage({ user, pending = [], recent = [], staff = [], files = {}, flash = null, error = null }) {
+  const kb = (n) => { const b = Number(n) || 0; return b >= 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB"; };
   const cards = pending.map(t => {
     const pri = PRIORITIES.includes(t.priority) ? t.priority : "normal";
+    // What the consultant attached. Downloads, never opened in the page.
+    const mine = files[t.id] || [];
+    const docs = mine.length ? `<span class="label">Documents they attached (${mine.length})</span>
+      <div style="margin:0 0 18px;">${mine.map(f => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:8px 0;border-top:1px solid var(--travertine);">
+        <span style="overflow-wrap:anywhere;">${esc(f.filename)} <span class="hint" style="margin:0;">· ${esc(kb(f.bytes))}</span></span>
+        <a class="btn-secondary btn-small" href="/api/staff/task-attachments/${Number(f.id)}">Download</a></div>`).join("")}</div>` : "";
     return `
     <section class="card" id="wo-${t.id}">
       <div style="display:flex;gap:10px 18px;flex-wrap:wrap;align-items:baseline;justify-content:space-between;">
@@ -234,6 +241,7 @@ function renderPage({ user, pending = [], recent = [], staff = [], flash = null,
           <div class="hint">From the firm's default for this matter type. Change it below.</div></div>
       </div>
       ${t.description ? `<span class="label">What they wrote</span><div class="quote" style="margin:0 0 18px;">${esc(t.description)}</div>` : ""}
+      ${docs}
 
       <div class="grid2" style="margin-bottom:0;align-items:start;">
         <form method="POST" action="${PAGE}/${t.id}/approve" style="border-top:3px solid var(--good);padding-top:14px;">
@@ -281,14 +289,54 @@ function renderPage({ user, pending = [], recent = [], staff = [], flash = null,
 
   return theme.page({
     title: "Consultant tasks", area: "Consultant Tasks",
-    nav: [
-      { key: "pending", href: PAGE, label: "Waiting for approval", count: pending.length || null },
-      { key: "tasks", href: "/admin/tasks", label: "Task list" },
-      { key: "alerts", href: "/admin/alerts", label: "Consultant alerts" },
-      { key: "home", href: "/admin/dashboard", label: "Dashboard" },
-    ],
-    active: "pending", who: nameOf(user), body,
+    nav: navFor(user, pending.length), active: "pending", who: nameOf(user), body,
   });
+}
+
+// The alerts page proper (/admin/alerts) edits consultants' contact details,
+// so it stays with admins and managers; an attorney is not shown the link.
+function navFor(user, waiting) {
+  return [
+    { key: "pending", href: PAGE, label: "Waiting for approval", count: waiting || null },
+    { key: "alert", href: PAGE + "/alert", label: "Send an alert" },
+    { key: "tasks", href: "/admin/tasks", label: "Task list" },
+    ...(user && (user.r === "admin" || user.r === "manager") ? [{ key: "alerts", href: "/admin/alerts", label: "Alert settings" }] : []),
+    { key: "home", href: "/admin/dashboard", label: "Dashboard" },
+  ];
+}
+
+/** Tell a client's consultant that something happened — attorneys included. */
+function renderAlertPage({ user, clients = [], waiting = 0, flash = null, error = null }) {
+  const notify = require("./notify");
+  const kinds = require("./notify-admin").HAND_KINDS.filter(k => notify.KINDS[k]);
+  const body = `
+    <div class="page-header">
+      <h1>Send an alert to a consultant</h1>
+      <div class="sub">Tells the consultant on a client that something happened. They get the headline you pick and a link to sign in;
+        the substance stays behind the login, so there is no message box. Court mail, hearings and deadlines already send on their own.</div>
+    </div>
+    ${flash ? `<div class="card ok">${esc(flash)}</div>` : ""}
+    ${error ? `<div class="card warn">${esc(error)}</div>` : ""}
+    <div class="card">
+      ${clients.length ? `
+      <form method="POST" action="${PAGE}/alert">
+        <div class="grid2">
+          <div><label for="al-client">Client</label>
+            <select id="al-client" name="client_key" required>
+              <option value="">Choose a client</option>
+              ${clients.map(c => `<option value="${esc(c.client_key)}">${esc(c.client_name || c.client_key)} · ${esc(c.consultants || "")}</option>`).join("")}
+            </select>
+            <div class="hint">Only clients who have a consultant are listed, with the consultant's name.</div></div>
+          <div><label for="al-kind">What happened</label>
+            <select id="al-kind" name="kind" required>
+              <option value="">Choose a headline</option>
+              ${kinds.map(k => `<option value="${k}">${esc(notify.KINDS[k].label)}</option>`).join("")}
+            </select></div>
+        </div>
+        <button type="submit" class="btn-primary">Send alert</button>
+      </form>` : `<div class="empty">No client has a consultant assigned yet.</div>`}
+    </div>`;
+  return theme.page({ title: "Send an alert", area: "Consultant Tasks", nav: navFor(user, waiting), active: "alert", who: nameOf(user), body });
 }
 
 /**
@@ -302,12 +350,35 @@ function mount(app, auth) {
   app.get(PAGE, async (req, res) => {
     try {
       const [pending, recent, staff] = await Promise.all([listPending(), recentDecisions(), staffNames()]);
+      const files = await require("./task-attachments").listForTasks(pending.map(t => t.id));
       const done = { approved: "Approved. It is in the task list now and the consultant has been told.",
                      rejected: "Not accepted. The consultant has been sent your reason." }[req.query.done] || null;
-      res.send(renderPage({ user: req.user, pending, recent, staff, flash: done, error: req.query.error ? String(req.query.error).slice(0, 300) : null }));
+      res.send(renderPage({ user: req.user, pending, recent, staff, files, flash: done, error: req.query.error ? String(req.query.error).slice(0, 300) : null }));
     } catch (err) {
       console.error("[work-orders page]:", err.message);
       res.status(500).send("Error: " + err.message);
+    }
+  });
+
+  app.get(PAGE + "/alert", async (req, res) => {
+    try {
+      const [clients, waiting] = await Promise.all([require("./notify-admin").loadAlertableClients(), pendingCount()]);
+      res.send(renderAlertPage({ user: req.user, clients, waiting,
+        flash: req.query.sent ? String(req.query.sent).slice(0, 600) : null,
+        error: req.query.problem ? String(req.query.problem).slice(0, 600) : null }));
+    } catch (err) {
+      console.error("[work-orders alert page]:", err.message);
+      res.status(500).send("Error: " + err.message);
+    }
+  });
+  app.post(PAGE + "/alert", async (req, res) => {
+    try {
+      const b = req.body || {};
+      const out = await require("./notify-admin").sendByHand({ clientKey: b.client_key, kind: b.kind, user: req.user });
+      res.redirect(PAGE + "/alert?" + (out.ok ? "sent=" : "problem=") + encodeURIComponent(out.text));
+    } catch (err) {
+      console.error("[work-orders alert]:", err.message);
+      res.redirect(PAGE + "/alert?problem=" + encodeURIComponent(err.message));
     }
   });
 
@@ -330,5 +401,5 @@ function mount(app, auth) {
 module.exports = {
   PAGE, APPROVER_ROLES, canApprove, MATTERS,
   pendingCount, listPending, recentDecisions, approve, reject, announce,
-  renderPage, mount,
+  renderPage, renderAlertPage, mount,
 };

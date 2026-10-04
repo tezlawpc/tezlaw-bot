@@ -22,9 +22,9 @@
   "use strict";
 
   var C = {
-    walnut: "#3E2818", walnutMid: "#5A3B22", gold: "#B8891E",
-    parchment: "#F5EBD3", parchmentLit: "#FBF3DE", border: "#D4C4A0",
-    muted: "#7B5330", waxRed: "#A02818", green: "#166534",
+    walnut: "#2B2523", walnutMid: "#3A3330", gold: "#A34C00",
+    parchment: "#F3EFE9", parchmentLit: "#FAF8F5", border: "#E8E3DC",
+    muted: "#5E5854", waxRed: "#9C2B1E", green: "#166534",
   };
 
   function h(tag, attrs, kids) {
@@ -106,7 +106,7 @@
     }, [
       h("div", {
         text: "☁ Drop the complaint, summons or retainer here",
-        style: "font-family:Cinzel,serif;font-size:12.5px;letter-spacing:1px;color:" + C.walnut + ";",
+        style: "font-family:Montserrat,sans-serif;font-size:12.5px;letter-spacing:1px;color:" + C.walnut + ";",
       }),
       h("div", {
         text: "PDF, DOCX or TXT · up to 6 files · Zara reads them and proposes the fields below",
@@ -173,7 +173,7 @@
         results.appendChild(h("div", {
           text: "⚠ " + w,
           style: "margin-top:8px;padding:9px 11px;border:1px solid " + C.waxRed +
-                 ";border-left-width:3px;border-radius:5px;background:#FBF3DE;font-size:12px;color:" + C.walnut + ";line-height:1.5;",
+                 ";border-left-width:3px;border-radius:5px;background:#FAF8F5;font-size:12px;color:" + C.walnut + ";line-height:1.5;",
         }));
       });
 
@@ -204,7 +204,7 @@
             h("div", { style: "display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;" }, [
               h("span", {
                 text: LABELS[k] || k,
-                style: "font-family:Cinzel,serif;font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;color:" + C.muted + ";",
+                style: "font-family:Montserrat,sans-serif;font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;color:" + C.muted + ";",
               }),
               h("span", {
                 text: fmt(fields[k]),
@@ -233,7 +233,7 @@
         }, [
           h("div", {
             text: "Zara proposes " + found.length + " field" + (found.length === 1 ? "" : "s"),
-            style: "font-family:Cinzel,serif;font-size:11.5px;letter-spacing:1.1px;color:" + C.walnut + ";",
+            style: "font-family:Montserrat,sans-serif;font-size:11.5px;letter-spacing:1.1px;color:" + C.walnut + ";",
           }),
           h("div", {
             text: "Each one is quoted from the document it came from. Untick anything you do not want, then fill the form. Nothing is saved until you submit it yourself.",
@@ -246,7 +246,7 @@
             type: "button",
             onclick: function () { apply(fields, boxes, applied); },
             style: "padding:9px 16px;border:none;border-radius:5px;background:" + C.walnutMid +
-                   ";color:" + C.parchmentLit + ";font-family:Cinzel,serif;font-size:11px;letter-spacing:1.2px;cursor:pointer;",
+                   ";color:" + C.parchmentLit + ";font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1.2px;cursor:pointer;",
           }, ["FILL THE FORM WITH THESE"]),
           applied,
         ]),

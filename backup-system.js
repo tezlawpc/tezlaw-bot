@@ -609,7 +609,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
 
   const body = `
     <div class="page-header">
-      <h1>📦 Backups</h1>
+      <h1>Backups</h1>
       <div style="font-size:13px; color:#666;">
         Daily backups of Zara's entire database, uploaded to <code style="font-size:11px;">/Zara-Backups/</code> in your Dropbox.
         Runs at 3 AM Pacific. Keeps the last 30 days.
@@ -617,19 +617,19 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
     </div>
 
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-bottom:20px;">
-      <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee; border-top:3px solid #B79C62;">
+      <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee; border-top:3px solid #FF7B00;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Total Backups</div>
-        <div style="font-size:26px; font-weight:600; color:#0C1C36; margin-top:4px;">${backups.length}</div>
+        <div style="font-size:26px; font-weight:600; color:#2B2523; margin-top:4px;">${backups.length}</div>
       </div>
       <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee; border-top:3px solid ${lastBackup && (Date.now() - new Date(lastBackup.server_modified).getTime()) < 30 * 60 * 60 * 1000 ? "#2e7d32" : "#c00"};">
         <div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Latest Backup</div>
-        <div style="font-size:16px; font-weight:600; color:#0C1C36; margin-top:4px;">
+        <div style="font-size:16px; font-weight:600; color:#2B2523; margin-top:4px;">
           ${lastBackup ? new Date(lastBackup.server_modified).toLocaleString() : "<span style='color:#c00;'>None yet</span>"}
         </div>
       </div>
       <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee; border-top:3px solid #0061FF;">
         <div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Retention</div>
-        <div style="font-size:16px; font-weight:600; color:#0C1C36; margin-top:4px;">30 days</div>
+        <div style="font-size:16px; font-weight:600; color:#2B2523; margin-top:4px;">30 days</div>
         <div style="font-size:10px; color:#888; margin-top:2px;">Older auto-deleted</div>
       </div>
     </div>
@@ -641,7 +641,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
           <span style="font-size:12px; color:#666;">Force a backup right now (in addition to the daily 3 AM run).</span>
         </div>
         <div style="display:flex; gap:6px; align-items:center;">
-          <button onclick="runBackupNow()" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">🚀 Backup now</button>
+          <button onclick="runBackupNow()" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">🚀 Backup now</button>
           <button onclick="resetBackupStatus()" title="If a previous backup crashed and status is stuck, reset it" style="background:transparent; color:#c00; padding:8px 10px; border:1px solid #ffe0e0; border-radius:4px; cursor:pointer; font-size:11px;">↻ Reset</button>
         </div>
       </div>
@@ -667,7 +667,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
 
     <div id="preview-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10000; align-items:center; justify-content:center;">
       <div style="background:white; padding:20px 24px; border-radius:8px; max-width:600px; width:90%; max-height:80vh; overflow-y:auto;">
-        <h3 style="margin:0 0 10px 0; color:#0C1C36;">📋 Backup preview</h3>
+        <h3 style="margin:0 0 10px 0; color:#2B2523;">📋 Backup preview</h3>
         <div id="preview-content" style="font-size:13px;">Loading…</div>
         <div style="margin-top:16px; text-align:right;">
           <button onclick="document.getElementById('preview-modal').style.display='none'" style="background:#eee; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">Close</button>

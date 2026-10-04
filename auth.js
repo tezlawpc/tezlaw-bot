@@ -41,17 +41,17 @@ const ROLES = {
   admin: {
     label: "Administrator",
     description: "Full access to everything, including user + system settings",
-    color: "#0C1C36",
+    color: "#2B2523",
   },
   manager: {
     label: "Manager / Case-load Supervisor",
     description: "Sees all firm cases + tasks. Can reassign work. No admin tools (no user management, no matter defaults).",
-    color: "#0C1C36",
+    color: "#2B2523",
   },
   attorney: {
     label: "Attorney",
     description: "Hearing notes (create/edit), clients, Dropbox, hearing notices",
-    color: "#B79C62",
+    color: "#A34C00",
   },
   paralegal: {
     label: "Paralegal / Case Manager",
@@ -154,6 +154,10 @@ const PERMISSIONS = {
   // Task list — everyone can see and interact with tasks
   "tasks.read":           ["admin", "manager", "attorney", "paralegal", "viewer"],
   "tasks.write":          ["admin", "manager", "attorney", "paralegal"],
+  // Approving a consultant's task. The page itself is guarded by role in
+  // work-orders.js; this key only decides who is shown the sidebar link, so
+  // it is deliberately not offered as a per-user override.
+  "tasks.approve":        ["admin", "manager", "attorney"],
 
   // Mobile PWA search — same as clients.read
   "mobile.search":        ["admin", "manager", "attorney", "paralegal", "viewer"],
@@ -341,7 +345,7 @@ function renderDeniedPage({ userRole, permission, requiredRoles }) {
 <style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f7f7f7;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
 .card{background:white;padding:40px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.08);max-width:480px;text-align:center}
 h1{color:#c00;margin:0 0 12px 0}p{color:#555;line-height:1.5}
-a{background:#0C1C36;color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin-top:16px}</style></head>
+a{background:#2B2523;color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin-top:16px}</style></head>
 <body><div class="card">
 <div style="font-size:48px; margin-bottom:12px;">🔒</div>
 <h1>Access Denied</h1>
@@ -477,6 +481,19 @@ function setSessionCookie(res, token, ttlMs) {
   ];
   if (secure) parts.push("Secure");
   res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+// The 30-day "do not ask this device for a code" cookie. Appended, so it can
+// be set in the same response as the session cookie.
+function setDeviceCookie(res, name, token, days) {
+  const secure = process.env.NODE_ENV === "production" ||
+                 process.env.RENDER === "true" ||
+                 process.env.RENDER_EXTERNAL_URL;
+  const parts = [`${name}=${encodeURIComponent(token)}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${days * 86400}`];
+  if (secure) parts.push("Secure");
+  const have = res.getHeader("Set-Cookie");
+  const list = Array.isArray(have) ? have : (have ? [have] : []);
+  res.setHeader("Set-Cookie", [...list, parts.join("; ")]);
 }
 
 function clearSessionCookie(res) {
@@ -639,7 +656,9 @@ async function changePassword(userId, newPassword) {
 // Module-level because requireFirmUser below has to honour exactly the same
 // list. When it was a local const, a second guard would have needed its own
 // copy, and a copy is a thing that drifts.
-const ADMIN_WHITELIST = new Set(["/login", "/logout", "/setup", "/whoami", "/whoami-early"]);
+// "/login/code" and "/login/resend" are the second step of signing in
+// (signin-code.js): the password has been accepted, the code has not yet.
+const ADMIN_WHITELIST = new Set(["/login", "/login/code", "/login/resend", "/logout", "/setup", "/whoami", "/whoami-early"]);
 
 // Roles that are firm staff. Deliberately an allowlist rather than
 // "everyone except consultant": a role added later is locked out of /admin
@@ -739,190 +758,70 @@ async function requireAdminAuth(req, res, next) {
 
 // ── Login flow handlers ──────────────────────────────────
 
+// The sign-in page, in the TEZ brand (tez-theme.js): the lockup on charcoal
+// and one marble card. Tara is the name of the platform; TEZ Law Firm is
+// whose it is. No script on either page.
 function renderLoginPage({ error = null, nextUrl = "", username = "" } = {}) {
   const nextField = nextUrl ? `<input type="hidden" name="next" value="${escapeHtml(nextUrl)}">` : "";
-  return `<!doctype html>
-<html><head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sign in — Tara · Tez Law Firm</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;700&family=IM+Fell+English:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --walnut:#3E2818; --walnut-mid:#5A3B22; --walnut-light:#7B5330;
-      --ink:#2A1810; --ink-body:#4A3020;
-      --sandstone:#E4CC94; --sandstone-lit:#F0DDB4;
-      --parchment:#FBF3DE; --parchment-lit:#FFF7E4;
-      --gold:#B8891E; --gold-bright:#E0B44E; --gold-deep:#7B5810;
-      --ember:#F07800; --ember-bright:#FFA544; --ember-deep:#B84200;
-      --wax-red:#A02818; --border-hair:#D4B983;
-    }
-    * { box-sizing:border-box; margin:0; padding:0; }
-    body {
-      font-family:'Inter',-apple-system,sans-serif;
-      background:var(--walnut); min-height:100vh;
-      color:var(--ink); position:relative; overflow-x:hidden;
-    }
-    .hero-bg {
-      position:fixed; inset:0; z-index:0;
-      background-image:url('/static/britannia-hero.jpg');
-      background-size:cover; background-position:center;
-      filter:brightness(0.75);
-    }
-    .hero-overlay {
-      position:fixed; inset:0; z-index:1;
-      background:linear-gradient(180deg,
-        rgba(26,16,8,0.55) 0%,
-        rgba(26,16,8,0.75) 50%,
-        rgba(26,16,8,0.90) 100%);
-    }
-    .center-wrap {
-      position:relative; z-index:10;
-      min-height:100vh; display:flex; align-items:center; justify-content:center;
-      padding:24px;
-    }
-    .card {
-      background:var(--parchment-lit); border-radius:14px;
-      padding:40px 36px 32px; width:100%; max-width:420px;
-      box-shadow:0 24px 60px rgba(0,0,0,0.5), 0 0 0 1.5px var(--gold);
-      position:relative;
-    }
-    .corner {
-      position:absolute; font-family:'Cinzel',serif; font-size:20px;
-      color:var(--gold); opacity:0.55; user-select:none;
-    }
-    .corner.tl{top:8px;left:12px} .corner.tr{top:8px;right:12px}
-    .corner.bl{bottom:8px;left:12px} .corner.br{bottom:8px;right:12px}
-
-    .shield-wrap { position:relative; display:inline-block; margin-bottom:6px; }
-    .shield-glow {
-      position:absolute; inset:-10px;
-      background:var(--ember); opacity:0.18;
-      border-radius:999px; filter:blur(20px); z-index:0;
-    }
-    .shield-img {
-      position:relative; z-index:1;
-      width:74px; height:auto; display:block; margin:0 auto;
-    }
-
-    .head { text-align:center; margin-bottom:26px; }
-    h1 {
-      font-family:'Cinzel',serif; font-weight:700;
-      font-size:32px; color:var(--gold-bright);
-      letter-spacing:8px; margin-top:14px;
-      text-shadow:0 1px 6px rgba(184,66,0,0.35);
-    }
-    .sub {
-      font-family:'IM Fell English',serif; font-style:italic;
-      color:var(--walnut-mid); font-size:13px;
-      margin-top:4px; letter-spacing:2px;
-    }
-    .subtitle {
-      font-family:'IM Fell English',serif; font-style:italic;
-      color:var(--walnut-light); font-size:13px;
-      margin-top:8px;
-    }
-
-    label {
-      display:block; margin:14px 0 6px;
-      font-family:'Cinzel',serif; font-weight:500; font-size:11px;
-      color:var(--walnut); letter-spacing:2px; text-transform:uppercase;
-    }
-    input[type="text"], input[type="password"] {
-      width:100%; padding:12px 14px;
-      border:1px solid var(--border-hair); border-radius:8px;
-      font-size:15px; color:var(--ink);
-      background:var(--parchment);
-      font-family:'Inter',sans-serif;
-      transition:border-color .15s, background .15s;
-    }
-    input:focus {
-      outline:none; border-color:var(--ember); border-width:2px;
-      padding:11px 13px; background:#fff;
-    }
-    .row {
-      display:flex; align-items:center; margin:16px 0 4px;
-      font-size:13px; color:var(--walnut-mid);
-    }
-    .row input { margin-right:8px; }
-    .row label {
-      margin:0; font-family:'Inter',sans-serif; font-weight:500;
-      color:var(--walnut-mid); font-size:13px;
-      letter-spacing:normal; text-transform:none;
-      cursor:pointer;
-    }
-    button[type="submit"] {
-      width:100%; padding:16px;
-      background:var(--ember); color:var(--parchment-lit);
-      border:2px solid var(--wax-red); border-radius:10px;
-      font-family:'Cinzel',serif; font-weight:700;
-      font-size:14px; letter-spacing:3px; text-transform:uppercase;
-      cursor:pointer; margin-top:22px;
-      box-shadow:0 4px 14px rgba(184,66,0,0.35);
-      transition:transform .15s, background .15s;
-    }
-    button[type="submit"]:hover { background:var(--ember-deep); }
-    button[type="submit"]:active { transform:scale(0.98); }
-
-    .err {
-      background:rgba(160,40,24,0.10); color:var(--wax-red);
-      padding:12px 14px; border-radius:8px; margin-bottom:14px;
-      font-size:13px; border:1px solid var(--wax-red);
-      font-family:'Inter',sans-serif;
-    }
-    .foot {
-      position:fixed; z-index:10;
-      bottom:16px; left:0; right:0;
-      text-align:center;
-      font-family:'IM Fell English',serif; font-style:italic;
-      font-size:11px; color:var(--sandstone-lit);
-      opacity:0.7; letter-spacing:1px;
-      text-shadow:0 1px 3px rgba(0,0,0,0.5);
-    }
-  </style>
-</head>
-<body>
-  <div class="hero-bg"></div>
-  <div class="hero-overlay"></div>
-
-  <div class="center-wrap">
-    <div class="card">
-      <span class="corner tl">❦</span>
-      <span class="corner tr">❦</span>
-
-      <div class="head">
-        <div class="shield-wrap">
-          <div class="shield-glow"></div>
-          <img src="/static/tez-shield.png" alt="Tez Law" class="shield-img">
-        </div>
-        <h1>TARA</h1>
-        <p class="sub">by Tez Law</p>
-        <p class="subtitle">Welcome back. Sign in to continue.</p>
-      </div>
-
-      ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
+  return require("./tez-theme").authPage({
+    title: "Sign in", heading: "Sign in to Tara",
+    sub: "For the firm's staff and consultants.",
+    body: `
+      ${error ? `<div class="auth-err" role="alert">${escapeHtml(error)}</div>` : ""}
       <form method="POST" action="/admin/login">
         ${nextField}
-        <label for="username">Username or email</label>
-        <input type="text" id="username" name="username" value="${escapeHtml(username)}" autofocus required autocomplete="username">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" required autocomplete="current-password">
+        <div class="field"><label for="username">Username or email</label>
+          <input type="text" id="username" name="username" value="${escapeHtml(username)}" autofocus required autocomplete="username" autocapitalize="none" spellcheck="false"></div>
+        <div class="field"><label for="password">Password</label>
+          <input type="password" id="password" name="password" required autocomplete="current-password"></div>
         <div class="row">
           <input type="checkbox" id="remember" name="remember" value="1">
-          <label for="remember">Remember me for 30 days</label>
+          <label for="remember">Keep me signed in for 30 days</label>
         </div>
-        <button type="submit">Sign In</button>
+        <button type="submit" class="btn-primary">Sign in</button>
+      </form>`,
+  });
+}
+
+// Step two: the code. `sent` is what signin-code.send() returned.
+function renderCodePage({ pending, sent = {}, error = null, notice = null } = {}) {
+  const where = sent.channel === "email" ? `by email to <strong>${escapeHtml(sent.masked || "your email")}</strong>`
+    : `by text to the <strong>${escapeHtml(sent.masked || "phone on file")}</strong>`;
+  const other = (sent.others || [])[0];
+  return require("./tez-theme").authPage({
+    title: "Enter your code", heading: "Enter your code",
+    sub: `We sent a 6-digit code ${where}. It is good for 10 minutes.`,
+    body: `
+      ${error ? `<div class="auth-err" role="alert">${escapeHtml(error)}</div>` : ""}
+      ${notice ? `<div class="auth-ok" role="status">${escapeHtml(notice)}</div>` : ""}
+      <form method="POST" action="/admin/login/code">
+        <input type="hidden" name="pending" value="${escapeHtml(pending)}">
+        <input type="hidden" name="channel" value="${escapeHtml(sent.channel || "")}">
+        <input type="hidden" name="masked" value="${escapeHtml(sent.masked || "")}">
+        <div class="field"><label for="code">6-digit code</label>
+          <input class="code-input" type="text" id="code" name="code" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" autocomplete="one-time-code" autofocus required></div>
+        <div class="row">
+          <input type="checkbox" id="trust" name="trust" value="1" checked>
+          <label for="trust">Do not ask on this device for 30 days</label>
+        </div>
+        <button type="submit" class="btn-primary">Finish signing in</button>
       </form>
-
-      <span class="corner bl">❦</span>
-      <span class="corner br">❦</span>
-    </div>
-  </div>
-
-  <p class="foot">Protect your rights — we handle the rest.</p>
-</body></html>`;
+      <div class="auth-alt">
+        <span>No code?</span>
+        <form method="POST" action="/admin/login/resend">
+          <input type="hidden" name="pending" value="${escapeHtml(pending)}">
+          <input type="hidden" name="channel" value="${escapeHtml(sent.channel || "")}">
+          <button type="submit" class="auth-link">Send it again</button>
+        </form>
+        ${other ? `<form method="POST" action="/admin/login/resend">
+          <input type="hidden" name="pending" value="${escapeHtml(pending)}">
+          <input type="hidden" name="channel" value="${escapeHtml(other.channel)}">
+          <button type="submit" class="auth-link">${other.channel === "email" ? "Email it instead" : "Text it instead"}</button>
+        </form>` : ""}
+        <a class="auth-link" href="/admin/login" style="margin-left:auto;">Start over</a>
+      </div>`,
+    foot: "Wrong phone or email on file? Call the firm: 626-678-8677",
+  });
 }
 
 function renderSetupPage({ error = null, username = "", fullName = "" } = {}) {
@@ -934,14 +833,14 @@ function renderSetupPage({ error = null, username = "", fullName = "" } = {}) {
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f7f7f7; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
     .card { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: min(500px, 90vw); }
-    h1 { color: #0C1C36; margin: 0 0 6px 0; font-size: 26px; }
-    .brand { color: #B79C62; font-size: 12px; letter-spacing: 2px; margin-bottom: 16px; font-weight: 600; }
-    .intro { background: #fdf7f0; border-left: 3px solid #B79C62; padding: 12px 14px; border-radius: 4px; margin: 16px 0 20px 0; font-size: 13px; color: #555; }
+    h1 { color: #2B2523; margin: 0 0 6px 0; font-size: 26px; }
+    .brand { color: #A34C00; font-size: 12px; letter-spacing: 2px; margin-bottom: 16px; font-weight: 600; }
+    .intro { background: #FAF8F5; border-left: 3px solid #FF7B00; padding: 12px 14px; border-radius: 4px; margin: 16px 0 20px 0; font-size: 13px; color: #555; }
     label { display: block; margin: 12px 0 4px 0; color: #333; font-size: 13px; font-weight: 600; }
     input[type="text"], input[type="password"] { width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 15px; box-sizing: border-box; }
-    input:focus { outline: none; border-color: #B79C62; }
+    input:focus { outline: none; border-color: #FF7B00; }
     .hint { font-size: 11px; color: #888; margin-top: 3px; }
-    button { width: 100%; padding: 12px; background: #0C1C36; color: white; border: none; border-radius: 4px; font-size: 15px; cursor: pointer; margin-top: 20px; font-weight: 600; }
+    button { width: 100%; padding: 12px; background: #2B2523; color: white; border: none; border-radius: 4px; font-size: 15px; cursor: pointer; margin-top: 20px; font-weight: 600; }
     .err { background: #fee; color: #900; padding: 10px 12px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; border-left: 3px solid #c00; }
   </style>
 </head>
@@ -1003,27 +902,93 @@ function mount(app) {
       if (!user || !verifyPasswordHash(password, user.password_hash)) {
         return res.send(renderLoginPage({ error: "Wrong username or password.", nextUrl, username }));
       }
-      const ttl = remember ? SESSION_TTL_LONG_MS : SESSION_TTL_MS;
-      const token = await makeToken({
-        uid: user.id,
-        u: user.username,
-        n: user.full_name,
-        r: user.role,
-        exp: Date.now() + ttl,
-      });
-      setSessionCookie(res, token, ttl);
-      await updateLastLogin(user.id);
-      // Consultants have their own portal — bounce them there instead of
-      // the firm admin panel (which they can't see anyway).
-      let safeNext;
-      if (user.role === "consultant") {
-        safeNext = nextUrl.startsWith("/consultant") ? nextUrl : "/consultant";
-      } else {
-        safeNext = (nextUrl.startsWith("/admin/") || nextUrl === "/admin") ? nextUrl : "/admin/hearing/notes";
+      // The password is right. Is a code needed as well? (signin-code.js)
+      const signin = require("./signin-code");
+      const cookies = parseCookies(req);
+      const gate = await signin.gate(user, { surface: "web", device: cookies[signin.DEVICE_COOKIE] });
+      if (gate.required) {
+        const sent = await signin.send(user);
+        if (sent.ok) {
+          const pending = await signin.pendingToken(user, { rm: remember ? 1 : 0, nx: nextUrl.slice(0, 300) });
+          return res.send(renderCodePage({ pending, sent }));
+        }
+        if (sent.limited) return res.send(renderLoginPage({ error: sent.error, nextUrl, username }));
+        // Could not be sent on any channel: let them in, and tell the firm.
+        await signin.reportUnsendable(user, sent, "web");
       }
-      res.redirect(safeNext);
+      await finishSignIn(res, user, { remember, nextUrl });
     } catch (err) {
       console.error("[login]:", err.message);
+      res.status(500).send(renderLoginPage({ error: "Login error: " + err.message }));
+    }
+  });
+
+  // Session cookie, last-login stamp, and where to land. Shared by the
+  // password-only path and the code step so they cannot disagree.
+  async function finishSignIn(res, user, { remember = false, nextUrl = "", trustDevice = false } = {}) {
+    const ttl = remember ? SESSION_TTL_LONG_MS : SESSION_TTL_MS;
+    const token = await makeToken({
+      uid: user.id,
+      u: user.username,
+      n: user.full_name,
+      r: user.role,
+      exp: Date.now() + ttl,
+    });
+    setSessionCookie(res, token, ttl);
+    if (trustDevice) {
+      const signin = require("./signin-code");
+      setDeviceCookie(res, signin.DEVICE_COOKIE, await signin.deviceToken(user), signin.DEVICE_DAYS);
+    }
+    await updateLastLogin(user.id);
+    // Consultants have their own portal — bounce them there instead of
+    // the firm admin panel (which they can't see anyway).
+    let safeNext;
+    const next = String(nextUrl || "");
+    if (user.role === "consultant") {
+      safeNext = next.startsWith("/consultant") ? next : "/consultant";
+    } else {
+      safeNext = (next.startsWith("/admin/") || next === "/admin") ? next : "/admin/hearing/notes";
+    }
+    res.redirect(safeNext);
+  }
+
+  // Step two: the code they were sent.
+  app.post("/admin/login/code", async (req, res) => {
+    try {
+      const signin = require("./signin-code");
+      const pending = String(req.body.pending || "");
+      const found = await signin.userFromPending(pending);
+      if (!found) return res.send(renderLoginPage({ error: "That sign-in took too long. Please start again." }));
+      const sent = { channel: String(req.body.channel || ""), masked: String(req.body.masked || "").slice(0, 80) };
+      const out = await signin.check(found.user, req.body.code);
+      if (!out.ok) {
+        const others = (await signin.channelsFor(found.user.id)).filter(c => c.channel !== sent.channel).map(c => ({ channel: c.channel, masked: c.masked }));
+        return res.send(renderCodePage({ pending, sent: { ...sent, others }, error: out.error }));
+      }
+      await finishSignIn(res, found.user, { remember: !!found.payload.rm, nextUrl: found.payload.nx || "", trustDevice: !!req.body.trust });
+    } catch (err) {
+      console.error("[login code]:", err.message);
+      res.status(500).send(renderLoginPage({ error: "Login error: " + err.message }));
+    }
+  });
+
+  app.post("/admin/login/resend", async (req, res) => {
+    try {
+      const signin = require("./signin-code");
+      const pending = String(req.body.pending || "");
+      const found = await signin.userFromPending(pending);
+      if (!found) return res.send(renderLoginPage({ error: "That sign-in took too long. Please start again." }));
+      const prefer = ["sms", "email"].includes(req.body.channel) ? req.body.channel : null;
+      const sent = await signin.send(found.user, { prefer });
+      if (!sent.ok) {
+        const channels = await signin.channelsFor(found.user.id);
+        const c = channels.find(x => x.channel === prefer) || channels[0] || {};
+        return res.send(renderCodePage({ pending, sent: { channel: c.channel, masked: c.masked, others: channels.filter(x => x !== c) },
+          error: sent.limited ? sent.error : "The code could not be sent just now. Try the other option, or call the firm." }));
+      }
+      res.send(renderCodePage({ pending, sent, notice: "A new code is on its way." }));
+    } catch (err) {
+      console.error("[login resend]:", err.message);
       res.status(500).send(renderLoginPage({ error: "Login error: " + err.message }));
     }
   });
@@ -1091,11 +1056,46 @@ function mount(app) {
     });
   });
 
+  // The two sign-in code switches (signin-code.js) — admin only.
+  app.post("/admin/users/signin-code", requireRole("admin"), async (req, res) => {
+    try {
+      await require("./signin-code").setSettings(
+        { web_required: req.body.web_required === "1", app_required: req.body.app_required === "1" },
+        req.user && (req.user.u || req.user.uid));
+      res.redirect("/admin/users");
+    } catch (err) {
+      console.error("[signin-code settings]:", err.message);
+      res.status(500).send("Error: " + err.message);
+    }
+  });
+
   // User management page — admin only
   app.get("/admin/users", requireRole("admin"), async (req, res) => {
     try {
       const users = await listUsers();
       const existingUsernames = new Set(users.map(u => u.username));
+
+      // Sign-in codes (signin-code.js): the two switches, and who is covered.
+      const signin = require("./signin-code");
+      const codeSettings = await signin.getSettings();
+      const reachable = (u) => !!signin.e164(u.phone) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(u.email || "").trim());
+      const uncovered = users.filter(u => !u.disabled && !reachable(u));
+      const signinCard = `
+        <div style="background:white; padding:16px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee; border-left:4px solid #FF7B00;">
+          <strong style="color:#2B2523;">Sign-in code</strong>
+          <div style="font-size:12.5px; color:#555; margin:4px 0 10px; line-height:1.55;">
+            After the password, a 6-digit code goes to the phone (or email) on file for the person signing in.
+            Someone with <em>no</em> phone and <em>no</em> email on file still signs in with the password alone &mdash;
+            ${uncovered.length
+              ? `<strong style="color:#A34C00;">${uncovered.length} account${uncovered.length === 1 ? " is" : "s are"} in that position now: ${uncovered.map(u => escapeHtml(u.username)).join(", ")}.</strong> Add a phone in the table below to cover ${uncovered.length === 1 ? "it" : "them"}.`
+              : `every active account has one, so everyone is covered.`}
+          </div>
+          <form method="POST" action="/admin/users/signin-code" style="display:flex; gap:8px 22px; flex-wrap:wrap; align-items:center; margin:0;">
+            <label style="display:flex; gap:7px; align-items:center; font-size:13px; margin:0;"><input type="checkbox" name="web_required" value="1" ${codeSettings.web_required ? "checked" : ""}> Ask for a code on the website</label>
+            <label style="display:flex; gap:7px; align-items:center; font-size:13px; margin:0;" title="Leave this off until everyone has the new app build. Older builds cannot show the code step and will be told to update."><input type="checkbox" name="app_required" value="1" ${codeSettings.app_required ? "checked" : ""}> Require it in the phone app (older builds must update)</label>
+            <button type="submit" style="background:#2B2523; color:white; border:none; padding:7px 14px; border-radius:3px; cursor:pointer; font-size:12px; font-weight:600;">Save</button>
+          </form>
+        </div>`;
 
       const rows = users.map(u => {
         const roleInfo = ROLES[u.role] || { label: u.role, color: "#666" };
@@ -1107,18 +1107,18 @@ function mount(app) {
             <span style="background:${roleInfo.color}; color:white; padding:3px 8px; border-radius:10px; font-size:11px; font-weight:600;">${escapeHtml(roleInfo.label)}</span>
           </td>
           <td style="white-space:nowrap;">
-            ${u.phone ? escapeHtml(u.phone) : '<span style="color:#c60; font-style:italic;">none</span>'}
-            <button type="button" data-id="${u.id}" data-username="${escapeHtml(u.username)}" data-phone="${escapeHtml(u.phone || "")}" onclick="editPhone(this)" title="Set or change the phone number" style="background:none; border:none; color:#0C1C36; cursor:pointer; font-size:11px; text-decoration:underline; padding:0 0 0 6px;">${u.phone ? "edit" : "add"}</button>
+            ${u.phone ? escapeHtml(u.phone) : (u.email ? '<span style="color:#888; font-style:italic;" title="Sign-in codes go to their email">none (code by email)</span>' : '<span style="color:#c60; font-style:italic;" title="No phone or email: signs in with the password alone">none &mdash; no code</span>')}
+            <button type="button" data-id="${u.id}" data-username="${escapeHtml(u.username)}" data-phone="${escapeHtml(u.phone || "")}" onclick="editPhone(this)" title="Set or change the phone number" style="background:none; border:none; color:#2B2523; cursor:pointer; font-size:11px; text-decoration:underline; padding:0 0 0 6px;">${u.phone ? "edit" : "add"}</button>
           </td>
           <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '<span style="color:#c00; font-style:italic;">never</span>'}</td>
           <td>${new Date(u.created_at).toLocaleDateString()}</td>
           <td>
             ${req.user && req.user.uid !== u.id
               ? `<button type="button" onclick="editUser(${u.id}, '${escapeHtml(u.username)}', '${escapeHtml(u.role)}')" style="background:#eee; color:#333; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Edit role</button>
-                 <a href="/admin/users/${u.id}/permissions" style="background:#0C1C36; color:white; text-decoration:none; padding:5px 10px; border-radius:3px; font-size:11px; margin-right:4px; display:inline-block;">🔐 Permissions</a>
-                 <button type="button" onclick="resetUserPassword(${u.id}, '${escapeHtml(u.username)}')" style="background:#B79C62; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Reset password</button>
+                 <a href="/admin/users/${u.id}/permissions" style="background:#2B2523; color:white; text-decoration:none; padding:5px 10px; border-radius:3px; font-size:11px; margin-right:4px; display:inline-block;">🔐 Permissions</a>
+                 <button type="button" onclick="resetUserPassword(${u.id}, '${escapeHtml(u.username)}')" style="background:#A34C00; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Reset password</button>
                  <form method="POST" action="/admin/users/${u.id}/delete" style="display:inline;" onsubmit="return confirm('Delete user ${escapeHtml(u.username)}? This cannot be undone.');"><button type="submit" style="background:#c00; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Delete</button></form>`
-              : `<a href="/admin/users/${u.id}/permissions" style="background:#0C1C36; color:white; text-decoration:none; padding:5px 10px; border-radius:3px; font-size:11px; display:inline-block;">🔐 My permissions</a>`}
+              : `<a href="/admin/users/${u.id}/permissions" style="background:#2B2523; color:white; text-decoration:none; padding:5px 10px; border-radius:3px; font-size:11px; display:inline-block;">🔐 My permissions</a>`}
           </td>
         </tr>`;
       }).join("");
@@ -1132,16 +1132,16 @@ function mount(app) {
       ];
       const missingStaff = KNOWN_STAFF.filter(s => !existingUsernames.has(s.username));
       const quickAddHTML = missingStaff.length ? `
-        <div style="background:#fdf7f0; padding:15px 20px; border-radius:6px; margin-bottom:15px; border-left:4px solid #B79C62;">
+        <div style="background:#FAF8F5; padding:15px 20px; border-radius:6px; margin-bottom:15px; border-left:4px solid #FF7B00;">
           <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:8px;">
             <div>
-              <strong style="color:#0C1C36;">⚡ Quick-add Tez Law staff</strong>
+              <strong style="color:#2B2523;">⚡ Quick-add Tez Law staff</strong>
               <div style="font-size:12px; color:#666; margin-top:3px;">Click a name to pre-fill the form below. Set a strong temporary password and share with the person.</div>
             </div>
           </div>
           <div style="display:flex; flex-wrap:wrap; gap:6px;">
             ${missingStaff.map(s => `
-              <button type="button" onclick="quickAddStaff(${JSON.stringify(s).replace(/"/g, "&quot;")})" style="background:white; border:1px solid #B79C62; color:#0C1C36; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:12px;">
+              <button type="button" onclick="quickAddStaff(${JSON.stringify(s).replace(/"/g, "&quot;")})" style="background:white; border:1px solid #FF7B00; color:#2B2523; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:12px;">
                 <strong>${escapeHtml(s.full_name)}</strong>
                 <span style="color:#666; font-size:11px; margin-left:6px;">${escapeHtml(s.note)}</span>
               </button>
@@ -1153,7 +1153,7 @@ function mount(app) {
       // Role legend — helps JJ pick the right one
       const roleLegend = `
         <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee;">
-          <strong style="color:#0C1C36;">📋 Role permissions</strong>
+          <strong style="color:#2B2523;">📋 Role permissions</strong>
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px; margin-top:10px;">
             ${Object.entries(ROLES).map(([key, r]) => `
               <div style="border-left:3px solid ${r.color}; padding:8px 12px;">
@@ -1185,8 +1185,9 @@ function mount(app) {
 
       const hearingNotes = require("./hearing-notes");
       const body = `
-        <div class="page-header"><h1>👤 Admin Users</h1></div>
+        <div class="page-header"><h1>Admin Users</h1></div>
 
+        ${signinCard}
         ${quickAddHTML}
         ${roleLegend}
 
@@ -1198,7 +1199,7 @@ function mount(app) {
         </table>
 
         <div style="background:white; padding:20px; border-radius:6px; margin-top:20px; border:1px solid #eee;">
-          <h3 style="margin:0 0 12px 0; color:#0C1C36;">➕ Add a user</h3>
+          <h3 style="margin:0 0 12px 0; color:#2B2523;">➕ Add a user</h3>
           <form method="POST" action="/admin/users/new" onsubmit="return tezCheckNewUser()">
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
               <div>
@@ -1252,16 +1253,16 @@ function mount(app) {
               </div>
             </div>
             <div style="margin-top:14px; text-align:right;">
-              <button type="submit" style="background:#0C1C36; color:white; padding:10px 18px; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Create user</button>
+              <button type="submit" style="background:#2B2523; color:white; padding:10px 18px; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Create user</button>
             </div>
           </form>
         </div>
 
-        <div style="background:#f9f9f9; padding:15px 20px; border-radius:6px; margin-top:20px; font-size:13px; color:#666; border-left:3px solid #B79C62;">
+        <div style="background:#f9f9f9; padding:15px 20px; border-radius:6px; margin-top:20px; font-size:13px; color:#666; border-left:3px solid #FF7B00;">
           <strong>🔑 Change your password:</strong>
           <form method="POST" action="/admin/users/change-password" style="display:inline-flex; gap:6px; align-items:center; margin-left:8px;">
             <input type="password" name="new_password" placeholder="new password (min 8 chars)" required minlength="8" style="padding:6px 10px; border:1px solid #ccc; border-radius:3px; width:200px;">
-            <button type="submit" style="background:#B79C62; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:12px;">Change</button>
+            <button type="submit" style="background:#A34C00; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:12px;">Change</button>
           </form>
           <div style="font-size:11px; margin-top:4px; color:#888;">You'll be signed out and asked to log in again after changing.</div>
         </div>
@@ -1354,14 +1355,14 @@ function mount(app) {
               modal.style.cssText = "position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:10000; display:flex; align-items:center; justify-content:center;";
               modal.innerHTML =
                 '<div style="background:white; padding:30px; border-radius:8px; max-width:480px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
-                  '<h2 style="margin:0 0 12px 0; color:#0C1C36;">🔑 Password reset</h2>' +
+                  '<h2 style="margin:0 0 12px 0; color:#2B2523;">🔑 Password reset</h2>' +
                   '<p style="color:#666; font-size:13px;">Share this temporary password with <strong>' + data.full_name + '</strong> (' + data.username + ') via a secure channel. It will only be shown once.</p>' +
-                  '<div style="background:#fdf7f0; padding:15px; border-radius:6px; text-align:center; margin:15px 0; border:2px solid #B79C62;">' +
-                    '<code style="font-size:22px; font-weight:600; color:#0C1C36; letter-spacing:2px; font-family:monospace;">' + data.temporary_password + '</code>' +
+                  '<div style="background:#FAF8F5; padding:15px; border-radius:6px; text-align:center; margin:15px 0; border:2px solid #FF7B00;">' +
+                    '<code style="font-size:22px; font-weight:600; color:#2B2523; letter-spacing:2px; font-family:monospace;">' + data.temporary_password + '</code>' +
                   '</div>' +
                   '<div style="display:flex; gap:8px; justify-content:flex-end;">' +
                     '<button onclick="navigator.clipboard.writeText(\\'' + data.temporary_password + '\\'); this.textContent=\\'Copied\\';" style="background:#eee; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">📋 Copy</button>' +
-                    '<button onclick="this.closest(\\'div\\').parentElement.parentElement.remove()" style="background:#0C1C36; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">Done</button>' +
+                    '<button onclick="this.closest(\\'div\\').parentElement.parentElement.remove()" style="background:#2B2523; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">Done</button>' +
                   '</div>' +
                   '<div style="font-size:11px; color:#888; margin-top:12px;">The user should log in and immediately change their password via the "Change your password" box.</div>' +
                 '</div>';
@@ -1623,7 +1624,7 @@ function mount(app) {
 
       const body = `
         <div class="page-header">
-          <h1>🔐 Permissions — ${escapeHtml(user.full_name || user.username)}</h1>
+          <h1>Permissions — ${escapeHtml(user.full_name || user.username)}</h1>
           <a href="/admin/users" class="back-link">← Users</a>
         </div>
 
@@ -1636,8 +1637,8 @@ function mount(app) {
           ${groupBlocks}${otherBlock}
 
           <div style="margin-top:20px; display:flex; gap:10px; align-items:center;">
-            <button type="button" onclick="savePerms()" id="saveBtn" style="background:#0C1C36; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💾 Save Permissions</button>
-            <button type="button" onclick="resetToRoleDefaults()" style="background:#f5f2ea; color:#0C1C36; padding:12px 24px; border:1px solid #B79C62; border-radius:6px; cursor:pointer;">↺ Reset to Role Defaults</button>
+            <button type="button" onclick="savePerms()" id="saveBtn" style="background:#2B2523; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💾 Save Permissions</button>
+            <button type="button" onclick="resetToRoleDefaults()" style="background:#F3EFE9; color:#2B2523; padding:12px 24px; border:1px solid #FF7B00; border-radius:6px; cursor:pointer;">↺ Reset to Role Defaults</button>
             <span id="permStatus" style="color:#666; font-size:12px; margin-left:10px;"></span>
           </div>
         </form>
@@ -1679,7 +1680,7 @@ function mount(app) {
       if (hearingNotes && hearingNotes.renderAdminChrome) {
         res.send(hearingNotes.renderAdminChrome({ title: "User Permissions", body, activeItem: "users" }));
       } else {
-        res.send(`<html><head><title>Permissions</title><style>body{font-family:system-ui;padding:20px;max-width:960px;margin:auto;background:#faf9f5;} .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;} .back-link{color:#666;text-decoration:none;}</style></head><body>${body}</body></html>`);
+        res.send(`<html><head><title>Permissions</title><style>body{font-family:system-ui;padding:20px;max-width:960px;margin:auto;background:#FAF8F5;} .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;} .back-link{color:#666;text-decoration:none;}</style></head><body>${body}</body></html>`);
       }
     } catch (err) {
       console.error("[permissions page]:", err.message);
@@ -1693,7 +1694,7 @@ function mount(app) {
       const roleGranted = (PERMISSIONS[k] || []).includes(userRole);
       const hasOverride = overrides[k] !== undefined;
       const effective = hasOverride ? overrides[k] : roleGranted;
-      const bg = hasOverride ? "#fff8e1" : (effective ? "#e8f5e9" : "#fafaf7");
+      const bg = hasOverride ? "#fff8e1" : (effective ? "#e8f5e9" : "#FAF8F5");
       const explainer = hasOverride
         ? (effective ? "✎ Overridden ON" : "✎ Overridden OFF")
         : (effective ? "Role default: ON" : "Role default: OFF");
@@ -1704,7 +1705,7 @@ function mount(app) {
             <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
               <input type="checkbox" data-perm-key="${escapeHtml(k)}" ${effective ? "checked" : ""} style="width:18px; height:18px; cursor:pointer;">
               <div>
-                <div style="font-size:13px; color:#0C1C36;">${escapeHtml(PERMISSION_LABELS[k] || k)}</div>
+                <div style="font-size:13px; color:#2B2523;">${escapeHtml(PERMISSION_LABELS[k] || k)}</div>
                 <div style="font-size:10px; color:#888; font-family:ui-monospace, Menlo, monospace; margin-top:2px;">${escapeHtml(k)}</div>
               </div>
             </label>
@@ -1716,7 +1717,7 @@ function mount(app) {
     }).join("");
     return `
       <div style="background:white; border-radius:8px; border:1px solid #eee; margin-bottom:12px; overflow:hidden;">
-        <div style="padding:10px 16px; background:#0C1C36; color:white; font-weight:600; font-size:13px;">${escapeHtml(label)}</div>
+        <div style="padding:10px 16px; background:#2B2523; color:white; font-weight:600; font-size:13px;">${escapeHtml(label)}</div>
         <table style="width:100%; border-collapse:collapse;">
           <tbody>${rows}</tbody>
         </table>

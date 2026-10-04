@@ -281,7 +281,7 @@ async function getClientDetail(key) {
       conds.push(`POSITION(LOWER(TRIM(client_name)) IN $${params.length}) > 0`);
     }
     if (!conds.length) return [];
-    const sql = `SELECT id, hearing_date, hearing_type, judge_name, ${extraCols}, created_at
+    const sql = `SELECT id, hearing_date, judge_name, ${extraCols}, created_at
                  FROM ${table}
                  WHERE ${conds.join(' OR ')}
                  ORDER BY hearing_date DESC NULLS LAST, created_at DESC
@@ -297,7 +297,7 @@ async function getClientDetail(key) {
 
   const hearingNotesRaw = await fetchNotes(
     'hearing_notes',
-    'disposition, paralegal_summary, client_summary, sent_to_paralegal_at, sent_to_client_at'
+    'hearing_type, disposition, paralegal_summary, client_summary, sent_to_paralegal_at, sent_to_client_at'
   );
   const hearingNotes = hearingNotesRaw.map(n => ({
     id: n.id,
@@ -315,7 +315,10 @@ async function getClientDetail(key) {
 
   const individualNotesRaw = await fetchNotes(
     'individual_hearing_notes',
-    'outcome, notes'
+    // This table has no hearing_type, outcome or notes column. Asking for
+    // them made the query fail every time, so a client's individual
+    // hearings never appeared here. These are the columns it does have.
+    "'Individual' AS hearing_type, COALESCE(disposition, '') AS outcome, COALESCE(NULLIF(disposition_notes, ''), paralegal_summary, '') AS notes"
   );
   const individualNotes = individualNotesRaw.map(n => ({
     id: n.id,
@@ -377,7 +380,7 @@ function renderMobileSearchPage() {
 <title>Zara — Client Search</title>
 
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#0C1C36">
+<meta name="theme-color" content="#2B2523">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Zara">
@@ -385,11 +388,11 @@ function renderMobileSearchPage() {
 
 <style>
   :root {
-    --navy: #0C1C36;
-    --gold: #B79C62;
-    --canvas: #f5f2ea;
+    --navy: #2B2523;
+    --gold: #A34C00;
+    --canvas: #F3EFE9;
     --card: #ffffff;
-    --text: #0C1C36;
+    --text: #2B2523;
     --muted: #6b6b6b;
     --danger: #c62828;
     --success: #2e7d32;
@@ -534,7 +537,7 @@ function renderMobileSearchPage() {
     flex-wrap: wrap;
   }
   .result-hearing {
-    background: #fdf7f0;
+    background: #FAF8F5;
     border-left: 3px solid var(--gold);
     padding: 6px 10px;
     margin-top: 8px;
@@ -804,18 +807,18 @@ function renderMobileClientPage(client) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <title>${escapeHtml(client.client_name || "Client")} — Zara</title>
-<meta name="theme-color" content="#0C1C36">
+<meta name="theme-color" content="#2B2523">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="https://tezlawfirm.com/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png">
 <link rel="manifest" href="/manifest.json">
 <style>
   :root {
-    --navy: #0C1C36;
-    --gold: #B79C62;
-    --canvas: #f5f2ea;
+    --navy: #2B2523;
+    --gold: #A34C00;
+    --canvas: #F3EFE9;
     --card: #ffffff;
-    --text: #0C1C36;
+    --text: #2B2523;
     --muted: #6b6b6b;
     --safe-top: env(safe-area-inset-top);
     --safe-bottom: env(safe-area-inset-bottom);
@@ -867,7 +870,7 @@ function renderMobileClientPage(client) {
     flex-wrap: wrap;
   }
   .badge {
-    background: rgba(183,156,98,.25);
+    background: rgba(255,123,0,.25);
     color: var(--gold);
     padding: 2px 8px;
     border-radius: 8px;
@@ -939,7 +942,7 @@ function renderMobileClientPage(client) {
     align-items: stretch;
   }
   .hearing-date {
-    background: linear-gradient(180deg, #fdf7f0 0%, #f7ede0 100%);
+    background: linear-gradient(180deg, #FAF8F5 0%, #f7ede0 100%);
     border-radius: 8px;
     padding: 6px 8px;
     text-align: center;
@@ -994,7 +997,7 @@ function renderMobileClientPage(client) {
     display: block;
     font-weight: 600;
     font-size: 15px;
-    box-shadow: 0 3px 12px rgba(183,156,98,.3);
+    box-shadow: 0 3px 12px rgba(255,123,0,.3);
   }
   .cta-btn:active { transform: scale(.98); }
   .cta-secondary {
@@ -1120,7 +1123,7 @@ function renderMobileClientPage(client) {
 // Shared mobile chrome with bottom tab bar. Every mobile page uses this.
 function renderMobileChrome({ title = "TEZ", body, activeTab = "home", user = {} }) {
   const tab = (key, href, icon, label) => `
-    <a href="${href}" style="flex:1; text-align:center; padding:8px 4px; text-decoration:none; color:${activeTab === key ? '#B79C62' : '#666'}; font-size:10px; font-weight:${activeTab === key ? '700' : '500'};">
+    <a href="${href}" style="flex:1; text-align:center; padding:8px 4px; text-decoration:none; color:${activeTab === key ? '#A34C00' : '#666'}; font-size:10px; font-weight:${activeTab === key ? '700' : '500'};">
       <div style="font-size:22px; line-height:1;">${icon}</div>
       <div style="margin-top:3px;">${label}</div>
     </a>`;
@@ -1133,12 +1136,12 @@ function renderMobileChrome({ title = "TEZ", body, activeTab = "home", user = {}
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="TEZ">
-  <meta name="theme-color" content="#0C1C36">
+  <meta name="theme-color" content="#2B2523">
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png">
   <title>${escapeHtml(title)} — TEZ</title>
   <style>
-    :root { --gold: #B79C62; --navy: #0C1C36; --light: #faf9f5; --border: #e5e5e5; }
+    :root { --gold: #A34C00; --navy: #2B2523; --light: #FAF8F5; --border: #e5e5e5; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; padding: 0; background: var(--light); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--navy); overscroll-behavior: none; }
     header.appbar { position: sticky; top: 0; z-index: 100; background: var(--navy); color: white; padding: 12px 16px; padding-top: calc(12px + env(safe-area-inset-top)); display: flex; align-items: center; gap: 10px; }
@@ -1148,14 +1151,14 @@ function renderMobileChrome({ title = "TEZ", body, activeTab = "home", user = {}
     nav.tabbar { position: fixed; bottom: 0; left: 0; right: 0; background: white; border-top: 1px solid var(--border); display: flex; padding-bottom: env(safe-area-inset-bottom); z-index: 100; box-shadow: 0 -1px 3px rgba(0,0,0,0.06); }
     .card { background: white; border-radius: 12px; padding: 14px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
     .card-tap { display: block; text-decoration: none; color: inherit; }
-    .card-tap:active { background: #f5f2ea; }
+    .card-tap:active { background: #F3EFE9; }
     .stat-tile { background: white; border-radius: 12px; padding: 14px; text-align: center; }
     .stat-tile .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
     .stat-tile .value { font-size: 28px; font-weight: 700; color: var(--navy); margin-top: 4px; }
     .btn { display: block; width: 100%; padding: 14px; background: var(--gold); color: white; text-align: center; text-decoration: none; border-radius: 10px; font-weight: 600; font-size: 15px; border: none; cursor: pointer; margin-bottom: 10px; }
     .btn:active { background: #a08a55; }
     .btn-secondary { background: white; color: var(--navy); border: 1px solid var(--border); }
-    .btn-secondary:active { background: #f5f2ea; }
+    .btn-secondary:active { background: #F3EFE9; }
     .section-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin: 20px 0 8px; font-weight: 600; }
     .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; color: white; }
     .badge-urgent { background: #c62828; }
@@ -1420,7 +1423,7 @@ async function renderMobileTaskDetail(id) {
   ]);
 
   const priBadge = task.priority === "urgent" ? "urgent" : task.priority === "high" ? "high" : task.priority === "low" ? "low" : "normal";
-  const statusColor = { pending: "#B79C62", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" }[task.status] || "#666";
+  const statusColor = { pending: "#A34C00", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" }[task.status] || "#666";
 
   const mHtml = mList.length ? mList.map(m => {
     const isDone = m.status === "completed";
@@ -1650,7 +1653,7 @@ function renderMobileClients() {
           if (!d.results.length) { results.innerHTML = '<div class="empty">No matches for "' + escapeHtml(term) + '"</div>'; return; }
           results.innerHTML = d.results.map(c => \`
             <a href="/admin/mobile/client/\${encodeURIComponent(c.key)}" class="card card-tap">
-              <div style="font-weight:600; color:#0C1C36; font-size:14px;">\${escapeHtml(c.client_name || "(unnamed)")}</div>
+              <div style="font-weight:600; color:#2B2523; font-size:14px;">\${escapeHtml(c.client_name || "(unnamed)")}</div>
               \${c.a_number ? '<div style="font-size:11px; color:#888;">' + escapeHtml(c.a_number) + '</div>' : ''}
               \${c.upcoming_hearing_date ? '<div style="font-size:12px; color:#0061FF; margin-top:3px;">📅 Next: ' + new Date(c.upcoming_hearing_date).toLocaleDateString() + ' — ' + escapeHtml(c.upcoming_hearing_type || '') + '</div>' : ''}
               <div style="font-size:11px; color:#666; margin-top:2px;">\${c.total_hearings} hearing\${c.total_hearings === 1 ? '' : 's'}</div>

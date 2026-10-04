@@ -28,7 +28,7 @@ const axios = require("axios");
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = "claude-sonnet-4-5-20250929";
 
-const brand = { gold: "#B79C62", navy: "#0C1C36" };
+const brand = { gold: "#A34C00", navy: "#2B2523" };
 
 // ─── Motion type definitions ─────────────────────────
 
@@ -666,7 +666,7 @@ function renderMotionListPage(motions, filters = {}) {
     const dt = new Date(m.created_at).toLocaleDateString();
     const statusColor = m.status === "filed" ? "#2e7d32"
                        : m.status === "reviewed" ? "#0061FF"
-                       : "#B79C62";
+                       : "#A34C00";
     return `
       <tr style="border-bottom:1px solid #eee;">
         <td style="padding:10px 12px;"><a href="/admin/motions/${m.id}" style="color:${brand.gold}; font-weight:600; text-decoration:none;">${escapeHtml(m.title || type)}</a></td>
@@ -686,7 +686,7 @@ function renderMotionListPage(motions, filters = {}) {
 
   return `
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
-    <h1 style="margin:0;">📜 Court Motions</h1>
+    <h1 style="margin:0;">Court Motions</h1>
     <div style="display:flex; gap:8px;">
       <a href="/admin/motions/templates" style="background:#eee; color:#333; padding:9px 16px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px;">📋 Templates</a>
       <a href="/admin/motions/new" style="background:${brand.gold}; color:white; padding:9px 16px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px;">+ New motion</a>
@@ -741,7 +741,7 @@ function renderNewMotionForm(prefill = {}) {
 
   return `
   <div class="page-header">
-    <h1>📜 New Motion</h1>
+    <h1>New Motion</h1>
     <a href="/admin/motions" class="back-link">← All motions</a>
   </div>
 
@@ -820,7 +820,7 @@ function renderNewMotionForm(prefill = {}) {
       <div style="font-size:16px; font-weight:600; color:${brand.navy}; margin-bottom:8px;">Claude is drafting your motion…</div>
       <div id="gen-progress" style="font-size:12px; color:#666;">Analyzing case history…</div>
       <div style="background:#eee; height:5px; border-radius:3px; margin-top:16px; overflow:hidden;">
-        <div id="gen-bar" style="background:linear-gradient(to right, ${brand.gold}, #d4b979); height:100%; width:10%; transition:width 0.5s;"></div>
+        <div id="gen-bar" style="background:linear-gradient(to right, ${brand.gold}, #E8E3DC); height:100%; width:10%; transition:width 0.5s;"></div>
       </div>
       <div style="font-size:11px; color:#888; margin-top:14px;">Usually takes 15-45 seconds.</div>
     </div>
@@ -871,7 +871,7 @@ function renderNewMotionForm(prefill = {}) {
         const m = matches[i];
         const escStr = (s) => String(s || "").replace(/'/g, "\\\\'").replace(/&/g, "&amp;").replace(/</g, "&lt;");
         html += '<div onclick="selectClient(' + i + ')" style="padding:8px 10px; margin-bottom:4px; background:white; border:1px solid #ddd; border-radius:4px; cursor:pointer; font-size:12px;" onmouseover="this.style.background=\\'#fffbe6\\'" onmouseout="this.style.background=\\'white\\'">';
-        html +=   '<div style="font-weight:600; color:#0C1C36;">' + escStr(m.client_name || "(no name)") + (m.a_number ? ' <span style="color:#888; font-size:11px;">' + escStr(m.a_number) + '</span>' : '') + '</div>';
+        html +=   '<div style="font-weight:600; color:#2B2523;">' + escStr(m.client_name || "(no name)") + (m.a_number ? ' <span style="color:#888; font-size:11px;">' + escStr(m.a_number) + '</span>' : '') + '</div>';
         if (m.court_name) html += '<div style="color:#666; margin-top:2px;">📍 ' + escStr(m.court_name) + '</div>';
         if (m.judge_name) html += '<div style="color:#666;">⚖️ ' + escStr(m.judge_name) + '</div>';
         if (m.last_hearing_date) {

@@ -125,7 +125,19 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   const portal = fs.readFileSync(path.join(REPO, "consultant-portal.js"), "utf8");
   const appApi = fs.readFileSync(path.join(REPO, "app-api.js"), "utf8");
   check("the three pages are consultant-only", ['"/consultant/clients", requireConsultant', '"/consultant/clients/new", requireConsultant', '"/consultant/client/:key", requireConsultant'].every(s => server.includes(s)));
-  check("the portal has My Clients and Add Client tabs", /href: "\/consultant\/clients", label: "My clients"/.test(portal) && /href: "\/consultant\/clients\/new", label: "Add client"/.test(portal));
+  {
+    // Asked of the page a consultant is actually sent, in both languages.
+    // (This used to look for `label: "My clients"` in the source; the labels
+    // moved into the English/Chinese table and the literal went with them.)
+    const P = require("../consultant-portal");
+    const tab = (html, href) => (html.match(new RegExp('<a href="' + href.replace(/\//g, "\\/") + '"[^>]*>([\\s\\S]*?)<\\/a>')) || [])[1] || "";
+    const en = P.renderChrome({ title: "t", user: { uid: 5, n: "Luna", r: "consultant" }, body: "" });
+    const zh = P.renderChrome({ title: "t", user: { uid: 5, n: "Luna", r: "consultant", lang: "zh" }, body: "" });
+    check("the portal has My Clients and Add Client tabs",
+      /My clients/.test(tab(en, "/consultant/clients")) && /Add client/.test(tab(en, "/consultant/clients/new")) &&
+      /我的客户/.test(tab(zh, "/consultant/clients")) && /添加客户/.test(tab(zh, "/consultant/clients/new")),
+      [tab(en, "/consultant/clients"), tab(zh, "/consultant/clients/new")]);
+  }
   check("add, search and edit routes exist and are consultant-only", /app\.post\("\/api\/consultant\/clients", requireBearer, requireConsultantRole/.test(appApi) && /app\.patch\("\/api\/consultant\/clients\/:key", requireBearer, requireConsultantRole/.test(appApi));
   const listRoute = (appApi.match(/app\.get\("\/api\/consultant\/clients", requireBearer[\s\S]*?\n  \}\);/) || [""])[0];
   check("search stays inside the consultant's own clients",
@@ -202,7 +214,11 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   check("nothing a person reads says 'work order'",
     rendered.every(h => !/work.?orders?/i.test(noSvg(h))) && !/work orders?/i.test(bundle.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")) && !/work order/i.test(fromNotify),
     (noSvg(rendered.join(" ")).match(/.{30}work.?orders?.{20}/i) || [fromNotify])[0]);
-  check("the tabs read Tasks and New task", /label: "Tasks" \}/.test(portal) && /label: "New task" \}/.test(portal));
+  {
+    const tab = (html, href) => (html.match(new RegExp('<a href="' + href.replace(/\//g, "\\/") + '"[^>]*>([\\s\\S]*?)<\\/a>')) || [])[1] || "";
+    check("the tabs read Tasks and New task", /^\s*Tasks/.test(tab(rendered[0], "/consultant")) && /New task/.test(tab(rendered[0], "/consultant/new")),
+      [tab(rendered[0], "/consultant"), tab(rendered[0], "/consultant/new")]);
+  }
   check("the dashboard says a task is awaiting approval", /Awaiting approval/.test(rendered[0]) && /An attorney or manager approves a task before the firm starts on it/.test(rendered[0]));
   check("the form says so before they send it, and sends to the route that enforces it",
     /Send for approval/.test(rendered[1]) && /fetch\("\/api\/consultant\/tasks"/.test(rendered[1]));

@@ -79,6 +79,33 @@ async function loadAlertableClients() {
   }
 }
 
+// The headlines a person may send by hand, in the order the form offers them.
+const HAND_KINDS = ["update", "action", "document", "status", "court_mail", "hearing_set", "hearing_moved", "deadline"];
+
+/**
+ * Send one alert by hand. Used by the firm's alerts page (admin, manager) and
+ * by the consultant-tasks page (attorneys too) — JJ wanted attorneys able to
+ * tell a broker something happened without being given the page that edits
+ * brokers' email addresses and phone numbers.
+ *
+ * The sender chooses a client and a headline. There is no text: see notify.js.
+ * Returns { ok, text } — text is what to show the sender either way.
+ */
+async function sendByHand({ clientKey, kind, user }) {
+  const key = String(clientKey || "").trim().slice(0, 200);
+  const k = String(kind || "").trim();
+  if (!key || !HAND_KINDS.includes(k) || !notify.KINDS[k]) return { ok: false, text: "Choose a client and what happened." };
+  const who = (user && (user.uid || user.id)) || 0;
+  const q = await notify.notifyAndFlush({ clientKey: key, kind: k, ref: `manual-${who}-${Date.now()}` });
+  try { await db.logAudit(String((user && (user.u || user.uid)) || "firm"), "consultant_alert_sent", key, null, `${k} · ${q.recipients} recipient(s)`); }
+  catch { /* audit is best-effort */ }
+  if (!q.recipients) return { ok: false, text: "No consultant is assigned to that client, so nobody was told." };
+  const missed = q.unreachable.length
+    ? ` ${q.unreachable.length} could not be reached outside the portal (${q.unreachable.map(u => `${u.username}: ${u.why}`).join("; ")}) — they will still see it when they sign in.`
+    : "";
+  return { ok: true, text: `${notify.KINDS[k].label}: ${q.recipients} consultant${q.recipients === 1 ? "" : "s"} told.${missed}` };
+}
+
 async function loadOutbox(limit = 60) {
   await notify.initTables();
   const r = await db.query(
@@ -98,12 +125,12 @@ async function counts() {
   return out;
 }
 
-const STATUS_COLOR = { sent: "#2e7d32", pending: "#B45309", failed: "#A02818" };
+const STATUS_COLOR = { sent: "#2e7d32", pending: "#B45309", failed: "#9C2B1E" };
 
 function renderPage({ consultants, outbox, totals, health, saved = false, clients = [], sent = null, problem = null }) {
   const chanCell = (on, addr, label) => {
     if (!on) return `<span style="color:#bbb;">off</span>`;
-    if (!addr) return `<span style="color:#A02818;font-weight:600;" title="Turned on but nowhere to send">on — missing</span>`;
+    if (!addr) return `<span style="color:#9C2B1E;font-weight:600;" title="Turned on but nowhere to send">on — missing</span>`;
     return `<span style="color:#2e7d32;font-weight:600;">on</span>`;
   };
 
@@ -121,7 +148,7 @@ function renderPage({ consultants, outbox, totals, health, saved = false, client
         ${c.broker_folder && c.client_count === 0
           ? `<div style="font-size:11px;color:#B45309;margin-top:2px;">Folder linked but no clients found in it yet</div>`
           : ""}
-        ${stuck ? `<div style="font-size:11px;color:#A02818;font-weight:600;margin-top:3px;">Cannot be alerted — ${esc(notify.reasonUnreachable(c))}</div>` : ""}
+        ${stuck ? `<div style="font-size:11px;color:#9C2B1E;font-weight:600;margin-top:3px;">Cannot be alerted — ${esc(notify.reasonUnreachable(c))}</div>` : ""}
       </td>
       <td style="padding:10px 8px;">
         <form method="POST" action="/admin/alerts/contact" style="display:flex;gap:6px;align-items:center;margin:0;">
@@ -130,7 +157,7 @@ function renderPage({ consultants, outbox, totals, health, saved = false, client
                  style="width:190px;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;">
           <input type="tel" name="phone" value="${esc(c.phone || "")}" placeholder="phone"
                  style="width:130px;padding:5px 7px;border:1px solid #ccc;border-radius:4px;font-size:12px;">
-          <button type="submit" style="padding:5px 12px;border:1px solid #B8891E;background:#FBF3DE;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">Save</button>
+          <button type="submit" style="padding:5px 12px;border:1px solid #A34C00;background:#FAF8F5;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">Save</button>
         </form>
       </td>
       <td style="padding:10px 8px;font-size:12px;">${chanCell(c.notify_email !== false, c.email)}</td>
@@ -151,7 +178,7 @@ function renderPage({ consultants, outbox, totals, health, saved = false, client
       <td style="padding:7px 8px;font-size:12px;color:${STATUS_COLOR[o.status] || "#666"};font-weight:600;">
         ${esc(o.status)}${o.attempts > 1 ? ` <span style="color:#888;font-weight:400;">(${o.attempts} tries)</span>` : ""}
       </td>
-      <td style="padding:7px 8px;font-size:11px;color:#A02818;max-width:340px;">${esc(o.last_error || "")}</td>
+      <td style="padding:7px 8px;font-size:11px;color:#9C2B1E;max-width:340px;">${esc(o.last_error || "")}</td>
     </tr>`).join("");
 
   const down = [];
@@ -163,7 +190,7 @@ function renderPage({ consultants, outbox, totals, health, saved = false, client
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Broker Alerts — Tez Law</title>
 <style>
-  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#faf9f5; color:#0C1C36; margin:0; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#FAF8F5; color:#2B2523; margin:0; }
   main { max-width:1150px; margin:24px auto; padding:0 20px; }
   h1 { font-size:24px; margin:0 0 4px; }
   .sub { color:#666; font-size:13px; margin-bottom:20px; }
@@ -178,7 +205,7 @@ function renderPage({ consultants, outbox, totals, health, saved = false, client
 
   ${saved ? `<div class="card" style="border-left:4px solid #2e7d32;background:#f4faf5;">Saved.</div>` : ""}
   ${sent ? `<div class="card" style="border-left:4px solid #2e7d32;background:#f4faf5;">${esc(sent)}</div>` : ""}
-  ${problem ? `<div class="card" style="border-left:4px solid #A02818;background:#fdf3f1;">${esc(problem)}</div>` : ""}
+  ${problem ? `<div class="card" style="border-left:4px solid #9C2B1E;background:#fdf3f1;">${esc(problem)}</div>` : ""}
 
   <div class="card">
     <h3 style="margin:0 0 4px;font-size:16px;">Send an alert now</h3>
@@ -196,7 +223,7 @@ function renderPage({ consultants, outbox, totals, health, saved = false, client
       </select>
       <select name="kind" required style="flex:1;min-width:190px;padding:7px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
         <option value="">&mdash; what happened &mdash;</option>
-        ${["update", "action", "document", "status", "court_mail", "hearing_set", "hearing_moved", "deadline"].filter(k => notify.KINDS[k])
+        ${HAND_KINDS.filter(k => notify.KINDS[k])
           .map(k => `<option value="${k}">${esc(notify.KINDS[k].label)}</option>`).join("")}
       </select>
       <button type="submit" style="padding:8px 16px;border:1px solid #2B2523;background:#2B2523;color:#fff;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">Send</button>
@@ -214,7 +241,7 @@ function renderPage({ consultants, outbox, totals, health, saved = false, client
   <div class="card">
     <span class="pill" style="background:#e8f5e9;color:#2e7d32;">${totals.sent} sent</span>
     <span class="pill" style="background:#fff4e5;color:#B45309;">${totals.pending} waiting</span>
-    <span class="pill" style="background:#fdecea;color:#A02818;">${totals.failed} gave up</span>
+    <span class="pill" style="background:#fdecea;color:#9C2B1E;">${totals.failed} gave up</span>
     <form method="POST" action="/admin/alerts/flush" style="display:inline;margin-left:10px;">
       <button type="submit" style="padding:6px 14px;border:1px solid #ccc;background:#fff;border-radius:5px;cursor:pointer;font-size:12px;">Try the waiting ones now</button>
     </form>
@@ -246,4 +273,4 @@ function renderPage({ consultants, outbox, totals, health, saved = false, client
 </main></body></html>`;
 }
 
-module.exports = { loadConsultants, loadAlertableClients, loadOutbox, counts, renderPage };
+module.exports = { loadConsultants, loadAlertableClients, loadOutbox, counts, renderPage, sendByHand, HAND_KINDS };

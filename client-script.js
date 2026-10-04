@@ -124,15 +124,15 @@ function clientScriptTag(file) {
 
 function missingBanner(file, why) {
   return `
-    <div style="margin:18px 0;padding:16px 18px;border:2px solid #A02818;border-radius:6px;background:#FBF3DE;">
-      <div style="font-family:Cinzel,serif;font-size:13px;letter-spacing:1.2px;color:#A02818;margin-bottom:6px;">
+    <div style="margin:18px 0;padding:16px 18px;border:2px solid #9C2B1E;border-radius:6px;background:#FAF8F5;">
+      <div style="font-family:Montserrat,sans-serif;font-size:13px;letter-spacing:1.2px;color:#9C2B1E;margin-bottom:6px;">
         THIS PAGE'S CLIENT SCRIPT IS MISSING
       </div>
-      <div style="font-size:13px;line-height:1.6;color:#3E2818;">
+      <div style="font-size:13px;line-height:1.6;color:#2B2523;">
         <code>public/${esc(file)}</code> is not on the server (${esc(why)}), so nothing on this
         page can load. The panels below will stay empty until it is uploaded.
       </div>
-      <div style="font-size:12px;color:#7B5330;margin-top:8px;font-style:italic;">
+      <div style="font-size:12px;color:#5E5854;margin-top:8px;font-style:italic;">
         Fix: put <code>${esc(file)}</code> in the repository's <code>public/</code> folder — the same
         folder as <code>tez-shield.png</code> — and redeploy. If the file is in the repository root
         instead, the server moves it across by itself on the next boot; this banner means it is not

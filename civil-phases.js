@@ -32,9 +32,9 @@ const utbms = require("./civil-utbms");
 const ROLES = [
   { key: "sales",        label: "Sales / Intake",           color: "#0284C7",
     blurb: "Sources and qualifies the lead, captures adverse parties, chases the signature and the retainer." },
-  { key: "attorney",     label: "Attorney",                 color: "#3E2818",
+  { key: "attorney",     label: "Attorney",                 color: "#2B2523",
     blurb: "Owns strategy, the client decision, and every judgment call. Signs what has to be signed." },
-  { key: "case_manager", label: "Case Manager / Paralegal", color: "#E0B44E",
+  { key: "case_manager", label: "Case Manager / Paralegal", color: "#FF7B00",
     blurb: "Runs the file: records, chronology, e-filing, service, exhibits, productions." },
   { key: "docketing",    label: "Docketing",                color: "#7C3AED",
     blurb: "Calendars every deadline independently of the attorney. The second pair of eyes on the calendar." },

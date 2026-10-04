@@ -33,8 +33,8 @@ function attach(app, auth) {
   app.get("/admin/transcripts", staff, (req, res) => {
     try {
       page(res, "Transcripts", `
-        <h1 style="margin:0 0 4px 0;font-family:Cinzel,serif;color:#3E2818;">🎙️ Transcripts</h1>
-        <div style="color:#7B5330;font-style:italic;margin-bottom:16px;">Every voice dictation and hearing recording, saved when it is transcribed — whether or not it was applied to a note. Speakers are separated automatically and named by Zara; correct a name on the transcript and it changes everywhere.</div>
+        <h1 style="margin:0 0 4px 0;font-family:Cormorant Garamond,Georgia,serif;color:#2B2523;">Transcripts</h1>
+        <div style="color:#5E5854;font-style:italic;margin-bottom:16px;">Every voice dictation and hearing recording, saved when it is transcribed — whether or not it was applied to a note. Speakers are separated automatically and named by Zara; correct a name on the transcript and it changes everywhere.</div>
         <div data-transcripts="list"></div>`);
     } catch (e) { res.status(500).send("Transcripts failed: " + e.message); }
   });
@@ -42,7 +42,7 @@ function attach(app, auth) {
   app.get("/admin/transcripts/:id(\\d+)", staff, (req, res) => {
     try {
       page(res, "Transcript", `
-        <div style="margin-bottom:10px;"><a href="/admin/transcripts" style="color:#7B5330;">← All transcripts</a></div>
+        <div style="margin-bottom:10px;"><a href="/admin/transcripts" style="color:#5E5854;">← All transcripts</a></div>
         <div data-transcripts="view" data-id="${Number(req.params.id)}"></div>`);
     } catch (e) { res.status(500).send("Transcript failed: " + e.message); }
   });

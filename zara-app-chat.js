@@ -730,7 +730,12 @@ Tez Law's own context:
 - Multilingual: English, Mandarin, Shanghainese, Spanish`;
 
 const CLIENT_OPS = (clientName, lang, caseContext) => {
-  const langInstr = lang === "zh-TW" ? "Respond in Traditional Chinese (繁體中文)."
+  // Simplified is the firm's Chinese (JJ's rule for everything it publishes).
+  // "zh-TW" is what the phone app saved when its only Chinese was labelled
+  // 中文 — it was never a choice of Traditional over Simplified, and the app's
+  // screens are Simplified now, so Zara answers those accounts the same way.
+  // If a client writes in Traditional she will naturally follow them.
+  const langInstr = (lang === "zh-CN" || lang === "zh" || lang === "zh-Hans" || lang === "zh-TW") ? "Respond in Simplified Chinese (简体中文), unless they write to you in Traditional Chinese."
                   : lang === "es"    ? "Responde en español."
                   : "Respond in English.";
 

@@ -298,7 +298,7 @@ function renderDictatePage() {
   const hn = require("./hearing-notes");
   const body = `
 <div class="page-header">
-  <h1>🎙️ Voice Dictate Hearing Notes</h1>
+  <h1>Voice Dictate Hearing Notes</h1>
   <div style="font-size:13px; color:#666;">
     Just walked out of court? Record your notes here — Zara transcribes with Whisper, extracts the hearing fields with Claude, and creates a draft for you to review.
   </div>
@@ -307,7 +307,7 @@ function renderDictatePage() {
 <div style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:720px; margin:0 auto;">
 
   <!-- Optional context inputs to help Claude with tricky names -->
-  <div style="background:#fdf7f0; border:1px solid #e8dbc0; border-radius:6px; padding:14px 16px; margin-bottom:20px;">
+  <div style="background:#FAF8F5; border:1px solid #e8dbc0; border-radius:6px; padding:14px 16px; margin-bottom:20px;">
     <div style="font-size:12px; color:#666; margin-bottom:8px; font-weight:600;">Optional context (helps with name spelling)</div>
     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
       <div>
@@ -334,11 +334,11 @@ function renderDictatePage() {
   <!-- Big record button -->
   <div id="record-panel" style="text-align:center; padding:20px 0;">
     <button type="button" id="record-btn" onclick="toggleRecording()"
-            style="width:180px; height:180px; border-radius:50%; border:none; background:linear-gradient(145deg, #B79C62, #8f7a4c); color:white; font-size:16px; font-weight:600; cursor:pointer; box-shadow:0 8px 24px rgba(183,156,98,0.3); transition:all 0.2s;">
+            style="width:180px; height:180px; border-radius:50%; border:none; background:linear-gradient(145deg, #A34C00, #7A3900); color:white; font-size:16px; font-weight:600; cursor:pointer; box-shadow:0 8px 24px rgba(255,123,0,0.3); transition:all 0.2s;">
       <div style="font-size:52px; margin-bottom:6px;" id="record-icon">🎙️</div>
       <div id="record-label">Tap to record</div>
     </button>
-    <div id="timer" style="font-family:monospace; font-size:28px; color:#0C1C36; margin-top:20px; letter-spacing:2px;">00:00</div>
+    <div id="timer" style="font-family:monospace; font-size:28px; color:#2B2523; margin-top:20px; letter-spacing:2px;">00:00</div>
     <div id="slice-status" style="font-size:12px; color:#2e7d32; margin-top:8px; font-weight:600; min-height:16px;"></div>
     <div id="record-hint" style="font-size:12px; color:#888; margin-top:8px;">
       Tips: mention client name, A-number, judge, DHS attorney, pleadings, applications, next hearing date, and any deadlines.
@@ -352,7 +352,7 @@ function renderDictatePage() {
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button type="button" onclick="rerecord()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">🔄 Re-record</button>
         <button type="button" onclick="downloadAudio()" title="Keep a copy on this computer before uploading" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">💾 Save a copy</button>
-        <button type="button" onclick="saveOnly()" id="save-btn" style="background:#0C1C36; color:white; padding:8px 16px; border:none; border-radius:3px; cursor:pointer; font-size:13px; font-weight:700; flex:1;">💾 Save recording</button>
+        <button type="button" onclick="saveOnly()" id="save-btn" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:3px; cursor:pointer; font-size:13px; font-weight:700; flex:1;">💾 Save recording</button>
         <button type="button" onclick="submitAudio()" id="submit-btn" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">🎯 Transcribe now</button>
       </div>
       <div style="font-size:12px; color:#666; margin-top:8px; line-height:1.5;">
@@ -366,13 +366,13 @@ function renderDictatePage() {
   <!-- Saved -->
   <div id="saved-panel" style="display:none; padding:24px 0; text-align:center;">
     <div style="font-size:40px; margin-bottom:10px;">💾</div>
-    <div style="font-size:18px; font-weight:700; color:#0C1C36;">Recording saved</div>
+    <div style="font-size:18px; font-weight:700; color:#2B2523;">Recording saved</div>
     <div style="font-size:13px; color:#555; margin-top:6px;">
       You can close the laptop now. It will be transcribed on its own, or you can
       do it from <a href="/admin/hearing/notes/dictate/inbox">Recordings</a>.
     </div>
     <div style="margin-top:14px; display:flex; gap:8px; justify-content:center;">
-      <a href="/admin/hearing/notes/dictate/inbox" style="background:#0C1C36; color:white; padding:8px 16px; border-radius:3px; text-decoration:none; font-size:13px;">Recordings</a>
+      <a href="/admin/hearing/notes/dictate/inbox" style="background:#2B2523; color:white; padding:8px 16px; border-radius:3px; text-decoration:none; font-size:13px;">Recordings</a>
       <button type="button" onclick="resetAll()" style="background:#eee; color:#333; padding:8px 16px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">Record another</button>
     </div>
   </div>
@@ -380,16 +380,16 @@ function renderDictatePage() {
   <!-- Processing state -->
   <div id="processing-panel" style="display:none; padding:30px 0; text-align:center;">
     <div id="processing-icon" style="font-size:40px; margin-bottom:12px;">🎧</div>
-    <div id="processing-status" style="font-size:16px; color:#0C1C36; font-weight:600;">Uploading audio…</div>
+    <div id="processing-status" style="font-size:16px; color:#2B2523; font-weight:600;">Uploading audio…</div>
     <div id="processing-sub" style="font-size:12px; color:#888; margin-top:6px;">This can take 30-90 seconds depending on length.</div>
 
     <div style="margin-top:20px; max-width:400px; margin-left:auto; margin-right:auto;">
       <div style="background:#eee; height:6px; border-radius:3px; overflow:hidden;">
-        <div id="processing-progress" style="background:linear-gradient(to right, #B79C62, #d4b979); height:100%; width:0%; transition:width 0.4s;"></div>
+        <div id="processing-progress" style="background:linear-gradient(to right, #A34C00, #E8E3DC); height:100%; width:0%; transition:width 0.4s;"></div>
       </div>
     </div>
 
-    <details id="transcript-preview" style="display:none; margin-top:24px; text-align:left; background:#fdf7f0; padding:12px 16px; border-radius:6px; border:1px solid #e8dbc0;">
+    <details id="transcript-preview" style="display:none; margin-top:24px; text-align:left; background:#FAF8F5; padding:12px 16px; border-radius:6px; border:1px solid #e8dbc0;">
       <summary style="cursor:pointer; font-weight:600; font-size:13px;">📝 Transcript preview</summary>
       <div id="transcript-text" style="font-size:13px; margin-top:8px; color:#333; white-space:pre-wrap; max-height:200px; overflow-y:auto;"></div>
     </details>
@@ -399,14 +399,14 @@ function renderDictatePage() {
     <strong>❌ Error:</strong> <span id="error-text"></span>
     <div style="margin-top:10px;">
       <button type="button" onclick="resetAll()" style="background:#eee; color:#333; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:12px;">Start over</button>
-      <a id="error-login" href="/admin/login" target="_blank" rel="noopener" style="display:none; background:#0C1C36; color:white; padding:6px 12px; border-radius:3px; text-decoration:none; font-size:12px; margin-left:6px;">Log in (opens a new tab)</a>
+      <a id="error-login" href="/admin/login" target="_blank" rel="noopener" style="display:none; background:#2B2523; color:white; padding:6px 12px; border-radius:3px; text-decoration:none; font-size:12px; margin-left:6px;">Log in (opens a new tab)</a>
     </div>
   </div>
 
 </div>
 
 <p style="margin-top:24px; color:#888; font-size:13px; text-align:center;">
-  <a href="/admin/hearing/notes" style="color:#B79C62;">← Back to note-taking</a>
+  <a href="/admin/hearing/notes" style="color:#A34C00;">← Back to note-taking</a>
 </p>
 
 <!-- Holds audio slices and form drafts on this computer when the courthouse
@@ -501,7 +501,7 @@ async function uploadSlices() {
     }
   } catch (e) {
     // Keep the slice. Say so plainly rather than looking fine while losing audio.
-    setSliceStatus("Upload is behind (" + sliceQueue.length + " waiting) — still recording, will retry: " + e.message, "#A02818");
+    setSliceStatus("Upload is behind (" + sliceQueue.length + " waiting) — still recording, will retry: " + e.message, "#9C2B1E");
   } finally {
     sliceUploading = false;
   }
@@ -719,7 +719,7 @@ async function startRecording() {
       } else {
         // Slices did not make it. Fall back to the old whole-file upload,
         // which is what the Save button does, and say why it is showing.
-        setSliceStatus("The server did not get the whole recording. Press Save recording below — the audio is still on this page.", "#A02818");
+        setSliceStatus("The server did not get the whole recording. Press Save recording below — the audio is still on this page.", "#9C2B1E");
         showPlayback();
       }
     };
@@ -779,8 +779,8 @@ function rerecord() {
   document.getElementById("timer").textContent = "00:00";
   document.getElementById("record-icon").textContent = "🎙️";
   document.getElementById("record-label").textContent = "Tap to record";
-  document.getElementById("record-btn").style.background = "linear-gradient(145deg, #B79C62, #8f7a4c)";
-  document.getElementById("record-btn").style.boxShadow = "0 8px 24px rgba(183,156,98,0.3)";
+  document.getElementById("record-btn").style.background = "linear-gradient(145deg, #A34C00, #7A3900)";
+  document.getElementById("record-btn").style.boxShadow = "0 8px 24px rgba(255,123,0,0.3)";
   document.getElementById("record-hint").textContent = "Tips: mention client name, A-number, judge, DHS attorney, pleadings, applications, next hearing date, and any deadlines.";
 }
 
