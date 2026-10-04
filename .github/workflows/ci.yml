@@ -100,6 +100,13 @@ jobs:
       - name: Zara admin UI
         run: node scripts/check-zara-admin-ui.js
 
+      # The public contact form shipped once complete, tested and unmounted:
+      # the file was in the repo, the form was on the site, and every intake
+      # went nowhere. This asserts server.js still mounts it, and exercises
+      # the honeypot, the field validation and the flood limit.
+      - name: Public intake form
+        run: node scripts/check-web-intake.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never

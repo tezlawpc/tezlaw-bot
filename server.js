@@ -9126,6 +9126,15 @@ app.post("/webhook", handleWeChatMsg);
 // ────────────────────────────────────────────────────────────
 //  WEBSITE CHAT
 // ────────────────────────────────────────────────────────────
+
+// The brief intake form on the public contact pages posts to /intake/web.
+// Mounted here, with the website chat, because it is the same surface: an
+// intake filed through the form lands in the same inbox thread and is already
+// in Zara's history if the person goes on to chat. Unmounted, the form on
+// tezlawfirm.com posts into nothing and the prospect is simply lost -- which
+// is what scripts/check-web-intake.js exists to catch.
+require("./web-intake").mount(app);
+
 app.post("/chat", async (req, res) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Content-Type");
