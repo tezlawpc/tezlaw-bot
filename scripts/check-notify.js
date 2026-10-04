@@ -16,7 +16,7 @@ const Module = require("module");
 
 // ── Stub unresolvable bare modules (the harness pattern) ────
 const realLoad = Module._load;
-const sent = { email: [], sms: [], telegram: [] };
+const sent = { email: [], sms: [], telegram: [], app: [] };
 Module._load = function (req, parent, isMain) {
   if (req === "nodemailer") {
     return { createTransport: () => ({ sendMail: async (m) => { sent.email.push(m); } }) };
@@ -24,6 +24,7 @@ Module._load = function (req, parent, isMain) {
   if (req === "axios") {
     return {
       post: async (url, body) => {
+        if (/exp\.host/.test(url)) { sent.app.push(...body); return { data: { data: body.map(() => ({ status: "ok" })) } }; }
         if (/api\.twilio\.com/.test(url)) sent.sms.push(String(body));
         else if (/api\.telegram\.org/.test(url)) sent.telegram.push(body);
         return { data: { ok: true } };
@@ -44,6 +45,9 @@ const T = {
   links: [],       // { client_key, consultant_id, removed_at }
   tasks: [],       // { client_key, client_name, a_number }
   outbox: [],
+  feed: [],        // consultant_feed: what a consultant sees when signed in
+  phones: [],      // push_tokens: { user_kind, user_ref, expo_token }
+  orders: [],      // work orders: { id, submitted_by_user_id, client_name, client_key }
 };
 let seq = 1;
 
@@ -70,13 +74,26 @@ function stubDb() {
         const keys = [...new Set(T.tasks.filter(t => String(t.client_name || "").trim().toLowerCase() === String(v[0]).toLowerCase()).map(t => t.client_key))];
         return { rows: keys.map(k => ({ client_key: k })) };
       }
+      if (/^INSERT INTO consultant_feed/.test(q)) {
+        if (!T.feed.some(r => r.dedupe_key === v[5])) T.feed.push({ user_id: v[0], client_key: v[1], task_id: v[2], kind: v[3], who: v[4], dedupe_key: v[5] });
+        return { rows: [] };
+      }
+      if (/FROM push_tokens WHERE user_ref = \$1 AND user_kind IN \('consultant', 'firm'\)/.test(q)) {
+        return { rows: T.phones.filter(p => p.user_ref === v[0] && ["consultant", "firm"].includes(p.user_kind)).map(p => ({ expo_token: p.expo_token })) };
+      }
+      if (/FROM tasks WHERE id = \$1 AND submitted_by_user_id = \$2/.test(q)) {
+        return { rows: T.orders.filter(o => o.id === v[0] && o.submitted_by_user_id === v[1]) };
+      }
+      if (/FROM admin_users WHERE id = \$1/.test(q)) {
+        return { rows: T.users.filter(u => u.id === v[0]) };
+      }
       if (/^INSERT INTO notification_outbox/.test(q)) {
         if (T.outbox.some(r => r.dedupe_key === v[7])) return { rows: [] };
         const row = {
           id: seq++, user_id: v[0], client_key: v[1], kind: v[2], channel: v[3],
           address: v[4], subject: v[5], body: v[6], dedupe_key: v[7],
           status: "pending", attempts: 0, last_error: null, last_try_at: null,
-          queued_at: new Date(),
+          queued_at: new Date(), task_id: v[8] == null ? null : v[8],
         };
         T.outbox.push(row);
         return { rows: [{ id: row.id }] };
@@ -128,7 +145,8 @@ function check(name, cond, detail) {
 }
 function reset() {
   T.users.length = 0; T.links.length = 0; T.tasks.length = 0; T.outbox.length = 0;
-  sent.email.length = 0; sent.sms.length = 0; sent.telegram.length = 0;
+  T.feed.length = 0; T.phones.length = 0; T.orders.length = 0;
+  sent.email.length = 0; sent.sms.length = 0; sent.telegram.length = 0; sent.app.length = 0;
   for (const k of ["TWILIO_ACCOUNT_SID","TWILIO_AUTH_TOKEN","TWILIO_PHONE_NUMBER","TELEGRAM_TOKEN","SMTP_HOST","SMTP_USER","SMTP_PASS","GMAIL_EMAIL","GMAIL_APP_PASSWORD"]) delete process.env[k];
 }
 function consultant(o) { const u = { id: o.id, username: o.username || ("c" + o.id), full_name: o.full_name || null, email: null, phone: null, telegram_chat_id: null, notify_email: true, notify_sms: false, notify_telegram: false, notify_paused_until: null, disabled: false, ...o }; T.users.push(u); return u; }
@@ -253,6 +271,87 @@ console.log("\n── Channels ──");
   check("channel health reports what is actually configured", h.telegram === true && h.email === false);
 }
 
+// JJ: "should be able to push case notification to brokers/consultants as
+// well." Two halves: the Tara app as a channel, and a record the consultant
+// can read once signed in — the alert has always said "log in to view" and,
+// until this, logging in showed nothing.
+console.log("\n── The Tara app, and what they see when signed in ──");
+{
+  reset();
+  consultant({ id: 1, notify_email: false });           // no email, no text, no Telegram
+  T.links.push({ client_key: "k1", consultant_id: 1, removed_at: null });
+  T.tasks.push({ client_key: "k1", client_name: "Wang, Baohong" });
+  const r = await notify.notifyClientEvent({ clientKey: "k1", kind: "update", ref: "m1" });
+  check("an event is listed for the consultant even when no channel can reach them",
+    r.queued === 0 && r.unreachable.length === 1 && T.feed.length === 1 && T.feed[0].kind === "update" && T.feed[0].who === "Wang, Baohong",
+    JSON.stringify({ r, feed: T.feed }));
+  await notify.notifyClientEvent({ clientKey: "k1", kind: "update", ref: "m1" });
+  check("and listed once", T.feed.length === 1);
+
+  reset();
+  consultant({ id: 7, notify_email: false });
+  T.links.push({ client_key: "k1", consultant_id: 7, removed_at: null });
+  T.tasks.push({ client_key: "k1", client_name: "Wang, Baohong" });
+  T.phones.push({ user_kind: "firm", user_ref: "7", expo_token: "ExponentPushToken[old]" });       // registered before the fix
+  T.phones.push({ user_kind: "consultant", user_ref: "7", expo_token: "ExponentPushToken[new]" });
+  T.phones.push({ user_kind: "client", user_ref: "7", expo_token: "ExponentPushToken[a-client]" }); // client account 7 is someone else
+  const q = await notify.notifyAndFlush({ clientKey: "k1", kind: "court_mail", ref: 3 });
+  check("a consultant signed in to the app is reachable through it", q.queued === 1 && q.unreachable.length === 0 && T.outbox[0].channel === "app");
+  check("the push goes to their phones — however they were registered — and to nobody else's",
+    sent.app.length === 2 && sent.app.every(m => /\[(old|new)\]/.test(m.to)), JSON.stringify(sent.app.map(m => m.to)));
+  check("the lock screen shows the headline only",
+    sent.app.every(m => m.title === "New court notice — Wang, Baohong" && m.body === "Open Tara to view."), JSON.stringify(sent.app[0]));
+
+  reset();
+  const off = consultant({ id: 7, notify_email: false, notify_app: false });
+  T.links.push({ client_key: "k1", consultant_id: 7, removed_at: null });
+  T.phones.push({ user_kind: "consultant", user_ref: "7", expo_token: "ExponentPushToken[new]" });
+  const q2 = await notify.notifyClientEvent({ clientKey: "k1", kind: "court_mail", ref: 4 });
+  check("turning the app channel off is respected", q2.queued === 0 && off.notify_app === false);
+
+  check("the hand-sent kinds are fixed headlines too",
+    ["update", "action", "document"].every(k => notify.KINDS[k] && notify.renderMessage(k, "X", "y").body.split("\n").length === 2));
+}
+
+// JJ: work orders "will need attorney or manager's approval" — so the person
+// who sent one has to hear which way it went. (On screen they are "tasks".)
+console.log("\n── A consultant's own task ──");
+{
+  reset();
+  process.env.GMAIL_EMAIL = "firm@x.com"; process.env.GMAIL_APP_PASSWORD = "pw";
+  consultant({ id: 1, email: "a@x.com" });
+  consultant({ id: 2, email: "b@x.com" });
+  T.orders.push({ id: 40, submitted_by_user_id: 1, client_name: "Chen, Mei", client_key: null });
+  T.orders.push({ id: 41, submitted_by_user_id: 1, client_name: null, client_key: null });
+
+  const src = require("fs").readFileSync(path.join(__dirname, "..", "notify.js"), "utf8");
+  const sig = (src.match(/async function notifyUserEvent\(\{([^}]*)\}/) || [])[1] || "";
+  const params = sig.split(",").map(x => x.trim().split(/[=:]/)[0].trim()).filter(Boolean);
+  check("callers cannot pass message text here either", params.every(p => ["userId", "kind", "taskId", "ref"].includes(p)), params.join(", "));
+
+  const r = await notify.notifyUserEvent({ userId: 1, kind: "wo_approved", taskId: 40, ref: "act-1" });
+  await notify.flush();
+  check("the submitter is told their task was approved", r.queued === 1 && sent.email.length === 1 && sent.email[0].to === "a@x.com");
+  check("with the client's name and a link to it, and nothing else",
+    sent.email[0].subject === "Task approved — Chen, Mei" &&
+    sent.email[0].text.split("\n").length === 2 && /https:\/\/tez\.example\/consultant\/task\/40$/.test(sent.email[0].text), sent.email[0].text);
+  check("it is in their list, pointing at the task", T.feed.length === 1 && T.feed[0].task_id === 40 && T.feed[0].kind === "wo_approved");
+
+  const wrong = await notify.notifyUserEvent({ userId: 2, kind: "wo_rejected", taskId: 40, ref: "act-2" });
+  check("it cannot be pointed at somebody else's task", wrong.recipients === 0 && wrong.queued === 0 && sent.email.length === 1 && T.feed.length === 1);
+
+  const bare = notify.renderUserMessage("wo_rejected", { id: 41, client_name: null });
+  check("one that named no client is referred to by number", bare.subject === "Task not accepted — task #41");
+  let threw = false; try { await notify.notifyUserEvent({ userId: 1, kind: "court_mail", taskId: 40 }); } catch { threw = true; }
+  check("a client-event kind is refused here", threw);
+
+  const tasksSrc = require("fs").readFileSync(path.join(__dirname, "..", "tasks.js"), "utf8");
+  check("every visible step on a task a consultant sent alerts its submitter, from one place",
+    /await tellSubmitter\(taskId, activityId, action, actor_id, visible_to_submitter\)/.test(tasksSrc) &&
+    /approved: "wo_approved", rejected: "wo_rejected"/.test(tasksSrc));
+  check("but not for something the submitter did themselves", /String\(to\) === String\(actorId\)\) return/.test(tasksSrc));
+}
+
 console.log("\n── Telegram linking ──");
 {
   reset();
@@ -282,10 +381,17 @@ console.log("\n── Wiring ──");
   check("the outbox is swept on a timer", /setInterval\(sweep/.test(srv));
   check("hearings and deadlines are swept daily", /sweepUpcoming\(\)/.test(srv));
   check("the alerts admin page is role-gated", /app\.use\("\/admin\/alerts", auth\.requireRole\("admin", "manager"\)\)/.test(srv));
+  const send = (srv.match(/app\.post\("\/admin\/alerts\/send"[\s\S]*?\n\}\);/) || [""])[0];
+  check("an alert sent by hand takes a client and a kind, and no text",
+    /notify\.KINDS\[kind\]/.test(send) && /notifyAndFlush\(\{ clientKey, kind, ref:/.test(send) && !/b\.(message|text|body|note|subject)/.test(send));
   check("a consultant cannot change the address they are alerted at",
     !/UPDATE admin_users SET email[\s\S]{0,200}req\.user\.uid/.test(srv));
   check("the Telegram link code is read before the text reaches Zara",
-    srv.indexOf("linkTelegram(linkMatch[0]") < srv.indexOf('/^\\/chatid'));
+    // The /chatid test became /^\/(chatid|whereami)…/ when alert routing was
+    // added, and this still looked for the old spelling — which is not in
+    // the file, so indexOf gave -1 and the comparison could never pass.
+    srv.indexOf("linkTelegram(linkMatch[0]") > 0 &&
+    srv.indexOf("linkTelegram(linkMatch[0]") < srv.search(/if \(\/\^\\\/\(?chatid/));
 }
 
 console.log(`\n${fail ? "✗" : "✓"} ${pass} passed, ${fail} failed\n`);

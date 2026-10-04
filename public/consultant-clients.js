@@ -9,13 +9,17 @@
  * JJ: consultants must be able to enter client info, search it, and see
  * it on their phone and computer. Same /api/consultant/* calls as the
  * phone app; the web sign-in cookie is accepted there.
+ *
+ * Colours are the TEZ brand's (tez-theme.js sets them as CSS variables on
+ * the page; the names below are what this file has always called them).
+ * No emoji — the brand guide rules them out as icons.
  * ──────────────────────────────────────────────────────────── */
 (function () {
   "use strict";
   var host = document.querySelector("[data-consultant-clients]");
   if (!host) return;
   var API = "/api/consultant";
-  var NAVY = "#0C1C36", GOLD = "#B79C62", MUTED = "#666", RED = "#c62828";
+  var NAVY = "#2B2523", GOLD = "#A34C00", MUTED = "#5E5854", RED = "#9C2B1E", LINE = "#E8E3DC", MARBLE = "#FAF8F5", GREEN = "#2F6B3F";
 
   function h(tag, attrs, kids) {
     var e = document.createElement(tag);
@@ -57,7 +61,7 @@
     var q = h("input", { type: "search", placeholder: "Search name, phone, email or A-number…", style: "flex:1;min-width:220px;" });
     var box = h("div");
     host.appendChild(h("div", { style: "display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;" }, [
-      q, h("a", { href: "/consultant/clients/new", class: "btn-primary", text: "＋ Add Client" }),
+      q, h("a", { href: "/consultant/clients/new", class: "btn-primary", text: "Add client" }),
     ]));
     host.appendChild(box);
     var timer = null, seq = 0;
@@ -66,17 +70,17 @@
       api("/clients?q=" + encodeURIComponent(q.value.trim())).then(function (d) {
         if (mine !== seq) return;
         clear(box);
-        if (!d.clients.length) { box.appendChild(note(q.value.trim() ? "No client of yours matches." : "No clients yet. Add one, or the firm will assign clients to you.")); return; }
+        if (!d.clients.length) { box.appendChild(h("div", { class: "card" }, [note(q.value.trim() ? "No client of yours matches." : "No clients yet. Add one, or the firm will assign clients to you.")])); return; }
         d.clients.forEach(function (c) {
           var meta = [c.client_phone, c.client_email, c.a_number ? "A# " + c.a_number : null].filter(Boolean).join(" · ");
           box.appendChild(h("a", { href: "/consultant/client/" + encodeURIComponent(c.client_key), class: "card",
             style: "display:block;text-decoration:none;color:inherit;padding:14px 18px;" }, [
             h("div", { style: "display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;" }, [
               h("strong", { text: c.client_name || "(no name yet)", style: "color:" + NAVY + ";font-size:15px;" }),
-              h("span", { text: c.entered_by_me ? "Entered by you" : (c.role_description || "Assigned by the firm"), style: "font-size:11px;color:" + GOLD + ";font-weight:600;" }),
+              h("span", { text: c.entered_by_me ? "Entered by you" : (c.role_description || "Assigned by the firm"), style: "font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:" + GOLD + ";font-weight:600;" }),
             ]),
             meta ? h("div", { text: meta, style: "font-size:12.5px;color:" + MUTED + ";margin-top:3px;" }) : null,
-            h("div", { text: (c.matter_type ? c.matter_type + " · " : "") + (Number(c.open_task_count) || 0) + " open item(s)", style: "font-size:12px;color:" + MUTED + ";margin-top:3px;" }),
+            h("div", { text: (c.matter_type ? c.matter_type + " · " : "") + (function (n) { return n === 1 ? "1 open item" : n + " open items"; })(Number(c.open_task_count) || 0), style: "font-size:12px;color:" + MUTED + ";margin-top:3px;" }),
           ]));
         });
       }).catch(function (e) { clear(box).appendChild(note(e.message, true)); });
@@ -109,7 +113,7 @@
     var file = h("input", { type: "file", accept: "application/pdf", style: "display:none;" });
     var btn = h("button", {
       type: "button", class: "btn-secondary",
-      style: "width:100%;padding:10px;border:1.5px dashed " + GOLD + ";border-radius:6px;background:transparent;color:" + NAVY + ";cursor:pointer;font-size:13px;font-weight:600;",
+      style: "width:100%;border-style:dashed;",
       text: "Choose a PDF",
       onclick: function () { file.click(); }
     });
@@ -151,7 +155,7 @@
         var cb = h("input", { type: "checkbox", checked: "checked", style: "margin-top:3px;" });
         boxes[k] = cb;
         review.appendChild(h("label", {
-          style: "display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid #ddd;border-radius:6px;background:#fff;margin-bottom:6px;cursor:pointer;"
+          style: "display:flex;gap:8px;align-items:flex-start;padding:10px;border:1px solid " + LINE + ";border-radius:3px;background:#fff;margin-bottom:6px;cursor:pointer;text-transform:none;letter-spacing:0;"
         }, [cb, h("span", { style: "flex:1;" }, [
           h("span", { style: "display:block;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:" + MUTED + ";", text: AG_LABELS[k] || k }),
           h("span", { style: "display:block;font-size:14px;color:" + NAVY + ";", text: String(c.value) }),
@@ -172,7 +176,7 @@
       }));
     }
     return h("div", { class: "card", style: "margin-bottom:14px;" }, [
-      h("div", { style: "font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:" + NAVY + ";margin-bottom:4px;", text: "Signed agreement" }),
+      h("h3", { text: "Signed agreement" }),
       note, file, btn, review
     ]);
   }
@@ -210,9 +214,9 @@
   // ── One client ────────────────────────────────────────────
   function view() {
     var key = host.getAttribute("data-key");
-    var top = h("div"), work = h("div"), msgs = h("div");
-    host.appendChild(top); host.appendChild(work); host.appendChild(msgs);
-    if (/saved=1/.test(location.search)) top.appendChild(h("div", { class: "card", style: "background:#e8f5e9;border-color:#a5d6a7;color:#2e7d32;padding:12px 16px;", text: "✅ Client saved. The firm has been notified." }));
+    var top = h("div"), updates = h("div"), work = h("div"), msgs = h("div");
+    host.appendChild(top); host.appendChild(updates); host.appendChild(work); host.appendChild(msgs);
+    if (/saved=1/.test(location.search)) top.appendChild(h("div", { class: "card ok", text: "Client saved. The firm has been notified." }));
 
     function drawInfo(c, assignment) {
       var box = h("div", { class: "card" });
@@ -224,11 +228,11 @@
         return h("div", {}, [h("label", { text: r[0] }), h("div", { text: r[1], style: "font-weight:600;color:" + NAVY + ";" })]);
       })));
       var actions = h("div", { style: "margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;" }, [
-        h("a", { class: "btn-primary", href: "/consultant/new?client=" + encodeURIComponent(c.client_name || ""), text: "＋ Work order for this client" }),
+        h("a", { class: "btn-primary", href: "/consultant/new?client=" + encodeURIComponent(c.client_name || ""), text: "New task for this client" }),
       ]);
-      if (c.editable) actions.appendChild(h("button", { type: "button", class: "btn-secondary", text: "✎ Edit details", onclick: function () { clear(box); box.appendChild(editForm(c)); } }));
+      if (c.editable) actions.appendChild(h("button", { type: "button", class: "btn-secondary", text: "Edit details", onclick: function () { clear(box); box.appendChild(editForm(c)); } }));
       box.appendChild(actions);
-      if (!c.editable) box.appendChild(note("This client's record belongs to the firm. To change their details, send a work order or a message."));
+      if (!c.editable) box.appendChild(note("This client's record belongs to the firm. To change their details, send the firm a task or a message."));
       return box;
     }
 
@@ -256,29 +260,63 @@
       return form;
     }
 
+    // What the firm has open for this client. The server sends the wording
+    // only of work orders this consultant submitted; the firm's own tasks
+    // arrive as a title. `completed` is what older servers sent; `status`
+    // is the truth.
+    var STATUS_WORDS = { pending_approval: "Awaiting approval", open: "Approved", pending: "In the queue", in_progress: "In progress" };
     function drawWork(tasks) {
       clear(work);
-      var open = tasks.filter(function (t) { return !t.completed && t.matter_type !== "Contact"; });
-      var box = h("div", { class: "card" }, [h("h3", { text: "Open work (" + open.length + ")", style: "margin:0 0 8px;color:" + NAVY + ";font-size:16px;" })]);
+      var open = tasks.filter(function (t) { return !t.completed && t.status !== "completed" && t.matter_type !== "Contact"; });
+      var box = h("div", { class: "card" }, [h("h3", { text: "Open work (" + open.length + ")" })]);
       if (!open.length) box.appendChild(note("Nothing open for this client."));
       open.slice(0, 30).forEach(function (t) {
-        box.appendChild(h("div", { style: "padding:8px 0;border-top:1px solid #f0f0f0;font-size:13.5px;" }, [
-          h("div", { text: t.description || "(task)", style: "color:" + NAVY + ";white-space:pre-wrap;" }),
-          h("div", { text: [t.status, t.due_date ? "due " + String(t.due_date).slice(0, 10) : null].filter(Boolean).join(" · "), style: "font-size:11.5px;color:" + MUTED + ";margin-top:2px;" }),
+        var meta = [STATUS_WORDS[t.status] || String(t.status || "").replace(/_/g, " "), t.due_date ? "due " + String(t.due_date).slice(0, 10) : null, t.mine ? "sent by you" : null].filter(Boolean).join(" · ");
+        box.appendChild(h("div", { style: "padding:10px 0;border-top:1px solid " + LINE + ";font-size:14px;" }, [
+          h("div", { text: t.description || t.title || "(task)", style: "color:" + NAVY + ";white-space:pre-wrap;overflow-wrap:anywhere;" }),
+          h("div", { text: meta, style: "font-size:12px;color:" + MUTED + ";margin-top:2px;" }),
         ]));
       });
       work.appendChild(box);
     }
 
+    // Court dates and what the consultant has been alerted to. The alerts
+    // they get outside the portal say only "something happened — log in";
+    // this is where they read it.
+    function drawUpdates(d) {
+      clear(updates);
+      var dates = d.court_dates || [], alerts = d.alerts || [];
+      var box = h("div", { class: "card" }, [h("h3", { text: "Court dates" })]);
+      if (!dates.length) box.appendChild(note("No upcoming court date is on file for this client."));
+      dates.forEach(function (c) {
+        box.appendChild(h("div", { style: "padding:10px 0;border-top:1px solid " + LINE + ";" }, [
+          h("div", { text: c.day + (c.time ? " at " + c.time : ""), style: "font-weight:600;color:" + NAVY + ";" }),
+          h("div", { text: [c.type, c.court].filter(Boolean).join(" · "), style: "font-size:12.5px;color:" + MUTED + ";margin-top:2px;" }),
+        ]));
+      });
+      if (dates.length) box.appendChild(note("Dates change. Confirm with the firm before telling the client anything."));
+      updates.appendChild(box);
+      if (alerts.length) {
+        var list = h("div", { class: "card" }, [h("h3", { text: "Recent updates" })]);
+        alerts.slice(0, 12).forEach(function (a) {
+          list.appendChild(h("div", { style: "display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:9px 0;border-top:1px solid " + LINE + ";font-size:14px;" }, [
+            a.task_id ? h("a", { href: "/consultant/task/" + a.task_id, text: a.label }) : h("span", { text: a.label, style: "color:" + NAVY + ";" }),
+            h("span", { text: when(a.at), style: "font-size:12px;color:" + MUTED + ";" }),
+          ]));
+        });
+        updates.appendChild(list);
+      }
+    }
+
     function drawMsgs(list) {
       clear(msgs);
-      var box = h("div", { class: "card" }, [h("h3", { text: "Messages with the client", style: "margin:0 0 8px;color:" + NAVY + ";font-size:16px;" })]);
+      var box = h("div", { class: "card" }, [h("h3", { text: "Messages with the client" })]);
       var thread = h("div", { style: "max-height:360px;overflow:auto;" });
       if (!list.length) thread.appendChild(note("No messages yet."));
       list.forEach(function (m) {
         var fromClient = m.sender_kind === "client";
         thread.appendChild(h("div", { style: "margin:6px 0;display:flex;justify-content:" + (fromClient ? "flex-start" : "flex-end") + ";" }, [
-          h("div", { style: "max-width:75%;padding:8px 12px;border-radius:10px;font-size:13.5px;white-space:pre-wrap;background:" + (fromClient ? "#f1f1f1" : "#f5efe0") + ";" }, [
+          h("div", { style: "max-width:75%;padding:8px 12px;font-size:13.5px;white-space:pre-wrap;border-radius:3px;background:" + (fromClient ? MARBLE : "#fff") + ";border:1px solid " + LINE + ";" }, [
             h("div", { text: m.body }),
             h("div", { text: (m.sender_name || (fromClient ? "Client" : "Firm")) + " · " + when(m.created_at), style: "font-size:10.5px;color:" + MUTED + ";margin-top:3px;" }),
           ]),
@@ -307,7 +345,8 @@
         clear(top); if (keep) top.appendChild(keep);
         top.appendChild(drawInfo(d.client, d.assignment));
         return Promise.all([
-          api("/clients/" + enc + "/tasks").then(function (t) { drawWork(t.tasks || []); }).catch(function () { clear(work); }),
+          api("/clients/" + enc + "/updates").then(drawUpdates).catch(function () { clear(updates); }),
+          api("/clients/" + enc + "/tasks").then(function (t) { drawWork(t.tasks || []); }).catch(function (e) { clear(work).appendChild(h("div", { class: "card" }, [note("Open work could not be loaded: " + e.message, true)])); }),
           api("/clients/" + enc + "/messages").then(function (m) { drawMsgs(m.messages || []); }).catch(function () { clear(msgs); }),
         ]);
       }).catch(function (e) { clear(top).appendChild(note(e.message, true)); });
