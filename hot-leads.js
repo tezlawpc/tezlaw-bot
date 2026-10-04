@@ -34,12 +34,9 @@ const ESCALATION_TIERS = [
 
 // ── Send Telegram alert ───────────────────────────────────
 async function sendTelegramAlert(lead) {
-  const { TELEGRAM_TOKEN, JJ_TELEGRAM_ID } = process.env;
-  if (!TELEGRAM_TOKEN || !JJ_TELEGRAM_ID) return false;
   try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      chat_id: JJ_TELEGRAM_ID,
-      text: `🔥 HOT LEAD — UNACKNOWLEDGED!\n\n` +
+    return await require("./tg-route").send("leads",
+      `🔥 HOT LEAD — UNACKNOWLEDGED!\n\n` +
             `👤 ${lead.name || "Unknown"}\n` +
             `⚖️ ${lead.case_type || "General"}\n` +
             `📞 ${lead.contact || "No contact"}\n` +
@@ -47,9 +44,7 @@ async function sendTelegramAlert(lead) {
             `⏱ ${Math.round(lead.minutes_waiting)} min waiting\n\n` +
             `Acknowledge in Admin Panel → Pipeline\n` +
             `Or call: 626-678-8677`,
-      parse_mode: "Markdown",
-    });
-    return true;
+      { parse_mode: "Markdown" });
   } catch (err) {
     console.error("Hot lead Telegram alert error:", err.message);
     return false;

@@ -68,13 +68,9 @@ async function logViolation(platform, platformId, userMessage, zaraResponse, vio
 
 // ── Notify JJ via Telegram ────────────────────────────────
 async function notifyComplianceViolation(platform, userId, violationType, zaraResponse, correctionSent) {
-  const { TELEGRAM_TOKEN, TEAM_TELEGRAM_CHAT_ID } = process.env;
-  if (!TELEGRAM_TOKEN || !TEAM_TELEGRAM_CHAT_ID) return;
-
   try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      chat_id: TEAM_TELEGRAM_CHAT_ID,
-      text: `⚖️ COMPLIANCE FLAG — ${platform.toUpperCase()}
+    await require("./tg-route").send("ops",
+      `⚖️ COMPLIANCE FLAG — ${platform.toUpperCase()}
 
 Type: ${violationType}
 Client: ${userId}
@@ -85,8 +81,7 @@ Zara said:
 Correction auto-sent:
 "${correctionSent.substring(0, 200)}${correctionSent.length > 200 ? "..." : ""}"
 
-Review in Admin Panel → Compliance Log`,
-    });
+Review in Admin Panel → Compliance Log`);
   } catch (err) {
     console.error("notifyComplianceViolation error:", err.message);
   }

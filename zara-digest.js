@@ -111,16 +111,11 @@ function formatDigest(d) {
 }
 
 async function sendToJJ(text) {
-  if (!TELEGRAM_TOKEN || !JJ_TELEGRAM_ID) {
-    console.warn("[zara-digest] TELEGRAM_TOKEN or JJ_TELEGRAM_ID not set — digest not sent");
+  const sent = await require("./tg-route").send("ops", text, { parse_mode: "HTML" });
+  if (!sent) {
+    console.warn("[zara-digest] no Telegram destination — digest not sent");
     return { sent: false, reason: "not configured" };
   }
-  await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-    chat_id: JJ_TELEGRAM_ID,
-    text,
-    parse_mode: "HTML",
-    disable_web_page_preview: true,
-  }, { timeout: 15000 });
   return { sent: true };
 }
 

@@ -1034,7 +1034,9 @@ async function sendToParalegal(id) {
       await axios.post(
         `https://api.telegram.org/bot${telegramToken}/sendMessage`,
         {
-          chat_id: chatId,
+          // Court & deadlines topic; chatId stays the fallback so an
+          // unconfigured group cannot swallow a hearing note.
+          ...(require("./tg-route").target("court") || { chat_id: chatId }),
           text: chunk,
           parse_mode: "Markdown",
         },

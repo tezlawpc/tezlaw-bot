@@ -465,13 +465,7 @@ async function proposeEntries(caseId, entries, { rate = null, summary = null, re
 const jobs = new Map(); // caseId -> { status, started_at, finished_at, proposal_id, stats, error, by }
 
 async function tellJJ(text) {
-  const token = process.env.TELEGRAM_TOKEN, chat = process.env.JJ_TELEGRAM_ID;
-  if (!token || !chat) return false;
-  try {
-    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`,
-      { chat_id: chat, text: String(text).slice(0, 3900), disable_web_page_preview: true }, { timeout: 10000 });
-    return true;
-  } catch (e) { return false; }
+  return require("./tg-route").send("ops", text);
 }
 
 function startJob(caseId, opts = {}) {

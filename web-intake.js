@@ -147,12 +147,11 @@ function inboxText(i) {
 }
 
 async function notifyTelegram(i, deps) {
-  const { TELEGRAM_TOKEN, TEAM_TELEGRAM_CHAT_ID } = process.env;
-  if (!TELEGRAM_TOKEN || !TEAM_TELEGRAM_CHAT_ID) throw new Error("Telegram is not configured");
-  await deps.axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-    chat_id: TEAM_TELEGRAM_CHAT_ID,
-    text: teamText(i).slice(0, 3900),
-  }, { timeout: 15000 });
+  // Still throws when nothing is configured: the caller treats a failed
+  // team notification as a failed intake, and a silently dropped intake is
+  // a lost client.
+  const sent = await require("./tg-route").send("leads", teamText(i));
+  if (!sent) throw new Error("Telegram is not configured");
 }
 
 async function notifyEmail(i, deps) {
@@ -203,12 +202,9 @@ async function fileWithZara(i, deps) {
     const lead = await db.createLead({ platform: i.platform, platformId: i.platformId, name: i.name, contact, caseType: i.caseType });
     if (!lead) return;
     const conflict = await db.runConflictCheck(lead.id, i.platform, i.platformId, i.name);
-    const { TELEGRAM_TOKEN, JJ_TELEGRAM_ID } = process.env;
-    if (conflict && conflict.disposition === "possible" && TELEGRAM_TOKEN && JJ_TELEGRAM_ID) {
-      await deps.axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-        chat_id: JJ_TELEGRAM_ID,
-        text: `⚠️ CONFLICT CHECK — Possible match!\n\nNew client: ${i.name}\nCase: ${i.caseType}\n\n${(conflict.matches || []).length} existing record(s) found with similar name.\n\nReview in Admin Panel → Conflicts tab before assigning.`,
-      }, { timeout: 15000 });
+    if (conflict && conflict.disposition === "possible") {
+      await require("./tg-route").send("leads",
+        `⚠️ CONFLICT CHECK — Possible match!\n\nNew client: ${i.name}\nCase: ${i.caseType}\n\n${(conflict.matches || []).length} existing record(s) found with similar name.\n\nReview in Admin Panel → Conflicts tab before assigning.`);
     }
   });
 }

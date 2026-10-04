@@ -43,13 +43,8 @@ const STALE_DAYS = 60;
 
 // ── Telegram (plain text: a formatting error must never swallow an alert) ──
 async function tell(text) {
-  const token = process.env.TELEGRAM_TOKEN, chat = process.env.JJ_TELEGRAM_ID;
   console.log("[site-watch] " + text.split("\n")[0]);
-  if (!token || !chat) return;
-  try {
-    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`,
-      { chat_id: chat, text: text.substring(0, 4000), disable_web_page_preview: true }, { timeout: 15000 });
-  } catch (e) { console.error("[site-watch] telegram failed:", e.message); }
+  await require("./tg-route").send("social", text);
 }
 
 // ── Small persistent state (one row per key) ──

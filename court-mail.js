@@ -817,13 +817,9 @@ async function calendar(target, reading, row, filed, record) {
 }
 
 async function tellJJ(text) {
-  const token = process.env.TELEGRAM_TOKEN, chat = process.env.JJ_TELEGRAM_ID;
-  if (!token || !chat) return false;
-  try {
-    await require("axios").post(`https://api.telegram.org/bot${token}/sendMessage`,
-      { chat_id: chat, text: String(text).slice(0, 3900), disable_web_page_preview: true }, { timeout: 10000 });
-    return true;
-  } catch (e) { console.warn("[court-mail] telegram:", e.message); return false; }
+  // Court & deadlines topic, falling back to the direct message when no
+  // group is configured. See tg-route.js.
+  return require("./tg-route").send("court", text);
 }
 
 function listUrl() {

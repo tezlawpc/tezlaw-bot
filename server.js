@@ -2136,14 +2136,8 @@ app.post("/consultant/tasks", requireConsultant, async (req, res) => {
 
     // Ping the firm's Telegram group so someone reviews the new submission
     try {
-      const telegramGroup = process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID;
-      if (telegramGroup && (process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN)) {
-        const axios = require("axios");
-        const msg = `🆕 *New consultant work order*\nFrom: ${req.user.name || req.user.username}\n\n*${cleaned.title}*\n${cleaned.client_name ? `Client: ${cleaned.client_name}\n` : ""}Priority: ${cleaned.priority}${cleaned.due_date ? `\nDue: ${cleaned.due_date}` : ""}\n\nView: ${process.env.RENDER_EXTERNAL_URL || ""}/admin/tasks`;
-        await axios.post(`https://api.telegram.org/bot${(process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN)}/sendMessage`, {
-          chat_id: telegramGroup, text: msg, parse_mode: "Markdown",
-        }).catch(() => {});
-      }
+      const msg = `🆕 *New consultant work order*\nFrom: ${req.user.name || req.user.username}\n\n*${cleaned.title}*\n${cleaned.client_name ? `Client: ${cleaned.client_name}\n` : ""}Priority: ${cleaned.priority}${cleaned.due_date ? `\nDue: ${cleaned.due_date}` : ""}\n\nView: ${process.env.RENDER_EXTERNAL_URL || ""}/admin/tasks`;
+      await require("./tg-route").send("ops", msg, { parse_mode: "Markdown" });
     } catch {}
 
     res.json({ ok: true, task });
@@ -7531,6 +7525,39 @@ console.log("TRELLIS_API_KEY:", !!TRELLIS_API_KEY);
 console.log("JJ_TELEGRAM_ID:", !!JJ_TELEGRAM_ID);
 
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
+
+// ── Who may tap an approval button ──────────────────────────
+//
+// The wcpost_ / soc_ / admin_ callbacks publish under the firm's name or let
+// someone into the admin panel. Until now they were safe by accident: those
+// buttons only ever appeared in JJ's private chat, so the only person who
+// could press one was JJ. Once approvals land in a group topic, every member
+// of that group can see them — and without this check, press them.
+//
+// TG_APPROVER_IDS is an optional comma-separated list of additional Telegram
+// user ids. With nothing configured the old behaviour stands, so a missing
+// env var cannot lock JJ out of his own buttons.
+function isApprover(from) {
+  const allowed = new Set(
+    [process.env.JJ_TELEGRAM_ID, process.env.RECIPIENT_JJ_TELEGRAM_ID]
+      .concat(String(process.env.TG_APPROVER_IDS || "").split(","))
+      .map(v => String(v == null ? "" : v).trim())
+      .filter(Boolean)
+  );
+  if (!allowed.size) return true;
+  return allowed.has(String((from && from.id) || ""));
+}
+
+function denyApproval(cb, what) {
+  console.warn(`[telegram] ${what} approval refused for ` +
+               `${(cb.from && cb.from.id) || "unknown"} ` +
+               `(${(cb.from && cb.from.first_name) || "?"})`);
+  require("axios").post(`${TELEGRAM_API}/answerCallbackQuery`, {
+    callback_query_id: cb.id,
+    text: "Only an approver can action this.",
+    show_alert: true,
+  }).catch(() => {});
+}
 const CACHE_FILE   = process.env.CACHE_PATH || "/var/data/legal_cache.json";
 
 // ── System prompt ─────────────────────────────────────────
@@ -7742,17 +7769,15 @@ async function notifyDistress(userId, message, urgency, platform) {
 }
 
 async function notifyLead(userId, message, platform) {
-  if (!TEAM_TELEGRAM_CHAT_ID || !TELEGRAM_TOKEN) return;
+  if (!TELEGRAM_TOKEN) return;
   // Never forward JJ's private messages to the team
   if (isJJAuthenticated(platform, userId)) return;
   const phoneMatch = message.match(/(\+?1?\s?)?(\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})/);
   const emailMatch = message.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
   if (!phoneMatch && !emailMatch) return;
   try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      chat_id: TEAM_TELEGRAM_CHAT_ID,
-      text: `🆕 New Lead from ${platform}!\n\n${phoneMatch ? `📞 ${phoneMatch[0]}\n` : ""}${emailMatch ? `📧 ${emailMatch[0]}\n` : ""}\nClient: ${userId}`
-    });
+    await require("./tg-route").send("leads",
+      `🆕 New Lead from ${platform}!\n\n${phoneMatch ? `📞 ${phoneMatch[0]}\n` : ""}${emailMatch ? `📧 ${emailMatch[0]}\n` : ""}\nClient: ${userId}`);
   } catch(e) { console.error("Lead notify error:", e.message); }
 }
 
@@ -8332,6 +8357,7 @@ app.post("/telegram", async (req, res) => {
   if (update.callback_query) {
     const cb = update.callback_query;
     if (cb.data?.startsWith("admin_")) {
+      if (!isApprover(cb.from)) { denyApproval(cb, "admin"); return; }
       const result = await handleAdminCallback(cb.data, cb.id);
       if (result) {
         axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
@@ -8345,6 +8371,7 @@ app.post("/telegram", async (req, res) => {
     // ── WeChat publish approval (wcpost_go_ID / wcpost_no_ID) ──
     // Nothing reaches the 公众号 until one of these is tapped.
     if (cb.data?.startsWith("wcpost_")) {
+      if (!isApprover(cb.from)) { denyApproval(cb, "wechat publish"); return; }
       try {
         const who = cb.from?.first_name || "JJ";
         const result = await require("./wechat-publish")
@@ -8363,6 +8390,7 @@ app.post("/telegram", async (req, res) => {
     // Approving hands the finished text back to paste; nothing is posted to a
     // channel until an adapter is connected, and not then without this tap.
     if (cb.data?.startsWith("soc_")) {
+      if (!isApprover(cb.from)) { denyApproval(cb, "social post"); return; }
       try {
         const who = cb.from?.first_name || "JJ";
         const r = await require("./social-posts")
@@ -8433,15 +8461,33 @@ app.post("/telegram", async (req, res) => {
       return;
     }
 
-    if (/^\/chatid(@\w+)?\s*$/i.test(textForCmd)) {
+    // /chatid (alias /whereami) — the ids alert routing needs.
+    //
+    // Telegram exposes no API that lists a group's topics: a topic's thread id
+    // only ever appears on a message sent inside it. Run this once in each
+    // topic and paste the values into the environment. The (@\w+)? allows for
+    // the @botname suffix Telegram clients append inside groups.
+    if (/^\/(chatid|whereami)(@\w+)?\s*$/i.test(textForCmd)) {
       const chatType = msg.chat.type || "unknown"; // 'private', 'group', 'supergroup', 'channel'
       const chatTitle = msg.chat.title || "(no title)";
+      const thread = msg.message_thread_id || null;
+      const topicName = (msg.reply_to_message
+                         && msg.reply_to_message.forum_topic_created
+                         && msg.reply_to_message.forum_topic_created.name) || null;
       const info =
         `📍 *Chat ID Info*\n\n` +
         `Chat ID: \`${chatId}\`\n` +
         `Type: ${chatType}\n` +
         (chatType !== "private" ? `Title: ${chatTitle}\n` : `From: ${firstName}\n`) +
-        `\n_Copy the Chat ID above to use in env vars like_ \`HEARING_NOTES_TELEGRAM_GROUP_ID\`.`;
+        (thread
+          ? `Topic: ${topicName || "(unnamed)"}\n` +
+            `Thread ID: \`${thread}\`\n\n` +
+            `_Env:_\n\`TG_OPS_CHAT_ID=${chatId}\`\n` +
+            `\`TG_TOPIC_<COURT|SOCIAL|LEADS|OPS>=${thread}\``
+          : chatType === "private"
+            ? `\n_This is a direct message, so there is no topic thread._`
+            : `\n_No topic — this is the group itself. Run this inside a topic to get its thread id._\n\n` +
+              `_Env:_\n\`TG_OPS_CHAT_ID=${chatId}\``);
       await tgSend(chatId, info);
       return;
     }

@@ -8296,15 +8296,8 @@ ${groups.map(g => `
         [client_key, req.user.uid, interest]
       );
       try {
-        const group = process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID;
-        const tok = (process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN);
-        if (group && tok) {
-          const axios = require("axios");
-          await axios.post(`https://api.telegram.org/bot${tok}/sendMessage`, {
-            chat_id: group,
-            text: `🆕 New client entered by consultant ${who}\n\n${name}${phone ? "\n📞 " + phone : ""}${email ? "\n✉️ " + email : ""}${anum ? "\nA# " + anum : ""}${interest ? "\nNeeds: " + interest : ""}`,
-          }).catch(() => {});
-        }
+        await require("./tg-route").send("leads",
+          `🆕 New client entered by consultant ${who}\n\n${name}${phone ? "\n📞 " + phone : ""}${email ? "\n✉️ " + email : ""}${anum ? "\nA# " + anum : ""}${interest ? "\nNeeds: " + interest : ""}`);
       } catch (e) { /* notice only */ }
       const folder = await provisionFolderSafely({
         clientKey: client_key, clientName: name, aNumber: anum,
@@ -8927,17 +8920,9 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
         data: { screen: "client-message", clientKey },
       }).catch(() => {});
       try {
-        if ((process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN) && (process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID)) {
-          const axios = require("axios");
-          await axios.post(
-            `https://api.telegram.org/bot${(process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN)}/sendMessage`,
-            {
-              chat_id: process.env.HEARING_NOTES_TELEGRAM_GROUP_ID || process.env.TELEGRAM_GROUP_ID,
-              text: `💬 *New client message* from ${req.user.n || "client"}\n\n${body.substring(0, 400)}`,
-              parse_mode: "Markdown",
-            }
-          ).catch(() => {});
-        }
+        await require("./tg-route").send("leads",
+          `💬 *New client message* from ${req.user.n || "client"}\n\n${body.substring(0, 400)}`,
+          { parse_mode: "Markdown" });
       } catch {}
       res.json({ ok: true, message: r.rows[0] });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }

@@ -432,14 +432,8 @@ ${transcript.slice(-1500) || "(call just started)"}
 
 ⚡ JJ — please call this clerk back ASAP.`;
 
-  const targets = [JJ_TELEGRAM_ID, TEAM_TELEGRAM_CHAT_ID].filter(Boolean);
-  for (const chat_id of targets) {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      chat_id,
-      text: text.substring(0, 4000),
-    }).catch(e => console.error("[voice] Court clerk alert error:", e.message));
-  }
-  console.log(`[voice] 🚨 COURT CLERK ALERT sent to ${targets.length} recipient(s)`);
+  await require("./tg-route").send("court", text);
+  console.log("[voice] 🚨 COURT CLERK ALERT routed to Court & deadlines");
 }
 
 // ── 👔 IMMEDIATE opposing counsel alert (JJ + Team) ──────
@@ -461,14 +455,8 @@ ${transcript.slice(-1500) || "(call just started)"}
 
 ⚡ JJ — please return this call promptly.`;
 
-  const targets = [JJ_TELEGRAM_ID, TEAM_TELEGRAM_CHAT_ID].filter(Boolean);
-  for (const chat_id of targets) {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      chat_id,
-      text: text.substring(0, 4000),
-    }).catch(e => console.error("[voice] Opp counsel alert error:", e.message));
-  }
-  console.log(`[voice] 👔 OPP COUNSEL ALERT sent to ${targets.length} recipient(s)`);
+  await require("./tg-route").send("court", text);
+  console.log("[voice] 👔 OPP COUNSEL ALERT routed to Court & deadlines");
 }
 
 // ── 📁 IMMEDIATE existing case inquiry alert (JJ only) ───
@@ -487,11 +475,8 @@ async function notifyCaseInquiryAlert({ from, transcript, intake, callSid }) {
 📝 What they said so far:
 ${transcript.slice(-1500) || "(call just started)"}`;
 
-  await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-    chat_id: JJ_TELEGRAM_ID,
-    text: text.substring(0, 4000),
-  }).catch(e => console.error("[voice] Case inquiry alert error:", e.message));
-  console.log("[voice] 📁 CASE INQUIRY ALERT sent to JJ");
+  await require("./tg-route").send("leads", text);
+  console.log("[voice] 📁 CASE INQUIRY ALERT routed to Leads & intake");
 }
 
 // ── 🚗 IMMEDIATE after-hours car accident alert (JJ + Team) ──
@@ -511,14 +496,8 @@ ${transcript.slice(-1500) || "(call just started)"}
 
 ⚡ Team — please reach out ASAP.`;
 
-  const targets = [JJ_TELEGRAM_ID, TEAM_TELEGRAM_CHAT_ID].filter(Boolean);
-  for (const chat_id of targets) {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      chat_id,
-      text: text.substring(0, 4000),
-    }).catch(e => console.error("[voice] Car accident alert error:", e.message));
-  }
-  console.log(`[voice] 🚗 CAR ACCIDENT ALERT sent to ${targets.length} recipient(s)`);
+  await require("./tg-route").send("leads", text);
+  console.log("[voice] 🚗 CAR ACCIDENT ALERT routed to Leads & intake");
 }
 
 // ── Post-call summary (JJ ONLY — no team flood) ──────────
@@ -545,12 +524,8 @@ async function notifyCallSummary({ from, transcript, intake, transferred, isCour
 
   const text = `${header}\n\n📱 Caller: ${from}\n${transferred ? "🔀 Transferred to JJ\n" : ""}${courtBlock}${firmBlock}${intakeText}\n\n📝 Full transcript:\n${transcript.slice(-2000) || "(empty)"}`;
 
-  // JJ only — team chat already received urgent alert if applicable
-  await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-    chat_id: JJ_TELEGRAM_ID,
-    text: text.substring(0, 4000),
-  }).catch(e => console.error("[voice] Telegram notify error:", e.message));
-  console.log("[voice] Call summary sent to JJ only");
+  await require("./tg-route").send("leads", text);
+  console.log("[voice] Call summary routed to Leads & intake");
 }
 
 // ── Save intake to DB ─────────────────────────────────────
@@ -897,12 +872,8 @@ async function handleTranscription(req, res) {
   res.sendStatus(200);
   const { TranscriptionText, From } = req.body || {};
   if (!TranscriptionText) return;
-  const { TELEGRAM_TOKEN, JJ_TELEGRAM_ID } = process.env;
-  if (!TELEGRAM_TOKEN || !JJ_TELEGRAM_ID) return;
-  await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-    chat_id: JJ_TELEGRAM_ID,
-    text: `📨 VOICEMAIL — TEZ LAW P.C.\n\n📱 From: ${From || "unknown"}\n\n📝 Message:\n${TranscriptionText}`,
-  }).catch(() => {});
+  await require("./tg-route").send("leads",
+    `📨 VOICEMAIL — TEZ LAW P.C.\n\n📱 From: ${From || "unknown"}\n\n📝 Message:\n${TranscriptionText}`);
 }
 
 module.exports = {

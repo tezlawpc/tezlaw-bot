@@ -141,9 +141,6 @@ function detectCaseType(text) {
 
 // ── Notify Telegram ───────────────────────────────────────
 async function notifyTelegram(data) {
-  const { TELEGRAM_TOKEN, TEAM_TELEGRAM_CHAT_ID } = process.env;
-  if (!TELEGRAM_TOKEN || !TEAM_TELEGRAM_CHAT_ID) return;
-
   const text = `📋 NEW INTAKE — ${data.platform.toUpperCase()}
 
 👤 Name: ${data.name || "Not provided"}
@@ -154,10 +151,7 @@ async function notifyTelegram(data) {
 
 Reply to this client ASAP! 🔔`;
 
-  await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-    chat_id: TEAM_TELEGRAM_CHAT_ID,
-    text,
-  });
+  await require("./tg-route").send("leads", text);
 }
 
 // ── Notify Email ──────────────────────────────────────────
@@ -324,13 +318,8 @@ async function checkIntake(platform, userId, userText) {
             lead.id, platform, userId, intakeData.name
           );
           if (conflict?.disposition === "possible") {
-            const { TELEGRAM_TOKEN, JJ_TELEGRAM_ID } = process.env;
-            if (TELEGRAM_TOKEN && JJ_TELEGRAM_ID) {
-              await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-                chat_id: JJ_TELEGRAM_ID,
-                text: `⚠️ CONFLICT CHECK — Possible match!\n\nNew client: ${intakeData.name}\nCase: ${intakeData.caseType}\n\n${conflict.matches.length} existing record(s) found with similar name.\n\nReview in Admin Panel → Conflicts tab before assigning.`,
-              }).catch(() => {});
-            }
+            await require("./tg-route").send("leads",
+              `⚠️ CONFLICT CHECK — Possible match!\n\nNew client: ${intakeData.name}\nCase: ${intakeData.caseType}\n\n${conflict.matches.length} existing record(s) found with similar name.\n\nReview in Admin Panel → Conflicts tab before assigning.`);
           }
         }
       } catch (e) {

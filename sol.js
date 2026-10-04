@@ -50,13 +50,7 @@ function calculateDeadline(incidentDate, caseType) {
 }
 
 async function sendTelegramAlert(text) {
-  const { TELEGRAM_TOKEN, JJ_TELEGRAM_ID } = process.env;
-  if (!TELEGRAM_TOKEN || !JJ_TELEGRAM_ID) return;
-  await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-    chat_id: JJ_TELEGRAM_ID,
-    text,
-    parse_mode: "Markdown",
-  }).catch(e => console.error("SOL Telegram alert error:", e.message));
+  await require("./tg-route").send("court", text, { parse_mode: "Markdown" });
 }
 
 async function checkSolAlerts() {

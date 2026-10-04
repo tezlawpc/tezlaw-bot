@@ -438,7 +438,7 @@ async function sendTelegramDigest(message) {
     for (let i = 0; i < chunks.length; i++) {
       const part = chunks.length > 1 ? `[Part ${i+1}/${chunks.length}]\n\n${chunks[i]}` : chunks[i];
       await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-        chat_id:    JJ_TELEGRAM_ID,
+        ...(require("./tg-route").target("ops") || { chat_id: JJ_TELEGRAM_ID }),
         text:       part,
         parse_mode: "Markdown",
         disable_web_page_preview: true,
@@ -635,7 +635,7 @@ async function queuePendingUpdate({ question, oldAnswer, newAnswer, practiceArea
       await axios.post(
         `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
         {
-          chat_id:    JJ_TELEGRAM_ID,
+          ...(require("./tg-route").target("ops") || { chat_id: JJ_TELEGRAM_ID }),
           text:       msg,
           parse_mode: "HTML",
           disable_web_page_preview: true,
@@ -842,7 +842,7 @@ async function saveResearchNoteToJJMemory(opinion) {
       await axios.post(
         `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
         {
-          chat_id:    JJ_TELEGRAM_ID,
+          ...(require("./tg-route").target("ops") || { chat_id: JJ_TELEGRAM_ID }),
           text:       urgentMsg,
           parse_mode: "HTML",
           disable_web_page_preview: true,

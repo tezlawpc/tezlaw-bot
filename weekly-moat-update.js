@@ -85,16 +85,7 @@ async function notifyJJ(text) {
     return;
   }
   try {
-    await axios.post(
-      `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-      {
-        chat_id:    JJ_TELEGRAM_ID,
-        text:       text,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-      },
-      { timeout: 10000 }
-    );
+    await require("./tg-route").send("social", text, { parse_mode: "Markdown" });
   } catch (e) {
     console.error("[weekly-moat] Telegram send failed:", e.message);
   }

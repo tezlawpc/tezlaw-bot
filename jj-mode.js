@@ -102,13 +102,8 @@ async function isLockedOut(platform, userId) {
 // Telegram's Markdown parser, and a security alert that fails to send
 // because of formatting is worse than an unformatted one.
 async function alertJJ(text) {
-  const token = process.env.TELEGRAM_TOKEN, chat = process.env.JJ_TELEGRAM_ID;
   console.warn("[jj-mode] SECURITY: " + text);
-  if (!token || !chat) return;
-  try {
-    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`,
-      { chat_id: chat, text, disable_web_page_preview: true }, { timeout: 10000 });
-  } catch (e) { console.error("[jj-mode] alert failed:", e.message); }
+  await require("./tg-route").send("ops", text);
 }
 
 // ── Trigger phrases ───────────────────────────────────────

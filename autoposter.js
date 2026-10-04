@@ -539,9 +539,8 @@ async function publishAllLanguages(post, notifyPrefix, state) {
 }
 
 async function notifyTeam(message) {
-  if (!TEAM_CHAT_ID || !TELEGRAM_TOKEN) { console.log("Telegram notify:", message); return; }
-  try { await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, { chat_id: TEAM_CHAT_ID, text: message, parse_mode: "Markdown" }); }
-  catch (e) { console.error("Telegram notify failed:", e.message); }
+  const sent = await require("./tg-route").send("social", message, { parse_mode: "Markdown" });
+  if (!sent) console.log("Telegram notify:", message);
 }
 
 const decodeEntities = t => String(t || "").replace(/&amp;/g, "&").replace(/&#0?38;/g, "&").replace(/&#8217;/g, "’").replace(/&quot;/g, '"').replace(/&#039;/g, "'").trim();

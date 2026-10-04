@@ -260,7 +260,10 @@ async function askJJ(id, title, digest) {
   ].join("\n");
   try {
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      chat_id: JJ_TELEGRAM_ID,
+      // Social & content topic. The Publish/Skip buttons below are now gated
+      // by isApprover() in server.js, because in a group anyone could see —
+      // and otherwise press — them.
+      ...(require("./tg-route").target("social") || { chat_id: JJ_TELEGRAM_ID }),
       text,
       parse_mode: "Markdown",
       reply_markup: {
@@ -382,11 +385,8 @@ async function handlePublishCallback(msg) {
 }
 
 async function tellJJ(text) {
-  if (!TELEGRAM_TOKEN || !JJ_TELEGRAM_ID) return;
-  try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-      { chat_id: JJ_TELEGRAM_ID, text });
-  } catch (e) { /* a lost notification must never fail a publish */ }
+  // send() never throws: a lost notification must never fail a publish.
+  await require("./tg-route").send("social", text);
 }
 
 // ── Status, for the admin page ───────────────────────────
