@@ -136,6 +136,13 @@ jobs:
       - name: Court mail reading
         run: node scripts/check-court-mail-reading.js
 
+      # Client trust money. The staff app computes each running balance from
+      # ORDER BY id DESC -- insertion order, not transaction date -- so a
+      # back-dated withdrawal can pass the overdraft guard and still leave a
+      # past day below zero. RRC 1.15 does not allow that to go unseen.
+      - name: Trust ledger
+        run: node scripts/check-trust-ledger.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never
