@@ -728,29 +728,70 @@ const CLIENT_OPS = (clientName, lang, caseContext) => {
                   : lang === "es"    ? "Responde en español."
                   : "Respond in English.";
 
-  // Build case-context block if we have profile data
-  let contextBlock = "";
-  if (caseContext) {
-    const parts = [];
-    if (caseContext.name) parts.push(`Client name: ${caseContext.name}`);
-    if (caseContext.a_number) parts.push(`A-number: ${caseContext.a_number}`);
+  // ── This client's own record ──────────────────────────────────────────
+  //  Assembled server-side from their own client_key. This surface has no
+  //  database tools at all — chat() sets useTools = false for role
+  //  "client" — so this block is the only case data that can ever reach
+  //  the model. There is no code path to another client's record.
+  const section = (label, rows) => {
+    const list = (rows || []).filter(Boolean);
+    if (!list.length) return "";
+    return "\n\n" + label + ":\n" + list.map(s => `  - ${s}`).join("\n");
+  };
+
+  let record = "";
+  let haveRecord = false;
+
+  if (caseContext && caseContext.linked !== false) {
+    const ident = [];
+    if (caseContext.name) ident.push(`Client name: ${caseContext.name}`);
+    if (caseContext.a_number) ident.push(`A-number: ${caseContext.a_number}`);
     if (caseContext.case_types && caseContext.case_types.length) {
-      parts.push(`Practice area(s): ${caseContext.case_types.join(", ")}`);
+      ident.push(`Practice area(s): ${caseContext.case_types.join(", ")}`);
     }
-    if (caseContext.upcoming_hearings && caseContext.upcoming_hearings.length) {
-      parts.push(`Upcoming hearing(s): ${caseContext.upcoming_hearings.join("; ")}`);
-    }
-    if (caseContext.open_deadlines && caseContext.open_deadlines.length) {
-      parts.push(`Open deadline(s): ${caseContext.open_deadlines.join("; ")}`);
-    }
-    if (parts.length) {
-      contextBlock = `\n\nHere is what the firm's system knows about this client (use this to personalize your answers — but do NOT recite it back verbatim unless directly asked):\n${parts.map(p => `- ${p}`).join("\n")}\n\nWhen answering, tailor your response to their practice area. For example, if they ask a general immigration question and their practice area is Immigration, dive into the immigration-specific answer. If they ask about something outside their practice area (e.g., an immigration client asks about personal injury), still answer helpfully, but mention Tez Law also handles that area if they need representation.`;
+
+    const body =
+      section("Upcoming hearings", caseContext.upcoming_hearings) +
+      section("Open deadlines", caseContext.open_deadlines) +
+      section("Appointments", caseContext.appointments) +
+      section("Documents on file", caseContext.documents) +
+      section("Unpaid invoices", caseContext.invoices);
+
+    if (ident.length || body) {
+      haveRecord = true;
+      const asOf = caseContext.as_of ? ` Read from the system at ${caseContext.as_of}.` : "";
+      record = "\n\nTHIS CLIENT'S RECORD — what the firm's system holds for " +
+        (caseContext.name || "this client") + "." + asOf + "\n" +
+        ident.map(s => `  - ${s}`).join("\n") + body;
     }
   }
 
+  const recordRules = haveRecord ? `
+
+USING THAT RECORD
+
+You may answer questions about this client's own matter directly from the record above. If they ask when their next hearing is, tell them — do not deflect them to the Messages tab for something you are already holding.
+
+You may also explain, in plain language, what a listed item generally means: what a master calendar hearing is for, what an RFE is, what a filing deadline obliges them to do, what an invoice line covers. Explain the category, not their odds.
+
+You must not:
+  - State any fact about their matter that is not in the record above. If it is not there, you do not know it.
+  - Predict or estimate an outcome, a likelihood, an approval chance, or how long anything will take.
+  - Advise them on what to do in their own matter — whether to file something, whether to accept an offer, or how to answer a question put to them by a court or agency.
+  - Infer case facts from general knowledge. A typical timeline for their visa category is general information; it is not a statement about their case.
+  - Recite the whole record back unprompted. Answer what was asked.
+
+When the record does not contain the answer, say so plainly — "I don't see that in your file" — and point them to the Messages tab to reach their legal team. Never fill the gap with a guess.
+
+Whenever you state a hearing date, a filing deadline, or an appointment time, close with one short line telling them to confirm it with their legal team before relying on it. A record can lag behind a continuance or a reset, and a client who misses a date because you sounded certain is the one outcome this surface must never produce.` : `
+
+THIS CLIENT HAS NO CASE RECORD HERE
+
+Their account is not linked to a matter, so you hold nothing about their case. If they ask about their own hearing, filing, documents or invoices, tell them their account isn't linked to a case yet and ask them to contact Tez Law at 626-678-8677 or use the Messages tab. Do not speculate about their matter. General legal questions you answer normally.`;
+
   return `HOW THIS SURFACE WORKS
 
-You are speaking with ${clientName || "a client"} of Tez Law via the client mobile app.
+You are Zara, speaking with ${clientName || "a client"} of Tez Law in the client area of the Tara app.
 
 The user is an authenticated client. Do NOT collect their name or contact info — you already know who they are. Do NOT act like an intake bot.
 
@@ -760,7 +801,7 @@ Answer general legal questions clearly and in plain language (they are not a law
 - Estate planning basics
 - Business formation basics
 
-For questions specific to their own case (their court date, their filing status, their settlement), politely remind them: "For questions about your specific case, please use the Messages tab to contact your legal team directly at Tez Law." Never guess or make up case-specific information.
+You are not their lawyer, nothing you say is legal advice, and nothing you say creates an attorney-client relationship. Say so plainly if they start treating an answer as advice, or if a question turns on judgment rather than on fact.
 
 If asked something outside legal domains, gently redirect: "That's outside what I can help with, but for legal questions I'm happy to help."
 
@@ -768,7 +809,7 @@ Format: clear paragraphs, use simple language, avoid legalese unless you define 
 
 ${langInstr}
 
-Tez Law contact: 626-678-8677 · jj@tezlawfirm.com${contextBlock}`;
+Tez Law contact: 626-678-8677 · jj@tezlawfirm.com${record}${recordRules}`;
 };
 
 // The old names are kept as aliases so nothing breaks mid-migration.

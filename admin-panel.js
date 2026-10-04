@@ -181,7 +181,7 @@
     };
     document.getElementById('complianceTable').innerHTML = data.length
       ? `<table>
-          <thead><tr><th>Date</th><th>Platform</th><th>Type</th><th>Tara Said</th><th>Correction Sent</th></tr></thead>
+          <thead><tr><th>Date</th><th>Platform</th><th>Type</th><th>Zara Said</th><th>Correction Sent</th></tr></thead>
           <tbody>${data.map(r => `<tr>
             <td style="white-space:nowrap;font-size:11px">${new Date(r.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
             <td>${platBadge(r.platform)}</td>
@@ -190,7 +190,7 @@
             <td style="max-width:220px;font-size:12px;color:#006600" title="${(r.correction_sent||'').replace(/"/g,'&quot;')}">${(r.correction_sent||'').substring(0,100)}${(r.correction_sent||'').length>100?'…':''}</td>
           </tr>`).join('')}</tbody>
         </table>`
-      : '<p style="color:#006600;font-size:13px;padding:12px">✅ No compliance violations logged. Tara is clean!</p>';
+      : '<p style="color:#006600;font-size:13px;padding:12px">✅ No compliance violations logged. Zara is clean!</p>';
   }
 
   // Analytics
@@ -406,7 +406,7 @@ async function loadQuestions() {
           + '<td style="font-size:11px;color:#999">'+(r.zara_response||'').substring(0,80)+'...</td>'
           + '<td><button class="action-btn" style="font-size:11px;padding:4px 10px" data-qid="'+r.id+'" onclick="resolveQuestion(this.getAttribute(\'data-qid\'),this)">Resolved</button></td></tr>';
     });
-    ae.innerHTML = '<table><thead><tr><th>Date</th><th>Platform</th><th>Question</th><th>Tara Said</th><th>Action</th></tr></thead><tbody>'+ar+'</tbody></table>';
+    ae.innerHTML = '<table><thead><tr><th>Date</th><th>Platform</th><th>Question</th><th>Zara Said</th><th>Action</th></tr></thead><tbody>'+ar+'</tbody></table>';
   } else {
     ae.innerHTML = '<p style="color:#006600;font-size:13px;padding:12px">No open questions!</p>';
   }

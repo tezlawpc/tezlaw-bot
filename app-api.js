@@ -302,6 +302,13 @@ async function initClientAuthTables() {
   // endpoint SELECTs it and 500s if missing.
   try { await db.query(`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email TEXT`); } catch {}
 
+  // ─── Phone for firm users and consultants ───────────────────────────
+  // A client who came in through a broker sees that broker's name and
+  // number on their My Case page. The broker is identified by their
+  // Dropbox folder (admin_users.broker_folder); this is where the number
+  // to actually reach them lives.
+  try { await db.query(`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS phone TEXT`); } catch {}
+
   // ─── PI-specific columns on tasks (Phase 1 of PI workflow redesign) ────
   // Option A schema: extend the case (tasks) row with PI-only fields rather
   // than a separate pi_cases table. Fields are null for non-PI matters.
@@ -3198,7 +3205,8 @@ function registerAppApi(app) {
   app.get("/api/staff/admin/users", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
     try {
       const r = await db.query(
-        `SELECT id, username, full_name, role, email, disabled, created_at
+        `SELECT id, username, full_name, role, email, phone, broker_folder,
+                disabled, created_at
          FROM admin_users
          ORDER BY (role = 'admin') DESC, (role = 'manager') DESC, full_name ASC`
       );
@@ -3222,6 +3230,41 @@ function registerAppApi(app) {
       const r = await db.query(
         `UPDATE admin_users SET role = $1 WHERE id = $2 RETURNING id, username, full_name, role`,
         [role, id]
+      );
+      if (!r.rows[0]) return res.status(404).json({ ok: false, error: "user not found" });
+      res.json({ ok: true, user: r.rows[0] });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Set a firm user's or consultant's contact details. A consultant's phone
+  // is shown to their own clients on My Case, so an empty string clears the
+  // field rather than storing "" — the client view tests for null.
+  app.patch("/api/staff/admin/users/:id/contact", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
+
+      const clean = (v) => {
+        if (v === undefined) return undefined;          // field not sent — leave as is
+        const t = String(v).trim().substring(0, 200);
+        return t === "" ? null : t;
+      };
+      const phone = clean(req.body?.phone);
+      const email = clean(req.body?.email);
+      if (phone === undefined && email === undefined) {
+        return res.status(400).json({ ok: false, error: "nothing to update" });
+      }
+
+      const sets = [];
+      const vals = [];
+      if (phone !== undefined) { vals.push(phone); sets.push(`phone = $${vals.length}`); }
+      if (email !== undefined) { vals.push(email); sets.push(`email = $${vals.length}`); }
+      vals.push(id);
+
+      const r = await db.query(
+        `UPDATE admin_users SET ${sets.join(", ")} WHERE id = $${vals.length}
+         RETURNING id, username, full_name, role, email, phone, broker_folder`,
+        vals
       );
       if (!r.rows[0]) return res.status(404).json({ ok: false, error: "user not found" });
       res.json({ ok: true, user: r.rows[0] });
@@ -8755,6 +8798,63 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
         ).then(r => r.rows[0]?.n || 0).catch(() => 0),
       ]);
       const nextHearing = hearings.find(h => new Date(h.hearing_date) >= new Date());
+
+      // Who their consultant is, if they came in through one.
+      //
+      // client_consultants is the firm's own link and is what admin screens
+      // maintain, so it is read first: it honours a consultant deliberately
+      // removed from a client, which re-deriving from the folder tree would
+      // silently overrule. The Dropbox path is the fallback for a client
+      // filed under a broker who has no consultant login yet — matched
+      // case-insensitively, the same way broker-accounts.linkClients does,
+      // because broker_folder is not stored in a canonical case.
+      //
+      // Null on any error: a missing consultant never costs them the page.
+      let broker = null;
+      try {
+        const linked = await db.query(
+          `SELECT a.full_name, a.phone, a.email
+             FROM client_consultants cc
+             JOIN admin_users a ON a.id = cc.consultant_id
+            WHERE cc.client_key = $1
+              AND cc.removed_at IS NULL
+              AND a.disabled IS NOT TRUE
+            ORDER BY cc.assigned_at ASC
+            LIMIT 1`,
+          [clientKey]
+        );
+        const b = linked.rows[0];
+        if (b) {
+          broker = { name: b.full_name, phone: b.phone || null, email: b.email || null };
+        } else {
+          const pathR = await db.query(
+            `SELECT dropbox_path FROM client_dropbox_mapping
+              WHERE client_key = $1 AND dropbox_path IS NOT NULL LIMIT 1`,
+            [clientKey]
+          );
+          const folder = pathR.rows[0]
+            ? require("./broker-accounts").brokerOfPath(pathR.rows[0].dropbox_path)
+            : null;
+          if (folder) {
+            const fR = await db.query(
+              `SELECT full_name, phone, email FROM admin_users
+                WHERE LOWER(TRIM(broker_folder)) = LOWER(TRIM($1))
+                  AND disabled IS NOT TRUE
+                LIMIT 1`,
+              [folder]
+            );
+            const f = fR.rows[0];
+            broker = {
+              name: (f && f.full_name) || folder,
+              phone: (f && f.phone) || null,
+              email: (f && f.email) || null,
+            };
+          }
+        }
+      } catch (e) {
+        console.warn("[client overview broker]:", e.message);
+      }
+
       res.json({
         ok: true,
         linked_to_case: true,
@@ -8763,6 +8863,7 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
         upcoming_hearings: hearings,
         deadlines,
         unread_messages: unread,
+        broker,
       });
     } catch (err) {
       console.error("[api client overview]:", err.message);
@@ -8831,8 +8932,13 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
         return res.status(501).json({ ok: false, error: "Chat not available" });
       }
 
-      // Look up this client's real case context so Zara can personalize responses.
-      // Never fails the chat if lookup errors — falls back to basic prompt.
+      // Look up this client's own case record so Zara can answer from it.
+      // Every query below is keyed to THIS client's client_key, and the
+      // client surface has no database tools (zara-app-chat chat() sets
+      // useTools = false for role "client"), so this snapshot is the only
+      // case data that reaches the model — there is no path to anyone
+      // else's record. Each lookup degrades to empty rather than failing
+      // the chat, so a missing table never costs the client an answer.
       let caseContext = null;
       try {
         // req.user.uid is the client_accounts.id; fetch phone + client_key
@@ -8843,32 +8949,72 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
         );
         const acct = acctR.rows[0];
         if (acct && acct.client_key) {
+          const ck = acct.client_key;
           const cp = require("./client-profiles");
-          const profile = await cp.getClientByKey(acct.client_key);
-          if (profile) {
-            const now = Date.now();
-            const upcoming = (profile.hearings || [])
+          const [profile, appts, docs, invs] = await Promise.all([
+            cp.getClientByKey(ck).catch(() => null),
+            db.query(
+              `SELECT purpose, status, scheduled_time, scheduled_location
+                 FROM appointments
+                WHERE client_key = $1 AND cancelled_at IS NULL
+                ORDER BY COALESCE(scheduled_time, created_at) DESC LIMIT 5`,
+              [ck]
+            ).then(r => r.rows).catch(() => []),
+            db.query(
+              `SELECT filename, category, uploaded_at
+                 FROM client_documents
+                WHERE client_key = $1
+                ORDER BY uploaded_at DESC LIMIT 8`,
+              [ck]
+            ).then(r => r.rows).catch(() => []),
+            db.query(
+              `SELECT description, amount_cents, due_date, status
+                 FROM client_invoices
+                WHERE client_key = $1 AND paid_at IS NULL
+                ORDER BY COALESCE(due_date, created_at) ASC LIMIT 8`,
+              [ck]
+            ).then(r => r.rows).catch(() => []),
+          ]);
+
+          const dt = (v) => (v ? new Date(v).toDateString() : null);
+          const now = Date.now();
+          const hearings = (profile && profile.hearings) || [];
+          const deadlines = (profile && profile.deadlines) || [];
+
+          caseContext = {
+            linked: true,
+            name: (profile && profile.client_name) || acct.full_name,
+            a_number: (profile && profile.a_number) || null,
+            case_types: profile ? Array.from(profile.case_types || []) : [],
+            upcoming_hearings: hearings
               .filter(h => h.hearing_date && new Date(h.hearing_date).getTime() >= now)
               .sort((a, b) => new Date(a.hearing_date) - new Date(b.hearing_date))
-              .slice(0, 2)
-              .map(h => `${new Date(h.hearing_date).toDateString()}${h.type_label ? ` (${h.type_label})` : ""}${h.court_name ? ` at ${h.court_name}` : ""}`);
-            const openDeadlines = (profile.deadlines || [])
+              .slice(0, 5)
+              .map(h => `${dt(h.hearing_date)}${h.type_label ? ` — ${h.type_label}` : ""}${h.court_name ? ` at ${h.court_name}` : ""}`),
+            open_deadlines: deadlines
               .filter(d => !d.completed_at)
-              .slice(0, 3)
-              .map(d => `${d.description}${d.due_date ? ` (due ${new Date(d.due_date).toDateString()})` : ""}`);
-            caseContext = {
-              name: profile.client_name || acct.full_name,
-              a_number: profile.a_number || null,
-              case_types: Array.from(profile.case_types || []),
-              upcoming_hearings: upcoming,
-              open_deadlines: openDeadlines,
-              language: acct.language || req.user.lang || "en",
-            };
-          } else {
-            caseContext = { name: acct.full_name, language: acct.language || "en" };
-          }
+              .slice(0, 8)
+              .map(d => `${d.description}${d.due_date ? ` (due ${dt(d.due_date)})` : ""}`),
+            appointments: appts.map(a =>
+              `${a.purpose}${a.scheduled_time ? ` — ${dt(a.scheduled_time)}` : ""}` +
+              `${a.scheduled_location ? ` at ${a.scheduled_location}` : ""} [${a.status}]`),
+            documents: docs.map(x =>
+              `${x.filename}${x.category ? ` (${x.category})` : ""}` +
+              `${x.uploaded_at ? ` — uploaded ${dt(x.uploaded_at)}` : ""}`),
+            invoices: invs.map(x =>
+              `${x.description} — $${((x.amount_cents || 0) / 100).toFixed(2)}` +
+              `${x.due_date ? `, due ${dt(x.due_date)}` : ""}${x.status ? ` [${x.status}]` : ""}`),
+            as_of: new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" }) + " PT",
+            language: acct.language || req.user.lang || "en",
+          };
         } else if (acct) {
-          caseContext = { name: acct.full_name, language: acct.language || "en" };
+          // Signed in, but no matter linked yet. linked:false tells
+          // CLIENT_OPS to say so rather than imply an empty case file.
+          caseContext = {
+            linked: false,
+            name: acct.full_name,
+            language: acct.language || "en",
+          };
         }
       } catch (e) {
         console.warn("[client chat context lookup]:", e.message);

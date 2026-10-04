@@ -334,7 +334,7 @@ router.get("/choose", requireAuth, (req, res) => {
       </a>
       <a href="/admin/" class="panel-card admin">
         <div class="icon">📊</div>
-        <div class="meta">Tara &amp; firm analytics</div>
+        <div class="meta">Zara &amp; firm analytics</div>
         <h2>Admin Panel</h2>
         <p>Leads, conflicts, SOL tracker, drip campaigns, intake compliance, prompt history.</p>
         <div class="enter">Enter →</div>
@@ -1690,7 +1690,7 @@ function dashboardHtml(opts = {}) {
       <button class="logout-btn" onclick="logout()">Logout</button>
     </div>
     <div class="card">
-      <h3>✏️ Edit Tara's System Prompt</h3>
+      <h3>✏️ Edit Zara's System Prompt</h3>
       <p style="font-size:13px;color:#666;margin-bottom:12px">
         Changes apply <strong>immediately</strong> — no GitHub or Render deploy needed.
         Each save is versioned in the database.
@@ -1741,7 +1741,7 @@ function dashboardHtml(opts = {}) {
     <div class="card">
       <h3>⚖️ Flagged Responses</h3>
       <p style="font-size:13px;color:#666;margin-bottom:16px">
-        Tara responses that contained definitive legal conclusions, guarantees, or UPL risk.
+        Zara responses that contained definitive legal conclusions, guarantees, or UPL risk.
         A correction was automatically sent to the client for each entry.
       </p>
       <div id="complianceTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
@@ -1773,7 +1773,7 @@ function dashboardHtml(opts = {}) {
     <div class="card">
       <h3>✍️ Post Custom Topic</h3>
       <p style="font-size:13px;color:#666;margin-bottom:16px">
-        Write a post on any topic or news link. Tara will research, write, and publish to WordPress with Chinese and Spanish translations — just like the daily auto-poster.
+        Write a post on any topic or news link. Zara will research, write, and publish to WordPress with Chinese and Spanish translations — just like the daily auto-poster.
       </p>
       <div style="display:grid;gap:10px;max-width:700px">
         <div>
@@ -1842,7 +1842,7 @@ function dashboardHtml(opts = {}) {
   <div class="page" id="page-questions">
     <div class="page-header"><h1>Knowledge Gaps</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
     <div class="card"><h3>📊 Top Gaps This Week</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">Questions Tara failed — fix in System Prompt.</p>
+      <p style="font-size:13px;color:#666;margin-bottom:16px">Questions Zara failed — fix in System Prompt.</p>
       <div id="questionsWeekly"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
     <div class="card"><h3>❓ All Open Questions</h3>
@@ -1866,7 +1866,7 @@ function dashboardHtml(opts = {}) {
       <h3>📝 Create a Post</h3>
       <p style="font-size:13px;color:#666;margin-bottom:20px">
         Enter a topic, paste a news link, or describe what you want to post.
-        Tara will write and publish it to WordPress just like the daily autoposter.
+        Zara will write and publish it to WordPress just like the daily autoposter.
       </p>
       <div style="display:grid;gap:14px">
         <div>
