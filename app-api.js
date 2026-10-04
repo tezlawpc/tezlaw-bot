@@ -154,7 +154,7 @@ function requireClient(req, res, next) {
 //
 // A client token carries uid "c<id>" (issueClientToken) so a client can never
 // be mistaken for the staff user with the same number. client_accounts.id,
-// appointments.client_account_id, client_documents.client_id and friends are
+// appointments.client_account_id, client_uploads.client_id and friends are
 // integer columns: handing them "c12" makes Postgres reject the whole query
 // ("invalid input syntax for type integer"). Every client route that looked
 // its account up with req.user.uid failed that way — documents, invoices,
@@ -504,9 +504,19 @@ async function initClientAuthTables() {
     }
   }
 
-  // Client-uploaded documents
+  // Documents that come through the phone app: what a client uploads, a
+  // hearing exhibit a staff member attaches, a generated document saved to
+  // the client.
+  //
+  // These used to be kept in a table called client_documents — the same name
+  // the firm's own Documents tab (client-documents.js) uses for a table with
+  // different columns. "CREATE TABLE IF NOT EXISTS" let whichever ran first
+  // win, and every query from the other feature then failed. They are two
+  // different things with two different audiences, so they are two tables
+  // now: client_documents is the firm's, client_uploads is this one. Nothing
+  // a client-facing route reads can return a file from the firm's tab.
   await db.query(`
-    CREATE TABLE IF NOT EXISTS client_documents (
+    CREATE TABLE IF NOT EXISTS client_uploads (
       id            SERIAL PRIMARY KEY,
       client_key    TEXT NOT NULL,
       client_id     INTEGER,
@@ -520,7 +530,29 @@ async function initClientAuthTables() {
       uploaded_at   TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_documents_key ON client_documents (client_key)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_client_uploads_key ON client_uploads (client_key)`);
+  // If the shared table on this database happens to be the app-shaped one,
+  // the app's rows are in it. Copy them across once, keeping their ids (a
+  // hearing note's exhibit list refers to a document by id). Copied, not
+  // moved: nothing is deleted from client_documents.
+  try {
+    const shape = await db.query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'client_documents'`);
+    const cols = new Set(shape.rows.map(r => r.column_name));
+    if (["client_id", "note", "content", "uploaded_by"].every(c => cols.has(c))) {
+      const already = await db.query(`SELECT 1 FROM client_uploads LIMIT 1`);
+      if (!already.rows.length) {
+        const copied = await db.query(
+          `INSERT INTO client_uploads (id, client_key, client_id, filename, mime_type, size_bytes, category, note, content, uploaded_by, uploaded_at)
+           SELECT id, client_key, client_id, filename, mime_type, size_bytes, category, note, content, uploaded_by, uploaded_at
+             FROM client_documents WHERE content IS NOT NULL`);
+        await db.query(
+          `SELECT setval(pg_get_serial_sequence('client_uploads', 'id'), GREATEST((SELECT COALESCE(MAX(id), 0) FROM client_uploads), 1))`);
+        if (copied.rowCount) console.log(`[client uploads] copied ${copied.rowCount} app document(s) out of the shared client_documents table`);
+      }
+    }
+  } catch (e) { console.warn("[client uploads] carry-over skipped:", e.message); }
 
   // Client invoices — for the multi-method billing flow (Zelle, check, credit card link)
   await db.query(`
@@ -2356,7 +2388,7 @@ function registerAppApi(app) {
   // ── Upload a file attached to a hearing exhibit ──────────────────────
   //
   // Base64 upload (matches /api/client/documents shape). The file lands in
-  // client_documents so it's queryable + downloadable through the existing
+  // client_uploads so it's queryable + downloadable through the existing
   // document pipeline; we just tag it with a hearing-specific category so
   // the mobile exhibit editor can reference it by document id.
   //
@@ -2380,12 +2412,12 @@ function registerAppApi(app) {
       const label = `Ex. ${exhibit_number || "?"}${description ? ": " + String(description).substring(0, 100) : ""}`;
       const category = hearing_kind === "individual" ? "hearing-exhibit-individual" : "hearing-exhibit-master";
       const noteRef = hearing_note_id ? ` (note #${hearing_note_id})` : "";
-      // client_documents.client_key is NOT NULL — fall back to a hearing-scoped
+      // client_uploads.client_key is NOT NULL — fall back to a hearing-scoped
       // synthetic key so orphaned hearing files still land in the table.
       const effectiveKey = client_key
         || (hearing_note_id ? `hearing-${hearing_kind || "master"}-${hearing_note_id}` : "hearing-unattached");
       const r = await db.query(
-        `INSERT INTO client_documents
+        `INSERT INTO client_uploads
            (client_key, filename, mime_type, size_bytes, category, note, content, uploaded_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id, filename, mime_type, size_bytes, category, note, uploaded_at`,
@@ -4075,7 +4107,7 @@ function registerAppApi(app) {
         return res.status(413).json({ ok: false, error: `File too large. Max ${Math.round(MAX_DOC_BYTES / 1024 / 1024)} MB.` });
       }
       const r = await db.query(
-        `INSERT INTO client_documents
+        `INSERT INTO client_uploads
            (client_key, client_id, filename, mime_type, size_bytes, category, note, content, uploaded_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'client')
          RETURNING id, filename, mime_type, size_bytes, category, note, uploaded_at`,
@@ -4112,7 +4144,7 @@ function registerAppApi(app) {
       if (!clientKey) return res.json({ ok: true, documents: [] });
       const r = await db.query(
         `SELECT id, filename, mime_type, size_bytes, category, note, uploaded_by, uploaded_at
-         FROM client_documents WHERE client_key = $1 ORDER BY uploaded_at DESC`,
+         FROM client_uploads WHERE client_key = $1 ORDER BY uploaded_at DESC`,
         [clientKey]
       );
       res.json({ ok: true, documents: r.rows });
@@ -4126,7 +4158,7 @@ function registerAppApi(app) {
       if (!ok) return res.status(403).json({ ok: false, error: "You don't have access to this client" });
       const r = await db.query(
         `SELECT id, filename, mime_type, size_bytes, category, note, uploaded_by, uploaded_at
-         FROM client_documents WHERE client_key = $1 ORDER BY uploaded_at DESC`,
+         FROM client_uploads WHERE client_key = $1 ORDER BY uploaded_at DESC`,
         [req.params.key]
       );
       res.json({ ok: true, documents: r.rows });
@@ -4136,7 +4168,7 @@ function registerAppApi(app) {
   // ── Dropbox client folder listing (with thumbnails) ────────────
   // Firm-side: list all files in the client's mapped Dropbox folder. Firm
   // uses this for a quick preview grid inside the client detail. Client-side
-  // never sees this — clients only see explicitly-uploaded client_documents.
+  // never sees this — clients only see explicitly-uploaded client_uploads.
   app.get("/api/staff/clients/:key/dropbox-files", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const ok = await canUserAccessClient(req.user, req.params.key);
@@ -4224,7 +4256,7 @@ function registerAppApi(app) {
       const id = parseInt(req.params.id, 10);
       if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
       const r = await db.query(
-        `SELECT filename, mime_type, content, client_key FROM client_documents WHERE id = $1 LIMIT 1`,
+        `SELECT filename, mime_type, content, client_key FROM client_uploads WHERE id = $1 LIMIT 1`,
         [id]
       );
       if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
@@ -5605,11 +5637,11 @@ function registerAppApi(app) {
         [client_key || null, template_slug, tpl.name, finalTitle, body, JSON.stringify(allVars), req.user.uid]
       );
 
-      // Optionally save a copy to client_documents (searchable by client)
+      // Optionally save a copy to the client's documents (client_uploads)
       if (save_to_client_documents && client_key) {
         try {
           await db.query(
-            `INSERT INTO client_documents
+            `INSERT INTO client_uploads
                (client_key, filename, mime_type, size_bytes, category, note, content, uploaded_by)
              VALUES ($1, $2, 'text/plain', $3, 'legal_document', $4, $5, 'firm')`,
             [
@@ -5620,7 +5652,7 @@ function registerAppApi(app) {
               Buffer.from(body, 'utf8'),
             ]
           );
-        } catch (e) { console.warn("[doc gen] save to client_documents failed:", e.message); }
+        } catch (e) { console.warn("[doc gen] save to client_uploads failed:", e.message); }
       }
 
       res.json({ ok: true, document: saved.rows[0] });
@@ -6159,6 +6191,7 @@ function registerAppApi(app) {
           `UPDATE client_invoices SET client_key = $2 WHERE client_key = $1`,
           `UPDATE client_notes SET client_key = $2 WHERE client_key = $1`,
           `UPDATE client_documents SET client_key = $2 WHERE client_key = $1`,
+          `UPDATE client_uploads SET client_key = $2 WHERE client_key = $1`,
           `UPDATE time_entries SET client_key = $2 WHERE client_key = $1`,
           `UPDATE trust_transactions SET client_key = $2 WHERE client_key = $1`,
           `UPDATE case_members SET client_key = $2 WHERE client_key = $1`,
@@ -6344,7 +6377,8 @@ function registerAppApi(app) {
                  (SELECT COUNT(*)::int FROM tasks WHERE client_key = $1) AS task_count,
                  (SELECT COUNT(*)::int FROM client_invoices WHERE client_key = $1) AS invoice_count,
                  (SELECT COUNT(*)::int FROM client_notes WHERE client_key = $1) AS note_count,
-                 (SELECT COUNT(*)::int FROM client_documents WHERE client_key = $1) AS doc_count,
+                 ((SELECT COUNT(*)::int FROM client_documents WHERE client_key = $1)
+                   + (SELECT COUNT(*)::int FROM client_uploads WHERE client_key = $1)) AS doc_count,
                  (SELECT COALESCE(SUM(amount_cents), 0)::int FROM client_invoices WHERE client_key = $1) AS invoice_cents`,
               [m.client_key]
             );
@@ -6385,7 +6419,7 @@ function registerAppApi(app) {
         ).catch(() => ({ rows: [] })),
         db.query(
           `SELECT id, filename, category, uploaded_at, uploaded_by
-           FROM client_documents WHERE client_key = $1 ORDER BY uploaded_at DESC LIMIT 50`, [key]
+           FROM client_uploads WHERE client_key = $1 ORDER BY uploaded_at DESC LIMIT 50`, [key]
         ).catch(() => ({ rows: [] })),
         db.query(
           `SELECT id, description, amount_cents, status, paid_at, created_at
@@ -6519,7 +6553,7 @@ function registerAppApi(app) {
         try {
           const buf = Buffer.from(body, 'utf-8');
           await db.query(
-            `INSERT INTO client_documents (client_key, filename, mime_type, size_bytes, category, note, content, uploaded_by)
+            `INSERT INTO client_uploads (client_key, filename, mime_type, size_bytes, category, note, content, uploaded_by)
              VALUES ($1, $2, 'text/plain', $3, 'legal_document', $4, $5, $6)`,
             [String(client_key), `${finalTitle}.txt`, buf.length, `Generated from ${tmpl.name}`, buf, `staff:${req.user.uid}`]
           );

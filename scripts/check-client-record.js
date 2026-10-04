@@ -112,7 +112,10 @@ const T = {
   case_members: [{ client_key: CK, full_name: "Spouse Client", relationship: "spouse", a_number: "INTERNAL-A-number", is_primary: false }],
   client_contacts: [{ client_key: CK, phone: "+16265550001", address: "100 Test St, West Covina, CA", notes: "INTERNAL do not call before noon" }],
   client_consultants: [],
-  client_documents: [{ client_key: CK, filename: "passport.pdf", category: "identity", uploaded_by: "client", uploaded_at: D("2026-09-02T18:00:00Z") }],
+  // What the client sent from the app. client_documents is the firm's own
+  // Documents tab — same client, and never part of the client's record.
+  client_uploads: [{ client_key: CK, filename: "passport.pdf", category: "identity", uploaded_by: "client", uploaded_at: D("2026-09-02T18:00:00Z") }],
+  client_documents: [{ client_key: CK, filename: "INTERNAL-strategy-memo.pdf", category: "work product", uploaded_at: D("2026-09-03T18:00:00Z") }],
   signature_requests: [
     { client_key: CK, title: "Fee agreement", status: "pending", created_at: D("2026-09-28T18:00:00Z") },
     { client_key: CK, title: "Release of information", status: "signed", signed_at: D("2026-08-03T18:00:00Z") },
@@ -279,7 +282,10 @@ Module._load = orig;
     () => asked.filter(a => Array.isArray(a.params[0])).every(a => a.params[0].every(id => [7, 5, 41, 42, 2].includes(id))));
   check("another client's rows are nowhere in it", () => !(JSON.stringify(again) + chat.CLIENT_OPS("Test Client", "en", again)).includes("OTHERCLIENT"));
   check("file contents are never fetched — documents and signature requests by named columns only",
-    () => asked.filter(a => /FROM (client_documents|signature_requests|esign_packets|client_messages)/.test(a.q)).every(a => !/SELECT \*/.test(a.q) && !/\b(content|body_snapshot|signed_pdf|docx|body)\b/.test(a.q.split(" FROM ")[0])));
+    () => asked.filter(a => /FROM (client_uploads|signature_requests|esign_packets|client_messages)/.test(a.q)).every(a => !/SELECT \*/.test(a.q) && !/\b(content|body_snapshot|signed_pdf|docx|body)\b/.test(a.q.split(" FROM ")[0])));
+  check("the client's documents come from the app's table, and the firm's Documents tab is never read",
+    () => asked.some(a => /FROM client_uploads/.test(a.q)) && !asked.some(a => /FROM client_documents/.test(a.q)) &&
+      JSON.stringify(again).includes("passport.pdf") && !(JSON.stringify(again) + chat.CLIENT_OPS("Test Client", "en", again)).includes("INTERNAL-strategy-memo"));
   check("unbilled time, settlement offers and notes tables are not queried at all",
     () => !asked.some(a => /FROM (time_entries|civil_time_entries|pi_offers|pi_negotiations|client_notes|pi_liens|pi_medical)/.test(a.q)) ||
           asked.filter(a => /FROM (time_entries|civil_time_entries|pi_offers|pi_negotiations|client_notes|pi_liens|pi_medical)/.test(a.q)).map(a => a.q.slice(0, 60)).join(" | "));

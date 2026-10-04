@@ -165,8 +165,11 @@ async function build(db, { uid, clientKey = null, name = null, lang = "en", now 
     rows(`SELECT * FROM appointments
            WHERE client_key = $1 AND cancelled_at IS NULL AND status <> 'cancelled'
            ORDER BY COALESCE(scheduled_time, created_at) DESC LIMIT 20`, [ck]),
-    // Never SELECT * here: client_documents.content is the file itself.
-    rows(`SELECT filename, category, uploaded_by, uploaded_at FROM client_documents
+    // The client's own documents: what they sent from the app and what the
+    // firm chose to save to them. client_uploads, never client_documents —
+    // that one is the firm's Documents tab and is not the client's to see.
+    // Never SELECT * here: client_uploads.content is the file itself.
+    rows(`SELECT filename, category, uploaded_by, uploaded_at FROM client_uploads
            WHERE client_key = $1 ORDER BY uploaded_at DESC LIMIT 10`, [ck]),
     rows(`SELECT * FROM client_invoices WHERE client_key = $1 ORDER BY created_at DESC LIMIT 30`, [ck]),
     rows(`SELECT * FROM accounting_invoices WHERE client_key = $1 ORDER BY invoice_date DESC NULLS LAST LIMIT 12`, [ck]),

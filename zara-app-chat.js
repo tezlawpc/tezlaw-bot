@@ -346,10 +346,19 @@ async function executeTool(db, user, name, args, sink = null) {
         params.push(`%${args.client_name}%`);
         where += ` AND client_key IN (SELECT DISTINCT client_key FROM tasks WHERE client_name ILIKE $${params.length})`;
       }
+      // Staff only (this tool is not offered to clients): both the files the
+      // firm filed under Documents and the ones that came in through the app.
       const r = await db.query(
-        `SELECT d.id, d.filename, d.mime_type, d.size_bytes, d.category, d.uploaded_at,
+        `SELECT d.id, d.filename, d.mime_type, d.size_bytes, d.category, d.uploaded_at, d.source,
                 (SELECT client_name FROM tasks t WHERE t.client_key = d.client_key LIMIT 1) AS client_name
-         FROM client_documents d
+         FROM (
+           SELECT id, client_key, filename, mime_type, size_bytes, category, uploaded_at, 'filed by the firm' AS source
+             FROM client_documents WHERE file_data IS NOT NULL
+           UNION ALL
+           SELECT id, client_key, filename, mime_type, size_bytes, category, uploaded_at,
+                  CASE WHEN uploaded_by = 'client' THEN 'uploaded by the client' ELSE 'from the app' END AS source
+             FROM client_uploads
+         ) d
          WHERE ${where}
          ORDER BY d.uploaded_at DESC
          LIMIT 30`,

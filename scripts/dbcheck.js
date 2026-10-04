@@ -242,6 +242,34 @@ async function exercises({ tok, cookie }) {
   note("…with each hearing as a calendar day and the time printed on the notice",
     !!h0 && /^\d{4}-\d{2}-\d{2}$/.test(h0.hearing_ymd || "") && /T12:00:00$/.test(h0.hearing_date || "") && h0.hearing_time === "8:30 AM", JSON.stringify(h0));
 
+  // Two kinds of document, two tables. What the firm files under a client's
+  // Documents tab must never be something the client's app can list or open.
+  {
+    const firmDocs = require("../client-documents");
+    const b64 = Buffer.from("%PDF-1.4 the client's own passport scan").toString("base64");
+    r = await send("client", "POST", "/api/client/documents", { filename: "client-passport.pdf", mime_type: "application/pdf", category: "passport", content_base64: b64 }, "json");
+    note("a client can upload a document from the app", r.status === 200 && r.json && r.json.document && r.json.document.filename === "client-passport.pdf", r.text);
+    let filed = null, filedErr = null;
+    try {
+      filed = await firmDocs.uploadDocument({ clientKey: "a-111222333", clientName: "Wang, Li", aNumber: "111-222-333",
+        filename: "firm-strategy-memo.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 INTERNAL strategy"), category: "work product" });
+    } catch (e) { filedErr = e.message; }
+    note("the firm can file a document under the same client", !!(filed && filed.id), filedErr);
+    r = await send("client", "GET", "/api/client/documents");
+    const mine = (r.json && r.json.documents || []).map(d => d.filename);
+    note("the client's app lists their upload and not the firm's file", r.status === 200 && mine.includes("client-passport.pdf") && !mine.includes("firm-strategy-memo.pdf"), mine);
+    if (filed) {
+      r = await send("client", "GET", `/api/documents/${filed.id}`);
+      note("the firm's file cannot be opened from the client's app by its id", !/INTERNAL strategy/.test(r.text), r.status);
+      const theirs = (await firmDocs.listDocuments("a-111222333", "111-222-333")).map(d => d.filename);
+      note("the firm's Documents tab lists the firm's file and not the client's upload", theirs.includes("firm-strategy-memo.pdf") && !theirs.includes("client-passport.pdf"), theirs);
+    }
+    r = await send("admin", "GET", "/api/staff/clients/a-111222333/documents");
+    note("staff see the client's upload in the app", r.status === 200 && (r.json.documents || []).some(d => d.filename === "client-passport.pdf"), r.text);
+    r = await send("admin", "GET", "/api/staff/clients/a-111222333/timeline");
+    note("…and on the client's timeline", r.status === 200, r.status);
+  }
+
   r = await send("consultant", "GET", "/api/consultant/clients");
   note("a consultant's client list loads", r.status === 200 && r.json && Array.isArray(r.json.clients) && r.json.clients.length >= 1, r.text);
   r = await send("consultant", "GET", "/api/consultant/clients/a-111222333/updates");

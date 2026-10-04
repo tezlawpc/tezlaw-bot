@@ -50,7 +50,14 @@ const CATEGORY_SUGGESTIONS = [
 
 // ── Schema ───────────────────────────────────────────────
 
-async function initTable() {
+// Runs once per process. Every function below awaits it.
+let _ready = null;
+function initTable() {
+  if (!_ready) _ready = createTable().catch(e => { _ready = null; throw e; });
+  return _ready;
+}
+
+async function createTable() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS client_documents (
       id           SERIAL PRIMARY KEY,
@@ -66,6 +73,22 @@ async function initTable() {
       uploaded_at  TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // This table is the firm's. The phone app used to create a table of the
+  // same name with different columns (it now has its own, client_uploads —
+  // see app-api.js). On a database where the app's version was created
+  // first, the columns this module needs are missing and every query here
+  // failed. Add them; and let the app's old `content` column be empty, or it
+  // would refuse every file the firm adds. On a database that already has
+  // this module's shape, none of this changes anything.
+  for (const col of ["client_name TEXT", "a_number TEXT", "description TEXT", "file_data BYTEA"]) {
+    await db.query(`ALTER TABLE client_documents ADD COLUMN IF NOT EXISTS ${col}`).catch(() => {});
+  }
+  try {
+    const old = await db.query(
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'client_documents' AND column_name = 'content'`);
+    if (old.rows.length) await db.query(`ALTER TABLE client_documents ALTER COLUMN content DROP NOT NULL`);
+  } catch (e) { /* the firm's uploads will say so if this mattered */ }
   await db.query(`
     CREATE INDEX IF NOT EXISTS idx_client_documents_client_key
       ON client_documents (client_key)
@@ -117,15 +140,16 @@ async function listDocuments(clientKey, aNumber = null) {
     q = `SELECT id, client_key, client_name, a_number, filename, mime_type, size_bytes,
                 category, description, uploaded_at
          FROM client_documents
-         WHERE client_key = $1
-            OR LOWER(REGEXP_REPLACE(COALESCE(a_number, ''), '[^\\w]', '', 'g')) = $2
+         WHERE file_data IS NOT NULL
+           AND (client_key = $1
+            OR LOWER(REGEXP_REPLACE(COALESCE(a_number, ''), '[^\\w]', '', 'g')) = $2)
          ORDER BY uploaded_at DESC`;
     params = [clientKey, normalizedA];
   } else {
     q = `SELECT id, client_key, client_name, a_number, filename, mime_type, size_bytes,
                 category, description, uploaded_at
          FROM client_documents
-         WHERE client_key = $1
+         WHERE client_key = $1 AND file_data IS NOT NULL
          ORDER BY uploaded_at DESC`;
     params = [clientKey];
   }
@@ -138,7 +162,7 @@ async function getDocument(id) {
   const r = await db.query(
     `SELECT id, client_key, client_name, a_number, filename, mime_type,
             size_bytes, category, description, file_data, uploaded_at
-     FROM client_documents WHERE id = $1`,
+     FROM client_documents WHERE id = $1 AND file_data IS NOT NULL`,
     [id]
   );
   return r.rows[0];
@@ -147,7 +171,7 @@ async function getDocument(id) {
 async function deleteDocument(id) {
   await initTable();
   const r = await db.query(
-    `DELETE FROM client_documents WHERE id = $1 RETURNING id, filename`,
+    `DELETE FROM client_documents WHERE id = $1 AND file_data IS NOT NULL RETURNING id, filename`,
     [id]
   );
   if (!r.rows.length) throw new Error(`Document ${id} not found`);
@@ -159,7 +183,7 @@ async function getStorageStats() {
   await initTable();
   const r = await db.query(
     `SELECT COUNT(*) AS count, COALESCE(SUM(size_bytes), 0) AS total_bytes
-     FROM client_documents`
+     FROM client_documents WHERE file_data IS NOT NULL`
   );
   return { count: parseInt(r.rows[0].count), total_bytes: parseInt(r.rows[0].total_bytes) };
 }
