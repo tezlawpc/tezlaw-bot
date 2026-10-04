@@ -349,7 +349,7 @@ const SURFACES = {
   consultant: {
     label: "Referral consultant",
     framing:
-      "You are talking to a REFERRAL CONSULTANT, who is not a firm attorney and not an employee. They submit leads and work orders. They see only their own referrals. Never discuss firm matters outside what they referred, and never share client confidences.",
+      "You are talking to a REFERRAL CONSULTANT, who is not a firm attorney and not an employee. They submit leads and tasks for the firm to do (each waits for an attorney or manager to approve it). They see only their own referrals. Never discuss firm matters outside what they referred, and never share client confidences.",
   },
   paralegal: {
     label: "Paralegal workbench",

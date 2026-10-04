@@ -215,6 +215,13 @@ async function initTable() {
 
 // ─── CRUD ───────────────────────────────────────────────
 
+// A consultant's work order is not the firm's task until an attorney or
+// manager approves it (status 'pending_approval'), and never is if they turn
+// it down ('rejected'). Neither belongs in the firm's open list, its counts,
+// or its reminders: before this, an order nobody had approved was already
+// sitting in /admin/tasks and going out in the 8 AM Telegram digest.
+const NOT_LIVE = "('completed', 'cancelled', 'rejected', 'pending_approval')";
+
 async function createTask(data) {
   await initTable();
   const r = await db.query(
@@ -248,7 +255,7 @@ async function createTask(data) {
     actor_role: data.actor_role || null,
     action: "created",
     new_value: task.status,
-    note: data.submitted_by_user_id ? "Work order submitted by consultant" : null,
+    note: data.submitted_by_user_id ? "Task submitted by consultant" : null,
   });
 
   // Auto-seed milestones from category template if one exists (habeas corpus,
@@ -288,14 +295,43 @@ async function logActivity(taskId, {
   action, old_value = null, new_value = null, note = null,
   visible_to_submitter = true,
 } = {}) {
+  let activityId = null;
   try {
-    await db.query(
+    const r = await db.query(
       `INSERT INTO task_activity (task_id, actor_id, actor_name, actor_role, action, old_value, new_value, note, visible_to_submitter)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
       [taskId, actor_id, actor_name, actor_role, action, old_value, new_value, note, visible_to_submitter]
     );
+    activityId = r.rows && r.rows[0] ? r.rows[0].id : null;
   } catch (e) {
     console.warn("[tasks] activity log failed:", e.message);
+    return;
+  }
+  await tellSubmitter(taskId, activityId, action, actor_id, visible_to_submitter);
+}
+
+// The portal's own form promises the consultant "you'll get notified at every
+// step". Nothing did that. This is the one place every step passes through,
+// so it is the one place to keep the promise: an entry the submitter is
+// allowed to see, made by somebody other than the submitter, is news to them.
+// The alert is queued here (a database write) and sent in the background, so
+// a slow mail server never holds up the person at the firm who clicked.
+const SUBMITTER_KIND = {
+  approved: "wo_approved", rejected: "wo_rejected", completed: "wo_done",
+  status_changed: "wo_update", note_added: "wo_update",
+};
+async function tellSubmitter(taskId, activityId, action, actorId, visible) {
+  const kind = SUBMITTER_KIND[action];
+  if (!kind || visible === false || !activityId) return;
+  try {
+    const r = await db.query(`SELECT submitted_by_user_id FROM tasks WHERE id = $1`, [taskId]);
+    const to = r.rows[0] && r.rows[0].submitted_by_user_id;
+    if (!to || String(to) === String(actorId)) return;
+    const notify = require("./notify");
+    const q = await notify.notifyUserEvent({ userId: to, kind, taskId, ref: `act-${activityId}` });
+    if (q.queued) notify.flush({ limit: q.queued + 10 }).catch(e => console.warn("[tasks] alert flush:", e.message));
+  } catch (e) {
+    console.warn("[tasks] submitter alert:", e.message);
   }
 }
 
@@ -468,8 +504,12 @@ async function listTasks({
     conds.push(`status = 'completed'`);
   } else if (status) {
     conds.push(`status = $${i++}`); params.push(status);
-  } else {
+  } else if (submitted_by_user_id) {
+    // The person who submitted a work order sees it at every stage,
+    // including while it waits for approval and after it is turned down.
     conds.push(`status NOT IN ('completed', 'cancelled')`);
+  } else {
+    conds.push(`status NOT IN ${NOT_LIVE}`);
   }
   if (matter_type) { conds.push(`matter_type = $${i++}`); params.push(matter_type); }
   if (category) { conds.push(`category = $${i++}`); params.push(category); }
@@ -510,11 +550,11 @@ async function getStats() {
   await initTable();
   const r = await db.query(`
     SELECT
-      COUNT(*) FILTER (WHERE status NOT IN ('completed', 'cancelled')) as open_count,
-      COUNT(*) FILTER (WHERE status NOT IN ('completed', 'cancelled') AND due_date IS NOT NULL AND due_date < CURRENT_DATE) as overdue_count,
-      COUNT(*) FILTER (WHERE status NOT IN ('completed', 'cancelled') AND due_date = CURRENT_DATE) as due_today,
-      COUNT(*) FILTER (WHERE status NOT IN ('completed', 'cancelled') AND due_date > CURRENT_DATE AND due_date <= CURRENT_DATE + INTERVAL '7 days') as due_this_week,
-      COUNT(*) FILTER (WHERE priority = 'urgent' AND status NOT IN ('completed', 'cancelled')) as urgent_count,
+      COUNT(*) FILTER (WHERE status NOT IN ${NOT_LIVE}) as open_count,
+      COUNT(*) FILTER (WHERE status NOT IN ${NOT_LIVE} AND due_date IS NOT NULL AND due_date < CURRENT_DATE) as overdue_count,
+      COUNT(*) FILTER (WHERE status NOT IN ${NOT_LIVE} AND due_date = CURRENT_DATE) as due_today,
+      COUNT(*) FILTER (WHERE status NOT IN ${NOT_LIVE} AND due_date > CURRENT_DATE AND due_date <= CURRENT_DATE + INTERVAL '7 days') as due_this_week,
+      COUNT(*) FILTER (WHERE priority = 'urgent' AND status NOT IN ${NOT_LIVE}) as urgent_count,
       COUNT(*) FILTER (WHERE status = 'completed' AND completed_at > CURRENT_DATE - INTERVAL '7 days') as completed_this_week
     FROM tasks
   `);
@@ -531,8 +571,8 @@ async function sendDailyReminders() {
   // Get tasks needing attention
   const [overdue, dueToday, dueSoon] = await Promise.all([
     listTasks({ overdue_only: true, limit: 50 }),
-    db.query(`SELECT * FROM tasks WHERE status NOT IN ('completed', 'cancelled') AND due_date = CURRENT_DATE ORDER BY priority ASC, id`),
-    db.query(`SELECT * FROM tasks WHERE status NOT IN ('completed', 'cancelled') AND due_date IS NOT NULL AND due_date > CURRENT_DATE AND due_date <= CURRENT_DATE + reminder_days_before ORDER BY due_date ASC, priority ASC`),
+    db.query(`SELECT * FROM tasks WHERE status NOT IN ${NOT_LIVE} AND due_date = CURRENT_DATE ORDER BY priority ASC, id`),
+    db.query(`SELECT * FROM tasks WHERE status NOT IN ${NOT_LIVE} AND due_date IS NOT NULL AND due_date > CURRENT_DATE AND due_date <= CURRENT_DATE + reminder_days_before ORDER BY due_date ASC, priority ASC`),
   ]);
   const dueTodayRows = dueToday.rows;
   const dueSoonRows = dueSoon.rows;
@@ -607,7 +647,7 @@ async function sendPerTaskReminders() {
   // - Not completed/cancelled
   const candidates = await db.query(`
     SELECT * FROM tasks
-    WHERE status NOT IN ('completed', 'cancelled')
+    WHERE status NOT IN ${NOT_LIVE}
       AND due_date IS NOT NULL
       AND (
         due_date < CURRENT_DATE
@@ -691,6 +731,7 @@ async function sendSingleTaskReminder(task, chatId) {
 // Immediate reminder when a task is created that's due soon
 async function sendCreationReminder(task) {
   if (!task || !task.due_date) return;
+  if (task.status === "pending_approval") return;   // not the firm's task yet
   const chatId = process.env.JJ_TELEGRAM_ID;
   if (!chatId) return;
   const daysUntil = Math.floor((new Date(task.due_date) - new Date()) / 86400000);
@@ -1002,4 +1043,5 @@ module.exports = {
   handleTelegramCommand, handleTelegramCallback,
   extractTasksFromContent,
   logActivity, listActivity, addTaskComment,
+  NOT_LIVE,
 };

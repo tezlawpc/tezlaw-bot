@@ -239,7 +239,7 @@ async function executeTool(db, user, name, args, sink = null) {
       const r = await db.query(
         `SELECT COALESCE(matter_type, 'Uncategorized') AS matter_type, COUNT(*)::int AS n
          FROM tasks
-         WHERE ${where} AND (completed = false OR completed IS NULL)
+         WHERE ${where} AND status NOT IN ('completed', 'cancelled', 'rejected', 'pending_approval')
          GROUP BY matter_type
          ORDER BY n DESC`,
         params
@@ -289,7 +289,7 @@ async function executeTool(db, user, name, args, sink = null) {
          WHERE t.due_date IS NOT NULL
            AND t.due_date >= CURRENT_DATE
            AND t.due_date <= CURRENT_DATE + $1::int
-           AND (t.completed = false OR t.completed IS NULL)
+           AND t.status NOT IN ('completed', 'cancelled', 'rejected', 'pending_approval')
            AND (
              LOWER(t.description) LIKE '%hearing%'
              OR LOWER(t.description) LIKE '%court%'
@@ -306,26 +306,32 @@ async function executeTool(db, user, name, args, sink = null) {
 
     if (name === "list_my_tasks") {
       const limit = Math.min(50, Math.max(1, parseInt(args.limit, 10) || 20));
-      let where = isAdmin ? "1=1" : "(assigned_to_user_id = $1 OR created_by_user_id = $1)";
-      let params = isAdmin ? [] : [userId];
+      // tasks has no `completed`, `assigned_to_user_id` or `created_by_user_id`
+      // column: a task is open or not by `status`, it is created by
+      // `created_by`, and `assigned_to` is free text (a name). Every branch
+      // of this tool failed on its first query until these were corrected.
+      const myName = String(user.n || user.u || "").trim();
+      let where = isAdmin ? "1=1" : "(created_by = $1 OR ($2 <> '' AND assigned_to ILIKE '%' || $2 || '%'))";
+      let params = isAdmin ? [] : [userId, myName.split(/\s+/)[0] || ""];
       let statusFilter = "";
       if (args.status === "overdue") {
-        statusFilter = " AND due_date < CURRENT_DATE AND (completed = false OR completed IS NULL)";
+        statusFilter = " AND due_date < CURRENT_DATE AND status NOT IN ('completed', 'cancelled', 'rejected', 'pending_approval')";
       } else if (args.status === "due_today") {
-        statusFilter = " AND due_date = CURRENT_DATE AND (completed = false OR completed IS NULL)";
+        statusFilter = " AND due_date = CURRENT_DATE AND status NOT IN ('completed', 'cancelled', 'rejected', 'pending_approval')";
       } else if (args.status === "due_this_week") {
-        statusFilter = " AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7 AND (completed = false OR completed IS NULL)";
+        statusFilter = " AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7 AND status NOT IN ('completed', 'cancelled', 'rejected', 'pending_approval')";
       } else if (args.status === "completed") {
-        statusFilter = " AND completed = true";
+        statusFilter = " AND status = 'completed'";
       } else if (args.status === "open") {
-        statusFilter = " AND (completed = false OR completed IS NULL)";
+        statusFilter = " AND status NOT IN ('completed', 'cancelled', 'rejected', 'pending_approval')";
       }
       params.push(limit);
       const limitParam = `$${params.length}`;
       const r = await db.query(
-        `SELECT id, description, matter_type, client_name, due_date, assigned_to, completed
+        `SELECT id, title, description, matter_type, client_name, due_date, assigned_to, status,
+                (status = 'completed') AS completed
          FROM tasks WHERE ${where}${statusFilter}
-         ORDER BY (completed IS NULL OR completed = false) DESC, due_date ASC NULLS LAST
+         ORDER BY (status = 'completed') ASC, due_date ASC NULLS LAST
          LIMIT ${limitParam}`,
         params
       );
@@ -492,7 +498,7 @@ async function executeTool(db, user, name, args, sink = null) {
                   WHERE t.created_at >= $1
                   GROUP BY a.full_name ORDER BY mins DESC LIMIT 10`, [fromStr]),
         db.query(`SELECT COUNT(*)::int AS n FROM tasks WHERE created_at >= $1`, [fromStr]),
-        db.query(`SELECT COUNT(*)::int AS n FROM tasks WHERE completed=true AND updated_at >= $1`, [fromStr]),
+        db.query(`SELECT COUNT(*)::int AS n FROM tasks WHERE status = 'completed' AND COALESCE(completed_at, updated_at) >= $1`, [fromStr]),
       ]);
       return {
         period,

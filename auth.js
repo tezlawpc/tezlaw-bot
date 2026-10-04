@@ -65,7 +65,7 @@ const ROLES = {
   },
   consultant: {
     label: "Consultant / Referral Partner",
-    description: "Referral partners who submit new leads + work orders. Sees ONLY their own submissions and progress. No access to firm-wide clients or matters.",
+    description: "Referral partners who submit new leads + tasks for the firm. Sees ONLY their own submissions and progress. No access to firm-wide clients or matters.",
     color: "#7c4dff",
   },
 };
@@ -1593,8 +1593,8 @@ function mount(app) {
     "outlook.setup": "Configure Outlook integration",
     "system.settings": "System settings",
     "consultant.portal": "Access consultant portal (external referral partners)",
-    "consultant.submit": "Submit new work orders / leads to the firm",
-    "consultant.track": "Track own submitted work orders",
+    "consultant.submit": "Submit new tasks / leads to the firm",
+    "consultant.track": "Track own submitted tasks",
   };
 
   app.get("/admin/users/:id/permissions", requireRole("admin"), async (req, res) => {

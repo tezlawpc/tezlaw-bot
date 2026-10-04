@@ -205,7 +205,9 @@ function canUserSeeTask(user, task) {
   // until the admin approves. The consultant who submitted still sees their
   // own via the /api/consultant/* endpoints (this function is for firm side).
   if (task.status === "pending_approval") {
-    // Only the person who created it (a consultant, but firm creators too) sees it
+    // An attorney can approve it (work-orders.js), so an attorney can read it.
+    if (user.r === "attorney") return true;
+    // Otherwise only the person who created it (a consultant, but firm creators too) sees it
     if (task.created_by && String(task.created_by) === String(user.uid)) return true;
     if (task.submitted_by_user_id && String(task.submitted_by_user_id) === String(user.uid)) return true;
     return false;
@@ -3150,9 +3152,13 @@ function registerAppApi(app) {
       }
       const user = req.user;
       // Determine user kind + ref from JWT
+      // The role is `r`. This read `k`, which no token carries, so every
+      // device — consultant and client included — was filed as 'firm' and
+      // pushes addressed to a consultant or a client found nobody.
+      // A client's uid is already "c<account id>".
       let userKind = "firm", userRef = String(user.uid || "");
-      if (user.k === "consultant") userKind = "consultant";
-      else if (user.k === "client") { userKind = "client"; userRef = user.phone || String(user.uid || ""); }
+      if (user.r === "consultant") userKind = "consultant";
+      else if (user.r === "client") userKind = "client";
 
       await db.query(`
         INSERT INTO push_tokens (user_kind, user_ref, expo_token, platform, updated_at)
@@ -3525,23 +3531,19 @@ function registerAppApi(app) {
   //  with a reason.
   // ═══════════════════════════════════════════════════════
 
-  app.get("/api/staff/admin/tasks/pending", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+  // JJ: work orders "will need attorney or manager's approval." These four
+  // were admin-only; the deciding itself now lives in work-orders.js, which
+  // the firm's web page (/admin/work-orders) uses too.
+  function requireApprover(req, res, next) {
+    if (!require("./work-orders").canApprove(req.user)) {
+      return res.status(403).json({ ok: false, error: "An attorney or manager must approve a consultant's task" });
+    }
+    next();
+  }
+
+  app.get("/api/staff/admin/tasks/pending", requireBearer, requireFirmUser, requireApprover, async (req, res) => {
     try {
-      const r = await db.query(
-        `SELECT t.*,
-                au.full_name AS submitter_name,
-                au.username  AS submitter_username
-         FROM tasks t
-         LEFT JOIN admin_users au ON au.id = t.submitted_by_user_id
-         WHERE t.status = 'pending_approval'
-         ORDER BY t.created_at DESC
-         LIMIT 200`
-      );
-      // Enrich with default assignee info so admin sees "will go to X"
-      const rows = r.rows.map(row => ({
-        ...row,
-        proposed_assignee: row.assigned_to,
-      }));
+      const rows = (await require("./work-orders").listPending()).map(row => ({ ...row, proposed_assignee: row.assigned_to }));
       res.json({ ok: true, tasks: rows, count: rows.length });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -3549,120 +3551,33 @@ function registerAppApi(app) {
   });
 
   // Approve a pending task. Body may include field overrides (assigned_to,
-  // priority, due_date, matter_type). Task becomes status='open' and enters
-  // the assignee's queue.
-  app.post("/api/staff/admin/tasks/:id/approve", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+  // priority, due_date, matter_type) and a note the consultant will see.
+  // Task becomes status='open' and enters the assignee's queue.
+  app.post("/api/staff/admin/tasks/:id/approve", requireBearer, requireFirmUser, requireApprover, async (req, res) => {
     try {
-      const id = parseInt(req.params.id, 10);
-      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
-
-      // Load existing to ensure it's actually pending
-      const existing = await db.query(`SELECT * FROM tasks WHERE id = $1`, [id]);
-      if (!existing.rows.length) return res.status(404).json({ ok: false, error: "Task not found" });
-      const t = existing.rows[0];
-      if (t.status !== "pending_approval") {
-        return res.status(400).json({ ok: false, error: `Task is not pending (current: ${t.status})` });
-      }
-
-      // Apply any admin overrides
-      const overrides = req.body || {};
-      const fields = ["status = 'open'"];
-      const vals = [id];
-      let idx = 2;
-      if (overrides.assigned_to !== undefined) { fields.push(`assigned_to = $${idx++}`); vals.push(overrides.assigned_to); }
-      if (overrides.priority && ["urgent","high","normal","low"].includes(overrides.priority)) {
-        fields.push(`priority = $${idx++}`); vals.push(overrides.priority);
-      }
-      if (overrides.due_date && /^\d{4}-\d{2}-\d{2}$/.test(overrides.due_date)) {
-        fields.push(`due_date = $${idx++}`); vals.push(overrides.due_date);
-      }
-      if (overrides.matter_type) { fields.push(`matter_type = $${idx++}`); vals.push(overrides.matter_type); }
-
-      const r = await db.query(
-        `UPDATE tasks SET ${fields.join(", ")} WHERE id = $1 RETURNING *`,
-        vals
-      );
-      const approvedTask = r.rows[0];
-      // Notify the assignee that they have a new task
-      if (approvedTask.assigned_to) {
-        push.sendToFirmByName(approvedTask.assigned_to, {
-          title: `Approved: ${approvedTask.title}`,
-          body: `New task in your queue${approvedTask.client_name ? ` · ${approvedTask.client_name}` : ""}`,
-          data: { screen: "task", taskId: approvedTask.id },
-        }).catch(() => {});
-      }
-      // Notify the consultant that their submission was approved
-      if (approvedTask.submitted_by_user_id) {
-        push.sendToUser("consultant", approvedTask.submitted_by_user_id, {
-          title: "✓ Work order approved",
-          body: `Your submission "${approvedTask.title}" has been approved.`,
-          data: { screen: "consultant-task", taskId: approvedTask.id },
-        }).catch(() => {});
-      }
-      // Log activity
-      try {
-        const tasks = require("./tasks");
-        if (typeof tasks.recordActivity === "function") {
-          await tasks.recordActivity(id, {
-            kind: "approved",
-            actor_id: req.user.uid,
-            actor_name: req.user.n || req.user.u,
-            actor_role: req.user.r,
-            note: overrides.note || "Approved",
-            visible_to_submitter: true,
-          });
-        }
-      } catch (e) { /* activity log optional */ }
-      res.json({ ok: true, task: approvedTask });
+      const out = await require("./work-orders").approve(req.params.id, req.user, req.body || {});
+      if (!out.ok) return res.status(out.status || 400).json({ ok: false, error: out.error });
+      res.json({ ok: true, task: out.task });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
 
   // Reject a pending task with a reason. Consultant sees the reason.
-  app.post("/api/staff/admin/tasks/:id/reject", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+  app.post("/api/staff/admin/tasks/:id/reject", requireBearer, requireFirmUser, requireApprover, async (req, res) => {
     try {
-      const id = parseInt(req.params.id, 10);
-      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ ok: false, error: "Bad id" });
-      const reason = String(req.body?.reason || "").trim();
-      if (!reason) return res.status(400).json({ ok: false, error: "Rejection reason required" });
-
-      const existing = await db.query(`SELECT * FROM tasks WHERE id = $1`, [id]);
-      if (!existing.rows.length) return res.status(404).json({ ok: false, error: "Task not found" });
-      const t = existing.rows[0];
-      if (t.status !== "pending_approval") {
-        return res.status(400).json({ ok: false, error: `Task is not pending (current: ${t.status})` });
-      }
-
-      const r = await db.query(
-        `UPDATE tasks SET status = 'rejected' WHERE id = $1 RETURNING *`,
-        [id]
-      );
-      // Log rejection reason as activity
-      try {
-        const tasks = require("./tasks");
-        if (typeof tasks.recordActivity === "function") {
-          await tasks.recordActivity(id, {
-            kind: "rejected",
-            actor_id: req.user.uid,
-            actor_name: req.user.n || req.user.u,
-            actor_role: req.user.r,
-            note: reason,
-            visible_to_submitter: true,
-          });
-        }
-      } catch (e) { /* activity log optional */ }
-      res.json({ ok: true, task: r.rows[0] });
+      const out = await require("./work-orders").reject(req.params.id, req.user, req.body?.reason);
+      if (!out.ok) return res.status(out.status || 400).json({ ok: false, error: out.error });
+      res.json({ ok: true, task: out.task });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
 
   // Pending count — for badges on home dashboard
-  app.get("/api/staff/admin/tasks/pending-count", requireBearer, requireFirmUser, requireAdmin, async (req, res) => {
+  app.get("/api/staff/admin/tasks/pending-count", requireBearer, requireFirmUser, requireApprover, async (req, res) => {
     try {
-      const r = await db.query(`SELECT COUNT(*)::int AS n FROM tasks WHERE status = 'pending_approval'`);
-      res.json({ ok: true, count: r.rows[0]?.n || 0 });
+      res.json({ ok: true, count: await require("./work-orders").pendingCount() });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -6414,7 +6329,8 @@ function registerAppApi(app) {
            WHERE t.client_key = $1 ORDER BY t.entry_date DESC LIMIT 50`, [key]
         ).catch(() => ({ rows: [] })),
         db.query(
-          `SELECT id, description, due_date, completed, created_at, updated_at
+          `SELECT id, COALESCE(description, title) AS description, due_date,
+                  (status = 'completed') AS completed, created_at, updated_at
            FROM tasks WHERE client_key = $1 ORDER BY created_at DESC LIMIT 50`, [key]
         ).catch(() => ({ rows: [] })),
       ]);
@@ -7197,7 +7113,7 @@ function registerAppApi(app) {
         ),
         // Tasks completed in period
         db.query(
-          `SELECT COUNT(*)::int AS n FROM tasks WHERE completed = true AND updated_at >= $1 AND updated_at <= $2`,
+          `SELECT COUNT(*)::int AS n FROM tasks WHERE status = 'completed' AND COALESCE(completed_at, updated_at) >= $1 AND COALESCE(completed_at, updated_at) <= $2`,
           [fromStr, toStr]
         ),
         // New distinct clients in period (first appearance)
@@ -7211,7 +7127,7 @@ function registerAppApi(app) {
         db.query(
           `SELECT COUNT(*)::int AS n FROM tasks
            WHERE due_date IS NOT NULL AND due_date >= CURRENT_DATE AND due_date <= CURRENT_DATE + 7
-             AND (completed = false OR completed IS NULL)
+             AND status NOT IN ('completed', 'cancelled', 'rejected', 'pending_approval')
              AND (LOWER(description) LIKE '%hearing%' OR LOWER(description) LIKE '%court%'
                   OR LOWER(description) LIKE '%interview%' OR LOWER(description) LIKE '%deposition%')`
         ),
@@ -8232,7 +8148,10 @@ ${groups.map(g => `
   app.get("/api/consultant/clients", requireBearer, requireConsultantRole, async (req, res) => {
     try {
       const q = String(req.query.q || "").trim().slice(0, 100);
-      const digits = q.replace(/\D/g, "");
+      // JJ, signed in as a consultant: the list showed "column t.completed
+      // does not exist" and nothing else. tasks has never had a `completed`
+      // column — a task is open or not by its `status`. One wrong word in the
+      // SELECT took the whole list down for every consultant.
       const r = await db.query(
         `SELECT cc.id AS assignment_id, cc.client_key, cc.role_description, cc.assigned_at,
                 cc.notes AS assignment_notes, (cc.assigned_by IS NULL) AS entered_by_me,
@@ -8241,20 +8160,54 @@ ${groups.map(g => `
                 MAX(t.client_email) AS client_email,
                 MAX(t.a_number) AS a_number,
                 MAX(t.matter_type) FILTER (WHERE t.matter_type IS DISTINCT FROM 'Contact') AS matter_type,
-                COUNT(DISTINCT t.id) FILTER (WHERE (t.completed = false OR t.completed IS NULL) AND t.matter_type IS DISTINCT FROM 'Contact') AS open_task_count
+                COUNT(DISTINCT t.id) FILTER (WHERE t.status NOT IN ('completed', 'cancelled', 'rejected')
+                                               AND t.matter_type IS DISTINCT FROM 'Contact') AS open_task_count,
+                MAX(t.updated_at) AS last_activity
          FROM client_consultants cc
          LEFT JOIN tasks t ON t.client_key = cc.client_key
          WHERE cc.consultant_id = $1 AND cc.removed_at IS NULL
          GROUP BY cc.id, cc.client_key, cc.role_description, cc.assigned_at, cc.notes, cc.assigned_by
-         HAVING $2 = ''
-             OR MAX(t.client_name) ILIKE '%' || $2 || '%'
-             OR MAX(t.client_email) ILIKE '%' || $2 || '%'
-             OR ($3 <> '' AND (regexp_replace(COALESCE(MAX(t.client_phone), ''), '\\D', '', 'g') LIKE '%' || $3 || '%'
-                           OR regexp_replace(COALESCE(MAX(t.a_number), ''), '\\D', '', 'g') LIKE '%' || $3 || '%'))
-         ORDER BY MAX(t.updated_at) DESC NULLS LAST`,
-        [req.user.uid, q, digits.length >= 3 ? digits : ""]
+         ORDER BY MAX(t.updated_at) DESC NULLS LAST, cc.assigned_at DESC`,
+        [req.user.uid]
       );
-      res.json({ ok: true, clients: r.rows });
+      let clients = r.rows;
+
+      // A broker's clients are the ones filed in their Dropbox folder
+      // (broker-accounts.js), and a client can be filed there long before
+      // anyone opens a task for them. Those had no name here at all — the
+      // name only ever came from a task row. Take it from the folder
+      // mapping, and the phone and email from the contact record. Each is
+      // its own guarded lookup: neither table is guaranteed to exist yet,
+      // and a missing extra must not take the list down again.
+      const bare = clients.filter(c => !c.client_name || !c.client_phone || !c.client_email).map(c => c.client_key);
+      if (bare.length) {
+        const [map, contacts] = await Promise.all([
+          db.query(`SELECT client_key, client_name, a_number FROM client_dropbox_mapping WHERE client_key = ANY($1::text[])`, [bare]).catch(() => ({ rows: [] })),
+          db.query(`SELECT client_key, phone, email FROM client_contacts WHERE client_key = ANY($1::text[])`, [bare]).catch(() => ({ rows: [] })),
+        ]);
+        const byKey = (rows) => new Map(rows.map(x => [x.client_key, x]));
+        const m = byKey(map.rows), k = byKey(contacts.rows);
+        clients = clients.map(c => ({
+          ...c,
+          client_name: c.client_name || (m.get(c.client_key) || {}).client_name || null,
+          a_number: c.a_number || (m.get(c.client_key) || {}).a_number || null,
+          client_phone: c.client_phone || (k.get(c.client_key) || {}).phone || null,
+          client_email: c.client_email || (k.get(c.client_key) || {}).email || null,
+        }));
+      }
+
+      // Search runs over the list above and nothing else, so a consultant
+      // can only ever find a client who is already theirs.
+      if (q) {
+        const needle = q.toLowerCase();
+        const digits = q.replace(/\D/g, "");
+        const num = (v) => String(v || "").replace(/\D/g, "");
+        clients = clients.filter(c =>
+          String(c.client_name || "").toLowerCase().includes(needle) ||
+          String(c.client_email || "").toLowerCase().includes(needle) ||
+          (digits.length >= 3 && (num(c.client_phone).includes(digits) || num(c.a_number).includes(digits))));
+      }
+      res.json({ ok: true, clients });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -8317,7 +8270,7 @@ ${groups.map(g => `
       const own = await db.query(
         `SELECT id FROM tasks WHERE client_key = $1 AND matter_type = 'Contact' AND submitted_by_user_id = $2 LIMIT 1`,
         [req.params.key, req.user.uid]);
-      if (!own.rows[0]) return res.status(403).json({ ok: false, error: "Only clients you entered can be edited here — send the firm a work order for other changes." });
+      if (!own.rows[0]) return res.status(403).json({ ok: false, error: "Only clients you entered can be edited here — send the firm a task for other changes." });
       const email = clip(b.client_email, 200);
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ ok: false, error: "That email address doesn't look right" });
       const name = clip(b.client_name, 200);
@@ -8356,7 +8309,20 @@ ${groups.map(g => `
          ORDER BY client_key, (matter_type = 'Contact') ASC, updated_at DESC NULLS LAST LIMIT 1`,
         [req.params.key, req.user.uid]
       );
-      if (!cR.rows[0]) return res.status(404).json({ ok: false, error: "client not found" });
+      if (!cR.rows[0]) {
+        // Filed in the broker's Dropbox folder, no task opened yet.
+        const mR = await db.query(
+          `SELECT client_key, client_name, a_number FROM client_dropbox_mapping WHERE client_key = $1 LIMIT 1`,
+          [req.params.key]).catch(() => ({ rows: [] }));
+        if (!mR.rows[0]) return res.status(404).json({ ok: false, error: "client not found" });
+        const kR = await db.query(`SELECT phone, email FROM client_contacts WHERE client_key = $1 LIMIT 1`,
+          [req.params.key]).catch(() => ({ rows: [] }));
+        cR.rows[0] = {
+          client_key: mR.rows[0].client_key, client_name: mR.rows[0].client_name, a_number: mR.rows[0].a_number,
+          client_phone: (kR.rows[0] || {}).phone || null, client_email: (kR.rows[0] || {}).email || null,
+          matter_type: null, editable: false,
+        };
+      }
       // Get assignment info
       const aR = await db.query(
         `SELECT role_description, assigned_at, notes
@@ -8379,16 +8345,69 @@ ${groups.map(g => `
       if (!keys.has(req.params.key) && req.user.r !== "admin") {
         return res.status(403).json({ ok: false, error: "not assigned" });
       }
+      // Same missing column as the list (`completed`), so this had been
+      // failing too and the client page showed no work at all. `completed`
+      // is still returned, computed, because the phone app reads it.
+      //
+      // What the consultant sees of each item: the wording of a work order
+      // THEY submitted, in full; for the firm's own tasks, the title only.
+      // A task's description is where staff write to each other, and an
+      // outside referrer is not who it was written for.
       const r = await db.query(
-        `SELECT id, description, matter_type, due_date, completed, priority, created_at,
-                assigned_to, submitted_by_user_id, status
-         FROM tasks WHERE client_key = $1
-         ORDER BY (completed IS NULL OR completed = false) DESC,
+        `SELECT id, title,
+                CASE WHEN submitted_by_user_id = $2 THEN COALESCE(description, title) ELSE title END AS description,
+                matter_type, due_date, (status = 'completed') AS completed, priority, created_at,
+                assigned_to, (submitted_by_user_id = $2) AS mine, status
+         FROM tasks WHERE client_key = $1 AND status NOT IN ('rejected', 'cancelled')
+         ORDER BY (status = 'completed') ASC,
                   due_date ASC NULLS LAST, created_at DESC
          LIMIT 100`,
-        [req.params.key]
+        [req.params.key, req.user.uid]
       );
       res.json({ ok: true, tasks: r.rows });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // What has happened on this client, for the consultant assigned to them.
+  //
+  // The alerts a consultant gets by email, text or app say only "New court
+  // notice — <client>. Log in to view." Until now, logging in showed nothing
+  // about it. This is the page that sentence promises: the upcoming court
+  // dates (day, time, kind of hearing, court) and the list of what they have
+  // been alerted to. It does not carry the notice itself, documents, staff
+  // notes, billing or the A-number of anyone else on the case.
+  app.get("/api/consultant/clients/:key/updates", requireBearer, requireConsultantRole, async (req, res) => {
+    try {
+      const key = req.params.key;
+      const keys = await getConsultantClientKeys(req.user.uid);
+      if (!keys.has(key)) return res.status(403).json({ ok: false, error: "You're not assigned to this client" });
+      const rec = require("./client-record");
+      const quiet = (p) => p.then(r => r.rows || []).catch(() => []);
+      const [notices, noted, feed] = await Promise.all([
+        quiet(db.query(
+          `SELECT hearing_date, hearing_time_text, hearing_type, court_name FROM client_hearing_notices
+            WHERE client_key = $1 AND dismissed_at IS NULL AND hearing_date >= CURRENT_DATE
+            ORDER BY hearing_date ASC LIMIT 6`, [key])),
+        quiet(db.query(
+          `SELECT next_hearing_date, next_hearing_type FROM (
+             SELECT next_hearing_date, next_hearing_type, a_number, client_name FROM hearing_notes
+             UNION ALL
+             SELECT next_hearing_date, next_hearing_type, a_number, client_name FROM individual_hearing_notes
+           ) n
+            WHERE next_hearing_date >= CURRENT_DATE AND ${rec.KEY_SQL} = $1
+            ORDER BY next_hearing_date ASC LIMIT 4`, [key])),
+        require("./notify").feedFor(req.user.uid, { clientKey: key, limit: 20 }).catch(() => []),
+      ]);
+      const seen = new Set();
+      const court_dates = [
+        ...notices.map(h => ({ day: rec.hearingDay(h.hearing_date), time: h.hearing_time_text || null, type: h.hearing_type || null, court: h.court_name || null })),
+        ...noted.map(n => ({ day: rec.hearingDay(n.next_hearing_date), time: null, type: n.next_hearing_type || null, court: null })),
+      ].filter(d => d.day && !seen.has(d.day) && seen.add(d.day));
+      res.json({
+        ok: true,
+        court_dates,
+        alerts: feed.map(f => ({ id: f.id, kind: f.kind, label: f.label, at: f.created_at, task_id: f.task_id || null })),
+      });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
@@ -8670,12 +8689,9 @@ ${groups.map(g => `
         }
       }
       const task = await tasks.createTask(cleaned);
-      // Notify all admins that a consultant work order needs approval
-      push.sendToAdmins({
-        title: "⏳ Work order needs approval",
-        body: `${req.user.n || "A consultant"} submitted: ${task.title}`,
-        data: { screen: "pending-approvals", taskId: task.id },
-      }).catch(() => {});
+      // An attorney or a manager approves it — tell all of them (and the
+      // firm's Telegram), not admins only. Not awaited: the order is saved.
+      require("./work-orders").announce(task, req.user.n || req.user.u).catch(() => {});
       res.json({ ok: true, task });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
@@ -8722,7 +8738,7 @@ ${groups.map(g => `
       // compiled in rather than written here.
       const consultantOps = `HOW THIS SURFACE WORKS
 
-The consultant submits leads and work orders to Tez Law and manages client relationships they have brought in. They see only their own referrals.
+The consultant submits leads and tasks to Tez Law and manages client relationships they have brought in. They see only their own referrals.
 
 Do NOT:
 - Give advice that requires practicing law (that's what Tez Law's attorneys do)

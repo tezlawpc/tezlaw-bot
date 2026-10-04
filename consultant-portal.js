@@ -18,168 +18,136 @@
 //
 //  Consultants have their own UI chrome (no firm sidebar); everything
 //  they see lives at /consultant/*.
+//
+//  A work order is a REQUEST until an attorney or manager approves it
+//  (work-orders.js). The pages here say which stage each one is at.
 // ============================================================
 
-const esc = s => String(s == null ? "" : s)
-  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const theme = require("./tez-theme");
+const { esc } = theme;
 
-const STATUS_COLORS = {
-  pending: "#B79C62",
-  in_progress: "#0061FF",
-  completed: "#2e7d32",
-  cancelled: "#999",
+// ── Words ───────────────────────────────────────────────────
+// What a consultant sends the firm is called a TASK on every screen and in
+// every message. It was "work order"; JJ: "word work order seems weird. tez
+// is a law firm after all, maybe revise to task or case?" Task, because that
+// is what the firm already calls it once approved (the firm's Task list), and
+// because much of what is sent concerns a client the firm already has — a
+// document to collect is not a "case". The code keeps its old names
+// (work-orders.js, wo_approved): those are never shown to anyone.
+
+// ── Look ────────────────────────────────────────────────────
+// JJ, signed in as a consultant: "keep the design theme similar to tez."
+// The colours, type and shield come from tez-theme.js (the brand guide);
+// nothing on these pages sets its own. No emoji: the guide rules them out
+// as icons, and a status is a word with a dot beside it.
+
+// A work order's life, in the words a consultant should read.
+//   pending_approval → an attorney or manager has not said yes yet
+//   open / pending   → accepted, waiting in the firm's queue
+const STATUS = {
+  pending_approval: { short: "Awaiting approval", long: "Waiting for an attorney or manager at the firm to approve it. Nothing has been started.", dot: "var(--orange)" },
+  open:             { short: "Approved",          long: "Approved and in the firm's queue.", dot: "var(--good)" },
+  pending:          { short: "In the queue",      long: "In the firm's queue.", dot: "var(--good)" },
+  in_progress:      { short: "In progress",       long: "The firm is working on it.", dot: "var(--charcoal)" },
+  completed:        { short: "Completed",         long: "The firm has finished this.", dot: "var(--stone)" },
+  rejected:         { short: "Not accepted",      long: "The firm did not accept this task.", dot: "var(--bad)" },
+  cancelled:        { short: "Cancelled",         long: "This task was cancelled.", dot: "var(--stone)" },
 };
-const STATUS_LABELS = {
-  pending: "Pending — awaiting firm review",
-  in_progress: "In Progress — firm working on it",
-  completed: "Completed",
-  cancelled: "Cancelled",
+const statusOf = (s) => STATUS[s] || { short: String(s || "").replace(/_/g, " ") || "—", long: "", dot: "var(--stone)" };
+const badge = (s) => `<span class="status-badge" style="--dot:${statusOf(s).dot};">${esc(statusOf(s).short)}</span>`;
+
+const PRIORITY_LABELS = { urgent: "Urgent", high: "High", normal: "Normal", low: "Low" };
+const MATTER_LABELS = {
+  immigration: "Immigration", pi: "Personal injury", business: "Business litigation",
+  ll_tenant: "Landlord / tenant", estate: "Estate planning", tm: "Trademarks / patents",
+  real_estate: "Real estate", admin: "General / other",
 };
-const PRIORITY_LABELS = {
-  urgent: "🔴 Urgent",
-  high: "🟠 High",
-  normal: "🔵 Normal",
-  low: "⚪ Low",
-};
+const matterLabel = (m) => MATTER_LABELS[m] || String(m || "").replace(/_/g, " ");
+
+// Dates. A DATE column arrives as local midnight, so it is read with local
+// getters; a timestamp is shown in Pacific time, where the firm is — the
+// server's own clock is UTC, which put evening submissions on the next day.
+const PT = "America/Los_Angeles";
+function fmtDay(v) {
+  if (!v) return "";
+  const d = v instanceof Date ? v : new Date(String(v).length <= 10 ? `${v}T12:00:00` : v);
+  return isNaN(d) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+function fmtWhen(v, withTime = false) {
+  const d = v ? new Date(v) : null;
+  if (!d || isNaN(d)) return "";
+  return d.toLocaleString("en-US", withTime
+    ? { timeZone: PT, month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }
+    : { timeZone: PT, month: "short", day: "numeric", year: "numeric" });
+}
+const nameOf = (user) => (user && (user.n || user.u || user.name || user.username)) || "Consultant";
 
 // Render the consultant portal chrome (self-contained — no firm sidebar).
-// The consultant sees a simple top nav: Dashboard | + New Work Order | Sign Out.
 function renderChrome({ title = "Consultant Portal", body, activeTab = "dashboard", user = {} }) {
-  const tabLink = (key, href, label) => `
-    <a href="${href}" style="color:${activeTab === key ? "#0C1C36" : "#666"}; text-decoration:none; padding:10px 16px; font-weight:${activeTab === key ? "700" : "500"}; border-bottom:${activeTab === key ? "3px solid #B79C62" : "3px solid transparent"};">${label}</a>`;
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${esc(title)} — Tez Law</title>
-  <style>
-    :root { --gold: #B79C62; --navy: #0C1C36; --light: #faf9f5; }
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: var(--light); color: var(--navy); }
-    header { background: white; border-bottom: 1px solid #eee; padding: 12px 24px; display: flex; align-items: center; gap: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-    .brand { font-size: 18px; font-weight: 700; color: var(--navy); }
-    .brand .gold { color: var(--gold); }
-    nav.tabs { display: flex; gap: 4px; margin-left: 20px; flex: 1; }
-    .who { font-size: 12px; color: #666; }
-    .who strong { color: var(--navy); }
-    .signout { background: none; border: none; color: #666; font-size: 12px; cursor: pointer; padding: 6px 12px; }
-    .signout:hover { color: #c62828; }
-    main { max-width: 1100px; margin: 20px auto; padding: 0 20px; }
-    .page-header { margin-bottom: 20px; }
-    .page-header h1 { margin: 0 0 6px; font-size: 26px; color: var(--navy); }
-    .page-header .sub { font-size: 13px; color: #666; }
-    .card { background: white; border-radius: 8px; border: 1px solid #eee; padding: 20px; margin-bottom: 16px; }
-    .btn-primary { background: var(--gold); color: white; padding: 10px 20px; border: none; border-radius: 6px; text-decoration: none; font-weight: 600; cursor: pointer; display: inline-block; font-size: 14px; }
-    .btn-primary:hover { background: #a08a55; }
-    .btn-secondary { background: white; color: var(--navy); padding: 10px 20px; border: 1px solid #ccc; border-radius: 6px; text-decoration: none; font-weight: 500; cursor: pointer; display: inline-block; font-size: 14px; }
-    label { display: block; font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 0.4px; }
-    input, textarea, select { width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; font-family: inherit; }
-    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(183,156,98,0.15); }
-    .status-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; color: white; }
-    @media (max-width: 640px) { header { padding: 10px 12px; flex-wrap: wrap; } nav.tabs { margin-left: 0; width: 100%; overflow-x: auto; } main { padding: 0 12px; } }
-  </style>
-</head>
-<body>
-  <header>
-    <div class="brand">TEZ <span class="gold">LAW</span> · Consultant Portal</div>
-    <nav class="tabs">
-      ${tabLink("dashboard", "/consultant", "📊 My Work Orders")}
-      ${tabLink("new", "/consultant/new", "＋ Submit New")}
-      ${tabLink("clients", "/consultant/clients", "👥 My Clients")}
-      ${tabLink("add-client", "/consultant/clients/new", "＋ Add Client")}
-      ${tabLink("alerts", "/consultant/alerts", "🔔 Alerts")}
-    </nav>
-    <div class="who">Signed in as <strong>${esc(user.name || user.username || "Consultant")}</strong></div>
-    <form method="POST" action="/logout" style="margin:0;"><button type="submit" class="signout">Sign out</button></form>
-  </header>
-  <main>${body}</main>
-</body>
-</html>`;
+  return theme.page({
+    title, area: "Consultant Portal",
+    nav: [
+      { key: "dashboard", href: "/consultant", label: "Tasks" },
+      { key: "new", href: "/consultant/new", label: "New task" },
+      { key: "clients", href: "/consultant/clients", label: "My clients" },
+      { key: "add-client", href: "/consultant/clients/new", label: "Add client" },
+      { key: "alerts", href: "/consultant/alerts", label: "Alerts", count: Number(user.alerts) > 0 ? Number(user.alerts) : null },
+    ],
+    active: activeTab, who: nameOf(user), body,
+    foot: "Questions about a client or a task: 626-678-8677 · jj@tezlawfirm.com",
+  });
 }
 
 // ── Dashboard: list of THIS consultant's submissions ───────────
 function renderDashboard({ user, tasks, stats }) {
+  const n = (k) => Number(stats[k]) || 0;
   const rowsHtml = tasks.length ? tasks.map(t => {
-    const status = STATUS_COLORS[t.status] || "#666";
-    const statusLabel = t.status.replace(/_/g, " ").toUpperCase();
-    const dueLabel = t.due_date ? new Date(t.due_date).toLocaleDateString() : "—";
-    const isOverdue = t.due_date && t.status !== "completed" && new Date(t.due_date) < new Date();
+    const overdue = t.due_date && !["completed", "rejected", "cancelled"].includes(t.status) && new Date(t.due_date) < new Date(Date.now() - 864e5);
     return `
-      <tr>
-        <td style="padding:14px 12px; border-bottom:1px solid #eee; vertical-align:top;">
-          <a href="/consultant/task/${t.id}" style="color:var(--navy); font-weight:600; text-decoration:none; font-size:14px;">${esc(t.title)}</a>
-          ${t.client_name ? `<div style="font-size:12px; color:#666; margin-top:3px;">👤 ${esc(t.client_name)}</div>` : ""}
-          ${t.matter_type ? `<div style="font-size:11px; color:#888; margin-top:2px;">${esc(t.matter_type.replace(/_/g, " "))}</div>` : ""}
-        </td>
-        <td style="padding:14px 12px; border-bottom:1px solid #eee; vertical-align:top;">
-          <span class="status-badge" style="background:${status};">${statusLabel}</span>
-          ${t.assigned_to ? `<div style="font-size:11px; color:#666; margin-top:4px;">Assigned: ${esc(t.assigned_to)}</div>` : ""}
-        </td>
-        <td style="padding:14px 12px; border-bottom:1px solid #eee; vertical-align:top; font-size:13px; ${isOverdue ? "color:#c62828; font-weight:600;" : "color:#666;"}">
-          ${dueLabel}${isOverdue ? " ⚠" : ""}
-        </td>
-        <td style="padding:14px 12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px; color:#666;">
-          ${new Date(t.created_at).toLocaleDateString()}
-        </td>
-        <td style="padding:14px 12px; border-bottom:1px solid #eee; vertical-align:top;">
-          <a href="/consultant/task/${t.id}" class="btn-secondary" style="padding:6px 12px; font-size:12px;">View →</a>
-        </td>
-      </tr>`;
-  }).join("") : `<tr><td colspan="5" style="padding:60px; text-align:center; color:#888;">You haven't submitted any work orders yet. <a href="/consultant/new" style="color:var(--gold);">Submit your first one →</a></td></tr>`;
+      <a href="/consultant/task/${t.id}">
+        <div>
+          <div class="t">${esc(t.title)}</div>
+          <div class="m">${[t.client_name ? esc(t.client_name) : null, t.matter_type ? esc(matterLabel(t.matter_type)) : null].filter(Boolean).join(" · ")}</div>
+        </div>
+        <div>
+          ${badge(t.status)}
+          ${t.assigned_to && t.status !== "pending_approval" && t.status !== "rejected" ? `<div class="m">With ${esc(t.assigned_to)}</div>` : ""}
+        </div>
+        <div class="m">
+          ${t.due_date ? `<span${overdue ? ' style="color:var(--bad);font-weight:600;"' : ""}>Due ${esc(fmtDay(t.due_date))}</span><br>` : ""}
+          Sent ${esc(fmtWhen(t.created_at))}
+        </div>
+      </a>`;
+  }).join("") : `<div class="empty">You have not sent the firm any tasks yet.<br><a href="/consultant/new">Send your first one</a></div>`;
 
   return `
     <div class="page-header">
-      <h1>📊 My Work Orders</h1>
-      <div class="sub">Every case you've referred to Tez Law. Click any row to see the current status and full activity timeline.</div>
+      <h1>Tasks</h1>
+      <div class="sub">What you have sent to the firm and where each one stands. An attorney or manager approves a task before the firm starts on it.</div>
     </div>
 
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:20px;">
-      <div class="card" style="padding:14px; margin-bottom:0;">
-        <div style="font-size:10px; color:#888; text-transform:uppercase;">Total Submitted</div>
-        <div style="font-size:24px; font-weight:700; color:var(--navy);">${stats.total || 0}</div>
-      </div>
-      <div class="card" style="padding:14px; margin-bottom:0;">
-        <div style="font-size:10px; color:#0061FF; text-transform:uppercase;">In Progress</div>
-        <div style="font-size:24px; font-weight:700; color:#0061FF;">${stats.in_progress || 0}</div>
-      </div>
-      <div class="card" style="padding:14px; margin-bottom:0;">
-        <div style="font-size:10px; color:#B79C62; text-transform:uppercase;">Pending Review</div>
-        <div style="font-size:24px; font-weight:700; color:#B79C62;">${stats.pending || 0}</div>
-      </div>
-      <div class="card" style="padding:14px; margin-bottom:0;">
-        <div style="font-size:10px; color:#2e7d32; text-transform:uppercase;">Completed</div>
-        <div style="font-size:24px; font-weight:700; color:#2e7d32;">${stats.completed || 0}</div>
-      </div>
+    <div class="tiles">
+      <div class="tile${n("pending_approval") ? " hot" : ""}"><div class="k">Awaiting approval</div><div class="v">${n("pending_approval")}</div></div>
+      <div class="tile"><div class="k">With the firm</div><div class="v">${n("open") + n("pending") + n("in_progress")}</div></div>
+      <div class="tile"><div class="k">Completed</div><div class="v">${n("completed")}</div></div>
+      <div class="tile"><div class="k">Not accepted</div><div class="v">${n("rejected")}</div></div>
     </div>
 
-    <div style="text-align:right; margin-bottom:12px;">
-      <a href="/consultant/new" class="btn-primary">＋ Submit New Work Order</a>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+      <h3 style="margin:0;">Current tasks</h3>
+      <a href="/consultant/new" class="btn-primary">New task</a>
     </div>
 
-    <div class="card" style="padding:0; overflow:hidden;">
-      <table style="width:100%; border-collapse:collapse;">
-        <thead><tr style="background:#fafaf7;">
-          <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Work Order</th>
-          <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Status</th>
-          <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Due</th>
-          <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Submitted</th>
-          <th style="padding:10px 12px; border-bottom:1px solid #eee;"></th>
-        </tr></thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
-    </div>`;
+    <div class="card flush"><div class="rows">${rowsHtml}</div></div>`;
 }
 
-// ── New work order form ─────────────────────────────────────
 // My Clients / Add Client / one client: drawn in the browser by
 // public/consultant-clients.js from /api/consultant/* (the same calls the
 // phone app makes), so phone and computer show the same thing.
 function renderClientsPage({ mode = "list", clientKey = null } = {}) {
   const heads = {
-    list: ["My Clients", "Clients the firm assigned to you and clients you entered. Search by name, phone, email or A-number."],
-    new: ["Add a Client", "Enter a new client's details. The firm is notified and the client appears in your list right away."],
+    list: ["My clients", "Clients filed under you at the firm, clients the firm assigned to you, and clients you entered. Search by name, phone, email or A-number."],
+    new: ["Add a client", "Enter a new client's details. The firm is notified and the client appears in your list right away."],
     view: ["Client", ""],
   };
   const [h, sub] = heads[mode] || heads.list;
@@ -189,248 +157,254 @@ function renderClientsPage({ mode = "list", clientKey = null } = {}) {
     ${require("./client-script").clientScriptTag("consultant-clients.js")}`;
 }
 
+// ── New work order form ─────────────────────────────────────
 function renderNewForm() {
   return `
     <div class="page-header">
-      <h1>＋ Submit New Work Order</h1>
-      <div class="sub">Fill in what you know — the firm will review, assign, and start work. You'll get notified at every step.</div>
+      <h1>New task</h1>
+      <div class="sub">Tell the firm what is needed. An attorney or manager reviews it first; once it is approved the firm starts work, and you are told at each step.</div>
     </div>
 
     <div class="card">
-      <form onsubmit="submitOrder(event)">
-        <div style="margin-bottom:14px;">
-          <label>Work Order Title *</label>
-          <input type="text" name="title" required placeholder="e.g. New client: John Smith - Auto accident 8/12">
-          <div style="font-size:11px; color:#888; margin-top:4px;">Short summary of what the firm needs to work on</div>
+      <form id="wo-form">
+        <div class="field">
+          <label for="wo-title">What do you need the firm to do? *</label>
+          <input id="wo-title" type="text" name="title" required maxlength="300" placeholder="New client — auto accident on Aug 12">
+          <div class="hint">One line. The details go below.</div>
         </div>
 
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+        <div class="grid2">
           <div>
-            <label>Client Name</label>
-            <input type="text" name="client_name" placeholder="John Smith" id="wo-client-name">
+            <label for="wo-client-name">Client name</label>
+            <input type="text" name="client_name" maxlength="200" placeholder="Last, First" id="wo-client-name">
           </div>
           <div>
-            <label>Matter Type *</label>
-            <select name="matter_type" required>
-              <option value="">— pick one —</option>
-              <option value="immigration">Immigration</option>
-              <option value="pi">Personal Injury</option>
-              <option value="business">Business Litigation</option>
-              <option value="ll_tenant">Landlord/Tenant</option>
-              <option value="estate">Estate Planning</option>
-              <option value="tm">Trademarks/Patents</option>
-              <option value="real_estate">Real Estate</option>
-              <option value="admin">General / Other</option>
+            <label for="wo-matter">Matter type *</label>
+            <select id="wo-matter" name="matter_type" required>
+              <option value="">Choose one</option>
+              ${Object.keys(MATTER_LABELS).map(k => `<option value="${k}">${esc(MATTER_LABELS[k])}</option>`).join("")}
             </select>
           </div>
         </div>
 
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+        <div class="grid2">
           <div>
-            <label>Client Phone (if known)</label>
-            <input type="tel" name="_client_phone" placeholder="(555) 123-4567">
+            <label for="wo-phone">Client phone, if known</label>
+            <input id="wo-phone" type="tel" name="_client_phone" maxlength="40" placeholder="(626) 555-0100">
           </div>
           <div>
-            <label>Client Email (if known)</label>
-            <input type="email" name="_client_email" placeholder="john@example.com">
+            <label for="wo-email">Client email, if known</label>
+            <input id="wo-email" type="email" name="_client_email" maxlength="200">
           </div>
         </div>
 
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+        <div class="grid2">
           <div>
-            <label>Urgency</label>
-            <select name="priority">
-              <option value="normal">🔵 Normal — standard timeline</option>
-              <option value="high">🟠 High — deadline within 30 days</option>
-              <option value="urgent">🔴 Urgent — imminent deadline or detained client</option>
-              <option value="low">⚪ Low — no rush</option>
+            <label for="wo-priority">Urgency</label>
+            <select id="wo-priority" name="priority">
+              <option value="normal">Normal — standard timeline</option>
+              <option value="high">High — deadline within 30 days</option>
+              <option value="urgent">Urgent — imminent deadline or detained client</option>
+              <option value="low">Low — no rush</option>
             </select>
           </div>
           <div>
-            <label>Deadline / Court Date (if known)</label>
-            <input type="date" name="due_date">
+            <label for="wo-due">Deadline or court date, if known</label>
+            <input id="wo-due" type="date" name="due_date">
           </div>
         </div>
 
-        <div style="margin-bottom:14px;">
-          <label>Details & Context *</label>
-          <textarea name="description" rows="6" required placeholder="What happened? What does the client need? Any key facts, dates, or documents you already have? The more detail, the faster the firm can move."></textarea>
+        <div class="field">
+          <label for="wo-desc">Details *</label>
+          <textarea id="wo-desc" name="description" rows="7" required maxlength="7500" placeholder="What happened, what the client needs, key dates, and which documents you already have."></textarea>
         </div>
 
-        <div style="display:flex; gap:10px; align-items:center;">
-          <button type="submit" class="btn-primary" id="submit-btn">📤 Submit to Firm</button>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <button type="submit" class="btn-primary" id="submit-btn">Send for approval</button>
           <a href="/consultant" class="btn-secondary">Cancel</a>
-          <span id="submit-status" style="color:#666; font-size:12px; margin-left:12px;"></span>
+          <span id="submit-status" role="status" class="hint" style="margin:0;"></span>
         </div>
       </form>
     </div>
 
     <script>
-      // "Work order for this client" from a client page fills the name in.
+      // Kept free of apostrophes and backslashes on purpose: this script sits
+      // inside a server-side template literal, which swallows both.
       (function () {
+        var form = document.getElementById("wo-form");
+        var btn = document.getElementById("submit-btn");
+        var status = document.getElementById("submit-status");
         try {
           var c = new URLSearchParams(location.search).get("client");
           var el = document.getElementById("wo-client-name");
           if (c && el && !el.value) el.value = c.slice(0, 200);
         } catch (e) { /* older browser: type it */ }
-      })();
-      async function submitOrder(e) {
-        e.preventDefault();
-        const btn = document.getElementById("submit-btn");
-        btn.disabled = true; btn.textContent = "⏳ Submitting…";
-        const fd = new FormData(e.target);
-        const data = {};
-        for (const [k, v] of fd.entries()) if (v !== "") data[k] = v;
-        // Roll optional contact fields into the description so the firm has them
-        const contactBits = [];
-        if (data._client_phone) contactBits.push("Phone: " + data._client_phone);
-        if (data._client_email) contactBits.push("Email: " + data._client_email);
-        if (contactBits.length) data.description = contactBits.join(" · ") + "\\n\\n" + (data.description || "");
-        delete data._client_phone;
-        delete data._client_email;
-        try {
-          const r = await fetch("/consultant/tasks", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-          });
-          const d = await r.json();
-          if (d.ok) {
-            location.href = "/consultant/task/" + d.task.id;
-          } else {
-            alert("Error: " + (d.error || "unknown"));
-            btn.disabled = false; btn.textContent = "📤 Submit to Firm";
-          }
-        } catch (err) {
-          alert("Network error: " + err.message);
-          btn.disabled = false; btn.textContent = "📤 Submit to Firm";
+        function fail(msg) {
+          status.textContent = msg; status.style.color = "var(--bad)";
+          btn.disabled = false; btn.textContent = "Send for approval";
         }
-      }
+        form.addEventListener("submit", function (e) {
+          e.preventDefault();
+          btn.disabled = true; btn.textContent = "Sending";
+          status.textContent = ""; status.style.color = "";
+          var data = {};
+          new FormData(form).forEach(function (v, k) { if (v !== "") data[k] = v; });
+          var bits = [];
+          if (data._client_phone) bits.push("Phone: " + data._client_phone);
+          if (data._client_email) bits.push("Email: " + data._client_email);
+          if (bits.length) data.description = bits.join(" · ") + String.fromCharCode(10, 10) + (data.description || "");
+          delete data._client_phone; delete data._client_email;
+          fetch("/api/consultant/tasks", {
+            method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "Accept": "application/json" },
+            body: JSON.stringify(data)
+          }).then(function (r) {
+            return r.json().catch(function () { return { ok: false, error: "The server answered with HTTP " + r.status }; });
+          }).then(function (d) {
+            if (d.ok && d.task) location.href = "/consultant/task/" + d.task.id + "?sent=1";
+            else fail(d.error || "That did not go through. Please try again.");
+          }).catch(function (err) { fail("Could not reach the server: " + err.message); });
+        });
+      })();
     </script>`;
 }
 
 // ── Task detail with activity timeline ─────────────────────
-function renderTaskDetail({ task, activity, milestones = [], progress = null, user }) {
-  const status = STATUS_COLORS[task.status] || "#666";
-  const statusLabel = STATUS_LABELS[task.status] || task.status;
+function renderTaskDetail({ task, activity, milestones = [], progress = null, user, justSent = false }) {
+  const st = statusOf(task.status);
+  const last = (action) => [...activity].reverse().find(a => a.action === action);
+  const rejected = task.status === "rejected" ? last("rejected") : null;
+  const approved = last("approved");
+
+  // Where it stands, said once at the top in plain words.
+  let standing = "";
+  if (task.status === "pending_approval") {
+    standing = `<div class="card note"><strong>${justSent ? "Sent. " : ""}Waiting for approval.</strong>
+      An attorney or manager at the firm reviews every task before any work starts. You will be told as soon as they decide.</div>`;
+  } else if (rejected) {
+    standing = `<div class="card warn"><strong>The firm did not accept this task.</strong>
+      ${rejected.note ? `<div class="quote">${esc(rejected.note)}</div>` : ""}
+      <div class="hint">${rejected.actor_name ? esc(rejected.actor_name) + " · " : ""}${esc(fmtWhen(rejected.created_at, true))}. If something has changed, send a new task.</div></div>`;
+  } else if (approved && task.status === "open") {
+    standing = `<div class="card ok"><strong>Approved${approved.actor_name ? " by " + esc(approved.actor_name) : ""}.</strong>
+      It is in the firm's queue${task.assigned_to ? " with " + esc(task.assigned_to) : ""}.${approved.note ? `<div class="quote">${esc(approved.note)}</div>` : ""}</div>`;
+  }
 
   // Milestone progress display — read-only for consultants. They see the
   // steps the firm is working through so they know exactly where things
   // stand without asking for updates.
+  const pct = progress ? progress.percent : 0;
   const milestonesHtml = milestones.length ? `
     <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="margin:0; font-size:16px; color:var(--navy);">✅ Progress (${progress ? progress.percent : 0}%)</h3>
-        <div style="font-size:12px; color:#666;">${progress ? (progress.completed + progress.skipped) : 0} of ${progress ? progress.total : 0} steps done</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+        <h3 style="margin:0;">Progress</h3>
+        <div class="hint" style="margin:0;">${progress ? (progress.completed + progress.skipped) : 0} of ${progress ? progress.total : 0} steps · ${pct}%</div>
       </div>
-      <div style="background:#eee; border-radius:4px; height:8px; margin-bottom:16px; overflow:hidden;">
-        <div style="background:linear-gradient(90deg, var(--gold), #2e7d32); height:100%; width:${progress ? progress.percent : 0}%;"></div>
-      </div>
+      <div class="bar"><i style="width:${pct}%;"></i></div>
+      <div class="timeline">
       ${milestones.map(m => {
-        const isDone = m.status === "completed";
-        const isSkipped = m.status === "skipped";
-        const isActive = m.status === "in_progress";
-        const bg = isDone ? "#e8f5e9" : isActive ? "#e3f2fd" : isSkipped ? "#f5f5f5" : "white";
-        const strike = isDone || isSkipped ? "text-decoration:line-through; color:#888;" : "";
+        const done = m.status === "completed", skipped = m.status === "skipped", active = m.status === "in_progress";
         return `
-          <div style="background:${bg}; padding:12px 14px; border-radius:6px; border:1px solid #eee; margin-bottom:6px; display:flex; align-items:center; gap:12px;">
-            <div style="width:26px; height:26px; border-radius:13px; background:${isDone ? "#2e7d32" : isActive ? "#0061FF" : "#ddd"}; color:white; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0;">${isDone ? "✓" : isSkipped ? "⊘" : m.order_num}</div>
-            <div style="flex:1;">
-              <div style="font-size:14px; color:var(--navy); ${strike}">${esc(m.title)}</div>
-              ${m.completed_at ? `<div style="font-size:11px; color:#2e7d32; margin-top:2px;">Completed ${new Date(m.completed_at).toLocaleDateString()}</div>` : ""}
-              ${m.due_date && !isDone ? `<div style="font-size:11px; color:#666; margin-top:2px;">Target: ${new Date(m.due_date).toLocaleDateString()}</div>` : ""}
+          <div>
+            <span class="dot${done || active ? " on" : ""}"${done ? ' style="background:var(--good);"' : ""}></span>
+            <div>
+              <div class="what"${done || skipped ? ' style="color:var(--stone);"' : ""}>${esc(m.title)}${active ? ' <span class="tag" style="--dot:var(--orange);margin-left:8px;">In progress</span>' : ""}${skipped ? " (not needed)" : ""}</div>
+              ${m.completed_at ? `<div class="when">Done ${esc(fmtWhen(m.completed_at))}</div>` : (m.due_date && !done ? `<div class="when">Target ${esc(fmtDay(m.due_date))}</div>` : "")}
             </div>
-            ${isActive ? '<span style="background:#0061FF; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">IN PROGRESS</span>' : ""}
           </div>`;
       }).join("")}
+      </div>
     </div>` : "";
 
-  const ACTION_ICONS = {
-    created: "＋",
-    status_changed: "↻",
-    assigned: "👤",
-    note_added: "💬",
-    completed: "✓",
-    reopened: "↺",
-    edited: "✎",
-  };
-
+  const words = (v) => esc(statusOf(v).short !== "—" ? statusOf(v).short : (v || "?"));
   const timeline = activity.length ? activity.map(a => {
-    const icon = ACTION_ICONS[a.action] || "•";
     let text = "";
-    if (a.action === "created") text = "Work order submitted";
-    else if (a.action === "status_changed") text = `Status changed from <strong>${esc(a.old_value || "?")}</strong> to <strong>${esc(a.new_value || "?")}</strong>`;
+    if (a.action === "created") text = "Task sent to the firm";
+    else if (a.action === "approved") text = "Approved";
+    else if (a.action === "rejected") text = "Not accepted";
+    else if (a.action === "status_changed") text = `Status changed from <strong>${words(a.old_value)}</strong> to <strong>${words(a.new_value)}</strong>`;
     else if (a.action === "assigned") text = a.new_value ? `Assigned to <strong>${esc(a.new_value)}</strong>` : "Unassigned";
-    else if (a.action === "note_added") text = "Note added by firm";
+    else if (a.action === "note_added") text = String(a.actor_id) === String(user && (user.uid || user.id)) ? "Your note" : "Note from the firm";
     else if (a.action === "completed") text = "Marked complete";
     else if (a.action === "reopened") text = "Reopened";
-    else if (a.action === "edited") text = `Updated: ${esc(a.old_value)} → ${esc(a.new_value)}`;
-    else text = esc(a.action);
-
-    const when = new Date(a.created_at).toLocaleString();
+    else if (a.action === "edited") text = a.old_value || a.new_value ? `Updated: ${esc(a.old_value)} → ${esc(a.new_value)}` : "Updated";
+    else text = esc(String(a.action || "").replace(/_/g, " "));
+    const key = ["approved", "rejected", "completed", "created"].includes(a.action);
     return `
-      <div style="display:flex; gap:12px; padding:12px 0; border-bottom:1px solid #f0f0f0;">
-        <div style="width:32px; height:32px; border-radius:16px; background:#f5f2ea; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:14px; color:var(--gold);">${icon}</div>
-        <div style="flex:1;">
-          <div style="font-size:13px; color:var(--navy);">${text}${a.actor_name ? ` — <span style="color:#666;">by ${esc(a.actor_name)}</span>` : ""}</div>
-          ${a.note ? `<div style="background:#fafaf7; padding:10px 12px; border-radius:6px; margin-top:6px; font-size:13px; color:#333; white-space:pre-wrap;">${esc(a.note)}</div>` : ""}
-          <div style="font-size:11px; color:#999; margin-top:4px;">${when}</div>
+      <div>
+        <span class="dot${key ? " on" : ""}"></span>
+        <div>
+          <div class="what">${text}${a.actor_name ? ` <span style="color:var(--stone);">· ${esc(a.actor_name)}</span>` : ""}</div>
+          ${a.note && a.action !== "created" ? `<div class="quote">${esc(a.note)}</div>` : ""}
+          <div class="when">${esc(fmtWhen(a.created_at, true))}</div>
         </div>
       </div>`;
-  }).join("") : `<div style="color:#888; padding:20px; text-align:center;">No activity yet.</div>`;
+  }).join("") : `<div class="empty">No activity yet.</div>`;
+
+  const fact = (label, value) => value ? `<div><span class="label">${label}</span><div style="font-weight:600;">${value}</div></div>` : "";
+  const open = !["completed", "cancelled", "rejected"].includes(task.status);
 
   return `
     <div class="page-header">
-      <a href="/consultant" style="color:#666; text-decoration:none; font-size:13px;">← Back to my work orders</a>
-      <h1 style="margin-top:8px;">${esc(task.title)}</h1>
-      <div class="sub">
-        <span class="status-badge" style="background:${status};">${task.status.replace(/_/g, " ").toUpperCase()}</span>
-        <span style="margin-left:10px;">${statusLabel}</span>
-      </div>
+      <a class="back" href="/consultant">&larr; All tasks</a>
+      <h1 style="margin-top:10px;overflow-wrap:anywhere;">${esc(task.title)}</h1>
+      <div class="sub">${badge(task.status)}${st.long ? `<span style="margin-left:12px;">${esc(st.long)}</span>` : ""}</div>
     </div>
 
+    ${standing}
+
     <div class="card">
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:16px; font-size:13px;">
-        ${task.client_name ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Client</div><div style="font-weight:600; color:var(--navy);">${esc(task.client_name)}</div></div>` : ""}
-        ${task.matter_type ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Matter Type</div><div>${esc(task.matter_type.replace(/_/g, " "))}</div></div>` : ""}
-        ${task.priority ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Priority</div><div>${PRIORITY_LABELS[task.priority] || task.priority}</div></div>` : ""}
-        ${task.due_date ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Deadline</div><div>${new Date(task.due_date).toLocaleDateString()}</div></div>` : ""}
-        ${task.assigned_to ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Assigned To</div><div>${esc(task.assigned_to)}</div></div>` : ""}
-        <div><div style="font-size:10px; color:#888; text-transform:uppercase;">Submitted</div><div>${new Date(task.created_at).toLocaleDateString()}</div></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:18px;">
+        ${fact("Client", task.client_name ? esc(task.client_name) : "")}
+        ${fact("Matter type", task.matter_type ? esc(matterLabel(task.matter_type)) : "")}
+        ${fact("Urgency", esc(PRIORITY_LABELS[task.priority] || task.priority || ""))}
+        ${fact("Deadline", esc(fmtDay(task.due_date)))}
+        ${task.status !== "pending_approval" && task.status !== "rejected" ? fact("With", task.assigned_to ? esc(task.assigned_to) : "") : ""}
+        ${fact("Sent", esc(fmtWhen(task.created_at)))}
       </div>
-      ${task.description ? `<div style="margin-top:16px; padding-top:16px; border-top:1px solid #eee;"><div style="font-size:10px; color:#888; text-transform:uppercase; margin-bottom:6px;">Original Submission</div><div style="white-space:pre-wrap; font-size:13px; color:#333;">${esc(task.description)}</div></div>` : ""}
+      ${task.description ? `<div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--travertine);"><span class="label">What you sent</span><div style="white-space:pre-wrap;overflow-wrap:anywhere;">${esc(task.description)}</div></div>` : ""}
     </div>
 
     ${milestonesHtml}
 
     <div class="card">
-      <h3 style="margin-top:0; font-size:16px; color:var(--navy);">📋 Activity Timeline</h3>
-      ${timeline}
+      <h3>Activity</h3>
+      <div class="timeline">${timeline}</div>
     </div>
 
-    ${task.status !== "completed" && task.status !== "cancelled" ? `
+    ${open ? `
     <div class="card">
-      <h3 style="margin-top:0; font-size:16px; color:var(--navy);">💬 Add a Follow-Up Note</h3>
-      <textarea id="comment-text" rows="3" placeholder="Send a follow-up message to the firm about this work order..." style="margin-bottom:10px;"></textarea>
-      <button type="button" onclick="addComment()" class="btn-primary" id="comment-btn">📤 Send to Firm</button>
-      <span id="comment-status" style="color:#666; font-size:12px; margin-left:12px;"></span>
+      <h3>Add a note for the firm</h3>
+      <label for="comment-text">Your note</label>
+      <textarea id="comment-text" rows="3" maxlength="2000" placeholder="Anything new the firm should know about this task." style="margin-bottom:12px;"></textarea>
+      <button type="button" class="btn-primary" id="comment-btn">Send note</button>
+      <span id="comment-status" role="status" class="hint" style="margin:0 0 0 12px;"></span>
     </div>
 
     <script>
-      async function addComment() {
-        const text = document.getElementById("comment-text").value.trim();
-        if (!text) return alert("Type a note first.");
-        const btn = document.getElementById("comment-btn");
-        btn.disabled = true; btn.textContent = "⏳ Sending…";
-        try {
-          const r = await fetch("/consultant/task/${task.id}/comment", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ note: text }),
+      // No apostrophes or backslashes in here — see the note in the form above.
+      (function () {
+        var btn = document.getElementById("comment-btn");
+        var status = document.getElementById("comment-status");
+        btn.addEventListener("click", function () {
+          var text = document.getElementById("comment-text").value.trim();
+          if (!text) { status.textContent = "Write a note first."; status.style.color = "var(--bad)"; return; }
+          btn.disabled = true; btn.textContent = "Sending"; status.textContent = "";
+          fetch("/consultant/task/${Number(task.id)}/comment", {
+            method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ note: text })
+          }).then(function (r) {
+            return r.json().catch(function () { return { ok: false, error: "The server answered with HTTP " + r.status }; });
+          }).then(function (d) {
+            if (d.ok) location.reload();
+            else { status.textContent = d.error || "That did not go through."; status.style.color = "var(--bad)"; btn.disabled = false; btn.textContent = "Send note"; }
+          }).catch(function (e) {
+            status.textContent = "Could not reach the server: " + e.message; status.style.color = "var(--bad)";
+            btn.disabled = false; btn.textContent = "Send note";
           });
-          const d = await r.json();
-          if (d.ok) location.reload();
-          else { alert("Error: " + d.error); btn.disabled = false; btn.textContent = "📤 Send to Firm"; }
-        } catch (e) { alert("Network error: " + e.message); btn.disabled = false; btn.textContent = "📤 Send to Firm"; }
-      }
+        });
+      })();
     </script>
     ` : ""}`;
 }
@@ -449,20 +423,20 @@ function renderTaskDetail({ task, activity, milestones = [], progress = null, us
  * What a consultant can see here is their own contact details and their
  * own switches. Nothing about any client appears on this page.
  */
-function renderAlertsPage({ user = {}, me = {}, health = {}, linkCode = null, saved = false, linked = false }) {
+function renderAlertsPage({ user = {}, me = {}, health = {}, linkCode = null, saved = false, linked = false, feed = [], hasApp = false }) {
   const on = (v) => v ? "checked" : "";
   const chan = (key, label, enabled, address, missing, note) => {
     const ready = !!address;
     return `
-    <div style="display:flex; gap:14px; align-items:flex-start; padding:16px 0; border-bottom:1px solid #f0f0f0;">
-      <input type="checkbox" name="${key}" value="1" ${on(enabled)} style="width:18px; height:18px; margin-top:2px; flex:0 0 auto;">
+    <div style="display:flex;gap:14px;align-items:flex-start;padding:16px 0;border-top:1px solid var(--travertine);">
+      <input type="checkbox" id="ch-${key}" name="${key}" value="1" ${on(enabled)} style="margin-top:3px;flex:0 0 auto;">
       <div style="flex:1;">
-        <div style="font-weight:600; font-size:15px;">${label}</div>
-        <div style="font-size:13px; color:${ready ? "#555" : "#B45309"}; margin-top:3px;">
+        <label for="ch-${key}" style="font-size:15px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--charcoal);margin:0;">${label}</label>
+        <div style="font-size:13px;color:${ready ? "var(--stone)" : "var(--ember)"};margin-top:3px;">
           ${ready ? esc(address) : missing}
         </div>
-        ${note ? `<div style="font-size:12px; color:#888; margin-top:4px;">${note}</div>` : ""}
-        ${enabled && !ready ? `<div style="font-size:12px; color:#B45309; margin-top:4px; font-weight:600;">Turned on, but there is nowhere to send — you will not be alerted on this channel.</div>` : ""}
+        ${note ? `<div class="hint">${note}</div>` : ""}
+        ${enabled && !ready ? `<div class="hint" style="color:var(--bad);font-weight:600;">Turned on, but there is nowhere to send — you will not be alerted on this channel.</div>` : ""}
       </div>
     </div>`;
   };
@@ -472,33 +446,52 @@ function renderAlertsPage({ user = {}, me = {}, health = {}, linkCode = null, sa
   if (!health.sms) down.push("text message");
   if (!health.telegram) down.push("Telegram");
 
+  // What has happened, newest first. This is the list the alerts point to.
+  const feedHtml = feed.length ? feed.map(f => {
+    const href = f.task_id ? `/consultant/task/${Number(f.task_id)}`
+      : (f.client_key ? `/consultant/client/${encodeURIComponent(f.client_key)}` : null);
+    const inner = `
+        <div>
+          <div class="t">${esc(f.label)}${f.seen_at ? "" : ' <span class="tag" style="--dot:var(--orange);margin-left:8px;">New</span>'}</div>
+          <div class="m">${esc(f.who || (f.task_id ? "Task #" + f.task_id : "A client of yours"))}</div>
+        </div>
+        <div class="m">${esc(fmtWhen(f.created_at, true))}</div>
+        <div class="m" style="font-weight:600;color:var(--ember);">${href ? "Open" : ""}</div>`;
+    return href ? `<a href="${esc(href)}">${inner}</a>` : `<div>${inner}</div>`;
+  }).join("") : `<div class="empty">Nothing yet. When something happens on one of your clients or tasks, it is listed here.</div>`;
+
   return `
   <div class="page-header">
     <h1>Alerts</h1>
-    <div class="sub">How you hear when something happens on a client you are assigned to.</div>
+    <div class="sub">What has happened on your clients and tasks, and how you hear about it.</div>
   </div>
 
-  ${saved ? `<div class="card" style="border-left:4px solid #2e7d32; background:#f4faf5;">Saved.</div>` : ""}
-  ${linked ? `<div class="card" style="border-left:4px solid #2e7d32; background:#f4faf5;">Telegram is linked. Alerts will go to that chat.</div>` : ""}
+  ${saved ? `<div class="card ok">Saved.</div>` : ""}
+  ${linked ? `<div class="card ok">Telegram is linked. Alerts will go to that chat.</div>` : ""}
 
-  <div class="card">
-    <h3 style="margin:0 0 4px; font-size:16px;">What you will be told</h3>
-    <p style="font-size:13px; color:#555; line-height:1.6; margin:0 0 14px;">
+  <h3>Recent</h3>
+  <div class="card flush"><div class="rows">${feedHtml}</div></div>
+
+  <div class="card" style="margin-top:28px;">
+    <h3>What you will be told</h3>
+    <p style="color:var(--stone);margin:0 0 14px;">
       A new court notice, a hearing scheduled or rescheduled, a deadline coming up,
-      or a change in case status &mdash; for your clients only.
+      a change in case status, or an update the firm sends you &mdash; for your clients only.
+      And every decision on a task you sent: approved, not accepted, updated, completed.
     </p>
-    <p style="font-size:13px; color:#555; line-height:1.6; margin:0; padding:12px 14px; background:#faf9f5; border-radius:6px;">
+    <p class="quote" style="margin:0;white-space:normal;">
       <strong>The alert itself says only what happened and for which client.</strong>
       Dates, documents, A&#8209;numbers and the substance of a notice are never sent by
-      email or text &mdash; you sign in here to read them. That is deliberate:
+      email, text or app notification &mdash; you sign in here to read them. That is deliberate:
       an email gets forwarded and a phone gets lost.
     </p>
   </div>
 
   <form method="POST" action="/consultant/alerts">
     <div class="card">
-      <h3 style="margin:0 0 6px; font-size:16px;">Where to reach you</h3>
-      <div style="font-size:12px; color:#888; margin-bottom:6px;">Ask the firm to change your email or phone number.</div>
+      <h3>Where to reach you</h3>
+      <div class="hint" style="margin:0 0 12px;">Ask the firm to change your email or phone number.</div>
+      ${chan("notify_app", "Tara app on your phone", me.notify_app !== false, hasApp ? "This account is signed in on a phone" : "", "Not signed in on a phone yet &mdash; open the Tara app and sign in with this account.", "A notification on your lock screen.")}
       ${chan("notify_email", "Email", me.notify_email !== false, me.email, "No email address on file &mdash; ask the firm to add one.", "")}
       ${chan("notify_sms", "Text message", me.notify_sms === true, me.phone, "No phone number on file &mdash; ask the firm to add one.", "Standard message rates apply.")}
       ${chan("notify_telegram", "Telegram", me.notify_telegram === true, me.telegram_chat_id ? "Linked" : "", "Not linked yet &mdash; use the box below.", "")}
@@ -509,27 +502,27 @@ function renderAlertsPage({ user = {}, me = {}, health = {}, linkCode = null, sa
   </form>
 
   <div class="card">
-    <h3 style="margin:0 0 6px; font-size:16px;">Link Telegram</h3>
-    <p style="font-size:13px; color:#555; line-height:1.6;">
+    <h3>Link Telegram</h3>
+    <p style="color:var(--stone);margin-top:0;">
       Telegram will not let us message you until you message the bot first.
       ${linkCode
-        ? `Open Telegram, start a chat with <strong>@TEZJJBot</strong>, and send it this code:
-           <div style="font-family:ui-monospace,Menlo,monospace; font-size:22px; font-weight:700; letter-spacing:2px; background:#faf9f5; border:1px dashed #ccc; border-radius:6px; padding:14px; text-align:center; margin:12px 0;">${esc(linkCode)}</div>
-           The code works once. Come back to this page afterwards to confirm.`
+        ? `Open Telegram, start a chat with <strong>@TEZJJBot</strong>, and send it this code:`
         : `Generate a code, then send it to <strong>@TEZJJBot</strong> on Telegram.`}
     </p>
+    ${linkCode ? `<div style="font-family:ui-monospace,Menlo,monospace;font-size:22px;font-weight:700;letter-spacing:2px;background:var(--marble);border:1px dashed var(--stone);border-radius:3px;padding:14px;text-align:center;margin:0 0 12px;">${esc(linkCode)}</div>
+      <p class="hint" style="margin:0 0 14px;">The code works once. Come back to this page afterwards to confirm.</p>` : ""}
     <form method="POST" action="/consultant/alerts/telegram-code" style="margin:0;">
       <button type="submit" class="btn-secondary">${linkCode ? "Generate a new code" : "Generate a code"}</button>
     </form>
   </div>
 
   ${down.length ? `
-  <div class="card" style="border-left:4px solid #B45309; background:#fffaf3;">
-    <strong style="font-size:14px;">Not available right now</strong>
-    <div style="font-size:13px; color:#555; margin-top:6px; line-height:1.6;">
+  <div class="card note">
+    <strong>Not available right now</strong>
+    <div class="hint" style="font-size:13px;">
       The firm has not set up ${esc(down.join(" or "))} on the server yet, so alerts on
       ${down.length > 1 ? "those channels" : "that channel"} will queue rather than send.
-      Nothing is lost &mdash; they go out once it is switched on.
+      Nothing is lost &mdash; they go out once it is switched on, and everything is listed above in the meantime.
     </div>
   </div>` : ""}
   `;

@@ -52,9 +52,29 @@ const KINDS = {
   hearing_moved: { emoji: "📅", label: "Hearing rescheduled" },
   deadline:      { emoji: "⏰", label: "Deadline approaching" },
   status:        { emoji: "🔄", label: "Case status changed" },
+  // Sent by hand from the firm's alerts page, when something happened that
+  // no sweep would notice. Still a fixed headline: the person sending it
+  // picks from this list, they do not type the message.
+  document:      { emoji: "📄", label: "New document on file" },
+  update:        { emoji: "🔔", label: "Case update" },
+  action:        { emoji: "❗", label: "Action needed" },
 };
 
-const CHANNELS = ["email", "sms", "telegram"];
+// Events about a consultant's OWN work order, sent to that consultant only.
+// JJ: work orders "will need attorney or manager's approval" — so the person
+// who submitted one has to hear which way it went, and why.
+const USER_KINDS = {
+  wo_approved: { emoji: "✅", label: "Task approved" },
+  wo_rejected: { emoji: "↩️", label: "Task not accepted" },
+  wo_update:   { emoji: "📝", label: "Update on your task" },
+  wo_done:     { emoji: "✅", label: "Task completed" },
+};
+
+const labelOf = (kind) => (KINDS[kind] || USER_KINDS[kind] || {}).label || kind;
+
+// "app" is a push to the Tara app on the consultant's phone. JJ: "should be
+// able to push case notification to brokers/consultants as well."
+const CHANNELS = ["email", "sms", "telegram", "app"];
 
 function baseUrl() {
   return (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/$/, "");
@@ -85,6 +105,18 @@ function renderMessage(kind, clientName, clientKey) {
   return { subject, body };
 }
 
+/** The same, for a work order. Names the client if the order named one. */
+function renderUserMessage(kind, task) {
+  const k = USER_KINDS[kind];
+  if (!k) throw new Error(`notify: unknown kind "${kind}"`);
+  const what = String((task && task.client_name) || "").trim() || `task #${task.id}`;
+  const b = baseUrl();
+  const link = b ? `${b}/consultant/task/${task.id}` : "";
+  const subject = `${k.label} — ${what}`;
+  const body = [`${k.emoji} ${k.label} — ${what}`, link ? `Log in to view: ${link}` : "Log in to view."].join("\n");
+  return { subject, body };
+}
+
 // ── Schema ──────────────────────────────────────────────────
 
 let _inited = false;
@@ -100,6 +132,7 @@ async function initTables() {
     `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS notify_sms BOOLEAN DEFAULT FALSE`,
     `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS notify_telegram BOOLEAN DEFAULT FALSE`,
     `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS notify_paused_until TIMESTAMPTZ`,
+    `ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS notify_app BOOLEAN DEFAULT TRUE`,
   ]) {
     try { await db.query(sql); } catch (e) { console.warn("[notify] schema:", e.message); }
   }
@@ -122,7 +155,27 @@ async function initTables() {
       sent_at      TIMESTAMPTZ
     )
   `);
+  // What a consultant sees when they DO sign in. The outbox records what
+  // was sent and whether it arrived; this records what happened, whether or
+  // not anything could be sent. Without it "Log in to view" led to a page
+  // with nothing on it, and a consultant with no channel turned on had no
+  // record at all.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS consultant_feed (
+      id          SERIAL PRIMARY KEY,
+      user_id     INTEGER NOT NULL,
+      client_key  TEXT,
+      task_id     INTEGER,
+      kind        TEXT NOT NULL,
+      who         TEXT,
+      dedupe_key  TEXT UNIQUE,
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      seen_at     TIMESTAMPTZ
+    )
+  `);
   for (const sql of [
+    `ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS task_id INTEGER`,
+    `CREATE INDEX IF NOT EXISTS consultant_feed_user ON consultant_feed (user_id, created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS notification_outbox_pending ON notification_outbox (status, last_try_at)`,
     `CREATE INDEX IF NOT EXISTS notification_outbox_user ON notification_outbox (user_id, queued_at DESC)`,
   ]) {
@@ -141,7 +194,7 @@ async function initTables() {
 async function consultantsForClient(clientKey) {
   const r = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.phone, u.telegram_chat_id,
-            u.notify_email, u.notify_sms, u.notify_telegram, u.notify_paused_until, u.disabled
+            u.notify_email, u.notify_sms, u.notify_telegram, u.notify_app, u.notify_paused_until, u.disabled
        FROM client_consultants cc
        JOIN admin_users u ON u.id = cc.consultant_id
       WHERE cc.client_key = $1 AND cc.removed_at IS NULL
@@ -159,6 +212,35 @@ function channelsFor(user) {
   if (user.notify_sms === true && user.phone) out.push({ channel: "sms", address: String(user.phone).trim() });
   if (user.notify_telegram === true && user.telegram_chat_id) out.push({ channel: "telegram", address: String(user.telegram_chat_id).trim() });
   return out;
+}
+
+/**
+ * channelsFor(), plus the Tara app when this person has it installed and
+ * signed in. Whether a phone is registered is a database fact, so this half
+ * cannot live in the synchronous function above (which the admin page calls
+ * once per row).
+ */
+async function reachable(user) {
+  if (user.notify_paused_until && new Date(user.notify_paused_until) > new Date()) return [];
+  const out = channelsFor(user);
+  if (user.notify_app === false) return out;
+  try {
+    const r = await db.query(
+      `SELECT 1 FROM push_tokens WHERE user_ref = $1 AND user_kind IN ('consultant', 'firm') LIMIT 1`,
+      [String(user.id)]);
+    if (r.rows.length) out.push({ channel: "app", address: String(user.id) });
+  } catch { /* no push_tokens table yet: nobody has the app */ }
+  return out;
+}
+
+/** One line in the consultant's own list of what has happened. */
+async function addToFeed({ userId, clientKey = null, taskId = null, kind, who = null, dedupe }) {
+  try {
+    await db.query(
+      `INSERT INTO consultant_feed (user_id, client_key, task_id, kind, who, dedupe_key)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (dedupe_key) DO NOTHING`,
+      [userId, clientKey, taskId, kind, who, dedupe]);
+  } catch (e) { console.warn("[notify] feed:", e.message); }
 }
 
 // ── Resolving a client ──────────────────────────────────────
@@ -238,7 +320,9 @@ async function notifyClientEvent({ clientKey, kind, ref = null, clientName = nul
   const users = await consultantsForClient(clientKey);
   result.recipients = users.length;
   for (const u of users) {
-    const chans = channelsFor(u);
+    await addToFeed({ userId: u.id, clientKey, kind, who: name || null,
+      dedupe: `${kind}:${ref == null ? "-" : ref}:${clientKey}:${u.id}` });
+    const chans = await reachable(u);
     if (!chans.length) {
       result.unreachable.push({ user_id: u.id, username: u.username, why: reasonUnreachable(u) });
       continue;
@@ -258,6 +342,78 @@ async function notifyClientEvent({ clientKey, kind, ref = null, clientName = nul
     }
   }
   return result;
+}
+
+/**
+ * Tell ONE consultant about their own work order.
+ *
+ * Same rule as above — the caller passes a kind and an id, never text. The
+ * task is looked up here and must have been submitted by that user, so there
+ * is no way to point this at somebody else's work order and have its client
+ * named to the wrong person.
+ */
+async function notifyUserEvent({ userId, kind, taskId, ref = null }) {
+  await initTables();
+  if (!USER_KINDS[kind]) throw new Error(`notify: unknown kind "${kind}"`);
+  const result = { queued: 0, unreachable: [], recipients: 0 };
+  const uid = parseInt(userId, 10), tid = parseInt(taskId, 10);
+  if (!uid || !tid) return result;
+
+  const t = (await db.query(
+    `SELECT id, client_name, client_key FROM tasks WHERE id = $1 AND submitted_by_user_id = $2`, [tid, uid])).rows[0];
+  if (!t) return result;
+  const u = (await db.query(
+    `SELECT id, username, full_name, email, phone, telegram_chat_id,
+            notify_email, notify_sms, notify_telegram, notify_app, notify_paused_until, disabled
+       FROM admin_users WHERE id = $1`, [uid])).rows[0];
+  if (!u || u.disabled) return result;
+  result.recipients = 1;
+
+  const { subject, body } = renderUserMessage(kind, t);
+  const base = `${kind}:${ref == null ? "-" : ref}:task${tid}:${uid}`;
+  await addToFeed({ userId: uid, clientKey: t.client_key || null, taskId: tid, kind, who: t.client_name || null, dedupe: base });
+
+  const chans = await reachable(u);
+  if (!chans.length) {
+    result.unreachable.push({ user_id: u.id, username: u.username, why: reasonUnreachable(u) });
+    return result;
+  }
+  for (const c of chans) {
+    try {
+      const ins = await db.query(
+        `INSERT INTO notification_outbox (user_id, client_key, kind, channel, address, subject, body, dedupe_key, task_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (dedupe_key) DO NOTHING RETURNING id`,
+        [uid, t.client_key || null, kind, c.channel, c.address, subject, body, `${base}:${c.channel}`, tid]);
+      if (ins.rows.length) result.queued++;
+    } catch (e) { console.warn("[notify] queue:", e.message); }
+  }
+  return result;
+}
+
+// ── What the consultant sees when signed in ─────────────────
+
+/** Their own recent events, newest first; optionally for one client. */
+async function feedFor(userId, { clientKey = null, limit = 30 } = {}) {
+  await initTables();
+  const r = await db.query(
+    `SELECT id, kind, client_key, task_id, who, created_at, seen_at FROM consultant_feed
+      WHERE user_id = $1 AND ($2::text IS NULL OR client_key = $2)
+      ORDER BY created_at DESC LIMIT $3`,
+    [userId, clientKey, Math.min(Math.max(parseInt(limit, 10) || 30, 1), 100)]);
+  return r.rows.map(x => ({ ...x, label: labelOf(x.kind) }));
+}
+
+async function unseenCount(userId) {
+  try {
+    await initTables();
+    const r = await db.query(`SELECT COUNT(*)::int AS n FROM consultant_feed WHERE user_id = $1 AND seen_at IS NULL`, [userId]);
+    return r.rows[0] ? r.rows[0].n : 0;
+  } catch { return 0; }
+}
+
+async function markSeen(userId) {
+  try { await db.query(`UPDATE consultant_feed SET seen_at = NOW() WHERE user_id = $1 AND seen_at IS NULL`, [userId]); }
+  catch (e) { console.warn("[notify] seen:", e.message); }
 }
 
 function reasonUnreachable(u) {
@@ -334,7 +490,27 @@ async function sendTelegram(row) {
   );
 }
 
-const SENDERS = { email: sendEmail, sms: sendSms, telegram: sendTelegram };
+/**
+ * The Tara app. Expo's push service takes the message; the row's address is
+ * the consultant's user id and their devices are looked up at send time, so
+ * a phone registered after the alert was queued still gets it on the retry.
+ * The lock-screen text is the same headline as every other channel.
+ */
+async function sendApp(row) {
+  const push = require("./push-notifications");
+  const data = row.task_id
+    ? { screen: "consultant-task", taskId: row.task_id }
+    : { screen: "consultant-client", type: "consultant_client_update", clientKey: row.client_key, client_key: row.client_key };
+  const r = await push.sendToUser("consultant", row.address, {
+    title: row.subject || "Update on your client",
+    body: "Open Tara to view.",
+    data,
+  });
+  if (r && r.error) throw new Error(`app push: ${r.error}`);
+  if (!r || !r.sent) throw new Error("no phone is signed in to the Tara app for this consultant");
+}
+
+const SENDERS = { email: sendEmail, sms: sendSms, telegram: sendTelegram, app: sendApp };
 
 // ── Flush ───────────────────────────────────────────────────
 
@@ -511,15 +687,18 @@ function channelHealth() {
   const s = !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN &&
                (process.env.TWILIO_SMS_FROM || process.env.TWILIO_PHONE_NUMBER));
   const t = !!(process.env.TELEGRAM_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
-  return { email: m, sms: s, telegram: t };
+  // The app needs no server setting: Expo's push service takes any valid
+  // device token. Whether a given consultant HAS a device is per person.
+  return { email: m, sms: s, telegram: t, app: true };
 }
 
 module.exports = {
-  KINDS, CHANNELS,
+  KINDS, USER_KINDS, CHANNELS, labelOf,
   initTables,
-  notifyClientEvent, notifyAndFlush, flush, sweepUpcoming,
-  consultantsForClient, channelsFor, reasonUnreachable, resolveClientKey,
-  renderMessage, loginLink,
+  notifyClientEvent, notifyAndFlush, notifyUserEvent, flush, sweepUpcoming,
+  consultantsForClient, channelsFor, reachable, reasonUnreachable, resolveClientKey,
+  renderMessage, renderUserMessage, loginLink,
+  feedFor, unseenCount, markSeen,
   issueLinkCode, linkTelegram,
   channelHealth,
 };

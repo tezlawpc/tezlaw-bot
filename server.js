@@ -2056,6 +2056,9 @@ function requireConsultant(req, res, next) {
       req.user = payload;
       // Now check consultant permission
       if (typeof auth.hasPermission === "function" && auth.hasPermission(req.user, "consultant.portal")) {
+        // The number beside "Alerts" in the portal's navigation. Best-effort:
+        // a count that cannot be read must not keep anyone out of the portal.
+        try { req.user.alerts = await require("./notify").unseenCount(req.user.uid || req.user.id); } catch { req.user.alerts = 0; }
         return next();
       }
       // Non-consultants who somehow land here go back to the firm dashboard.
@@ -2089,7 +2092,7 @@ app.get("/consultant", requireConsultant, async (req, res) => {
       stats.total += row.n;
     }
     const body = portal.renderDashboard({ user: req.user, tasks: openTasks, stats });
-    res.send(portal.renderChrome({ title: "My Work Orders", body, activeTab: "dashboard", user: req.user }));
+    res.send(portal.renderChrome({ title: "Tasks", body, activeTab: "dashboard", user: req.user }));
   } catch (err) {
     console.error("[consultant dashboard]:", err.message);
     res.status(500).send("Error: " + err.message);
@@ -2100,46 +2103,49 @@ app.get("/consultant", requireConsultant, async (req, res) => {
 app.get("/consultant/new", requireConsultant, async (req, res) => {
   const portal = require("./consultant-portal");
   const body = portal.renderNewForm();
-  res.send(portal.renderChrome({ title: "New Work Order", body, activeTab: "new", user: req.user }));
+  res.send(portal.renderChrome({ title: "New task", body, activeTab: "new", user: req.user }));
 });
 
 // Submit new work order
+//
+// The portal's form now posts to /api/consultant/tasks, the same route the
+// phone app uses, so there is one set of rules. This older address is kept
+// for any page still open in a browser from before the change — and it
+// follows the same rule: JJ, "work orders can be submitted. however, will
+// need attorney or manager's approval." It used to file the order as
+// 'pending', which put it straight into the firm's task list with nobody
+// having approved anything.
 app.post("/consultant/tasks", requireConsultant, async (req, res) => {
   try {
     const tasks = require("./tasks");
     const userId = req.user.uid || req.user.id;
+    const who = req.user.n || req.user.u || req.user.name || req.user.username || "Consultant";
     const data = { ...req.body };
     // Force ownership + hygiene: consultant CANNOT set arbitrary fields
     // that a firm-side user might (assigned_to, category, etc.). Strip them.
     const cleaned = {
-      title: String(data.title || "").trim(),
+      title: String(data.title || "").trim().substring(0, 300),
       description: data.description ? String(data.description).substring(0, 8000) : null,
       matter_type: data.matter_type || "admin",
       priority: ["urgent", "high", "normal", "low"].includes(data.priority) ? data.priority : "normal",
       due_date: data.due_date && /^\d{4}-\d{2}-\d{2}$/.test(data.due_date) ? data.due_date : null,
       client_name: data.client_name ? String(data.client_name).substring(0, 200) : null,
-      status: "pending",
+      status: "pending_approval",
       submitted_by_user_id: userId,
       submitter_visible: true,
       created_by: userId,
-      actor_name: req.user.name || req.user.username,
+      actor_name: who,
       actor_role: req.user.r || "consultant",
     };
     if (!cleaned.title) return res.status(400).json({ ok: false, error: "Title is required" });
 
-    // Client key derived from name (best-effort)
-    if (cleaned.client_name) {
-      cleaned.client_key = cleaned.client_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    }
+    // No client_key is derived from the typed name here. A key built from a
+    // name would file this order on whichever existing client shares that
+    // name — possibly one this consultant has nothing to do with. The name
+    // is kept as typed; matching it to a client is part of approving it.
 
     const task = await tasks.createTask(cleaned);
-
-    // Ping the firm's Telegram group so someone reviews the new submission
-    try {
-      const msg = `🆕 *New consultant work order*\nFrom: ${req.user.name || req.user.username}\n\n*${cleaned.title}*\n${cleaned.client_name ? `Client: ${cleaned.client_name}\n` : ""}Priority: ${cleaned.priority}${cleaned.due_date ? `\nDue: ${cleaned.due_date}` : ""}\n\nView: ${process.env.RENDER_EXTERNAL_URL || ""}/admin/tasks`;
-      await require("./tg-route").send("ops", msg, { parse_mode: "Markdown" });
-    } catch {}
-
+    require("./work-orders").announce(task, who).catch(() => {});
     res.json({ ok: true, task });
   } catch (err) {
     console.error("[consultant submit]:", err.message);
@@ -2168,14 +2174,21 @@ app.get("/consultant/client/:key", requireConsultant, (req, res) => {
 // gate is because this page shows and edits people's contact details.
 app.use("/admin/alerts", auth.requireRole("admin", "manager"));
 
+// Tasks sent in by consultants wait here for an attorney or a manager
+// (/admin/consultant-tasks).
+require("./work-orders").mount(app, auth);
+
 app.get("/admin/alerts", async (req, res) => {
   try {
     const na = require("./notify-admin");
     const notify = require("./notify");
-    const [consultants, outbox, totals] = await Promise.all([
-      na.loadConsultants(), na.loadOutbox(60), na.counts(),
+    const [consultants, outbox, totals, clients] = await Promise.all([
+      na.loadConsultants(), na.loadOutbox(60), na.counts(), na.loadAlertableClients(),
     ]);
-    res.send(na.renderPage({ consultants, outbox, totals, health: notify.channelHealth(), saved: req.query.saved === "1" }));
+    res.send(na.renderPage({
+      consultants, outbox, totals, clients, health: notify.channelHealth(),
+      saved: req.query.saved === "1", sent: req.query.sent || null, problem: req.query.problem || null,
+    }));
   } catch (err) {
     console.error("[admin alerts]:", err.message);
     res.status(500).send("Error: " + err.message);
@@ -2198,6 +2211,30 @@ app.post("/admin/alerts/contact", async (req, res) => {
   } catch (err) {
     console.error("[admin alerts contact]:", err.message);
     res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Push an alert to a client's consultant(s) by hand. The sender picks the
+// client and one of the fixed headlines (notify.KINDS); there is no text box,
+// for the reason notify.js gives — what the alert says is decided once, in
+// one place, not by whoever is sending it today.
+app.post("/admin/alerts/send", async (req, res) => {
+  try {
+    const notify = require("./notify");
+    const b = req.body || {};
+    const clientKey = String(b.client_key || "").trim().slice(0, 200);
+    const kind = String(b.kind || "").trim();
+    if (!clientKey || !notify.KINDS[kind]) return res.redirect("/admin/alerts?problem=" + encodeURIComponent("Choose a client and what happened."));
+    const q = await notify.notifyAndFlush({ clientKey, kind, ref: `manual-${req.user && req.user.uid || 0}-${Date.now()}` });
+    try { await require("./db").logAudit(String(req.user && (req.user.u || req.user.uid) || "firm"), "consultant_alert_sent", clientKey, null, `${kind} · ${q.recipients} recipient(s)`); } catch { /* audit is best-effort */ }
+    if (!q.recipients) return res.redirect("/admin/alerts?problem=" + encodeURIComponent("No consultant is assigned to that client, so nobody was told."));
+    const missed = q.unreachable.length
+      ? ` ${q.unreachable.length} could not be reached outside the portal (${q.unreachable.map(u => `${u.username}: ${u.why}`).join("; ")}) — they will still see it when they sign in.`
+      : "";
+    res.redirect("/admin/alerts?sent=" + encodeURIComponent(`${notify.KINDS[kind].label}: ${q.recipients} consultant${q.recipients === 1 ? "" : "s"} told.${missed}`));
+  } catch (err) {
+    console.error("[admin alerts send]:", err.message);
+    res.redirect("/admin/alerts?problem=" + encodeURIComponent(err.message));
   }
 });
 
@@ -2231,7 +2268,7 @@ async function loadMe(uid) {
   await notify.initTables();
   const r = await require("./db").query(
     `SELECT id, username, full_name, email, phone, telegram_chat_id, telegram_link_code,
-            notify_email, notify_sms, notify_telegram
+            notify_email, notify_sms, notify_telegram, notify_app
        FROM admin_users WHERE id = $1`, [uid]);
   return r.rows[0] || {};
 }
@@ -2240,12 +2277,22 @@ app.get("/consultant/alerts", requireConsultant, async (req, res) => {
   try {
     const portal = require("./consultant-portal");
     const notify = require("./notify");
-    const me = await loadMe(req.user.uid || req.user.id);
+    const uid = req.user.uid || req.user.id;
+    const me = await loadMe(uid);
+    const [feed, phones] = await Promise.all([
+      notify.feedFor(uid, { limit: 40 }).catch(() => []),
+      require("./db").query(
+        `SELECT 1 FROM push_tokens WHERE user_ref = $1 AND user_kind IN ('consultant', 'firm') LIMIT 1`, [String(uid)]
+      ).then(r => r.rows.length > 0).catch(() => false),
+    ]);
     const body = portal.renderAlertsPage({
-      user: req.user, me, health: notify.channelHealth(),
+      user: req.user, me, health: notify.channelHealth(), feed, hasApp: phones,
       linkCode: me.telegram_link_code || null,
       saved: req.query.saved === "1", linked: req.query.linked === "1",
     });
+    // They are looking at the list now, so the count beside "Alerts" clears.
+    await notify.markSeen(uid);
+    req.user.alerts = 0;
     res.send(portal.renderChrome({ title: "Alerts", body, activeTab: "alerts", user: req.user }));
   } catch (err) {
     console.error("[consultant alerts]:", err.message);
@@ -2259,8 +2306,8 @@ app.post("/consultant/alerts", requireConsultant, async (req, res) => {
     await notify.initTables();
     const b = req.body || {};
     await require("./db").query(
-      `UPDATE admin_users SET notify_email = $2, notify_sms = $3, notify_telegram = $4 WHERE id = $1`,
-      [req.user.uid || req.user.id, b.notify_email === "1", b.notify_sms === "1", b.notify_telegram === "1"]
+      `UPDATE admin_users SET notify_email = $2, notify_sms = $3, notify_telegram = $4, notify_app = $5 WHERE id = $1`,
+      [req.user.uid || req.user.id, b.notify_email === "1", b.notify_sms === "1", b.notify_telegram === "1", b.notify_app === "1"]
     );
     res.redirect("/consultant/alerts?saved=1");
   } catch (err) {
@@ -2289,14 +2336,14 @@ app.get("/consultant/task/:id", requireConsultant, async (req, res) => {
     const userId = req.user.uid || req.user.id;
     const task = await tasks.getTask(parseInt(req.params.id, 10));
     if (!task || task.submitted_by_user_id !== userId) {
-      return res.status(404).send("Work order not found");
+      return res.status(404).send("Task not found");
     }
     const [activity, mList, mProgress] = await Promise.all([
       tasks.listActivity(task.id, { filterVisibleOnly: true }),
       milestones.listMilestones(task.id),
       milestones.getProgress(task.id),
     ]);
-    const body = portal.renderTaskDetail({ task, activity, milestones: mList, progress: mProgress, user: req.user });
+    const body = portal.renderTaskDetail({ task, activity, milestones: mList, progress: mProgress, user: req.user, justSent: req.query.sent === "1" });
     res.send(portal.renderChrome({ title: task.title, body, activeTab: "dashboard", user: req.user }));
   } catch (err) {
     console.error("[consultant task view]:", err.message);
@@ -2317,7 +2364,7 @@ app.post("/consultant/task/:id/comment", requireConsultant, async (req, res) => 
     if (!note) return res.status(400).json({ ok: false, error: "Note required" });
     await tasks.addTaskComment(task.id, {
       actor_id: userId,
-      actor_name: req.user.name || req.user.username,
+      actor_name: req.user.n || req.user.u || req.user.name || req.user.username,
       actor_role: req.user.r || "consultant",
       note,
       visible_to_submitter: true,
@@ -3168,9 +3215,10 @@ app.get("/admin/tasks", async (req, res) => {
     if (q.due_within_days) filters.due_within_days = parseInt(q.due_within_days, 10);
     if (q.completed) filters.completed_only = true;
 
-    const [rows, stats] = await Promise.all([
+    const [rows, stats, awaitingApproval] = await Promise.all([
       tasks.listTasks(filters),
       tasks.getStats(),
+      require("./work-orders").pendingCount(),
     ]);
 
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -3233,6 +3281,8 @@ app.get("/admin/tasks", async (req, res) => {
         </div>
         <a href="/admin/tasks/new" style="background:#B79C62; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Task</a>
       </div>
+
+      ${awaitingApproval ? `<a href="/admin/consultant-tasks" style="display:block; background:#FFF6EC; border:1px solid #F0C89A; border-left:4px solid #FF7B00; border-radius:6px; padding:12px 16px; margin-bottom:14px; color:#2B2523; text-decoration:none; font-size:14px;"><strong>${awaitingApproval} task${awaitingApproval === 1 ? "" : "s"} from consultants waiting for approval</strong> — not in this list until an attorney or manager approves. Review &rarr;</a>` : ""}
 
       <!-- Stats tiles -->
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">

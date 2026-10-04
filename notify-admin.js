@@ -40,14 +40,43 @@ async function loadConsultants() {
   await notify.initTables();
   const r = await db.query(
     `SELECT u.id, u.username, u.full_name, u.email, u.phone, u.telegram_chat_id,
-            u.notify_email, u.notify_sms, u.notify_telegram, u.disabled, u.broker_folder,
+            u.notify_email, u.notify_sms, u.notify_telegram, u.notify_app, u.disabled, u.broker_folder,
             (SELECT COUNT(*)::int FROM client_consultants cc
-              WHERE cc.consultant_id = u.id AND cc.removed_at IS NULL) AS client_count
+              WHERE cc.consultant_id = u.id AND cc.removed_at IS NULL) AS client_count,
+            EXISTS (SELECT 1 FROM push_tokens pt
+                     WHERE pt.user_ref = u.id::text AND pt.user_kind IN ('consultant', 'firm')) AS has_app
        FROM admin_users u
       WHERE u.role = 'consultant'
       ORDER BY COALESCE(u.full_name, u.username)`
   );
   return r.rows;
+}
+
+/**
+ * Every client who has a consultant, for the "send an alert" form: you can
+ * only alert about a client somebody would actually be told about.
+ * The name comes from a task row, or failing that from the Dropbox folder
+ * mapping — a broker's client can be filed before any task exists.
+ */
+async function loadAlertableClients() {
+  await notify.initTables();
+  try {
+    const r = await db.query(
+      `SELECT cc.client_key,
+              COALESCE((SELECT MAX(t.client_name) FROM tasks t WHERE t.client_key = cc.client_key),
+                       (SELECT m.client_name FROM client_dropbox_mapping m WHERE m.client_key = cc.client_key)) AS client_name,
+              string_agg(DISTINCT COALESCE(u.full_name, u.username), ', ') AS consultants
+         FROM client_consultants cc
+         JOIN admin_users u ON u.id = cc.consultant_id AND COALESCE(u.disabled, FALSE) = FALSE
+        WHERE cc.removed_at IS NULL
+        GROUP BY cc.client_key
+        ORDER BY 2 NULLS LAST
+        LIMIT 2000`);
+    return r.rows;
+  } catch (e) {
+    console.warn("[notify-admin] clients:", e.message);
+    return [];
+  }
 }
 
 async function loadOutbox(limit = 60) {
@@ -71,7 +100,7 @@ async function counts() {
 
 const STATUS_COLOR = { sent: "#2e7d32", pending: "#B45309", failed: "#A02818" };
 
-function renderPage({ consultants, outbox, totals, health, saved = false }) {
+function renderPage({ consultants, outbox, totals, health, saved = false, clients = [], sent = null, problem = null }) {
   const chanCell = (on, addr, label) => {
     if (!on) return `<span style="color:#bbb;">off</span>`;
     if (!addr) return `<span style="color:#A02818;font-weight:600;" title="Turned on but nowhere to send">on — missing</span>`;
@@ -107,6 +136,9 @@ function renderPage({ consultants, outbox, totals, health, saved = false }) {
       <td style="padding:10px 8px;font-size:12px;">${chanCell(c.notify_email !== false, c.email)}</td>
       <td style="padding:10px 8px;font-size:12px;">${chanCell(c.notify_sms === true, c.phone)}</td>
       <td style="padding:10px 8px;font-size:12px;">${chanCell(c.notify_telegram === true, c.telegram_chat_id)}</td>
+      <td style="padding:10px 8px;font-size:12px;">${c.notify_app === false
+        ? `<span style="color:#bbb;">off</span>`
+        : (c.has_app ? `<span style="color:#2e7d32;font-weight:600;">on</span>` : `<span style="color:#888;" title="They have not signed in to the Tara app on a phone">no phone</span>`)}</td>
     </tr>`;
   }).join("");
 
@@ -114,7 +146,7 @@ function renderPage({ consultants, outbox, totals, health, saved = false }) {
     <tr style="border-bottom:1px solid #f0f0f0;">
       <td style="padding:7px 8px;font-size:12px;white-space:nowrap;">${esc(ago(o.queued_at))}</td>
       <td style="padding:7px 8px;font-size:12px;">${esc(o.who || "user " + o.user_id)}</td>
-      <td style="padding:7px 8px;font-size:12px;">${esc((notify.KINDS[o.kind] || {}).label || o.kind)}</td>
+      <td style="padding:7px 8px;font-size:12px;">${esc(notify.labelOf(o.kind))}</td>
       <td style="padding:7px 8px;font-size:12px;">${esc(o.channel)}</td>
       <td style="padding:7px 8px;font-size:12px;color:${STATUS_COLOR[o.status] || "#666"};font-weight:600;">
         ${esc(o.status)}${o.attempts > 1 ? ` <span style="color:#888;font-weight:400;">(${o.attempts} tries)</span>` : ""}
@@ -145,6 +177,31 @@ function renderPage({ consultants, outbox, totals, health, saved = false }) {
     <a href="/admin/clients" style="margin-left:10px;">&larr; Clients</a></div>
 
   ${saved ? `<div class="card" style="border-left:4px solid #2e7d32;background:#f4faf5;">Saved.</div>` : ""}
+  ${sent ? `<div class="card" style="border-left:4px solid #2e7d32;background:#f4faf5;">${esc(sent)}</div>` : ""}
+  ${problem ? `<div class="card" style="border-left:4px solid #A02818;background:#fdf3f1;">${esc(problem)}</div>` : ""}
+
+  <div class="card">
+    <h3 style="margin:0 0 4px;font-size:16px;">Send an alert now</h3>
+    <div style="font-size:12px;color:#888;margin-bottom:12px;">
+      Tells the consultant(s) on a client that something happened. They get the headline you pick and a link to sign in &mdash;
+      there is no message box, on purpose: the substance stays behind the login.
+      Court mail, hearings and deadlines already send on their own; this is for everything else.
+      <a href="/admin/consultant-tasks" style="margin-left:6px;">Consultant tasks waiting for approval &rarr;</a>
+    </div>
+    ${clients.length ? `
+    <form method="POST" action="/admin/alerts/send" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0;">
+      <select name="client_key" required style="flex:2;min-width:260px;padding:7px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+        <option value="">&mdash; client &mdash;</option>
+        ${clients.map(c => `<option value="${esc(c.client_key)}">${esc(c.client_name || c.client_key)} &middot; ${esc(c.consultants || "")}</option>`).join("")}
+      </select>
+      <select name="kind" required style="flex:1;min-width:190px;padding:7px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+        <option value="">&mdash; what happened &mdash;</option>
+        ${["update", "action", "document", "status", "court_mail", "hearing_set", "hearing_moved", "deadline"].filter(k => notify.KINDS[k])
+          .map(k => `<option value="${k}">${esc(notify.KINDS[k].label)}</option>`).join("")}
+      </select>
+      <button type="submit" style="padding:8px 16px;border:1px solid #2B2523;background:#2B2523;color:#fff;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">Send</button>
+    </form>` : `<div style="font-size:13px;color:#888;">No client has a consultant assigned yet.</div>`}
+  </div>
 
   ${down.length ? `<div class="card" style="border-left:4px solid #B45309;background:#fffaf3;">
     <strong>Not configured on the server</strong>
@@ -174,8 +231,8 @@ function renderPage({ consultants, outbox, totals, health, saved = false }) {
       They turn their own channels on and off in the portal; only you can change the address those point at.
     </div>
     <table>
-      <thead><tr><th>Who</th><th>Reach them at</th><th>Email</th><th>Text</th><th>Telegram</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="5" style="padding:14px;color:#888;font-size:13px;">No consultant accounts yet.</td></tr>`}</tbody>
+      <thead><tr><th>Who</th><th>Reach them at</th><th>Email</th><th>Text</th><th>Telegram</th><th>Tara app</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" style="padding:14px;color:#888;font-size:13px;">No consultant accounts yet.</td></tr>`}</tbody>
     </table>
   </div>
 
@@ -189,4 +246,4 @@ function renderPage({ consultants, outbox, totals, health, saved = false }) {
 </main></body></html>`;
 }
 
-module.exports = { loadConsultants, loadOutbox, counts, renderPage };
+module.exports = { loadConsultants, loadAlertableClients, loadOutbox, counts, renderPage };
