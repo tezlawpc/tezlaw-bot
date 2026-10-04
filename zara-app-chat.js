@@ -750,22 +750,40 @@ const CLIENT_OPS = (clientName, lang, caseContext) => {
       ident.push(`Practice area(s): ${caseContext.case_types.join(", ")}`);
     }
 
+    // When the record is complete (client-record.js sets `complete`), the
+    // things a client asks "when is my next…" about are listed even when
+    // there are none. An omitted section reads to the model as "I cannot
+    // see that", and she hedges; "None scheduled" lets her say so plainly.
+    const always = (label, rows, none) => {
+      const list = (rows || []).filter(Boolean);
+      if (list.length) return section(label, list);
+      return caseContext.complete ? "\n\n" + label + ":\n  - " + none : "";
+    };
+
     const body =
-      section("Upcoming hearings", caseContext.upcoming_hearings) +
+      always("Upcoming hearings (from hearing notices on file)", caseContext.upcoming_hearings,
+        "None on file.") +
+      section("Next hearing as recorded in the attorney's hearing notes", caseContext.noted_next_hearings) +
       section("Open deadlines", caseContext.open_deadlines) +
+      always("Upcoming appointments with the firm (date and time confirmed)", caseContext.upcoming_appointments,
+        "None scheduled.") +
+      section("Appointment requests still waiting for a time", caseContext.requested_appointments) +
+      section("Past appointments", caseContext.past_appointments) +
       section("Appointments", caseContext.appointments) +
       section("Documents on file", caseContext.documents) +
       section("Unpaid invoices", caseContext.invoices);
 
     if (ident.length || body) {
       haveRecord = true;
-      const asOf = caseContext.as_of ? ` Read from the system at ${caseContext.as_of}.` : "";
+      const asOf = (caseContext.as_of ? ` Read from the system at ${caseContext.as_of}.` : "") +
+        (caseContext.today ? ` Today is ${caseContext.today}.` : "");
       record = "\n\nTHIS CLIENT'S RECORD — what the firm's system holds for " +
         (caseContext.name || "this client") + "." + asOf + "\n" +
         ident.map(s => `  - ${s}`).join("\n") + body;
     }
   }
 
+  const noDeadlines = !(caseContext && caseContext.open_deadlines && caseContext.open_deadlines.length);
   const recordRules = haveRecord ? `
 
 USING THAT RECORD
@@ -781,17 +799,19 @@ You must not:
   - Infer case facts from general knowledge. A typical timeline for their visa category is general information; it is not a statement about their case.
   - Recite the whole record back unprompted. Answer what was asked.
 
-When the record does not contain the answer, say so plainly — "I don't see that in your file" — and point them to the Messages tab to reach their legal team. Never fill the gap with a guess.
+"When is my next appointment?" is answered from the record: give the earliest upcoming appointment with its day, time and place. If none is upcoming, say plainly that no appointment is scheduled in their file right now; mention a request still waiting for a time if there is one; and tell them they can request one from the Appointments screen or write to their legal team in the Messages tab. Treat "appointment", "appt", "meeting" and "consultation" as the same question, and if they might mean a court date, tell them their next hearing as well. "None scheduled" and "None on file" are facts you hold — state them; do not say you cannot see their case.
+
+${noDeadlines ? "Filing deadlines are not shown to you here. If they ask about a deadline, say you do not have their deadlines in this chat and point them to the Messages tab — do not guess one.\n\n" : ""}When the record does not contain the answer, say so plainly — "I don't see that in your file" — and point them to the Messages tab to reach their legal team. Never fill the gap with a guess.
 
 Whenever you state a hearing date, a filing deadline, or an appointment time, close with one short line telling them to confirm it with their legal team before relying on it. A record can lag behind a continuance or a reset, and a client who misses a date because you sounded certain is the one outcome this surface must never produce.` : `
 
 THIS CLIENT HAS NO CASE RECORD HERE
 
-Their account is not linked to a matter, so you hold nothing about their case. If they ask about their own hearing, filing, documents or invoices, tell them their account isn't linked to a case yet and ask them to contact Tez Law at 626-678-8677 or use the Messages tab. Do not speculate about their matter. General legal questions you answer normally.`;
+Their account is not linked to a matter, so you hold nothing about their case. If they ask about their own hearing, appointment, filing, documents or invoices, tell them plainly that their account isn't linked to a case yet and ask them to contact Tez Law at 626-678-8677 or use the Messages tab. Do not speculate about their matter. General legal questions you answer normally.`;
 
   return `HOW THIS SURFACE WORKS
 
-You are Zara, speaking with ${clientName || "a client"} of Tez Law in the client area of the Tara app.
+You are speaking with ${clientName || "a client"} of Tez Law in the client area of the Tara app.
 
 The user is an authenticated client. Do NOT collect their name or contact info — you already know who they are. Do NOT act like an intake bot.
 

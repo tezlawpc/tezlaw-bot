@@ -513,15 +513,63 @@ async function findUserByUsername(username) {
   return r.rows[0] || null;
 }
 
-async function createUser({ username, password, fullName, role = "admin" }) {
+// A sign-in name typed by a person: "Cindy Wang" → "cindy.wang". The Add-user
+// form used to reject anything but lowercase with the browser's own "Please
+// match the requested format", which says nothing about what was wrong — a
+// capital letter or a space was enough. Tidy it instead of refusing it.
+function cleanUsername(raw) {
+  return String(raw || "").trim().toLowerCase()
+    .replace(/@.*$/, "")                 // an email address: keep the part before the @
+    .replace(/\s+/g, ".")
+    .replace(/[^a-z0-9_.-]/g, "")
+    .replace(/\.{2,}/g, ".")
+    .replace(/^[.-]+|[.-]+$/g, "")
+    .slice(0, 32);
+}
+
+// A phone number in the one form the SMS code sender accepts (+1XXXXXXXXXX).
+// Same rule as the client sign-in (app-api normalizePhone), plus a refusal
+// for numbers too short to be real — a mistyped number must be caught here,
+// not when a code fails to arrive. Empty in, null out.
+function cleanPhone(raw) {
+  const t = String(raw || "").trim();
+  if (!t) return null;
+  const digits = t.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) {
+    throw new Error(`"${t}" does not look like a full phone number. Enter all 10 digits, e.g. 626-555-0123.`);
+  }
+  if (digits.length === 10) return "+1" + digits;
+  return "+" + digits;
+}
+
+function cleanEmail(raw) {
+  const t = String(raw || "").trim().toLowerCase();
+  if (!t) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) throw new Error(`"${t}" does not look like an email address.`);
+  return t.slice(0, 200);
+}
+
+// admin_users.phone / .email are added by app-api and notify on their own
+// start-up. This file must not depend on either having run first.
+let _contactCols = false;
+async function ensureContactColumns() {
+  if (_contactCols) return;
+  await db.query(`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS phone TEXT`).catch(() => {});
+  await db.query(`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email TEXT`).catch(() => {});
+  _contactCols = true;
+}
+
+async function createUser({ username, password, fullName, role = "admin", phone = null, email = null }) {
   await initTables();
-  const clean = String(username || "").trim().toLowerCase();
+  const clean = cleanUsername(username);
   if (!clean || !/^[a-z0-9_.-]{2,32}$/.test(clean)) {
-    throw new Error("Username must be 2–32 chars, letters/numbers/._- only");
+    throw new Error("Username must be 2–32 characters: letters, numbers, dot, dash or underscore (no spaces or @).");
   }
   if (!password || password.length < 8) {
     throw new Error("Password must be at least 8 characters");
   }
+  const cleanedPhone = cleanPhone(phone);
+  const cleanedEmail = cleanEmail(email);
   const hash = hashPassword(password);
   const r = await db.query(
     `INSERT INTO admin_users (username, password_hash, full_name, role)
@@ -529,6 +577,25 @@ async function createUser({ username, password, fullName, role = "admin" }) {
      RETURNING id, username, full_name, role`,
     [clean, hash, fullName || null, role]
   );
+  const user = r.rows[0];
+  if (user && (cleanedPhone || cleanedEmail)) {
+    await ensureContactColumns();
+    await db.query(`UPDATE admin_users SET phone = $2, email = $3 WHERE id = $1`, [user.id, cleanedPhone, cleanedEmail]);
+    user.phone = cleanedPhone; user.email = cleanedEmail;
+  }
+  return user;
+}
+
+// Set or clear a user's phone / email (undefined = leave as is, "" = clear).
+async function setUserContact(id, { phone, email } = {}) {
+  await ensureContactColumns();
+  const sets = [], vals = [id];
+  if (phone !== undefined) { vals.push(cleanPhone(phone)); sets.push(`phone = $${vals.length}`); }
+  if (email !== undefined) { vals.push(cleanEmail(email)); sets.push(`email = $${vals.length}`); }
+  if (!sets.length) throw new Error("Nothing to update");
+  const r = await db.query(
+    `UPDATE admin_users SET ${sets.join(", ")} WHERE id = $1 RETURNING id, username, phone, email`, vals);
+  if (!r.rows[0]) throw new Error("User not found");
   return r.rows[0];
 }
 
@@ -538,8 +605,9 @@ async function updateLastLogin(userId) {
 
 async function listUsers() {
   await initTables();
+  await ensureContactColumns();
   const r = await db.query(
-    `SELECT id, username, full_name, role, created_at, last_login_at, disabled
+    `SELECT id, username, full_name, role, phone, email, created_at, last_login_at, disabled
      FROM admin_users
      ORDER BY created_at ASC`
   );
@@ -1038,6 +1106,10 @@ function mount(app) {
           <td>
             <span style="background:${roleInfo.color}; color:white; padding:3px 8px; border-radius:10px; font-size:11px; font-weight:600;">${escapeHtml(roleInfo.label)}</span>
           </td>
+          <td style="white-space:nowrap;">
+            ${u.phone ? escapeHtml(u.phone) : '<span style="color:#c60; font-style:italic;">none</span>'}
+            <button type="button" data-id="${u.id}" data-username="${escapeHtml(u.username)}" data-phone="${escapeHtml(u.phone || "")}" onclick="editPhone(this)" title="Set or change the phone number" style="background:none; border:none; color:#0C1C36; cursor:pointer; font-size:11px; text-decoration:underline; padding:0 0 0 6px;">${u.phone ? "edit" : "add"}</button>
+          </td>
           <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '<span style="color:#c00; font-style:italic;">never</span>'}</td>
           <td>${new Date(u.created_at).toLocaleDateString()}</td>
           <td>
@@ -1120,22 +1192,36 @@ function mount(app) {
 
         <table style="background:white;">
           <thead>
-            <tr><th>Username</th><th>Full name</th><th>Role</th><th>Last login</th><th>Created</th><th></th></tr>
+            <tr><th>Username</th><th>Full name</th><th>Role</th><th>Phone</th><th>Last login</th><th>Created</th><th></th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
 
         <div style="background:white; padding:20px; border-radius:6px; margin-top:20px; border:1px solid #eee;">
           <h3 style="margin:0 0 12px 0; color:#0C1C36;">➕ Add a user</h3>
-          <form method="POST" action="/admin/users/new">
+          <form method="POST" action="/admin/users/new" onsubmit="return tezCheckNewUser()">
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
               <div>
                 <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Full name</label>
-                <input type="text" name="full_name" id="new_full_name" required style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                <input type="text" name="full_name" id="new_full_name" required oninput="tezSuggestUsername()" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
               </div>
               <div>
-                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Username (letters/numbers/._-, 2–32 chars)</label>
-                <input type="text" name="username" id="new_username" required pattern="[a-z0-9_.\\-]{2,32}" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Username <span style="color:#999;">— what they type to sign in</span></label>
+                <input type="text" name="username" id="new_username" required minlength="2" maxlength="64"
+                       autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"
+                       oninput="tezUserTouched = true; tezShowUsername()"
+                       style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                <div id="new_username_hint" style="font-size:11px; color:#888; margin-top:4px;">Lowercase letters, numbers, dot, dash or underscore. Capitals and spaces are fixed for you.</div>
+              </div>
+              <div>
+                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Mobile phone <span style="color:#999;">— for sign-in codes and text alerts</span></label>
+                <input type="tel" name="phone" id="new_phone" inputmode="tel" autocomplete="off" placeholder="626-555-0123"
+                       style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+              </div>
+              <div>
+                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Email <span style="color:#999;">— optional</span></label>
+                <input type="text" name="email" id="new_email" inputmode="email" autocapitalize="none" autocomplete="off"
+                       style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
               </div>
               <div>
                 <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Password (min 8 chars)</label>
@@ -1181,7 +1267,59 @@ function mount(app) {
         </div>
 
         <script>
+          // The sign-in name is tidied as it is typed, so the browser never
+          // has to refuse it with "Please match the requested format".
+          var tezUserTouched = false;
+          function tezCleanUsername(v) {
+            return String(v || "").trim().toLowerCase()
+              .replace(/@.*$/, "").replace(/\\s+/g, ".").replace(/[^a-z0-9_.-]/g, "")
+              .replace(/\\.{2,}/g, ".").replace(/^[.-]+|[.-]+$/g, "").slice(0, 32);
+          }
+          function tezShowUsername() {
+            var raw = document.getElementById("new_username").value;
+            var clean = tezCleanUsername(raw);
+            var hint = document.getElementById("new_username_hint");
+            if (!raw) { hint.style.color = "#888"; hint.textContent = "Lowercase letters, numbers, dot, dash or underscore. Capitals and spaces are fixed for you."; return clean; }
+            if (clean.length < 2) { hint.style.color = "#c00"; hint.textContent = "Use at least 2 letters or numbers (English letters only)."; return clean; }
+            hint.style.color = clean === raw ? "#888" : "#0a6";
+            hint.textContent = "They will sign in as: " + clean;
+            return clean;
+          }
+          function tezSuggestUsername() {
+            if (tezUserTouched) return;
+            var u = document.getElementById("new_username");
+            u.value = tezCleanUsername(document.getElementById("new_full_name").value);
+            tezShowUsername();
+          }
+          function tezCheckNewUser() {
+            var u = document.getElementById("new_username");
+            var clean = tezShowUsername();
+            if (clean.length < 2) { u.focus(); return false; }
+            u.value = clean;
+            var p = document.getElementById("new_phone");
+            var digits = p.value.replace(/\\D/g, "");
+            if (p.value.trim() && (digits.length < 10 || digits.length > 15)) {
+              alert("That phone number looks incomplete. Enter all 10 digits, for example 626-555-0123.");
+              p.focus(); return false;
+            }
+            if (!p.value.trim() && !confirm("No phone number entered. Without one, this person cannot be sent a sign-in code or text alerts. Create the user anyway?")) {
+              p.focus(); return false;
+            }
+            return true;
+          }
+          function editPhone(btn) {
+            var next = prompt("Mobile phone for " + btn.dataset.username + " (leave empty to remove):", btn.dataset.phone || "");
+            if (next === null) return;
+            fetch("/admin/users/" + btn.dataset.id + "/contact", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: "phone=" + encodeURIComponent(next),
+            }).then(function (r) { return r.json(); }).then(function (d) {
+              if (d.ok) location.reload(); else alert(d.error || "Could not save the phone number.");
+            }).catch(function (e) { alert("Could not save: " + e.message); });
+          }
           function quickAddStaff(staff) {
+            tezUserTouched = true;
             document.getElementById("new_full_name").value = staff.full_name;
             document.getElementById("new_username").value = staff.username;
             document.getElementById("new_role").value = staff.role;
@@ -1263,6 +1401,8 @@ function mount(app) {
         password: req.body.password,
         fullName: req.body.full_name,
         role,
+        phone: req.body.phone,
+        email: req.body.email,
       });
 
       if (folder && user && user.id) {
@@ -1279,6 +1419,18 @@ function mount(app) {
       res.redirect("/admin/users");
     } catch (err) {
       res.status(400).send(`<h1>Error</h1><p>${escapeHtml(err.message)}</p><p><a href="/admin/users">← Back</a></p>`);
+    }
+  });
+
+  // Set or clear a user's phone (and email) from the Admin Users table.
+  app.post("/admin/users/:id/contact", requireRole("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const user = await setUserContact(id, { phone: req.body.phone, email: req.body.email });
+      res.json({ ok: true, user });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
     }
   });
 
@@ -1632,6 +1784,9 @@ module.exports = {
   ensureOverrideTable,
   mount,
   createUser,
+  setUserContact,
+  cleanUsername,
+  cleanPhone,
   findUserByUsername,
   countUsers,
   hashPassword,

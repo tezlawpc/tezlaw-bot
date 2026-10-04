@@ -774,21 +774,69 @@ router.post("/api/autoposter/custom", requireAuth, async (req, res) => {
 
 
 // ── Manual Post Creator ───────────────────────────────────
+
+// Read an uploaded document (PDF / Word / text) so a post can be written from
+// it. The file comes as base64 in the JSON body — the global limit is 25 MB —
+// is read in memory, and is not stored anywhere.
+router.post("/api/post/extract", requireAuth, async (req, res) => {
+  try {
+    const { filename, content_base64 } = req.body || {};
+    if (!filename || !content_base64) return res.status(400).json({ error: "Choose a file first." });
+    const buf = Buffer.from(String(content_base64).replace(/^data:[^,]*,/, ""), "base64");
+    const out = await require("./post-source").extract(buf, filename);
+    if (!out.ok) return res.status(400).json({ error: out.error });
+    try { audit(req, "post_source_read", "post_creator", null, `${out.name} (${out.chars} chars)`); } catch (e) { /* the audit line must not cost the upload */ }
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.post("/api/post/generate", requireAuth, async (req, res) => {
   try {
-    const { topic, practiceArea, context, useSearch } = req.body;
-    if (!topic) return res.status(400).json({ error: "Topic required" });
-    const { generatePost } = require("./autoposter");
-    const post = await generatePost({
-      topic,
+    const { topic, practiceArea, context, useSearch, mode, source, ownText, anonymize } = req.body || {};
+    const ps = require("./post-source");
+    const ap = require("./autoposter");
+    const doc = source && source.text ? source : null;
+
+    // JJ's own article: his words, not rewritten. From the pasted text, or
+    // from the uploaded Word file when nothing was pasted.
+    if (mode === "as_written") {
+      const text = String(ownText || "").trim();
+      if (!text && !doc) return res.status(400).json({ error: "Paste your article or upload it as a Word or text file." });
+      const post = ps.postFromOwnText({
+        title: topic,
+        text: text || doc.text,
+        html: text ? "" : (doc.html || ""),
+        practiceArea: practiceArea || "General",
+        footer: ap.getStaticFooter,
+      });
+      return res.json({ ok: true, post, issues: ap.complianceIssues(ap.stripFooter(post.content)) });
+    }
+
+    if (!topic && !doc) return res.status(400).json({ error: "Enter a topic, or upload a document to write from." });
+    const post = await ap.generatePost({
+      topic: doc ? ps.topicFor({ topic, name: doc.name }) : topic,
       practiceArea: practiceArea || "General",
-      context: context || "",
-      useSearch: useSearch !== false,
+      context: doc
+        ? ps.sourceContext({ name: doc.name, text: doc.text, anonymize: anonymize !== false, notes: context, truncated: !!doc.truncated })
+        : (context || ""),
+      // With a document in hand the document is the source; a search can only
+      // add things about the matter that are not in it.
+      useSearch: doc ? useSearch === true : useSearch !== false,
       sources: [],
     });
     if (!post) return res.status(500).json({ error: "Failed to generate post" });
-    res.json({ ok: true, post });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+    let privacy = [];
+    if (doc) {
+      post.fromDocument = doc.name;
+      // The instruction to leave people out is checked, not trusted. Anything
+      // identifying that came through holds the post as a WordPress draft.
+      if (anonymize !== false) {
+        privacy = ps.privacyFlags(doc.text, ap.stripFooter(post.content) + " " + (post.title || "") + " " + (post.metaDescription || ""));
+        if (privacy.length) post.status = "draft";
+      }
+    }
+    res.json({ ok: true, post, privacy, issues: ap.complianceIssues(ap.stripFooter(post.content)) });
+  } catch(e) { res.status(e.message && /title|too short/i.test(e.message) ? 400 : 500).json({ error: e.message }); }
 });
 
 router.post("/api/post/publish", requireAuth, async (req, res) => {
@@ -815,7 +863,7 @@ router.post("/api/post/publish", requireAuth, async (req, res) => {
           const tx = await ap.translatePost({ ...post, category: post.category || practiceArea || "Immigration" }, lang);
           if (!tx) continue;
           const txWp = await publishToWordPress({ ...tx, status: wpResult.status === "publish" ? undefined : "draft" });
-          if (txWp) results.push({ lang: lang === "chinese" ? "中文" : "Español", langTag: tx.lang, id: txWp.id, url: txWp.link, link: txWp.link, status: txWp.status, complianceIssues: txWp.complianceIssues });
+          if (txWp) results.push({ lang: lang === "chinese" ? "中文" : "Español", langTag: tx.lang, id: txWp.id, url: txWp.link, link: txWp.link, status: txWp.status, complianceIssues: txWp.complianceIssues, _post: tx });
         } catch (txErr) {
           console.error("Translation error:", txErr.message);
         }
@@ -834,7 +882,41 @@ router.post("/api/post/publish", requireAuth, async (req, res) => {
       [post.title, practiceArea, topic, JSON.stringify(results.map(r => r.id))]
     ).catch(() => {}); // table may not exist yet, non-fatal
 
-    res.json({ ok: true, results });
+    // Social drafts, the same way the daily posts get them: composed from
+    // the post that just went live, queued, and sent to JJ in Telegram. They
+    // reach Postiz only when he approves each one. Only for a post that is
+    // actually public — a post held as a draft by the Rule 7.1 gate has no
+    // page to link to. A failure here never undoes the publish.
+    let social = null;
+    try {
+      const sp = require("./social-posts");
+      const live = (tag) => results.find(r => r.langTag === tag && r.status === "publish");
+      const en = live("en");
+      social = { queued: 0, notes: [] };
+      if (en) {
+        const s = await sp.queueForSource(
+          { title: post.title, url: en.link, summary: post.metaDescription, content: post.content },
+          { channels: ["linkedin", "facebook", "instagram", "gbp"] });
+        social.queued += s.queued || 0;
+        if (s.reason) social.notes.push(s.reason);
+        for (const r of s.rejected || []) social.notes.push(`${r.channel}: ${r.problems.join("; ")}`);
+      } else {
+        social.notes.push("The English post was saved as a draft, so no social drafts were made.");
+      }
+      const zh = results.find(r => r.lang === "中文" && r.status === "publish");
+      if (zh && zh._post) {
+        const s = await sp.queueForSource(
+          { title: zh._post.title, url: zh.link, summary: zh._post.metaDescription || zh._post.content },
+          { channels: ["wechat_moments"] });
+        social.queued += s.queued || 0;
+      }
+    } catch (socErr) {
+      console.error("Manual post social drafts:", socErr.message);
+      social = { queued: 0, notes: ["Social drafts could not be made: " + socErr.message] };
+    }
+    for (const r of results) delete r._post;
+
+    res.json({ ok: true, results, social });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1865,12 +1947,12 @@ function dashboardHtml(opts = {}) {
     <div class="card">
       <h3>📝 Create a Post</h3>
       <p style="font-size:13px;color:#666;margin-bottom:20px">
-        Enter a topic, paste a news link, or describe what you want to post.
-        Zara will write and publish it to WordPress just like the daily autoposter.
+        Enter a topic, paste a news link, upload a document, or paste an article you wrote.
+        It is published to WordPress like the daily posts, and the social drafts then come to you in Telegram for approval before Postiz sends them.
       </p>
       <div style="display:grid;gap:14px">
         <div>
-          <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:6px">Topic or News Link *</label>
+          <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:6px">Topic, news link, or title <span style="font-weight:normal;color:#888">(optional when you upload a document)</span></label>
           <textarea id="postTopic" placeholder="e.g. &#39;New USCIS fee increase effective January 2026&#39; or paste a URL like https://uscis.gov/news/..." 
             style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:13px;height:80px;resize:vertical;font-family:Arial"></textarea>
         </div>
@@ -1908,6 +1990,33 @@ function dashboardHtml(opts = {}) {
           <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:6px">Additional Context (optional)</label>
           <input id="postContext" placeholder="Any extra details, key points to include, or specific angle..." 
             style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+        </div>
+        <div style="border:1px dashed #D4C4A0;border-radius:8px;padding:14px;background:#FFFDF8">
+          <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:6px">Source document (optional)</label>
+          <div style="font-size:12px;color:#666;margin-bottom:10px">
+            Upload a decision, order, notice or memo &mdash; or your own draft. PDF, Word (.docx) or text, up to 15 MB.
+            The file is read for this post only and is not stored.
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <input type="file" id="postFile" accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onchange="onPostFile(this)" style="font-size:13px">
+            <button type="button" id="postFileClear" onclick="clearPostFile()" style="display:none;background:#eee;border:none;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer">Remove</button>
+          </div>
+          <div id="postFileMsg" style="font-size:12px;margin-top:8px;color:#666"></div>
+          <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:12px;color:#333;cursor:pointer">
+            <input type="checkbox" id="postAnon" checked style="margin-top:2px">
+            <span><strong>Leave out names and identifying details</strong> of clients and parties (recommended). Untick only for a public decision where naming the parties is appropriate.</span>
+          </label>
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:bold;color:#0C1C36;display:block;margin-bottom:6px">Who writes it</label>
+          <select id="postMode" onchange="onPostMode()" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+            <option value="write">Zara writes the article (from the topic, the link, or the uploaded document)</option>
+            <option value="as_written">I wrote it &mdash; publish my text as written</option>
+          </select>
+          <div id="postOwnWrap" style="display:none;margin-top:10px">
+            <textarea id="postOwnText" placeholder="Paste your article here. Leave a blank line between paragraphs. A short line on its own becomes a heading. Or leave this empty and upload the article as a Word file above." style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:13px;height:220px;resize:vertical;font-family:Arial"></textarea>
+            <div style="font-size:12px;color:#666;margin-top:6px">Your wording is not changed. The title comes from the box at the top, or from the first line of your text. The usual author footer is added, and the same Rule 7.1 check runs before it goes live.</div>
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
           <button class="action-btn" id="postBtn" onclick="submitManualPost()">🚀 Generate &amp; Publish</button>

@@ -642,45 +642,154 @@ async function rollbackPrompt(id) {
 // ── Manual Post Creator ───────────────────────────────────
 
 var _previewPost = null;
+var _postDoc = null;          // { name, text, html, truncated } from /api/post/extract
 
-async function previewManualPost() {
-  var topic   = document.getElementById('postTopic').value.trim();
-  var area    = document.getElementById('postArea').value;
-  var context = document.getElementById('postContext').value.trim();
-  var search  = document.getElementById('postSearch').value === 'true';
-  var msg     = document.getElementById('postMsg');
-  var btn     = document.getElementById('previewBtn');
+// Like api(), but keeps the server's error text so it can be shown.
+async function postApi(path, body) {
+  try {
+    var res = await fetch('/admin' + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': getCookie('admin_token') },
+      body: JSON.stringify(body)
+    });
+    if (res.status === 401) { window.location.href = '/admin/login'; return { ok: false, error: 'Signed out' }; }
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok) return { ok: false, error: data.error || ('Server error ' + res.status) };
+    return data;
+  } catch (e) { return { ok: false, error: e.message }; }
+}
 
-  if (!topic) { msg.style.color='#cc0000'; msg.textContent='Please enter a topic or URL.'; return; }
+function postSay(text, color) {
+  var msg = document.getElementById('postMsg');
+  msg.style.color = color || '#666'; msg.textContent = text || '';
+}
 
-  btn.disabled = true; btn.textContent = '⏳ Generating...';
-  msg.style.color = '#666'; msg.textContent = 'Writing post — usually takes 15-30 seconds...';
-  document.getElementById('postPreviewCard').style.display = 'none';
+function onPostMode() {
+  var own = document.getElementById('postMode').value === 'as_written';
+  document.getElementById('postOwnWrap').style.display = own ? 'block' : 'none';
+}
 
-  var res = await api('/api/post/generate', {
-    method: 'POST',
-    body: JSON.stringify({ topic, practiceArea: area, context, useSearch: search })
-  });
+function clearPostFile() {
+  _postDoc = null;
+  document.getElementById('postFile').value = '';
+  document.getElementById('postFileMsg').textContent = '';
+  document.getElementById('postFileClear').style.display = 'none';
+}
 
-  btn.disabled = false; btn.textContent = '👁 Preview First';
-
-  if (!res || !res.ok) {
-    msg.style.color = '#cc0000';
-    msg.textContent = '❌ Generation failed — check that WordPress credentials are set in Render env vars.';
-    return;
+function onPostFile(input) {
+  var f = input.files && input.files[0];
+  var note = document.getElementById('postFileMsg');
+  _postDoc = null;
+  document.getElementById('postFileClear').style.display = 'none';
+  if (!f) { note.textContent = ''; return; }
+  if (f.size > 15 * 1024 * 1024) {
+    note.style.color = '#cc0000';
+    note.textContent = 'That file is ' + (f.size / 1048576).toFixed(1) + ' MB. The limit is 15 MB.';
+    input.value = ''; return;
   }
+  note.style.color = '#666'; note.textContent = 'Reading ' + f.name + '...';
+  var reader = new FileReader();
+  reader.onerror = function () { note.style.color = '#cc0000'; note.textContent = 'Could not read the file from your computer.'; };
+  reader.onload = async function () {
+    var b64 = String(reader.result || '');
+    b64 = b64.substring(b64.indexOf(',') + 1);
+    var res = await postApi('/api/post/extract', { filename: f.name, content_base64: b64 });
+    if (!res.ok) {
+      note.style.color = '#cc0000'; note.textContent = res.error || 'Could not read that file.';
+      input.value = ''; return;
+    }
+    _postDoc = { name: res.name, text: res.text, html: res.html || '', truncated: !!res.truncated };
+    note.style.color = '#006600';
+    note.textContent = 'Read ' + res.name + ': ' + Number(res.chars).toLocaleString('en-US') + ' characters'
+      + (res.pages ? ', ' + res.pages + ' page' + (res.pages === 1 ? '' : 's') : '') + '.'
+      + (res.warning ? ' ' + res.warning : '');
+    document.getElementById('postFileClear').style.display = 'inline-block';
+  };
+  reader.readAsDataURL(f);
+}
 
-  _previewPost = res.post;
-  msg.textContent = '';
+// Everything the generate route needs, or a reason it cannot run yet.
+function postPayload() {
+  var topic   = document.getElementById('postTopic').value.trim();
+  var mode    = document.getElementById('postMode').value;
+  var ownText = document.getElementById('postOwnText').value.trim();
+  if (mode === 'as_written') {
+    if (!ownText && !_postDoc) return { error: 'Paste your article, or upload it as a Word or text file.' };
+  } else if (!topic && !_postDoc) {
+    return { error: 'Enter a topic or link, or upload a document to write from.' };
+  }
+  return {
+    topic: topic,
+    practiceArea: document.getElementById('postArea').value,
+    context: document.getElementById('postContext').value.trim(),
+    // With a document, the document is the source: no web search unless a topic link was also given.
+    useSearch: _postDoc ? false : document.getElementById('postSearch').value === 'true',
+    mode: mode,
+    source: _postDoc,
+    ownText: ownText,
+    anonymize: document.getElementById('postAnon').checked
+  };
+}
 
-  var preview = document.getElementById('postPreviewContent');
-  preview.textContent =
-    '📌 TITLE: ' + (res.post.title || '(no title)') + '\n\n' +
-    '🏷 CATEGORY: ' + (res.post.category || '') + ' | TAGS: ' + (res.post.tags || []).join(', ') + '\n\n' +
-    '📝 CONTENT:\n' + (res.post.content || '').replace(/<[^>]+>/g, '') + '\n\n' +
-    '🔍 META: ' + (res.post.metaDescription || '');
+function showPostPreview(post, issues, privacy) {
+  _previewPost = post;
+  var head = '';
+  if (privacy && privacy.length) head += 'PRIVACY CHECK - these details from the document appear in the draft, so it will be saved to WordPress as a DRAFT, not published. Remove them there, or untick "Leave out names" if this is a public decision:\n  - ' + privacy.join('\n  - ') + '\n';
+  if (post.asWritten) head += 'YOUR ARTICLE, AS WRITTEN - wording unchanged.\n';
+  if (post.fromDocument) head += 'WRITTEN FROM: ' + post.fromDocument
+    + (document.getElementById('postAnon').checked ? ' - names and identifying details left out.' : ' - party names kept.') + '\n';
+  if (post.fromDocument) head += 'Check it against the document before publishing: every statement about the matter should be in the document.\n';
+  if (issues && issues.length) head += 'RULE 7.1 CHECK - this would be saved as a DRAFT, not published:\n  - ' + issues.join('\n  - ') + '\n';
+  if (head) head += '\n';
+  var body = String(post.content || '');
+  var cut = body.indexOf('<style>.tez-ab{');
+  if (cut > 0) body = body.substring(0, cut);
+  document.getElementById('postPreviewContent').textContent = head +
+    '📌 TITLE: ' + (post.title || '(no title)') + '\n\n' +
+    '🏷 CATEGORY: ' + (post.category || '') + '\n\n' +
+    '📝 CONTENT:\n' + body.replace(/<\/(p|h2|h3|li|ul|ol|div)>/g, '\n').replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n') + '\n\n' +
+    '🔍 META: ' + (post.metaDescription || '');
   document.getElementById('postPreviewCard').style.display = 'block';
   document.getElementById('postPreviewCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+// What happened, in words: which language went live, which was held, and
+// whether the social drafts are on their way to Telegram.
+function describePublish(res) {
+  var parts = (res.results || []).map(function (r) {
+    return r.lang + (r.status === 'publish' ? ' published' : ' saved as a draft for your review') + ' (ID ' + r.id + ')';
+  });
+  var out = parts.join(', ') + '.';
+  if (res.social) {
+    if (res.social.queued) out += ' ' + res.social.queued + ' social draft' + (res.social.queued === 1 ? '' : 's') + ' sent to Telegram for your approval.';
+    else out += ' No social drafts' + (res.social.notes && res.social.notes.length ? ': ' + res.social.notes[0] : '.');
+  }
+  return out;
+}
+
+function resetPostForm() {
+  document.getElementById('postTopic').value = '';
+  document.getElementById('postContext').value = '';
+  document.getElementById('postOwnText').value = '';
+  clearPostFile();
+}
+
+async function previewManualPost() {
+  var btn = document.getElementById('previewBtn');
+  var payload = postPayload();
+  if (payload.error) { postSay(payload.error, '#cc0000'); return; }
+
+  btn.disabled = true; btn.textContent = '⏳ Generating...';
+  postSay(payload.mode === 'as_written' ? 'Preparing your article...'
+    : (payload.source ? 'Reading the document and writing the post - this can take a minute...' : 'Writing post - usually takes 15-30 seconds...'));
+  document.getElementById('postPreviewCard').style.display = 'none';
+
+  var res = await postApi('/api/post/generate', payload);
+
+  btn.disabled = false; btn.textContent = '👁 Preview First';
+  if (!res.ok) { postSay('❌ ' + (res.error || 'Generation failed.'), '#cc0000'); return; }
+  postSay('');
+  showPostPreview(res.post, res.issues, res.privacy);
 }
 
 async function publishPreview() {
@@ -688,83 +797,64 @@ async function publishPreview() {
   var btn  = document.getElementById('publishBtn');
   var area = document.getElementById('postArea').value;
   var lang = document.getElementById('postLang').value;
-  var topic = document.getElementById('postTopic').value.trim();
+  var topic = document.getElementById('postTopic').value.trim() || _previewPost.title || '';
 
   btn.disabled = true; btn.textContent = '⏳ Publishing...';
 
-  var res = await api('/api/post/publish', {
-    method: 'POST',
-    body: JSON.stringify({ post: _previewPost, topic, practiceArea: area, languages: lang })
-  });
+  var res = await postApi('/api/post/publish', { post: _previewPost, topic: topic, practiceArea: area, languages: lang });
 
   btn.disabled = false; btn.textContent = '✅ Publish Now';
 
-  if (res && res.ok) {
-    var ids = res.results.map(function(r) { return r.lang + ' (ID ' + r.id + ')'; }).join(', ');
-    document.getElementById('postMsg').style.color = '#006600';
-    document.getElementById('postMsg').textContent = '✅ Published! ' + ids;
+  if (res.ok) {
+    postSay('✅ ' + describePublish(res), '#006600');
     document.getElementById('postPreviewCard').style.display = 'none';
-    document.getElementById('postTopic').value = '';
-    document.getElementById('postContext').value = '';
+    resetPostForm();
     _previewPost = null;
     loadManualPost();
   } else {
-    document.getElementById('postMsg').style.color = '#cc0000';
-    document.getElementById('postMsg').textContent = '❌ Publish failed';
+    postSay('❌ Publish failed: ' + (res.error || 'unknown error'), '#cc0000');
   }
 }
 
 async function submitManualPost() {
-  var topic   = document.getElementById('postTopic').value.trim();
-  var area    = document.getElementById('postArea').value;
-  var context = document.getElementById('postContext').value.trim();
-  var search  = document.getElementById('postSearch').value === 'true';
-  var lang    = document.getElementById('postLang').value;
-  var msg     = document.getElementById('postMsg');
-  var btn     = document.getElementById('postBtn');
+  var btn = document.getElementById('postBtn');
+  var payload = postPayload();
+  if (payload.error) { postSay(payload.error, '#cc0000'); return; }
 
-  if (!topic) { msg.style.color='#cc0000'; msg.textContent='Please enter a topic or URL.'; return; }
+  // Anything built from an uploaded document or from your own text is shown
+  // to you first. One click must not put a client's order on the website.
+  if (payload.source || payload.mode === 'as_written') {
+    postSay('Showing you the draft first - publish it from the preview below.');
+    return previewManualPost();
+  }
 
+  var lang = document.getElementById('postLang').value;
   btn.disabled = true; btn.textContent = '⏳ Generating & Publishing...';
-  msg.style.color = '#666'; msg.textContent = 'Writing post — usually takes 15-30 seconds...';
+  postSay('Writing post - usually takes 15-30 seconds...');
 
-  var genRes = await api('/api/post/generate', {
-    method: 'POST',
-    body: JSON.stringify({ topic, practiceArea: area, context, useSearch: search })
-  });
-
-  if (!genRes || !genRes.ok) {
+  var genRes = await postApi('/api/post/generate', payload);
+  if (!genRes.ok) {
     btn.disabled = false; btn.textContent = '🚀 Generate & Publish';
-    msg.style.color = '#cc0000';
-    msg.textContent = '❌ Generation failed';
+    postSay('❌ ' + (genRes.error || 'Generation failed'), '#cc0000');
     return;
   }
 
-  msg.textContent = '✍️ Post written! Publishing to WordPress...';
-
-  var pubRes = await api('/api/post/publish', {
-    method: 'POST',
-    body: JSON.stringify({ post: genRes.post, topic, practiceArea: area, languages: lang })
-  });
+  postSay('✍️ Post written! Publishing to WordPress...');
+  var pubRes = await postApi('/api/post/publish', { post: genRes.post, topic: payload.topic, practiceArea: payload.practiceArea, languages: lang });
 
   btn.disabled = false; btn.textContent = '🚀 Generate & Publish';
-
-  if (pubRes && pubRes.ok) {
-    var ids = pubRes.results.map(function(r) { return r.lang + ' (ID ' + r.id + ')'; }).join(', ');
-    msg.style.color = '#006600';
-    msg.textContent = '✅ Published! ' + ids;
-    document.getElementById('postTopic').value = '';
-    document.getElementById('postContext').value = '';
+  if (pubRes.ok) {
+    postSay('✅ ' + describePublish(pubRes), '#006600');
+    resetPostForm();
     loadManualPost();
   } else {
-    msg.style.color = '#cc0000';
-    msg.textContent = '❌ Publish failed — ' + (pubRes && pubRes.error ? pubRes.error : 'unknown error');
+    postSay('❌ Publish failed: ' + (pubRes.error || 'unknown error'), '#cc0000');
   }
 }
 
 function cancelPreview() {
-  document.getElementById('postPreviewCard').style.display = 'none';
   _previewPost = null;
+  document.getElementById('postPreviewCard').style.display = 'none';
 }
 
 async function loadManualPost() {

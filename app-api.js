@@ -150,6 +150,20 @@ function requireClient(req, res, next) {
   next();
 }
 
+// The signed-in client's client_accounts.id, as a NUMBER.
+//
+// A client token carries uid "c<id>" (issueClientToken) so a client can never
+// be mistaken for the staff user with the same number. client_accounts.id,
+// appointments.client_account_id, client_documents.client_id and friends are
+// integer columns: handing them "c12" makes Postgres reject the whole query
+// ("invalid input syntax for type integer"). Every client route that looked
+// its account up with req.user.uid failed that way — documents, invoices,
+// signature requests, appointments, delete-account, and the record Zara is
+// given in /api/client/chat. Use this wherever the number is wanted.
+function clientAccountId(req) {
+  return require("./client-record").accountIdOf(req && req.user && req.user.uid);
+}
+
 // ═══════════════════════════════════════════════════════
 //  ROLE-BASED VISIBILITY HELPERS
 //  ────────────────────────────────────────────────────
@@ -3986,7 +4000,8 @@ function registerAppApi(app) {
   // records. The client is signed out immediately after.
   app.post("/api/client/delete-account", requireBearer, requireClient, async (req, res) => {
     try {
-      const uid = req.user.uid;
+      // The number, not the token's "c<id>" — see clientAccountId().
+      const uid = clientAccountId(req);
       // Fetch account info for the response + audit log
       const acctR = await db.query(
         `SELECT id, phone, full_name, email, client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
@@ -4000,17 +4015,23 @@ function registerAppApi(app) {
       try {
         await client.query('BEGIN');
         // Delete push tokens for this user
+        // Tokens have been filed under the account number, the phone, and the
+        // token's own "c<id>" at different times; clear all three. "c<id>" can
+        // never be a staff id, so it is safe to match whatever kind it carries.
         await client.query(
-          `DELETE FROM push_tokens WHERE user_kind = 'client' AND user_ref = $1`,
-          [String(uid)]
+          `DELETE FROM push_tokens
+            WHERE (user_kind = 'client' AND user_ref = ANY($1::text[])) OR user_ref = $2`,
+          [[String(uid), String(acct.phone || "")].filter(Boolean), `c${uid}`]
         );
         // Delete OTP records for this phone
         await client.query(`DELETE FROM client_otp WHERE phone = $1`, [acct.phone]);
-        // Delete their chat messages
-        await client.query(
-          `DELETE FROM client_messages WHERE from_user_id = $1 OR to_user_id = $1`,
-          [uid]
-        ).catch(() => {});
+        // Messages with the legal team are NOT deleted. The statement that
+        // used to sit here named columns client_messages does not have
+        // (from_user_id / to_user_id), so it never deleted anything — and
+        // because it ran inside this transaction, its failure aborted the
+        // transaction and the account delete below failed with it. The
+        // thread is part of the case file the firm keeps (see the reply
+        // below); deleting it would be a retention decision, not a cleanup.
         // Delete the account itself
         await client.query(`DELETE FROM client_accounts WHERE id = $1`, [uid]);
         await client.query('COMMIT');
@@ -4035,7 +4056,7 @@ function registerAppApi(app) {
       res.json({
         ok: true,
         deleted: true,
-        message: "Your Zara account has been deleted. Case records retained by the firm for legal purposes.",
+        message: "Your Tara account has been deleted. Case records retained by the firm for legal purposes.",
       });
     } catch (err) {
       console.error("[delete-account]:", err);
@@ -4053,7 +4074,7 @@ function registerAppApi(app) {
       // Look up client_key from their account
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const clientKey = acctR.rows[0]?.client_key;
       if (!clientKey) {
@@ -4070,7 +4091,7 @@ function registerAppApi(app) {
            (client_key, client_id, filename, mime_type, size_bytes, category, note, content, uploaded_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'client')
          RETURNING id, filename, mime_type, size_bytes, category, note, uploaded_at`,
-        [clientKey, req.user.uid, String(filename).substring(0, 200),
+        [clientKey, clientAccountId(req), String(filename).substring(0, 200),
          String(mime_type || 'application/octet-stream').substring(0, 100),
          buf.length, String(category || 'other').substring(0, 50),
          note ? String(note).substring(0, 500) : null,
@@ -4097,7 +4118,7 @@ function registerAppApi(app) {
     try {
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const clientKey = acctR.rows[0]?.client_key;
       if (!clientKey) return res.json({ ok: true, documents: [] });
@@ -4221,10 +4242,10 @@ function registerAppApi(app) {
       if (!r.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
       const doc = r.rows[0];
       // Auth: client can only download docs from their own case; firm can if they have client access
-      if (req.user.k === 'client') {
+      if (req.user.r === 'client') {
         const acctR = await db.query(
           `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-          [req.user.uid]
+          [clientAccountId(req)]
         );
         if (acctR.rows[0]?.client_key !== doc.client_key) {
           return res.status(403).json({ ok: false, error: "not your document" });
@@ -4382,7 +4403,7 @@ function registerAppApi(app) {
     try {
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const clientKey = acctR.rows[0]?.client_key;
       if (!clientKey) return res.json({ ok: true, invoices: [] });
@@ -4405,7 +4426,7 @@ function registerAppApi(app) {
       // Verify this invoice belongs to this client
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const clientKey = acctR.rows[0]?.client_key;
       if (!clientKey) return res.status(403).json({ ok: false, error: "no linked case" });
@@ -4475,7 +4496,7 @@ function registerAppApi(app) {
 
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const clientKey = acctR.rows[0]?.client_key;
       if (!clientKey) return res.status(403).json({ ok: false, error: "no linked case" });
@@ -4511,7 +4532,7 @@ function registerAppApi(app) {
       await db.query(`ALTER TABLE client_accounts ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT`).catch(() => {});
       const custMetaR = await db.query(
         `SELECT stripe_customer_id, phone FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       let customerId = custMetaR.rows[0]?.stripe_customer_id;
 
@@ -4528,7 +4549,7 @@ function registerAppApi(app) {
         customerId = customer.id;
         await db.query(
           `UPDATE client_accounts SET stripe_customer_id = $1 WHERE id = $2`,
-          [customerId, req.user.uid]
+          [customerId, clientAccountId(req)]
         );
       }
 
@@ -4753,7 +4774,7 @@ function registerAppApi(app) {
     try {
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const clientKey = acctR.rows[0]?.client_key;
       if (!clientKey) return res.json({ ok: true, requests: [] });
@@ -4774,7 +4795,7 @@ function registerAppApi(app) {
       const id = parseInt(req.params.id, 10);
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const r = await db.query(
         `SELECT * FROM signature_requests WHERE id = $1 AND client_key = $2 LIMIT 1`,
@@ -4795,7 +4816,7 @@ function registerAppApi(app) {
 
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const clientKey = acctR.rows[0]?.client_key;
       // Verify the request belongs to this client and is still pending
@@ -4817,7 +4838,7 @@ function registerAppApi(app) {
         await db.query(
           `INSERT INTO signatures (signature_request_id, client_account_id, signer_name, signature_image, user_agent, ip_address, esign_consent)
            VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
-          [id, req.user.uid, String(signer_name).substring(0, 200), cleanImage, ua, ip]
+          [id, clientAccountId(req), String(signer_name).substring(0, 200), cleanImage, ua, ip]
         );
         await db.query(
           `UPDATE signature_requests SET status = 'signed', signed_at = NOW(), updated_at = NOW() WHERE id = $1`,
@@ -4887,7 +4908,7 @@ function registerAppApi(app) {
 
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const clientKey = acctR.rows[0]?.client_key;
       if (!clientKey) return res.status(403).json({ ok: false, error: "no linked case" });
@@ -4898,7 +4919,7 @@ function registerAppApi(app) {
       const r = await db.query(
         `INSERT INTO appointments (client_key, client_account_id, purpose, preferred_dates, notes, fee_cents)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [clientKey, req.user.uid, String(purpose).substring(0, 500),
+        [clientKey, clientAccountId(req), String(purpose).substring(0, 500),
          preferred_dates ? String(preferred_dates).substring(0, 300) : null,
          notes ? String(notes).substring(0, 1000) : null,
          FEE_CENTS]
@@ -4930,7 +4951,7 @@ function registerAppApi(app) {
       const id = parseInt(req.params.id, 10);
       const acctR = await db.query(
         `SELECT client_key, stripe_customer_id, phone FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const clientKey = acctR.rows[0]?.client_key;
 
@@ -4973,7 +4994,7 @@ function registerAppApi(app) {
           metadata: { client_key: clientKey, account_id: String(req.user.uid) },
         });
         customerId = customer.id;
-        await db.query(`UPDATE client_accounts SET stripe_customer_id = $1 WHERE id = $2`, [customerId, req.user.uid]);
+        await db.query(`UPDATE client_accounts SET stripe_customer_id = $1 WHERE id = $2`, [customerId, clientAccountId(req)]);
       }
 
       const ephemeralKey = await stripe.ephemeralKeys.create(
@@ -5019,7 +5040,7 @@ function registerAppApi(app) {
     try {
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const clientKey = acctR.rows[0]?.client_key;
       if (!clientKey) return res.json({ ok: true, appointments: [] });
@@ -5037,13 +5058,13 @@ function registerAppApi(app) {
       const id = parseInt(req.params.id, 10);
       const acctR = await db.query(
         `SELECT client_key FROM client_accounts WHERE id = $1 LIMIT 1`,
-        [req.user.uid]
+        [clientAccountId(req)]
       );
       const r = await db.query(
         `UPDATE appointments SET status = 'cancelled', cancelled_at = NOW(), cancelled_by = $1, updated_at = NOW()
          WHERE id = $2 AND client_key = $3 AND status IN ('awaiting_payment', 'paid_pending')
          RETURNING *`,
-        [req.user.uid, id, acctR.rows[0]?.client_key]
+        [clientAccountId(req), id, acctR.rows[0]?.client_key]
       );
       if (!r.rows[0]) return res.status(400).json({ ok: false, error: "Cannot cancel — either already confirmed or not yours" });
       // Notify firm
@@ -8932,90 +8953,19 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com`;
         return res.status(501).json({ ok: false, error: "Chat not available" });
       }
 
-      // Look up this client's own case record so Zara can answer from it.
-      // Every query below is keyed to THIS client's client_key, and the
-      // client surface has no database tools (zara-app-chat chat() sets
-      // useTools = false for role "client"), so this snapshot is the only
-      // case data that reaches the model — there is no path to anyone
-      // else's record. Each lookup degrades to empty rather than failing
-      // the chat, so a missing table never costs the client an answer.
+      // This client's own record, so Zara can answer from it. Built in
+      // client-record.js, keyed to THIS account only; the client surface has
+      // no database tools (zara-app-chat chat() sets useTools = false for
+      // role "client"), so this is the only case data that reaches the model.
+      // A failure here costs the client the record, never the answer.
       let caseContext = null;
       try {
-        // req.user.uid is the client_accounts.id; fetch phone + client_key
-        const acctR = await db.query(
-          `SELECT full_name, email, phone, client_key, language
-           FROM client_accounts WHERE id = $1 LIMIT 1`,
-          [req.user.uid]
-        );
-        const acct = acctR.rows[0];
-        if (acct && acct.client_key) {
-          const ck = acct.client_key;
-          const cp = require("./client-profiles");
-          const [profile, appts, docs, invs] = await Promise.all([
-            cp.getClientByKey(ck).catch(() => null),
-            db.query(
-              `SELECT purpose, status, scheduled_time, scheduled_location
-                 FROM appointments
-                WHERE client_key = $1 AND cancelled_at IS NULL
-                ORDER BY COALESCE(scheduled_time, created_at) DESC LIMIT 5`,
-              [ck]
-            ).then(r => r.rows).catch(() => []),
-            db.query(
-              `SELECT filename, category, uploaded_at
-                 FROM client_documents
-                WHERE client_key = $1
-                ORDER BY uploaded_at DESC LIMIT 8`,
-              [ck]
-            ).then(r => r.rows).catch(() => []),
-            db.query(
-              `SELECT description, amount_cents, due_date, status
-                 FROM client_invoices
-                WHERE client_key = $1 AND paid_at IS NULL
-                ORDER BY COALESCE(due_date, created_at) ASC LIMIT 8`,
-              [ck]
-            ).then(r => r.rows).catch(() => []),
-          ]);
-
-          const dt = (v) => (v ? new Date(v).toDateString() : null);
-          const now = Date.now();
-          const hearings = (profile && profile.hearings) || [];
-          const deadlines = (profile && profile.deadlines) || [];
-
-          caseContext = {
-            linked: true,
-            name: (profile && profile.client_name) || acct.full_name,
-            a_number: (profile && profile.a_number) || null,
-            case_types: profile ? Array.from(profile.case_types || []) : [],
-            upcoming_hearings: hearings
-              .filter(h => h.hearing_date && new Date(h.hearing_date).getTime() >= now)
-              .sort((a, b) => new Date(a.hearing_date) - new Date(b.hearing_date))
-              .slice(0, 5)
-              .map(h => `${dt(h.hearing_date)}${h.type_label ? ` — ${h.type_label}` : ""}${h.court_name ? ` at ${h.court_name}` : ""}`),
-            open_deadlines: deadlines
-              .filter(d => !d.completed_at)
-              .slice(0, 8)
-              .map(d => `${d.description}${d.due_date ? ` (due ${dt(d.due_date)})` : ""}`),
-            appointments: appts.map(a =>
-              `${a.purpose}${a.scheduled_time ? ` — ${dt(a.scheduled_time)}` : ""}` +
-              `${a.scheduled_location ? ` at ${a.scheduled_location}` : ""} [${a.status}]`),
-            documents: docs.map(x =>
-              `${x.filename}${x.category ? ` (${x.category})` : ""}` +
-              `${x.uploaded_at ? ` — uploaded ${dt(x.uploaded_at)}` : ""}`),
-            invoices: invs.map(x =>
-              `${x.description} — $${((x.amount_cents || 0) / 100).toFixed(2)}` +
-              `${x.due_date ? `, due ${dt(x.due_date)}` : ""}${x.status ? ` [${x.status}]` : ""}`),
-            as_of: new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" }) + " PT",
-            language: acct.language || req.user.lang || "en",
-          };
-        } else if (acct) {
-          // Signed in, but no matter linked yet. linked:false tells
-          // CLIENT_OPS to say so rather than imply an empty case file.
-          caseContext = {
-            linked: false,
-            name: acct.full_name,
-            language: acct.language || "en",
-          };
-        }
+        caseContext = await require("./client-record").build(db, {
+          uid: req.user.uid,
+          clientKey: req.user.ck || null,
+          name: req.user.n || null,
+          lang: req.user.lang || "en",
+        });
       } catch (e) {
         console.warn("[client chat context lookup]:", e.message);
       }
