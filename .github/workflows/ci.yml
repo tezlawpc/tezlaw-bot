@@ -27,6 +27,14 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      # Cheapest check, so it runs first. A file uploaded through the GitHub
+      # website lands at the top of the repo, where its require("../x") resolves
+      # outside the repo and npm never runs it -- so the script looks present and
+      # is in fact dead. This also catches a file left at both ./ and scripts/,
+      # where one copy is silently stale.
+      - name: Repo layout
+        run: node scripts/check-repo-layout.js
+
       # Every .js file must parse. A syntax error anywhere takes the whole
       # server down at boot, after the deploy has already swapped instances.
       - name: Syntax
@@ -106,6 +114,13 @@ jobs:
       # the honeypot, the field validation and the flood limit.
       - name: Public intake form
         run: node scripts/check-web-intake.js
+
+      # Every link the court calendar emits, checked against the route table
+      # read out of server.js. Three of its five destinations were paths that
+      # had never existed, so clicking a merits hearing or an EOIR notice
+      # returned "Cannot GET" -- and the month grid was not clickable at all.
+      - name: Calendar links
+        run: node scripts/check-calendar-links.js
 
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed

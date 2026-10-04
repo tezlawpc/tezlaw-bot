@@ -108,6 +108,7 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
   // ──────────────────────────────────────────────
   const q3 = `
     SELECT 'hearing_notice' as source, id::text as source_id,
+           client_key,
            client_name, a_number, hearing_date as event_date,
            hearing_type as event_subtype,
            judge_name, court_name, court_address,
@@ -299,6 +300,7 @@ function dedupeEvents(events) {
       if (!existing.description && e.description) existing.description = e.description;
       if (!existing.a_number && e.a_number) existing.a_number = e.a_number;
       if (!existing.client_name && e.client_name) existing.client_name = e.client_name;
+      if (!existing.client_key && e.client_key) existing.client_key = e.client_key;
       // Priority (higher = more authoritative source):
       //   outlook_event (4) - JJ's own Outlook calendar, source of truth
       //   hearing_notice (3) - EOIR official paperwork
@@ -799,6 +801,46 @@ function renderListView(groups) {
   }).join("");
 }
 
+// Where an event's own record actually lives, shared by the list and the month
+// grid so the two can never disagree. Returns null when there is no page to
+// open; the caller then renders plain text instead of a link that goes nowhere.
+//
+// Three of these used to be wrong. /admin/individual-hearings/:id and
+// /admin/notices were never routes at all, so clicking a merits hearing or an
+// EOIR notice produced "Cannot GET". An Outlook event linked to
+// /admin/outlook-sync, which is the feed's settings page rather than the event,
+// so it looked like the calendar was broken.
+function eventHref(event) {
+  const ref = event.source_refs?.[0] || { source: event.source, id: event.source_id };
+  switch (ref.source) {
+    case "hearing_note_upcoming":
+    case "hearing_note_past":
+      return ref.id ? `/admin/hearing/notes/${encodeURIComponent(ref.id)}` : null;
+    case "individual_hearing":
+    case "individual_upcoming":
+      return ref.id ? `/admin/hearing/individual/${encodeURIComponent(ref.id)}` : null;
+    case "hearing_notice":
+      // The notices page is per client, and only the notices query carries the key.
+      return event.client_key
+        ? `/admin/clients/${encodeURIComponent(event.client_key)}/hearing-notices`
+        : null;
+    case "deadline":
+      return "/admin/deadlines";
+    case "outlook_event":
+      // A synced event has no record of its own here, and the sync settings page
+      // is not this event. Better to show it as text than to mislead.
+      return null;
+    default:
+      return null;
+  }
+}
+
+// The day a month cell points at, as the list view's own date filter.
+function dayListHref(year, month, day) {
+  const key = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return `/admin/calendar?view=list&from=${key}&to=${key}`;
+}
+
 function renderEventCard(event, isPast) {
   const color = EVENT_COLORS[event.source] || EVENT_COLORS.hearing;
   const dt = new Date(event.event_date);
@@ -809,23 +851,16 @@ function renderEventCard(event, isPast) {
     ? Array.from(new Set(event.sources)).map(s => SOURCE_LABELS[s] || s)
     : [SOURCE_LABELS[event.source] || event.source];
 
-  // Build link to source
-  let linkHref = "#";
-  const primaryRef = event.source_refs?.[0] || { source: event.source, id: event.source_id };
-  if (primaryRef.source === "hearing_note_upcoming" || primaryRef.source === "hearing_note_past") {
-    linkHref = `/admin/hearing/notes/${primaryRef.id}`;
-  } else if (primaryRef.source === "individual_hearing" || primaryRef.source === "individual_upcoming") {
-    linkHref = `/admin/individual-hearings/${primaryRef.id}`;
-  } else if (primaryRef.source === "hearing_notice") {
-    linkHref = `/admin/notices`;
-  } else if (primaryRef.source === "deadline") {
-    linkHref = `/admin/deadlines`;
-  } else if (primaryRef.source === "outlook_event") {
-    linkHref = `/admin/outlook-sync`;
-  }
+  const href = eventHref(event);
+  const cardCss = `display:block; background:white; padding:12px 14px; border-radius:6px; border:1px solid #eee; border-left:4px solid ${color}; margin-bottom:6px; text-decoration:none; color:inherit; opacity:${opacity}; transition:box-shadow .1s;`;
+  const hover = ` onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)';" onmouseout="this.style.boxShadow='none';"`;
+  const cardOpen = href
+    ? `<a href="${href}" style="${cardCss} cursor:pointer;"${hover}>`
+    : `<div style="${cardCss} cursor:default;">`;
+  const cardClose = href ? "</a>" : "</div>";
 
   return `
-    <a href="${linkHref}" style="display:block; background:white; padding:12px 14px; border-radius:6px; border:1px solid #eee; border-left:4px solid ${color}; margin-bottom:6px; text-decoration:none; color:inherit; opacity:${opacity}; transition:box-shadow .1s;" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)';" onmouseout="this.style.boxShadow='none';">
+    ${cardOpen}
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
         <div style="flex:1;">
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -844,7 +879,7 @@ function renderEventCard(event, isPast) {
           <div style="font-size:15px; font-weight:600; color:${isPast ? '#888' : brand.navy};">${timeStr}</div>
         </div>
       </div>
-    </a>`;
+    ${cardClose}`;
 }
 
 // ─── Month grid view ─────────────────────────────────
@@ -898,15 +933,32 @@ function renderMonthView(events, monthYear) {
       const dt = new Date(e.event_date);
       const timeStr = dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
       const label = e.client_name ? e.client_name.split(",")[0].substring(0, 12) : "?";
-      return `<div title="${escapeHtml(timeStr + ' ' + (e.client_name || ''))}" style="background:${color}; color:white; padding:2px 5px; border-radius:3px; font-size:10px; margin-bottom:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-        ${escapeHtml(timeStr.replace(":00", ""))} ${escapeHtml(label)}
-      </div>`;
+      // A chip is the only handle on an event in this view, so it has to be the
+      // link. These were plain divs with a tooltip: nothing in the month grid
+      // could be opened at all.
+      const chipCss = `display:block; background:${color}; color:white; padding:2px 5px; border-radius:3px; font-size:10px; margin-bottom:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-decoration:none;`;
+      const tip = escapeHtml(timeStr + " " + (e.client_name || ""));
+      const chip = `${escapeHtml(timeStr.replace(":00", ""))} ${escapeHtml(label)}`;
+      const chipHref = eventHref(e);
+      return chipHref
+        ? `<a href="${chipHref}" title="${tip}" style="${chipCss} cursor:pointer;">${chip}</a>`
+        : `<div title="${tip}" style="${chipCss} cursor:default;">${chip}</div>`;
     }).join("");
-    const overflowLabel = dayEvents.length > 4 ? `<div style="font-size:10px; color:#666; font-weight:600;">+${dayEvents.length - 4} more</div>` : "";
+    // Only four chips fit, and the cell clips the rest. "+N more" was plain
+    // text, so a day with five or more events hid some of them with no way to
+    // reach them. Both it and the date now open that one day in the list view.
+    const dayHref = dayListHref(currentYear, currentMonth, day);
+    const overflowLabel = dayEvents.length > 4
+      ? `<a href="${dayHref}" style="display:block; font-size:10px; color:#666; font-weight:600; text-decoration:none; margin-top:2px;">+${dayEvents.length - 4} more ›</a>`
+      : "";
+    const dayLabel = `${day}${isToday ? " \u00b7 Today" : ""}`;
+    const dayNumHtml = dayEvents.length
+      ? `<a href="${dayHref}" title="${dayEvents.length} event(s) on this day" style="text-decoration:none; color:inherit;">${dayLabel}</a>`
+      : dayLabel;
 
     cells.push(`
       <div style="background:white; padding:6px; min-height:110px; border:1px solid #f0f0f0; ${isToday ? `background:#fff8e1; border:2px solid ${brand.gold};` : ""} display:flex; flex-direction:column;">
-        <div style="font-size:12px; color:${isToday ? brand.gold : '#333'}; font-weight:${isToday ? '700' : '500'}; margin-bottom:4px;">${day}${isToday ? " · Today" : ""}</div>
+        <div style="font-size:12px; color:${isToday ? brand.gold : '#333'}; font-weight:${isToday ? '700' : '500'}; margin-bottom:4px;">${dayNumHtml}</div>
         <div style="flex:1; overflow:hidden;">
           ${eventsHtml}
           ${overflowLabel}
@@ -947,6 +999,8 @@ module.exports = {
   renderCalendarPage,
   renderListView,
   renderMonthView,
+  eventHref,
+  dayListHref,
   EVENT_COLORS,
   SOURCE_LABELS,
 };
