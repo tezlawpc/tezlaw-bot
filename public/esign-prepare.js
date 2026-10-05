@@ -28,7 +28,7 @@
   var SIGNER_COLORS = ["#C2410C", "#0F766E", "#6D28D9", "#1D4ED8", "#BE185D", "#2F6B3F", "#854D0E", "#0E7490", "#7F1D1D", "#4338CA"];
   // Sizes in PDF points (1/72 inch), turned into fractions of the page they land on.
   var TYPES = {
-    signature: { label: "Signature", short: "Sign", w: 170, h: 38 },
+    signature: { label: "Signature", short: "Sign", w: 150, h: 32 },
     initials: { label: "Initials", short: "Init", w: 54, h: 32 },
     date: { label: "Date signed", short: "Date", w: 84, h: 18 },
     name: { label: "Full name", short: "Name", w: 160, h: 18 },
