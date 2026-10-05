@@ -145,14 +145,24 @@ check("a mail failure does not lose the signed document", () => {
   const i = esign.indexOf("copies = await require(\"./esign-pdf\").emailCopies");
   assert.ok(i > -1);
   const after = esign.slice(i);
-  assert.ok(/catch \(e\) \{ errors\.push\("signed copies were not emailed/.test(after));
+  // Caught and logged, never pushed into the filing errors — see the check
+  // below. What matters here is that the signed PDF is saved afterwards
+  // regardless, so a bounced client address cannot leave the firm without
+  // the signed file.
+  assert.ok(/catch \(e\) \{\s*\n\s*console\.warn\("\[esign\] signed copies were not emailed/.test(after),
+    "a mail failure must be caught, not thrown into finalize");
   assert.ok(after.indexOf("UPDATE esign_packets SET signed_pdf") > -1,
     "the signed PDF is still saved after the copies are attempted");
 });
 
-check("a failure to email is recorded on the packet, not swallowed", () => {
-  assert.ok(/finalize_error/.test(esign));
-  assert.ok(/copies_sent/.test(esign), "and a success is logged as an event");
+check("a failure to email is recorded on the event log, not in finalize_error", () => {
+  // finalize_error means the signed document could not be FILED. A copy that
+  // did not go out is a different fact, and putting it there made a filed
+  // document look unfiled — which is what check-esign.js caught.
+  assert.ok(/copies_failed/.test(esign), "a failure should be logged as an event");
+  assert.ok(/copies_sent/.test(esign), "and so should a success");
+  assert.ok(!/errors\.push\(\.\.\.copies\.errors\)/.test(esign),
+    "a mail problem must not become a filing error");
 });
 
 // ── Addresses are not interpolated blindly ─────────────────

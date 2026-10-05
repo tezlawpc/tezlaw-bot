@@ -218,7 +218,8 @@ function fakeImap(messages, validity = 7, uidNext = null) {
     deadlines: [{ date: "2026-09-23", description: "Opposition", computed: true, rule: "CCP 1005(b)", evidence: "hearing on October 14, 2026 is VACATED" },
                 { date: "2027-01-05", description: "Reply", evidence: "Notice of Hearing" }] },
     "Notice of Hearing. The hearing on October 14, 2026 is VACATED.");
-  check("a vacated hearing is not calendared", () => c2.hearings.length === 0 && c2.dropped.some(d => /vacated/.test(d)));
+  check("a vacated hearing is not calendared, and is recorded as vacated",
+    () => c2.hearings.length === 0 && (c2.vacated || []).some(v => /vacat/i.test(v.evidence || "")));
   check("a deadline Zara calculated, or one the quote does not state, is only a suggestion", () => c2.deadlines.length === 0 && c2.suggested.length === 2);
 
   console.log("\n── Collecting from the mailbox ─────────────────");

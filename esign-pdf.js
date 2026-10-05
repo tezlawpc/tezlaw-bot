@@ -591,8 +591,10 @@ async function finalize(id) {
   let copies = { sent: [], errors: [] };
   if (p.email_copies !== false) {
     copies = await emailCopies(done, pdf);
-    errors.push(...copies.errors);
     if (copies.sent.length) await E().logEvent(p.id, "copies_sent", { detail: `Signed copy emailed to ${copies.sent.join(", ")}` });
+    // Same reasoning as esign.js finalize: finalize_error is about filing the
+    // signed document, not about posting copies of it.
+    if (copies.errors.length) await E().logEvent(p.id, "copies_failed", { detail: copies.errors.join("; ") });
   }
   await db.query(`UPDATE esign_packets SET dropbox_pdf = $2, finalize_error = $3 WHERE id = $1`, [p.id, pdfPath, errors.join("; ") || null]);
   await E().notify(done, `"${p.title}" is fully signed${pdfPath ? " and filed in Dropbox" : ""}`);

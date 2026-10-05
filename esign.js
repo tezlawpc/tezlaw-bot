@@ -1014,9 +1014,17 @@ async function finalize(id) {
   if (p.email_copies !== false) {
     try {
       copies = await require("./esign-pdf").emailCopies(done, pdf);
-      errors.push(...copies.errors);
       if (copies.sent.length) await logEvent(p.id, "copies_sent", { detail: `Signed copy emailed to ${copies.sent.join(", ")}` });
-    } catch (e) { errors.push("signed copies were not emailed: " + e.message); }
+      // NOT pushed into `errors`. finalize_error means the signed document
+      // could not be FILED — Dropbox down, the PDF not made. A copy that did
+      // not go out is a different thing, and folding the two together makes a
+      // document that IS filed look unfiled, and makes "file it again" look
+      // like it did not work. It goes on the document's own event log.
+      if (copies.errors.length) await logEvent(p.id, "copies_failed", { detail: copies.errors.join("; ") });
+    } catch (e) {
+      console.warn("[esign] signed copies were not emailed:", e.message);
+      try { await logEvent(p.id, "copies_failed", { detail: e.message }); } catch (x) { /* the document is filed either way */ }
+    }
   }
 
   await db.query(`UPDATE esign_packets SET signed_pdf = $2, dropbox_docx = $3, dropbox_pdf = $4, finalize_error = $5 WHERE id = $1`,
