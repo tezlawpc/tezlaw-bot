@@ -8853,6 +8853,12 @@ app.post("/telegram", async (req, res) => {
     // else typed there is staff talking to staff: no reply, no intake, no
     // history. /routing shows where each kind of alert is going.
     const tgOps = require("./tg-ops");
+    // Staff may ask Zara here, by @mention or /ask, and JJ links who may with
+    // /staff (tg-ask.js). She looks things up and changes nothing. Checked
+    // before the rule below, which still leaves everything else alone.
+    const tgAsk = require("./tg-ask");
+    if (await tgAsk.handleStaffCommand(msg)) return;
+    if (await tgAsk.handle(msg)) return;
     if (tgOps.isOpsChat(chatId) && !tgOps.allowedInOpsGroup(textForCmd)) return;
     if (await tgOps.handleRouting(msg)) return;
 

@@ -886,6 +886,7 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com${record}${recordRules}`;
 // to carry lives in the charter and is prepended by zara-core.
 module.exports = {
   chat,
+  executeTool,
   STAFF_TOOLS,
   STAFF_OPS,
   CLIENT_OPS,
