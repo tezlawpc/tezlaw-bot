@@ -283,6 +283,8 @@ const STRINGS = {
     hot_close: "Thank you, {name}. Based on what you've shared, this appears urgent. JJ will reach out within 4 hours during business hours (Mon-Fri 9-6 PT). Outside those hours, we'll call as soon as we're back. If truly emergency, call our main line: 626-678-8677.",
     warm_close: "Thank you, {name}. JJ will personally review your inquiry and reach out within 24 business hours. If you need to reach us sooner, call 626-678-8677.",
     cold_close: "Thanks for reaching out, {name}. We'll review your inquiry and follow up if it's a matter our firm can assist with. If it's outside our practice areas, we'll try to refer you elsewhere.",
+    ask_heard: "One last question, if you don't mind: how did you hear about us? For example a friend, Google, WeChat, or another lawyer.",
+    heard_thanks: "Thank you, that helps us.",
   },
   zh: {
     greeting: "您好!我是章律师事务所的AI助手Zara。我帮章律师筛选新的咨询。为了让律师能尽快回复您,我会问您几个问题。\n\n首先,请问您的姓名?",
@@ -293,6 +295,8 @@ const STRINGS = {
     hot_close: "谢谢您,{name}。根据您所提供的信息,此事看起来紧急。章律师会在4个营业小时内联系您(周一至周五 上午9点至下午6点 太平洋时间)。如果紧急情况,请拨打事务所主线:626-678-8677。",
     warm_close: "谢谢您,{name}。章律师会亲自审阅您的咨询,并在24个营业小时内回复。如需更快回复,请拨打626-678-8677。",
     cold_close: "谢谢您的咨询,{name}。我们会审阅您的咨询,如果是我们事务所可以协助的事项,会跟进联系。如果不在我们的业务范围内,我们会尽量为您推荐其他律师。",
+    ask_heard: "最后想请问一下:您是怎么知道我们的?例如朋友介绍、谷歌搜索、微信、小红书,或其他律师介绍。",
+    heard_thanks: "谢谢您,这对我们很有帮助。",
   },
   es: {
     greeting: "¡Hola! Soy Zara, la asistente virtual de Tez Law, P.C. Ayudo al abogado JJ Zhang a filtrar nuevas consultas. Para asegurar que alguien le responda rápidamente, le haré algunas preguntas.\n\nPrimero, ¿cómo se llama?",
@@ -303,6 +307,8 @@ const STRINGS = {
     hot_close: "Gracias, {name}. Según lo que ha compartido, esto parece urgente. JJ le contactará dentro de 4 horas hábiles (Lun-Vie 9-6 PT). Fuera de ese horario, le llamaremos cuando regresemos. Para emergencias, llame a: 626-678-8677.",
     warm_close: "Gracias, {name}. JJ revisará personalmente su consulta y responderá dentro de 24 horas hábiles. Si necesita hablar antes, llame al 626-678-8677.",
     cold_close: "Gracias por contactarnos, {name}. Revisaremos su consulta y responderemos si es un asunto en el que nuestra firma puede ayudar. Si está fuera de nuestras áreas de práctica, trataremos de referirle a otro abogado.",
+    ask_heard: "Una última pregunta, si no le molesta: ¿cómo supo de nosotros? Por ejemplo, un amigo, Google, WeChat u otro abogado.",
+    heard_thanks: "Gracias, eso nos ayuda.",
   },
 };
 
@@ -607,6 +613,15 @@ async function processIntakeMessage(platform, platformId, userMessage, options =
                        : "cold_close";
       reply = t(session.language, closeKey, { name: collected.name });
 
+      // One optional question after the close, so the firm can see which of
+      // its listings, posts and referrals bring people in. Not asked of an
+      // urgent lead: someone whose relative was just detained should not be
+      // asked a marketing question.
+      if (classification.level !== "hot") {
+        reply += "\n\n" + t(session.language, "ask_heard");
+        collected.heard_asked_at = Date.now();
+      }
+
       // Fire notifications (async, don't block reply)
       notifyJJ({ record, session, collected, classification }).catch(e => {
         console.error("[intake] notify JJ error:", e.message);
@@ -626,7 +641,25 @@ async function processIntakeMessage(platform, platformId, userMessage, options =
     // ── State: completed → session is done. Return handled=false so normal
     //    Claude chat takes over for any further messages ──
     else if (session.state === "completed") {
-      return { handled: false };
+      // The close asked how they heard about the firm. The next message,
+      // within half an hour, is read as the answer if it looks like one.
+      // A question or a new subject is left for the normal conversation.
+      const askedAt = Number(collected.heard_asked_at) || 0;
+      if (!askedAt || collected.heard_done || Date.now() - askedAt > 30 * 60 * 1000) {
+        return { handled: false };
+      }
+      collected.heard_done = true;
+      await updateSession(session.id, { collected });
+      const leadSources = require("./lead-sources");
+      if (!leadSources.looksLikeAnswer(userMessage)) {
+        return { handled: false };
+      }
+      const answer = leadSources.parseAnswer(userMessage);
+      await leadSources.record({
+        platform, platformId, caseType: collected.practice_area,
+        heard: answer.key, heardText: answer.text, channel: platform,
+      });
+      reply = t(session.language, "heard_thanks");
     }
 
     // Otherwise: unknown state

@@ -9351,6 +9351,10 @@ app.post("/webhook", handleWeChatMsg);
 // is what scripts/check-web-intake.js exists to catch.
 require("./web-intake").mount(app);
 
+// "How did you hear about us?": the answers the form and Zara collect, and
+// the page that counts them (/admin/lead-sources).
+require("./lead-sources").mount(app);
+
 app.post("/chat", async (req, res) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Content-Type");

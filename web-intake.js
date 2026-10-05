@@ -101,10 +101,16 @@ function validate(body) {
   const message = para(b.message, 1000);
   if (message.length < 10) return { ok: false, error: "Please tell us a little about your situation.", field: "message" };
   const lang = line(b.lang, 12).toLowerCase();
+  // "How did you hear about us?" is optional. A value that is not on the
+  // list is dropped rather than refused: the question must never cost the
+  // firm an intake.
+  const leadSources = require("./lead-sources");
+  const heard = leadSources.normalizeKey(b.heard);
   return {
     ok: true,
     intake: {
       name, phone: phoneRaw, digits, email, serviceKey, caseType: SERVICES[serviceKey], message,
+      heard, heardLabel: heard ? leadSources.OPTIONS.find(o => o.key === heard).en : "",
       lang: /^zh/.test(lang) ? "zh" : /^es/.test(lang) ? "es" : "en",
       source: line(b.source, 40) || "website form",
       platform: "website",
@@ -126,6 +132,7 @@ function teamText(i) {
     `📞 Phone: ${i.phone}`,
     i.email ? `📧 Email: ${i.email}` : null,
     `🌐 Browser language: ${i.lang}`,
+    i.heardLabel ? `📣 Heard about us: ${i.heardLabel}` : null,
     `📝 ${i.message}`,
     "",
     `🕐 ${nowPT()} PT · from ${i.source}`,
@@ -171,7 +178,8 @@ async function notifyEmail(i, deps) {
         ${row("Phone", esc(i.phone))}
         ${row("Email", i.email ? esc(i.email) : "Not given", true)}
         ${row("In their words", esc(i.message).replace(/\n/g, "<br>"))}
-        ${row("Sent", `${esc(nowPT())} PT, from ${esc(i.source)}`, true)}
+        ${row("Heard about us", i.heardLabel ? esc(i.heardLabel) : "Not answered", true)}
+        ${row("Sent", `${esc(nowPT())} PT, from ${esc(i.source)}`)}
       </table>
     </div>
     <div style="background:#2B2523;padding:14px 24px;text-align:center">
@@ -198,6 +206,11 @@ async function fileWithZara(i, deps) {
   });
   await step("message", () => db.saveMessage(i.platform, i.platformId, "user", inboxText(i)));
   await step("intake", () => db.saveIntake(i.platform, i.platformId, { name: i.name, issue: i.message, contact, caseType: i.caseType }));
+  await step("lead source", async () => {
+    if (!i.heard) return;
+    await (deps.leadSources || require("./lead-sources")).record({
+      platform: i.platform, platformId: i.platformId, caseType: i.caseType, heard: i.heard, channel: "website form" });
+  });
   await step("lead", async () => {
     const lead = await db.createLead({ platform: i.platform, platformId: i.platformId, name: i.name, contact, caseType: i.caseType });
     if (!lead) return;
@@ -214,13 +227,19 @@ function mount(app, overrides = {}) {
     get axios()      { return overrides.axios      || require("axios"); },
     get nodemailer() { return overrides.nodemailer || require("nodemailer"); },
     get db()         { return overrides.db         || require("./db"); },
+    get leadSources(){ return overrides.leadSources || require("./lead-sources"); },
   };
 
   app.options("/intake/web", (req, res) => { cors(req, res); res.sendStatus(200); });
 
   // The page asks this before showing the form, so the form never appears
-  // on a day this module is not deployed.
-  app.get("/intake/web", (req, res) => { cors(req, res); res.json({ ok: true, form: "web-intake", version: 1 }); });
+  // on a day this module is not deployed. From version 2 the answer also
+  // carries the "How did you hear about us?" choices, so the page can offer
+  // the question without holding its own copy of the list.
+  app.get("/intake/web", (req, res) => {
+    cors(req, res);
+    res.json({ ok: true, form: "web-intake", version: 2, heard: deps.leadSources.publicOptions() });
+  });
 
   app.post("/intake/web", async (req, res) => {
     cors(req, res);

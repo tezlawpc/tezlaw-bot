@@ -1706,6 +1706,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/panel/pipeline" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◪</span><span class="nav-label">Pipeline</span>
       </a>
+      <a href="/admin/lead-sources" class="nav-link" data-perm="matters.access">
+        <span class="nav-icon">◎</span><span class="nav-label">Lead Sources</span>
+      </a>
       <a href="/admin/panel/drip" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◍</span><span class="nav-label">Drip Campaigns</span>
       </a>

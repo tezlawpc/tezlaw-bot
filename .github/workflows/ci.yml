@@ -115,6 +115,9 @@ jobs:
       - name: Public intake form
         run: node scripts/check-web-intake.js
 
+      - name: Lead sources
+        run: node scripts/check-lead-sources.js
+
       # A document uploaded for signature: the fields a signer fills must land
       # where staff placed them, on rotated and cropped pages too, and nobody
       # outside the client's team may open the packet.
@@ -204,13 +207,13 @@ jobs:
       # Court mail put hearings on the calendar and never took one off, so a
       # continuance produced half an update: the new date went on and the old
       # one stayed. A hearing nobody is going to hides the one that matters.
-      - name: Court mail: hearings off calendar
+      - name: "Court mail: hearings off calendar"
         run: node scripts/check-court-mail-vacate.js
 
       # One address holding every court notice, with the deadline reading
       # attached. The guard that matters: copying to the mailbox being read
       # would forward every message to itself, forever.
-      - name: Court mail: the docket mailbox
+      - name: "Court mail: the docket mailbox"
         run: node scripts/check-court-mail-docket.js
 
       # ── The real server against a real database ──────────────────────
