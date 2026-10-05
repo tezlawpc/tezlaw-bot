@@ -189,8 +189,8 @@ const TEMPLATES = {
   tm_application: [
     "Conduct trademark clearance search",
     "Prepare specimen and description of use",
-    "File application with USPTO (TEAS)",
-    "Await examining attorney review (2-3 months)",
+    "File application in USPTO Trademark Center; save filing receipt",
+    "Await examining attorney review (first action averages 4 to 5 months)",
     "Respond to any office actions",
     "Publication for opposition",
     "Registration certificate issued",
@@ -199,7 +199,7 @@ const TEMPLATES = {
     "Review office action objections",
     "Draft substantive response with legal argument",
     "Client review and approval",
-    "File response with USPTO before deadline (usually 3-6 months)",
+    "File response before deadline (3 months from issue; one 3-month extension for $125)",
     "Await examiner's next action",
   ],
   tm_sou: [

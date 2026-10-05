@@ -605,6 +605,31 @@
   :focus-visible { outline:2px solid var(--mark); outline-offset:2px; }
   input:focus, select:focus, textarea:focus { box-shadow:0 0 0 3px rgba(255,123,0,.22); }
   @media (max-width: 720px) { html.embed .app { padding:14px 14px 50px; } }
+
+  /* Firm staff reach this page for TRADEMARK matters only (see matterAccess
+     in matter-manager.js, which is what enforces it). What they cannot use
+     is not drawn. */
+  html.scope-tm .nav-btn[data-view="inbox"],
+  html.scope-tm .nav-btn[data-view="courts"],
+  html.scope-tm .nav-btn[data-view="reference"],
+  html.scope-tm #import-btn,
+  html.scope-tm .nef-intake:not(.uspto-intake),
+  html.scope-tm .order-parser,
+  html.scope-tm #archive-btn, html.scope-tm #restore-btn, html.scope-tm #delete-btn,
+  html.scope-tm .deadline .remove { display:none !important; }
+  /* …and someone who may look but not change sees no controls that change. */
+  html.read-only #show-new-matter,
+  html.read-only #add-deadline,
+  html.read-only .deadline .actions,
+  html.read-only .add-link-form,
+  html.read-only .files-card .del,
+  html.read-only .lc-btn-group:not(#tsdr-card),
+  html.read-only #tsdr-check-btn,
+  html.read-only #gen-client-summary,
+  html.read-only #dl-calc { display:none !important; }
+  html.read-only .dl-title-display, html.read-only .dl-date-display, html.read-only ul.check li { pointer-events:none; cursor:default; }
+  .scope-note { display:none; margin:0 0 14px; padding:10px 14px; border-left:3px solid var(--mark); background:var(--paper-2); font-size:12px; color:var(--ink); }
+  html.scope-tm .scope-note { display:block; }
 </style>
 </head>
 <body>
@@ -630,12 +655,14 @@
 
   <!-- ACTIVE MATTERS -->
   <section class="panel active" id="view-active">
+    <div class="scope-note" id="scope-note"></div>
     <div class="page-head">
       <div>
-        <h2>Active Matters</h2>
-        <div class="sub">All cases · sorted by next deadline</div>
+        <h2 id="active-heading">Active Matters</h2>
+        <div class="sub" id="active-sub">All cases · sorted by next deadline</div>
       </div>
       <div class="actions">
+        <button class="btn ghost" id="show-all-matters" style="display:none;" onclick="clearTypeFilter()">Show All Matters</button>
         <button class="btn ghost" id="export-all-ics-btn">Export All to Calendar</button>
         <button class="btn ghost" id="export-btn">Backup JSON</button>
         <button class="btn ghost" id="import-btn">Restore</button>
@@ -1409,8 +1436,8 @@ const CHECKLISTS = {
     { id:"uscis-7", text:"Interview scheduled / completed",        cite:"" }
   ]},
   Trademark: { heading:"Trademark · USPTO Prosecution", cite:"15 U.S.C. § 1051 · TMEP", items:[
-    { id:"tm-1",  text:"Conflict / clearance search completed (TESS + common law)",         cite:"TMEP §§ 1207-1208" },
-    { id:"tm-2",  text:"Application drafted (TEAS Plus or Standard)",                        cite:"15 U.S.C. § 1051(a)/(b)" },
+    { id:"tm-1",  text:"Conflict / clearance search completed (USPTO Trademark Search + state + common law)", cite:"TMEP §§ 1207-1208" },
+    { id:"tm-2",  text:"Application drafted in Trademark Center (base application)",          cite:"15 U.S.C. § 1051(a)/(b)" },
     { id:"tm-3",  text:"Goods/services per ID Manual; class(es) confirmed",                  cite:"TMEP § 1402" },
     { id:"tm-4",  text:"Filing basis selected: 1(a) / 1(b) / 44(e) / 66(a)",                 cite:"15 U.S.C. § 1051" },
     { id:"tm-5",  text:"Specimen acceptable (1(a) only)",                                    cite:"TMEP § 904" },
@@ -1549,6 +1576,51 @@ function showView(view) {
 document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
 const START_VIEW = (location.hash || '').replace('#', '');
 
+// ── Who is looking, and at what ─────────────────────────────
+// ME comes from /api/me. scope "trademark" = a staff member: the server
+// sends them Trademark matters only and refuses everything else, so this
+// only decides what is drawn. typeFilter narrows the active list to one
+// matter type (the sidebar's Trademarks link, for JJ too).
+let ME = { scope: 'all', can_write: true };
+let typeFilter = null;
+function showHeading() {
+  const h = document.getElementById('active-heading'), sub = document.getElementById('active-sub');
+  h.textContent = typeFilter ? 'Trademark Matters' : 'Active Matters';
+  sub.textContent = typeFilter ? 'USPTO · sorted by next deadline' : 'All cases · sorted by next deadline';
+  // JJ can widen the list again; for staff it is the only list there is.
+  const all = document.getElementById('show-all-matters');
+  if (all) all.style.display = (typeFilter && ME.scope === 'all') ? '' : 'none';
+}
+function clearTypeFilter() {
+  if (ME.scope !== 'all') return;
+  typeFilter = null; showHeading();
+  renderMatterList(); renderOverviewStats(); renderBadges();
+}
+function applyScope() {
+  const root = document.documentElement;
+  const staff = ME.scope === 'trademark';
+  root.classList.toggle('scope-tm', staff);
+  root.classList.toggle('read-only', !ME.can_write);
+  if (staff || START_VIEW === 'trademarks') typeFilter = 'Trademark';
+  showHeading();
+  const note = document.getElementById('scope-note');
+  if (staff) {
+    note.textContent = ME.can_write
+      ? 'Trademark matters. You can open a matter, record USPTO dates, add and complete deadlines, and tick the checklist. Archiving a matter and removing a deadline are done by JJ.'
+      : 'Trademark matters, view only.';
+    // The form's examples are for the kinds of matter JJ opens; staff get plain ones.
+    const ph = { 'nm-client': 'e.g., the mark owner', 'nm-owner-name': 'Exact legal name of the owner' };
+    Object.keys(ph).forEach(id => { const el = document.getElementById(id); if (el) el.placeholder = ph[id]; });
+    // Staff open Trademark matters only.
+    const sel = document.getElementById('nm-type');
+    [...sel.options].forEach(o => { if (o.value !== 'Trademark') o.remove(); });
+    sel.value = 'Trademark';
+    toggleIpFields();
+    const notes = document.getElementById('matter-notes');
+    if (notes && !ME.can_write) notes.readOnly = true;
+  }
+}
+
 // ============================================================
 // MATTER LIST
 // ============================================================
@@ -1563,11 +1635,16 @@ function nextDeadlineFor(matter) {
   return open[0] || null;
 }
 
+// The matters the current view is about: all of them, or one type when the
+// list has been narrowed (the Trademarks link; always, for staff).
+function inView(m) { return !typeFilter || m.type === typeFilter; }
 function renderMatterList() {
   const list = document.getElementById('matter-list');
-  const active = state.matters.filter(m => !m.archived);
+  const active = state.matters.filter(m => !m.archived && inView(m));
   if (active.length === 0) {
-    list.innerHTML = `<div class="empty">No active matters. Click <strong>+ New Matter</strong> above to open your first case.</div>`;
+    list.innerHTML = typeFilter
+      ? `<div class="empty">No active trademark matters.${ME.can_write ? ' Click <strong>+ New Matter</strong> above to open one.' : ''}</div>`
+      : `<div class="empty">No active matters. Click <strong>+ New Matter</strong> above to open your first case.</div>`;
     return;
   }
   const decorated = active.map(m => ({ m, next: nextDeadlineFor(m) }));
@@ -1649,7 +1726,7 @@ function matterTypeLabel(t) {
 
 function renderOverviewStats() {
   const c = document.getElementById('overview-stats');
-  const active = state.matters.filter(m => !m.archived);
+  const active = state.matters.filter(m => !m.archived && inView(m));
   // Open-deadline count includes everything (so the firm knows total workload),
   // but overdue/urgent/next exclude Govt/Opp (those aren't your action items).
   const totalDL = active.reduce((s,m) => s + (m.deadlines || []).filter(d => !d.done).length, 0);
@@ -1707,8 +1784,8 @@ function renderOverviewStats() {
 }
 
 function renderBadges() {
-  document.getElementById('badge-active').textContent = state.matters.filter(m => !m.archived).length;
-  document.getElementById('badge-archive').textContent = state.matters.filter(m => m.archived).length;
+  document.getElementById('badge-active').textContent = state.matters.filter(m => !m.archived && inView(m)).length;
+  document.getElementById('badge-archive').textContent = state.matters.filter(m => m.archived && inView(m)).length;
   const inboxBadge = document.getElementById('badge-inbox');
   if (inboxBadge) {
     const n = state.proposalCounts?.pending || 0;
@@ -1735,6 +1812,7 @@ async function loadProposalCounts() {
 // ============================================================
 document.getElementById('show-new-matter').addEventListener('click', () => {
   document.getElementById('new-matter-form').style.display = 'block';
+  if (typeFilter) { document.getElementById('nm-type').value = typeFilter; toggleIpFields(); }
   document.getElementById('nm-client').focus();
 });
 document.getElementById('nm-cancel').addEventListener('click', () => {
@@ -1842,6 +1920,8 @@ document.getElementById('nm-save').addEventListener('click', async () => {
     payload.owner_email   = newMatterLocal.owner_email;
     const r = await api('/matters', { method: 'POST', body: payload });
     if (!r?.matter?.id) throw new Error('No id returned');
+    // Opened another kind of matter from the narrowed list: show the whole list again.
+    if (typeFilter && r.matter.case_type !== typeFilter) clearTypeFilter();
     await reloadMatter(r.matter.id);
     document.getElementById('nm-cancel').click();
     currentMatterId = r.matter.id;
@@ -2106,7 +2186,7 @@ function renderMatterDetail() {
       <div><dt>${m.type === 'Trademark' ? 'Filed' : 'Filed / Recorded'}</dt><dd>${m.trigger ? dayLabel(m.trigger) : (m.created ? dayLabel(m.created) : '—')}</dd></div>
       ${m.serial_number ? `<div><dt>Serial / App / Reg</dt><dd>${escapeHtml(m.serial_number)}</dd></div>` : ''}
       ${m.intl_class ? `<div><dt>Int'l Class</dt><dd>${escapeHtml(m.intl_class)}</dd></div>` : ''}
-      ${m.filing_basis ? `<div><dt>Filing Basis</dt><dd>${filingBasisLabel}</dd></div>` : ''}
+      ${m.filing_basis ? `<div><dt>Filing Basis</dt><dd>${escapeHtml(filingBasisLabel)}</dd></div>` : ''}
       ${m.mark_format ? `<div><dt>Mark Format</dt><dd>${escapeHtml(m.mark_format)}</dd></div>` : ''}
       ${m.owner_email ? `<div><dt>Owner Email</dt><dd><a href="mailto:${escapeAttr(m.owner_email)}" style="color:var(--brand);">${escapeHtml(m.owner_email)}</a></dd></div>` : ''}
       ${m.relief ? `<div><dt>Goods / Services</dt><dd>${escapeHtml(m.relief)}</dd></div>` : ''}
@@ -2191,11 +2271,25 @@ function renderIpLifecycle(m) {
       event: 'tm_examination',
       label: 'Filing Watch',
       title: 'Add Examination Watch Events',
-      hint: 'Informational events: expected OA, publication, opposition window',
+      hint: 'Expected first action (~5 mo) and publication, plus TSDR status checks at 3, 6, 9 and 12 months',
       defaultAnchor: m.trigger || m.created || ''
     });
+    buttons.push({
+      event: 'tm_office_action',
+      label: 'Office Action Received',
+      title: 'Record Office Action Issue Date',
+      hint: 'Application office actions only. Response or extension due 3 mo from issue; last day 6 mo if extended ($125). Use again for each new action.',
+      defaultAnchor: ''
+    });
+    buttons.push({
+      event: 'tm_publication',
+      label: 'Published',
+      title: 'Record Publication Date',
+      hint: '30-day opposition period, then a TSDR check for registration (1(a)) or NOA (1(b))',
+      defaultAnchor: ''
+    });
     // Only show NOA button if filing basis is 1(b) or unset
-    if (!m.filing_basis || m.filing_basis === '1(b)') {
+    if (!m.filing_basis || /1\s*\(?\s*b\s*\)?/i.test(m.filing_basis)) {
       buttons.push({
         event: 'tm_noa',
         label: 'NOA Received',
@@ -2208,7 +2302,7 @@ function renderIpLifecycle(m) {
       event: 'tm_registration',
       label: 'Registered',
       title: 'Record Registration Date',
-      hint: 'Generates § 8 (yr 5-6) and § 8/§ 9 renewal (yr 9-10) deadlines',
+      hint: 'Generates § 8 (yr 5-6) and § 8/§ 9 renewal (yr 9-10) deadlines, with grace-period end dates',
       defaultAnchor: ''
     });
   } else if (m.type === 'Patent') {
@@ -2250,7 +2344,21 @@ function renderIpLifecycle(m) {
     });
   }
 
-  container.innerHTML = buttons.map((b, idx) => `
+  // USPTO status card (Trademark only). Filled in by loadTsdrCard().
+  const tsdrCard = (m.type === 'Trademark') ? `
+    <div class="lc-btn-group" id="tsdr-card" style="flex-basis:100%;">
+      <span class="lc-label">USPTO status (TSDR)</span>
+      <span class="lc-title" id="tsdr-status-line">Loading…</span>
+      <span class="ord" id="tsdr-detail-line" style="font-size:10px;"></span>
+      <div class="lc-action">
+        <button class="btn small" id="tsdr-check-btn">Check USPTO now</button>
+        <a id="tsdr-open-link" target="_blank" rel="noopener" style="display:none; font-family:var(--mono); font-size:10px;">Open in TSDR ↗</a>
+      </div>
+      <span class="lc-status" id="tsdr-check-status"></span>
+      <pre id="tsdr-summary" style="display:none; white-space:pre-wrap; font-family:var(--mono); font-size:10px; line-height:1.5; margin:6px 0 0; padding:10px; border:1px solid var(--rule); background:var(--paper);"></pre>
+    </div>` : '';
+
+  container.innerHTML = tsdrCard + buttons.map((b, idx) => `
     <div class="lc-btn-group">
       <span class="lc-label">${escapeHtml(b.label)}</span>
       <span class="lc-title">${escapeHtml(b.title)}</span>
@@ -2262,6 +2370,8 @@ function renderIpLifecycle(m) {
       <span class="lc-status" id="lc-status-${idx}"></span>
     </div>
   `).join('');
+
+  if (m.type === 'Trademark') loadTsdrCard(m);
 
   container.querySelectorAll('.lc-go').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -2289,8 +2399,9 @@ function renderIpLifecycle(m) {
           : `✓ Added ${r.added_count} deadline${r.added_count === 1 ? '' : 's'}`;
         statusEl.textContent = msg;
         statusEl.className = 'lc-status ok';
-        // Refresh the matter so the new deadlines appear
-        await reloadMatter(m.id);
+        // Refresh the matter and redraw, so the new deadlines appear at once
+        const fresh = await reloadMatter(m.id);
+        if (fresh) { renderMatterStats(fresh); renderDeadlines(fresh); }
       } catch (e) {
         statusEl.textContent = '⚠ ' + e.message;
         statusEl.className = 'lc-status err';
@@ -2298,6 +2409,94 @@ function renderIpLifecycle(m) {
         btn.disabled = false;
       }
     });
+  });
+}
+
+// ============================================================
+// USPTO STATUS CARD (Trademark matters) — data from tsdr-sync.js
+// ============================================================
+async function loadTsdrCard(m) {
+  const line   = document.getElementById('tsdr-status-line');
+  const detail = document.getElementById('tsdr-detail-line');
+  const btn    = document.getElementById('tsdr-check-btn');
+  const link   = document.getElementById('tsdr-open-link');
+  const out    = document.getElementById('tsdr-check-status');
+  if (!line || !btn) return;
+
+  // 8 digits = serial number, 7 digits = registration number
+  const digits = String(m.serial_number || '').replace(/\D/g, '');
+  const trackable = digits.length === 8 || digits.length === 7;
+  if (trackable) {
+    link.href = 'https://tsdr.uspto.gov/#caseNumber=' + digits + '&caseType=' + (digits.length === 7 ? 'US_REGISTRATION_NO' : 'SERIAL_NO') + '&searchType=statusSearch';
+    link.style.display = '';
+  }
+
+  function show(s) {
+    const st = s && s.status;
+    if (!trackable) {
+      line.textContent = 'Not checked: no USPTO number on this matter';
+      detail.textContent = 'Add the 8-digit serial number (or 7-digit registration number) and the daily check starts.';
+      btn.disabled = true;
+      return;
+    }
+    if (s && s.enabled === false) {
+      line.textContent = 'Not checked: the automatic check is off';
+      detail.textContent = 'USPTO_API_KEY is not set on the server.';
+      btn.disabled = true;
+      return;
+    }
+    if (s && s.matter_status && s.matter_status !== 'active') {
+      line.textContent = (st && st.status_desc) || 'Not checked';
+      detail.textContent = 'This matter is not active, so the daily check skips it. Reactivate it to resume checking.';
+      btn.disabled = true;
+      return;
+    }
+    if (!st || (!st.last_ok_at && !st.last_error)) {
+      line.textContent = 'Not checked yet';
+      detail.textContent = 'Checked every morning at 6:40 AM Pacific. Use the button to check now.';
+      return;
+    }
+    line.textContent = st.last_ok_at ? (st.status_desc || 'Status not stated') : 'Never read successfully';
+    const bits = [];
+    if (st.status_date) bits.push('status as of ' + st.status_date);
+    if (st.registration_number) bits.push('Reg. No. ' + st.registration_number);
+    if (st.last_ok_at) bits.push('last read ' + new Date(st.last_ok_at).toLocaleString('en-US'));
+    if (st.last_error) bits.push('⚠ last attempt failed: ' + st.last_error);
+    else bits.push('checked every morning');
+    detail.textContent = bits.join(' · ');
+  }
+
+  try { show(await api(`/matters/${m.id}/tsdr`)); }
+  catch (e) { line.textContent = 'Status unavailable'; detail.textContent = e.message; }
+
+  btn.addEventListener('click', async () => {
+    out.textContent = 'Checking the USPTO…'; out.className = 'lc-status';
+    btn.disabled = true;
+    try {
+      const r = await api(`/matters/${m.id}/tsdr/check`, { method: 'POST', body: {} });
+      const n = (r.added || []).length, p = (r.proposed || []).length, ev = (r.new_events || []).length;
+      const parts = [];
+      if (r.baseline) parts.push('tracking started');
+      else parts.push(ev ? ev + ' new entr' + (ev === 1 ? 'y' : 'ies') : 'no change');
+      if (n) parts.push(n + ' deadline' + (n === 1 ? '' : 's') + ' added');
+      if (p) parts.push(p + ' sent to the inbox');
+      const mm = (r.mismatches || []).length;
+      if (mm) parts.push(mm + ' date difference' + (mm === 1 ? '' : 's') + ' — read below');
+      out.textContent = (mm ? '⚠ ' : '✓ ') + parts.join(' · ');
+      out.className = 'lc-status ' + (mm ? 'err' : 'ok');
+      const sum = document.getElementById('tsdr-summary');
+      if (sum) { sum.textContent = r.summary || ''; sum.style.display = r.summary ? '' : 'none'; }
+      // Redraw the deadline list so anything added or ticked off shows at once
+      const fresh = await reloadMatter(m.id);
+      if (fresh) { renderMatterStats(fresh); renderDeadlines(fresh); }
+      show(await api(`/matters/${m.id}/tsdr`));
+    } catch (e) {
+      out.textContent = '⚠ ' + e.message;
+      out.className = 'lc-status err';
+    } finally {
+      const b = document.getElementById('tsdr-check-btn');
+      if (b) b.disabled = false;
+    }
   });
 }
 
@@ -3620,11 +3819,15 @@ document.getElementById('inbox-refresh').addEventListener('click', async () => {
 // ============================================================
 (async () => {
   if (!document.documentElement.classList.contains('embed')) return;   // on its way to the Tara page
+  try { const me = await api('/me'); if (me && me.scope) ME = me; } catch (e) { console.error('could not read /me:', e); }
+  applyScope();
   await loadState();
-  await loadProposalCounts();
+  if (ME.scope === 'trademark') state.proposalCounts = { pending: 0, by_matter: {} };   // the inbox is JJ's
+  else await loadProposalCounts();
   renderOverviewStats(); renderBadges();
   renderMatterList(); renderCourtLinks();
-  if (START_VIEW && START_VIEW !== 'detail' && document.getElementById('view-' + START_VIEW)) showView(START_VIEW);
+  if (START_VIEW && START_VIEW !== 'detail' && document.getElementById('view-' + START_VIEW)
+      && !(ME.scope === 'trademark' && ['inbox', 'courts', 'reference'].includes(START_VIEW))) showView(START_VIEW);
 })();
 </script>
 </body>

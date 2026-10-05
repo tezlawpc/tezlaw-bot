@@ -238,8 +238,150 @@ async function getStats() {
   return r.rows[0] || {};
 }
 
+// ─── Trademarks live in Matter Manager ──────────────────
+// Trademark matters are tracked in ONE place: Matter Manager
+// (/admin/matters), which has the deadline rules, the reminders and
+// the daily USPTO status check. This page no longer accepts new
+// trademark rows; the helpers below move the existing ones across.
+
+const MOVED_MARK = "[Moved to Matter Manager";
+const TM_DONE_STATUSES = ["closed", "abandoned", "denied", "settled"];
+
+function isTrademarkType(matterType) {
+  return TYPE_GROUPS[matterType] === "trademarks";
+}
+
+async function listTrademarksToMove() {
+  await initTable();
+  const keys = MATTER_TYPES.trademarks.map(t => t.key);
+  const r = await db.query(
+    `SELECT id, matter_type, client_name, matter_number, tm_mark, status
+       FROM federal_matters
+      WHERE matter_type = ANY($1)
+        AND status <> ALL($2)
+        AND COALESCE(notes, '') NOT LIKE '%' || $3 || '%'
+      ORDER BY id ASC`,
+    [keys, TM_DONE_STATUSES, MOVED_MARK]
+  );
+  return r.rows;
+}
+
+// Copies one trademark row into Matter Manager, carries its next
+// deadline across, then closes the row here with a note. Nothing is
+// deleted. Returns { matterId, deadlineCarried }.
+async function moveTrademarkToMatterManager(id) {
+  await initTable();
+  const r = await db.query(
+    `SELECT *, to_char(filing_date, 'YYYY-MM-DD') AS filing_date_s,
+               to_char(next_deadline_date, 'YYYY-MM-DD') AS next_deadline_s
+       FROM federal_matters WHERE id = $1`,
+    [id]
+  );
+  const row = r.rows[0];
+  if (!row) throw new Error("Matter not found");
+  if (!isTrademarkType(row.matter_type)) throw new Error("Only trademark rows move to Matter Manager");
+  if ((row.notes || "").includes(MOVED_MARK)) throw new Error("This row was already moved to Matter Manager");
+
+  // Matter Manager is single-owner: every matter belongs to the 'jj' user.
+  const u = await db.query(`SELECT id FROM users WHERE username = 'jj' LIMIT 1`);
+  const userId = u.rows[0] && u.rows[0].id;
+  if (!userId) throw new Error("Matter Manager owner account ('jj') not found");
+
+  const isTTAB = ["tm_opposition", "tm_cancellation", "tm_appeal_ttab"].includes(row.matter_type);
+  // 8 digits = serial number, 7 digits = registration number: both are checked
+  // daily against the USPTO. A TTAB row's number is a PROCEEDING number, not a
+  // serial number, so it is kept as the reference only and is not checked.
+  const digits = String(row.matter_number || "").replace(/\D/g, "");
+  const serial = !isTTAB && (digits.length === 8 || digits.length === 7) ? digits : null;
+  // "—", "TBD" and the like are placeholders, not numbers. Kept out of the
+  // reference field (which must be unique) and preserved in the notes instead.
+  const refAlnum = String(row.matter_number || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const isPlaceholder = !refAlnum || ["tbd", "na", "none", "pending", "unknown", "tba"].includes(refAlnum);
+  // Kept in the form the Matter Manager keeps a trademark's number in
+  // ("SN 97123456", "RN 5320233", "TTAB 91234567"), which no court docket
+  // number can equal. Anything else is carried over as it was written.
+  const matterRef = isPlaceholder ? null
+    : serial ? (digits.length === 8 ? "SN " : "RN ") + digits
+    : (isTTAB && /^9[1-4]\d{6}$/.test(digits)) ? "TTAB " + digits
+    : String(row.matter_number).substring(0, 100);
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+
+  const noteLines = [
+    `[Moved from the Federal & TM page on ${today}. Type there: ${TYPE_LABELS[row.matter_type] || row.matter_type}; status there: ${row.status}.]`,
+    row.opposing_party ? `Opposing party: ${row.opposing_party}` : null,
+    row.assigned_attorney ? `Attorney: ${row.assigned_attorney}` : null,
+    row.referral_source ? `Referral: ${row.referral_source}` : null,
+    row.dropbox_folder_path ? `Dropbox folder: ${row.dropbox_folder_path}` : null,
+    row.matter_number && isPlaceholder ? `Number as entered there: ${row.matter_number}` : null,
+    row.next_deadline_desc && !row.next_deadline_s ? `Next step noted there (no date was set): ${row.next_deadline_desc}` : null,
+    row.notes ? row.notes : null,
+  ].filter(Boolean);
+
+  // One trademark matter to a number, however the number was written on the
+  // matter that is already there ("97555123", "97/555,123", "SN 97555123").
+  const already = `Matter Manager already has a matter numbered ${row.matter_number}. Open that matter there; this row was left as it is.`;
+  if (matterRef && await require("./matter-manager").trademarkRefTaken(userId, matterRef, 0)) throw new Error(already);
+
+  let matterId;
+  try {
+    const ins = await db.query(
+      `INSERT INTO matters
+         (user_id, client_name, matter_ref, court, case_type, status, notes,
+          opened_date, serial_number, mark, intl_class, owner_name)
+       VALUES ($1, $2, $3, $4, 'Trademark', 'active', $5, $6, $7, $8, $9, $10)
+       RETURNING id`,
+      [userId,
+       String(row.client_name || "Unknown").substring(0, 200),
+       matterRef,
+       isTTAB ? "TTAB" : "USPTO",
+       noteLines.join("\n"),
+       row.filing_date_s || null,
+       serial,
+       row.tm_mark ? String(row.tm_mark).substring(0, 300) : null,
+       row.tm_class ? String(row.tm_class).substring(0, 40) : null,
+       row.tm_owner ? String(row.tm_owner).substring(0, 200) : null]
+    );
+    matterId = ins.rows[0].id;
+  } catch (err) {
+    if (err.code === "23505") {
+      throw new Error(already);
+    }
+    throw err;
+  }
+
+  let deadlineCarried = false;
+  if (row.next_deadline_s) {
+    try {
+      await db.query(
+        `INSERT INTO matter_deadlines (matter_id, title, citation, due_date, party, note)
+         VALUES ($1, $2, NULL, $3, 'us', $4)`,
+        [matterId,
+         String(row.next_deadline_desc || "Deadline carried over from the Federal & TM page").substring(0, 300),
+         row.next_deadline_s,
+         `Carried over from the Federal & TM page on ${today}. Confirm the date against the USPTO record.`]
+      );
+      deadlineCarried = true;
+    } catch (err) {
+      // Do not leave a matter behind without its deadline.
+      await db.query(`DELETE FROM matters WHERE id = $1`, [matterId]).catch(() => {});
+      throw new Error("Could not carry the deadline across, so nothing was moved: " + err.message);
+    }
+  }
+
+  await db.query(
+    `UPDATE federal_matters
+        SET status = 'closed',
+            notes = COALESCE(notes || E'\n', '') || $2,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [id, `${MOVED_MARK} as matter #${matterId} on ${today}. Track it there.]`]
+  );
+  return { matterId, deadlineCarried, tracked: !!serial, isTTAB };
+}
+
 module.exports = {
   initTable,
   MATTER_TYPES, TYPE_LABELS, TYPE_GROUPS, STATUSES, STATUS_COLORS,
   createMatter, updateMatter, deleteMatter, getMatter, listMatters, getStats,
+  isTrademarkType, listTrademarksToMove, moveTrademarkToMatterManager,
 };

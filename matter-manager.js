@@ -19,9 +19,359 @@ const path = require("path");
 const crypto = require("crypto");
 const https = require("https");
 const db = require("./db");
-const { requireAuth } = require("./admin");
+const { requireAuth: requireAdminAuth } = require("./admin");
 
 const router = express.Router();
+
+// ── Who may use the Matter Manager ────────────────────────
+// JJ (role "admin"): everything, as before.
+//
+// Firm staff: TRADEMARK matters only. JJ, asked whether staff need to see
+// trademark matters now that they live here: "Yes they do." They get what
+// they had on the Federal & TM page, by the same two permissions, so the
+// per-user switches on the Permissions page keep working:
+//     federal.read   see trademark matters
+//     federal.write  open a trademark matter and work on it
+//
+// Everything else in here stays JJ's: every other kind of matter, the
+// docket inbox, the court-order and NEF readers, email intake, archiving or
+// deleting a matter, and removing a deadline.
+//
+// The rule for staff is "refused unless listed". matterAccess (mounted in
+// front of this router in server.js) lets a staff request through only if
+// it matches a line of STAFF_ROUTES, and only after it has looked up the
+// matter the address names and found it to be a Trademark matter. A route
+// added to this file later is therefore closed to staff until someone adds
+// it to the list on purpose.
+const TM_TYPE = "Trademark";
+const STAFF_MATTER_POSTS = "deadlines|lifecycle|notes|files|tsdr/check|client-summary";
+const STAFF_ROUTES = [
+  { method: "GET",    re: /^\/$/ },
+  { method: "GET",    re: /^\/app$/ },
+  { method: "GET",    re: /^\/v2$/ },
+  { method: "GET",    re: /^\/api\/me$/ },
+  { method: "GET",    re: /^\/api\/matters$/ },                       // the handler lists Trademark matters only
+  { method: "GET",    re: /^\/api\/matters\/(\d{1,9})$/,                              matter: true },
+  { method: "GET",    re: /^\/api\/matters\/(\d{1,9})\/tsdr$/,                        matter: true },
+  { method: "POST",   re: /^\/api\/matters$/,                                     write: true, creates: true },
+  { method: "PATCH",  re: /^\/api\/matters\/(\d{1,9})$/,                              write: true, matter: true, edits: true },
+  { method: "POST",   re: new RegExp("^\\/api\\/matters\\/(\\d{1,9})\\/(?:" + STAFF_MATTER_POSTS + ")$"), write: true, matter: true },
+  { method: "POST",   re: /^\/api\/matters\/(\d{1,9})\/checklists\/template\/trademark$/, write: true, matter: true },
+  { method: "PATCH",  re: /^\/api\/matters\/(\d{1,9})\/deadlines\/(\d{1,9})$/,            write: true, matter: true, deadline: true },
+  { method: "DELETE", re: /^\/api\/matters\/(\d{1,9})\/(notes|files)\/(\d{1,9})$/, write: true, matter: true, removes: true },
+  { method: "PATCH",  re: /^\/api\/checklist-items\/(\d{1,9})$/,                      write: true, item: true },
+  { method: "POST",   re: /^\/api\/parse-uspto$/,                                write: true },
+];
+
+// What a staff member may set on a trademark matter. Not here on purpose:
+// status and case_type (archiving or re-typing is JJ's), court, and the
+// custody / petitioner fields that belong to other kinds of matter.
+const STAFF_MATTER_FIELDS = new Set([
+  "client_name", "matter_ref", "notes", "dropbox_url", "opened_date", "triggering_date", "relief_sought",
+  "serial_number", "mark", "mark_format", "filing_basis", "intl_class", "owner_name", "owner_email",
+]);
+const DEADLINE_FIELDS = ["title", "citation", "due_date", "party", "note", "completed"];
+
+// A matter's case number is shared by every kind of matter: it must be
+// unique, and it decides which matter an inbound court email is filed under.
+// So a trademark matter's case number is kept in one form, which no court
+// docket number or A-number can equal:
+//     "SN 97123456"    application serial number (8 digits)
+//     "RN 5320233"     registration number (7 digits; an older, shorter one
+//                      must be written with "RN" or "Reg. No." in front)
+//     "TTAB 91234567"  Board proceeding number (8 digits beginning 91–94)
+// A staff member may enter nothing else. ("cv" as a case number would have
+// caught every court email the firm receives; a bare 2612345 would have
+// blocked JJ from opening Ninth Circuit No. 26-12345.) What the person wrote
+// in front of the number is honoured, never overridden: "RN 97123456" is
+// refused, not quietly filed as a serial number.
+function usptoRef(v) {
+  if (typeof v !== "string" || v.length > 100) return null;     // the column holds 100; and nothing long is ever matched
+  const m = /^(?:(sn|serial(?:\s+no\.?)?|rn|reg(?:istration)?\.?(?:\s+no\.?)?|ttab|opp(?:osition)?\.?(?:\s+no\.?)?|canc(?:ellation)?\.?(?:\s+no\.?)?)\s*)?([\d\s\/,\-]+)$/i.exec(v.trim());
+  if (!m) return null;
+  const said = (m[1] || "").toLowerCase();
+  const digits = m[2].replace(/\D/g, "");
+  const proceeding = /^9[1-4]\d{6}$/.test(digits);     // 91 opposition, 92 cancellation, 93 interference, 94 concurrent use
+  if (said) {
+    if (/^s/.test(said)) return digits.length === 8 && !proceeding ? "SN " + digits : null;
+    if (/^r/.test(said)) return digits.length >= 5 && digits.length <= 7 ? "RN " + digits : null;
+    return proceeding ? "TTAB " + digits : null;
+  }
+  if (digits.length === 8) return (proceeding ? "TTAB " : "SN ") + digits;
+  return digits.length === 7 ? "RN " + digits : null;
+}
+
+// Is this USPTO number already the case number of another trademark matter,
+// however it was written there ("97123456", "97/123,456", "SN 97123456")?
+// Only a reference that IS a USPTO number is compared this way, and only
+// with others that are: "Docket 12345-A" and "Docket 12345-B" share their
+// digits and are different references. (An exact repeat of any reference is
+// refused by the database, as it always was.)
+async function trademarkRefTaken(userId, ref, exceptMatterId) {
+  const canonical = usptoRef(ref);
+  if (!canonical) return false;
+  const r = await db.query(
+    `SELECT matter_ref FROM matters
+      WHERE user_id = $1 AND case_type = $2 AND matter_ref IS NOT NULL
+        AND regexp_replace(matter_ref, '[^0-9]', '', 'g') = $3 AND id <> $4
+      LIMIT 50`, [userId, TM_TYPE, canonical.replace(/\D/g, ""), exceptMatterId || 0]);
+  return r.rows.some(row => usptoRef(row.matter_ref) === canonical);
+}
+
+// Longest value each field of a matter can hold. A longer one is refused
+// with a sentence rather than failing in the database.
+const STAFF_FIELD_MAX = {
+  client_name: 200, matter_ref: 100, notes: 20000, dropbox_url: 2000, relief_sought: 300, serial_number: 40, mark: 300,
+  mark_format: 40, filing_basis: 20, intl_class: 40, owner_name: 200, owner_email: 200,
+};
+// These hold a code or an address, never prose: no markup in them.
+const STAFF_PLAIN_FIELDS = ["serial_number", "mark_format", "filing_basis", "intl_class", "owner_email"];
+function isWebLink(v) { return typeof v === "string" && /^https?:\/\/\S+$/i.test(v.trim()); }
+function isPlainObject(v) { return !!v && typeof v === "object" && !Array.isArray(v); }
+
+// Pure: which staff rule (if any) covers this request. Exported for the check.
+function staffRule(method, pathname) {
+  const m = String(method || "").toUpperCase();
+  for (const rule of STAFF_ROUTES) {
+    if (rule.method !== m) continue;
+    const hit = rule.re.exec(String(pathname || ""));
+    if (!hit) continue;
+    const out = { ...rule, id: hit[1] ? parseInt(hit[1], 10) : null, subId: null, what: null };
+    if (rule.removes) { out.what = hit[2]; out.subId = parseInt(hit[3], 10); }
+    else if (hit[2]) out.subId = parseInt(hit[2], 10);
+    return out;
+  }
+  return null;
+}
+
+// Pure: is this body acceptable from a staff member under this rule?
+// Returns null when it is, or the sentence to refuse with. May tidy the
+// body: fields of a new matter that belong to other kinds of matter are
+// dropped, and the case number is put in its stored form.
+function staffBodyProblem(rule, body) {
+  if (!isPlainObject(body)) return rule.creates || rule.edits ? "Nothing to save." : null;
+  const keys = Object.keys(body);
+  if (keys.length > 40) return "Too many fields.";
+  // Plain values only: what is checked here is then exactly what is stored.
+  for (const k of keys) {
+    const v = body[k];
+    if (v !== null && !["string", "number", "boolean"].includes(typeof v)) return `The value of ${String(k).slice(0, 40)} must be plain text, a number, or yes/no.`;
+  }
+  if (rule.creates) {
+    if (body.case_type !== TM_TYPE) return "Staff can open Trademark matters here. Other matter types are opened by JJ.";
+    if (body.status != null && body.status !== "active") return "A new matter is opened as active.";
+    for (const k of keys) {
+      if (!STAFF_MATTER_FIELDS.has(k) && !["case_type", "status", "court"].includes(k)) delete body[k];
+    }
+    body.court = body.court === "TTAB" ? "TTAB" : "USPTO";
+  }
+  if (rule.edits) {
+    const extra = keys.filter(k => !STAFF_MATTER_FIELDS.has(k));
+    if (extra.includes("status") || extra.includes("case_type")) {
+      return "Only JJ can archive, reopen or re-type a matter. Archiving stops its reminders and its daily USPTO check.";
+    }
+    if (extra.length) return `Staff cannot change ${extra.slice(0, 5).map(k => String(k).slice(0, 40)).join(", ")} on a matter.`;
+  }
+  if (rule.creates || rule.edits) {
+    for (const k of keys) {
+      if (STAFF_MATTER_FIELDS.has(k) && body[k] !== null && typeof body[k] !== "string") return `The value of ${k} must be text.`;
+    }
+    if ("client_name" in body && !String(body.client_name || "").trim()) return "A matter needs a client or owner name.";
+    for (const k of keys) {
+      const max = STAFF_FIELD_MAX[k];
+      if (max && typeof body[k] === "string" && body[k].length > max) return `${k} is too long (${max} characters at most).`;
+    }
+    for (const k of STAFF_PLAIN_FIELDS) {
+      if (typeof body[k] === "string" && /[<>"\\]/.test(body[k])) return `${k} cannot contain < > " or a backslash.`;
+    }
+    if (typeof body.filing_basis === "string" && body.filing_basis.trim() && !normalizeFilingBasis(body.filing_basis)) {
+      return "The filing basis is 1(a), 1(b), 44(d), 44(e) or 66(a).";
+    }
+    if (typeof body.matter_ref === "string" && !body.matter_ref.trim()) body.matter_ref = null;
+    if (body.matter_ref != null) {
+      const ref = usptoRef(body.matter_ref);
+      if (!ref) return "The case number on a trademark matter is its USPTO serial number (8 digits), its registration number (7 digits; write RN before an older, shorter one), or its TTAB proceeding number.";
+      body.matter_ref = ref;
+    }
+    if (body.dropbox_url != null && body.dropbox_url !== "" && !isWebLink(body.dropbox_url)) return "A link must start with http:// or https://.";
+  }
+  if (body.url != null && body.url !== "" && !isWebLink(body.url)) return "A link must start with http:// or https://.";
+  return null;
+}
+
+function refuse(req, res, status, message) {
+  if (req.path.startsWith("/api/")) return res.status(status).json({ error: message });
+  return res.status(status).send(`<!doctype html><meta charset="utf-8"><title>Not available</title><body style="font-family:Montserrat,-apple-system,sans-serif;background:#FAF8F5;color:#1E1B1A;padding:40px;"><h2 style="font-family:'Cormorant Garamond',Georgia,serif;">Not available</h2><p>${message}</p><p><a href="/admin/dashboard" style="color:#A34C00;">Back to the dashboard</a></p></body>`);
+}
+
+// What goes into an audit row is bounded: each value clipped, the row capped.
+const clip = v => {
+  const t = typeof v === "string" ? v : v == null ? v : JSON.stringify(v);
+  return typeof t === "string" && t.length > 300 ? t.slice(0, 300) + "…" : t;
+};
+function pickFields(obj, keys) {
+  const out = {};
+  for (const k of keys) if (obj && Object.prototype.hasOwnProperty.call(obj, k)) out[String(k).slice(0, 40)] = clip(obj[k]);
+  return out;
+}
+// A row is kept to about 12,000 characters. When what was sent is larger,
+// the values are shortened — every field that was set is still named, with
+// the start of its value, and what was there before is kept whole. (A
+// request padded with junk must not be able to push the one real change, or
+// the value it overwrote, out of the record.)
+function staffAudit(req, action, matterId, matterLabel, changes) {
+  let c = changes;
+  if (JSON.stringify(c).length > 12000) {
+    const shorter = o => { const out = {}; for (const k of Object.keys(o)) out[k] = typeof o[k] === "string" && o[k].length > 80 ? o[k].slice(0, 80) + "…" : o[k]; return out; };
+    c = { ...changes, note: [changes.note, "long values shortened"].filter(Boolean).join("; ") };
+    if (isPlainObject(changes.set)) c.set = shorter(changes.set);
+    if (isPlainObject(changes.sent)) c.sent = shorter(changes.sent);
+  }
+  return require("./audit-log").log({
+    req, action, target_type: "matter", target_id: matterId != null ? String(matterId) : null, target_label: matterLabel, changes: c,
+  }).catch(() => {});
+}
+
+// What the record held before a staff change, so the audit log can show
+// what was overwritten or removed. Best effort: a failure here never blocks
+// the request.
+async function staffBefore(rule, body) {
+  try {
+    if (rule.edits) {
+      const keys = Object.keys(body).filter(k => STAFF_MATTER_FIELDS.has(k));
+      if (!keys.length) return null;
+      const r = await db.query(`SELECT ${keys.join(", ")} FROM matters WHERE id = $1`, [rule.id]);
+      return r.rows[0] ? pickFields(r.rows[0], keys) : null;
+    }
+    if (rule.deadline) {
+      const r = await db.query(
+        `SELECT title, citation, to_char(due_date, 'YYYY-MM-DD') AS due_date, party, note, completed
+           FROM matter_deadlines WHERE id = $1 AND matter_id = $2`, [rule.subId, rule.id]);
+      return r.rows[0] ? pickFields(r.rows[0], DEADLINE_FIELDS.filter(k => k in body)) : null;
+    }
+    if (rule.removes) {
+      const r = rule.what === "notes"
+        ? await db.query(`SELECT content FROM matter_notes WHERE id = $1 AND matter_id = $2`, [rule.subId, rule.id])
+        : await db.query(`SELECT filename, url FROM matter_files WHERE id = $1 AND matter_id = $2`, [rule.subId, rule.id]);
+      return r.rows[0] ? pickFields(r.rows[0], Object.keys(r.rows[0])) : null;
+    }
+    if (rule.item) {
+      const r = await db.query(`SELECT text, completed FROM matter_checklist_items WHERE id = $1`, [rule.id]);
+      return r.rows[0] ? pickFields(r.rows[0], ["text", "completed"]) : null;
+    }
+  } catch (e) { console.error("staffBefore:", e.message); }
+  return null;
+}
+
+async function matterAccess(req, res, next) {
+  // Set on every request, from the signed-in user only. Nothing a browser
+  // sends can set these.
+  req.mmScope = null;
+  req.mmCanWrite = false;
+  try {
+    const user = req.user;
+    if (!user) {
+      if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Unauthorized" });
+      return res.redirect(`/admin/login?next=${encodeURIComponent(req.originalUrl)}`);
+    }
+    if (user.r === "admin") { req.mmScope = "all"; req.mmCanWrite = true; return next(); }
+
+    const auth = require("./auth");
+    const NO = "The Matter Manager is open to you for trademark matters only.";
+    if (!(await auth.hasPermissionAsync(user, "federal.read"))) {
+      return refuse(req, res, 403, "Your account does not have access to Federal & TM matters. Ask JJ to turn it on under Users → Permissions.");
+    }
+    const requestLine = `${req.method} ${req.path}`.substring(0, 200);
+    // A change that is turned away is recorded too, so trying is not invisible.
+    const turnedAway = (status, message, matterId) => {
+      if (req.method !== "GET") {
+        const sentBody = isPlainObject(req.body) ? req.body : {}, sentKeys = Object.keys(sentBody);
+        const entry = { request: requestLine, refused_with: status, reason: message, sent: pickFields(sentBody, sentKeys.slice(0, 40)) };
+        if (sentKeys.length > 40) entry.fields_sent = sentKeys.length;
+        staffAudit(req, "matter_manager.staff_refused", matterId || null, null, entry);
+      }
+      return refuse(req, res, status, message);
+    };
+    const rule = staffRule(req.method, req.path);
+    if (!rule) return turnedAway(403, NO);
+
+    const canWrite = await auth.hasPermissionAsync(user, "federal.write");
+    if (rule.write && !canWrite) return turnedAway(403, "Your account can view trademark matters but not change them.");
+
+    // The matter the address names must be a Trademark matter.
+    let matterId = rule.matter ? rule.id : null, matterLabel = null;
+    if (rule.matter || rule.item) {
+      const r = rule.matter
+        ? await db.query(`SELECT id, case_type, client_name, mark FROM matters WHERE id = $1`, [rule.id])
+        : await db.query(
+            `SELECT m.id, m.case_type, m.client_name, m.mark FROM matter_checklist_items i
+               JOIN matter_checklists c ON c.id = i.checklist_id
+               JOIN matters m ON m.id = c.matter_id
+              WHERE i.id = $1`, [rule.id]);
+      // Same answer whether it does not exist or is another kind of matter.
+      // An attempt to CHANGE one is recorded (the reply says no more for it).
+      if (!r.rows.length || r.rows[0].case_type !== TM_TYPE) {
+        if (req.method !== "GET") {
+          staffAudit(req, "matter_manager.staff_refused", rule.matter ? rule.id : null, null,
+            { request: requestLine, refused_with: 404, reason: "Not a trademark matter, or no such matter." });
+        }
+        return res.status(404).json({ error: "Not found" });
+      }
+      matterId = r.rows[0].id;
+      matterLabel = r.rows[0].mark || r.rows[0].client_name || null;
+    }
+    if (rule.write) {
+      if (req.body != null && !isPlainObject(req.body)) return turnedAway(400, "Send the change as a JSON object.", matterId);
+      const problem = staffBodyProblem(rule, req.body || {});
+      if (problem) return turnedAway(403, problem, matterId);
+    }
+
+    req.mmScope = "trademark";
+    req.mmCanWrite = canWrite;
+
+    // Who changed what, with what it was before. Written when the reply is
+    // sent OR the connection closes first, so a dropped connection cannot
+    // leave a change unrecorded. (JJ's own changes are not logged here, as before.)
+    if (req.method !== "GET") {
+      const body = isPlainObject(req.body) ? req.body : {};
+      const before = await staffBefore(rule, body);
+      // Every field sent is recorded (there are at most 40: more is refused above).
+      const changes = { request: requestLine, set: pickFields(body, Object.keys(body)) };
+      if (before) changes.before = before;
+      // A new matter has no id until the handler replies with it.
+      if (rule.creates) {
+        const send = res.json.bind(res);
+        res.json = (payload) => {
+          try { if (payload && payload.matter && payload.matter.id) { matterId = payload.matter.id; matterLabel = payload.matter.mark || payload.matter.client_name || null; } } catch (_) {}
+          return send(payload);
+        };
+      }
+      let written = false;
+      const write = (how) => {
+        if (written) return;
+        written = true;
+        if (how === "sent" && (res.statusCode < 200 || res.statusCode >= 300)) changes.refused_with = res.statusCode;
+        if (how === "closed") changes.note = "the connection closed before the reply was sent; the change may have been made";
+        staffAudit(req, "matter_manager.staff_change", matterId, matterLabel, changes);
+      };
+      res.on("finish", () => write("sent"));
+      res.on("close", () => write("closed"));
+    }
+    return next();
+  } catch (err) {
+    console.error("matterAccess error:", err.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+}
+
+// Every route below names requireAuth. A request that matterAccess passed
+// for a staff member goes on; anything else must be the admin, exactly as
+// before. If this router is ever mounted WITHOUT matterAccess in front of
+// it, req.mmScope is never set and only the admin gets in.
+function requireAuth(req, res, next) {
+  if (req.mmScope === "trademark") return next();
+  return requireAdminAuth(req, res, next);
+}
 
 // ── The Matter Manager, inside Tara ───────────────────────
 // It used to be a page of its own, with its own masthead and no way to the
@@ -33,8 +383,10 @@ const router = express.Router();
 //   /admin/matters/            the Tara page (?view=inbox|archive|courts|reference)
 //   /admin/matters/app         the docket itself, shown only inside that frame
 //   /admin/matters/v2          an unfinished preview that was never shipped → the Tara page
-const VIEWS = new Set(["active", "inbox", "archive", "courts", "reference"]);
+const VIEWS = new Set(["active", "inbox", "archive", "courts", "reference", "trademarks"]);
 router.get("/", requireAuth, (req, res) => {
+  // Staff have one view here; whatever address they arrive by goes to it.
+  if (req.mmScope === "trademark" && req.query.view !== "trademarks") return res.redirect("/admin/matters/?view=trademarks");
   const view = VIEWS.has(String(req.query.view || "")) ? String(req.query.view) : "";
   // The frame fills Tara's content area edge to edge (the docket has its own
   // margins), below the top bar on a phone.
@@ -50,7 +402,7 @@ router.get("/", requireAuth, (req, res) => {
     </div>`;
   res.set("Cache-Control", "no-store");
   res.send(require("./hearing-notes").renderAdminChrome({
-    title: "Matter Manager", body, activeItem: view === "inbox" ? "matters-inbox" : "matters",
+    title: "Matter Manager", body, activeItem: view === "inbox" ? "matters-inbox" : (view === "trademarks" || req.mmScope === "trademark") ? "matters-trademarks" : "matters",
   }));
 });
 router.get("/app", requireAuth, (req, res) => {
@@ -391,8 +743,8 @@ Rules:
 - For trademarks: "Section 1(b)" → filing_basis "1(b)"; "Section 1(a)" → filing_basis "1(a)".
 - mark text should be exactly as it appears (preserve case for stylized; uppercase for standard character).
 - owner_name should be the legal name of the applicant/owner, not the attorney.
-- For Office Actions, set triggering_date to the OA issue date so the 6-month response can be calculated.
-- For Notices of Allowance, set triggering_date to the NOA mailing date so the 6-month SOU window can be calculated.
+- For Office Actions, set triggering_date to the OA issue date so the 3-month response deadline can be calculated.
+- For Notices of Allowance, set triggering_date to the NOA issue date so the 6-month SOU window can be calculated.
 - confidence "high" if all key fields (serial, mark, owner, dates) are clearly stated.
 
 Return ONLY the JSON.`;
@@ -607,10 +959,10 @@ router.post("/api/matters/:id/client-summary", requireAuth, async (req, res) => 
     const m = mRes.rows[0];
 
     const dRes = await db.query(
-      `SELECT title, citation, due_date, party, note, completed
+      `SELECT title, citation, to_char(due_date, 'YYYY-MM-DD') AS due_date, party, note, completed
          FROM matter_deadlines
         WHERE matter_id = $1
-        ORDER BY due_date ASC NULLS LAST`,
+        ORDER BY matter_deadlines.due_date ASC NULLS LAST`,
       [matterId]
     );
     const deadlines = dRes.rows;
@@ -751,6 +1103,13 @@ router.post("/api/matters/:id/client-summary", requireAuth, async (req, res) => 
 // "5:26-cv-02340" -> "526cv02340"
 // "23-1234"       -> "231234"
 // "A 216-866-000" -> "a216866000"
+// A court email (an NEF, an order, an immigration-court notice) is never
+// about a USPTO or Copyright Office matter. Those matters are skipped when
+// an email's case number is matched: an 8-digit serial number such as
+// 97261234 "contains" the circuit number 26-1234, and the email would be
+// filed under the trademark.
+const NOT_COURT_MATTERS = new Set(["Trademark", "Patent", "Copyright"]);
+
 function normalizeCaseRef(s) {
   return String(s || "").toLowerCase().replace(/[\s\-:\.\/]/g, "");
 }
@@ -819,6 +1178,7 @@ router.post("/api/ingest-dry-run", requireAuth, async (req, res) => {
       for (const cand of candidates) {
         const candNorm = normalizeCaseRef(cand);
         for (const m of allMatters.rows) {
+          if (NOT_COURT_MATTERS.has(m.case_type)) continue;
           const refNorm = normalizeCaseRef(m.matter_ref || "");
           if (!refNorm) continue;
           // Match if either contains the other (handles "5:26-cv-02340" vs "26-2340")
@@ -965,6 +1325,7 @@ async function ingestEmailText(userId, emailText, opts = {}) {
     for (const cand of candidates) {
       const candNorm = normalizeCaseRef(cand);
       for (const m of allMatters.rows) {
+        if (NOT_COURT_MATTERS.has(m.case_type)) continue;
         const refNorm = normalizeCaseRef(m.matter_ref || "");
         if (!refNorm) continue;
         if (candNorm === refNorm || candNorm.includes(refNorm) || refNorm.includes(candNorm)) {
@@ -1051,10 +1412,11 @@ async function ingestEmailText(userId, emailText, opts = {}) {
     if (!matterMatch && eoirFields && eoirFields.alien_number) {
       const aNorm = normalizeCaseRef(eoirFields.alien_number);
       const allMatters2 = await db.query(
-        `SELECT id, client_name, matter_ref FROM matters WHERE user_id = $1`,
+        `SELECT id, client_name, matter_ref, case_type FROM matters WHERE user_id = $1`,
         [userId]
       );
       for (const m of allMatters2.rows) {
+        if (NOT_COURT_MATTERS.has(m.case_type)) continue;
         const refNorm = normalizeCaseRef(m.matter_ref || "");
         if (refNorm && (refNorm === aNorm || refNorm.includes(aNorm) || aNorm.includes(refNorm))) {
           matterMatch = { id: m.id, client_name: m.client_name, matter_ref: m.matter_ref };
@@ -1544,6 +1906,13 @@ async function getCurrentUserId(req) {
 
 // GET /admin/matters/api/matters?status=active
 // List matters for the current user.
+// GET /admin/matters/api/me — what this person may do here, so the page can
+// show only what will work. The page is not what enforces it; matterAccess is.
+router.get("/api/me", requireAuth, (req, res) => {
+  const staff = req.mmScope === "trademark";
+  res.json({ scope: staff ? "trademark" : "all", can_write: staff ? !!req.mmCanWrite : true });
+});
+
 router.get("/api/matters", requireAuth, async (req, res) => {
   try {
     const userId = await getCurrentUserId(req);
@@ -1554,9 +1923,12 @@ router.get("/api/matters", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Invalid status filter" });
     }
 
-    const whereClause = status === "all"
+    // Staff see Trademark matters only. (requireAuth lets a non-admin reach
+    // this line only with req.mmScope === "trademark".)
+    const tmOnly = req.mmScope === "trademark";
+    const whereClause = (status === "all"
       ? "WHERE m.user_id = $1"
-      : "WHERE m.user_id = $1 AND m.status = $2";
+      : "WHERE m.user_id = $1 AND m.status = $2") + (tmOnly ? ` AND m.case_type = '${TM_TYPE}'` : "");
     const params = status === "all" ? [userId] : [userId, status];
 
     const r = await db.query(
@@ -1726,6 +2098,16 @@ router.post("/api/matters", requireAuth, async (req, res) => {
       return res.status(400).json({ error: e.message });
     }
 
+    // A trademark's case number is kept in one form whoever enters it (see
+    // usptoRef), and no two trademark matters may carry the same number.
+    let refVal = matter_ref || null;
+    if (case_type === TM_TYPE && typeof refVal === "string") {
+      refVal = usptoRef(refVal) || refVal;
+      if (await trademarkRefTaken(userId, refVal, 0)) {
+        return res.status(409).json({ error: "A trademark matter with that number already exists" });
+      }
+    }
+
     const r = await db.query(
       `INSERT INTO matters
          (user_id, client_name, matter_ref, court, case_type, status, dropbox_url, notes,
@@ -1733,7 +2115,7 @@ router.post("/api/matters", requireAuth, async (req, res) => {
           serial_number, mark, mark_format, filing_basis, intl_class, owner_name, owner_email)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
        RETURNING *`,
-      [userId, client_name, matter_ref || null, court || null, case_type || null,
+      [userId, client_name, refVal, court || null, case_type || null,
        finalStatus, dropbox_url || null, notes || null,
        openedDateVal, triggeringDateVal,
        custody_location || null, petitioner_name || null, relief_sought || null,
@@ -1771,6 +2153,26 @@ router.patch("/api/matters/:id", requireAuth, async (req, res) => {
                      "serial_number", "mark", "mark_format", "filing_basis",
                      "intl_class", "owner_name", "owner_email"];
     const dateFields = new Set(["opened_date", "triggering_date"]);
+    // The case number: an empty one is "none" (stored empty, it would take
+    // the one unique slot and block the next matter cleared the same way),
+    // and a trademark's is kept in one form (see usptoRef).
+    let refVal;
+    if (req.body && typeof req.body.matter_ref === "string") {
+      refVal = req.body.matter_ref.trim() ? req.body.matter_ref : null;
+      if (refVal) {
+        let type = req.body.case_type;
+        if (type === undefined) {
+          const cur = await db.query(`SELECT case_type FROM matters WHERE id = $1 AND user_id = $2`, [matterId, userId]);
+          type = cur.rows[0] && cur.rows[0].case_type;
+        }
+        if (type === TM_TYPE) {
+          refVal = usptoRef(refVal) || refVal;
+          if (await trademarkRefTaken(userId, refVal, matterId)) {
+            return res.status(409).json({ error: "A trademark matter with that number already exists" });
+          }
+        }
+      }
+    }
     const fields = [];
     const values = [matterId, userId];
     let i = 3;
@@ -1780,6 +2182,7 @@ router.patch("/api/matters/:id", requireAuth, async (req, res) => {
           return res.status(400).json({ error: "Invalid status" });
         }
         let v = req.body[k];
+        if (k === "matter_ref" && refVal !== undefined) v = refVal;
         // Normalize date inputs: empty string → null
         if (dateFields.has(k)) {
           if (v === "" || v === undefined) {
@@ -1917,109 +2320,218 @@ function addYears(yyyymmdd, years) {
   return addMonths(yyyymmdd, years * 12);
 }
 
+// Helper: add N calendar days
+function addCalendarDays(yyyymmdd, days) {
+  const [y, m, d] = yyyymmdd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+}
+
 // Event definitions. Each returns an array of deadline templates from the anchor date.
 // title MUST be unique-per-event so idempotency check works.
-function lifecycleDeadlines(eventKey, anchorDate) {
+// Normalise a stored filing basis: "Section 1(b)", "1(B)" and "1b" all
+// become "1(b)". Returns "1(a)" | "1(b)" | "44" | "66(a)" | null.
+function normalizeFilingBasis(raw) {
+  const b = String(raw || "").toLowerCase().replace(/[^0-9a-z]/g, "");
+  return b.includes("66a") ? "66(a)"
+       : b.includes("1b")  ? "1(b)"
+       : b.includes("44")  ? "44"
+       : b.includes("1a")  ? "1(a)"
+       : null;
+}
+
+function lifecycleDeadlines(eventKey, anchorDate, matter) {
+  const filingBasis = normalizeFilingBasis(matter && matter.filing_basis);
+  const ET = " USPTO deadlines close at 11:59 p.m. Eastern (8:59 p.m. Pacific) on the due date.";
   const events = {
     // ── TRADEMARK ──────────────────────────────────────────────
+    // Timings per USPTO "Trademark processing wait times" (data as of
+    // Oct 1, 2026): first examining action averages 4.3 months (target 5.0);
+    // registration or abandonment averages 10.4 months. These are estimates
+    // for watching only. The real deadlines come from tm_office_action and
+    // tm_publication, which are anchored to the dates the USPTO actually issues.
     tm_examination: () => [
       {
-        title: "USPTO: Expected first Office Action (informational)",
+        title: "USPTO: First examining action expected (estimate)",
         citation: "TMEP §§ 700-1400",
-        due_date: addMonths(anchorDate, 8),
+        due_date: addMonths(anchorDate, 5),
         party: "them",
-        note: "USPTO examination typically begins 8-12 months after filing. Watch for office action; you'll have 6 months from issue to respond."
+        note: "First examining action currently averages about 4 to 5 months after filing. If an office action issues, click 'Office Action Received' with its issue date: the response is due 3 months from that date (one 3-month extension available for $125)."
       },
       {
-        title: "USPTO: Watch for Publication Notice (informational)",
+        title: "USPTO: Publication expected if approved (estimate)",
         citation: "15 U.S.C. § 1062 · TMEP § 1502",
-        due_date: addMonths(anchorDate, 12),
+        due_date: addMonths(anchorDate, 7),
         party: "them",
-        note: "If approved, USPTO publishes for opposition. 30-day opposition window starts on publication date."
+        note: "If approved, the mark is published in the Trademark Official Gazette. Click 'Published' with the publication date to calendar the 30-day opposition period."
       },
+      // Status checks. 37 C.F.R. § 2.23(d) puts the duty to monitor on the
+      // applicant (at least every 6 months); the USPTO advises every 3 to 4.
+      ...[3, 6, 9, 12].map(mo => ({
+        title: `TM: Check TSDR status — month ${mo} after filing`,
+        citation: "37 C.F.R. § 2.23(d)",
+        due_date: addMonths(anchorDate, mo),
+        party: "us",
+        note: "Look the serial number up in TSDR (Status and Documents tabs) and confirm no office action or notice was missed in email. An office action runs from its issue date whether or not the email was seen. Mark complete once checked; delete the remaining checks after registration."
+      }))
+    ],
+    // Anchor = ISSUE DATE of the office action. Titles carry the date so a
+    // second office action on the same matter (e.g. a final action) is not
+    // skipped by the duplicate-title check.
+    tm_office_action: () => (filingBasis === "66(a)")
+      ? [
+          {
+            title: `TM: Office Action (issued ${anchorDate}) — response due (Madrid § 66(a): no extension)`,
+            citation: "37 C.F.R. § 2.62(a)(1)(ii)",
+            due_date: addMonths(anchorDate, 6),
+            party: "us",
+            note: "6 months from the issue date for a Madrid § 66(a) application. NO extension is available. If no response is filed the application is ABANDONED. FINAL action: the request for reconsideration and/or notice of appeal to the TTAB is due by this same date." + ET
+          }
+        ]
+      : [
+          {
+            title: `TM: Office Action (issued ${anchorDate}) — response OR extension request due`,
+            citation: "15 U.S.C. § 1062(b) · 37 C.F.R. § 2.62(a)",
+            due_date: addMonths(anchorDate, 3),
+            party: "us",
+            note: "3 months from the issue date (applications under Section 1 or 44). By this date file the response OR a one-time 3-month extension request ($125 per application). If neither is filed the application is ABANDONED; a petition to revive is then due 2 months after the notice of abandonment ($250). FINAL action: the request for reconsideration and/or notice of appeal to the TTAB is due by this same date, and a request for reconsideration does not extend the time to appeal. NOT for an office action on a Section 8 or renewal filing: that response is due 6 months from issue or the end of the filing period, whichever is later, with no extension (37 C.F.R. §§ 2.163(b), 2.184(b)); enter that date by hand." + ET
+          },
+          {
+            title: `TM: Office Action (issued ${anchorDate}) — LAST DAY if extension was filed`,
+            citation: "37 C.F.R. § 2.62(a)(2)",
+            due_date: addMonths(anchorDate, 6),
+            party: "us",
+            note: "6 months from the issue date. Applies ONLY if the 3-month extension request was filed and paid on time. No further extension. Mark complete when the response is filed, or if the response was filed in the first 3 months." + ET
+          }
+        ],
+    // Anchor = PUBLICATION DATE in the Trademark Official Gazette.
+    tm_publication: () => [
       {
-        title: "USPTO: Opposition window closes (informational)",
-        citation: "15 U.S.C. § 1063",
-        due_date: addMonths(anchorDate, 13),
+        title: `USPTO: Opposition period closes (published ${anchorDate})`,
+        citation: "15 U.S.C. § 1063(a)",
+        due_date: addCalendarDays(anchorDate, 30),
         party: "them",
-        note: "30 days from publication. If no opposition filed, application proceeds to NOA (1(b)) or registration (1(a))."
-      }
+        note: "Anyone may file an opposition, or a request to extend the time to oppose, within 30 days of publication. After this date check TSDR/TTABVUE for an opposition or extension."
+      },
+      (filingBasis === "1(b)")
+        ? {
+            title: `TM: Check TSDR — Notice of Allowance expected (published ${anchorDate})`,
+            citation: "15 U.S.C. § 1063(b)(2)",
+            due_date: addCalendarDays(anchorDate, 70),
+            party: "us",
+            note: "For a 1(b) application the notice of allowance issues about 8 weeks after publication if no opposition is filed. When it issues, click 'NOA Received' with the NOA issue date to calendar the statement of use deadlines."
+          }
+        : (filingBasis === "1(a)" || filingBasis === "44" || filingBasis === "66(a)")
+        ? {
+            title: `TM: Check TSDR — registration expected (published ${anchorDate})`,
+            citation: "15 U.S.C. § 1063(b)(1)",
+            due_date: addMonths(anchorDate, 3),
+            party: "us",
+            note: "The registration certificate issues about 3 months after publication if no opposition is filed. When it issues, click 'Registered' with the registration date to calendar the maintenance deadlines."
+          }
+        : {
+            title: `TM: Check TSDR — NOA or registration expected (published ${anchorDate})`,
+            citation: "15 U.S.C. § 1063(b)",
+            due_date: addCalendarDays(anchorDate, 70),
+            party: "us",
+            note: "This matter has no recognised filing basis. A 1(b) application gets a notice of allowance about 8 weeks after publication; other applications register in about 3 months. Click 'NOA Received' or 'Registered' when the document issues."
+          }
     ],
-    tm_noa: () => [
-      // Six SOU/extension deadlines from NOA date.
-      // SOU initial: 6 months from NOA. Then 5 six-month extension periods.
-      // Each is the FILING deadline for either SOU or next extension.
-      {
-        title: "TM: Statement of Use OR 1st Extension Request due",
-        citation: "15 U.S.C. § 1051(d)(1)",
-        due_date: addMonths(anchorDate, 6),
-        party: "us",
-        note: "6 months from NOA. File SOU (if mark is in use) OR file 1st 6-month Extension Request with $125/class fee."
-      },
-      {
-        title: "TM: SOU OR 2nd Extension Request due",
-        citation: "15 U.S.C. § 1051(d)(2)",
-        due_date: addMonths(anchorDate, 12),
-        party: "us",
-        note: "12 months from NOA. Each extension requires good-cause statement after the 1st."
-      },
-      {
-        title: "TM: SOU OR 3rd Extension Request due",
-        citation: "15 U.S.C. § 1051(d)(2)",
-        due_date: addMonths(anchorDate, 18),
-        party: "us",
-        note: "18 months from NOA."
-      },
-      {
-        title: "TM: SOU OR 4th Extension Request due",
-        citation: "15 U.S.C. § 1051(d)(2)",
-        due_date: addMonths(anchorDate, 24),
-        party: "us",
-        note: "24 months from NOA."
-      },
-      {
-        title: "TM: SOU OR 5th Extension Request due",
-        citation: "15 U.S.C. § 1051(d)(2)",
-        due_date: addMonths(anchorDate, 30),
-        party: "us",
-        note: "30 months from NOA. Penultimate extension."
-      },
-      {
-        title: "TM: SOU due — FINAL (no further extensions)",
-        citation: "15 U.S.C. § 1051(d)(2)",
-        due_date: addMonths(anchorDate, 36),
-        party: "us",
-        note: "36 months from NOA. ABSOLUTE DEADLINE. No more extensions. If SOU not filed by this date, application is ABANDONED."
-      }
-    ],
+    // Six SOU/extension deadlines from the NOA issue date. Each period is
+    // counted from the end of the one before it, which for an NOA issued on
+    // the 29th to 31st can land a day or two EARLIER than counting straight
+    // from the NOA date. The earlier date is used on purpose.
+    tm_noa: () => {
+      const p = [];
+      let d = anchorDate;
+      for (let i = 0; i < 6; i++) { d = addMonths(d, 6); p.push(d); }
+      return [
+        {
+          title: "TM: Statement of Use OR 1st Extension Request due",
+          citation: "15 U.S.C. § 1051(d)(1)",
+          due_date: p[0],
+          party: "us",
+          note: "6 months from the NOA issue date. File the Statement of Use ($150/class) if the mark is in use, OR the 1st 6-month Extension Request ($125/class). Missing this date ABANDONS the application." + ET
+        },
+        {
+          title: "TM: SOU OR 2nd Extension Request due",
+          citation: "15 U.S.C. § 1051(d)(2)",
+          due_date: p[1],
+          party: "us",
+          note: "12 months from NOA. Each extension after the 1st requires a showing of good cause." + ET
+        },
+        {
+          title: "TM: SOU OR 3rd Extension Request due",
+          citation: "15 U.S.C. § 1051(d)(2)",
+          due_date: p[2],
+          party: "us",
+          note: "18 months from NOA." + ET
+        },
+        {
+          title: "TM: SOU OR 4th Extension Request due",
+          citation: "15 U.S.C. § 1051(d)(2)",
+          due_date: p[3],
+          party: "us",
+          note: "24 months from NOA." + ET
+        },
+        {
+          title: "TM: SOU OR 5th Extension Request due",
+          citation: "15 U.S.C. § 1051(d)(2)",
+          due_date: p[4],
+          party: "us",
+          note: "30 months from NOA. The 5th extension is the LAST one available." + ET
+        },
+        {
+          title: "TM: SOU due — FINAL (no further extensions)",
+          citation: "15 U.S.C. § 1051(d)(2) · 37 C.F.R. § 2.89",
+          due_date: p[5],
+          party: "us",
+          note: "36 months from NOA. ABSOLUTE DEADLINE. No more extensions. If the SOU is not filed by this date, the application is ABANDONED. Confirm the exact date in TSDR." + ET
+        }
+      ];
+    },
     tm_registration: () => [
       {
         title: "TM: Section 8 affidavit of continued use — window opens",
         citation: "15 U.S.C. § 1058(a)",
         due_date: addYears(anchorDate, 5),
         party: "us",
-        note: "Filing window: between 5th and 6th anniversary of registration. 6-month grace period available with surcharge. Missing this CANCELS the registration."
+        note: "Filing window: between the 5th and 6th anniversary of registration. $325/class. For a Principal Register mark, a Section 15 declaration of incontestability can be filed with it after 5 consecutive years of use (combined $575/class). Gather a current specimen for each class. Keep this matter ACTIVE: archived matters do not send reminders. Madrid § 66(a) registrations are maintained under Section 71 instead; check the dates by hand."
       },
       {
         title: "TM: Section 8 affidavit — window CLOSES",
         citation: "15 U.S.C. § 1058(a)",
         due_date: addYears(anchorDate, 6),
         party: "us",
-        note: "Last day of regular window (6-year anniversary). 6-month grace period thereafter with surcharge. Set internal deadline before this date."
+        note: "Last day of the regular window (6th anniversary). After this date the filing costs an extra $100/class grace-period fee."
+      },
+      {
+        title: "TM: Section 8 affidavit — GRACE PERIOD ENDS (registration cancelled after this)",
+        citation: "15 U.S.C. § 1058(a)(3)",
+        due_date: addMonths(addYears(anchorDate, 6), 6),
+        party: "us",
+        note: "6 months after the 6th anniversary. ABSOLUTE DEADLINE. If the Section 8 declaration is not on file by this date the registration is CANCELLED and cannot be revived."
       },
       {
         title: "TM: Combined § 8 & § 9 renewal — window opens",
         citation: "15 U.S.C. § 1058 + § 1059",
         due_date: addYears(anchorDate, 9),
         party: "us",
-        note: "Filing window: between 9th and 10th anniversary of registration."
+        note: "Filing window: between the 9th and 10th anniversary of registration. $650/class combined."
       },
       {
         title: "TM: Combined § 8 & § 9 renewal — window CLOSES",
         citation: "15 U.S.C. § 1058 + § 1059",
         due_date: addYears(anchorDate, 10),
         party: "us",
-        note: "Last day to file regular renewal. 6-month grace period available with surcharge. Missing this CANCELS the registration."
+        note: "Last day to file the regular renewal (10th anniversary). After this date the filing costs an extra $200/class in grace-period fees ($100 each for the § 8 and the § 9)."
+      },
+      {
+        title: "TM: Combined § 8 & § 9 renewal — GRACE PERIOD ENDS (registration expires after this)",
+        citation: "15 U.S.C. § 1059(a)",
+        due_date: addMonths(addYears(anchorDate, 10), 6),
+        party: "us",
+        note: "6 months after the 10th anniversary. ABSOLUTE DEADLINE. If the renewal is not on file by this date the registration is CANCELLED/EXPIRED. The daily USPTO check calendars the next renewal (years 19 to 20) when TSDR shows this one accepted; if that check is not running, add it by hand."
       }
     ],
 
@@ -2155,10 +2667,14 @@ router.post("/api/matters/:matterId/lifecycle", requireAuth, async (req, res) =>
     if (!anchor_date || !/^\d{4}-\d{2}-\d{2}$/.test(anchor_date)) {
       return res.status(400).json({ error: "anchor_date required (YYYY-MM-DD)" });
     }
+    // Reject impossible dates such as 2026-02-31 (JS would silently roll them forward)
+    if (addCalendarDays(anchor_date, 0) !== anchor_date) {
+      return res.status(400).json({ error: "anchor_date is not a real calendar date" });
+    }
 
     // Validate event for matter type
     const validForType = {
-      Trademark: ["tm_examination", "tm_noa", "tm_registration"],
+      Trademark: ["tm_examination", "tm_office_action", "tm_publication", "tm_noa", "tm_registration"],
       Patent:    ["pat_examination", "pat_first_oa", "pat_noa", "pat_issue"],
       Copyright: ["cr_registration"]
     };
@@ -2170,13 +2686,14 @@ router.post("/api/matters/:matterId/lifecycle", requireAuth, async (req, res) =>
     }
 
     // Extra rule: tm_noa only makes sense for 1(b)
-    if (event === "tm_noa" && matter.filing_basis && matter.filing_basis !== "1(b)") {
+    const normalizedBasis = normalizeFilingBasis(matter.filing_basis);
+    if (event === "tm_noa" && normalizedBasis && normalizedBasis !== "1(b)") {
       return res.status(400).json({
         error: "NOA is only relevant for Section 1(b) intent-to-use applications. This matter's filing basis is " + matter.filing_basis
       });
     }
 
-    const templates = lifecycleDeadlines(event, anchor_date);
+    const templates = lifecycleDeadlines(event, anchor_date, matter);
     if (!templates || templates.length === 0) {
       return res.status(500).json({ error: "No deadlines generated for that event" });
     }
@@ -2499,14 +3016,14 @@ const CHECKLIST_TEMPLATES = {
       title: "Trademark Filing — Initial",
       subtitle: "USPTO TMEP · 15 U.S.C. § 1051",
       items: [
-        { text: "Conflict / clearance search completed (USPTO TESS + common law)",            citation: "TMEP §§ 1207-1208" },
-        { text: "Trademark/Service Mark application drafted (TEAS Plus or Standard)",         citation: "15 U.S.C. § 1051(a)/(b)" },
+        { text: "Conflict / clearance search completed (USPTO Trademark Search + state + common law)", citation: "TMEP §§ 1207-1208" },
+        { text: "Trademark/Service Mark application drafted in Trademark Center (base application)", citation: "15 U.S.C. § 1051(a)/(b)" },
         { text: "Goods/services identification matches USPTO ID Manual",                       citation: "TMEP § 1402" },
         { text: "International class(es) confirmed",                                            citation: "Nice Agreement" },
         { text: "Filing basis selected: 1(a) in-use / 1(b) ITU / 44(e) / 66(a)",               citation: "15 U.S.C. § 1051(a)/(b), § 1126(e)" },
         { text: "Specimen acceptable (if 1(a)) — actual use in commerce",                      citation: "TMEP § 904" },
         { text: "Declaration signed by authorized party",                                       citation: "37 C.F.R. § 2.20" },
-        { text: "Filing fee paid (TEAS Plus $250/class, Standard $350/class)",                  citation: "" },
+        { text: "Filing fee paid ($350/class base; +$200 free-form ID, +$100 missing info)",    citation: "37 C.F.R. § 2.6(a)(1)" },
         { text: "Filing receipt + serial number saved to matter",                               citation: "" },
         { text: "Engagement letter signed; conflict checked; client billed",                    citation: "" }
       ]
@@ -2515,8 +3032,8 @@ const CHECKLIST_TEMPLATES = {
       title: "Examination & Prosecution",
       subtitle: "TMEP §§ 700-1400 · 37 C.F.R. Part 2",
       items: [
-        { text: "Examining attorney assigned (typically 8-12 months after filing)",            citation: "" },
-        { text: "Office Action received — review & calendar 6-month response deadline",        citation: "15 U.S.C. § 1062(b)" },
+        { text: "Examining attorney assigned (first action averages 4 to 5 months after filing)", citation: "" },
+        { text: "Office Action received — calendar 3-month response deadline (one 3-mo extension, $125)", citation: "37 C.F.R. § 2.62(a)" },
         { text: "OA response drafted with arguments & amendments as needed",                    citation: "" },
         { text: "OA response filed before deadline; new examiner review if needed",             citation: "" },
         { text: "Notice of Publication received (after approval)",                              citation: "TMEP § 1502" },
@@ -3080,4 +3597,77 @@ async function handleCalendarFeed(req, res) {
   }
 }
 
-module.exports = { router, handleCalendarFeed, ingestEmailText };
+// ─────────────────────────────────────────────────────────────
+//  TSDR STATUS (Trademark matters) — the daily USPTO status check
+//  lives in tsdr-sync.js. These endpoints feed the matter page.
+//
+//  GET  /api/matters/:matterId/tsdr         stored status for one matter
+//  POST /api/matters/:matterId/tsdr/check   run the check for one matter now
+//  GET  /api/tsdr/test?sn=XXXXXXXX          read one serial, save nothing
+// ─────────────────────────────────────────────────────────────
+async function loadOwnedMatter(req, res) {
+  const userId = await getCurrentUserId(req);
+  const matterId = parseInt(req.params.matterId);
+  if (isNaN(matterId)) { res.status(400).json({ error: "Invalid matter id" }); return null; }
+  const mr = await db.query(
+    `SELECT id, case_type, status, serial_number FROM matters WHERE id = $1 AND user_id = $2`,
+    [matterId, userId]
+  );
+  if (!mr.rows.length) { res.status(404).json({ error: "Matter not found" }); return null; }
+  return mr.rows[0];
+}
+
+router.get("/api/matters/:matterId/tsdr", requireAuth, async (req, res) => {
+  try {
+    const matter = await loadOwnedMatter(req, res);
+    if (!matter) return;
+    const tsdr = require("./tsdr-sync");
+    const s = await tsdr.getStatusForMatter(matter.id);
+    res.json({ ...s, serial_number: matter.serial_number, matter_status: matter.status });
+  } catch (err) {
+    console.error("GET tsdr error:", err.message);
+    res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+router.post("/api/matters/:matterId/tsdr/check", requireAuth, async (req, res) => {
+  try {
+    const matter = await loadOwnedMatter(req, res);
+    if (!matter) return;
+    if (matter.case_type !== "Trademark") return res.status(400).json({ error: "Only Trademark matters are checked against TSDR" });
+    if (matter.status !== "active") return res.status(400).json({ error: "This matter is archived. Only active matters are checked." });
+    const tsdr = require("./tsdr-sync");
+    if (!tsdr.caseId(matter.serial_number)) {
+      return res.status(400).json({ error: "Add the 8-digit serial number (or 7-digit registration number) to this matter first" });
+    }
+    // Any news is sent to Telegram as well as shown on the page, so a manual
+    // check never uses up an alert that the morning run would have sent.
+    const stats = await tsdr.runAll({ matterId: matter.id });
+    if (stats.busy) return res.status(409).json({ error: "A USPTO check is already running. Try again in a minute." });
+    if (stats.skippedNoKey) return res.status(400).json({ error: "USPTO_API_KEY is not set on the server, so the check cannot run" });
+    if (stats.failures.length) return res.status(502).json({ error: stats.failures[0].message });
+    const r = stats.results[0];
+    if (!r) return res.status(500).json({ error: "The check did not run for this matter" });
+    res.json({
+      ok: true, baseline: r.baseline, status_desc: r.statusDesc, status_date: r.statusDate,
+      status_changed: r.statusChanged, new_events: r.newEvents, added: r.added, proposed: r.proposed,
+      mismatches: r.mismatches, passed: r.passed,
+      completed_checks: r.completedChecks, summary: r.alertText || null
+    });
+  } catch (err) {
+    console.error("POST tsdr/check error:", err.message);
+    res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+router.get("/api/tsdr/test", requireAuth, async (req, res) => {
+  try {
+    const tsdr = require("./tsdr-sync");
+    const t = await tsdr.testSerial(String(req.query.sn || ""));
+    res.json({ ok: true, ...t });
+  } catch (err) {
+    res.status(err.code === "BAD_NUMBER" ? 400 : 502).json({ error: err.message, code: err.code || null });
+  }
+});
+
+module.exports = { router, handleCalendarFeed, ingestEmailText, lifecycleDeadlines, normalizeFilingBasis, matterAccess, staffRule, staffBodyProblem, usptoRef, trademarkRefTaken, STAFF_ROUTES, extractCaseNumbers, normalizeCaseRef, NOT_COURT_MATTERS };

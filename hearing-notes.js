@@ -1626,7 +1626,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/federal" class="nav-link ${isActive('federal')}" data-perm="federal.read">
         <span class="nav-icon">⚖</span><span class="nav-label">All Matters</span>
       </a>
-      <a href="/admin/federal?group=trademarks" class="nav-link" data-perm="federal.read">
+      <a href="/admin/matters/?view=trademarks" class="nav-link ${isActive('matters-trademarks')}" data-perm="federal.read">
         <span class="nav-icon">™</span><span class="nav-label">Trademarks</span>
       </a>
       <a href="/admin/federal?group=federal_court" class="nav-link" data-perm="federal.read">

@@ -32,7 +32,7 @@ const { initJudgeProfileTables, getScanStatus }   = require("./judge-scanner");
 const { initCacheTable, getCacheStats, purgeExpiredCache } = require("./answer-cache");
 
 // Matter manager: REST routes (mounted at /admin/matters) + .ics calendar feed
-const { router: matterManagerRouter, handleCalendarFeed, ingestEmailText } = require("./matter-manager");
+const { router: matterManagerRouter, handleCalendarFeed, ingestEmailText, matterAccess } = require("./matter-manager");
 const multer  = require("multer");
 const db      = require("./db");
 const pdfParse = require("pdf-parse");
@@ -2902,7 +2902,11 @@ app.get("/admin/federal", async (req, res) => {
     if (q.overdue) filters.overdue_only = true;
     if (q.deadline_within_days) filters.deadline_within_days = parseInt(q.deadline_within_days, 10);
 
-    const [rows, stats] = await Promise.all([fm.listMatters(filters), fm.getStats()]);
+    const [rows, stats, tmToMove, tmInManager] = await Promise.all([
+      fm.listMatters(filters), fm.getStats(), fm.listTrademarksToMove(),
+      // Trademarks are tracked in the Matter Manager; the tile below counts them there.
+      require("./db").query(`SELECT COUNT(*)::int AS n FROM matters WHERE case_type = 'Trademark' AND status = 'active'`).then(r => r.rows[0].n).catch(() => 0),
+    ]);
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const fmtDate = d => d ? new Date(d).toLocaleDateString() : "—";
 
@@ -2963,11 +2967,38 @@ app.get("/admin/federal", async (req, res) => {
     const body = `
       <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
         <div>
-          <h1>Federal Matters & Trademarks</h1>
-          <div style="font-size:12px; color:#5E5854; margin-top:4px;">Unified tracking for USPTO/TTAB filings and federal court cases (District Court, Circuit Appeals, Habeas, Mandamus).</div>
+          <h1>Federal Matters</h1>
+          <div style="font-size:12px; color:#5E5854; margin-top:4px;">Federal court cases (District Court, Circuit Appeals, Habeas, Mandamus). Trademarks are tracked in <a href="/admin/matters/" style="color:#A34C00;">Matter Manager</a>.</div>
         </div>
         <a href="/admin/federal/new" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Matter</a>
       </div>
+
+      ${tmToMove.length ? `
+      <div style="background:#F3EFE9; border-left:4px solid #A34C00; padding:14px 18px; border-radius:8px; margin-bottom:16px;">
+        <div style="font-weight:700; color:#2B2523;">™ ${tmToMove.length} trademark matter${tmToMove.length === 1 ? " is" : "s are"} still listed here</div>
+        <div style="font-size:12px; color:#555; margin-top:4px;">Trademarks now live in Matter Manager, which sets the deadlines, sends the reminders and checks the USPTO every morning. Moving copies each one across with its next deadline and closes it here. Nothing is deleted.</div>
+        ${req.user && req.user.r === "admin"
+          ? `<button onclick="moveTrademarks()" id="move-tm-btn" style="margin-top:10px; background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Move ${tmToMove.length === 1 ? "it" : "all " + tmToMove.length} to Matter Manager</button>
+        <span id="move-tm-status" style="margin-left:10px; font-size:12px; color:#555;"></span>`
+          : `<div style="font-size:12px; color:#5E5854; margin-top:8px;">JJ moves them; until then they stay listed below.</div>`}
+      </div>
+      <script>
+        async function moveTrademarks() {
+          const btn = document.getElementById("move-tm-btn"), out = document.getElementById("move-tm-status");
+          btn.disabled = true; out.textContent = "Moving…";
+          try {
+            const r = await fetch("/admin/federal/move-trademarks", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error || "Move failed");
+            const failed = (d.failed || []).length;
+            const untracked = d.moved.filter(x => !x.tracked);
+            out.textContent = "Moved " + d.moved.length + "."
+              + (untracked.length ? " Not checked against the USPTO automatically (no serial or registration number, or a TTAB proceeding): " + untracked.map(x => x.client_name).join("; ") + ". Add the number in Matter Manager." : "")
+              + (failed ? " Could not be moved: " + d.failed.map(f => f.client_name + " — " + f.error).join("; ") + "." : "");
+            if (!failed && !untracked.length) setTimeout(() => location.reload(), 900); else btn.disabled = false;
+          } catch (e) { out.textContent = "Error: " + e.message; btn.disabled = false; }
+        }
+      </script>` : ""}
 
       <!-- Stats tiles -->
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">
@@ -2976,9 +3007,10 @@ app.get("/admin/federal", async (req, res) => {
           <div style="font-size:22px; font-weight:700; color:#2B2523;">${stats.active || 0}</div>
           <div style="font-size:10px; color:#5E5854;">${stats.total || 0} total</div>
         </a>
-        <a href="/admin/federal?group=trademarks" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+        <a href="/admin/matters/?view=trademarks" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
           <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">™ Trademarks</div>
-          <div style="font-size:22px; font-weight:700; color:#5E5854;">${stats.tm_count || 0}</div>
+          <div style="font-size:22px; font-weight:700; color:#5E5854;">${tmInManager}</div>
+          <div style="font-size:10px; color:#5E5854;">in Matter Manager</div>
         </a>
         <a href="/admin/federal?group=federal_court" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
           <div style="font-size:10px; color:#A34C00; text-transform:uppercase;">⚖ Federal Court</div>
@@ -2997,7 +3029,7 @@ app.get("/admin/federal", async (req, res) => {
       <!-- Group tabs -->
       <div style="display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;">
         <a href="/admin/federal" style="background:${!q.group ? "#2B2523" : "#F3EFE9"}; color:${!q.group ? "white" : "#2B2523"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">All Matters</a>
-        <a href="/admin/federal?group=trademarks" style="background:${q.group === "trademarks" ? "#5E5854" : "#F3EFE9"}; color:${q.group === "trademarks" ? "white" : "#5E5854"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">™ Trademarks Only</a>
+        <a href="/admin/matters/?view=trademarks" style="background:#F3EFE9; color:#5E5854; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">™ Trademarks (Matter Manager)</a>
         <a href="/admin/federal?group=federal_court" style="background:${q.group === "federal_court" ? "#2B2523" : "#F3EFE9"}; color:${q.group === "federal_court" ? "white" : "#A34C00"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">⚖ Federal Court</a>
         <a href="/admin/federal?group=federal_appeal" style="background:${q.group === "federal_appeal" ? "#2B2523" : "#F3EFE9"}; color:${q.group === "federal_appeal" ? "white" : "#A34C00"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Appeals</a>
         <a href="/admin/federal?group=federal_writ" style="background:${q.group === "federal_writ" ? "#2B2523" : "#F3EFE9"}; color:${q.group === "federal_writ" ? "white" : "#A34C00"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Writs (Habeas/Mandamus)</a>
@@ -3049,15 +3081,20 @@ app.get("/admin/federal/new", async (req, res) => {
   try {
     const fm = require("./federal-matters");
     const hearingNotes = require("./hearing-notes");
-    const typeGroups = Object.entries(fm.MATTER_TYPES).map(([grp, types]) => {
+    // Trademark matters are opened in Matter Manager, so the trademark types are not offered here.
+    const typeGroups = Object.entries(fm.MATTER_TYPES).filter(([grp]) => grp !== "trademarks").map(([grp, types]) => {
       const opts = types.map(t => `<option value="${t.key}" data-agency="${t.agency || ""}" data-group="${grp}">${t.label}</option>`).join("");
       return `<optgroup label="${grp.replace(/_/g, " ")}">${opts}</optgroup>`;
     }).join("");
 
     const body = `
       <div class="page-header">
-        <h1>+ New Federal Matter / Trademark</h1>
+        <h1>+ New Federal Matter</h1>
         <a href="/admin/federal" class="back-link">← All matters</a>
+      </div>
+
+      <div style="background:#F3EFE9; border-left:4px solid #A34C00; padding:12px 16px; border-radius:8px; margin-bottom:16px; max-width:800px; font-size:13px;">
+        ™ Opening a trademark matter? Use <a href="/admin/matters/" style="color:#A34C00; font-weight:600;">Matter Manager</a>. It sets the USPTO deadlines and checks the status every morning.
       </div>
 
       <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #E8E3DC; max-width:800px;">
@@ -3148,8 +3185,32 @@ app.get("/admin/federal/new", async (req, res) => {
 app.post("/admin/federal", async (req, res) => {
   try {
     const fm = require("./federal-matters");
+    if (fm.isTrademarkType(req.body && req.body.matter_type)) {
+      return res.status(400).json({ ok: false, error: "Trademark matters are opened in Matter Manager (/admin/matters/), not here." });
+    }
     const matter = await fm.createMatter({ ...req.body, created_by: req.user?.id || null });
     res.json({ ok: true, matter });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Move trademark rows into Matter Manager. Body: { id } for one row,
+// or {} for every open trademark row. Rows are closed here, never deleted.
+app.post("/admin/federal/move-trademarks", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const fm = require("./federal-matters");
+    const oneId = req.body && req.body.id ? parseInt(req.body.id, 10) : null;
+    const targets = oneId ? [{ id: oneId, client_name: "" }] : await fm.listTrademarksToMove();
+    const moved = [], failed = [];
+    for (const t of targets) {
+      try {
+        const r = await fm.moveTrademarkToMatterManager(t.id);
+        moved.push({ id: t.id, client_name: t.client_name, matter_id: r.matterId, deadline_carried: r.deadlineCarried, tracked: r.tracked, ttab: r.isTTAB });
+      } catch (err) {
+        failed.push({ id: t.id, client_name: t.client_name || ("row " + t.id), error: err.message });
+      }
+    }
+    if (oneId && failed.length) return res.status(400).json({ ok: false, error: failed[0].error });
+    res.json({ ok: true, moved, failed });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -3203,9 +3264,16 @@ app.get("/admin/federal/:id", async (req, res) => {
       <div style="display:flex; gap:8px;">
         <a href="/admin/tasks/new?client_name=${encodeURIComponent(m.client_name)}&matter_type=${encodeURIComponent(fm.TYPE_GROUPS[m.matter_type] === 'trademarks' ? 'tm' : 'immigration')}${m.a_number ? '&a_number=' + encodeURIComponent(m.a_number) : ''}${m.matter_number ? '&case_number=' + encodeURIComponent(m.matter_number) : ''}${m.agency ? '&court=' + encodeURIComponent(m.agency) : ''}" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ Add Task</a>
         <button onclick="deleteMatter()" style="background:#9C2B1E; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🗑️ Delete</button>
+        ${isTM && req.user && req.user.r === "admin" && !String(m.notes || "").includes("[Moved to Matter Manager") ? `<button onclick="moveToMatterManager()" style="background:#2B2523; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">™ Move to Matter Manager</button>` : ""}
       </div>
 
       <script>
+        async function moveToMatterManager() {
+          if (!confirm("Copy this trademark matter into Matter Manager and close it here?")) return;
+          const r = await fetch("/admin/federal/move-trademarks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: ${m.id} }) });
+          const d = await r.json();
+          if (d.ok) location.href = "/admin/matters/"; else alert("Could not move: " + d.error);
+        }
         async function deleteMatter() {
           if (!confirm("Delete this matter? This cannot be undone.")) return;
           const r = await fetch("/admin/federal/${m.id}", { method: "DELETE" });
@@ -7394,7 +7462,10 @@ app.get("/admin/", (req, res, next) => {
   next();
 });
 
-app.use("/admin/matters", auth.requireRole("admin"), matterManagerRouter);
+// The Matter Manager is JJ's, except that firm staff with the Federal & TM
+// permission reach its TRADEMARK matters (and nothing else in it).
+// matterAccess, in matter-manager.js, is the whole of that rule.
+app.use("/admin/matters", matterAccess, matterManagerRouter);
 // NOTE: The role gate that used to be here has moved INSIDE adminRouter itself
 // (see admin.js). Applying requireRole("admin") on the mount blocked EVERY /admin/*
 // request from non-admins because Express runs mount middleware before route
@@ -7823,7 +7894,7 @@ BUSINESS LITIGATION (→ JJ Zhang):
 - Got served: 30 days to respond, preserve all documents
 
 PATENTS & TRADEMARKS (→ JJ Zhang):
-- Trademark: 8-12 months, $350/class USPTO fee
+- Trademark: typically about 10 to 12 months to registration, $350/class USPTO fee
 - Utility patent: 20 years, $10,000-$30,000+ total
 
 ESTATE PLANNING (→ JJ Zhang):
@@ -8165,7 +8236,9 @@ async function sendDailyDeadlineSummary() {
     const [y, m, d] = dateStr.split("-").map(Number);
     const dt = new Date(Date.UTC(y, m - 1, d));
     dt.setUTCDate(dt.getUTCDate() + n);
-    return ptFmt.format(dt);
+    // Plain calendar arithmetic. (Formatting this UTC midnight in Pacific time
+    // gave the day BEFORE, so every look-ahead window was one day short.)
+    return dt.toISOString().slice(0, 10);
   }
   const in7Str  = addDaysPT(todayStr, 7);
   const in14Str = addDaysPT(todayStr, 14);
@@ -8199,7 +8272,7 @@ async function sendDailyDeadlineSummary() {
   let ipRows = [];
   try {
     const r = await db.query(
-      `SELECT d.id, d.title, d.party, d.due_date, d.citation,
+      `SELECT d.id, d.title, d.party, to_char(d.due_date, 'YYYY-MM-DD') AS due_date, d.citation,
               m.client_name, m.matter_ref, m.case_type, m.id AS matter_id, m.mark
          FROM matter_deadlines d
          JOIN matters m ON m.id = d.matter_id
@@ -8286,7 +8359,7 @@ async function sendDailyDeadlineSummary() {
   let rows;
   try {
     const r = await db.query(
-      `SELECT d.id, d.title, d.party, d.due_date, d.citation,
+      `SELECT d.id, d.title, d.party, to_char(d.due_date, 'YYYY-MM-DD') AS due_date, d.citation,
               m.client_name, m.matter_ref, m.id AS matter_id
          FROM matter_deadlines d
          JOIN matters m ON m.id = d.matter_id
@@ -8375,7 +8448,24 @@ async function sendDailyDeadlineSummary() {
   }
 
   try {
-    await tgSend(String(JJ_TELEGRAM_ID), msg);
+    // Telegram refuses a message over 4,096 characters, and a refused summary
+    // is a morning with no deadlines shown. Long ones go out in parts, cut
+    // between lines.
+    const parts = require("./tsdr-sync").splitMessage(msg, 3850);
+    let undelivered = 0;
+    for (let i = 0; i < parts.length; i++) {
+      const text = parts.length > 1 ? `(${i + 1}/${parts.length})\n${parts[i]}` : parts[i];
+      try { await tgSend(String(JJ_TELEGRAM_ID), text); }
+      catch (e1) {
+        // Once more after a pause (Telegram asks a fast sender to wait).
+        await new Promise(r => setTimeout(r, 3000));
+        try { await tgSend(String(JJ_TELEGRAM_ID), text); }
+        catch (e2) { undelivered++; console.error(`Daily summary part ${i + 1}/${parts.length} not sent:`, e2.message); }
+      }
+    }
+    if (undelivered) {
+      await tgSend(String(JJ_TELEGRAM_ID), `⚠️ Today's deadline summary is incomplete: ${undelivered} of ${parts.length} part(s) could not be sent. Open the Matter Manager for the full list: https://tezlaw-bot.onrender.com/admin/matters/`).catch(() => {});
+    }
     console.log(`📅 Daily deadline summary sent — ${criticalAlerts.length} critical, ${overdue.length} overdue, ${today.length} today, ${week.length} this week, ${next.length} next week`);
   } catch (err) {
     console.error("Failed to send daily summary:", err.message);
@@ -8473,10 +8563,10 @@ async function handleDeadlineCommand(chatId, text) {
   let matches;
   try {
     const r = await db.query(
-      `SELECT id, client_name, matter_ref FROM matters
+      `SELECT id, client_name, matter_ref, case_type FROM matters
         WHERE user_id = 1 AND status = 'active'
           AND (client_name ILIKE $1 OR matter_ref ILIKE $1 OR petitioner_name ILIKE $1)
-        ORDER BY updated_at DESC NULLS LAST, id DESC
+        ORDER BY (case_type IN ('Trademark', 'Patent', 'Copyright')) ASC, updated_at DESC NULLS LAST, id DESC
         LIMIT 10`,
       [`%${matterSearch}%`]
     );
@@ -8504,7 +8594,7 @@ async function handleDeadlineCommand(chatId, text) {
   });
   let msg = `Multiple matters matched "${matterSearch}". Reply with a number:\n\n`;
   matches.forEach((m, i) => {
-    msg += `${i + 1}. ${m.client_name}${m.matter_ref ? " — " + m.matter_ref : ""}\n`;
+    msg += `${i + 1}. ${m.client_name}${m.matter_ref ? " — " + m.matter_ref : ""}${m.case_type ? " (" + m.case_type + ")" : ""}\n`;
   });
   msg += `\n(or /deadline cancel)`;
   await tgSend(chatId, msg);
@@ -13115,6 +13205,40 @@ app.listen(PORT, async () => {
     usptoWatch.startUsptoScheduler();
   } catch (e) {
     console.error("⚠️  USPTO watch init failed:", e.message);
+  }
+
+  // Repair for the daily deadline reminders, safe to run at every start.
+  // The reminder job used to misread due dates, so on the first day a
+  // deadline came within 60 days it logged its 30/14/7/1-day (and hearing
+  // 60/30/14-day) reminders as already sent. Rows logged when MORE days
+  // remained than their threshold are removed here so those reminders can
+  // still go out at the right time. A correctly logged row never matches.
+  try {
+    const fix = await require("./db").query(
+      `DELETE FROM matter_ip_reminders r USING matter_deadlines d
+        WHERE d.id = r.deadline_id AND d.completed = FALSE
+          AND (d.due_date - (r.sent_at AT TIME ZONE 'America/Los_Angeles')::date) > r.days_out`
+    );
+    if (fix.rowCount) console.log(`🧹 Cleared ${fix.rowCount} deadline-reminder log row(s) that the old date bug wrote too early`);
+  } catch (e) {
+    console.error("⚠️  Reminder log repair failed:", e.message);
+  }
+
+  // Daily USPTO status check (TSDR) for Trademark matters in Matter Manager.
+  // Alerts go to JJ on Telegram only, like the daily deadline summary.
+  try {
+    const tsdrSync = require("./tsdr-sync");
+    await tsdrSync.init().catch(e => console.error("⚠️  TSDR table init failed (will retry on the first run):", e.message));
+    tsdrSync.startScheduler({
+      notify: async (text) => {
+        // Throwing keeps the alert saved, so it is sent once Telegram works.
+        if (!JJ_TELEGRAM_ID) throw new Error("JJ_TELEGRAM_ID is not set");
+        await tgSend(String(JJ_TELEGRAM_ID), text);
+      },
+    });
+    console.log("✅ TSDR status check ready");
+  } catch (e) {
+    console.error("⚠️  TSDR status check init failed:", e.message);
   }
 
   // Initialize hearing notes tables (courtroom note-taking tool)

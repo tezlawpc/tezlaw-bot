@@ -347,6 +347,12 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
       "  `/uspto matches [days]` — recent matches (default 30 days)",
       "  `/uspto check` — force check now (usually runs daily 6:30 AM PT)",
       "",
+      "*™️ USPTO Status Check (TSDR)*",
+      "  Runs daily 6:40 AM PT on every active Trademark matter with a serial number.",
+      "  `/tsdr` — status of each trademark matter",
+      "  `/tsdr check` — run the check now",
+      "  `/tsdr test <serial>` — read one serial number, save nothing",
+      "",
       "*📬 Email Paralegal*",
       "  `/unreplied` — refresh digest of unreplied emails now",
       "  `/replied <id>` — mark thread as handled",
@@ -614,6 +620,51 @@ async function handleJJSession(platform, userId, userMessage, options = {}) {
     } catch (err) {
       console.error("[JJ-Mode] /uspto error:", err.message);
       return { handled: true, message: `❌ USPTO command error: ${err.message}` };
+    }
+  }
+
+  // ── /tsdr [status|check|test <serial>] — daily USPTO status check ─
+  const tsdrMatch = usptoFirstLine.match(/^\/tsdr(?:\s+(status|list|check|test))?(?:\s+(.+))?\s*$/);
+  if (tsdrMatch) {
+    try {
+      const tsdr = require("./tsdr-sync");
+      const arg = (tsdrMatch[2] || "").trim();
+      // "/tsdr 97123456" means "/tsdr test 97123456"
+      const action = tsdrMatch[1] || (arg ? "test" : "status");
+
+      if (action === "test") {
+        if (!arg) return { handled: true, message: "Usage: `/tsdr test <8-digit serial or 7-digit registration number>`" };
+        const t = await tsdr.testSerial(arg);
+        return { handled: true, message: tsdr.formatTest(t) };
+      }
+
+      if (action === "check") {
+        // Each matter with news gets its own Telegram message from the check
+        // itself; this reply is only the tally, with failures listed first.
+        const stats = await tsdr.runAll({});
+        if (stats.busy) return { handled: true, message: "™️ A USPTO check is already running. Try again in a minute." };
+        if (stats.skippedNoKey) return { handled: true, message: "⚠️ USPTO_API_KEY is not set on the server, so the check cannot run.\nGet a free key at https://account.uspto.gov/api-manager/ and add it in Render." };
+        const parts = [];
+        for (const f of stats.failures) parts.push(`⚠️ ${f.label}: ${f.message}`);
+        if (stats.stoppedEarly) parts.push(`The run stopped early; ${stats.notChecked} matter(s) were not checked.`);
+        parts.push(`™️ USPTO check done: ${stats.checked} matter(s) checked, ${stats.changed} with news, ${stats.deadlinesAdded} deadline(s) added, ${stats.errors} error(s). ${stats.alertsSent} alert message(s) sent separately.`);
+        return { handled: true, message: parts.join("\n").substring(0, 3900) };
+      }
+
+      const rows = await tsdr.listStatus();
+      if (!rows.length) return { handled: true, message: "™️ No active Trademark matters in Matter Manager." };
+      const lines = rows.map(r => {
+        const name = `${r.mark || r.client_name || "Matter " + r.id}${r.serial_number ? ` (${r.serial_number})` : " (no serial number)"}`;
+        if (!r.serial_number) return `• ${name}\n   not checked: add the serial or registration number to the matter`;
+        if (r.last_error) return `• ${name}\n   ⚠️ ${r.last_error}${r.consecutive_errors > 1 ? ` (${r.consecutive_errors} checks in a row)` : ""}`;
+        if (!r.last_ok_at) return `• ${name}\n   not checked yet`;
+        const checked = new Date(r.last_ok_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" });
+        return `• ${name}\n   ${r.status_desc || "status not stated"}${r.status_date ? ` (as of ${r.status_date})` : ""}\n   checked ${checked}`;
+      });
+      return { handled: true, message: `™️ USPTO status — ${rows.length} trademark matter(s):\n\n${lines.join("\n\n")}`.substring(0, 3900) };
+    } catch (err) {
+      console.error("[JJ-Mode] /tsdr error:", err.message);
+      return { handled: true, message: `❌ TSDR: ${err.message}` };
     }
   }
 
