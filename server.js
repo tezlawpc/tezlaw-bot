@@ -4377,7 +4377,8 @@ app.get("/admin/accounting", async (req, res) => {
     const ui = require("./accounting-ui");
     const hearingNotes = require("./hearing-notes");
     const body = await ui.renderDashboard(req.query || {});
-    res.send(hearingNotes.renderAdminChrome({ title: "Accounting", body, activeItem: "accounting" }));
+    const qboTop = await require("./qbo-panel").dashboardPanel(req.query || {});
+    res.send(hearingNotes.renderAdminChrome({ title: "Accounting", body: qboTop + body, activeItem: "accounting" }));
   } catch (err) {
     console.error("[accounting dashboard]:", err.message);
     res.status(500).send("Error: " + err.message);
@@ -4401,7 +4402,8 @@ app.get("/admin/accounting/income-statement", async (req, res) => {
     const ui = require("./accounting-ui");
     const hearingNotes = require("./hearing-notes");
     const body = await ui.renderIncomeStatement(req.query || {});
-    res.send(hearingNotes.renderAdminChrome({ title: "Income Statement", body, activeItem: "accounting" }));
+    const qboTop = await require("./qbo-panel").profitAndLossPanel(req.query || {});
+    res.send(hearingNotes.renderAdminChrome({ title: "Income Statement", body: qboTop + body, activeItem: "accounting" }));
   } catch (err) {
     console.error("[accounting P&L]:", err.message);
     res.status(500).send("Error: " + err.message);
@@ -4413,7 +4415,8 @@ app.get("/admin/accounting/balance-sheet", async (req, res) => {
     const ui = require("./accounting-ui");
     const hearingNotes = require("./hearing-notes");
     const body = await ui.renderBalanceSheet(req.query || {});
-    res.send(hearingNotes.renderAdminChrome({ title: "Balance Sheet", body, activeItem: "accounting" }));
+    const qboTop = await require("./qbo-panel").balanceSheetPanel(req.query || {});
+    res.send(hearingNotes.renderAdminChrome({ title: "Balance Sheet", body: qboTop + body, activeItem: "accounting" }));
   } catch (err) {
     console.error("[accounting BS]:", err.message);
     res.status(500).send("Error: " + err.message);

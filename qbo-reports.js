@@ -209,8 +209,21 @@ async function getReport(name, params = {}, { company_id = null, ttlMinutes = DE
   await initTables();
   const companyId = await qbo.companyIdOf(company_id);
 
+  // The realm belongs in the cache key, not just the company.
+  //
+  // A set of books here can be re-pointed at a different QuickBooks company --
+  // which is exactly what reconnecting to fix a sandbox or wrong-account link
+  // does. Keyed on company alone, the cache would keep serving the OLD realm's
+  // figures under the new connection, and they would look entirely plausible.
+  let realm = "none";
+  try {
+    const cfg = await qbo.getConfig(companyId);
+    if (cfg && cfg.realm_id) realm = String(cfg.realm_id);
+  } catch (e) { /* not connected yet; the fetch below will say so */ }
+  const cacheParams = { ...params, _realm: realm };
+
   let cached = null;
-  try { cached = await readCache(companyId, name, params, ttlMinutes); } catch (e) {
+  try { cached = await readCache(companyId, name, cacheParams, ttlMinutes); } catch (e) {
     console.warn("[qbo-reports] cache read failed:", e.message);
   }
 
@@ -222,7 +235,7 @@ async function getReport(name, params = {}, { company_id = null, ttlMinutes = DE
   try {
     const resp = await qbo.qboRequest({ method: "GET", path: `/reports/${name}`, params, company_id: companyId });
     payload = resp && resp.data ? resp.data : resp;
-    try { await writeCache(companyId, name, params, payload); } catch (e) {
+    try { await writeCache(companyId, name, cacheParams, payload); } catch (e) {
       console.warn("[qbo-reports] cache write failed:", e.message);
     }
   } catch (e) {
