@@ -195,6 +195,12 @@ jobs:
       - name: Signed-copy delivery
         run: node scripts/check-esign-copies.js
 
+      # A stalled matter does not announce itself: it stops appearing in
+      # anybody day. The board showed last-updated, which any field edit
+      # moves, so it answered a different question from the one being asked.
+      - name: Civil board staleness
+        run: node scripts/check-civil-staleness.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never

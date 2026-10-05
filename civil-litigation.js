@@ -772,11 +772,110 @@ async function listCommunications(caseId) {
   return r.rows;
 }
 
+/**
+ * For a set of matters: when each last moved, and what is due next.
+ *
+ * Two questions an attorney or paralegal scanning the board actually has, and
+ * neither was on it. "Last updated" is on every case row, but updated_at is
+ * touched by any edit to any field — correcting a case number counts as
+ * movement — so it answers a different question from the one being asked.
+ *
+ * WHAT COUNTS AS MOVEMENT
+ * An entry in the case log (civil_case_events) or a deadline marked done.
+ * Those are the two things that mean work happened: logEvent is what filings,
+ * calls, time entries, court-email readings and signed documents all write to.
+ * Measured by created_at, not event_date — when the entry was actually made is
+ * what tells you whether anybody has touched this matter, and a hearing logged
+ * for next March must not make a quiet case look busy.
+ *
+ * A matter with no entries at all reports the days since it was opened, and
+ * says so, rather than reporting nothing — a case sitting untouched since
+ * intake is the single most useful thing this column can surface.
+ *
+ * ONE QUERY PER SOURCE, not one per case: the board carries every active
+ * matter, which for this firm is a couple of hundred.
+ */
+async function caseActivity(caseIds = []) {
+  const ids = [...new Set((caseIds || []).map(Number).filter(Number.isFinite))];
+  const out = new Map();
+  if (!ids.length) return out;
+
+  const q = (sql) => db.query(sql, [ids]).catch(e => {
+    // A missing table must not take the board down; the chip just goes quiet.
+    console.warn("[civil-litigation] caseActivity:", e.message);
+    return { rows: [] };
+  });
+
+  const [events, done, deadlines, hearings] = await Promise.all([
+    q(`SELECT case_id, MAX(created_at) AS at FROM civil_case_events
+        WHERE case_id = ANY($1) GROUP BY case_id`),
+    q(`SELECT case_id, MAX(completed_at) AS at FROM civil_case_deadlines
+        WHERE case_id = ANY($1) AND completed_at IS NOT NULL GROUP BY case_id`),
+    // Earliest still-open deadline from today on. An overdue one is more
+    // urgent than a future one, so past-due dates are kept, not skipped.
+    q(`SELECT DISTINCT ON (case_id) case_id, to_char(due_date, 'YYYY-MM-DD') AS d, description, priority
+         FROM civil_case_deadlines
+        WHERE case_id = ANY($1) AND status = 'pending'
+        ORDER BY case_id, due_date ASC`),
+    q(`SELECT DISTINCT ON (case_id) case_id, to_char(hearing_date, 'YYYY-MM-DD') AS d,
+              hearing_type, purpose
+         FROM civil_hearings
+        WHERE case_id = ANY($1) AND status = 'scheduled'
+        ORDER BY case_id, hearing_date ASC`),
+  ]);
+
+  for (const id of ids) out.set(id, { last_activity_at: null, last_activity_source: null, next_due: null });
+
+  const touch = (row, source) => {
+    if (!row || !row.at) return;
+    const rec = out.get(Number(row.case_id));
+    if (!rec) return;
+    const at = new Date(row.at);
+    if (!rec.last_activity_at || at > new Date(rec.last_activity_at)) {
+      rec.last_activity_at = row.at;
+      rec.last_activity_source = source;
+    }
+  };
+  for (const r of events.rows) touch(r, "case log");
+  for (const r of done.rows) touch(r, "deadline completed");
+
+  const dl = new Map(deadlines.rows.map(r => [Number(r.case_id), r]));
+  const hr = new Map(hearings.rows.map(r => [Number(r.case_id), r]));
+  for (const id of ids) {
+    const rec = out.get(id);
+    const d = dl.get(id), h = hr.get(id);
+    const options = [];
+    if (d) options.push({ date: d.d, kind: "deadline", label: d.description, priority: d.priority || null });
+    if (h) options.push({ date: h.d, kind: "hearing", label: h.hearing_type || h.purpose || "Hearing", priority: null });
+    options.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    rec.next_due = options[0] || null;
+  }
+
+  return out;
+}
+
 async function kanban(filter = {}) {
   const cases = await listCases({ status: "active", ...filter });
   const grouped = {};
   for (const s of STAGES) grouped[s.key] = [];
+
+  // Staleness and the next due date, for every matter on the board at once.
+  let activity = new Map();
+  try { activity = await caseActivity(cases.map(c => c.id)); }
+  catch (e) { console.warn("[civil-litigation] kanban activity:", e.message); }
+
   for (const c of cases) {
+    const a = activity.get(Number(c.id));
+    if (a && a.last_activity_at) {
+      c.last_activity_at = a.last_activity_at;
+      c.last_activity_source = a.last_activity_source;
+    } else {
+      // Nothing has ever been logged. Days since the matter was opened is the
+      // honest answer and the one worth seeing.
+      c.last_activity_at = c.created_at || null;
+      c.last_activity_source = "case opened";
+    }
+    c.next_due = (a && a.next_due) || null;
     if (grouped[c.stage]) grouped[c.stage].push(c);
     else grouped.intake.push(c);
   }
@@ -1195,7 +1294,7 @@ module.exports = {
   logEvent, listEvents, deleteDeadline, reopenDeadline,
   autoGenerateDeadlines, addManualDeadline, completeDeadline, listDeadlines,
   logCommunication, listCommunications,
-  kanban, getCaseSummary,
+  kanban, getCaseSummary, caseActivity,
   STAGE_PLAYBOOK, getStageWorkspace,
   addCalendarDays, subCalendarDaysBackToCourtDay, fmtDate,
 };

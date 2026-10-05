@@ -58,15 +58,46 @@ async function renderKanban(opts = {}) {
     const t = new Date(d).getTime();
     return Number.isFinite(t) ? Math.ceil((t - Date.now()) / DAY) : null;
   };
+  // ── Two questions the board never answered ───────────────
+  //
+  // "How long has this sat?" and "what's due next?". Both were only findable
+  // by opening the matter, which on a board of ~220 means they were not
+  // findable. A stalled case does not announce itself: it just stops
+  // appearing in anybody's day.
+  //
+  // Quiet days are counted from the last entry in the case log (or the last
+  // deadline marked done) — not from updated_at, which a typo correction
+  // moves. A matter with no entries counts from the day it was opened, which
+  // is the one most worth seeing.
+  const daysSince = at => {
+    if (!at) return null;
+    const t = new Date(at).getTime();
+    return Number.isFinite(t) ? Math.floor((Date.now() - t) / DAY) : null;
+  };
+  // Thresholds are deliberately plain: a fortnight is a reminder, a month is
+  // a problem, a quarter on an active matter is how a malpractice claim
+  // starts.
+  const QUIET_WARN = 14, QUIET_BAD = 30, QUIET_SEVERE = 90;
+  const quietColor = d =>
+    d >= QUIET_SEVERE ? "#9C2B1E" : d >= QUIET_BAD ? "#FF7B00" : "#5E5854";
+
   const urgencyOf = c => {
     const t = daysUntil(c.trial_date);
     const sol = daysUntil(c.statute_of_limitations);
-    if ((t !== null && t <= 60) || (sol !== null && sol <= 90)) return 2;
-    if (t !== null && t <= 120) return 1;
+    // An overdue deadline or a hearing inside a week belongs at the top
+    // alongside a near trial date. Most matters on this board have no trial
+    // date set, so without this the triage only ever ranked a handful of them.
+    const due = c.next_due ? daysUntil(c.next_due.date) : null;
+    if ((t !== null && t <= 60) || (sol !== null && sol <= 90) || (due !== null && due < 0)) return 2;
+    if ((t !== null && t <= 120) || (due !== null && due <= 7)) return 1;
     return 0;
   };
   const soonestOf = c => {
-    const xs = [daysUntil(c.trial_date), daysUntil(c.statute_of_limitations)].filter(v => v !== null);
+    const xs = [
+      daysUntil(c.trial_date),
+      daysUntil(c.statute_of_limitations),
+      c.next_due ? daysUntil(c.next_due.date) : null,
+    ].filter(v => v !== null);
     return xs.length ? Math.min(...xs) : Infinity;
   };
 
@@ -77,7 +108,12 @@ async function renderKanban(opts = {}) {
       if (ua !== ub) return ub - ua;
       const sa = soonestOf(a), sb = soonestOf(b);
       if (sa !== sb) return sa - sb;
-      return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+      // Then the quietest first, rather than the most recently touched. A
+      // board sorted by updated_at buries exactly the matters that need
+      // looking at: the ones nobody has touched.
+      const qa = new Date(a.last_activity_at || a.created_at || 0).getTime();
+      const qb = new Date(b.last_activity_at || b.created_at || 0).getTime();
+      return qa - qb;
     });
 
     const cards = cases.map(c => {
@@ -91,8 +127,24 @@ async function renderKanban(opts = {}) {
       const chip = (label, color, title) =>
         `<span title="${esc(title)}" style="display:inline-block;padding:1px 4px;border-radius:3px;background:${color};color:#FAF8F5;font-size:9px;font-weight:700;line-height:1.4;white-space:nowrap;">${esc(label)}</span>`;
 
+      // Days quiet, and what is due next. Both sit before the trial and SOL
+      // chips because they are the ones that apply to every matter on the
+      // board, not only the ones with a trial date set.
+      const quiet = daysSince(c.last_activity_at);
+      const due = c.next_due;
+      const dueIn = due ? daysUntil(due.date) : null;
       const chips = [
         c.files_archived_at ? chip("ARCHIVED", "#5E5854", "Case file archived — Dropbox sync paused") : "",
+        quiet !== null && quiet >= QUIET_WARN
+          ? chip("QUIET " + quiet + "d", quietColor(quiet),
+                 `No movement for ${quiet} day${quiet === 1 ? "" : "s"} — last: ${c.last_activity_source || "unknown"} ${fmtDate(c.last_activity_at)}`)
+          : "",
+        due
+          ? chip(
+              (dueIn !== null && dueIn < 0 ? "OVERDUE " + Math.abs(dueIn) + "d" : "DUE " + fmtDate(due.date)),
+              dueIn !== null && dueIn < 0 ? "#9C2B1E" : dueIn !== null && dueIn <= 7 ? "#FF7B00" : "#2F6B3F",
+              `${due.kind === "hearing" ? "Hearing" : "Deadline"} ${fmtDate(due.date)}: ${due.label || ""}`)
+          : "",
         role ? `<span style="display:inline-block;padding:1px 4px;border:1px solid ${stage.color};border-radius:3px;color:${stage.color};font-size:9px;font-weight:600;line-height:1.4;">${esc(role)}</span>` : "",
         t !== null ? chip(t < 0 ? "TRIAL PAST" : "T-" + t + "d", t <= 60 ? "#9C2B1E" : t <= 120 ? "#FF7B00" : "#5E5854", "Trial: " + fmtDate(c.trial_date)) : "",
         sol !== null && sol <= 180 ? chip("SOL " + sol + "d", sol <= 90 ? "#9C2B1E" : "#A34C00", "SOL: " + fmtDate(c.statute_of_limitations)) : "",
