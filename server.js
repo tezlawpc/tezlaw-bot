@@ -8197,6 +8197,19 @@ async function processMessage(platform, userId, userText, sendFn) {
 async function tgSend(chatId, text) {
   await axios.post(`${TELEGRAM_API}/sendMessage`, { chat_id: chatId, text });
 }
+// Like tgSend, but to an alert topic (tg-route.js): the ops group's topic, the
+// group itself, or JJ's direct message, whichever is configured. Throws when
+// it cannot deliver, as tgSend does, because its callers retry or re-queue.
+async function tgSendTopic(topic, text) {
+  const to = require("./tg-route").target(topic);
+  if (!to) throw new Error("no Telegram destination is set (TG_OPS_CHAT_ID or JJ_TELEGRAM_ID)");
+  try {
+    await axios.post(`${TELEGRAM_API}/sendMessage`, { ...to, text });
+  } catch (e) {
+    if (!(to.message_thread_id && e.response && e.response.status === 400)) throw e;
+    await axios.post(`${TELEGRAM_API}/sendMessage`, { chat_id: to.chat_id, text });
+  }
+}
 async function tgDownloadFile(fileId) {
   const r = await axios.get(`${TELEGRAM_API}/getFile`, { params: { file_id: fileId } });
   const path = r.data.result.file_path;
@@ -8299,8 +8312,8 @@ function thresholdsForDeadline(caseType, title, party) {
 }
 
 async function sendDailyDeadlineSummary() {
-  if (!JJ_TELEGRAM_ID) {
-    console.log("Daily summary skipped — JJ_TELEGRAM_ID not set");
+  if (!require("./tg-route").routeFor("court")) {
+    console.log("Daily summary skipped — no Telegram destination set (TG_OPS_CHAT_ID or JJ_TELEGRAM_ID)");
     return;
   }
   const db = require("./db");
@@ -8539,16 +8552,16 @@ async function sendDailyDeadlineSummary() {
     let undelivered = 0;
     for (let i = 0; i < parts.length; i++) {
       const text = parts.length > 1 ? `(${i + 1}/${parts.length})\n${parts[i]}` : parts[i];
-      try { await tgSend(String(JJ_TELEGRAM_ID), text); }
+      try { await tgSendTopic("court", text); }
       catch (e1) {
         // Once more after a pause (Telegram asks a fast sender to wait).
         await new Promise(r => setTimeout(r, 3000));
-        try { await tgSend(String(JJ_TELEGRAM_ID), text); }
+        try { await tgSendTopic("court", text); }
         catch (e2) { undelivered++; console.error(`Daily summary part ${i + 1}/${parts.length} not sent:`, e2.message); }
       }
     }
     if (undelivered) {
-      await tgSend(String(JJ_TELEGRAM_ID), `⚠️ Today's deadline summary is incomplete: ${undelivered} of ${parts.length} part(s) could not be sent. Open the Matter Manager for the full list: https://tezlaw-bot.onrender.com/admin/matters/`).catch(() => {});
+      await tgSendTopic("court", `⚠️ Today's deadline summary is incomplete: ${undelivered} of ${parts.length} part(s) could not be sent. Open the Matter Manager for the full list: https://tezlaw-bot.onrender.com/admin/matters/`).catch(() => {});
     }
     console.log(`📅 Daily deadline summary sent — ${criticalAlerts.length} critical, ${overdue.length} overdue, ${today.length} today, ${week.length} this week, ${next.length} next week`);
   } catch (err) {
@@ -8786,7 +8799,10 @@ app.post("/telegram", async (req, res) => {
       try {
         const tasks = require("./tasks");
         const cbChatId = String(cb.message?.chat?.id || cb.from?.id || "");
-        const result = await tasks.handleTelegramCallback(cb.data, cbChatId, cb.id);
+        const tgOps = require("./tg-ops");
+        if (!tgOps.mayUseStaffCommands(cb.from, cbChatId)) { denyApproval(cb, "task"); return; }
+        const result = await tasks.handleTelegramCallback(
+          cb.data, cb.message ? tgOps.replyDest(cb.message) : cbChatId, cb.id);
         if (result) {
           axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
             callback_query_id: cb.id,
@@ -8808,6 +8824,14 @@ app.post("/telegram", async (req, res) => {
     // Works in DMs, groups, and channels. Returns the current chat's ID
     // so JJ can set env vars like HEARING_NOTES_TELEGRAM_GROUP_ID.
     const textForCmd = (msg.text || msg.caption || "").trim();
+
+    // ── The ops group is for alerts, not for Zara (tg-ops.js) ──
+    // Inside TG_OPS_CHAT_ID only a short list of commands is read. Anything
+    // else typed there is staff talking to staff: no reply, no intake, no
+    // history. /routing shows where each kind of alert is going.
+    const tgOps = require("./tg-ops");
+    if (tgOps.isOpsChat(chatId) && !tgOps.allowedInOpsGroup(textForCmd)) return;
+    if (await tgOps.handleRouting(msg)) return;
 
     // ── Consultant linking their Telegram (TEZ-XXXXXX) ──────
     // Checked before anything else reads the text, so a code is never
@@ -8859,7 +8883,7 @@ app.post("/telegram", async (req, res) => {
             ? `\n_This is a direct message, so there is no topic thread._`
             : `\n_No topic — this is the group itself. Run this inside a topic to get its thread id._\n\n` +
               `_Env:_\n\`TG_OPS_CHAT_ID=${chatId}\``);
-      await tgSend(chatId, info);
+      await tgOps.reply(tgOps.replyDest(msg), info);
       return;
     }
 
@@ -8867,7 +8891,12 @@ app.post("/telegram", async (req, res) => {
     if (/^\/(tasks|done|snooze|newtask)(@\w+)?(\s|$)/i.test(textForCmd)) {
       try {
         const tasks = require("./tasks");
-        const handled = await tasks.handleTelegramCommand(textForCmd, chatId);
+        // Staff only. This bot is public, and the task list names clients.
+        if (!tgOps.mayUseStaffCommands(msg.from, chatId)) {
+          await tgSend(chatId, "Sorry, that command is restricted.");
+          return;
+        }
+        const handled = await tasks.handleTelegramCommand(textForCmd, tgOps.replyDest(msg));
         if (handled) return;
       } catch (e) {
         console.warn("[telegram] task command:", e.message);
@@ -8938,6 +8967,8 @@ app.post("/telegram", async (req, res) => {
       }
       if (text === "/today") {
         await sendDailyDeadlineSummary();
+        const court = require("./tg-route").routeFor("court");
+        if (court && court.via !== "dm") await tgSend(chatId, "Today's summary goes to the Court & deadlines topic in the ops group.");
         return;
       }
       if (text === "/help_matters") {
@@ -13313,15 +13344,16 @@ app.listen(PORT, async () => {
   }
 
   // Daily USPTO status check (TSDR) for Trademark matters in Matter Manager.
-  // Alerts go to JJ on Telegram only, like the daily deadline summary.
+  // Alerts go to the Court & deadlines topic, like the daily deadline summary
+  // (JJ's direct message when no ops group is set).
   try {
     const tsdrSync = require("./tsdr-sync");
     await tsdrSync.init().catch(e => console.error("⚠️  TSDR table init failed (will retry on the first run):", e.message));
     tsdrSync.startScheduler({
       notify: async (text) => {
         // Throwing keeps the alert saved, so it is sent once Telegram works.
-        if (!JJ_TELEGRAM_ID) throw new Error("JJ_TELEGRAM_ID is not set");
-        await tgSend(String(JJ_TELEGRAM_ID), text);
+        if (!require("./tg-route").routeFor("court")) throw new Error("JJ_TELEGRAM_ID is not set");
+        await tgSendTopic("court", text);
       },
     });
     console.log("✅ TSDR status check ready");

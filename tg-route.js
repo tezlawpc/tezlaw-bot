@@ -158,4 +158,47 @@ function describeRouting() {
   });
 }
 
-module.exports = { send, target, routeFor, describeRouting, TOPICS };
+/**
+ * A photo or a video with a caption, to a topic. Same promises as send():
+ * never throws, falls back to the group itself when the topic thread is
+ * rejected, and to JJ's direct message when no group is configured.
+ * kind is "photo" or "video". Returns true once Telegram has it.
+ */
+async function sendMedia(topic, kind, buffer, filename, caption, opts = {}) {
+  const tok = token();
+  const route = routeFor(topic);
+  if (!tok || !route) {
+    console.warn(`[tg-route] ${topic}: no ${!tok ? "token" : "destination"}; ${kind} dropped`);
+    return false;
+  }
+  const method = kind === "video" ? "sendVideo" : "sendPhoto";
+  const url = `https://api.telegram.org/bot${tok}/${method}`;
+  const post = async (withThread) => {
+    const FormData = require("form-data");
+    const form = new FormData();
+    form.append("chat_id", String(route.chat_id));
+    if (withThread && route.message_thread_id) form.append("message_thread_id", String(route.message_thread_id));
+    form.append(kind === "video" ? "video" : "photo", buffer, { filename });
+    if (caption) form.append("caption", String(caption).slice(0, 1020));
+    if (kind === "video") form.append("supports_streaming", "true");
+    if (opts.reply_markup) form.append("reply_markup", JSON.stringify(opts.reply_markup));
+    await axios().post(url, form, { headers: form.getHeaders(), timeout: opts.timeout || 120000, maxBodyLength: Infinity });
+  };
+  try {
+    await post(true);
+    return true;
+  } catch (e) {
+    const status = e.response && e.response.status;
+    if (route.message_thread_id && status === 400) {
+      try {
+        await post(false);
+        console.warn(`[tg-route] ${topic}: topic thread rejected; ${kind} sent to the group instead`);
+        return true;
+      } catch (e2) { console.warn(`[tg-route] ${topic} ${kind}: ${e2.message}`); return false; }
+    }
+    console.warn(`[tg-route] ${topic} ${kind}: ${e.message}`);
+    return false;
+  }
+}
+
+module.exports = { send, sendMedia, target, routeFor, describeRouting, TOPICS };

@@ -22,26 +22,13 @@ const TOKEN = () => process.env.TELEGRAM_TOKEN;
 const JJ = () => process.env.JJ_TELEGRAM_ID;
 const TG = () => `https://api.telegram.org/bot${TOKEN()}`;
 
+// Social & content topic; JJ's direct message when no group is set (tg-route.js).
 async function send(text, reply_markup = null) {
-  if (!TOKEN() || !JJ()) return false;
-  try {
-    await require("axios").post(`${TG()}/sendMessage`, { chat_id: JJ(), text: String(text).slice(0, 3900),
-      disable_web_page_preview: true, ...(reply_markup ? { reply_markup } : {}) }, { timeout: 10000 });
-    return true;
-  } catch (e) { console.warn("[social-resend] telegram:", e.message); return false; }
+  return require("./tg-route").send("social", String(text), reply_markup ? { reply_markup } : {});
 }
 async function sendPhoto(buffer, caption, reply_markup = null) {
-  if (!TOKEN() || !JJ()) return false;
-  try {
-    const FormData = require("form-data");
-    const form = new FormData();
-    form.append("chat_id", String(JJ()));
-    form.append("photo", buffer, { filename: "card.png" });
-    if (caption) form.append("caption", String(caption).slice(0, 1020));
-    if (reply_markup) form.append("reply_markup", JSON.stringify(reply_markup));
-    await require("axios").post(`${TG()}/sendPhoto`, form, { headers: form.getHeaders(), timeout: 60000, maxBodyLength: Infinity });
-    return true;
-  } catch (e) { console.warn("[social-resend] telegram photo:", e.message); return false; }
+  return require("./tg-route").sendMedia("social", "photo", buffer, "card.png", caption,
+    { ...(reply_markup ? { reply_markup } : {}), timeout: 60000 });
 }
 
 const name = (S, ch) => ch === "video" ? "Video · YouTube Shorts + TikTok" : ((S.CHANNELS[ch] || {}).name || ch);

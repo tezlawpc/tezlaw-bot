@@ -118,6 +118,9 @@ jobs:
       - name: Lead sources
         run: node scripts/check-lead-sources.js
 
+      - name: Ops group rules
+        run: node scripts/check-ops-chat.js
+
       # A document uploaded for signature: the fields a signer fills must land
       # where staff placed them, on rotated and cropped pages too, and nobody
       # outside the client's team may open the packet.
@@ -219,13 +222,13 @@ jobs:
       # Client trust is recorded in two tables that have never been joined.
       # Both figures are shown side by side; merging them means deciding which
       # rows are the same transaction twice, which is an attorney judgement.
-      - name: Trust: both figures
+      - name: "Trust: both figures"
         run: node scripts/check-trust-both-figures.js
 
       # Record Fee and Record Retainer slugified a typed name into the client
       # key the entry — and a retainers trust ledger — was filed under. And
       # Sync from PI selected a pi_cases column that does not exist.
-      - name: Accounting entries: client and columns
+      - name: "Accounting entries: client and columns"
         run: node scripts/check-accounting-entry.js
 
       # All three export buttons read this apps own journal, which is empty,

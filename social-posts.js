@@ -381,31 +381,16 @@ function initTable() {
 
 const TG = () => `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
+// Drafts and their Approve / Skip buttons go to the Social & content topic of
+// the ops group, and to JJ's direct message when no group is set (tg-route.js).
+// Who may press the buttons is decided in server.js (isApprover), not here.
 async function tellJJ(text, reply_markup = null) {
-  if (!TELEGRAM_TOKEN || !JJ_TELEGRAM_ID) return false;
-  try {
-    await require("axios").post(`${TG()}/sendMessage`,
-      { chat_id: JJ_TELEGRAM_ID, text: String(text).slice(0, 3900), disable_web_page_preview: true,
-        ...(reply_markup ? { reply_markup } : {}) }, { timeout: 10000 });
-    return true;
-  } catch (e) { console.warn("[social] telegram:", e.message); return false; }
+  return require("./tg-route").send("social", String(text), reply_markup ? { reply_markup } : {});
 }
 
 // Photo or video with a caption (Telegram allows 1,024 characters there).
 async function sendMediaToJJ(kind, buffer, filename, caption, reply_markup = null) {
-  if (!TELEGRAM_TOKEN || !JJ_TELEGRAM_ID) return false;
-  try {
-    const FormData = require("form-data");
-    const form = new FormData();
-    form.append("chat_id", String(JJ_TELEGRAM_ID));
-    form.append(kind, buffer, { filename });
-    if (caption) form.append("caption", String(caption).slice(0, 1020));
-    if (kind === "video") form.append("supports_streaming", "true");
-    if (reply_markup) form.append("reply_markup", JSON.stringify(reply_markup));
-    await require("axios").post(`${TG()}/${kind === "video" ? "sendVideo" : "sendPhoto"}`, form,
-      { headers: form.getHeaders(), timeout: 120000, maxBodyLength: Infinity });
-    return true;
-  } catch (e) { console.warn(`[social] telegram ${kind}:`, e.message); return false; }
+  return require("./tg-route").sendMedia("social", kind, buffer, filename, caption, reply_markup ? { reply_markup } : {});
 }
 
 const nameOf = ch => ch === "video" ? "Video · YouTube Shorts + TikTok" : (CHANNELS[ch] ? CHANNELS[ch].name : ch);
