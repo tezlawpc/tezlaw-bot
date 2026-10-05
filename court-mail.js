@@ -414,7 +414,7 @@ function eoirReading(mail, row) {
     action_items: [],
     urgent: false,
     // Nothing to calendar, by construction — these statuses never carry a date.
-    hearings: [], deadlines: [], suggested: [], dropped: [],
+    hearings: [], deadlines: [], suggested: [], dropped: [], vacated: [],
     // Kept so the review page and the digest can show what the parser saw
     // without re-parsing, and so a later change of heart is auditable.
     eoir: {
@@ -449,6 +449,10 @@ function buildPrompt(mail, attTexts) {
     '  "court": "<court or agency office>",',
     '  "hearings": [ { "date": "YYYY-MM-DD", "time": "<e.g. 8:30 AM>", "type": "<e.g. Master calendar, Individual hearing, Motion hearing, CMC, Interview, Biometrics>",',
     '                  "department": "", "judge": "", "location": "", "evidence": "<exact words from the email or attachment showing this date>" } ],',
+    '  "vacated": [ { "date": "YYYY-MM-DD", "type": "<the hearing being taken off calendar>",',
+    '                 "disposition": "<vacated | cancelled | off_calendar | continued | rescheduled | advanced>",',
+    '                 "replaced_by": "<YYYY-MM-DD if this notice sets a new date for that hearing, else empty>",',
+    '                 "evidence": "<exact words showing that hearing is off calendar>" } ],',
     '  "deadlines": [ { "date": "YYYY-MM-DD", "description": "<what is due>", "rule": "<rule or basis if stated>",',
     '                   "computed": <true if YOU calculated the date from a rule, false if the date is printed>, "evidence": "<exact words it comes from>" } ],',
     '  "action_items": ["<short to-dos for the firm>"],',
@@ -457,7 +461,9 @@ function buildPrompt(mail, attTexts) {
     "",
     "RULES:",
     "· A hearing or deadline without an exact quote in \"evidence\" will be thrown away — never guess a date.",
-    "· A hearing that was VACATED or taken off calendar is not a hearing: say so in the summary instead.",
+    "· A hearing coming OFF calendar goes in \"vacated\", not \"hearings\", with the exact words that say so.",
+    "· A continuance is BOTH: the old date in \"vacated\" with its new date in \"replaced_by\", and the new date in \"hearings\".",
+    "· Never put a date in \"vacated\" unless the document says that hearing is off calendar. Taking a hearing off a calendar wrongly is worse than leaving a stale one on it.",
     "· Copy case numbers and A-numbers exactly. Do not invent numbers.",
     "· If it is not court or agency mail (a newsletter, a personal email), set is_court_mail false and leave the lists empty.",
     "",
@@ -475,6 +481,11 @@ function isDay(s) {
   const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
   return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];   // 2026-02-30 is not a day
 }
+
+// How a notice can take a hearing off calendar. The first three end it; the
+// last three move it, and a move carries a new date this notice also states.
+const VACATE_DISPOSITIONS = ["vacated", "cancelled", "off_calendar", "continued", "rescheduled", "advanced"];
+const MOVES = new Set(["continued", "rescheduled", "advanced"]);
 
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 /** Does this quote actually say that date? Any common way of writing it. */
@@ -516,12 +527,24 @@ function cleanReading(o, sourceText) {
     court: String(o.court || "").slice(0, 200),
     action_items: arr(o.action_items).map(String).slice(0, 8),
     urgent: !!o.urgent,
-    hearings: [], deadlines: [], suggested: [],
+    hearings: [], deadlines: [], suggested: [], vacated: [],
   };
   for (const h of arr(o.hearings)) {
     // The quote must be in the email AND must itself say that date.
     if (!isDay(h.date) || !inSource(h.evidence) || !quoteSaysDate(h.evidence, h.date)) { dropped.push(`hearing ${h.date || "?"} (the document does not say that date)`); continue; }
-    if (/vacat|off calendar|taken off|cancel/i.test(h.evidence)) { dropped.push(`hearing ${h.date} (vacated or off calendar)`); continue; }
+    // A quote that says this hearing is coming OFF calendar is not evidence
+    // for adding it. This used to be dropped with a note and nothing else
+    // happened, so a vacated hearing stayed on the calendar for good.
+    //
+    // Deliberately the same narrow wording as before, plus stricken/struck.
+    // "continued" is NOT in here: "continued to March 3" is evidence FOR the
+    // new date, and treating it as a vacatur would take the replacement
+    // hearing off the calendar the moment it was set.
+    if (/vacat|off calendar|taken off|cancel|stricken|struck from/i.test(h.evidence)) {
+      out.vacated.push({ date: h.date, type: String(h.type || "Hearing").slice(0, 80),
+        disposition: "vacated", replaced_by: null, evidence: String(h.evidence).slice(0, 300) });
+      continue;
+    }
     out.hearings.push({ date: h.date, time: String(h.time || "").slice(0, 30), type: String(h.type || "Hearing").slice(0, 80),
       department: String(h.department || "").slice(0, 40), judge: String(h.judge || "").slice(0, 80),
       location: String(h.location || "").slice(0, 200), evidence: String(h.evidence).slice(0, 300) });
@@ -535,6 +558,31 @@ function cleanReading(o, sourceText) {
     if (d.computed || !quoteSaysDate(d.evidence, d.date)) out.suggested.push(item);
     else out.deadlines.push(item);
   }
+  // Hearings coming off calendar. Held to the same standard as one going on:
+  // the quote has to be in the document AND has to say that date. The cost of
+  // being wrong is higher in this direction — a hearing wrongly removed is a
+  // hearing nobody appears at — so nothing here is inferred.
+  for (const v of arr(o.vacated)) {
+    if (!isDay(v.date) || !inSource(v.evidence) || !quoteSaysDate(v.evidence, v.date)) {
+      dropped.push(`hearing off calendar ${v.date || "?"} (the document does not say that date)`);
+      continue;
+    }
+    if (out.vacated.some(x => x.date === v.date)) continue;
+    const disposition = VACATE_DISPOSITIONS.includes(v.disposition) ? v.disposition : "vacated";
+    // A replacement date is only honoured if the document states it too. A
+    // continuance with an invented new date would put a hearing on the
+    // calendar that nobody has been noticed for.
+    const replaced = isDay(v.replaced_by) && quoteSaysDate(v.evidence, v.replaced_by) ? v.replaced_by
+      : (isDay(v.replaced_by) && out.hearings.some(h => h.date === v.replaced_by) ? v.replaced_by : null);
+    out.vacated.push({
+      date: v.date,
+      type: String(v.type || "Hearing").slice(0, 80),
+      disposition,
+      replaced_by: replaced,
+      evidence: String(v.evidence).slice(0, 300),
+    });
+  }
+
   out.dropped = dropped;
   return out;
 }
@@ -808,7 +856,57 @@ async function calendar(target, reading, row, filed, record) {
   if (target.caseId) {
     const civil = require("./civil-litigation");
     const hearings = require("./civil-hearings");
+
+    // ── Off the calendar first, then on ──────────────────────
+    //
+    // A notice that continues a hearing says two things: this date is off,
+    // that date is on. Until now only the second half was acted on, so the
+    // matter kept both — and the old date went on showing in the calendar,
+    // the board's "next due" chip and the reminder digests until somebody
+    // noticed by hand. A hearing nobody is going to is worse than no hearing
+    // at all: it hides the one that matters.
+    //
+    // Vacating runs first so a continuance never leaves the matter briefly
+    // holding two conflicting dates, and so `haveH` below is read AFTER the
+    // old date is gone — which is what lets recordOutcome's own replacement
+    // hearing be recognised rather than duplicated.
+    const offCalendar = [];
+    for (const v of (reading.vacated || [])) {
+      const found = (await db.query(
+        `SELECT id, hearing_type, to_char(hearing_date, 'YYYY-MM-DD') AS d
+           FROM civil_hearings
+          WHERE case_id = $1 AND hearing_date = $2::date AND status = 'scheduled'
+          ORDER BY id ASC`,
+        [target.caseId, v.date]).catch(() => ({ rows: [] }))).rows;
+      if (!found.length) { notes.push(`nothing scheduled on ${v.date} to take off calendar`); continue; }
+      const moving = MOVES.has(v.disposition) && v.replaced_by;
+      for (const h of found) {
+        try {
+          // recordOutcome is the module's own way of doing this: it writes the
+          // status, logs it to the matter's history, re-points any linked
+          // deadline, and for a continuance creates the replacement hearing
+          // carrying the department, judge and location forward.
+          const out = await hearings.recordOutcome(h.id, {
+            status: moving ? "continued" : "vacated",
+            continued_to: moving ? v.replaced_by : null,
+            notes: `From court email: "${v.evidence}" (${VERIFY})`,
+          }, { by: "court email" });
+          await add({ type: "civil_hearing_off", id: h.id,
+            label: `${moving ? "Continued" : "Vacated"} ${h.d} — ${h.hearing_type}${moving ? " → " + v.replaced_by : ""}` });
+          offCalendar.push(h.d);
+          if (out && out.continued) {
+            await add({ type: "civil_hearing", id: out.continued.id,
+              label: `Hearing ${v.replaced_by} — ${h.hearing_type} (continued from ${h.d})` });
+          }
+        } catch (e) {
+          notes.push(`could not take the ${h.d} hearing off calendar: ${e.message}`);
+        }
+      }
+    }
+
     // Dates compared as the database writes them — no timezone in between.
+    // Read after the vacatur pass, so a replacement hearing it created is
+    // already here and the loop below does not add it twice.
     const haveH = (await db.query(`SELECT to_char(hearing_date, 'YYYY-MM-DD') AS d FROM civil_hearings WHERE case_id = $1 AND status = 'scheduled'`, [target.caseId])
       .catch(() => ({ rows: [] }))).rows.map(x => x.d);
     for (const h of reading.hearings) {
@@ -833,6 +931,7 @@ async function calendar(target, reading, row, filed, record) {
         event_kind: "note", event_date: dayPT(row.received_at), title: `Court email: ${reading.title}`,
         description: [reading.summary,
           added.length ? "Added: " + added.map(a => a.label).join("; ") + " (verify against the document)." : null,
+          offCalendar.length ? "Taken off calendar: " + offCalendar.join(", ") + "." : null,
           reading.suggested.length ? "Suggested, NOT added (calculated or not stated in the document): " + reading.suggested.map(x => `${x.date} ${x.description}${x.rule ? " (" + x.rule + ")" : ""}`).join("; ") : null,
           filed.length ? "Filed: " + filed.map(f => f.name).join(", ") : null,
           reading.action_items.length ? "To do: " + reading.action_items.join("; ") : null].filter(Boolean).join("\n"),
@@ -842,6 +941,26 @@ async function calendar(target, reading, row, filed, record) {
   } else if (target.clientKey) {
     const c = await require("./client-profiles").getClientByKey(target.clientKey);
     try { await require("./hearing-notices").initTable(); } catch (e) { /* table exists */ }
+
+    // Off the calendar first, same reasoning as the civil side above. An
+    // immigration client's hearing notice is dismissed rather than deleted,
+    // so the original notice stays in the record and Undo can put it back.
+    for (const v of (reading.vacated || [])) {
+      const r = (await db.query(
+        `UPDATE client_hearing_notices
+            SET dismissed_at = NOW(), dismiss_reason = $3
+          WHERE client_key = $1 AND hearing_date::date = $2::date AND dismissed_at IS NULL
+          RETURNING id, to_char(hearing_date, 'YYYY-MM-DD') AS d, hearing_type`,
+        [target.clientKey, v.date,
+         `${MOVES.has(v.disposition) ? "Moved" : "Off calendar"} by court email: ${v.evidence}`.slice(0, 500)])
+        .catch(() => ({ rows: [] }))).rows;
+      if (!r.length) { notes.push(`nothing scheduled on ${v.date} to take off calendar`); continue; }
+      for (const row of r) {
+        await add({ type: "client_hearing_off", id: row.id,
+          label: `${MOVES.has(v.disposition) ? "Moved" : "Vacated"} ${row.d} — ${row.hearing_type || "hearing"}${v.replaced_by ? " → " + v.replaced_by : ""}` });
+      }
+    }
+
     for (const h of reading.hearings) {
       const dup = await db.query(
         `SELECT id FROM client_hearing_notices WHERE client_key = $1 AND hearing_date::date = $2::date AND dismissed_at IS NULL LIMIT 1`,
@@ -1107,6 +1226,16 @@ async function undoAction(mailId, index, { by = null } = {}) {
   else if (a.type === "civil_deadline") await require("./civil-litigation").deleteDeadline(a.id, by || "court email undo");
   else if (a.type === "client_hearing") await db.query(`UPDATE client_hearing_notices SET dismissed_at = NOW(), dismiss_reason = 'Undone from Court Mail' WHERE id = $1`, [a.id]);
   else if (a.type === "client_deadline") await require("./deadline-tracker").markCancelled(a.id);
+  // Put a hearing back on the calendar. A continuance records two actions —
+  // the old date coming off and the new one going on — each with its own
+  // Undo, so putting the old one back deliberately leaves the new one alone
+  // rather than guessing which half was wrong.
+  else if (a.type === "civil_hearing_off") {
+    await db.query(`UPDATE civil_hearings SET status = 'scheduled', continued_to = NULL, updated_at = NOW() WHERE id = $1`, [a.id]);
+  }
+  else if (a.type === "client_hearing_off") {
+    await db.query(`UPDATE client_hearing_notices SET dismissed_at = NULL, dismiss_reason = NULL WHERE id = $1`, [a.id]);
+  }
   else if (a.type === "a_number") {
     // Put the client back to having no A-number, and only if it is still
     // the one we saved — an A-number corrected by hand since then stays.

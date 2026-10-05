@@ -201,6 +201,12 @@ jobs:
       - name: Civil board staleness
         run: node scripts/check-civil-staleness.js
 
+      # Court mail put hearings on the calendar and never took one off, so a
+      # continuance produced half an update: the new date went on and the old
+      # one stayed. A hearing nobody is going to hides the one that matters.
+      - name: Court mail: hearings off calendar
+        run: node scripts/check-court-mail-vacate.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never
