@@ -47,8 +47,12 @@ check("the preview that was never shipped (/v2) goes there too, instead of an er
   /router\.get\("\/v2", requireAuth, \(req, res\) => res\.redirect\("\/admin\/matters\/"\)\)/.test(mm) && !/matters-v2\.html/.test(mm));
 check("a session that has ended sends the whole window to sign in, not the frame", () =>
   /\(window\.top \|\| window\)\.location\.href = '\/admin\/login/.test(js));
-check("it is still for admins only, behind the firm's sign-in", () =>
-  /app\.use\("\/admin\/matters", auth\.requireRole\("admin"\), matterManagerRouter\)/.test(server) && (mm.match(/requireAuth/g) || []).length > 30);
+// It was admins only. JJ, asked whether staff need to see trademark matters
+// now that they live here: "Yes they do." The gate that lets staff reach the
+// TRADEMARK matters and nothing else is pinned in check-trademarks.js.
+check("it is JJ's, behind the firm's sign-in; staff reach its trademark matters only", () =>
+  /app\.use\("\/admin\/matters", matterAccess, matterManagerRouter\)/.test(server) && (mm.match(/requireAuth/g) || []).length > 30
+  && /if \(user\.r === "admin"\) \{ req\.mmScope = "all"; req\.mmCanWrite = true; return next\(\); \}/.test(mm));
 check("the daily Telegram summary still links to the same address", () => (server.match(/tezlaw-bot\.onrender\.com\/admin\/matters\//g) || []).length >= 3);
 check("the API the docket talks to has not moved", () => js.includes("const API_BASE = '/admin/matters/api';"));
 

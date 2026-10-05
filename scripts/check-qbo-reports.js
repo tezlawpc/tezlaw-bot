@@ -272,6 +272,22 @@ check("the cache key does not depend on option order", () => {
 
 // ── It only reads ──────────────────────────────────────────
 
+check("the cache key includes the realm, not just the company", () => {
+  // A set of books here can be re-pointed at a different QuickBooks company --
+  // which is exactly what reconnecting to fix a sandbox or wrong-account link
+  // does. Keyed on company alone, the cache would go on serving the previous
+  // realm's figures under the new connection, and they would look entirely
+  // plausible: right shape, right periods, wrong firm.
+  assert.notStrictEqual(
+    paramsKey({ start_date: "2026-01-01", _realm: "9130354" }),
+    paramsKey({ start_date: "2026-01-01", _realm: "4620816" }),
+    "two realms must not share a cache row"
+  );
+  const src = fs.readFileSync(path.join(ROOT, "qbo-reports.js"), "utf8");
+  assert.ok(/_realm/.test(src) && /cacheParams/.test(src),
+    "getReport must fold the realm into the cache key");
+});
+
 check("this module never writes to QuickBooks", () => {
   const src = fs.readFileSync(path.join(ROOT, "qbo-reports.js"), "utf8");
   assert.ok(!/method:\s*["'](POST|PUT|PATCH|DELETE)["']/.test(src),

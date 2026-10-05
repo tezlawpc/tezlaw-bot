@@ -92,7 +92,10 @@ console.log("\nA page with no nav entry of its own falls back to its parent");
 console.log("\nQuery-string links are distinguished from their base page");
 for (const [url, want] of Object.entries({
   "/admin/federal": "/admin/federal",
-  "/admin/federal?group=trademarks": "/admin/federal?group=trademarks",
+  // Trademarks moved into the Matter Manager; the sidebar link went with them.
+  "/admin/matters/?view=trademarks": "/admin/matters/?view=trademarks",
+  "/admin/matters/": "/admin/matters/",
+  "/admin/matters/?view=inbox": "/admin/matters/?view=inbox",
   "/admin/federal?group=federal_court": "/admin/federal?group=federal_court",
   "/admin/federal?overdue=1": "/admin/federal?overdue=1",
 })) {

@@ -172,6 +172,15 @@ jobs:
       - name: QuickBooks reports
         run: node scripts/check-qbo-reports.js
 
+      # Every accounting page read 0.00 for months -- not because the firm
+      # earned nothing, but because the pages read local tables nobody fills
+      # while the books sat in QuickBooks. A zero on an income statement
+      # reads as a fact about the firm. So: no connection, a sandbox realm,
+      # a dead token, an unreadable report and an empty period must each SAY
+      # so, and none of them may render a dollar amount.
+      - name: QuickBooks panel
+        run: node scripts/check-qbo-panel.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never
