@@ -176,11 +176,11 @@ function renderAuditLogPage({ entries, filters, users, actions }) {
   const rows = entries.length ? entries.map(e => {
     try {
       const ts = e.created_at ? new Date(e.created_at).toLocaleString() : "";
-      const roleColor = { admin: "#2B2523", attorney: "#A34C00", paralegal: "#0061FF", viewer: "#666" }[e.user_role] || "#999";
+      const roleColor = { admin: "#2B2523", attorney: "#A34C00", paralegal: "#0061FF", viewer: "#5E5854" }[e.user_role] || "#5E5854";
       const changesPreview = shortenJson(e.changes);
       return `
         <tr>
-          <td style="white-space:nowrap; font-size:11px; color:#666;">${escapeHtml(ts)}</td>
+          <td style="white-space:nowrap; font-size:11px; color:#5E5854;">${escapeHtml(ts)}</td>
           <td>
             <strong>${escapeHtml(e.username || "(system)")}</strong>
             ${e.user_role ? `<span style="background:${roleColor}; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:4px;">${escapeHtml(e.user_role)}</span>` : ""}
@@ -188,16 +188,16 @@ function renderAuditLogPage({ entries, filters, users, actions }) {
           <td>${escapeHtml(ACTION_LABELS[e.action] || e.action || "")}</td>
           <td>
             ${e.target_label ? `<strong>${escapeHtml(e.target_label)}</strong>` : ""}
-            ${e.target_type ? `<div style="font-size:10px; color:#999;">${escapeHtml(e.target_type)}${e.target_id ? ":" + escapeHtml(e.target_id) : ""}</div>` : ""}
+            ${e.target_type ? `<div style="font-size:10px; color:#5E5854;">${escapeHtml(e.target_type)}${e.target_id ? ":" + escapeHtml(e.target_id) : ""}</div>` : ""}
           </td>
-          <td style="font-size:11px; color:#666; font-family:monospace; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(changesPreview)}">${escapeHtml(changesPreview)}</td>
-          <td style="font-size:10px; color:#999; font-family:monospace;">${escapeHtml(e.ip_address || "")}</td>
+          <td style="font-size:11px; color:#5E5854; font-family:monospace; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(changesPreview)}">${escapeHtml(changesPreview)}</td>
+          <td style="font-size:10px; color:#5E5854; font-family:monospace;">${escapeHtml(e.ip_address || "")}</td>
         </tr>`;
     } catch (renderErr) {
       // Skip individual bad rows rather than crashing the whole page
-      return `<tr><td colspan="6" style="color:#c00; font-size:11px; padding:6px;">⚠️ Skipped entry #${e.id}: ${escapeHtml(renderErr.message)}</td></tr>`;
+      return `<tr><td colspan="6" style="color:#9C2B1E; font-size:11px; padding:6px;">⚠️ Skipped entry #${e.id}: ${escapeHtml(renderErr.message)}</td></tr>`;
     }
-  }).join("") : `<tr><td colspan="6" style="text-align:center; color:#888; padding:30px;">No audit entries match your filters.</td></tr>`;
+  }).join("") : `<tr><td colspan="6" style="text-align:center; color:#5E5854; padding:30px;">No audit entries match your filters.</td></tr>`;
 
   const userOptions = users.map(u =>
     `<option value="${u.user_id}" ${String(filters.userId) === String(u.user_id) ? "selected" : ""}>${escapeHtml(u.username)}</option>`
@@ -209,20 +209,20 @@ function renderAuditLogPage({ entries, filters, users, actions }) {
   const body = `
     <div class="page-header">
       <h1>Audit Log</h1>
-      <div style="font-size:13px; color:#666;">Every change made through Zara — who did what, when, and to which record.</div>
+      <div style="font-size:13px; color:#5E5854;">Every change made through Zara — who did what, when, and to which record.</div>
     </div>
 
-    <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee;">
+    <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #E8E3DC;">
       <form method="GET" style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
         <div>
-          <label style="font-size:11px; color:#666; display:block;">User</label>
-          <select name="user_id" style="padding:7px; border:1px solid #ccc; border-radius:3px; min-width:120px;">
+          <label style="font-size:11px; color:#5E5854; display:block;">User</label>
+          <select name="user_id" style="padding:7px; border:1px solid #CFC8BE; border-radius:3px; min-width:120px;">
             <option value="">All users</option>${userOptions}
           </select>
         </div>
         <div>
-          <label style="font-size:11px; color:#666; display:block;">Action type</label>
-          <select name="action" style="padding:7px; border:1px solid #ccc; border-radius:3px; min-width:180px;">
+          <label style="font-size:11px; color:#5E5854; display:block;">Action type</label>
+          <select name="action" style="padding:7px; border:1px solid #CFC8BE; border-radius:3px; min-width:180px;">
             <option value="">All actions</option>${actionOptions}
           </select>
         </div>
@@ -232,7 +232,7 @@ function renderAuditLogPage({ entries, filters, users, actions }) {
         <div>
           <a href="/admin/audit-log" style="color:#A34C00; font-size:12px;">Clear</a>
         </div>
-        <div style="margin-left:auto; font-size:12px; color:#666;">
+        <div style="margin-left:auto; font-size:12px; color:#5E5854;">
           Showing latest <strong>${entries.length}</strong> ${entries.length === 200 ? "(limit)" : ""}
         </div>
       </form>

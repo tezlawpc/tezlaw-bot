@@ -21,9 +21,9 @@
   var C = {
     walnut: "#2B2523", walnutMid: "#3A3330", walnutLight: "#5E5854",
     gold: "#A34C00", goldBright: "#FF7B00",
-    ember: "#FF7B00", emberDeep: "#B84200", waxRed: "#9C2B1E",
+    ember: "#FF7B00", emberDeep: "#A34C00", waxRed: "#9C2B1E",
     parchment: "#F3EFE9", parchmentLit: "#FAF8F5", border: "#E8E3DC",
-    green: "#166534", ink: "#2B2523", muted: "#5E5854",
+    green: "#2F6B3F", ink: "#2B2523", muted: "#5E5854",
   };
 
   // ── HTTP ───────────────────────────────────────────────────
@@ -814,7 +814,7 @@
 
   var HEARING_STATUS = {
     scheduled: { label: "SCHEDULED", color: C.gold },
-    held: { label: "HELD", color: C.green || "#166534" },
+    held: { label: "HELD", color: C.green || "#2F6B3F" },
     continued: { label: "CONTINUED", color: C.ember },
     vacated: { label: "VACATED", color: C.walnutLight },
     off_calendar: { label: "OFF CALENDAR", color: C.walnutLight },
@@ -1487,10 +1487,11 @@
   //    Documents — the Dropbox files this phase produced
   //    Budget    — UTBMS phase budget vs actual
   // ═══════════════════════════════════════════════════════════
-  var ALERT_COLOR = { danger: C.waxRed, warn: C.ember, info: C.walnutLight };
+  // Text, so Ember: the orange is for marks, and is not readable as words on a light ground.
+  var ALERT_COLOR = { danger: C.waxRed, warn: C.emberDeep, info: C.walnutLight };
   var ROLE_COLOR = {
-    sales: "#0284C7", attorney: "#2B2523", case_manager: "#FF7B00",
-    docketing: "#7C3AED", billing: "#166534",
+    sales: "#A34C00", attorney: "#2B2523", case_manager: "#FF7B00",
+    docketing: "#5E5854", billing: "#2F6B3F",
   };
   var ROLE_LABEL = {
     sales: "Sales / Intake", attorney: "Attorney", case_manager: "Case Manager",
@@ -1667,14 +1668,14 @@
         h("div", {
           text: c.gate_ready ? "✓ GATE READY — all criteria met" : "GATE: " + c.gates_open + " of " + c.gates.length + " criteria outstanding",
           style: "font-family:Montserrat,sans-serif;font-size:10px;letter-spacing:1.2px;color:" +
-                 (c.gate_ready ? C.green : C.ember) + ";margin-bottom:5px;",
+                 (c.gate_ready ? C.green : C.emberDeep) + ";margin-bottom:5px;",
         }),
         h("div", { style: "display:flex;flex-wrap:wrap;gap:4px;" },
           c.gates.map(function (gt) {
             return h("span", {
               text: (gt.ok ? "✓ " : "○ ") + gt.label, title: gt.label,
               style: "font-size:10px;padding:2px 7px;border-radius:9px;max-width:100%;" +
-                     "background:" + (gt.ok ? "#E7F0E7" : C.parchment) + ";color:" + (gt.ok ? C.green : C.muted) +
+                     "background:" + (gt.ok ? "#EEF5EF" : C.parchment) + ";color:" + (gt.ok ? C.green : C.muted) +
                      ";border:1px solid " + (gt.ok ? C.green : C.border) + ";",
             });
           })),
@@ -2237,13 +2238,13 @@
         head.appendChild(h("th", {
           text: t,
           style: "padding:10px;text-align:" + (i >= 4 && i <= 6 ? "right" : "left") +
-                 ";font-size:11px;letter-spacing:1px;color:" + C.parchmentLit + ";",
+                 ";font-size:11px;letter-spacing:1px;color:" + C.parchmentLit + ";background:" + C.walnut + ";",
         }));
       });
       table.appendChild(h("thead", { style: "background:" + C.walnut + ";" }, [head]));
       var tbody = h("tbody", {});
       rows.forEach(function (r) {
-        tbody.appendChild(h("tr", { style: "border-bottom:1px solid #E5D5B8;" }, [
+        tbody.appendChild(h("tr", { style: "border-bottom:1px solid #E8E3DC;" }, [
           h("td", { style: "padding:10px;" }, [
             h("a", { href: "/admin/civil/case/" + r.case_id, text: r.case_name, style: "color:" + C.ink + ";font-weight:600;text-decoration:none;" }),
           ]),

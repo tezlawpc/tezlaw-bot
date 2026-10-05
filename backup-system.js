@@ -598,11 +598,11 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
     return `
       <tr>
         <td style="font-family:monospace; font-size:12px;">${escapeHtml(b.name)}</td>
-        <td style="font-size:12px;">${dt.toLocaleString()} <span style="color:${isRecent ? "#2e7d32" : "#888"};">(${ageStr})</span></td>
+        <td style="font-size:12px;">${dt.toLocaleString()} <span style="color:${isRecent ? "#2F6B3F" : "#5E5854"};">(${ageStr})</span></td>
         <td style="font-size:12px;">${sizeKB} KB</td>
         <td>
-          <button onclick="previewBackup('${b.path.replace(/'/g, "\\'")}')" style="background:#eee; color:#333; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Preview</button>
-          <button onclick="restoreBackup('${b.path.replace(/'/g, "\\'")}', '${escapeHtml(b.name)}')" style="background:#c00; color:white; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; font-size:11px;">Restore</button>
+          <button onclick="previewBackup('${b.path.replace(/'/g, "\\'")}')" style="background:#F3EFE9; color:#2B2523; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Preview</button>
+          <button onclick="restoreBackup('${b.path.replace(/'/g, "\\'")}', '${escapeHtml(b.name)}')" style="background:#9C2B1E; color:white; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; font-size:11px;">Restore</button>
         </td>
       </tr>`;
   }).join("");
@@ -610,47 +610,47 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
   const body = `
     <div class="page-header">
       <h1>Backups</h1>
-      <div style="font-size:13px; color:#666;">
+      <div style="font-size:13px; color:#5E5854;">
         Daily backups of Zara's entire database, uploaded to <code style="font-size:11px;">/Zara-Backups/</code> in your Dropbox.
         Runs at 3 AM Pacific. Keeps the last 30 days.
       </div>
     </div>
 
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-bottom:20px;">
-      <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee; border-top:3px solid #FF7B00;">
-        <div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Total Backups</div>
+      <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC; border-top:3px solid #FF7B00;">
+        <div style="font-size:11px; color:#5E5854; text-transform:uppercase; font-weight:600;">Total Backups</div>
         <div style="font-size:26px; font-weight:600; color:#2B2523; margin-top:4px;">${backups.length}</div>
       </div>
-      <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee; border-top:3px solid ${lastBackup && (Date.now() - new Date(lastBackup.server_modified).getTime()) < 30 * 60 * 60 * 1000 ? "#2e7d32" : "#c00"};">
-        <div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Latest Backup</div>
+      <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC; border-top:3px solid ${lastBackup && (Date.now() - new Date(lastBackup.server_modified).getTime()) < 30 * 60 * 60 * 1000 ? "#2F6B3F" : "#9C2B1E"};">
+        <div style="font-size:11px; color:#5E5854; text-transform:uppercase; font-weight:600;">Latest Backup</div>
         <div style="font-size:16px; font-weight:600; color:#2B2523; margin-top:4px;">
-          ${lastBackup ? new Date(lastBackup.server_modified).toLocaleString() : "<span style='color:#c00;'>None yet</span>"}
+          ${lastBackup ? new Date(lastBackup.server_modified).toLocaleString() : "<span style='color:#9C2B1E;'>None yet</span>"}
         </div>
       </div>
-      <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee; border-top:3px solid #0061FF;">
-        <div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Retention</div>
+      <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC; border-top:3px solid #A34C00;">
+        <div style="font-size:11px; color:#5E5854; text-transform:uppercase; font-weight:600;">Retention</div>
         <div style="font-size:16px; font-weight:600; color:#2B2523; margin-top:4px;">30 days</div>
-        <div style="font-size:10px; color:#888; margin-top:2px;">Older auto-deleted</div>
+        <div style="font-size:10px; color:#5E5854; margin-top:2px;">Older auto-deleted</div>
       </div>
     </div>
 
-    <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:20px; border:1px solid #eee;">
+    <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:20px; border:1px solid #E8E3DC;">
       <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
         <div>
           <strong>Manual backup:</strong>
-          <span style="font-size:12px; color:#666;">Force a backup right now (in addition to the daily 3 AM run).</span>
+          <span style="font-size:12px; color:#5E5854;">Force a backup right now (in addition to the daily 3 AM run).</span>
         </div>
         <div style="display:flex; gap:6px; align-items:center;">
           <button onclick="runBackupNow()" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">🚀 Backup now</button>
-          <button onclick="resetBackupStatus()" title="If a previous backup crashed and status is stuck, reset it" style="background:transparent; color:#c00; padding:8px 10px; border:1px solid #ffe0e0; border-radius:4px; cursor:pointer; font-size:11px;">↻ Reset</button>
+          <button onclick="resetBackupStatus()" title="If a previous backup crashed and status is stuck, reset it" style="background:transparent; color:#9C2B1E; padding:8px 10px; border:1px solid #FBEDEA; border-radius:4px; cursor:pointer; font-size:11px;">↻ Reset</button>
         </div>
       </div>
       <div id="backup-status" style="margin-top:10px; font-size:13px;"></div>
     </div>
 
-    <div style="background:#fef3f0; padding:15px 20px; border-radius:6px; margin-bottom:20px; border-left:4px solid #c62828;">
-      <strong style="color:#c62828;">⚠️ Restore warning</strong>
-      <div style="font-size:12px; color:#666; margin-top:6px;">
+    <div style="background:#FBEDEA; padding:15px 20px; border-radius:6px; margin-bottom:20px; border-left:4px solid #9C2B1E;">
+      <strong style="color:#9C2B1E;">⚠️ Restore warning</strong>
+      <div style="font-size:12px; color:#5E5854; margin-top:6px;">
         Restore <strong>wipes ALL current Zara data</strong> and replaces it with the selected backup.
         Every existing record (hearings, clients, users, audit log) will be gone.
         A safety snapshot is automatically saved right before restore, so you can undo — but only if you catch it fast.
@@ -662,7 +662,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
       <thead>
         <tr><th>Filename</th><th>Uploaded</th><th>Size</th><th>Actions</th></tr>
       </thead>
-      <tbody>${rows || '<tr><td colspan="4" style="text-align:center; color:#888; padding:20px;">No backups yet. Click "Backup now" or wait for the daily 3 AM run.</td></tr>'}</tbody>
+      <tbody>${rows || '<tr><td colspan="4" style="text-align:center; color:#5E5854; padding:20px;">No backups yet. Click "Backup now" or wait for the daily 3 AM run.</td></tr>'}</tbody>
     </table>
 
     <div id="preview-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10000; align-items:center; justify-content:center;">
@@ -670,7 +670,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
         <h3 style="margin:0 0 10px 0; color:#2B2523;">📋 Backup preview</h3>
         <div id="preview-content" style="font-size:13px;">Loading…</div>
         <div style="margin-top:16px; text-align:right;">
-          <button onclick="document.getElementById('preview-modal').style.display='none'" style="background:#eee; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">Close</button>
+          <button onclick="document.getElementById('preview-modal').style.display='none'" style="background:#F3EFE9; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">Close</button>
         </div>
       </div>
     </div>
@@ -678,7 +678,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
     <script>
       async function runBackupNow() {
         const status = document.getElementById("backup-status");
-        status.innerHTML = '<span style="color:#666;">⏳ Starting backup…</span>';
+        status.innerHTML = '<span style="color:#5E5854;">⏳ Starting backup…</span>';
         try {
           const r = await fetch("/admin/backups/run-now", { method: "POST" });
           const responseText = await r.text();
@@ -689,7 +689,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
             throw new Error("Server returned HTTP " + r.status + " with non-JSON body: " + snippet);
           }
           if (!d.ok) {
-            status.innerHTML = '<span style="color:#c00;">❌ ' + (d.error || "unknown error") + '</span>';
+            status.innerHTML = '<span style="color:#9C2B1E;">❌ ' + (d.error || "unknown error") + '</span>';
             return;
           }
 
@@ -699,7 +699,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
           const pollInterval = setInterval(async () => {
             if (Date.now() - pollStart > maxPollMs) {
               clearInterval(pollInterval);
-              status.innerHTML = '<span style="color:#c00;">⏱️ Backup polling timed out after 20 min — but the server may still finish. Refresh in a few minutes to check.</span>';
+              status.innerHTML = '<span style="color:#9C2B1E;">⏱️ Backup polling timed out after 20 min — but the server may still finish. Refresh in a few minutes to check.</span>';
               return;
             }
             try {
@@ -710,13 +710,13 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
                 clearInterval(pollInterval);
                 if (sd.last.status === "completed") {
                   const bytea = sd.last.skipped_bytea_columns || {};
-                  const skipMsg = Object.keys(bytea).length ? '<div style="font-size:11px; color:#888; margin-top:4px;">(Skipped BYTEA columns: ' + Object.entries(bytea).map(([t, cs]) => t + '.' + cs.join('+')).join(', ') + ')</div>' : "";
-                  status.innerHTML = '<span style="color:#2e7d32;">✅ Backup complete! ' +
+                  const skipMsg = Object.keys(bytea).length ? '<div style="font-size:11px; color:#5E5854; margin-top:4px;">(Skipped BYTEA columns: ' + Object.entries(bytea).map(([t, cs]) => t + '.' + cs.join('+')).join(', ') + ')</div>' : "";
+                  status.innerHTML = '<span style="color:#2F6B3F;">✅ Backup complete! ' +
                     sd.last.total_rows + ' rows / ' + sd.last.tables_backed_up + ' tables / ' +
                     (sd.last.compressed_size_bytes / 1024).toFixed(1) + ' KB in ' + sd.last.duration_seconds + 's.</span>' + skipMsg;
                   setTimeout(() => location.reload(), 3000);
                 } else if (sd.last.status === "failed") {
-                  status.innerHTML = '<span style="color:#c00; word-break:break-word; display:block;">❌ Backup failed: ' + (sd.last.error || "unknown") + '</span>';
+                  status.innerHTML = '<span style="color:#9C2B1E; word-break:break-word; display:block;">❌ Backup failed: ' + (sd.last.error || "unknown") + '</span>';
                 }
               } else if (sd.running) {
                 // Show phase + progress
@@ -730,14 +730,14 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
                     detail += " · " + (sd.progress.raw_bytes / 1024 / 1024).toFixed(1) + " MB";
                   }
                 }
-                status.innerHTML = '<span style="color:#666;">⏳ ' + phase + detail + ' (' + elapsed + 's)</span>';
+                status.innerHTML = '<span style="color:#5E5854;">⏳ ' + phase + detail + ' (' + elapsed + 's)</span>';
               }
             } catch (pollErr) {
               console.warn("Poll error:", pollErr);
             }
           }, 2000);
         } catch (e) {
-          status.innerHTML = '<span style="color:#c00; word-break:break-word; display:block;">❌ ' + e.message + '</span>';
+          status.innerHTML = '<span style="color:#9C2B1E; word-break:break-word; display:block;">❌ ' + e.message + '</span>';
         }
       }
 
@@ -760,7 +760,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
           const sd = await sr.json();
           if (sd.running) {
             const status = document.getElementById("backup-status");
-            status.innerHTML = '<span style="color:#666;">⏳ Backup in progress (' + (sd.phase || 'running') + ')… resuming polling.</span>';
+            status.innerHTML = '<span style="color:#5E5854;">⏳ Backup in progress (' + (sd.phase || 'running') + ')… resuming polling.</span>';
             const pollStart = Date.now() - (sd.started_at ? (new Date() - new Date(sd.started_at)) : 0);
             const maxPollMs = 20 * 60 * 1000;
             const iv = setInterval(async () => {
@@ -772,26 +772,26 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
                 if (!d2.running && d2.last) {
                   clearInterval(iv);
                   if (d2.last.status === "completed") {
-                    status.innerHTML = '<span style="color:#2e7d32;">✅ Backup complete! ' +
+                    status.innerHTML = '<span style="color:#2F6B3F;">✅ Backup complete! ' +
                       d2.last.total_rows + ' rows / ' + d2.last.tables_backed_up + ' tables / ' +
                       (d2.last.compressed_size_bytes / 1024).toFixed(1) + ' KB in ' + d2.last.duration_seconds + 's.</span>';
                     setTimeout(() => location.reload(), 3000);
                   } else if (d2.last.status === "failed") {
-                    status.innerHTML = '<span style="color:#c00; word-break:break-word;">❌ Backup failed: ' + (d2.last.error || 'unknown') + '</span>';
+                    status.innerHTML = '<span style="color:#9C2B1E; word-break:break-word;">❌ Backup failed: ' + (d2.last.error || 'unknown') + '</span>';
                   }
                 } else if (d2.running) {
                   const phase = d2.phase || "running";
                   let detail = "";
                   if (d2.progress?.current_table) detail = " · " + d2.progress.current_table + " (" + d2.progress.tables_done + "/" + d2.progress.tables_total + ")";
                   if (d2.progress?.raw_bytes) detail += " · " + (d2.progress.raw_bytes / 1024 / 1024).toFixed(1) + " MB";
-                  status.innerHTML = '<span style="color:#666;">⏳ ' + phase + detail + ' (' + elapsed + 's)</span>';
+                  status.innerHTML = '<span style="color:#5E5854;">⏳ ' + phase + detail + ' (' + elapsed + 's)</span>';
                 }
               } catch { /* silent */ }
             }, 2000);
           } else if (sd.last && sd.last.status === "failed") {
             // Show the last failure so user knows why previous run failed
             const status = document.getElementById("backup-status");
-            status.innerHTML = '<span style="color:#c00; word-break:break-word;">Last run failed: ' + (sd.last.error || "unknown") + '</span>';
+            status.innerHTML = '<span style="color:#9C2B1E; word-break:break-word;">Last run failed: ' + (sd.last.error || "unknown") + '</span>';
           }
         } catch { /* silent — status endpoint may not be available */ }
       })();
@@ -803,7 +803,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
         try {
           const r = await fetch("/admin/backups/preview?path=" + encodeURIComponent(path));
           const d = await r.json();
-          if (!d.ok) { content.innerHTML = '<span style="color:#c00;">❌ ' + d.error + '</span>'; return; }
+          if (!d.ok) { content.innerHTML = '<span style="color:#9C2B1E;">❌ ' + d.error + '</span>'; return; }
           const rows = Object.entries(d.preview.counts).map(([t, c]) =>
             '<tr><td style="font-family:monospace; font-size:11px;">' + t + '</td><td style="text-align:right;">' + c + '</td></tr>'
           ).join("");
@@ -812,7 +812,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
             '<div><strong>Total rows:</strong> ' + d.preview.total_rows.toLocaleString() + ' across ' + d.preview.tables + ' tables</div>' +
             '<table style="width:100%; margin-top:10px; font-size:12px;"><thead><tr><th style="text-align:left;">Table</th><th style="text-align:right;">Rows</th></tr></thead><tbody>' + rows + '</tbody></table>';
         } catch (e) {
-          content.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
+          content.innerHTML = '<span style="color:#9C2B1E;">❌ ' + e.message + '</span>';
         }
       }
       async function restoreBackup(path, name) {
@@ -821,7 +821,7 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
         const confirmText = prompt("Type 'restore' (exactly) to confirm:");
         if (confirmText !== "restore") { alert("Cancelled."); return; }
         const status = document.getElementById("backup-status");
-        status.innerHTML = '<span style="color:#666;">⏳ Restoring — do NOT close this page…</span>';
+        status.innerHTML = '<span style="color:#5E5854;">⏳ Restoring — do NOT close this page…</span>';
         try {
           const r = await fetch("/admin/backups/restore", {
             method: "POST",
@@ -830,16 +830,16 @@ function renderBackupsPage({ backups, lastBackup, stats }) {
           });
           const d = await r.json();
           if (d.ok) {
-            status.innerHTML = '<span style="color:#2e7d32;">✅ Restore complete: ' +
+            status.innerHTML = '<span style="color:#2F6B3F;">✅ Restore complete: ' +
               d.result.tables_restored + ' tables, ' + d.result.rows_inserted + ' rows inserted. ' +
               (d.result.errors.length ? d.result.errors.length + ' errors — check server logs.' : '') +
               '<br><strong>You may need to log in again.</strong></span>';
             setTimeout(() => location.href = "/admin/dashboard", 4000);
           } else {
-            status.innerHTML = '<span style="color:#c00;">❌ Restore failed: ' + (d.error || "unknown") + '</span>';
+            status.innerHTML = '<span style="color:#9C2B1E;">❌ Restore failed: ' + (d.error || "unknown") + '</span>';
           }
         } catch (e) {
-          status.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
+          status.innerHTML = '<span style="color:#9C2B1E;">❌ ' + e.message + '</span>';
         }
       }
     </script>`;

@@ -29,6 +29,10 @@ const MAX_SIG_BYTES = 400 * 1024;
 const CONSENT_TEXT =
   "I agree to sign this document electronically. I understand my electronic signature has the same legal effect as a handwritten signature, " +
   "that I may ask Tez Law P.C. for a paper copy or to sign on paper instead, and that I can withdraw this consent before I sign by contacting the firm.";
+// Shown under the English when the signing page is in Chinese. The English
+// text is the one recorded; the certificate notes that the translation was shown.
+const CONSENT_TEXT_ZH =
+  "我同意以电子方式签署本文件。我理解我的电子签名与手写签名具有同等法律效力；我可以要求 Tez Law P.C. 提供纸质文本或改为在纸上签署；在签署之前，我可以联系律所撤回此项同意。";
 
 let ready = null;
 function initTables() {
@@ -64,6 +68,14 @@ function initTables() {
         finalize_error  TEXT
       )`);
     await db.query(`ALTER TABLE esign_packets ADD COLUMN IF NOT EXISTS link_base TEXT`).catch(() => {});
+    // Upload-and-send (esign-pdf.js): a packet is either made from a Word
+    // TEMPLATE (kind 'template', the docx column) or is an UPLOADED document
+    // (kind 'upload', the pdf column, with fields placed on its pages).
+    for (const col of ["kind TEXT DEFAULT 'template'", "source_filename TEXT", "pdf BYTEA", "pages JSONB", "fields JSONB", "email_copies BOOLEAN DEFAULT TRUE"]) {
+      await db.query(`ALTER TABLE esign_packets ADD COLUMN IF NOT EXISTS ${col}`);
+    }
+    await db.query(`ALTER TABLE esign_packets ALTER COLUMN docx DROP NOT NULL`);
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_esign_packets_created ON esign_packets (created_at DESC)`);
     await db.query(`CREATE INDEX IF NOT EXISTS idx_esign_packets_case ON esign_packets (case_id, created_at DESC)`);
     await db.query(`
       CREATE TABLE IF NOT EXISTS esign_signers (
@@ -91,6 +103,11 @@ function initTables() {
         decline_reason  TEXT
       )`);
     await db.query(`CREATE INDEX IF NOT EXISTS idx_esign_signers_packet ON esign_signers (packet_id)`);
+    // What a signer typed into the fields that were theirs, their initials,
+    // and the language the signing page was shown in.
+    for (const col of ["field_values JSONB", "initials_png BYTEA", "lang TEXT"]) {
+      await db.query(`ALTER TABLE esign_signers ADD COLUMN IF NOT EXISTS ${col}`);
+    }
     await db.query(`
       CREATE TABLE IF NOT EXISTS esign_events (
         id          SERIAL PRIMARY KEY,
@@ -297,11 +314,23 @@ async function createPacket({ templateId, caseId = null, clientKey = null, title
   return getPacket(p.id);
 }
 
+// A list of documents must not drag every file out of the database with it:
+// an uploaded PDF can be 25 MB, and a client's page asks for all of theirs.
+// Without `withBytes`, the files and the signature pictures stay where they are.
+const PACKET_LIGHT = `id, template_id, template_name, category, case_id, client_key, title, field_values, doc_hash, status, message,
+  link_base, created_by, created_by_uid, created_at, sent_at, completed_at, cancelled_at, signed_hash, dropbox_docx, dropbox_pdf,
+  finalize_error, kind, source_filename, pages, fields, email_copies,
+  (signed_docx IS NOT NULL) AS has_signed_docx, (signed_pdf IS NOT NULL) AS has_signed_pdf`;
+const SIGNER_LIGHT = `id, packet_id, role, label, name, email, phone, sign_order, token, status, expires_at, sent_at, sent_via,
+  delivery_error, viewed_at, signed_at, typed_name, consent_text, ip, user_agent, decline_reason, lang,
+  (signature_png IS NOT NULL) AS has_signature,
+  CASE WHEN field_values IS NULL THEN NULL ELSE jsonb_build_object('values', COALESCE(field_values->'values', '{}'::jsonb)) END AS field_values`;
+
 async function getPacket(id, { withBytes = false, includeTokens = false } = {}) {
   await initTables();
-  const p = (await db.query(`SELECT * FROM esign_packets WHERE id = $1`, [Number(id)])).rows[0];
-  if (!p) throw new Error("Document not found");
-  const signers = (await db.query(`SELECT * FROM esign_signers WHERE packet_id = $1 ORDER BY sign_order, id`, [p.id])).rows;
+  const p = (await db.query(`SELECT ${withBytes ? "*" : PACKET_LIGHT} FROM esign_packets WHERE id = $1`, [Number(id)])).rows[0];
+  if (!p) throw Object.assign(new Error("Document not found"), { status: 404 });
+  const signers = (await db.query(`SELECT ${withBytes ? "*" : SIGNER_LIGHT} FROM esign_signers WHERE packet_id = $1 ORDER BY sign_order, id`, [p.id])).rows;
   return shape(p, signers, { withBytes, includeTokens: includeTokens || withBytes });
 }
 
@@ -310,12 +339,19 @@ async function getPacket(id, { withBytes = false, includeTokens = false } = {}) 
 function shape(p, signers, { withBytes = false, includeTokens = false } = {}) {
   const out = { ...p };
   if (!withBytes) {
-    delete out.docx; delete out.signed_docx; delete out.signed_pdf;
-    out.has_signed_docx = !!p.signed_docx; out.has_signed_pdf = !!p.signed_pdf;
+    delete out.docx; delete out.signed_docx; delete out.signed_pdf; delete out.pdf;
+    out.has_signed_docx = p.has_signed_docx !== undefined ? !!p.has_signed_docx : !!p.signed_docx;
+    out.has_signed_pdf = p.has_signed_pdf !== undefined ? !!p.has_signed_pdf : !!p.signed_pdf;
   }
+  out.kind = p.kind || "template";
   out.signers = signers.map(s => {
     const o = { ...s };
-    if (!withBytes) { delete o.signature_png; o.has_signature = !!s.signature_png; }
+    if (!withBytes) {
+      o.has_signature = s.has_signature !== undefined ? !!s.has_signature : !!s.signature_png;
+      delete o.signature_png; delete o.initials_png;
+      // What a signer typed is on the signed PDF; the pictures of it are not for lists.
+      if (o.field_values && o.field_values.images) o.field_values = { values: o.field_values.values || {} };
+    }
     if (!includeTokens) delete o.token;
     return o;
   });
@@ -356,45 +392,70 @@ function mailer() {
   return null;
 }
 
-function esc(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+/** Is this document for a client whose profile says they read Chinese? */
+async function readsChinese(p) {
+  if (!p || !p.client_key) return false;
+  if (p._zh !== undefined) return p._zh;
+  let zh = false;
+  try {
+    const c = await require("./client-profiles").getClientByKey(p.client_key);
+    zh = !!(c && /chinese|mandarin|cantonese|中文|普通话|国语|粤语|\bzh\b/i.test(String(c.client_language || "")));
+  } catch (e) { /* English only */ }
+  Object.defineProperty(p, "_zh", { value: zh, enumerable: false, configurable: true });
+  return zh;
+}
+
+/** One text message through Twilio's REST API (the `twilio` package is not installed here). */
+async function sendText(to, body) {
+  const sid = process.env.TWILIO_ACCOUNT_SID, token = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_SMS_FROM || process.env.TWILIO_PHONE_NUMBER;
+  if (!(sid && token && from)) throw Object.assign(new Error("text messages are not set up on the server (TWILIO_* settings)"), { setup: true });
+  await require("axios").post(
+    `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
+    new URLSearchParams({ From: from, To: to, Body: body }).toString(),
+    { headers: { Authorization: "Basic " + Buffer.from(`${sid}:${token}`).toString("base64"), "Content-Type": "application/x-www-form-urlencoded" }, timeout: 15000 });
+}
 
 /** Email and/or text one signer their link. Never throws: returns what happened. */
 async function deliver(p, s, { baseUrl, reminder = false } = {}) {
   const url = signUrl(baseUrl || p.link_base, s.token);
   const via = [], errors = [];
   const intro = reminder ? "A reminder: " : "";
-  if (s.email) {
+  const zh = await readsChinese(p);
+  if (s.email && !oneAddress(s.email)) errors.push("that is not one email address");
+  else if (s.email) {
     const m = mailer();
     if (!m) errors.push("email is not set up on the server (SMTP_* or GMAIL_* settings)");
     else {
       try {
+        const mail = require("./tez-email");
         await m.t.sendMail({
-          from: `"Tez Law P.C." <${m.from}>`, to: s.email,
+          from: `"TEZ Law Firm" <${m.from}>`, to: s.email,
           subject: `${reminder ? "Reminder — " : ""}Please sign: ${p.title}`,
-          text: `Hello ${s.name},\n\n${intro}Tez Law P.C. has sent you "${p.title}" to review and sign.\n\n` +
+          text: `Hello ${s.name},\n\n${intro}TEZ Law Firm has sent you "${p.title}" to review and sign.\n\n` +
             (p.message ? p.message + "\n\n" : "") + `Open this private link to read and sign it:\n${url}\n\n` +
-            `The link is for you only; please do not forward it. Questions: 626-678-8677.\n\nTez Law P.C.`,
-          html: `<div style="font-family:Georgia,serif;max-width:560px;color:#3E2818;">` +
-            `<p>Hello ${esc(s.name)},</p><p>${esc(intro)}Tez Law P.C. has sent you <strong>${esc(p.title)}</strong> to review and sign.</p>` +
-            (p.message ? `<p style="white-space:pre-wrap;">${esc(p.message)}</p>` : "") +
-            `<p><a href="${esc(url)}" style="display:inline-block;padding:12px 22px;background:#5A3B22;color:#FBF3DE;text-decoration:none;border-radius:5px;">Review and sign</a></p>` +
-            `<p style="font-size:12px;color:#7B5330;">This link is for you only; please do not forward it. Questions: 626-678-8677.</p></div>`,
+            (zh ? `请点击上面的链接查看并签署文件。如有疑问，请致电 626-678-8677。\n\n` : "") +
+            `The link is for you only; please do not forward it. Questions: 626-678-8677.\n\nTEZ Law Firm`,
+          html: mail.wrap({
+            preheader: `${intro}"${p.title}" is ready for you to review and sign.`,
+            heading: reminder ? "A document is waiting for your signature" : "Please review and sign",
+            body: `<p style="margin:0 0 14px;">Hello ${mail.esc(s.name)},</p>` +
+              `<p style="margin:0 0 14px;">${mail.esc(intro)}TEZ Law Firm has sent you <strong>${mail.esc(p.title)}</strong> to review and sign.</p>` +
+              (p.message ? `<p style="margin:0 0 14px;padding:12px 14px;background:${mail.C.marble};border-left:3px solid ${mail.C.orange};white-space:pre-wrap;">${mail.esc(p.message)}</p>` : "") +
+              (zh ? `<p style="margin:0 0 14px;">请点击下面的按钮查看并签署文件。如有疑问，请致电 626-678-8677。</p>` : ""),
+            button: { href: url, label: "Review and sign" },
+            note: "This link is for you only; please do not forward it. It works for " + LINK_DAYS + " days. Questions: 626-678-8677.",
+          }),
         });
         via.push("email");
       } catch (e) { errors.push("email failed: " + e.message); }
     }
   }
   if (s.phone) {
-    if (!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER)) {
-      errors.push("text messages are not set up on the server (TWILIO_* settings)");
-    } else {
-      try {
-        const twilio = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        await twilio.messages.create({ from: process.env.TWILIO_PHONE_NUMBER, to: s.phone,
-          body: `Tez Law P.C.: ${intro}please review and sign "${p.title}": ${url}` });
-        via.push("sms");
-      } catch (e) { errors.push("text failed: " + e.message); }
-    }
+    try {
+      await sendText(s.phone, `TEZ Law Firm: ${intro}please review and sign "${p.title}": ${url}`);
+      via.push("sms");
+    } catch (e) { errors.push(e.setup ? e.message : "text failed: " + e.message); }
   }
   await db.query(
     `UPDATE esign_signers SET status = CASE WHEN status = 'waiting' THEN 'sent' ELSE status END,
@@ -403,6 +464,62 @@ async function deliver(p, s, { baseUrl, reminder = false } = {}) {
   await logEvent(p.id, reminder ? "reminded" : "sent", { signerId: s.id,
     detail: `${s.name}: ${via.length ? "sent by " + via.join(" and ") : "link ready to hand over (not emailed or texted)"}${errors.length ? " — " + errors.join("; ") : ""}` });
   return { signer_id: s.id, name: s.name, url, via, errors };
+}
+
+/**
+ * One email address, or null. The firm's name goes out on these emails, so
+ * the recipient is exactly one person: a list ("a@x.com, b@y.com"), a name
+ * with an address, or anything with a line break in it is refused rather
+ * than handed to the mail server to interpret.
+ */
+function oneAddress(v) {
+  const a = String(v == null ? "" : v).trim();
+  return a.length <= 200 && /^[^\s@,;:<>()"'\\]+@[^\s@,;:<>()"'\\]+\.[^\s@,;:<>()"'\\]{2,}$/.test(a) ? a : null;
+}
+
+/**
+ * A signing link for the app's own "send for signature" (app-api.js, the
+ * /sign/<token> page): one email or one text, in the firm's design.
+ * Never throws: says what happened.
+ * @returns {{status:'email_sent'|'sms_sent'|'email_failed'|'sms_failed'|'not_sent', error:string|null}}
+ */
+async function sendSigningLink({ via, name = "", email = "", phone = "", title, url, days = 14 } = {}) {
+  const n = parseInt(days, 10) || 14;
+  if (via === "email" && email && !oneAddress(email)) {
+    return { status: "email_failed", error: "that is not one email address" };
+  }
+  email = oneAddress(email) || "";
+  if (via === "sms" && phone) {
+    try {
+      const digits = String(phone).replace(/[^\d+]/g, "");
+      const to = digits.startsWith("+") ? digits : "+1" + digits.replace(/\D/g, "").slice(-10);
+      await sendText(to, `TEZ Law Firm: please review and sign "${title}": ${url} (the link works for ${n} days)`);
+      return { status: "sms_sent", error: null };
+    } catch (e) { console.warn("[sign sms]:", e.message); return { status: "sms_failed", error: e.message }; }
+  }
+  if (via === "email" && email) {
+    try {
+      const m = mailer();
+      if (!m) throw new Error("email is not set up on the server (SMTP_* or GMAIL_* settings)");
+      const mail = require("./tez-email");
+      await m.t.sendMail({
+        from: `"TEZ Law Firm" <${m.from}>`, to: email,
+        subject: `Please sign: ${title}`,
+        text: `Hello${name ? " " + name : ""},\n\nTEZ Law Firm has sent you "${title}" to review and sign.\n\nOpen this private link:\n${url}\n\n` +
+          `The link works for ${n} days. Questions: 626-678-8677.\n\nTEZ Law Firm`,
+        html: mail.wrap({
+          preheader: `"${title}" is ready for you to review and sign.`,
+          heading: "Please review and sign",
+          body: `<p style="margin:0 0 14px;">Hello${name ? " " + mail.esc(name) : ""},</p>` +
+            `<p style="margin:0 0 14px;">TEZ Law Firm has sent you <strong>${mail.esc(title)}</strong> to review and sign.</p>`,
+          button: { href: url, label: "Review and sign" },
+          note: `This link is for you only; please do not forward it. It works for ${n} days. Questions: 626-678-8677.`,
+        }),
+      });
+      return { status: "email_sent", error: null };
+    } catch (e) { console.warn("[sign email]:", e.message); return { status: "email_failed", error: e.message }; }
+  }
+  return { status: "not_sent", error: null };
 }
 
 /** The signers whose turn it is now. */
@@ -414,8 +531,9 @@ function currentGroup(signers) {
 }
 
 async function sendPacket(id, { baseUrl = null, user = null } = {}) {
-  const p = await getPacket(id, { withBytes: true });
+  const p = await getPacket(id, { includeTokens: true });
   if (p.status !== "draft") throw new Error(`This document was already ${p.status === "sent" ? "sent" : p.status}`);
+  if (p.kind === "upload") require("./esign-pdf").readyToSend(p);
   // Claimed, so a double-click cannot email everyone twice. The address the
   // links point to is fixed now, by staff — never by whoever opens a link.
   const claim = await db.query(
@@ -458,13 +576,15 @@ async function cancelPacket(id, { user = null, reason = null } = {}) {
 
 // ── The signer's side ───────────────────────────────────────
 
-async function bySigner(token) {
+// `withBytes: false` leaves the files in the database: checking a link,
+// signing and declining do not need them.
+async function bySigner(token, { withBytes = true } = {}) {
   await initTables();
   const t = String(token || "");
   if (t.length < 20) return null;
-  const s = (await db.query(`SELECT * FROM esign_signers WHERE token = $1`, [t])).rows[0];
+  const s = (await db.query(`SELECT id, packet_id FROM esign_signers WHERE token = $1`, [t])).rows[0];
   if (!s) return null;
-  const p = await getPacket(s.packet_id, { withBytes: true });
+  const p = await getPacket(s.packet_id, withBytes ? { withBytes: true } : { includeTokens: true });
   return { s: p.signers.find(x => x.id === s.id), p };
 }
 
@@ -480,33 +600,43 @@ function signedMap(signers) {
 
 /** What the signing page shows. Marks the link viewed. */
 async function signerView(token, { ip = null } = {}) {
-  const found = await bySigner(token);
+  const found = await bySigner(token, { withBytes: false });
   if (!found) return { ok: false, status: 404, error: "This signing link is not valid. Check that the whole link was copied." };
-  const { s, p } = found;
-  const base = { title: p.title, signer: { name: s.name, label: s.label, role: s.role } };
-  if (p.status === "cancelled") return { ok: false, status: 410, error: "This document was withdrawn by Tez Law P.C. You do not need to sign it.", ...base };
-  if (s.status === "signed") return { ok: true, signed: true, signed_at: s.signed_at, completed: p.status === "completed", ...base };
-  if (s.status === "declined" || p.status === "declined") return { ok: false, status: 410, error: "Signing was declined for this document. Please contact Tez Law P.C. at 626-678-8677.", ...base };
-  if (s.expires_at && new Date(s.expires_at) < new Date()) return { ok: false, status: 410, error: "This link has expired. Please ask Tez Law P.C. to send it again.", ...base };
-  if (p.status !== "sent") return { ok: false, status: 409, error: "This document has not been sent for signature yet.", ...base };
+  const { s } = found;
+  let { p } = found;
+  const upload = p.kind === "upload";
+  const base = { title: p.title, kind: upload ? "upload" : "template", signer: { name: s.name, label: s.label, role: s.role } };
+  // `code` lets the page say the same thing in Chinese.
+  if (p.status === "cancelled") return { ok: false, status: 410, code: "withdrawn", error: "This document was withdrawn by TEZ Law Firm. You do not need to sign it.", ...base };
+  if (s.status === "signed") {
+    return { ok: true, signed: true, signed_at: s.signed_at, completed: p.status === "completed",
+      // A signer may keep a copy: the uploaded document as it stands, or the finished PDF.
+      can_download: upload || (p.status === "completed" && !!p.signed_pdf), ...base };
+  }
+  if (s.status === "declined" || p.status === "declined") return { ok: false, status: 410, code: "declined", error: "Signing was declined for this document. Please contact TEZ Law Firm at 626-678-8677.", ...base };
+  if (s.expires_at && new Date(s.expires_at) < new Date()) return { ok: false, status: 410, code: "expired", error: "This link has expired. Please ask TEZ Law Firm to send it again.", ...base };
+  if (p.status !== "sent") return { ok: false, status: 409, code: "not_sent", error: "This document has not been sent for signature yet.", ...base };
   const turn = currentGroup(p.signers).some(x => x.id === s.id);
 
   if (!s.viewed_at) {
     await db.query(`UPDATE esign_signers SET viewed_at = NOW(), status = CASE WHEN status IN ('waiting','sent') THEN 'viewed' ELSE status END WHERE id = $1`, [s.id]);
     await logEvent(p.id, "viewed", { signerId: s.id, ip, detail: `${s.name} opened the document` });
   }
-  // Show the document as it stands: earlier signatures in place, this
-  // signer's spots highlighted.
-  const current = docx.applySignatures(p.docx, signedMap(p.signers)).buffer;
-  const html = sanitizeHtml((await require("mammoth").convertToHtml({ buffer: current })).value);
-  return {
+  const common = {
     ok: true, signed: false, your_turn: turn,
     waiting_for: turn ? [] : currentGroup(p.signers).map(x => x.name),
-    document_html: markSpots(html, s.role),
-    consent_text: CONSENT_TEXT,
+    consent_text: CONSENT_TEXT, consent_text_zh: CONSENT_TEXT_ZH,
     message: p.message || null,
-    ...base,
   };
+  // An uploaded document: the page draws the PDF itself and lays this
+  // signer's fields over it.
+  if (upload) return { ...common, ...require("./esign-pdf").viewFor(p, s), ...base };
+  // Show the document as it stands: earlier signatures in place, this
+  // signer's spots highlighted. (Now the Word file itself is needed.)
+  p = await getPacket(p.id, { withBytes: true });
+  const current = docx.applySignatures(p.docx, signedMap(p.signers)).buffer;
+  const html = sanitizeHtml((await require("mammoth").convertToHtml({ buffer: current })).value);
+  return { ...common, document_html: markSpots(html, s.role), ...base };
 }
 
 // mammoth does not sanitise. A template made from an outside document could
@@ -539,7 +669,7 @@ function sanitizeHtml(html) {
 function markSpots(html, role) {
   return String(html).replace(/\{\{\s*(sig|date|name|initials):([a-z0-9_]+)\s*\}\}/gi, (_, kind, r) => {
     const mine = r === role;
-    const label = kind === "sig" ? (mine ? "✍ Your signature goes here" : "Signature of another signer")
+    const label = kind === "sig" ? (mine ? "Your signature goes here" : "Signature of another signer")
       : kind === "date" ? (mine ? "Date (filled in when you sign)" : "Date") : (mine ? "Your name" : "Name");
     return `<span class="esign-spot${mine ? " esign-mine" : ""}" data-kind="${kind}">${label}</span>`;
   });
@@ -550,12 +680,27 @@ function decodePng(dataUrl) {
   if (!m) throw new Error("Draw your signature in the box");
   const buf = Buffer.from(m[1], "base64");
   if (buf.length > MAX_SIG_BYTES) throw new Error("That signature image is too large");
-  if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error("Draw your signature in the box");
+  if (buf.length < 24 || buf.readUInt32BE(0) !== 0x89504e47) throw new Error("Draw your signature in the box");
+  if (!pngFits(buf)) throw new Error("That signature image is too large");
   return buf;
 }
 
-async function sign(token, { typed_name, signature, consent, ip = null, userAgent = null, baseUrl = null } = {}) {
-  const found = await bySigner(token);
+/**
+ * A PNG says how big its picture is in its first 24 bytes. A file of a few
+ * hundred kilobytes can declare 10,000 × 10,000 pixels, and drawing it into a
+ * PDF then takes over a gigabyte of memory. Nothing a signer draws or types
+ * comes near these limits (a phone's signature pad is about 1,800 × 660).
+ */
+const MAX_PNG_SIDE = 4096, MAX_PNG_PIXELS = 6000000;
+function pngFits(buf) {
+  if (!buf || buf.length < 24 || buf.toString("latin1", 12, 16) !== "IHDR") return false;
+  const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+  return w > 0 && h > 0 && w <= MAX_PNG_SIDE && h <= MAX_PNG_SIDE && w * h <= MAX_PNG_PIXELS;
+}
+
+async function sign(token, { typed_name, signature, consent, initials = null, values = null, images = null, lang = null, mode = null,
+                            ip = null, userAgent = null, baseUrl = null } = {}) {
+  const found = await bySigner(token, { withBytes: false });
   if (!found) throw Object.assign(new Error("This signing link is not valid"), { status: 404 });
   const { s, p } = found;
   if (p.status !== "sent") throw Object.assign(new Error("This document is not open for signing"), { status: 409 });
@@ -566,18 +711,38 @@ async function sign(token, { typed_name, signature, consent, ip = null, userAgen
   const name = String(typed_name || "").trim().replace(/\s+/g, " ");
   if (name.length < 2) throw Object.assign(new Error("Type your full name"), { status: 400 });
   const png = decodePng(signature);
+  // An uploaded document: everything this signer was asked to fill in must
+  // be there before anything is saved. A name in Chinese (or any script the
+  // PDF fonts lack) comes with a picture of itself, for the page and the
+  // certificate.
+  const pdfSide = require("./esign-pdf");
+  const filled = p.kind === "upload"
+    ? pdfSide.checkSubmission(p, s, { typed_name: name, initials, values, images })
+    : { initials: null, saved: pdfSide.nameImage(name, images) };
+  const zh = String(lang || "").toLowerCase().slice(0, 2) === "zh";
+  const consentShown = CONSENT_TEXT + (zh ? " [Shown to the signer with a Chinese translation.]" : "");
 
-  // Only the first submission counts, even if two arrive together.
+  // Only the first submission counts, even if two arrive together — and a signature that
+  // arrives with (or after) this signer's refusal, or after the document has been cancelled,
+  // does not count at all. One statement decides it.
   const r = await db.query(
     `UPDATE esign_signers SET status = 'signed', signed_at = NOW(), typed_name = $2, signature_png = $3,
-            consent_text = $4, ip = $5, user_agent = $6
-      WHERE id = $1 AND status <> 'signed' RETURNING id`,
-    [s.id, name.slice(0, 200), png, CONSENT_TEXT, ip, userAgent ? String(userAgent).slice(0, 400) : null]);
-  if (!r.rows.length) throw Object.assign(new Error("You have already signed this document"), { status: 409 });
+            consent_text = $4, ip = $5, user_agent = $6, field_values = $7::jsonb, initials_png = $8, lang = $9
+      WHERE id = $1 AND status NOT IN ('signed', 'declined')
+        AND EXISTS (SELECT 1 FROM esign_packets p WHERE p.id = esign_signers.packet_id AND p.status = 'sent')
+      RETURNING id`,
+    [s.id, name.slice(0, 200), png, consentShown, ip, userAgent ? String(userAgent).slice(0, 400) : null,
+     filled.saved ? JSON.stringify(filled.saved) : null, filled.initials, zh ? "zh" : "en"]);
+  if (!r.rows.length) {
+    // Lost to a submission that arrived a moment earlier: a second signature, or this signer's own refusal.
+    const now = (await db.query(`SELECT status FROM esign_signers WHERE id = $1`, [s.id])).rows[0];
+    throw Object.assign(new Error(now && now.status === "signed" ? "You have already signed this document" : "This document is not open for signing"), { status: 409 });
+  }
   await logEvent(p.id, "signed", { signerId: s.id, ip,
-    detail: `${name} signed as ${s.label || s.role}${name.toLowerCase() !== s.name.toLowerCase() ? ` (sent to ${s.name})` : ""}; document SHA-256 ${p.doc_hash}` });
+    detail: `${name} signed as ${s.label || s.role}${name.toLowerCase() !== s.name.toLowerCase() ? ` (sent to ${s.name})` : ""}` +
+      `${mode === "typed" ? "; signature typed and adopted" : mode === "drawn" ? "; signature drawn" : ""}; document SHA-256 ${p.doc_hash}` });
 
-  const after = await getPacket(p.id, { withBytes: true });
+  const after = await getPacket(p.id, { includeTokens: true });
   const next = currentGroup(after.signers);
   if (!next.length) {
     // Exactly one request finishes the document, even if the last two
@@ -608,16 +773,24 @@ async function sign(token, { typed_name, signature, consent, ip = null, userAgen
 }
 
 async function decline(token, { reason = null, ip = null } = {}) {
-  const found = await bySigner(token);
+  const found = await bySigner(token, { withBytes: false });
   if (!found) throw Object.assign(new Error("This signing link is not valid"), { status: 404 });
   const { s, p } = found;
   if (s.status === "signed") throw Object.assign(new Error("You have already signed"), { status: 409 });
   if (p.status !== "sent") throw Object.assign(new Error("This document is not open for signing"), { status: 409 });
   if (s.expires_at && new Date(s.expires_at) < new Date()) throw Object.assign(new Error("This link has expired"), { status: 410 });
-  await db.query(`UPDATE esign_signers SET status = 'declined', decline_reason = $2 WHERE id = $1`, [s.id, reason ? String(reason).slice(0, 1000) : null]);
-  await db.query(`UPDATE esign_packets SET status = 'declined' WHERE id = $1`, [p.id]);
+  // Claimed the way a signature is: one statement, and only if this signer has
+  // neither signed nor declined in the meantime. Without it, a signature and a
+  // refusal sent at the same moment both went through — a signed, hashed entry
+  // on a document the record called refused.
+  const claimed = await db.query(
+    `UPDATE esign_signers SET status = 'declined', decline_reason = $2
+      WHERE id = $1 AND status NOT IN ('signed', 'declined') RETURNING id`,
+    [s.id, reason ? String(reason).slice(0, 1000) : null]);
+  if (!claimed.rows.length) throw Object.assign(new Error("You have already signed"), { status: 409 });
+  await db.query(`UPDATE esign_packets SET status = 'declined' WHERE id = $1 AND status = 'sent'`, [p.id]);
   await logEvent(p.id, "declined", { signerId: s.id, ip, detail: `${s.name} declined to sign${reason ? ": " + reason : ""}` });
-  await notify(p, `✋ ${s.name} declined to sign "${p.title}"${reason ? ": " + String(reason).slice(0, 120) : ""}`);
+  await notify(p, `${s.name} declined to sign "${p.title}"${reason ? ": " + String(reason).slice(0, 120) : ""}`);
   return { ok: true };
 }
 
@@ -629,19 +802,32 @@ async function notify(p, text) {
 
 // ── Finishing ───────────────────────────────────────────────
 
+// The certificate is printed on white paper: the firm's lockup, Charcoal
+// text, a Seal Orange rule. Best effort — a missing image never stops it.
+function certificateLogo() {
+  try { return require("fs").readFileSync(require("path").join(__dirname, "public", "brand", "tez-lockup-print.png")); }
+  catch (e) { return null; }
+}
+
 async function certificatePdf(p, signers, events) {
   const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const charcoal = rgb(0.169, 0.145, 0.137), stone = rgb(0.369, 0.345, 0.329), orange = rgb(1, 0.482, 0);
   let page = pdf.addPage([612, 792]);
   let y = 740;
-  const clean = s => String(s || "").replace(/[^\x20-\x7E -ÿ]/g, "?");
-  const line = (text, { f = font, size = 10, color = rgb(0.24, 0.16, 0.09), indent = 0 } = {}) => {
+  // The standard PDF fonts write Latin-1 only; anything else prints as "?"
+  // here and is shown as a picture where the signer supplied one.
+  const can = new Set(font.getCharacterSet());
+  const latin = s => [...String(s || "")].every(ch => can.has(ch.codePointAt(0)));
+  const clean = s => [...String(s || "").replace(/[\r\n\t]+/g, " ")].map(ch => (can.has(ch.codePointAt(0)) ? ch : "?")).join("");
+  const room = (h) => { if (y - h < 60) { page = pdf.addPage([612, 792]); y = 740; } };
+  const line = (text, { f = font, size = 10, color = charcoal, indent = 0 } = {}) => {
     const words = clean(text).split(" ");
     let cur = "";
     const flush = () => {
-      if (y < 60) { page = pdf.addPage([612, 792]); y = 740; }
+      room(0);
       page.drawText(cur, { x: 54 + indent, y, size, font: f, color }); y -= size + 4; cur = "";
     };
     for (const w of words) {
@@ -650,29 +836,61 @@ async function certificatePdf(p, signers, events) {
     }
     if (cur) flush();
   };
+  const picture = async (png, { w = 150, maxH = 60, x = 60 } = {}) => {
+    try {
+      const img = await pdf.embedPng(png);
+      const h = Math.min(maxH, w * img.height / img.width), ww = h * img.width / img.height;
+      room(h);
+      page.drawImage(img, { x, y: y - h, width: ww, height: h }); y -= h + 6;
+    } catch (e) { /* the record below still stands */ }
+  };
+
+  const logo = certificateLogo();
+  if (logo) {
+    try {
+      const img = await pdf.embedPng(logo);
+      const w = 62, h = w * img.height / img.width;
+      page.drawImage(img, { x: 558 - w, y: 756 - h, width: w, height: h });
+    } catch (e) { /* no logo */ }
+  }
   line("CERTIFICATE OF ELECTRONIC SIGNATURE", { f: bold, size: 14 });
-  y -= 4;
+  page.drawRectangle({ x: 54, y: y + 6, width: 300, height: 2, color: orange });
+  y -= 8;
   line(`Document: ${p.title}`, { f: bold });
-  line(`Reference: TEZ-ESIGN-${p.id}   Prepared by: ${p.created_by || "Tez Law P.C."}`);
+  line(`Reference: TEZ-ESIGN-${p.id}   Prepared by: ${p.created_by || "TEZ Law Firm"}`);
+  if (p.kind === "upload") line(`Uploaded file: ${p.source_filename || "document"}   Pages: ${(p.pages || []).length}`);
   line(`Document as sent (SHA-256): ${p.doc_hash}`, { size: 8 });
   line(`Document as signed (SHA-256): ${p.signed_hash}`, { size: 8 });
   line(`Completed: ${stampPT(p.completed_at || new Date())}`);
   y -= 8;
   for (const s of signers) {
-    line(`${s.label || s.role}: ${s.typed_name || s.name}`, { f: bold, size: 11 });
-    if (s.signature_png) {
-      try {
-        const img = await pdf.embedPng(s.signature_png);
-        const w = 150, h = Math.min(60, w * img.height / img.width);
-        if (y - h < 60) { page = pdf.addPage([612, 792]); y = 740; }
-        page.drawImage(img, { x: 60, y: y - h, width: w, height: h }); y -= h + 6;
-      } catch (e) { /* the record below still stands */ }
-    }
+    const name = s.typed_name || s.name;
+    const saved = s.field_values || {};
+    const images = saved.images || {}, values = saved.values || {};
+    // A name the PDF fonts cannot write (Chinese, say) is shown as the picture
+    // the signing page made of it.
+    if (!latin(name) && images.__name) {
+      line(`${s.label || s.role}:`, { f: bold, size: 11 });
+      await picture(Buffer.from(images.__name, "base64"), { w: 160, maxH: 22 });
+    } else line(`${s.label || s.role}: ${name}`, { f: bold, size: 11 });
+    if (s.signature_png) await picture(s.signature_png);
+    if (s.initials_png) { line("Initials:", { indent: 6, size: 8, color: stone }); await picture(s.initials_png, { w: 60, maxH: 30 }); }
     line(`Sent to: ${s.name}${s.email ? " <" + s.email + ">" : ""}${s.phone ? " " + s.phone : ""}   via ${s.sent_via || "link"}`, { indent: 6 });
     if (s.sent_at) line(`Sent: ${stampPT(s.sent_at)}`, { indent: 6 });
     if (s.viewed_at) line(`First opened: ${stampPT(s.viewed_at)}`, { indent: 6 });
     line(`Signed: ${stampPT(s.signed_at)}   IP address: ${s.ip || "unknown"}`, { indent: 6 });
     if (s.user_agent) line(`Device: ${s.user_agent}`, { indent: 6, size: 8 });
+    // What this signer filled in on an uploaded document, beyond the signature.
+    for (const f of (p.kind === "upload" ? (p.fields || []) : [])) {
+      if (f.role !== s.role) continue;
+      const where = `page ${f.page + 1}${f.label ? ", " + f.label : ""}`;
+      if (f.type === "text" && values[f.id]) {
+        line(`Filled in (${where}): ${latin(values[f.id]) ? values[f.id] : "[not in Latin letters; shown below as the signer typed it]"}`, { indent: 6, size: 8 });
+        if (!latin(values[f.id]) && images[f.id]) await picture(Buffer.from(images[f.id], "base64"), { w: 220, maxH: 18, x: 66 });
+      } else if (f.type === "checkbox") {
+        line(`Checkbox (${where}): ${values[f.id] === true ? "ticked" : "left blank"}`, { indent: 6, size: 8 });
+      }
+    }
     line(`Agreed to sign electronically: "${s.consent_text || CONSENT_TEXT}"`, { indent: 6, size: 8 });
     y -= 6;
   }
@@ -680,9 +898,11 @@ async function certificatePdf(p, signers, events) {
   line("AUDIT TRAIL", { f: bold, size: 11 });
   for (const e of events) line(`${stampPT(e.at)} — ${e.event}${e.detail ? ": " + e.detail : ""}${e.ip ? " (IP " + e.ip + ")" : ""}`, { size: 8 });
   y -= 6;
-  line("Each signer consented to use electronic signatures, reviewed the document, typed their name and drew their signature. " +
+  line("Each signer consented to use electronic signatures, reviewed the document, typed their name and drew or adopted their signature. " +
        "Electronic signatures are valid under the federal ESIGN Act (15 U.S.C. § 7001 et seq.) and California's Uniform Electronic Transactions Act (Civ. Code § 1633.1 et seq.).",
-       { size: 8, color: rgb(0.48, 0.33, 0.19) });
+       { size: 8, color: stone });
+  y -= 2;
+  line("TEZ Law Firm (Tez Law P.C.)  ·  626-678-8677  ·  tezlawfirm.com", { size: 8, color: stone });
   return Buffer.from(await pdf.save({ useObjectStreams: false }));
 }
 
@@ -736,6 +956,8 @@ async function fileToClientFolder(p, signed, cert) {
 async function finalize(id) {
   const p = await getPacket(id, { withBytes: true });
   if (p.status !== "completed") throw new Error("Not every signer has signed yet");
+  // An uploaded document is a PDF already: its marks are stamped on it.
+  if (p.kind === "upload") return require("./esign-pdf").finalize(p.id);
   const signed = docx.applySignatures(p.docx, signedMap(p.signers)).buffer;
   const signedHash = sha256(signed);
   await db.query(`UPDATE esign_packets SET signed_docx = $2, signed_hash = $3, finalize_error = NULL WHERE id = $1`,
@@ -786,7 +1008,7 @@ async function finalize(id) {
   }
   await db.query(`UPDATE esign_packets SET signed_pdf = $2, dropbox_docx = $3, dropbox_pdf = $4, finalize_error = $5 WHERE id = $1`,
     [p.id, pdf, docxPath, pdfPath, errors.join("; ") || null]);
-  await notify(done, `✅ "${p.title}" is fully signed${pdfPath ? " and filed in Dropbox" : ""}`);
+  await notify(done, `"${p.title}" is fully signed${pdfPath ? " and filed in Dropbox" : ""}`);
   return getPacket(p.id);
 }
 
@@ -802,12 +1024,18 @@ async function download(id, which) {
   const p = await getPacket(id, { withBytes: true });
   const base = String(p.title).replace(/[\/\\:?*"<>|]+/g, " ").trim().slice(0, 90);
   if (which === "signed-pdf") { if (!p.signed_pdf) throw new Error("Not signed yet"); return { buffer: p.signed_pdf, name: base + " - signed.pdf", type: "application/pdf" }; }
+  if (p.kind === "upload") {
+    if (which === "signed-docx") throw new Error("This document was uploaded as a PDF; there is no Word copy");
+    return { buffer: p.pdf, name: base + ".pdf", type: "application/pdf" };
+  }
   if (which === "signed-docx") { if (!p.signed_docx) throw new Error("Not signed yet"); return { buffer: p.signed_docx, name: base + " - signed.docx", type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }; }
   return { buffer: p.docx, name: base + ".docx", type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" };
 }
 
 module.exports = {
-  CONSENT_TEXT, LINK_DAYS, initTables, matterValues, clientValues, prefill, formatValue, longDate,
+  CONSENT_TEXT, CONSENT_TEXT_ZH, LINK_DAYS, initTables, matterValues, clientValues, prefill, formatValue, longDate,
   createPacket, getPacket, listPackets, sendPacket, remind, cancelPacket, packetIdForSigner,
   signerView, sign, decline, finalize, refinalize, download, sanitizeHtml, certificatePdf, currentGroup, signUrl, markSpots,
+  // For esign-pdf.js (uploaded documents), which shares the packet, the links, the certificate and the filing.
+  logEvent, bySigner, mailer, fileBase, mergePdfs, stampPT, notify, deliver, sendText, readsChinese, sendSigningLink, oneAddress, pngFits,
 };

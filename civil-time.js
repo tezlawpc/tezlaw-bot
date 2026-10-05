@@ -386,21 +386,21 @@ async function renderInvoiceHtml(invoiceId) {
   return `<!doctype html><html><head><meta charset="utf-8">
 <title>Invoice ${esc(inv.invoice_number)} — ${esc(c.case_name || "")}</title>
 <style>
-  body { font-family: Georgia, "Times New Roman", serif; color: #222; max-width: 8.5in; margin: 0 auto; padding: 0.6in 0.6in; font-size: 11pt; }
+  body { font-family: Georgia, "Times New Roman", serif; color: #2B2523; max-width: 8.5in; margin: 0 auto; padding: 0.6in 0.6in; font-size: 11pt; }
   h1 { font-size: 20pt; margin: 0; letter-spacing: 1px; }
-  .firm { font-size: 10pt; color: #444; line-height: 1.5; }
-  .top { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #222; padding-bottom: 12px; }
+  .firm { font-size: 10pt; color: #2B2523; line-height: 1.5; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2B2523; padding-bottom: 12px; }
   .meta { text-align: right; font-size: 10pt; line-height: 1.6; }
   .block { margin: 18px 0; font-size: 10.5pt; line-height: 1.55; }
   table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
-  th { text-align: left; border-bottom: 1px solid #222; padding: 6px 4px; font-size: 8.5pt; letter-spacing: .5px; text-transform: uppercase; }
-  td { padding: 6px 4px; border-bottom: 1px solid #ddd; vertical-align: top; }
+  th { text-align: left; border-bottom: 1px solid #2B2523; padding: 6px 4px; font-size: 8.5pt; letter-spacing: .5px; text-transform: uppercase; }
+  td { padding: 6px 4px; border-bottom: 1px solid #E8E3DC; vertical-align: top; }
   td.n, th.n { text-align: right; white-space: nowrap; }
   td.d { white-space: nowrap; }
-  .code { color: #888; font-size: 8pt; }
+  .code { color: #5E5854; font-size: 8pt; }
   .total { font-size: 12pt; font-weight: bold; }
-  .void { color: #a00; border: 3px solid #a00; display: inline-block; padding: 4px 12px; font-size: 16pt; letter-spacing: 3px; transform: rotate(-4deg); }
-  .foot { margin-top: 28px; font-size: 9pt; color: #555; line-height: 1.5; }
+  .void { color: #9C2B1E; border: 3px solid #9C2B1E; display: inline-block; padding: 4px 12px; font-size: 16pt; letter-spacing: 3px; transform: rotate(-4deg); }
+  .foot { margin-top: 28px; font-size: 9pt; color: #5E5854; line-height: 1.5; }
   .bar { margin-bottom: 18px; } .bar button { padding: 8px 16px; font-size: 11pt; cursor: pointer; }
   @media print { .bar { display: none; } body { padding: 0; } }
 </style></head><body>

@@ -715,10 +715,10 @@ function renderDeadlinesPage(user, filters = {}) {
         <div style="margin-bottom:24px;">
           <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
             <div style="width:12px; height:12px; border-radius:50%; background:${color};"></div>
-            <h3 style="margin:0; color:${brand.navy};">${title} <span style="color:#888; font-weight:normal;">(${items.length})</span></h3>
-            ${hint ? `<span style="font-size:11px; color:#888;">${hint}</span>` : ""}
+            <h3 style="margin:0; color:${brand.navy};">${title} <span style="color:#5E5854; font-weight:normal;">(${items.length})</span></h3>
+            ${hint ? `<span style="font-size:11px; color:#5E5854;">${hint}</span>` : ""}
           </div>
-          <div style="background:white; border:1px solid #e0e0e0; border-radius:6px; overflow:hidden;">
+          <div style="background:white; border:1px solid #E8E3DC; border-radius:6px; overflow:hidden;">
             ${rows}
           </div>
         </div>`;
@@ -729,51 +729,51 @@ function renderDeadlinesPage(user, filters = {}) {
       <h1 style="margin:0;">Deadline Tracker</h1>
       <div style="display:flex; gap:8px;">
         <button type="button" onclick="openManualDeadlineModal()" style="background:${brand.gold}; color:white; padding:9px 16px; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">+ Add deadline</button>
-        <button type="button" onclick="resyncAll()" style="background:#eee; color:#333; padding:9px 16px; border:none; border-radius:6px; cursor:pointer; font-size:13px;">🔄 Re-sync from hearing notes</button>
+        <button type="button" onclick="resyncAll()" style="background:#F3EFE9; color:#2B2523; padding:9px 16px; border:none; border-radius:6px; cursor:pointer; font-size:13px;">🔄 Re-sync from hearing notes</button>
       </div>
     </div>
 
     <!-- Stat cards -->
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin:20px 0;">
-      <div style="background:#c62828; color:white; padding:14px 16px; border-radius:8px;">
+      <div style="background:#9C2B1E; color:white; padding:14px 16px; border-radius:8px;">
         <div style="font-size:11px; opacity:.9;">Overdue</div>
         <div style="font-size:26px; font-weight:600; margin-top:2px;">${overdueCount}</div>
       </div>
-      <div style="background:#ef6c00; color:white; padding:14px 16px; border-radius:8px;">
+      <div style="background:#A34C00; color:white; padding:14px 16px; border-radius:8px;">
         <div style="font-size:11px; opacity:.9;">Due today</div>
         <div style="font-size:26px; font-weight:600; margin-top:2px;">${todayCount}</div>
       </div>
-      <div style="background:#f9a825; color:white; padding:14px 16px; border-radius:8px;">
+      <div style="background:#A34C00; color:white; padding:14px 16px; border-radius:8px;">
         <div style="font-size:11px; opacity:.9;">This week</div>
         <div style="font-size:26px; font-weight:600; margin-top:2px;">${weekCount}</div>
       </div>
-      <div style="background:#546e7a; color:white; padding:14px 16px; border-radius:8px;">
+      <div style="background:#5E5854; color:white; padding:14px 16px; border-radius:8px;">
         <div style="font-size:11px; opacity:.9;">Later</div>
         <div style="font-size:26px; font-weight:600; margin-top:2px;">${laterCount}</div>
       </div>
-      <div style="background:#2e7d32; color:white; padding:14px 16px; border-radius:8px;">
+      <div style="background:#2F6B3F; color:white; padding:14px 16px; border-radius:8px;">
         <div style="font-size:11px; opacity:.9;">Completed</div>
         <div style="font-size:26px; font-weight:600; margin-top:2px;">${completedCount}</div>
       </div>
     </div>
 
     <!-- Filters -->
-    <form method="GET" style="background:#f8f8f8; padding:12px; border-radius:6px; margin-bottom:20px; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+    <form method="GET" style="background:#FAF8F5; padding:12px; border-radius:6px; margin-bottom:20px; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
       <div>
-        <label style="display:block; font-size:11px; color:#666;">Client / A-number</label>
-        <input type="text" name="client" value="${escapeHtml(filters.client_name || '')}" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; width:200px;">
+        <label style="display:block; font-size:11px; color:#5E5854;">Client / A-number</label>
+        <input type="text" name="client" value="${escapeHtml(filters.client_name || '')}" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px; width:200px;">
       </div>
       <div>
-        <label style="display:block; font-size:11px; color:#666;">Assigned to</label>
-        <select name="assigned" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+        <label style="display:block; font-size:11px; color:#5E5854;">Assigned to</label>
+        <select name="assigned" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px;">
           <option value="">All</option>
           <option value="unassigned" ${filters.assigned_to === 'unassigned' ? 'selected' : ''}>Unassigned</option>
           ${allUsers.map(u => `<option value="${u.id}" ${String(filters.assigned_to) === String(u.id) ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
         </select>
       </div>
       <div>
-        <label style="display:block; font-size:11px; color:#666;">Source</label>
-        <select name="source" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+        <label style="display:block; font-size:11px; color:#5E5854;">Source</label>
+        <select name="source" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px;">
           <option value="">All</option>
           <option value="hearing_note" ${filters.source_type === 'hearing_note' ? 'selected' : ''}>Master hearing</option>
           <option value="individual_hearing" ${filters.source_type === 'individual_hearing' ? 'selected' : ''}>Individual hearing</option>
@@ -781,85 +781,85 @@ function renderDeadlinesPage(user, filters = {}) {
         </select>
       </div>
       <div>
-        <label style="display:block; font-size:11px; color:#666;">Status</label>
-        <select name="status" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+        <label style="display:block; font-size:11px; color:#5E5854;">Status</label>
+        <select name="status" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px;">
           <option value="">Pending + Completed</option>
           <option value="pending" ${filters.status === 'pending' ? 'selected' : ''}>Pending only</option>
           <option value="completed" ${filters.status === 'completed' ? 'selected' : ''}>Completed only</option>
         </select>
       </div>
       <button type="submit" style="background:${brand.navy}; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
-      <a href="/admin/deadlines" style="padding:8px 16px; color:#666; text-decoration:none; font-size:13px;">Reset</a>
+      <a href="/admin/deadlines" style="padding:8px 16px; color:#5E5854; text-decoration:none; font-size:13px;">Reset</a>
     </form>
 
     <!-- Buckets -->
-    ${bucketHtml("Overdue", buckets.overdue, "#c62828", "⚠️ Action required immediately")}
-    ${bucketHtml("Due today", buckets.today, "#ef6c00")}
-    ${bucketHtml("Due tomorrow", buckets.tomorrow, "#f9a825")}
-    ${bucketHtml("This week", buckets.this_week, "#fbc02d")}
-    ${bucketHtml("Next 2 weeks", buckets.next_two_weeks, "#546e7a")}
-    ${bucketHtml("Later", buckets.later, "#455a64")}
+    ${bucketHtml("Overdue", buckets.overdue, "#9C2B1E", "⚠️ Action required immediately")}
+    ${bucketHtml("Due today", buckets.today, "#A34C00")}
+    ${bucketHtml("Due tomorrow", buckets.tomorrow, "#A34C00")}
+    ${bucketHtml("This week", buckets.this_week, "#A34C00")}
+    ${bucketHtml("Next 2 weeks", buckets.next_two_weeks, "#5E5854")}
+    ${bucketHtml("Later", buckets.later, "#5E5854")}
 
     ${buckets.completed.length ? `
     <details style="margin-top:24px;">
-      <summary style="cursor:pointer; padding:10px; background:#e8f5e9; border-radius:6px; font-weight:600; color:#2e7d32;">
+      <summary style="cursor:pointer; padding:10px; background:#EEF5EF; border-radius:6px; font-weight:600; color:#2F6B3F;">
         ✅ Completed (${buckets.completed.length})
       </summary>
-      <div style="background:white; border:1px solid #e0e0e0; border-radius:6px; overflow:hidden; margin-top:8px;">
+      <div style="background:white; border:1px solid #E8E3DC; border-radius:6px; overflow:hidden; margin-top:8px;">
         ${buckets.completed.slice(0, 100).map(d => renderDeadlineRow(d, allUsers)).join("")}
       </div>
     </details>
     ` : ""}
 
-    ${!deadlines.length ? `<div style="text-align:center; padding:40px; color:#888;">No deadlines yet. Deadlines added to hearing notes appear here automatically.</div>` : ""}
+    ${!deadlines.length ? `<div style="text-align:center; padding:40px; color:#5E5854;">No deadlines yet. Deadlines added to hearing notes appear here automatically.</div>` : ""}
 
     <!-- Manual deadline modal -->
     <div id="manual-deadline-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:10000; align-items:center; justify-content:center; padding:20px;">
       <div style="background:white; padding:24px; border-radius:10px; max-width:520px; width:100%;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
           <h2 style="margin:0; color:${brand.navy};">+ Add deadline</h2>
-          <button type="button" onclick="closeManualDeadlineModal()" style="background:transparent; border:none; font-size:20px; cursor:pointer; color:#888;">✕</button>
+          <button type="button" onclick="closeManualDeadlineModal()" style="background:transparent; border:none; font-size:20px; cursor:pointer; color:#5E5854;">✕</button>
         </div>
         <form id="manual-deadline-form" onsubmit="submitManualDeadline(event)">
           <div style="margin-bottom:12px;">
-            <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Client name *</label>
-            <input type="text" name="client_name" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+            <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Client name *</label>
+            <input type="text" name="client_name" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
           </div>
           <div style="margin-bottom:12px;">
-            <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">A-number</label>
-            <input type="text" name="a_number" placeholder="A123-456-789" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+            <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">A-number</label>
+            <input type="text" name="a_number" placeholder="A123-456-789" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
           </div>
           <div style="margin-bottom:12px;">
-            <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Due date *</label>
-            <input type="date" name="due_date" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+            <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Due date *</label>
+            <input type="date" name="due_date" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
           </div>
           <div style="margin-bottom:12px;">
-            <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Description *</label>
-            <input type="text" name="description" required placeholder="e.g. File I-589, biometrics, motion to reopen" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+            <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Description *</label>
+            <input type="text" name="description" required placeholder="e.g. File I-589, biometrics, motion to reopen" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
           </div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
             <div>
-              <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Priority</label>
-              <select name="priority" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Priority</label>
+              <select name="priority" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
                 <option value="normal">Normal</option>
                 <option value="high">High</option>
                 <option value="low">Low</option>
               </select>
             </div>
             <div>
-              <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Assign to</label>
-              <select name="assigned_to" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+              <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Assign to</label>
+              <select name="assigned_to" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
                 <option value="">Unassigned</option>
                 ${allUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)}</option>`).join('')}
               </select>
             </div>
           </div>
           <div style="margin-bottom:16px;">
-            <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Notes</label>
-            <textarea name="notes" rows="3" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></textarea>
+            <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Notes</label>
+            <textarea name="notes" rows="3" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></textarea>
           </div>
           <div style="display:flex; gap:8px;">
-            <button type="button" onclick="closeManualDeadlineModal()" style="flex:1; padding:10px; background:#eee; border:none; border-radius:4px; cursor:pointer;">Cancel</button>
+            <button type="button" onclick="closeManualDeadlineModal()" style="flex:1; padding:10px; background:#F3EFE9; border:none; border-radius:4px; cursor:pointer;">Cancel</button>
             <button type="submit" style="flex:1; padding:10px; background:${brand.navy}; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Create deadline</button>
           </div>
         </form>
@@ -944,10 +944,10 @@ function renderDeadlineRow(d, allUsers) {
                 : daysUntilDue < 0 ? new Date(d.due_date).toLocaleDateString()
                 : `In ${daysUntilDue}d`;
 
-  const dueColor = isOverdue ? '#c62828'
-                 : isDueToday ? '#ef6c00'
-                 : daysUntilDue <= 3 ? '#f9a825'
-                 : '#666';
+  const dueColor = isOverdue ? '#9C2B1E'
+                 : isDueToday ? '#A34C00'
+                 : daysUntilDue <= 3 ? '#A34C00'
+                 : '#5E5854';
 
   const sourceIcon = d.source_type === 'hearing_note' ? '📝'
                     : d.source_type === 'individual_hearing' ? '⚖️'
@@ -961,32 +961,32 @@ function renderDeadlineRow(d, allUsers) {
   const strike = isCompleted ? "text-decoration:line-through; opacity:0.6;" : "";
 
   const clientDisplay = d.client_name || 'Unknown';
-  const anum = d.a_number ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(d.a_number)})</span>` : '';
+  const anum = d.a_number ? ` <span style="color:#5E5854; font-size:11px;">(${escapeHtml(d.a_number)})</span>` : '';
 
-  const assignedDisplay = d.assigned_name ? escapeHtml(d.assigned_name) : (d.assigned_to ? 'Unknown' : '<em style="color:#888;">Unassigned</em>');
+  const assignedDisplay = d.assigned_name ? escapeHtml(d.assigned_name) : (d.assigned_to ? 'Unknown' : '<em style="color:#5E5854;">Unassigned</em>');
 
   const actions = isCompleted
-    ? `<button onclick="reopenDeadline(${d.id})" style="background:#e3f2fd; color:#0d47a1; border:none; padding:5px 10px; border-radius:4px; cursor:pointer; font-size:11px;">↩️ Reopen</button>
-       <button onclick="deleteDeadline(${d.id})" style="background:transparent; color:#c00; border:none; padding:5px 8px; cursor:pointer; font-size:11px;">🗑</button>`
-    : `<button onclick="markComplete(${d.id})" style="background:#2e7d32; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600;">✓ Complete</button>
-       <button onclick="snoozeDeadline(${d.id})" style="background:#fff3e0; color:#e65100; border:none; padding:5px 8px; border-radius:4px; cursor:pointer; font-size:11px;">🔕 Snooze</button>
-       <button onclick="editDeadline(${d.id})" style="background:transparent; color:#666; border:none; padding:5px 8px; cursor:pointer; font-size:11px;">✏️</button>
-       <button onclick="deleteDeadline(${d.id})" style="background:transparent; color:#c00; border:none; padding:5px 8px; cursor:pointer; font-size:11px;">🗑</button>`;
+    ? `<button onclick="reopenDeadline(${d.id})" style="background:#F3EFE9; color:#A34C00; border:none; padding:5px 10px; border-radius:4px; cursor:pointer; font-size:11px;">↩️ Reopen</button>
+       <button onclick="deleteDeadline(${d.id})" style="background:transparent; color:#9C2B1E; border:none; padding:5px 8px; cursor:pointer; font-size:11px;">🗑</button>`
+    : `<button onclick="markComplete(${d.id})" style="background:#2F6B3F; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600;">✓ Complete</button>
+       <button onclick="snoozeDeadline(${d.id})" style="background:#FFF3E6; color:#A34C00; border:none; padding:5px 8px; border-radius:4px; cursor:pointer; font-size:11px;">🔕 Snooze</button>
+       <button onclick="editDeadline(${d.id})" style="background:transparent; color:#5E5854; border:none; padding:5px 8px; cursor:pointer; font-size:11px;">✏️</button>
+       <button onclick="deleteDeadline(${d.id})" style="background:transparent; color:#9C2B1E; border:none; padding:5px 8px; cursor:pointer; font-size:11px;">🗑</button>`;
 
   return `
-    <div style="display:flex; padding:12px 16px; border-bottom:1px solid #f0f0f0; gap:16px; align-items:center; ${strike}">
+    <div style="display:flex; padding:12px 16px; border-bottom:1px solid #E8E3DC; gap:16px; align-items:center; ${strike}">
       <div style="flex:0 0 auto; font-size:20px;" title="${d.source_type}">${sourceIcon}</div>
       <div style="flex:1;">
         <div style="font-weight:600; color:#2B2523; margin-bottom:2px;">${escapeHtml(d.description)}</div>
-        <div style="font-size:12px; color:#666;">
+        <div style="font-size:12px; color:#5E5854;">
           ${sourceLink ? `<a href="${sourceLink}" style="color:#A34C00; text-decoration:none;">${escapeHtml(clientDisplay)}</a>` : escapeHtml(clientDisplay)}${anum}
         </div>
       </div>
       <div style="flex:0 0 100px; text-align:center;">
         <div style="font-weight:600; color:${dueColor}; font-size:13px;">${dueText}</div>
-        <div style="font-size:10px; color:#888;">${new Date(d.due_date).toLocaleDateString()}</div>
+        <div style="font-size:10px; color:#5E5854;">${new Date(d.due_date).toLocaleDateString()}</div>
       </div>
-      <div style="flex:0 0 120px; font-size:12px; color:#666;">${assignedDisplay}</div>
+      <div style="flex:0 0 120px; font-size:12px; color:#5E5854;">${assignedDisplay}</div>
       <div style="flex:0 0 auto; display:flex; gap:4px;">${actions}</div>
     </div>`;
 }

@@ -519,45 +519,49 @@ app.get("/sign/:token", (req, res) => {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Sign Document — Tez Law P.C.</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign Document — TEZ Law Firm</title>
+${require("./tez-theme").FONTS}
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f0; color: #2B2523; line-height: 1.5; }
-  .header { background: #2B2523; color: #fff; padding: 16px 20px; border-bottom: 4px solid #FF7B00; }
-  .header h1 { margin: 0; font-size: 18px; }
-  .header p { margin: 4px 0 0; font-size: 13px; color: #E8E3DC; opacity: 0.9; }
+  body { margin: 0; font-family: Montserrat, "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; background: #FAF8F5; color: #2B2523; line-height: 1.55; font-size: 15px; }
+  .header { background: #2B2523; color: #FAF8F5; padding: 14px 20px; border-bottom: 3px solid #FF7B00; display: flex; align-items: center; gap: 14px; }
+  .header .tez-shield { height: 40px; width: auto; display: block; flex: 0 0 auto; }
+  .header small { display: block; font-weight: 600; font-size: 10px; letter-spacing: .22em; text-transform: uppercase; color: #E8E3DC; opacity: .85; margin-bottom: 3px; }
+  .header .t { font-family: "Cormorant Garamond", "Noto Serif SC", Georgia, serif; font-weight: 600; font-size: 22px; line-height: 1.1; }
   main { max-width: 720px; margin: 20px auto; padding: 0 16px; }
-  .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-  .doc-title { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
-  .doc-meta { font-size: 13px; color: #666; margin: 0 0 16px; }
-  .doc-body { background: #FAF8F5; padding: 20px; border-radius: 6px; white-space: pre-wrap; word-wrap: break-word; font-family: ui-serif, Georgia, serif; font-size: 14px; line-height: 1.6; max-height: 60vh; overflow-y: auto; border: 1px solid #eee; }
-  h2 { font-size: 16px; margin: 0 0 12px; color: #2B2523; }
-  label { display: block; font-size: 13px; font-weight: 600; color: #666; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-  input[type=text] { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd; border-radius: 6px; }
-  .sig-canvas-wrap { border: 2px dashed #FF7B00; border-radius: 6px; background: #fff; height: 200px; position: relative; touch-action: none; }
+  .card { background: #fff; border: 1px solid #E8E3DC; border-radius: 4px; padding: 20px; margin-bottom: 16px; }
+  .doc-title { font-family: "Cormorant Garamond", "Noto Serif SC", Georgia, serif; font-size: 26px; font-weight: 600; line-height: 1.15; margin: 0 0 4px; }
+  .doc-meta { font-size: 13px; color: #5E5854; margin: 0 0 16px; }
+  .doc-body { background: #FAF8F5; border: 1px solid #E8E3DC; padding: 20px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; font-family: ui-serif, Georgia, serif; font-size: 14px; line-height: 1.6; max-height: 50vh; overflow-y: auto; }
+  h2 { font-family: "Cormorant Garamond", "Noto Serif SC", Georgia, serif; font-size: 22px; font-weight: 600; margin: 0 0 12px; color: #2B2523; }
+  label { display: block; font-size: 10.5px; font-weight: 600; color: #5E5854; margin: 12px 0 5px; text-transform: uppercase; letter-spacing: .14em; }
+  input[type=text] { width: 100%; padding: 12px; font: 400 16px Montserrat, Arial, sans-serif; color: #2B2523; border: 1px solid #CFC8BE; border-radius: 3px; }
+  input[type=text]:focus { outline: none; border-color: #2B2523; box-shadow: 0 0 0 3px rgba(255,123,0,.22); }
+  .sig-canvas-wrap { border: 2px dashed #A34C00; border-radius: 4px; background: #fff; height: 200px; position: relative; touch-action: none; }
   .sig-canvas-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .sig-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #A34C00; font-style: italic; pointer-events: none; opacity: 0.7; }
+  .sig-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #5E5854; font-style: italic; pointer-events: none; }
   .sig-actions { display: flex; gap: 8px; margin-top: 8px; }
-  .sig-actions button { flex: 1; padding: 10px; border: 1px solid #ddd; background: #fff; border-radius: 6px; font-size: 14px; cursor: pointer; }
-  .primary { background: #FF7B00 !important; color: #2B2523 !important; border: none !important; font-weight: 700 !important; padding: 16px !important; font-size: 16px !important; }
+  .sig-actions button { flex: 1; padding: 11px; border: 1px solid #2B2523; background: #fff; color: #2B2523; border-radius: 3px; font: 600 12px Montserrat, Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+  .primary { background: #FF7B00 !important; color: #1E1B1A !important; border: none !important; font-weight: 700 !important; padding: 16px !important; font-size: 14px !important; }
   .primary:disabled { opacity: 0.5; cursor: not-allowed; }
-  .success { background: #d4edda; color: #155724; padding: 20px; border-radius: 8px; text-align: center; }
-  .success h2 { color: #155724; margin: 0 0 8px; }
-  .error { background: #f8d7da; color: #721c24; padding: 16px; border-radius: 6px; margin-bottom: 16px; }
-  .footer { text-align: center; padding: 20px; font-size: 12px; color: #999; }
+  .success { background: #EEF5EF; border-left: 3px solid #2F6B3F; color: #2B2523; padding: 20px; border-radius: 4px; text-align: center; }
+  .success h2 { color: #2F6B3F; margin: 0 0 8px; }
+  .error { background: #FBEDEA; border-left: 3px solid #9C2B1E; color: #9C2B1E; padding: 16px; border-radius: 4px; margin-bottom: 16px; }
+  .footer { text-align: center; padding: 20px; font-size: 12px; color: #5E5854; }
+  :focus-visible { outline: 2px solid #FF7B00; outline-offset: 2px; }
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>Tez Law P.C.</h1>
-  <p>Secure Document Signing</p>
+  ${require("./tez-theme").SHIELD}
+  <div><small>TEZ Law Firm</small><div class="t">Secure document signing</div></div>
 </div>
 <main id="app">
-  <div class="card"><p style="text-align:center; color:#666;">Loading document…</p></div>
+  <div class="card"><p style="text-align:center; color:#5E5854;">Loading document…</p></div>
 </main>
 <div class="footer">
-  <p>Tez Law P.C. · 626-678-8677 · jj@tezlawfirm.com</p>
+  <p>TEZ Law Firm · 626-678-8677 · jj@tezlawfirm.com</p>
   <p>By signing you agree the electronic signature is legally binding under the ESIGN Act &amp; UETA.</p>
 </div>
 <script>
@@ -573,7 +577,7 @@ app.get("/sign/:token", (req, res) => {
       return;
     }
     if (data.signed) {
-      h('<div class="card success"><h2>✓ Signed</h2><p>You signed "' + data.document.title + '" as <strong>' + (data.signed_by_name || 'Unknown') + '</strong> on ' + new Date(data.signed_at).toLocaleString() + '.</p><p style="margin-top:16px;color:#155724">A copy has been saved on file with Tez Law.</p></div>');
+      h('<div class="card success"><h2>✓ Signed</h2><p>You signed "' + data.document.title + '" as <strong>' + (data.signed_by_name || 'Unknown') + '</strong> on ' + new Date(data.signed_at).toLocaleString() + '.</p><p style="margin-top:16px;color:#2F6B3F">A copy has been saved on file with Tez Law.</p></div>');
       return;
     }
     render(data);
@@ -582,7 +586,7 @@ app.get("/sign/:token", (req, res) => {
   }
 
   function render(data) {
-    h('<div class="card"><h2 class="doc-title">' + data.document.title + '</h2><p class="doc-meta">' + (data.document.template_name || 'Document') + (data.recipient?.name ? ' · For ' + data.recipient.name : '') + '</p><div class="doc-body" id="body"></div></div><div class="card" id="sign-card"><h2>Sign this document</h2><label>Full legal name</label><input id="name" type="text" placeholder="Type your full name" value="' + (data.recipient?.name || '').replace(/"/g,'&quot;') + '"><label>Signature</label><div class="sig-canvas-wrap"><canvas id="pad"></canvas><div class="sig-hint" id="hint">Sign with your finger or stylus</div></div><div class="sig-actions"><button type="button" id="clear">Clear</button></div><button type="button" class="primary" id="submit" style="width:100%;margin-top:16px;">Sign &amp; Submit</button><p style="font-size:11px;color:#999;margin-top:12px;line-height:1.5">By tapping "Sign &amp; Submit" you agree that this electronic signature has the same legal effect as a handwritten signature (ESIGN Act &amp; UETA).</p></div>');
+    h('<div class="card"><h2 class="doc-title">' + data.document.title + '</h2><p class="doc-meta">' + (data.document.template_name || 'Document') + (data.recipient?.name ? ' · For ' + data.recipient.name : '') + '</p><div class="doc-body" id="body"></div></div><div class="card" id="sign-card"><h2>Sign this document</h2><label>Full legal name</label><input id="name" type="text" placeholder="Type your full name" value="' + (data.recipient?.name || '').replace(/"/g,'&quot;') + '"><label>Signature</label><div class="sig-canvas-wrap"><canvas id="pad"></canvas><div class="sig-hint" id="hint">Sign with your finger or stylus</div></div><div class="sig-actions"><button type="button" id="clear">Clear</button></div><button type="button" class="primary" id="submit" style="width:100%;margin-top:16px;">Sign &amp; Submit</button><p style="font-size:11px;color:#5E5854;margin-top:12px;line-height:1.5">By tapping "Sign &amp; Submit" you agree that this electronic signature has the same legal effect as a handwritten signature (ESIGN Act &amp; UETA).</p></div>');
     document.getElementById('body').textContent = data.document.body;
     initPad();
   }
@@ -638,7 +642,7 @@ app.get("/sign/:token", (req, res) => {
           btn.disabled = false; btn.textContent = 'Sign & Submit';
           return;
         }
-        h('<div class="card success"><h2>✓ Signed</h2><p>Thank you, <strong>' + name + '</strong>.</p><p>Your signature has been recorded and Tez Law has been notified. A copy has been saved on file.</p><p style="margin-top:16px;font-size:13px;color:#155724">You may close this window.</p></div>');
+        h('<div class="card success"><h2>✓ Signed</h2><p>Thank you, <strong>' + name + '</strong>.</p><p>Your signature has been recorded and Tez Law has been notified. A copy has been saved on file.</p><p style="margin-top:16px;font-size:13px;color:#2F6B3F">You may close this window.</p></div>');
       } catch (err) {
         alert('Network error: ' + err.message);
         btn.disabled = false; btn.textContent = 'Sign & Submit';
@@ -737,7 +741,7 @@ app.get("/admin/civil/new", async (req, res) => {
       <div style="padding:24px;max-width:960px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
           <h1 style="margin:0;font-family:Cormorant Garamond,Georgia,serif;color:#2B2523;">New Civil Case</h1>
-          <a href="/admin/civil" style="color:#B84200;text-decoration:none;font-size:13px;">← Back to board</a>
+          <a href="/admin/civil" style="color:#A34C00;text-decoration:none;font-size:13px;">← Back to board</a>
         </div>
 
         <form onsubmit="submitCivil(event)" style="background:#F3EFE9;border:1px solid #E8E3DC;border-radius:8px;padding:20px;">
@@ -807,7 +811,7 @@ app.get("/admin/civil/new", async (req, res) => {
           </div>
 
           <div style="margin-top:18px;display:flex;align-items:center;gap:12px;">
-            <button type="submit" id="civil-submit" style="padding:11px 22px;background:#FF7B00;color:#1E1B1A;border:1px solid #D96800;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:12px;font-weight:600;letter-spacing:1.5px;">CREATE CASE</button>
+            <button type="submit" id="civil-submit" style="padding:11px 22px;background:#FF7B00;color:#1E1B1A;border:1px solid #FF7B00;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:12px;font-weight:600;letter-spacing:1.5px;">CREATE CASE</button>
             <a href="/admin/civil" style="color:#5E5854;text-decoration:none;font-size:13px;">Cancel</a>
             <span id="civil-err" style="color:#9C2B1E;font-size:12px;"></span>
           </div>
@@ -843,7 +847,7 @@ app.get("/admin/civil/new", async (req, res) => {
               var folderOk = p.dropbox && (p.dropbox.created || p.dropbox.adopted || p.dropbox.linked);
               var msg = document.getElementById("civil-setup");
               if (msg && p.summary) {
-                msg.style.color = folderOk || p.pending ? "#166534" : "#9C2B1E";
+                msg.style.color = folderOk || p.pending ? "#2F6B3F" : "#9C2B1E";
                 msg.textContent = "Case created — " + p.summary + ".";
               }
 
@@ -861,7 +865,7 @@ app.get("/admin/civil/new", async (req, res) => {
                 filedOk = !!up.ok && !bad;
                 if (msg) {
                   var line = document.createElement("div");
-                  line.style.color = filedOk ? "#166534" : "#9C2B1E";
+                  line.style.color = filedOk ? "#2F6B3F" : "#9C2B1E";
                   line.textContent = n
                     ? n + " document" + (n === 1 ? "" : "s") + " filed to Dropbox: " +
                       (up.uploaded || []).map(function (u) { return u.saved_as + " → " + u.folder_label; }).join("; ") +
@@ -1324,7 +1328,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
       <div style="padding:24px;max-width:1000px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <h1 style="margin:0;font-family:Cormorant Garamond,Georgia,serif;color:#2B2523;">Civil Document Sync</h1>
-          <a href="/admin/civil" style="color:#B84200;text-decoration:none;font-size:13px;">← Back to board</a>
+          <a href="/admin/civil" style="color:#A34C00;text-decoration:none;font-size:13px;">← Back to board</a>
         </div>
         <p style="color:#5E5854;font-style:italic;margin:0 0 18px 0;font-size:13px;">
           <strong>Preview import</strong> reads every folder under your civil root and proposes a case
@@ -1340,14 +1344,14 @@ app.get("/admin/civil/dropbox", async (req, res) => {
             <button onclick="saveRoots()" style="padding:7px 14px;background:#2B2523;color:#FAF8F5;border:1px solid #3A3330;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">SAVE ROOT</button>
             <button onclick="browse('')" style="padding:7px 14px;background:#FFF;color:#2B2523;border:1px solid #E8E3DC;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">BROWSE…</button>
             <button onclick="unlinkAll()" style="padding:7px 14px;background:#9C2B1E;color:#FAF8F5;border:1px solid #3A3330;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">UNLINK ALL</button>
-            <button onclick="resetImport()" style="padding:7px 14px;background:#7B1010;color:#FAF8F5;border:1px solid #3A3330;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">DELETE IMPORTED CASES</button>
+            <button onclick="resetImport()" style="padding:7px 14px;background:#9C2B1E;color:#FAF8F5;border:1px solid #3A3330;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">DELETE IMPORTED CASES</button>
           </div>
           <div id="browser" style="margin-top:10px;"></div>
         </div>
 
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;">
           <button onclick="imp(false)" style="padding:10px 18px;background:#2B2523;color:#FAF8F5;border:1px solid #3A3330;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:12px;letter-spacing:1.5px;">PREVIEW IMPORT</button>
-          <button onclick="imp(true)" style="padding:10px 18px;background:#FF7B00;color:#1E1B1A;border:1px solid #D96800;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:12px;letter-spacing:1.5px;">CREATE CASES + CLIENTS</button>
+          <button onclick="imp(true)" style="padding:10px 18px;background:#FF7B00;color:#1E1B1A;border:1px solid #FF7B00;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:12px;letter-spacing:1.5px;">CREATE CASES + CLIENTS</button>
           <span style="width:1px;height:26px;background:#E8E3DC;"></span>
           <button onclick="bulk(false)" style="padding:10px 14px;background:#FAF8F5;color:#2B2523;border:1px solid #E8E3DC;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:11px;letter-spacing:1px;">MATCH EXISTING</button>
           <button onclick="syncAll()" style="padding:10px 18px;background:#FAF8F5;color:#2B2523;border:1px solid #E8E3DC;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-size:12px;letter-spacing:1.5px;">SYNC ALL LINKED</button>
@@ -1377,7 +1381,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
             });
             var d = await r.json();
             if (!d.ok) { out.innerHTML = '<div style="color:#9C2B1E;padding:12px;">' + esc(d.error) + '</div>'; return; }
-            var head = '<div style="padding:12px;background:' + (d.dry_run ? "#FAF8F5" : "#E8F0E4") + ';border:1px solid #E8E3DC;border-radius:6px;">'
+            var head = '<div style="padding:12px;background:' + (d.dry_run ? "#FAF8F5" : "#EEF5EF") + ';border:1px solid #E8E3DC;border-radius:6px;">'
               + '<strong>' + (d.dry_run ? "DRY RUN — nothing was changed" : "APPLIED") + '</strong> · '
               + d.linked_count + ' matched · ' + d.ambiguous_count + ' ambiguous · ' + d.unmatched_count + ' unmatched</div>';
             // A bare "0 matched" hides whether the problem is no cases, no
@@ -1392,7 +1396,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
                 + '<div style="margin-top:4px;">' + g.total_civil_cases + ' civil case(s) in total · '
                 + g.cases_needing_a_folder + ' still need a folder · ' + g.folders_visible + ' Dropbox folder(s) visible</div>'
                 + (roots ? '<ul style="margin:6px 0 0 18px;padding:0;">' + roots + '</ul>' : '')
-                + (g.hint ? '<div style="margin-top:8px;padding:8px;background:#F5E4B4;border-left:3px solid #FF7B00;border-radius:4px;">' + esc(g.hint) + '</div>' : '')
+                + (g.hint ? '<div style="margin-top:8px;padding:8px;background:#FFF3E6;border-left:3px solid #FF7B00;border-radius:4px;">' + esc(g.hint) + '</div>' : '')
                 + '</div>';
             }
             var linked = d.linked.map(function (x) {
@@ -1411,7 +1415,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
                 + (x.best ? '<span style="font-size:11px;color:#5E5854;"> — closest: ' + esc(x.best.path) + ' (' + x.best.score + ')</span>' : '') + '</div>';
             });
             out.innerHTML = head
-              + card("✅ Matched", "#166534", linked)
+              + card("✅ Matched", "#2F6B3F", linked)
               + card("⚠ Ambiguous — link these by hand", "#FF7B00", amb)
               + card("○ No match found", "#5E5854", un);
           } catch (e) { out.innerHTML = '<div style="color:#9C2B1E;padding:12px;">' + esc(e.message) + '</div>'; }
@@ -1427,11 +1431,11 @@ app.get("/admin/civil/dropbox", async (req, res) => {
             });
             var d = await r.json();
             if (!d.ok) {
-              out.innerHTML = '<div style="padding:12px;background:#F5E4B4;border-left:3px solid #FF7B00;border-radius:4px;">'
+              out.innerHTML = '<div style="padding:12px;background:#FFF3E6;border-left:3px solid #FF7B00;border-radius:4px;">'
                 + esc(d.hint || d.error || d.reason) + '</div>';
               return;
             }
-            var conf = { high: "#166534", medium: "#A34C00", low: "#9C2B1E" };
+            var conf = { high: "#2F6B3F", medium: "#A34C00", low: "#9C2B1E" };
             var madeRows = d.created.map(function (c) {
               return '<div style="padding:8px 10px;border-bottom:1px solid #E8E3DC;">'
                 + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">'
@@ -1440,7 +1444,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
                 + '<span style="font-size:10px;font-weight:700;color:' + (conf[c.confidence] || "#5E5854") + ';">' + esc(c.confidence.toUpperCase()) + '</span></div>'
                 + '<div style="font-size:11px;color:#5E5854;margin-top:2px;">client: ' + esc(c.client_name)
                 + (c.client_created ? ' <em>(new)</em>' : ' <em>(existing)</em>')
-                + (c.nested ? ' · <span style="color:#B84200;">matter under client folder</span>' : '')
+                + (c.nested ? ' · <span style="color:#A34C00;">matter under client folder</span>' : '')
                 + (c.opposing_party ? ' · v. ' + esc(c.opposing_party) : '')
                 + (c.case_number ? ' · #' + esc(c.case_number) : '')
                 + (c.files ? ' · ' + c.files + ' file(s)' : '')
@@ -1454,15 +1458,15 @@ app.get("/admin/civil/dropbox", async (req, res) => {
               return '<div style="padding:6px 10px;border-bottom:1px solid #E8E3DC;font-size:12px;color:#9C2B1E;">'
                 + esc(x.folder || x.path) + ' — ' + esc(x.error) + '</div>';
             });
-            out.innerHTML = '<div style="padding:12px;background:' + (d.dry_run ? "#FAF8F5" : "#E8F0E4") + ';border:1px solid #E8E3DC;border-radius:6px;">'
+            out.innerHTML = '<div style="padding:12px;background:' + (d.dry_run ? "#FAF8F5" : "#EEF5EF") + ';border:1px solid #E8E3DC;border-radius:6px;">'
               + '<strong>' + (d.dry_run ? "PREVIEW — nothing was created" : "IMPORTED") + '</strong> · '
               + d.created_count + ' case(s) · ' + d.clients_created + ' new client(s) · '
               + d.skipped_count + ' skipped · ' + d.failed_count + ' failed'
               + '<div style="font-size:11px;margin-top:4px;">root: ' + d.roots.map(esc).join(", ") + '</div></div>'
-              + card(d.dry_run ? "Cases that would be created" : "Cases created", "#166534", madeRows)
+              + card(d.dry_run ? "Cases that would be created" : "Cases created", "#2F6B3F", madeRows)
               + card("Skipped", "#5E5854", skipRows)
               + card("Failed", "#9C2B1E", failRows)
-              + (d.dry_run && d.created_count ? '<div style="margin-top:10px;padding:10px;background:#F5E4B4;border-left:3px solid #FF7B00;border-radius:4px;font-size:12px;">Check the LOW-confidence rows above — those folder names did not match a familiar pattern, so the case and client names are the folder name verbatim. Everything is editable afterwards.</div>' : '');
+              + (d.dry_run && d.created_count ? '<div style="margin-top:10px;padding:10px;background:#FFF3E6;border-left:3px solid #FF7B00;border-radius:4px;font-size:12px;">Check the LOW-confidence rows above — those folder names did not match a familiar pattern, so the case and client names are the folder name verbatim. Everything is editable afterwards.</div>' : '');
           } catch (e) { out.innerHTML = '<div style="color:#9C2B1E;padding:12px;">' + esc(e.message) + '</div>'; }
         }
         async function resetImport() {
@@ -1487,7 +1491,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
           if (!d.ok) { el.textContent = d.error; return; }
           if (d.configured) {
             el.innerHTML = 'Using <strong>' + d.roots.map(esc).join(", ") + '</strong>';
-            el.style.color = "#166534";
+            el.style.color = "#2F6B3F";
             if (!document.getElementById("rootpath").value) document.getElementById("rootpath").value = d.roots[0] || "";
           } else {
             el.innerHTML = '<span style="color:#9C2B1E;font-weight:700;">No civil root set.</span> '
@@ -1521,7 +1525,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
           if (d.parent !== null) {
             var up = document.createElement("a");
             up.href = "#"; up.textContent = "⬆ up";
-            up.style.cssText = "display:inline-block;margin-bottom:6px;font-size:12px;color:#B84200;text-decoration:none;font-weight:600;";
+            up.style.cssText = "display:inline-block;margin-bottom:6px;font-size:12px;color:#A34C00;text-decoration:none;font-weight:600;";
             up.onclick = function (e) { e.preventDefault(); browse(d.parent); };
             box.appendChild(up);
           }
@@ -1534,7 +1538,7 @@ app.get("/admin/civil/dropbox", async (req, res) => {
             open.onclick = function (e) { e.preventDefault(); browse(f.path); };
             var pick = document.createElement("a");
             pick.href = "#"; pick.textContent = "USE THIS";
-            pick.style.cssText = "font-size:11px;color:#B84200;font-weight:600;text-decoration:none;white-space:nowrap;";
+            pick.style.cssText = "font-size:11px;color:#A34C00;font-weight:600;text-decoration:none;white-space:nowrap;";
             pick.onclick = function (e) {
               e.preventDefault();
               document.getElementById("rootpath").value = f.path;
@@ -1679,18 +1683,18 @@ app.get("/admin/pi/brokers", async (req, res) => {
     const rowsHtml = brokers.length ? brokers.map(b => {
       const pct = totalCases > 0 ? Math.round(b.case_count / totalCases * 100) : 0;
       const brokerLink = b.broker === "(no broker)"
-        ? `<span style="color:#999; font-style:italic;">${esc(b.broker)}</span>`
+        ? `<span style="color:#5E5854; font-style:italic;">${esc(b.broker)}</span>`
         : `<a href="/admin/pi/cases?broker=${encodeURIComponent(b.broker)}" style="color:#2B2523; font-weight:600; text-decoration:none;">🤝 ${esc(b.broker)}</a>`;
       return `
         <tr>
-          <td style="padding:12px; border-bottom:1px solid #eee;">${brokerLink}</td>
-          <td style="padding:12px; border-bottom:1px solid #eee; text-align:right; font-weight:600;">${b.case_count} <span style="font-weight:400; color:#888; font-size:11px;">(${pct}%)</span></td>
-          <td style="padding:12px; border-bottom:1px solid #eee; text-align:right; color:#0061FF;">${b.active_count}</td>
-          <td style="padding:12px; border-bottom:1px solid #eee; text-align:right; color:#2e7d32;">${b.settled_count}</td>
-          <td style="padding:12px; border-bottom:1px solid #eee; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(b.total_settled)}</td>
-          <td style="padding:12px; border-bottom:1px solid #eee; text-align:right; font-family:ui-monospace, Menlo, monospace; color:#666;">${fmt$(b.avg_settlement)}</td>
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC;">${brokerLink}</td>
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; text-align:right; font-weight:600;">${b.case_count} <span style="font-weight:400; color:#5E5854; font-size:11px;">(${pct}%)</span></td>
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; text-align:right; color:#A34C00;">${b.active_count}</td>
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; text-align:right; color:#2F6B3F;">${b.settled_count}</td>
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(b.total_settled)}</td>
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; text-align:right; font-family:ui-monospace, Menlo, monospace; color:#5E5854;">${fmt$(b.avg_settlement)}</td>
         </tr>`;
-    }).join("") : `<tr><td colspan="6" style="padding:40px; text-align:center; color:#888;">No PI cases yet.</td></tr>`;
+    }).join("") : `<tr><td colspan="6" style="padding:40px; text-align:center; color:#5E5854;">No PI cases yet.</td></tr>`;
 
     const body = `
       <div class="page-header">
@@ -1698,22 +1702,22 @@ app.get("/admin/pi/brokers", async (req, res) => {
         <a href="/admin/pi/cases" class="back-link">← PI Cases</a>
       </div>
 
-      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+      <div style="background:#F3EFE9; padding:14px 16px; border-radius:8px; border-left:4px solid #A34C00; margin-bottom:16px; font-size:13px;">
         Every PI case's <strong>referral source</strong> comes from the Dropbox folder one level above the client folder. Structure: <code>/Asylum_EOIR/[BROKER]/[CLIENT PI]</code>.
       </div>
 
-      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee; font-size:12px; color:#666;">
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden;">
+        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #E8E3DC; font-size:12px; color:#5E5854;">
           ${brokers.length} broker${brokers.length === 1 ? "" : "s"} · ${totalCases} total case${totalCases === 1 ? "" : "s"}
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
           <thead><tr style="background:#FAF8F5;">
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Broker</th>
-            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Total Cases</th>
-            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Active</th>
-            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Settled</th>
-            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Total Settled $</th>
-            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Avg Settlement</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Broker</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Total Cases</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Active</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Settled</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Total Settled $</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Avg Settlement</th>
           </tr></thead>
           <tbody>${rowsHtml}</tbody>
         </table>
@@ -1778,9 +1782,9 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
 
     const branchRows = results.branches_scanned.map(b => `
       <tr>
-        <td style="padding:8px 12px; border-bottom:1px solid #eee; font-family:ui-monospace, Menlo, monospace; font-size:12px;">${esc(b.root)}</td>
-        <td style="padding:8px 12px; border-bottom:1px solid #eee; text-align:right; font-size:12px;">${b.count}</td>
-        <td style="padding:8px 12px; border-bottom:1px solid #eee; color:${b.ok ? "#2e7d32" : "#c62828"}; font-size:12px;">${b.ok ? "✓ OK" : "✗ Failed"}</td>
+        <td style="padding:8px 12px; border-bottom:1px solid #E8E3DC; font-family:ui-monospace, Menlo, monospace; font-size:12px;">${esc(b.root)}</td>
+        <td style="padding:8px 12px; border-bottom:1px solid #E8E3DC; text-align:right; font-size:12px;">${b.count}</td>
+        <td style="padding:8px 12px; border-bottom:1px solid #E8E3DC; color:${b.ok ? "#2F6B3F" : "#9C2B1E"}; font-size:12px;">${b.ok ? "✓ OK" : "✗ Failed"}</td>
       </tr>`).join("");
 
     const matched = results.considered.filter(c => c.matched);
@@ -1790,17 +1794,17 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
       const clientName = pi.extractClientNameFromPIFolder(c.name);
       return `
         <tr>
-          <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:13px;">${esc(c.name)}</td>
-          <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:13px; color:#2e7d32; font-weight:600;">${esc(clientName)}</td>
-          <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:12px; color:#A34C00; font-weight:600;">${c.broker ? esc(c.broker) : '<span style="color:#999; font-weight:400;">—</span>'}</td>
-          <td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:11px; color:#666; font-family:ui-monospace, Menlo, monospace;">${esc(c.path)}</td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E8E3DC; font-size:13px;">${esc(c.name)}</td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E8E3DC; font-size:13px; color:#2F6B3F; font-weight:600;">${esc(clientName)}</td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E8E3DC; font-size:12px; color:#A34C00; font-weight:600;">${c.broker ? esc(c.broker) : '<span style="color:#5E5854; font-weight:400;">—</span>'}</td>
+          <td style="padding:8px 12px; border-bottom:1px solid #E8E3DC; font-size:11px; color:#5E5854; font-family:ui-monospace, Menlo, monospace;">${esc(c.path)}</td>
         </tr>`;
-    }).join("") : `<tr><td colspan="4" style="padding:20px; text-align:center; color:#888;">No PI folders matched.</td></tr>`;
+    }).join("") : `<tr><td colspan="4" style="padding:20px; text-align:center; color:#5E5854;">No PI folders matched.</td></tr>`;
 
     const notMatchedRows = notMatched.slice(0, 50).map(c => `
       <tr>
-        <td style="padding:6px 12px; border-bottom:1px solid #f0f0f0; font-size:12px; color:#666;">${esc(c.name)}</td>
-        <td style="padding:6px 12px; border-bottom:1px solid #f0f0f0; font-size:11px; color:#888; font-family:ui-monospace, Menlo, monospace;">${esc(c.path)}</td>
+        <td style="padding:6px 12px; border-bottom:1px solid #E8E3DC; font-size:12px; color:#5E5854;">${esc(c.name)}</td>
+        <td style="padding:6px 12px; border-bottom:1px solid #E8E3DC; font-size:11px; color:#5E5854; font-family:ui-monospace, Menlo, monospace;">${esc(c.path)}</td>
       </tr>`).join("");
 
     // ── Folder browser HTML (with drill-down links) ──
@@ -1808,39 +1812,39 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
     if (browserEntries || browserError) {
       const parent = browsePath ? browsePath.split("/").slice(0, -1).join("/") : null;
       const browserRows = browserError
-        ? `<tr><td colspan="2" style="padding:14px; color:#c62828;">${esc(browserError)}</td></tr>`
+        ? `<tr><td colspan="2" style="padding:14px; color:#9C2B1E;">${esc(browserError)}</td></tr>`
         : (browserEntries.length ? browserEntries.map(e => {
             const matchesPI = pi.PI_MATCHER.test(e.name);
             return `
               <tr>
-                <td style="padding:6px 12px; border-bottom:1px solid #f0f0f0; font-size:13px;">
-                  📁 <a href="/admin/pi/discover/preview?browse=${encodeURIComponent(e.path_display)}" style="color:${matchesPI ? "#2e7d32" : "#0061FF"}; text-decoration:none; ${matchesPI ? "font-weight:600;" : ""}">${esc(e.name)}</a>
-                  ${matchesPI ? '<span style="background:#2e7d32; color:white; padding:1px 6px; border-radius:8px; font-size:10px; margin-left:6px;">PI</span>' : ""}
+                <td style="padding:6px 12px; border-bottom:1px solid #E8E3DC; font-size:13px;">
+                  📁 <a href="/admin/pi/discover/preview?browse=${encodeURIComponent(e.path_display)}" style="color:${matchesPI ? "#2F6B3F" : "#A34C00"}; text-decoration:none; ${matchesPI ? "font-weight:600;" : ""}">${esc(e.name)}</a>
+                  ${matchesPI ? '<span style="background:#2F6B3F; color:white; padding:1px 6px; border-radius:8px; font-size:10px; margin-left:6px;">PI</span>' : ""}
                 </td>
-                <td style="padding:6px 12px; border-bottom:1px solid #f0f0f0; font-size:11px; color:#666; text-align:right;">
+                <td style="padding:6px 12px; border-bottom:1px solid #E8E3DC; font-size:11px; color:#5E5854; text-align:right;">
                   <a href="/admin/pi/discover/preview?path=${encodeURIComponent(e.path_display)}" style="color:#A34C00; text-decoration:none;">Scan here →</a>
                 </td>
               </tr>`;
-          }).join("") : `<tr><td colspan="2" style="padding:14px; color:#888;">(no subfolders)</td></tr>`);
+          }).join("") : `<tr><td colspan="2" style="padding:14px; color:#5E5854;">(no subfolders)</td></tr>`);
 
       const crumbs = browsePath
         ? browsePath.split("/").filter(Boolean).map((seg, i, arr) => {
             const cumulative = "/" + arr.slice(0, i + 1).join("/");
-            return `<a href="/admin/pi/discover/preview?browse=${encodeURIComponent(cumulative)}" style="color:#0061FF; text-decoration:none;">${esc(seg)}</a>`;
+            return `<a href="/admin/pi/discover/preview?browse=${encodeURIComponent(cumulative)}" style="color:#A34C00; text-decoration:none;">${esc(seg)}</a>`;
           }).join(" / ")
         : "";
 
       browserHtml = `
-        <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden; margin-bottom:16px;">
-          <div style="padding:12px 16px; background:#fff8e1; border-bottom:1px solid #eee;">
+        <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden; margin-bottom:16px;">
+          <div style="padding:12px 16px; background:#FFF3E6; border-bottom:1px solid #E8E3DC;">
             <strong style="color:#2B2523;">📂 Folder Browser</strong>
-            <div style="font-size:12px; color:#666; margin-top:4px;">
-              <a href="/admin/pi/discover/preview?browse=" style="color:#0061FF; text-decoration:none;">🏠 Dropbox root</a>
+            <div style="font-size:12px; color:#5E5854; margin-top:4px;">
+              <a href="/admin/pi/discover/preview?browse=" style="color:#A34C00; text-decoration:none;">🏠 Dropbox root</a>
               ${crumbs ? " / " + crumbs : ""}
             </div>
           </div>
           <table style="width:100%; border-collapse:collapse;">${browserRows}</table>
-          <div style="padding:8px 16px; background:#FAF8F5; font-size:11px; color:#666;">
+          <div style="padding:8px 16px; background:#FAF8F5; font-size:11px; color:#5E5854;">
             <strong>Green folders</strong> match the PI pattern. Click a folder to drill in, or "Scan here" to run the PI matcher against everything inside that folder.
           </div>
         </div>`;
@@ -1852,82 +1856,82 @@ app.get("/admin/pi/discover/preview", async (req, res) => {
         <a href="/admin/pi/cases" class="back-link">← PI Cases</a>
       </div>
 
-      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+      <div style="background:#F3EFE9; padding:14px 16px; border-radius:8px; border-left:4px solid #A34C00; margin-bottom:16px; font-size:13px;">
         <strong>How to find your PI folders:</strong> Use the folder browser below to navigate to where your PI cases live. When you find the parent folder, click <strong>"Scan here →"</strong> to run the PI matcher against everything inside.
       </div>
 
       <!-- Custom path scanner -->
-      <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <form method="GET" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
           <div style="flex:1; min-width:300px;">
-            <label style="font-size:11px; color:#888; display:block;">Scan a specific path (leave empty to use default branches)</label>
-            <input type="text" name="path" value="${esc(customPath)}" placeholder="/Path/To/PI/Cases" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:ui-monospace, Menlo, monospace;">
+            <label style="font-size:11px; color:#5E5854; display:block;">Scan a specific path (leave empty to use default branches)</label>
+            <input type="text" name="path" value="${esc(customPath)}" placeholder="/Path/To/PI/Cases" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:ui-monospace, Menlo, monospace;">
           </div>
           <input type="hidden" name="browse" value="${esc(browsePath)}">
           <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">🔍 Scan This Path</button>
-          ${customPath ? `<a href="/admin/pi/discover/preview" style="padding:8px 16px; color:#666; text-decoration:none;">Clear</a>` : ""}
+          ${customPath ? `<a href="/admin/pi/discover/preview" style="padding:8px 16px; color:#5E5854; text-decoration:none;">Clear</a>` : ""}
         </form>
       </div>
 
       ${browserHtml}
 
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:16px;">
-        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Folders Scanned</div>
+        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Folders Scanned</div>
           <div style="font-size:22px; font-weight:700; color:#2B2523;">${results.considered.length}</div>
         </div>
-        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Would Import</div>
-          <div style="font-size:22px; font-weight:700; color:#2e7d32;">${matched.length}</div>
+        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Would Import</div>
+          <div style="font-size:22px; font-weight:700; color:#2F6B3F;">${matched.length}</div>
         </div>
-        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Skipped</div>
-          <div style="font-size:22px; font-weight:700; color:#666;">${notMatched.length}</div>
+        <div style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Skipped</div>
+          <div style="font-size:22px; font-weight:700; color:#5E5854;">${notMatched.length}</div>
         </div>
       </div>
 
-      ${results.errors.length ? `<div style="background:#fee; padding:12px 16px; border-radius:8px; border-left:4px solid #c62828; margin-bottom:16px; font-size:13px;"><strong>Errors:</strong><ul style="margin:6px 0 0 20px;">${results.errors.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
+      ${results.errors.length ? `<div style="background:#FBEDEA; padding:12px 16px; border-radius:8px; border-left:4px solid #9C2B1E; margin-bottom:16px; font-size:13px;"><strong>Errors:</strong><ul style="margin:6px 0 0 20px;">${results.errors.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
 
-      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden; margin-bottom:16px;">
-        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee;">
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden; margin-bottom:16px;">
+        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #E8E3DC;">
           <strong style="color:#2B2523;">${customPath ? "Path Scanned" : "Branches Scanned"}</strong>
         </div>
         <table style="width:100%; border-collapse:collapse;">
           <thead><tr style="background:#FAF8F5;">
-            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Path</th>
-            <th style="padding:8px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase;">Folders</th>
-            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Status</th>
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Path</th>
+            <th style="padding:8px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase;">Folders</th>
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Status</th>
           </tr></thead>
-          <tbody>${branchRows || `<tr><td colspan="3" style="padding:20px; text-align:center; color:#888;">Use the browser above or type a path to scan.</td></tr>`}</tbody>
+          <tbody>${branchRows || `<tr><td colspan="3" style="padding:20px; text-align:center; color:#5E5854;">Use the browser above or type a path to scan.</td></tr>`}</tbody>
         </table>
       </div>
 
-      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden; margin-bottom:16px;">
-        <div style="padding:12px 16px; background:#e8f5e9; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
-          <strong style="color:#2e7d32;">✓ Will Import (${matched.length})</strong>
-          <button onclick="runSync(${customPath ? `'${esc(customPath).replace(/'/g, "\\'")}'` : "null"})" ${matched.length === 0 ? "disabled" : ""} style="background:#2e7d32; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:12px;">Import All →</button>
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden; margin-bottom:16px;">
+        <div style="padding:12px 16px; background:#EEF5EF; border-bottom:1px solid #E8E3DC; display:flex; justify-content:space-between; align-items:center;">
+          <strong style="color:#2F6B3F;">✓ Will Import (${matched.length})</strong>
+          <button onclick="runSync(${customPath ? `'${esc(customPath).replace(/'/g, "\\'")}'` : "null"})" ${matched.length === 0 ? "disabled" : ""} style="background:#2F6B3F; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:12px;">Import All →</button>
         </div>
         <table style="width:100%; border-collapse:collapse;">
           <thead><tr style="background:#FAF8F5;">
-            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Folder Name</th>
-            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Extracted Client</th>
-            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Broker / Referral</th>
-            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Full Path</th>
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Folder Name</th>
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Extracted Client</th>
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Broker / Referral</th>
+            <th style="padding:8px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Full Path</th>
           </tr></thead>
           <tbody>${matchedRows}</tbody>
         </table>
       </div>
 
       ${notMatched.length ? `
-      <details style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
+      <details style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden;">
         <summary style="padding:12px 16px; background:#FAF8F5; cursor:pointer; user-select:none;">
-          <strong style="color:#666;">— Not matched (${notMatched.length}) — click to expand</strong>
+          <strong style="color:#5E5854;">— Not matched (${notMatched.length}) — click to expand</strong>
         </summary>
         <table style="width:100%; border-collapse:collapse;">
           <tbody>${notMatchedRows}</tbody>
         </table>
-        ${notMatched.length > 50 ? `<div style="padding:10px; text-align:center; color:#888; font-size:12px;">Showing first 50 of ${notMatched.length}</div>` : ""}
-        <div style="padding:10px 16px; background:#fff8e1; font-size:12px; color:#666;">
+        ${notMatched.length > 50 ? `<div style="padding:10px; text-align:center; color:#5E5854; font-size:12px;">Showing first 50 of ${notMatched.length}</div>` : ""}
+        <div style="padding:10px 16px; background:#FFF3E6; font-size:12px; color:#5E5854;">
           If you see a folder here that <em>should</em> match, its name doesn't contain "PI" as a whole word. Either rename it (e.g., "Chen Wei" → "Chen Wei PI") or use "Scan here" on a parent folder that does contain PI folders.
         </div>
       </details>` : ""}
@@ -2427,78 +2431,78 @@ app.get("/admin/tasks/:id/edit", async (req, res, next) => {
         <a href="/admin/tasks/${id}" class="back-link">← Back to task</a>
       </div>
 
-      <form onsubmit="saveTaskEdit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:800px;">
+      <form onsubmit="saveTaskEdit(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #E8E3DC; max-width:800px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Task Title (required)</label>
-            <input type="text" name="title" required value="${esc(task.title)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-size:14px;">
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Task Title (required)</label>
+            <input type="text" name="title" required value="${esc(task.title)}" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-size:14px;">
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Category</label>
-            <select name="category" onchange="onCategoryChange(this)" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div><label style="font-size:11px; color:#5E5854;">Category</label>
+            <select name="category" onchange="onCategoryChange(this)" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="">— pick category —</option>${catGroups}
             </select>
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Matter Type</label>
-            <select name="matter_type" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div><label style="font-size:11px; color:#5E5854;">Matter Type</label>
+            <select name="matter_type" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="">—</option>${matterOpts}
             </select>
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Status</label>
-            <select name="status" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">${statusOpts}</select>
+          <div><label style="font-size:11px; color:#5E5854;">Status</label>
+            <select name="status" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">${statusOpts}</select>
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Priority</label>
-            <select name="priority" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">${priorityOpts}</select>
+          <div><label style="font-size:11px; color:#5E5854;">Priority</label>
+            <select name="priority" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">${priorityOpts}</select>
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Due Date</label>
-            <input type="date" name="due_date" value="${esc(dueDate)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div><label style="font-size:11px; color:#5E5854;">Due Date</label>
+            <input type="date" name="due_date" value="${esc(dueDate)}" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
           </div>
-          <div><label style="font-size:11px; color:#888;">Due Time (optional)</label>
-            <input type="time" name="due_time" value="${esc(dueTime)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
-          </div>
-
-          <div><label style="font-size:11px; color:#888;">Remind Days Before</label>
-            <input type="number" name="reminder_days_before" value="${task.reminder_days_before || 3}" min="0" max="30" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
-          </div>
-          <div><label style="font-size:11px; color:#888;">Assigned To</label>
-            <input type="text" name="assigned_to" value="${esc(task.assigned_to)}" placeholder="e.g. JJ, Michael, Chandler" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div><label style="font-size:11px; color:#5E5854;">Due Time (optional)</label>
+            <input type="time" name="due_time" value="${esc(dueTime)}" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Client Name</label>
-            <input type="text" name="client_name" value="${esc(task.client_name)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div><label style="font-size:11px; color:#5E5854;">Remind Days Before</label>
+            <input type="number" name="reminder_days_before" value="${task.reminder_days_before || 3}" min="0" max="30" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
           </div>
-          <div><label style="font-size:11px; color:#888;">A-Number (immigration)</label>
-            <input type="text" name="a_number" value="${esc(task.a_number)}" placeholder="A123456789" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
-          </div>
-
-          <div><label style="font-size:11px; color:#888;">Case Number</label>
-            <input type="text" name="case_number" value="${esc(task.case_number)}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
-          </div>
-          <div><label style="font-size:11px; color:#888;">Court</label>
-            <input type="text" name="court" value="${esc(task.court)}" placeholder="e.g. LA Immigration Court, LASC, 9th Cir." style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div><label style="font-size:11px; color:#5E5854;">Assigned To</label>
+            <input type="text" name="assigned_to" value="${esc(task.assigned_to)}" placeholder="e.g. JJ, Michael, Chandler" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Recurring?</label>
-            <select name="recurrence_pattern" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">${recurrenceOpts}</select>
+          <div><label style="font-size:11px; color:#5E5854;">Client Name</label>
+            <input type="text" name="client_name" value="${esc(task.client_name)}" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
+          </div>
+          <div><label style="font-size:11px; color:#5E5854;">A-Number (immigration)</label>
+            <input type="text" name="a_number" value="${esc(task.a_number)}" placeholder="A123456789" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
           </div>
 
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Description / Notes</label>
-            <textarea name="description" rows="4" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit;">${esc(task.description)}</textarea>
+          <div><label style="font-size:11px; color:#5E5854;">Case Number</label>
+            <input type="text" name="case_number" value="${esc(task.case_number)}" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
+          </div>
+          <div><label style="font-size:11px; color:#5E5854;">Court</label>
+            <input type="text" name="court" value="${esc(task.court)}" placeholder="e.g. LA Immigration Court, LASC, 9th Cir." style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
+          </div>
+
+          <div><label style="font-size:11px; color:#5E5854;">Recurring?</label>
+            <select name="recurrence_pattern" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">${recurrenceOpts}</select>
+          </div>
+
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Description / Notes</label>
+            <textarea name="description" rows="4" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:inherit;">${esc(task.description)}</textarea>
           </div>
 
           ${task.status === "completed" ? `
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Completion Notes</label>
-            <textarea name="completion_notes" rows="2" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit;">${esc(task.completion_notes)}</textarea>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Completion Notes</label>
+            <textarea name="completion_notes" rows="2" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:inherit;">${esc(task.completion_notes)}</textarea>
           </div>` : ""}
         </div>
 
         <div style="margin-top:20px; display:flex; gap:10px; align-items:center;">
           <button type="submit" id="save-btn" style="background:#2B2523; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💾 Save Changes</button>
-          <a href="/admin/tasks/${id}" style="color:#666; text-decoration:none;">Cancel</a>
-          <button type="button" onclick="deleteTaskConfirm()" style="background:#c62828; color:white; padding:10px 20px; border:none; border-radius:6px; cursor:pointer; margin-left:auto;">🗑️ Delete Task</button>
+          <a href="/admin/tasks/${id}" style="color:#5E5854; text-decoration:none;">Cancel</a>
+          <button type="button" onclick="deleteTaskConfirm()" style="background:#9C2B1E; color:white; padding:10px 20px; border:none; border-radius:6px; cursor:pointer; margin-left:auto;">🗑️ Delete Task</button>
         </div>
       </form>
 
@@ -2719,18 +2723,18 @@ app.get("/admin/tasks/:id", async (req, res, next) => {
       if (r.rows.length) submitterInfo = r.rows[0].full_name || r.rows[0].username;
     }
 
-    const priColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" };
-    const statusColor = { pending: "#A34C00", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" }[task.status] || "#666";
+    const priColor = { urgent: "#9C2B1E", high: "#A34C00", normal: "#2B2523", low: "#5E5854" };
+    const statusColor = { pending: "#A34C00", in_progress: "#2B2523", completed: "#2F6B3F", cancelled: "#5E5854" }[task.status] || "#5E5854";
 
     // Documents a consultant attached to this task (task-attachments.js).
     // Links are downloads, never opened in the page.
     const taskFiles = await require("./task-attachments").listForTask(task.id).catch(() => []);
     const filesHtml = taskFiles.length ? `
-      <div style="background:white; border-radius:8px; border:1px solid #eee; padding:20px; margin-bottom:16px;">
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; padding:20px; margin-bottom:16px;">
         <h3 style="margin:0 0 10px; font-size:16px; color:#2B2523;">Documents (${taskFiles.length})</h3>
-        ${taskFiles.map(f => `<div style="display:flex; justify-content:space-between; gap:12px; align-items:center; padding:8px 0; border-top:1px solid #f0f0f0; font-size:13px;">
+        ${taskFiles.map(f => `<div style="display:flex; justify-content:space-between; gap:12px; align-items:center; padding:8px 0; border-top:1px solid #F3EFE9; font-size:13px;">
           <div style="overflow-wrap:anywhere;"><strong>${esc(f.filename)}</strong>
-            <div style="font-size:11px; color:#888;">${Math.max(1, Math.round(f.bytes / 1024))} KB · ${esc(f.uploaded_by_name || "")} · ${new Date(f.created_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}</div></div>
+            <div style="font-size:11px; color:#5E5854;">${Math.max(1, Math.round(f.bytes / 1024))} KB · ${esc(f.uploaded_by_name || "")} · ${new Date(f.created_at).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}</div></div>
           <a href="/api/staff/task-attachments/${f.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px; white-space:nowrap;">Download</a>
         </div>`).join("")}
       </div>` : "";
@@ -2739,25 +2743,25 @@ app.get("/admin/tasks/:id", async (req, res, next) => {
       const isDone = m.status === "completed";
       const isSkipped = m.status === "skipped";
       const isActive = m.status === "in_progress";
-      const bg = isDone ? "#e8f5e9" : isActive ? "#e3f2fd" : isSkipped ? "#f5f5f5" : "white";
-      const strike = isDone || isSkipped ? "text-decoration:line-through; color:#888;" : "";
+      const bg = isDone ? "#EEF5EF" : isActive ? "#F3EFE9" : isSkipped ? "#FAF8F5" : "white";
+      const strike = isDone || isSkipped ? "text-decoration:line-through; color:#5E5854;" : "";
       return `
-        <div style="background:${bg}; padding:12px 14px; border-radius:6px; border:1px solid #eee; margin-bottom:6px; display:flex; align-items:center; gap:12px;">
-          <div style="width:26px; height:26px; border-radius:13px; background:${isDone ? "#2e7d32" : isActive ? "#0061FF" : "#ddd"}; color:white; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0;">${isDone ? "✓" : isSkipped ? "⊘" : m.order_num}</div>
+        <div style="background:${bg}; padding:12px 14px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:6px; display:flex; align-items:center; gap:12px;">
+          <div style="width:26px; height:26px; border-radius:13px; background:${isDone ? "#2F6B3F" : isActive ? "#2B2523" : "#F3EFE9"}; color:white; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0;">${isDone ? "✓" : isSkipped ? "⊘" : m.order_num}</div>
           <div style="flex:1;">
             <div style="font-size:14px; color:#2B2523; ${strike}">${esc(m.title)}</div>
-            ${m.due_date ? `<div style="font-size:11px; color:#666; margin-top:2px;">Due: ${new Date(m.due_date).toLocaleDateString()}</div>` : ""}
-            ${m.completed_at ? `<div style="font-size:11px; color:#2e7d32; margin-top:2px;">Completed ${new Date(m.completed_at).toLocaleDateString()}</div>` : ""}
+            ${m.due_date ? `<div style="font-size:11px; color:#5E5854; margin-top:2px;">Due: ${new Date(m.due_date).toLocaleDateString()}</div>` : ""}
+            ${m.completed_at ? `<div style="font-size:11px; color:#2F6B3F; margin-top:2px;">Completed ${new Date(m.completed_at).toLocaleDateString()}</div>` : ""}
           </div>
-          <select onchange="updateMilestone(${m.id}, this.value)" style="padding:6px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px;">
+          <select onchange="updateMilestone(${m.id}, this.value)" style="padding:6px 8px; border:1px solid #CFC8BE; border-radius:4px; font-size:12px;">
             <option value="pending" ${m.status === "pending" ? "selected" : ""}>Pending</option>
             <option value="in_progress" ${m.status === "in_progress" ? "selected" : ""}>In Progress</option>
             <option value="completed" ${m.status === "completed" ? "selected" : ""}>Completed</option>
             <option value="skipped" ${m.status === "skipped" ? "selected" : ""}>Skipped</option>
           </select>
-          <button onclick="deleteMilestone(${m.id})" style="background:none; border:none; color:#c62828; cursor:pointer; font-size:16px;" title="Delete milestone">×</button>
+          <button onclick="deleteMilestone(${m.id})" style="background:none; border:none; color:#9C2B1E; cursor:pointer; font-size:16px;" title="Delete milestone">×</button>
         </div>`;
-    }).join("") : `<div style="padding:24px; text-align:center; color:#888;">No milestones yet. Add one below, or the task's category may have a template that auto-populated on creation.</div>`;
+    }).join("") : `<div style="padding:24px; text-align:center; color:#5E5854;">No milestones yet. Add one below, or the task's category may have a template that auto-populated on creation.</div>`;
 
     const timelineHtml = activity.length ? activity.map(a => {
       const iconMap = { created: "＋", status_changed: "↻", assigned: "👤", note_added: "💬", completed: "✓", reopened: "↺", edited: "✎" };
@@ -2768,64 +2772,64 @@ app.get("/admin/tasks/:id", async (req, res, next) => {
       else if (a.action === "note_added") text = "Note added";
       else if (a.action === "created") text = "Task created";
       return `
-        <div style="display:flex; gap:10px; padding:10px 0; border-bottom:1px solid #f0f0f0;">
+        <div style="display:flex; gap:10px; padding:10px 0; border-bottom:1px solid #E8E3DC;">
           <div style="width:24px; height:24px; border-radius:12px; background:#F3EFE9; display:flex; align-items:center; justify-content:center; font-size:11px; color:#A34C00; flex-shrink:0;">${icon}</div>
           <div style="flex:1; font-size:12px;">
-            <div style="color:#2B2523;">${text}${a.actor_name ? ` — <span style="color:#666;">by ${esc(a.actor_name)}</span>` : ""}${!a.visible_to_submitter ? ' <span style="background:#666; color:white; padding:0 6px; border-radius:8px; font-size:9px;">INTERNAL</span>' : ""}</div>
-            ${a.note ? `<div style="background:#FAF8F5; padding:6px 8px; border-radius:4px; margin-top:4px; color:#333; white-space:pre-wrap;">${esc(a.note)}</div>` : ""}
-            <div style="color:#999; font-size:10px; margin-top:2px;">${new Date(a.created_at).toLocaleString()}</div>
+            <div style="color:#2B2523;">${text}${a.actor_name ? ` — <span style="color:#5E5854;">by ${esc(a.actor_name)}</span>` : ""}${!a.visible_to_submitter ? ' <span style="background:#5E5854; color:white; padding:0 6px; border-radius:8px; font-size:9px;">INTERNAL</span>' : ""}</div>
+            ${a.note ? `<div style="background:#FAF8F5; padding:6px 8px; border-radius:4px; margin-top:4px; color:#2B2523; white-space:pre-wrap;">${esc(a.note)}</div>` : ""}
+            <div style="color:#5E5854; font-size:10px; margin-top:2px;">${new Date(a.created_at).toLocaleString()}</div>
           </div>
         </div>`;
-    }).join("") : `<div style="color:#888; padding:16px; text-align:center; font-size:13px;">No activity yet.</div>`;
+    }).join("") : `<div style="color:#5E5854; padding:16px; text-align:center; font-size:13px;">No activity yet.</div>`;
 
     const body = `
       <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap;">
         <div style="flex:1;">
-          <a href="/admin/tasks" style="color:#666; text-decoration:none; font-size:13px;">← Task list</a>
+          <a href="/admin/tasks" style="color:#5E5854; text-decoration:none; font-size:13px;">← Task list</a>
           <h1 style="margin-top:8px;">${esc(task.title)}</h1>
           <div style="margin-top:6px;">
             <span style="background:${statusColor}; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600;">${task.status.replace(/_/g, " ").toUpperCase()}</span>
-            <span style="background:${priColor[task.priority] || '#666'}; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:6px;">${(task.priority || "normal").toUpperCase()}</span>
-            ${submitterInfo ? `<span style="background:#7c4dff; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:6px;">🤝 CONSULTANT: ${esc(submitterInfo)}</span>` : ""}
+            <span style="background:${priColor[task.priority] || '#5E5854'}; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:6px;">${(task.priority || "normal").toUpperCase()}</span>
+            ${submitterInfo ? `<span style="background:#5E5854; color:white; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-left:6px;">🤝 CONSULTANT: ${esc(submitterInfo)}</span>` : ""}
           </div>
         </div>
         <div style="display:flex; gap:8px;">
           <a href="/admin/tasks/${id}/edit" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600; font-size:13px;">✎ Edit</a>
-          ${task.status !== "completed" ? `<button onclick="markComplete()" style="background:#2e7d32; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600; font-size:13px;">✓ Mark Complete</button>` : ""}
+          ${task.status !== "completed" ? `<button onclick="markComplete()" style="background:#2F6B3F; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600; font-size:13px;">✓ Mark Complete</button>` : ""}
         </div>
       </div>
 
-      <div style="background:white; border-radius:8px; border:1px solid #eee; padding:20px; margin-bottom:16px;">
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; padding:20px; margin-bottom:16px;">
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px; font-size:13px;">
-          ${task.client_name ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Client</div><div style="font-weight:600;">${esc(task.client_name)}</div></div>` : ""}
-          ${task.matter_type ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Matter</div><div>${esc(task.matter_type.replace(/_/g, " "))}</div></div>` : ""}
-          ${task.category ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Category</div><div>${esc(task.category.replace(/_/g, " "))}</div></div>` : ""}
-          ${task.due_date ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Due</div><div>${new Date(task.due_date).toLocaleDateString()}</div></div>` : ""}
-          ${task.a_number ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">A-Number</div><div>${esc(task.a_number)}</div></div>` : ""}
-          ${task.court ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Court</div><div>${esc(task.court)}</div></div>` : ""}
-          ${task.assigned_to ? `<div><div style="font-size:10px; color:#888; text-transform:uppercase;">Assigned</div><div>${esc(task.assigned_to)}</div></div>` : ""}
+          ${task.client_name ? `<div><div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Client</div><div style="font-weight:600;">${esc(task.client_name)}</div></div>` : ""}
+          ${task.matter_type ? `<div><div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Matter</div><div>${esc(task.matter_type.replace(/_/g, " "))}</div></div>` : ""}
+          ${task.category ? `<div><div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Category</div><div>${esc(task.category.replace(/_/g, " "))}</div></div>` : ""}
+          ${task.due_date ? `<div><div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Due</div><div>${new Date(task.due_date).toLocaleDateString()}</div></div>` : ""}
+          ${task.a_number ? `<div><div style="font-size:10px; color:#5E5854; text-transform:uppercase;">A-Number</div><div>${esc(task.a_number)}</div></div>` : ""}
+          ${task.court ? `<div><div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Court</div><div>${esc(task.court)}</div></div>` : ""}
+          ${task.assigned_to ? `<div><div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Assigned</div><div>${esc(task.assigned_to)}</div></div>` : ""}
         </div>
-        ${task.description ? `<div style="margin-top:14px; padding-top:14px; border-top:1px solid #eee;"><div style="font-size:10px; color:#888; text-transform:uppercase; margin-bottom:6px;">Description</div><div style="white-space:pre-wrap; font-size:13px; color:#333;">${esc(task.description)}</div></div>` : ""}
+        ${task.description ? `<div style="margin-top:14px; padding-top:14px; border-top:1px solid #E8E3DC;"><div style="font-size:10px; color:#5E5854; text-transform:uppercase; margin-bottom:6px;">Description</div><div style="white-space:pre-wrap; font-size:13px; color:#2B2523;">${esc(task.description)}</div></div>` : ""}
       </div>
 
       ${filesHtml}
 
-      <div style="background:white; border-radius:8px; border:1px solid #eee; padding:20px; margin-bottom:16px;">
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; padding:20px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
           <h3 style="margin:0; font-size:16px; color:#2B2523;">✅ Milestones (${mProgress.completed + mProgress.skipped}/${mProgress.total} — ${mProgress.percent}%)</h3>
         </div>
-        <div style="background:#eee; border-radius:4px; height:8px; margin-bottom:14px; overflow:hidden;">
-          <div style="background:linear-gradient(90deg, #A34C00, #2e7d32); height:100%; width:${mProgress.percent}%; transition:width 0.3s;"></div>
+        <div style="background:#F3EFE9; border-radius:4px; height:8px; margin-bottom:14px; overflow:hidden;">
+          <div style="background:linear-gradient(90deg, #A34C00, #2F6B3F); height:100%; width:${mProgress.percent}%; transition:width 0.3s;"></div>
         </div>
         <div id="milestone-list">${mHtml}</div>
-        <div style="margin-top:14px; padding-top:14px; border-top:1px solid #eee; display:flex; gap:8px; flex-wrap:wrap;">
-          <input type="text" id="new-milestone" placeholder="Add custom milestone…" style="flex:1; min-width:200px; padding:8px 10px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
-          <input type="date" id="new-milestone-due" style="padding:8px; border:1px solid #ccc; border-radius:4px;">
+        <div style="margin-top:14px; padding-top:14px; border-top:1px solid #E8E3DC; display:flex; gap:8px; flex-wrap:wrap;">
+          <input type="text" id="new-milestone" placeholder="Add custom milestone…" style="flex:1; min-width:200px; padding:8px 10px; border:1px solid #CFC8BE; border-radius:4px; font-size:13px;">
+          <input type="date" id="new-milestone-due" style="padding:8px; border:1px solid #CFC8BE; border-radius:4px;">
           <button onclick="addMilestone()" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">+ Add</button>
         </div>
       </div>
 
-      <div style="background:white; border-radius:8px; border:1px solid #eee; padding:20px; margin-bottom:16px;">
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; padding:20px; margin-bottom:16px;">
         <h3 style="margin:0 0 10px; font-size:16px; color:#2B2523;">📋 Activity Timeline</h3>
         ${timelineHtml}
       </div>
@@ -2905,50 +2909,50 @@ app.get("/admin/federal", async (req, res) => {
     const rowsHtml = rows.length ? rows.map(m => {
       const days = m.days_until_deadline;
       let dueLabel = m.next_deadline_date ? fmtDate(m.next_deadline_date) : "—";
-      let dueColor = "#666"; let dueBold = false;
+      let dueColor = "#5E5854"; let dueBold = false;
       if (m.next_deadline_date && days != null && !["closed","abandoned","granted","denied","settled"].includes(m.status)) {
-        if (days < 0) { dueColor = "#c62828"; dueLabel = `⚠ ${Math.abs(days)}d OVERDUE`; dueBold = true; }
-        else if (days === 0) { dueColor = "#c62828"; dueLabel = `📌 TODAY`; dueBold = true; }
-        else if (days <= 7) { dueColor = "#e65100"; dueLabel = `${days}d — ${fmtDate(m.next_deadline_date)}`; }
-        else if (days <= 30) { dueColor = "#f57f17"; dueLabel = `${days}d — ${fmtDate(m.next_deadline_date)}`; }
+        if (days < 0) { dueColor = "#9C2B1E"; dueLabel = `⚠ ${Math.abs(days)}d OVERDUE`; dueBold = true; }
+        else if (days === 0) { dueColor = "#9C2B1E"; dueLabel = `📌 TODAY`; dueBold = true; }
+        else if (days <= 7) { dueColor = "#A34C00"; dueLabel = `${days}d — ${fmtDate(m.next_deadline_date)}`; }
+        else if (days <= 30) { dueColor = "#A34C00"; dueLabel = `${days}d — ${fmtDate(m.next_deadline_date)}`; }
         else { dueLabel = `${days}d — ${fmtDate(m.next_deadline_date)}`; }
       }
       const typeLabel = fm.TYPE_LABELS[m.matter_type] || m.matter_type;
       const typeGroup = fm.TYPE_GROUPS[m.matter_type];
       const isTM = typeGroup === "trademarks";
-      const statusColor = fm.STATUS_COLORS[m.status] || "#666";
+      const statusColor = fm.STATUS_COLORS[m.status] || "#5E5854";
 
       return `
         <tr>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top;">
             <div style="display:flex; align-items:center; gap:6px;">
-              <span style="background:${isTM ? "#7c4dff" : "#0061FF"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${isTM ? "™ TM" : "⚖ FED"}</span>
+              <span style="background:${isTM ? "#5E5854" : "#2B2523"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${isTM ? "™ TM" : "⚖ FED"}</span>
               <a href="/admin/federal/${m.id}" style="color:#2B2523; font-weight:600; text-decoration:none;">${esc(m.client_name)}</a>
             </div>
-            <div style="font-size:11px; color:#666; margin-top:3px;">${esc(typeLabel)}</div>
-            ${m.tm_mark ? `<div style="font-size:11px; color:#7c4dff; margin-top:2px;">✦ ${esc(m.tm_mark)}</div>` : ""}
-            ${m.opposing_party ? `<div style="font-size:11px; color:#666; margin-top:2px;">v. ${esc(m.opposing_party)}</div>` : ""}
+            <div style="font-size:11px; color:#5E5854; margin-top:3px;">${esc(typeLabel)}</div>
+            ${m.tm_mark ? `<div style="font-size:11px; color:#5E5854; margin-top:2px;">✦ ${esc(m.tm_mark)}</div>` : ""}
+            ${m.opposing_party ? `<div style="font-size:11px; color:#5E5854; margin-top:2px;">v. ${esc(m.opposing_party)}</div>` : ""}
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top; font-size:12px;">
             ${m.matter_number ? esc(m.matter_number) : "—"}
-            ${m.agency ? `<div style="font-size:11px; color:#888;">${esc(m.agency)}</div>` : ""}
-            ${m.a_number ? `<div style="font-size:11px; color:#888;">${esc(m.a_number)}</div>` : ""}
+            ${m.agency ? `<div style="font-size:11px; color:#5E5854;">${esc(m.agency)}</div>` : ""}
+            ${m.a_number ? `<div style="font-size:11px; color:#5E5854;">${esc(m.a_number)}</div>` : ""}
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px; color:${dueColor}; font-weight:${dueBold ? "700" : "500"};">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top; font-size:12px; color:${dueColor}; font-weight:${dueBold ? "700" : "500"};">
             ${dueLabel}
-            ${m.next_deadline_desc ? `<div style="font-size:11px; color:#666; font-weight:400; margin-top:2px;">${esc(m.next_deadline_desc)}</div>` : ""}
+            ${m.next_deadline_desc ? `<div style="font-size:11px; color:#5E5854; font-weight:400; margin-top:2px;">${esc(m.next_deadline_desc)}</div>` : ""}
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top;">
             <span style="background:${statusColor}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${m.status.replace(/_/g, " ").toUpperCase()}</span>
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top; font-size:12px;">
             ${m.assigned_attorney ? esc(m.assigned_attorney) : "—"}
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top;">
             <a href="/admin/federal/${m.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
           </td>
         </tr>`;
-    }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#888;">No matters yet. Click <a href="/admin/federal/new" style="color:#0061FF;">+ New Matter</a> to add one.</td></tr>`;
+    }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#5E5854;">No matters yet. Click <a href="/admin/federal/new" style="color:#A34C00;">+ New Matter</a> to add one.</td></tr>`;
 
     // Type filter dropdown grouped by category
     const typeOpts = Object.entries(fm.MATTER_TYPES).map(([grp, types]) => {
@@ -2960,32 +2964,32 @@ app.get("/admin/federal", async (req, res) => {
       <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
         <div>
           <h1>Federal Matters & Trademarks</h1>
-          <div style="font-size:12px; color:#666; margin-top:4px;">Unified tracking for USPTO/TTAB filings and federal court cases (District Court, Circuit Appeals, Habeas, Mandamus).</div>
+          <div style="font-size:12px; color:#5E5854; margin-top:4px;">Unified tracking for USPTO/TTAB filings and federal court cases (District Court, Circuit Appeals, Habeas, Mandamus).</div>
         </div>
         <a href="/admin/federal/new" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Matter</a>
       </div>
 
       <!-- Stats tiles -->
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">
-        <a href="/admin/federal" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Active</div>
+        <a href="/admin/federal" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Active</div>
           <div style="font-size:22px; font-weight:700; color:#2B2523;">${stats.active || 0}</div>
-          <div style="font-size:10px; color:#666;">${stats.total || 0} total</div>
+          <div style="font-size:10px; color:#5E5854;">${stats.total || 0} total</div>
         </a>
-        <a href="/admin/federal?group=trademarks" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#7c4dff; text-transform:uppercase;">™ Trademarks</div>
-          <div style="font-size:22px; font-weight:700; color:#7c4dff;">${stats.tm_count || 0}</div>
+        <a href="/admin/federal?group=trademarks" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">™ Trademarks</div>
+          <div style="font-size:22px; font-weight:700; color:#5E5854;">${stats.tm_count || 0}</div>
         </a>
-        <a href="/admin/federal?group=federal_court" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#0061FF; text-transform:uppercase;">⚖ Federal Court</div>
-          <div style="font-size:22px; font-weight:700; color:#0061FF;">${stats.federal_count || 0}</div>
+        <a href="/admin/federal?group=federal_court" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#A34C00; text-transform:uppercase;">⚖ Federal Court</div>
+          <div style="font-size:22px; font-weight:700; color:#A34C00;">${stats.federal_count || 0}</div>
         </a>
-        <a href="/admin/federal?overdue=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Overdue</div>
-          <div style="font-size:22px; font-weight:700; color:${stats.overdue > 0 ? "#c62828" : "#2B2523"};">${stats.overdue || 0}</div>
+        <a href="/admin/federal?overdue=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Overdue</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.overdue > 0 ? "#9C2B1E" : "#2B2523"};">${stats.overdue || 0}</div>
         </a>
-        <a href="/admin/federal?deadline_within_days=30" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Due in 30d</div>
+        <a href="/admin/federal?deadline_within_days=30" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Due in 30d</div>
           <div style="font-size:22px; font-weight:700; color:#2B2523;">${stats.due_this_month || 0}</div>
         </a>
       </div>
@@ -2993,43 +2997,43 @@ app.get("/admin/federal", async (req, res) => {
       <!-- Group tabs -->
       <div style="display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;">
         <a href="/admin/federal" style="background:${!q.group ? "#2B2523" : "#F3EFE9"}; color:${!q.group ? "white" : "#2B2523"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:500;">All Matters</a>
-        <a href="/admin/federal?group=trademarks" style="background:${q.group === "trademarks" ? "#7c4dff" : "#F3EFE9"}; color:${q.group === "trademarks" ? "white" : "#7c4dff"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">™ Trademarks Only</a>
-        <a href="/admin/federal?group=federal_court" style="background:${q.group === "federal_court" ? "#0061FF" : "#F3EFE9"}; color:${q.group === "federal_court" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">⚖ Federal Court</a>
-        <a href="/admin/federal?group=federal_appeal" style="background:${q.group === "federal_appeal" ? "#0061FF" : "#F3EFE9"}; color:${q.group === "federal_appeal" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Appeals</a>
-        <a href="/admin/federal?group=federal_writ" style="background:${q.group === "federal_writ" ? "#0061FF" : "#F3EFE9"}; color:${q.group === "federal_writ" ? "white" : "#0061FF"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Writs (Habeas/Mandamus)</a>
+        <a href="/admin/federal?group=trademarks" style="background:${q.group === "trademarks" ? "#5E5854" : "#F3EFE9"}; color:${q.group === "trademarks" ? "white" : "#5E5854"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">™ Trademarks Only</a>
+        <a href="/admin/federal?group=federal_court" style="background:${q.group === "federal_court" ? "#2B2523" : "#F3EFE9"}; color:${q.group === "federal_court" ? "white" : "#A34C00"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">⚖ Federal Court</a>
+        <a href="/admin/federal?group=federal_appeal" style="background:${q.group === "federal_appeal" ? "#2B2523" : "#F3EFE9"}; color:${q.group === "federal_appeal" ? "white" : "#A34C00"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Appeals</a>
+        <a href="/admin/federal?group=federal_writ" style="background:${q.group === "federal_writ" ? "#2B2523" : "#F3EFE9"}; color:${q.group === "federal_writ" ? "white" : "#A34C00"}; padding:8px 16px; border-radius:6px; text-decoration:none; font-size:13px; font-weight:600;">Writs (Habeas/Mandamus)</a>
       </div>
 
       <!-- Filters -->
-      <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+      <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
         ${q.group ? `<input type="hidden" name="group" value="${esc(q.group)}">` : ""}
-        <div><label style="font-size:11px; color:#888; display:block;">Type</label>
-          <select name="matter_type" style="padding:6px; border:1px solid #ccc; border-radius:4px; min-width:220px;">
+        <div><label style="font-size:11px; color:#5E5854; display:block;">Type</label>
+          <select name="matter_type" style="padding:6px; border:1px solid #CFC8BE; border-radius:4px; min-width:220px;">
             <option value="">All types</option>${typeOpts}
           </select>
         </div>
-        <div><label style="font-size:11px; color:#888; display:block;">Status</label>
-          <select name="status" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+        <div><label style="font-size:11px; color:#5E5854; display:block;">Status</label>
+          <select name="status" style="padding:6px; border:1px solid #CFC8BE; border-radius:4px;">
             <option value="">All</option>
             ${fm.STATUSES.map(s => `<option value="${s.key}" ${q.status === s.key ? "selected" : ""}>${s.label}</option>`).join("")}
           </select>
         </div>
-        <div><label style="font-size:11px; color:#888; display:block;">
+        <div><label style="font-size:11px; color:#5E5854; display:block;">
           <input type="checkbox" name="overdue" value="1" ${q.overdue ? "checked" : ""}> Overdue only
         </label></div>
         <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
-        <a href="/admin/federal${q.group ? "?group=" + q.group : ""}" style="padding:8px 16px; color:#666; text-decoration:none;">Clear</a>
+        <a href="/admin/federal${q.group ? "?group=" + q.group : ""}" style="padding:8px 16px; color:#5E5854; text-decoration:none;">Clear</a>
       </form>
 
-      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee; font-size:12px; color:#666;">${rows.length} matter${rows.length === 1 ? "" : "s"}</div>
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden;">
+        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #E8E3DC; font-size:12px; color:#5E5854;">${rows.length} matter${rows.length === 1 ? "" : "s"}</div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
           <thead><tr style="background:#FAF8F5;">
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Matter</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Serial / Case #</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Next Deadline</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Status</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Attorney</th>
-            <th style="padding:10px 12px; border-bottom:1px solid #eee;"></th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Matter</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Serial / Case #</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Next Deadline</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Status</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Attorney</th>
+            <th style="padding:10px 12px; border-bottom:1px solid #E8E3DC;"></th>
           </tr></thead>
           <tbody>${rowsHtml}</tbody>
         </table>
@@ -3056,59 +3060,59 @@ app.get("/admin/federal/new", async (req, res) => {
         <a href="/admin/federal" class="back-link">← All matters</a>
       </div>
 
-      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:800px;">
+      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #E8E3DC; max-width:800px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
           <div style="grid-column:1/-1;">
-            <label style="font-size:11px; color:#888;">Matter Type (required)</label>
-            <select name="matter_type" required onchange="onTypeChange(this)" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+            <label style="font-size:11px; color:#5E5854;">Matter Type (required)</label>
+            <select name="matter_type" required onchange="onTypeChange(this)" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="">— pick type —</option>${typeGroups}
             </select>
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Client Name (required)</label><input type="text" name="client_name" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Matter Number (serial/case #)</label><input type="text" name="matter_number" placeholder="e.g. 97/123456 or 2:26-cv-00123" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Client Name (required)</label><input type="text" name="client_name" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Matter Number (serial/case #)</label><input type="text" name="matter_number" placeholder="e.g. 97/123456 or 2:26-cv-00123" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
 
-          <div><label style="font-size:11px; color:#888;">Agency / Court</label><input type="text" name="agency" placeholder="USPTO, TTAB, Central Dist CA, 9th Cir" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">A-Number (if immigration-related)</label><input type="text" name="a_number" placeholder="A123456789" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Agency / Court</label><input type="text" name="agency" placeholder="USPTO, TTAB, Central Dist CA, 9th Cir" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">A-Number (if immigration-related)</label><input type="text" name="a_number" placeholder="A123456789" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
 
           <!-- Trademark-specific -->
-          <div class="tm-fields" style="grid-column:1/-1; padding:12px; background:#f5f0ff; border-radius:6px; display:none;">
-            <div style="font-size:11px; color:#7c4dff; font-weight:600; margin-bottom:8px;">✦ TRADEMARK FIELDS</div>
+          <div class="tm-fields" style="grid-column:1/-1; padding:12px; background:#F3EFE9; border-radius:6px; display:none;">
+            <div style="font-size:11px; color:#5E5854; font-weight:600; margin-bottom:8px;">✦ TRADEMARK FIELDS</div>
             <div style="display:grid; grid-template-columns:2fr 1fr; gap:12px;">
-              <div><label style="font-size:11px; color:#888;">Trademark (word mark or brief description)</label><input type="text" name="tm_mark" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-              <div><label style="font-size:11px; color:#888;">International Class(es)</label><input type="text" name="tm_class" placeholder="e.g. 9, 42" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-              <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Owner of Mark (if differs from client)</label><input type="text" name="tm_owner" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+              <div><label style="font-size:11px; color:#5E5854;">Trademark (word mark or brief description)</label><input type="text" name="tm_mark" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+              <div><label style="font-size:11px; color:#5E5854;">International Class(es)</label><input type="text" name="tm_class" placeholder="e.g. 9, 42" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+              <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Owner of Mark (if differs from client)</label><input type="text" name="tm_owner" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
             </div>
           </div>
 
           <!-- Federal court-specific -->
-          <div class="fed-fields" style="grid-column:1/-1; padding:12px; background:#f0f5ff; border-radius:6px; display:none;">
-            <div style="font-size:11px; color:#0061FF; font-weight:600; margin-bottom:8px;">⚖ FEDERAL COURT FIELDS</div>
+          <div class="fed-fields" style="grid-column:1/-1; padding:12px; background:#F3EFE9; border-radius:6px; display:none;">
+            <div style="font-size:11px; color:#A34C00; font-weight:600; margin-bottom:8px;">⚖ FEDERAL COURT FIELDS</div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-              <div><label style="font-size:11px; color:#888;">Opposing Party</label><input type="text" name="opposing_party" placeholder="e.g. USCIS, DHS, Merck & Co." style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-              <div><label style="font-size:11px; color:#888;">Cause of Action / Basis</label><input type="text" name="cause_of_action" placeholder="e.g. 5 USC §555(b), 28 USC §1361" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+              <div><label style="font-size:11px; color:#5E5854;">Opposing Party</label><input type="text" name="opposing_party" placeholder="e.g. USCIS, DHS, Merck & Co." style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+              <div><label style="font-size:11px; color:#5E5854;">Cause of Action / Basis</label><input type="text" name="cause_of_action" placeholder="e.g. 5 USC §555(b), 28 USC §1361" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
             </div>
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Filing Date</label><input type="date" name="filing_date" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Status</label>
-            <select name="status" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div><label style="font-size:11px; color:#5E5854;">Filing Date</label><input type="date" name="filing_date" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Status</label>
+            <select name="status" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               ${fm.STATUSES.map(s => `<option value="${s.key}">${s.label}</option>`).join("")}
             </select>
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Next Deadline Date</label><input type="date" name="next_deadline_date" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Next Deadline Description</label><input type="text" name="next_deadline_desc" placeholder="e.g. Office action response, opposition brief" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Next Deadline Date</label><input type="date" name="next_deadline_date" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Next Deadline Description</label><input type="text" name="next_deadline_desc" placeholder="e.g. Office action response, opposition brief" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
 
-          <div><label style="font-size:11px; color:#888;">Assigned Attorney</label><input type="text" name="assigned_attorney" placeholder="e.g. JJ, Chandler" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Referral Source (broker)</label>${await require("./broker-accounts").selectHTML({ name: "referral_source", style: "width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;" })}</div>
+          <div><label style="font-size:11px; color:#5E5854;">Assigned Attorney</label><input type="text" name="assigned_attorney" placeholder="e.g. JJ, Chandler" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Referral Source (broker)</label>${await require("./broker-accounts").selectHTML({ name: "referral_source", style: "width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;" })}</div>
 
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Notes</label><textarea name="notes" rows="3" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit;"></textarea></div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Notes</label><textarea name="notes" rows="3" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:inherit;"></textarea></div>
         </div>
 
         <div style="margin-top:20px;">
           <button type="submit" style="background:#2B2523; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create Matter</button>
-          <a href="/admin/federal" style="margin-left:10px; color:#666; text-decoration:none;">Cancel</a>
+          <a href="/admin/federal" style="margin-left:10px; color:#5E5854; text-decoration:none;">Cancel</a>
         </div>
       </form>
 
@@ -3158,22 +3162,22 @@ app.get("/admin/federal/:id", async (req, res) => {
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const typeLabel = fm.TYPE_LABELS[m.matter_type] || m.matter_type;
     const isTM = fm.TYPE_GROUPS[m.matter_type] === "trademarks";
-    const statusColor = fm.STATUS_COLORS[m.status] || "#666";
+    const statusColor = fm.STATUS_COLORS[m.status] || "#5E5854";
 
     const body = `
       <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
         <div>
           <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-            <span style="background:${isTM ? "#7c4dff" : "#0061FF"}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600;">${isTM ? "™ TRADEMARK" : "⚖ FEDERAL"}</span>
+            <span style="background:${isTM ? "#5E5854" : "#2B2523"}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600;">${isTM ? "™ TRADEMARK" : "⚖ FEDERAL"}</span>
             <span style="background:${statusColor}; color:white; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600;">${m.status.replace(/_/g, " ").toUpperCase()}</span>
           </div>
           <h1>${esc(m.client_name)}</h1>
-          <div style="font-size:14px; color:#666; margin-top:4px;">${esc(typeLabel)}${m.matter_number ? " · " + esc(m.matter_number) : ""}</div>
+          <div style="font-size:14px; color:#5E5854; margin-top:4px;">${esc(typeLabel)}${m.matter_number ? " · " + esc(m.matter_number) : ""}</div>
         </div>
         <a href="/admin/federal" class="back-link">← All matters</a>
       </div>
 
-      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; font-size:13px;">
           ${m.agency ? `<div><strong>Agency/Court:</strong> ${esc(m.agency)}</div>` : ""}
           ${m.a_number ? `<div><strong>A-Number:</strong> ${esc(m.a_number)}</div>` : ""}
@@ -3189,16 +3193,16 @@ app.get("/admin/federal/:id", async (req, res) => {
       </div>
 
       ${m.next_deadline_date ? `
-      <div style="background:${new Date(m.next_deadline_date) < new Date() ? "#fee" : "#fff8e1"}; padding:16px 20px; border-radius:8px; border-left:4px solid ${new Date(m.next_deadline_date) < new Date() ? "#c62828" : "#f57f17"}; margin-bottom:16px;">
-        <div style="font-size:11px; text-transform:uppercase; color:#666;">Next Deadline</div>
+      <div style="background:${new Date(m.next_deadline_date) < new Date() ? "#FBEDEA" : "#FFF3E6"}; padding:16px 20px; border-radius:8px; border-left:4px solid ${new Date(m.next_deadline_date) < new Date() ? "#9C2B1E" : "#FF7B00"}; margin-bottom:16px;">
+        <div style="font-size:11px; text-transform:uppercase; color:#5E5854;">Next Deadline</div>
         <div style="font-size:20px; font-weight:700; color:#2B2523; margin-top:4px;">${new Date(m.next_deadline_date).toLocaleDateString()}${m.next_deadline_desc ? " — " + esc(m.next_deadline_desc) : ""}</div>
       </div>` : ""}
 
-      ${m.notes ? `<div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; white-space:pre-wrap; font-size:13px; line-height:1.6;">${esc(m.notes)}</div>` : ""}
+      ${m.notes ? `<div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px; white-space:pre-wrap; font-size:13px; line-height:1.6;">${esc(m.notes)}</div>` : ""}
 
       <div style="display:flex; gap:8px;">
         <a href="/admin/tasks/new?client_name=${encodeURIComponent(m.client_name)}&matter_type=${encodeURIComponent(fm.TYPE_GROUPS[m.matter_type] === 'trademarks' ? 'tm' : 'immigration')}${m.a_number ? '&a_number=' + encodeURIComponent(m.a_number) : ''}${m.matter_number ? '&case_number=' + encodeURIComponent(m.matter_number) : ''}${m.agency ? '&court=' + encodeURIComponent(m.agency) : ''}" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ Add Task</a>
-        <button onclick="deleteMatter()" style="background:#c62828; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🗑️ Delete</button>
+        <button onclick="deleteMatter()" style="background:#9C2B1E; color:white; padding:10px 18px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">🗑️ Delete</button>
       </div>
 
       <script>
@@ -3248,50 +3252,50 @@ app.get("/admin/tasks", async (req, res) => {
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const fmtDate = d => d ? new Date(d).toLocaleDateString() : "—";
 
-    const priorityColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" };
-    const statusColor = { pending: "#A34C00", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" };
+    const priorityColor = { urgent: "#9C2B1E", high: "#A34C00", normal: "#2B2523", low: "#5E5854" };
+    const statusColor = { pending: "#A34C00", in_progress: "#2B2523", completed: "#2F6B3F", cancelled: "#5E5854" };
 
     const rowsHtml = rows.length ? rows.map(t => {
       const days = t.days_until_due;
       let dueLabel = t.due_date ? fmtDate(t.due_date) : "—";
-      let dueColor = "#666";
+      let dueColor = "#5E5854";
       let dueBold = false;
       if (t.due_date && days != null && t.status !== "completed" && t.status !== "cancelled") {
-        if (days < 0) { dueColor = "#c62828"; dueLabel = `⚠ ${Math.abs(days)}d OVERDUE — ${fmtDate(t.due_date)}`; dueBold = true; }
-        else if (days === 0) { dueColor = "#c62828"; dueLabel = `📌 TODAY — ${fmtDate(t.due_date)}`; dueBold = true; }
-        else if (days <= 3) { dueColor = "#e65100"; dueLabel = `${days}d — ${fmtDate(t.due_date)}`; }
-        else if (days <= 7) { dueColor = "#f57f17"; dueLabel = `${days}d — ${fmtDate(t.due_date)}`; }
+        if (days < 0) { dueColor = "#9C2B1E"; dueLabel = `⚠ ${Math.abs(days)}d OVERDUE — ${fmtDate(t.due_date)}`; dueBold = true; }
+        else if (days === 0) { dueColor = "#9C2B1E"; dueLabel = `📌 TODAY — ${fmtDate(t.due_date)}`; dueBold = true; }
+        else if (days <= 3) { dueColor = "#A34C00"; dueLabel = `${days}d — ${fmtDate(t.due_date)}`; }
+        else if (days <= 7) { dueColor = "#A34C00"; dueLabel = `${days}d — ${fmtDate(t.due_date)}`; }
         else { dueLabel = `${days}d — ${fmtDate(t.due_date)}`; }
       }
       const categoryLabel = t.category ? (tasks.CATEGORY_LABELS[t.category] || t.category) : "";
 
       return `
         <tr>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top;">
             <input type="checkbox" ${t.status === "completed" ? "checked disabled" : ""} onclick="completeTask(${t.id})" style="width:18px; height:18px; cursor:pointer; margin-top:2px;">
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top;">
             <div style="font-weight:600; ${t.status === "completed" ? "text-decoration:line-through; opacity:0.6;" : ""}"><a href="/admin/tasks/${t.id}" style="color:#2B2523; text-decoration:none;">${esc(t.title)}</a></div>
-            ${categoryLabel ? `<div style="font-size:11px; color:#888; margin-top:2px;">${esc(categoryLabel)}${t.matter_type ? " · " + esc(t.matter_type) : ""}</div>` : (t.matter_type ? `<div style="font-size:11px; color:#888; margin-top:2px;">${esc(t.matter_type)}</div>` : "")}
-            ${t.description ? `<div style="font-size:12px; color:#555; margin-top:4px; white-space:pre-wrap;">${esc(t.description).substring(0, 200)}${t.description.length > 200 ? "…" : ""}</div>` : ""}
+            ${categoryLabel ? `<div style="font-size:11px; color:#5E5854; margin-top:2px;">${esc(categoryLabel)}${t.matter_type ? " · " + esc(t.matter_type) : ""}</div>` : (t.matter_type ? `<div style="font-size:11px; color:#5E5854; margin-top:2px;">${esc(t.matter_type)}</div>` : "")}
+            ${t.description ? `<div style="font-size:12px; color:#5E5854; margin-top:4px; white-space:pre-wrap;">${esc(t.description).substring(0, 200)}${t.description.length > 200 ? "…" : ""}</div>` : ""}
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top; font-size:12px;">
             ${t.client_name ? esc(t.client_name) : "—"}
-            ${t.a_number ? `<div style="font-size:11px; color:#888;">${esc(t.a_number)}</div>` : ""}
-            ${t.case_number ? `<div style="font-size:11px; color:#888;">${esc(t.case_number)}</div>` : ""}
+            ${t.a_number ? `<div style="font-size:11px; color:#5E5854;">${esc(t.a_number)}</div>` : ""}
+            ${t.case_number ? `<div style="font-size:11px; color:#5E5854;">${esc(t.case_number)}</div>` : ""}
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px; color:${dueColor}; font-weight:${dueBold ? "700" : "500"};">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top; font-size:12px; color:${dueColor}; font-weight:${dueBold ? "700" : "500"};">
             ${dueLabel}
             ${t.due_time ? `<div style="font-size:11px;">${esc(t.due_time)}</div>` : ""}
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
-            <span style="background:${priorityColor[t.priority] || "#666"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${t.priority.toUpperCase()}</span>
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top;">
+            <span style="background:${priorityColor[t.priority] || "#5E5854"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${t.priority.toUpperCase()}</span>
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top;">
             <a href="/admin/tasks/${t.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
           </td>
         </tr>`;
-    }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#888;">No tasks match. Click <a href="/admin/tasks/new" style="color:#0061FF;">+ New Task</a> to create one.</td></tr>`;
+    }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#5E5854;">No tasks match. Click <a href="/admin/tasks/new" style="color:#A34C00;">+ New Task</a> to create one.</td></tr>`;
 
     // Category options for filter
     const matterOpts = ["immigration", "pi", "business", "ll_tenant", "estate", "tm", "real_estate", "admin"]
@@ -3301,50 +3305,50 @@ app.get("/admin/tasks", async (req, res) => {
       <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
         <div>
           <h1>Task List</h1>
-          <div style="font-size:12px; color:#666; margin-top:4px;">Filing deadlines, motions, habeas corpus, writs, appeals, and more.</div>
+          <div style="font-size:12px; color:#5E5854; margin-top:4px;">Filing deadlines, motions, habeas corpus, writs, appeals, and more.</div>
         </div>
         <a href="/admin/tasks/new" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ New Task</a>
       </div>
 
-      ${awaitingApproval ? `<a href="/admin/consultant-tasks" style="display:block; background:#FFF6EC; border:1px solid #F0C89A; border-left:4px solid #FF7B00; border-radius:6px; padding:12px 16px; margin-bottom:14px; color:#2B2523; text-decoration:none; font-size:14px;"><strong>${awaitingApproval} task${awaitingApproval === 1 ? "" : "s"} from consultants waiting for approval</strong> — not in this list until an attorney or manager approves. Review &rarr;</a>` : ""}
+      ${awaitingApproval ? `<a href="/admin/consultant-tasks" style="display:block; background:#FAF8F5; border:1px solid #E8E3DC; border-left:4px solid #FF7B00; border-radius:6px; padding:12px 16px; margin-bottom:14px; color:#2B2523; text-decoration:none; font-size:14px;"><strong>${awaitingApproval} task${awaitingApproval === 1 ? "" : "s"} from consultants waiting for approval</strong> — not in this list until an attorney or manager approves. Review &rarr;</a>` : ""}
 
       <!-- Stats tiles -->
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:16px;">
-        <a href="/admin/tasks" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">All Open</div>
+        <a href="/admin/tasks" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">All Open</div>
           <div style="font-size:22px; font-weight:700; color:#2B2523;">${stats.open_count || 0}</div>
         </a>
-        <a href="/admin/tasks?overdue=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Overdue</div>
-          <div style="font-size:22px; font-weight:700; color:${stats.overdue_count > 0 ? "#c62828" : "#2B2523"};">${stats.overdue_count || 0}</div>
+        <a href="/admin/tasks?overdue=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Overdue</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.overdue_count > 0 ? "#9C2B1E" : "#2B2523"};">${stats.overdue_count || 0}</div>
         </a>
-        <a href="/admin/tasks?due_within_days=0" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Due Today</div>
-          <div style="font-size:22px; font-weight:700; color:${stats.due_today > 0 ? "#e65100" : "#2B2523"};">${stats.due_today || 0}</div>
+        <a href="/admin/tasks?due_within_days=0" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Due Today</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.due_today > 0 ? "#A34C00" : "#2B2523"};">${stats.due_today || 0}</div>
         </a>
-        <a href="/admin/tasks?due_within_days=7" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">This Week</div>
+        <a href="/admin/tasks?due_within_days=7" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">This Week</div>
           <div style="font-size:22px; font-weight:700; color:#2B2523;">${stats.due_this_week || 0}</div>
         </a>
-        <a href="/admin/tasks?priority=urgent" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Urgent</div>
-          <div style="font-size:22px; font-weight:700; color:${stats.urgent_count > 0 ? "#c62828" : "#2B2523"};">${stats.urgent_count || 0}</div>
+        <a href="/admin/tasks?priority=urgent" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Urgent</div>
+          <div style="font-size:22px; font-weight:700; color:${stats.urgent_count > 0 ? "#9C2B1E" : "#2B2523"};">${stats.urgent_count || 0}</div>
         </a>
-        <a href="/admin/tasks?completed=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; text-decoration:none;">
-          <div style="font-size:10px; color:#888; text-transform:uppercase;">Done This Week</div>
-          <div style="font-size:22px; font-weight:700; color:#2e7d32;">${stats.completed_this_week || 0}</div>
+        <a href="/admin/tasks?completed=1" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; text-decoration:none;">
+          <div style="font-size:10px; color:#5E5854; text-transform:uppercase;">Done This Week</div>
+          <div style="font-size:22px; font-weight:700; color:#2F6B3F;">${stats.completed_this_week || 0}</div>
         </a>
       </div>
 
       <!-- Filters -->
-      <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
-        <div><label style="font-size:11px; color:#888; display:block;">Matter</label>
-          <select name="matter_type" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+      <form method="GET" style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+        <div><label style="font-size:11px; color:#5E5854; display:block;">Matter</label>
+          <select name="matter_type" style="padding:6px; border:1px solid #CFC8BE; border-radius:4px;">
             <option value="">All matters</option>${matterOpts}
           </select>
         </div>
-        <div><label style="font-size:11px; color:#888; display:block;">Priority</label>
-          <select name="priority" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+        <div><label style="font-size:11px; color:#5E5854; display:block;">Priority</label>
+          <select name="priority" style="padding:6px; border:1px solid #CFC8BE; border-radius:4px;">
             <option value="">All</option>
             <option value="urgent" ${q.priority==="urgent"?"selected":""}>Urgent</option>
             <option value="high" ${q.priority==="high"?"selected":""}>High</option>
@@ -3352,30 +3356,30 @@ app.get("/admin/tasks", async (req, res) => {
             <option value="low" ${q.priority==="low"?"selected":""}>Low</option>
           </select>
         </div>
-        <div><label style="font-size:11px; color:#888; display:block;">Status</label>
-          <select name="status" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+        <div><label style="font-size:11px; color:#5E5854; display:block;">Status</label>
+          <select name="status" style="padding:6px; border:1px solid #CFC8BE; border-radius:4px;">
             <option value="">Open</option>
             <option value="pending" ${q.status==="pending"?"selected":""}>Pending</option>
             <option value="in_progress" ${q.status==="in_progress"?"selected":""}>In Progress</option>
           </select>
         </div>
-        <div><label style="font-size:11px; color:#888; display:block;">
+        <div><label style="font-size:11px; color:#5E5854; display:block;">
           <input type="checkbox" name="overdue" value="1" ${q.overdue ? "checked" : ""}> Overdue only
         </label></div>
         <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
-        <a href="/admin/tasks" style="padding:8px 16px; color:#666; text-decoration:none;">Clear</a>
+        <a href="/admin/tasks" style="padding:8px 16px; color:#5E5854; text-decoration:none;">Clear</a>
       </form>
 
-      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee; font-size:12px; color:#666;">${rows.length} task${rows.length === 1 ? "" : "s"}</div>
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden;">
+        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #E8E3DC; font-size:12px; color:#5E5854;">${rows.length} task${rows.length === 1 ? "" : "s"}</div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
           <thead><tr style="background:#FAF8F5;">
-            <th style="padding:10px 12px; width:40px; border-bottom:1px solid #eee;"></th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Task</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Client</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Due</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Priority</th>
-            <th style="padding:10px 12px; border-bottom:1px solid #eee;"></th>
+            <th style="padding:10px 12px; width:40px; border-bottom:1px solid #E8E3DC;"></th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Task</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Client</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Due</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Priority</th>
+            <th style="padding:10px 12px; border-bottom:1px solid #E8E3DC;"></th>
           </tr></thead>
           <tbody>${rowsHtml}</tbody>
         </table>
@@ -3423,52 +3427,52 @@ app.get("/admin/tasks/new", async (req, res) => {
       </div>
 
       <!-- ── AI Assist: upload doc or type a brief summary ─────────────── -->
-      <div style="background:linear-gradient(135deg, #fff8e1, #fef3c7); padding:20px 24px; border-radius:8px; border-left:4px solid #FF7B00; margin-bottom:16px;">
+      <div style="background:linear-gradient(135deg, #FFF3E6, #FFF3E6); padding:20px 24px; border-radius:8px; border-left:4px solid #FF7B00; margin-bottom:16px;">
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
           <span style="font-size:20px;">✨</span>
           <strong style="color:#2B2523; font-size:15px;">AI Quick Create</strong>
-          <span style="font-size:11px; color:#666; margin-left:auto;">Upload a doc OR type a brief summary — Claude fills in the rest</span>
+          <span style="font-size:11px; color:#5E5854; margin-left:auto;">Upload a doc OR type a brief summary — Claude fills in the rest</span>
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
           <!-- Text summary mode -->
-          <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
-            <div style="font-size:12px; color:#666; margin-bottom:6px;"><strong>📝 Type a brief summary</strong></div>
-            <textarea id="ai-text" rows="4" placeholder="Examples:&#10;• File I-589 for Chen Wei by Friday, detained in Adelanto&#10;• Response to RFE from USCIS for Rodriguez family — 87 days from today&#10;• Rent payment due 1st of every month" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit; font-size:13px;"></textarea>
+          <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC;">
+            <div style="font-size:12px; color:#5E5854; margin-bottom:6px;"><strong>📝 Type a brief summary</strong></div>
+            <textarea id="ai-text" rows="4" placeholder="Examples:&#10;• File I-589 for Chen Wei by Friday, detained in Adelanto&#10;• Response to RFE from USCIS for Rodriguez family — 87 days from today&#10;• Rent payment due 1st of every month" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:inherit; font-size:13px;"></textarea>
             <button type="button" onclick="analyzeText()" id="ai-text-btn" style="margin-top:8px; background:#A34C00; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:13px;">✨ Extract Task(s) →</button>
           </div>
 
           <!-- Doc upload mode -->
-          <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
-            <div style="font-size:12px; color:#666; margin-bottom:6px;"><strong>📎 Or upload a document</strong></div>
-            <div style="font-size:11px; color:#888; margin-bottom:8px;">NTA, hearing notice, RFE, NOID, IJ decision, court order, PDF or image (PNG/JPG). Claude reads it and creates tasks with dates.</div>
+          <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC;">
+            <div style="font-size:12px; color:#5E5854; margin-bottom:6px;"><strong>📎 Or upload a document</strong></div>
+            <div style="font-size:11px; color:#5E5854; margin-bottom:8px;">NTA, hearing notice, RFE, NOID, IJ decision, court order, PDF or image (PNG/JPG). Claude reads it and creates tasks with dates.</div>
             <input type="file" id="ai-file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.doc,.docx" style="width:100%; font-size:13px;">
             <button type="button" onclick="analyzeDoc()" id="ai-file-btn" style="margin-top:8px; background:#2B2523; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600; font-size:13px;">✨ Analyze & Create →</button>
           </div>
         </div>
 
-        <div id="ai-status" style="margin-top:12px; font-size:12px; color:#666; display:none;"></div>
+        <div id="ai-status" style="margin-top:12px; font-size:12px; color:#5E5854; display:none;"></div>
       </div>
 
       <!-- ── Extracted tasks preview (populated by AI, before user confirms) ── -->
       <div id="ai-preview" style="display:none; margin-bottom:16px;"></div>
 
       <!-- ── Manual entry form (fallback / for direct control) ─────────── -->
-      <details style="background:white; padding:0; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <details style="background:white; padding:0; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <summary style="padding:14px 20px; cursor:pointer; font-weight:600; color:#2B2523;">✏️ Or enter task manually</summary>
       <form onsubmit="createTaskManual(event)" style="background:white; padding:24px; border-radius:8px; max-width:800px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Task Title (required)</label><input type="text" name="title" required placeholder="e.g. File motion to reopen for Chen Wei" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-size:14px;"></div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Task Title (required)</label><input type="text" name="title" required placeholder="e.g. File motion to reopen for Chen Wei" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-size:14px;"></div>
 
-          <div><label style="font-size:11px; color:#888;">Category</label>
-            <select name="category" onchange="onCategoryChange(this)" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div><label style="font-size:11px; color:#5E5854;">Category</label>
+            <select name="category" onchange="onCategoryChange(this)" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="">— pick category —</option>
               ${catGroups}
             </select>
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Matter Type</label>
-            <select name="matter_type" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div><label style="font-size:11px; color:#5E5854;">Matter Type</label>
+            <select name="matter_type" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="">—</option>
               <option value="immigration">Immigration</option>
               <option value="pi">Personal Injury</option>
@@ -3481,29 +3485,29 @@ app.get("/admin/tasks/new", async (req, res) => {
             </select>
           </div>
 
-          <div><label style="font-size:11px; color:#888;">Due Date</label><input type="date" name="due_date" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Due Time (optional)</label><input type="time" name="due_time" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Due Date</label><input type="date" name="due_date" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Due Time (optional)</label><input type="time" name="due_time" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
 
-          <div><label style="font-size:11px; color:#888;">Priority</label>
-            <select name="priority" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div><label style="font-size:11px; color:#5E5854;">Priority</label>
+            <select name="priority" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="normal">Normal</option>
               <option value="urgent">🔴 Urgent</option>
               <option value="high">🟠 High</option>
               <option value="low">⚪ Low</option>
             </select>
           </div>
-          <div><label style="font-size:11px; color:#888;">Remind Days Before</label><input type="number" name="reminder_days_before" value="3" min="0" max="30" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Remind Days Before</label><input type="number" name="reminder_days_before" value="3" min="0" max="30" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
 
-          <div><label style="font-size:11px; color:#888;">Client Name</label><input type="text" name="client_name" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">A-Number (immigration)</label><input type="text" name="a_number" placeholder="A123456789" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Client Name</label><input type="text" name="client_name" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">A-Number (immigration)</label><input type="text" name="a_number" placeholder="A123456789" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
 
-          <div><label style="font-size:11px; color:#888;">Case Number</label><input type="text" name="case_number" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Court</label><input type="text" name="court" placeholder="e.g. LA Immigration Court, LASC, 9th Cir." style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Case Number</label><input type="text" name="case_number" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Court</label><input type="text" name="court" placeholder="e.g. LA Immigration Court, LASC, 9th Cir." style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
 
-          <div><label style="font-size:11px; color:#888;">Assigned To</label><input type="text" name="assigned_to" placeholder="e.g. JJ, Michael, Chandler" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Assigned To</label><input type="text" name="assigned_to" placeholder="e.g. JJ, Michael, Chandler" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
           <div>
-            <label style="font-size:11px; color:#888;">Recurring?</label>
-            <select name="recurrence_pattern" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+            <label style="font-size:11px; color:#5E5854;">Recurring?</label>
+            <select name="recurrence_pattern" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="">One-time</option>
               <option value="weekly">Weekly</option>
               <option value="monthly">Monthly</option>
@@ -3512,12 +3516,12 @@ app.get("/admin/tasks/new", async (req, res) => {
             </select>
           </div>
 
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Description / Notes</label><textarea name="description" rows="3" placeholder="Specific facts, deadline citation (e.g. 8 CFR 1003.23(b)(1)), procedural context..." style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit;"></textarea></div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Description / Notes</label><textarea name="description" rows="3" placeholder="Specific facts, deadline citation (e.g. 8 CFR 1003.23(b)(1)), procedural context..." style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:inherit;"></textarea></div>
         </div>
 
         <div style="margin-top:20px;">
           <button type="submit" style="background:#2B2523; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Create Task</button>
-          <a href="/admin/tasks" style="margin-left:10px; color:#666; text-decoration:none;">Cancel</a>
+          <a href="/admin/tasks" style="margin-left:10px; color:#5E5854; text-decoration:none;">Cancel</a>
         </div>
       </form>
       </details>
@@ -3622,40 +3626,40 @@ app.get("/admin/tasks/new", async (req, res) => {
           const div = document.getElementById("ai-preview");
           if (!tasks || !tasks.length) {
             div.style.display = "block";
-            div.innerHTML = '<div style="background:#fff8e1; padding:14px 18px; border-radius:8px; border-left:4px solid #f57f17; font-size:13px;"><strong>No actionable tasks found.</strong> Try being more specific, or use the manual form below.</div>';
+            div.innerHTML = '<div style="background:#FFF3E6; padding:14px 18px; border-radius:8px; border-left:4px solid #FF7B00; font-size:13px;"><strong>No actionable tasks found.</strong> Try being more specific, or use the manual form below.</div>';
             return;
           }
-          const priColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" };
+          const priColor = { urgent: "#9C2B1E", high: "#A34C00", normal: "#2B2523", low: "#5E5854" };
           const rows = tasks.map((t, i) => \`
-            <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee; margin-bottom:8px;">
+            <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:8px;">
               <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
                 <div style="flex:1;">
                   <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
                     <input type="checkbox" id="task-\${i}" checked style="width:16px; height:16px;">
                     <strong style="color:#2B2523;">\${escHtml(t.title)}</strong>
-                    <span style="background:\${priColor[t.priority] || '#666'}; color:white; padding:1px 8px; border-radius:8px; font-size:10px;">\${t.priority.toUpperCase()}</span>
+                    <span style="background:\${priColor[t.priority] || '#5E5854'}; color:white; padding:1px 8px; border-radius:8px; font-size:10px;">\${t.priority.toUpperCase()}</span>
                   </div>
-                  <div style="font-size:11px; color:#666; margin-left:24px;">
+                  <div style="font-size:11px; color:#5E5854; margin-left:24px;">
                     \${t.category ? escHtml(t.category.replace(/_/g, ' ')) : ''} \${t.matter_type ? '· ' + escHtml(t.matter_type) : ''}
                     \${t.due_date ? ' · 📆 <strong>' + escHtml(t.due_date) + '</strong>' : ''}
                     \${t.client_name ? ' · 👤 ' + escHtml(t.client_name) : ''}
                     \${t.a_number ? ' · 🆔 ' + escHtml(t.a_number) : ''}
                     \${t.court ? ' · ⚖️ ' + escHtml(t.court) : ''}
                   </div>
-                  \${t.description ? '<div style="font-size:12px; color:#555; margin-top:6px; margin-left:24px; white-space:pre-wrap;">' + escHtml(t.description) + '</div>' : ''}
+                  \${t.description ? '<div style="font-size:12px; color:#5E5854; margin-top:6px; margin-left:24px; white-space:pre-wrap;">' + escHtml(t.description) + '</div>' : ''}
                 </div>
               </div>
             </div>
           \`).join("");
           div.style.display = "block";
           div.innerHTML = \`
-            <div style="background:#e8f5e9; padding:14px 18px; border-radius:8px; border-left:4px solid #2e7d32; margin-bottom:10px;">
-              <strong style="color:#2e7d32;">✓ Claude extracted \${tasks.length} task\${tasks.length === 1 ? '' : 's'}.</strong> Uncheck any you don't want, then click Create All.
+            <div style="background:#EEF5EF; padding:14px 18px; border-radius:8px; border-left:4px solid #2F6B3F; margin-bottom:10px;">
+              <strong style="color:#2F6B3F;">✓ Claude extracted \${tasks.length} task\${tasks.length === 1 ? '' : 's'}.</strong> Uncheck any you don't want, then click Create All.
             </div>
             \${rows}
             <div style="margin-top:12px; display:flex; gap:10px;">
-              <button type="button" onclick='createExtractedTasks(\${JSON.stringify(tasks).replace(/'/g, "&apos;")})' style="background:#2e7d32; color:white; padding:10px 20px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">✓ Create Selected Tasks</button>
-              <button type="button" onclick="document.getElementById('ai-preview').style.display='none'" style="background:none; color:#666; padding:10px 20px; border:1px solid #ccc; border-radius:6px; cursor:pointer;">Cancel</button>
+              <button type="button" onclick='createExtractedTasks(\${JSON.stringify(tasks).replace(/'/g, "&apos;")})' style="background:#2F6B3F; color:white; padding:10px 20px; border-radius:6px; border:none; cursor:pointer; font-weight:600;">✓ Create Selected Tasks</button>
+              <button type="button" onclick="document.getElementById('ai-preview').style.display='none'" style="background:none; color:#5E5854; padding:10px 20px; border:1px solid #CFC8BE; border-radius:6px; cursor:pointer;">Cancel</button>
             </div>
           \`;
         }
@@ -3846,10 +3850,10 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
 
     // Setup instructions box (shown when not configured)
     const setupHtml = !status.configured ? `
-      <div style="background:#fff8e1; padding:20px; border-radius:8px; border-left:4px solid #f57f17; margin-bottom:20px;">
-        <h3 style="margin:0 0 10px 0; color:#e65100; font-size:15px;">🔧 QuickBooks Setup Required (One Time)</h3>
-        <ol style="font-size:13px; line-height:1.7; color:#555; margin:0; padding-left:20px;">
-          <li>Go to <a href="https://developer.intuit.com/app/developer/dashboard" target="_blank" style="color:#0061FF;">Intuit Developer Dashboard</a></li>
+      <div style="background:#FFF3E6; padding:20px; border-radius:8px; border-left:4px solid #FF7B00; margin-bottom:20px;">
+        <h3 style="margin:0 0 10px 0; color:#A34C00; font-size:15px;">🔧 QuickBooks Setup Required (One Time)</h3>
+        <ol style="font-size:13px; line-height:1.7; color:#5E5854; margin:0; padding-left:20px;">
+          <li>Go to <a href="https://developer.intuit.com/app/developer/dashboard" target="_blank" style="color:#A34C00;">Intuit Developer Dashboard</a></li>
           <li>Sign in with your Intuit account (or create one)</li>
           <li>Click <strong>"+ Create an app"</strong> → select <strong>"QuickBooks Online and Payments"</strong></li>
           <li>Give it a name (e.g., "Tez Law Accounting Sync")</li>
@@ -3866,18 +3870,18 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
           <li>Redeploy the service (Render auto-redeploys on env var change)</li>
           <li>Come back here and click <strong>Connect to QuickBooks</strong></li>
         </ol>
-        <div style="background:#fee; padding:10px 14px; border-radius:6px; margin-top:14px; font-size:12px; color:#c62828;">
+        <div style="background:#FBEDEA; padding:10px 14px; border-radius:6px; margin-top:14px; font-size:12px; color:#9C2B1E;">
           <strong>⚠ For production:</strong> your Intuit app must go through Intuit's review process before it can connect to real QuickBooks Online accounts. Sandbox works immediately.
         </div>
       </div>` : "";
 
     // Connected status
     const connectionHtml = status.connected ? `
-      <div style="background:#e8f5e9; padding:20px; border-radius:8px; border-left:4px solid #2e7d32; margin-bottom:16px;">
+      <div style="background:#EEF5EF; padding:20px; border-radius:8px; border-left:4px solid #2F6B3F; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
           <div>
-            <strong style="color:#2e7d32; font-size:14px;">✓ Connected to QuickBooks Online</strong>
-            <div style="font-size:12px; color:#555; margin-top:4px;">
+            <strong style="color:#2F6B3F; font-size:14px;">✓ Connected to QuickBooks Online</strong>
+            <div style="font-size:12px; color:#5E5854; margin-top:4px;">
               ${companyInfo ? `<strong>${esc(companyInfo.CompanyName || "?")}</strong> · ` : ""}
               Realm ID: <code>${esc(status.realm_id)}</code> ·
               Environment: <strong>${esc(status.environment)}</strong>
@@ -3885,14 +3889,14 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
             </div>
           </div>
           <form method="POST" action="/admin/accounting/quickbooks/disconnect" style="margin:0;" onsubmit="return confirm('Disconnect from QuickBooks? Historical entries stay in QBO but future entries won\\'t auto-sync.');">
-            <button type="submit" style="background:#c62828; color:white; border:none; padding:8px 14px; border-radius:4px; cursor:pointer; font-size:12px;">Disconnect</button>
+            <button type="submit" style="background:#9C2B1E; color:white; border:none; padding:8px 14px; border-radius:4px; cursor:pointer; font-size:12px;">Disconnect</button>
           </form>
         </div>
       </div>` : (status.configured ? `
-      <div style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; text-align:center;">
+      <div style="background:white; padding:24px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px; text-align:center;">
         <h3 style="margin:0 0 10px 0; color:#2B2523;">Ready to Connect</h3>
-        <p style="font-size:13px; color:#666; margin-bottom:16px;">Click below to authorize Tez Law's access to your QuickBooks Online account. You'll be redirected to Intuit's sign-in page.</p>
-        <a href="/admin/accounting/quickbooks/connect" style="background:#2CA01C; color:white; padding:14px 28px; border-radius:6px; text-decoration:none; font-weight:600; display:inline-block; font-size:15px;">
+        <p style="font-size:13px; color:#5E5854; margin-bottom:16px;">Click below to authorize Tez Law's access to your QuickBooks Online account. You'll be redirected to Intuit's sign-in page.</p>
+        <a href="/admin/accounting/quickbooks/connect" style="background:#2F6B3F; color:white; padding:14px 28px; border-radius:6px; text-decoration:none; font-weight:600; display:inline-block; font-size:15px;">
           🔗 Connect to QuickBooks (${esc(status.environment)})
         </a>
       </div>` : "");
@@ -3900,69 +3904,69 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
     // Sync stats
     const statsHtml = status.connected ? `
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:16px;">
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">Total Entries</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Total Entries</div>
           <div style="font-size:22px; font-weight:700; color:#2B2523;">${status.total_entries}</div>
         </div>
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">Synced to QBO</div>
-          <div style="font-size:22px; font-weight:700; color:#2e7d32;">${status.synced_entries}</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Synced to QBO</div>
+          <div style="font-size:22px; font-weight:700; color:#2F6B3F;">${status.synced_entries}</div>
         </div>
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">Pending Sync</div>
-          <div style="font-size:22px; font-weight:700; color:${status.unsynced_entries > 0 ? "#e65100" : "#2B2523"};">${status.unsynced_entries}</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Pending Sync</div>
+          <div style="font-size:22px; font-weight:700; color:${status.unsynced_entries > 0 ? "#A34C00" : "#2B2523"};">${status.unsynced_entries}</div>
         </div>
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">QBO Accounts</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">QBO Accounts</div>
           <div style="font-size:22px; font-weight:700; color:#2B2523;">${qboAccountCount}</div>
         </div>
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">Mapped</div>
-          <div style="font-size:22px; font-weight:700; color:${status.mapped_accounts === ourAccounts.length ? "#2e7d32" : "#e65100"};">${status.mapped_accounts} / ${ourAccounts.length}</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Mapped</div>
+          <div style="font-size:22px; font-weight:700; color:${status.mapped_accounts === ourAccounts.length ? "#2F6B3F" : "#A34C00"};">${status.mapped_accounts} / ${ourAccounts.length}</div>
         </div>
       </div>
 
       <!-- Automation toggles -->
-      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <h3 style="margin:0 0 12px 0; color:#2B2523; font-size:15px;">⚡ Automation</h3>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
 
           <!-- Auto-Push -->
-          <div style="border:1px solid ${status.auto_push_enabled ? "#2e7d32" : "#eee"}; padding:16px; border-radius:6px; background:${status.auto_push_enabled ? "#e8f5e9" : "white"};">
+          <div style="border:1px solid ${status.auto_push_enabled ? "#2F6B3F" : "#E8E3DC"}; padding:16px; border-radius:6px; background:${status.auto_push_enabled ? "#EEF5EF" : "white"};">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
               <div>
                 <strong style="color:#2B2523;">Auto-Push</strong>
-                <span style="background:${status.auto_push_enabled ? "#2e7d32" : "#999"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; margin-left:6px;">${status.auto_push_enabled ? "ON" : "OFF"}</span>
+                <span style="background:${status.auto_push_enabled ? "#2F6B3F" : "#5E5854"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; margin-left:6px;">${status.auto_push_enabled ? "ON" : "OFF"}</span>
               </div>
               <label class="toggle" style="display:inline-block; position:relative; width:44px; height:24px; cursor:pointer;">
                 <input type="checkbox" ${status.auto_push_enabled ? "checked" : ""} onchange="toggleAutoPush(this.checked)" style="opacity:0; width:0; height:0;">
-                <span style="position:absolute; inset:0; background:${status.auto_push_enabled ? "#2e7d32" : "#ccc"}; border-radius:24px; transition:0.2s;">
+                <span style="position:absolute; inset:0; background:${status.auto_push_enabled ? "#2F6B3F" : "#E8E3DC"}; border-radius:24px; transition:0.2s;">
                   <span style="position:absolute; top:2px; left:${status.auto_push_enabled ? "22px" : "2px"}; width:20px; height:20px; background:white; border-radius:50%; transition:0.2s;"></span>
                 </span>
               </label>
             </div>
-            <div style="font-size:12px; color:#555; margin-top:8px;">
+            <div style="font-size:12px; color:#5E5854; margin-top:8px;">
               When ON, every journal entry pushes to QBO the moment it's created. Fires in the background — if push fails (unmapped account, QBO down), the entry stays in the pending queue for the next scheduled sync.
             </div>
           </div>
 
           <!-- Scheduled Sync -->
-          <div style="border:1px solid ${status.scheduled_sync_enabled ? "#2e7d32" : "#eee"}; padding:16px; border-radius:6px; background:${status.scheduled_sync_enabled ? "#e8f5e9" : "white"};">
+          <div style="border:1px solid ${status.scheduled_sync_enabled ? "#2F6B3F" : "#E8E3DC"}; padding:16px; border-radius:6px; background:${status.scheduled_sync_enabled ? "#EEF5EF" : "white"};">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
               <div>
                 <strong style="color:#2B2523;">Scheduled Sync</strong>
-                <span style="background:${status.scheduled_sync_enabled ? "#2e7d32" : "#999"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; margin-left:6px;">${status.scheduled_sync_enabled ? "ON" : "OFF"}</span>
+                <span style="background:${status.scheduled_sync_enabled ? "#2F6B3F" : "#5E5854"}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; margin-left:6px;">${status.scheduled_sync_enabled ? "ON" : "OFF"}</span>
               </div>
               <label class="toggle" style="display:inline-block; position:relative; width:44px; height:24px; cursor:pointer;">
                 <input type="checkbox" ${status.scheduled_sync_enabled ? "checked" : ""} onchange="toggleScheduledSync(this.checked)" style="opacity:0; width:0; height:0;">
-                <span style="position:absolute; inset:0; background:${status.scheduled_sync_enabled ? "#2e7d32" : "#ccc"}; border-radius:24px; transition:0.2s;">
+                <span style="position:absolute; inset:0; background:${status.scheduled_sync_enabled ? "#2F6B3F" : "#E8E3DC"}; border-radius:24px; transition:0.2s;">
                   <span style="position:absolute; top:2px; left:${status.scheduled_sync_enabled ? "22px" : "2px"}; width:20px; height:20px; background:white; border-radius:50%; transition:0.2s;"></span>
                 </span>
               </label>
             </div>
-            <div style="font-size:12px; color:#555; margin-top:8px;">
+            <div style="font-size:12px; color:#5E5854; margin-top:8px;">
               Runs a full batch sync every
-              <select onchange="setInterval(this.value)" style="padding:2px 6px; border:1px solid #ccc; border-radius:4px; font-size:12px;">
+              <select onchange="setInterval(this.value)" style="padding:2px 6px; border:1px solid #CFC8BE; border-radius:4px; font-size:12px;">
                 <option value="15" ${status.sync_interval_minutes === 15 ? "selected" : ""}>15 minutes</option>
                 <option value="30" ${status.sync_interval_minutes === 30 ? "selected" : ""}>30 minutes</option>
                 <option value="60" ${status.sync_interval_minutes === 60 ? "selected" : ""}>hour</option>
@@ -3973,23 +3977,23 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
               Safety net that catches anything Auto-Push missed.
             </div>
             ${status.last_scheduled_sync_at ? `
-            <div style="font-size:11px; color:#666; margin-top:6px; padding-top:6px; border-top:1px solid ${status.scheduled_sync_enabled ? "#c8e6c9" : "#eee"};">
+            <div style="font-size:11px; color:#5E5854; margin-top:6px; padding-top:6px; border-top:1px solid ${status.scheduled_sync_enabled ? "#EEF5EF" : "#E8E3DC"};">
               Last: ${new Date(status.last_scheduled_sync_at).toLocaleString()} — ✓ ${status.last_sync_pushed} pushed${status.last_sync_failed > 0 ? ", ⚠ " + status.last_sync_failed + " failed" : ""}
-              ${status.last_sync_errors ? `<details style="margin-top:4px;"><summary style="cursor:pointer; color:#c62828;">Show errors</summary><div style="margin-top:4px; font-family:ui-monospace, Menlo, monospace; font-size:10px; color:#c62828;">${esc(status.last_sync_errors)}</div></details>` : ""}
+              ${status.last_sync_errors ? `<details style="margin-top:4px;"><summary style="cursor:pointer; color:#9C2B1E;">Show errors</summary><div style="margin-top:4px; font-family:ui-monospace, Menlo, monospace; font-size:10px; color:#9C2B1E;">${esc(status.last_sync_errors)}</div></details>` : ""}
             </div>` : ""}
           </div>
         </div>
 
-        <div style="background:#f5f9ff; padding:10px 14px; border-radius:6px; margin-top:12px; font-size:11px; color:#555;">
+        <div style="background:#F3EFE9; padding:10px 14px; border-radius:6px; margin-top:12px; font-size:11px; color:#5E5854;">
           💡 <strong>Recommended setup:</strong> Turn ON both. Auto-Push handles instant sync of new entries; Scheduled Sync (every hour) catches anything Auto-Push missed (unmapped accounts, temporary QBO outages, retries).
         </div>
       </div>
 
-      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <h3 style="margin:0 0 12px 0; color:#2B2523; font-size:15px;">Manual Actions</h3>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button onclick="autoMap()" style="background:#A34C00; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;">🔗 Auto-map Accounts</button>
-          <button onclick="pushAll()" style="background:#2CA01C; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;" ${status.mapped_accounts < ourAccounts.length ? 'disabled title="Map all accounts first"' : ""}>⬆ Push ${status.unsynced_entries} Unsynced Now</button>
+          <button onclick="pushAll()" style="background:#2F6B3F; color:white; border:none; padding:10px 18px; border-radius:6px; cursor:pointer; font-weight:600;" ${status.mapped_accounts < ourAccounts.length ? 'disabled title="Map all accounts first"' : ""}>⬆ Push ${status.unsynced_entries} Unsynced Now</button>
           <a href="/admin/accounting/quickbooks/mapping" style="background:#2B2523; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">📋 Account Mapping</a>
         </div>
       </div>` : "";
@@ -4079,19 +4083,19 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
     const qbName = companyInfo && (companyInfo.CompanyName || companyInfo.LegalName || companyInfo.Name);
     let envBanner = "";
     if (status.connected && envUsed !== "production") {
-      envBanner = `<div style="background:#ffebee; border-left:4px solid #c62828; padding:14px 18px; border-radius:4px; margin-bottom:16px; font-size:13px; line-height:1.6;">
-        <b style="color:#c62828;">Connected to the QuickBooks SANDBOX, not your books.</b><br>
+      envBanner = `<div style="background:#FBEDEA; border-left:4px solid #9C2B1E; padding:14px 18px; border-radius:4px; margin-bottom:16px; font-size:13px; line-height:1.6;">
+        <b style="color:#9C2B1E;">Connected to the QuickBooks SANDBOX, not your books.</b><br>
         This connection was made while the environment was <code>${esc(envUsed)}</code>, and that is stored on the
         connection itself — changing QBO_ENVIRONMENT does not move an existing one. Every figure drawn from it is
         meaningless. Disconnect and connect again to re-point it${envNow === "production" ? " (the variable is already correct)" : ", after setting QBO_ENVIRONMENT=production"}.
       </div>`;
     } else if (status.connected && envUsed !== envNow) {
-      envBanner = `<div style="background:#fff8e1; border-left:4px solid #f57f17; padding:14px 18px; border-radius:4px; margin-bottom:16px; font-size:13px;">
+      envBanner = `<div style="background:#FFF3E6; border-left:4px solid #FF7B00; padding:14px 18px; border-radius:4px; margin-bottom:16px; font-size:13px;">
         <b>This connection says <code>${esc(envUsed)}</code> but QBO_ENVIRONMENT now says <code>${esc(envNow)}</code>.</b>
         The stored value is the one in use. Reconnect to adopt the new one.
       </div>`;
     } else if (status.connected) {
-      envBanner = `<div style="background:#e8f5e9; border-left:4px solid #2e7d32; padding:12px 18px; border-radius:4px; margin-bottom:16px; font-size:13px;">
+      envBanner = `<div style="background:#EEF5EF; border-left:4px solid #2F6B3F; padding:12px 18px; border-radius:4px; margin-bottom:16px; font-size:13px;">
         Connected to <b>${esc(qbName || "QuickBooks")}</b> &middot; realm <code>${esc(status.realm_id || "?")}</code> &middot; <b>production</b>
       </div>`;
     }
@@ -4289,14 +4293,14 @@ app.get("/admin/accounting/quickbooks/mapping", async (req, res) => {
       ).join("");
       return `
         <tr>
-          <td style="padding:10px 12px; border-bottom:1px solid #eee; font-family:ui-monospace, Menlo, monospace; font-size:12px; color:#2B2523;">${a.account_number}</td>
-          <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:13px;">${esc(a.name)}<div style="font-size:11px; color:#888;">${a.type}${a.subtype ? " · " + a.subtype : ""}</div></td>
-          <td style="padding:10px 12px; border-bottom:1px solid #eee;">
-            <select data-acct="${a.account_number}" onchange="updateMapping('${a.account_number}', this.value)" style="width:100%; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:12px;">
+          <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; font-family:ui-monospace, Menlo, monospace; font-size:12px; color:#2B2523;">${a.account_number}</td>
+          <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; font-size:13px;">${esc(a.name)}<div style="font-size:11px; color:#5E5854;">${a.type}${a.subtype ? " · " + a.subtype : ""}</div></td>
+          <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC;">
+            <select data-acct="${a.account_number}" onchange="updateMapping('${a.account_number}', this.value)" style="width:100%; padding:6px; border:1px solid #CFC8BE; border-radius:4px; font-size:12px;">
               <option value="">— unmapped —</option>${optsHtml}
             </select>
           </td>
-          <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:11px; color:${currentMapping ? "#2e7d32" : "#c62828"}; text-align:center;">
+          <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; font-size:11px; color:${currentMapping ? "#2F6B3F" : "#9C2B1E"}; text-align:center;">
             ${currentMapping ? "✓" : "—"}
           </td>
         </tr>`;
@@ -4308,17 +4312,17 @@ app.get("/admin/accounting/quickbooks/mapping", async (req, res) => {
         <a href="/admin/accounting/quickbooks" class="back-link">← QuickBooks Sync</a>
       </div>
 
-      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+      <div style="background:#F3EFE9; padding:14px 16px; border-radius:8px; border-left:4px solid #A34C00; margin-bottom:16px; font-size:13px;">
         Map each Tez Law internal account to its QuickBooks Online equivalent. Every journal entry line must have a mapped account before it can push.
       </div>
 
-      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden;">
         <table style="width:100%; border-collapse:collapse;">
           <thead><tr style="background:#FAF8F5;">
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Our #</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Our Account</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">QBO Account</th>
-            <th style="padding:10px 12px; text-align:center; font-size:11px; color:#666; text-transform:uppercase;">Status</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Our #</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Our Account</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">QBO Account</th>
+            <th style="padding:10px 12px; text-align:center; font-size:11px; color:#5E5854; text-transform:uppercase;">Status</th>
           </tr></thead>
           <tbody>${rowsHtml}</tbody>
         </table>
@@ -4506,14 +4510,14 @@ app.get("/admin/accounting/record-fee", async (req, res) => {
         <h1>Record Legal Fee</h1>
         <a href="/admin/accounting" class="back-link">← Accounting</a>
       </div>
-      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+      <div style="background:#F3EFE9; padding:14px 16px; border-radius:8px; border-left:4px solid #A34C00; margin-bottom:16px; font-size:13px;">
         Record fee revenue for ANY practice area — immigration, PI, business litigation, LL/T, estate, TM, real estate. Auto-posts to your ledger + pushes to QuickBooks (if enabled).
       </div>
-      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
+      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #E8E3DC; max-width:640px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Client Name (required)</label><input type="text" name="client_name" required placeholder="e.g. Chen Wei" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Matter Type</label>
-            <select name="matter_type" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Client Name (required)</label><input type="text" name="client_name" required placeholder="e.g. Chen Wei" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Matter Type</label>
+            <select name="matter_type" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="immigration">Immigration</option>
               <option value="pi">Personal Injury</option>
               <option value="business">Business Litigation</option>
@@ -4523,11 +4527,11 @@ app.get("/admin/accounting/record-fee", async (req, res) => {
               <option value="real_estate">Real Estate</option>
             </select>
           </div>
-          <div><label style="font-size:11px; color:#888;">Amount ($)</label><input type="number" step="0.01" min="0.01" name="amount" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Date</label><input type="date" name="date" value="${new Date().toISOString().split("T")[0]}" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Reference (invoice / receipt #)</label><input type="text" name="reference" placeholder="INV-2026-001" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Amount ($)</label><input type="number" step="0.01" min="0.01" name="amount" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Date</label><input type="date" name="date" value="${new Date().toISOString().split("T")[0]}" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Reference (invoice / receipt #)</label><input type="text" name="reference" placeholder="INV-2026-001" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
           <div style="grid-column:1/-1;">
-            <label style="font-size:11px; color:#888;">Payment Source</label>
+            <label style="font-size:11px; color:#5E5854;">Payment Source</label>
             <div style="display:flex; gap:14px; margin-top:4px;">
               <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
                 <input type="radio" name="from_trust" value="0" checked>
@@ -4538,12 +4542,12 @@ app.get("/admin/accounting/record-fee", async (req, res) => {
                 <span>Earned from retainer (Trust → Operating)</span>
               </label>
             </div>
-            <div style="font-size:11px; color:#666; margin-top:4px;">If "earned from retainer": we'll create 2 entries — one to recognize revenue from trust liability, one to move actual cash trust → operating.</div>
+            <div style="font-size:11px; color:#5E5854; margin-top:4px;">If "earned from retainer": we'll create 2 entries — one to recognize revenue from trust liability, one to move actual cash trust → operating.</div>
           </div>
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Description / Notes</label><input type="text" name="description" placeholder="Immigration consultation, motion to reopen, etc" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Description / Notes</label><input type="text" name="description" placeholder="Immigration consultation, motion to reopen, etc" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
         </div>
         <div style="margin-top:20px;">
-          <button type="submit" style="background:#2e7d32; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Record Fee</button>
+          <button type="submit" style="background:#2F6B3F; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Record Fee</button>
         </div>
       </form>
       <script>
@@ -4594,14 +4598,14 @@ app.get("/admin/accounting/record-retainer", async (req, res) => {
         <h1>Record Retainer / Trust Deposit</h1>
         <a href="/admin/accounting" class="back-link">← Accounting</a>
       </div>
-      <div style="background:#fff8e1; padding:14px 16px; border-radius:8px; border-left:4px solid #f57f17; margin-bottom:16px; font-size:13px;">
+      <div style="background:#FFF3E6; padding:14px 16px; border-radius:8px; border-left:4px solid #FF7B00; margin-bottom:16px; font-size:13px;">
         <strong>CA Bar RRC 1.15:</strong> Any money paid by a client that is NOT yet earned as fees must go into your IOLTA trust account. Record retainers here — the system tracks per-client balance and reconciles against bank.
       </div>
-      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
+      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #E8E3DC; max-width:640px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Client Name (required)</label><input type="text" name="client_name" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Matter Type</label>
-            <select name="matter_type" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Client Name (required)</label><input type="text" name="client_name" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Matter Type</label>
+            <select name="matter_type" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="immigration">Immigration</option>
               <option value="pi">Personal Injury</option>
               <option value="business">Business Litigation</option>
@@ -4611,10 +4615,10 @@ app.get("/admin/accounting/record-retainer", async (req, res) => {
               <option value="real_estate">Real Estate</option>
             </select>
           </div>
-          <div><label style="font-size:11px; color:#888;">Amount ($)</label><input type="number" step="0.01" min="0.01" name="amount" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Date</label><input type="date" name="date" value="${new Date().toISOString().split("T")[0]}" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Reference (check # / receipt)</label><input type="text" name="reference" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Description / Notes</label><input type="text" name="description" placeholder="Initial retainer, replenishment, etc" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Amount ($)</label><input type="number" step="0.01" min="0.01" name="amount" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Date</label><input type="date" name="date" value="${new Date().toISOString().split("T")[0]}" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Reference (check # / receipt)</label><input type="text" name="reference" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Description / Notes</label><input type="text" name="description" placeholder="Initial retainer, replenishment, etc" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
         </div>
         <div style="margin-top:20px;">
           <button type="submit" style="background:#A34C00; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Deposit to Trust</button>
@@ -4670,22 +4674,22 @@ app.get("/admin/accounting/record-expense", async (req, res) => {
         <h1>Record Expense</h1>
         <a href="/admin/accounting" class="back-link">← Accounting</a>
       </div>
-      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+      <div style="background:#F3EFE9; padding:14px 16px; border-radius:8px; border-left:4px solid #A34C00; margin-bottom:16px; font-size:13px;">
         Record any firm expense — rent, salaries, subscriptions, marketing, etc. Auto-posts to ledger + QuickBooks.
       </div>
-      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:640px;">
+      <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #E8E3DC; max-width:640px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div><label style="font-size:11px; color:#888;">Amount ($)</label><input type="number" step="0.01" min="0.01" name="amount" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Date</label><input type="date" name="date" value="${new Date().toISOString().split("T")[0]}" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Category</label>
-            <select name="account_number" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">${opts}</select>
+          <div><label style="font-size:11px; color:#5E5854;">Amount ($)</label><input type="number" step="0.01" min="0.01" name="amount" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Date</label><input type="date" name="date" value="${new Date().toISOString().split("T")[0]}" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Category</label>
+            <select name="account_number" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">${opts}</select>
           </div>
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#888;">Vendor / Payee</label><input type="text" name="vendor" placeholder="e.g. WeWork, Verizon, etc" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Reference (check # / receipt)</label><input type="text" name="reference" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
-          <div><label style="font-size:11px; color:#888;">Description</label><input type="text" name="description" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;"></div>
+          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Vendor / Payee</label><input type="text" name="vendor" placeholder="e.g. WeWork, Verizon, etc" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Reference (check # / receipt)</label><input type="text" name="reference" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div><label style="font-size:11px; color:#5E5854;">Description</label><input type="text" name="description" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
         </div>
         <div style="margin-top:20px;">
-          <button type="submit" style="background:#c62828; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Record Expense</button>
+          <button type="submit" style="background:#9C2B1E; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Record Expense</button>
         </div>
       </form>
       <script>
@@ -4738,11 +4742,11 @@ app.get("/admin/accounting/entry/:id", async (req, res) => {
     const fmt$ = n => "$" + (Number(n || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const linesHtml = (entry.lines || []).map(l => `
       <tr>
-        <td style="padding:10px 12px; border-bottom:1px solid #eee; font-family:ui-monospace, Menlo, monospace; font-size:12px;">${l.account_number}</td>
-        <td style="padding:10px 12px; border-bottom:1px solid #eee;">${esc(l.account_name)}</td>
-        <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:12px; color:#666;">${esc(l.memo || "")}</td>
-        <td style="padding:10px 12px; border-bottom:1px solid #eee; text-align:right; font-family:ui-monospace, Menlo, monospace;">${Number(l.debit) > 0 ? fmt$(l.debit) : ""}</td>
-        <td style="padding:10px 12px; border-bottom:1px solid #eee; text-align:right; font-family:ui-monospace, Menlo, monospace;">${Number(l.credit) > 0 ? fmt$(l.credit) : ""}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; font-family:ui-monospace, Menlo, monospace; font-size:12px;">${l.account_number}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC;">${esc(l.account_name)}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; font-size:12px; color:#5E5854;">${esc(l.memo || "")}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; text-align:right; font-family:ui-monospace, Menlo, monospace;">${Number(l.debit) > 0 ? fmt$(l.debit) : ""}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; text-align:right; font-family:ui-monospace, Menlo, monospace;">${Number(l.credit) > 0 ? fmt$(l.credit) : ""}</td>
       </tr>`).join("");
     const totalD = (entry.lines || []).reduce((s, l) => s + Number(l.debit || 0), 0);
     const totalC = (entry.lines || []).reduce((s, l) => s + Number(l.credit || 0), 0);
@@ -4751,7 +4755,7 @@ app.get("/admin/accounting/entry/:id", async (req, res) => {
         <h1>Journal Entry #${entry.id}</h1>
         <a href="/admin/accounting/ledger" class="back-link">← Ledger</a>
       </div>
-      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; font-size:13px;">
           <div><strong>Date:</strong> ${new Date(entry.entry_date).toLocaleDateString()}</div>
           <div><strong>Reference:</strong> ${esc(entry.reference || "—")}</div>
@@ -4762,14 +4766,14 @@ app.get("/admin/accounting/entry/:id", async (req, res) => {
           ${entry.is_trust ? '<div><strong>🔒 TRUST TRANSACTION</strong></div>' : ""}
         </div>
       </div>
-      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden;">
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
           <thead><tr style="background:#FAF8F5;">
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Acct #</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Account</th>
-            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase;">Memo</th>
-            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase;">Debit</th>
-            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#666; text-transform:uppercase;">Credit</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Acct #</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Account</th>
+            <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase;">Memo</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase;">Debit</th>
+            <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase;">Credit</th>
           </tr></thead>
           <tbody>${linesHtml}
             <tr style="background:#FAF8F5; font-weight:700;">
@@ -4893,40 +4897,40 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
 
     // Existing letters
     const statusColors = {
-      draft: "#A34C00", sent: "#0061FF", carrier_responded: "#7c4dff",
-      limits_disclosed: "#00838f", tendered: "#2e7d32", rejected: "#c62828",
-      bad_faith_flagged: "#c62828", superseded: "#999",
+      draft: "#A34C00", sent: "#2B2523", carrier_responded: "#5E5854",
+      limits_disclosed: "#A34C00", tendered: "#2F6B3F", rejected: "#9C2B1E",
+      bad_faith_flagged: "#9C2B1E", superseded: "#5E5854",
     };
     const lettersHtml = letters.length ? letters.map(l => {
       const dt = new Date(l.generated_at).toLocaleString();
       const preview = (l.letter_text || "").substring(0, 300).replace(/</g, "&lt;");
       const status = l.status || "draft";
-      const color = statusColors[status] || "#666";
+      const color = statusColors[status] || "#5E5854";
       const daysToDeadline = l.deadline_date ? Math.ceil((new Date(l.deadline_date) - new Date()) / 86400000) : null;
       let deadlineLabel = "";
       if (l.deadline_date && ["sent", "carrier_responded"].includes(status)) {
-        if (daysToDeadline < 0) deadlineLabel = `<span style="color:#c62828; font-weight:600;">⚠ ${Math.abs(daysToDeadline)}d PAST DEADLINE</span>`;
-        else if (daysToDeadline <= 7) deadlineLabel = `<span style="color:#c62828; font-weight:600;">${daysToDeadline}d until deadline</span>`;
-        else deadlineLabel = `<span style="color:#666;">${daysToDeadline}d to deadline</span>`;
+        if (daysToDeadline < 0) deadlineLabel = `<span style="color:#9C2B1E; font-weight:600;">⚠ ${Math.abs(daysToDeadline)}d PAST DEADLINE</span>`;
+        else if (daysToDeadline <= 7) deadlineLabel = `<span style="color:#9C2B1E; font-weight:600;">${daysToDeadline}d until deadline</span>`;
+        else deadlineLabel = `<span style="color:#5E5854;">${daysToDeadline}d to deadline</span>`;
       }
       return `
-        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;">
             <div style="flex:1;">
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 <strong style="color:#2B2523; font-size:15px;">Version ${l.version || 1}</strong>
                 <span style="background:${color}; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">${status.toUpperCase().replace(/_/g, " ")}</span>
-                ${l.bad_faith_flagged ? '<span style="background:#c62828; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">🚩 BAD FAITH</span>' : ""}
-                <span style="font-size:11px; color:#888;">#${l.id}</span>
+                ${l.bad_faith_flagged ? '<span style="background:#9C2B1E; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">🚩 BAD FAITH</span>' : ""}
+                <span style="font-size:11px; color:#5E5854;">#${l.id}</span>
               </div>
-              <div style="font-size:12px; color:#666; margin-top:4px;">
+              <div style="font-size:12px; color:#5E5854; margin-top:4px;">
                 ${dt} · To ${esc(l.target_carrier_name || "?")}${l.target_claim_number ? " (Claim " + esc(l.target_claim_number) + ")" : ""}
               </div>
-              <div style="font-size:12px; color:#666; margin-top:2px;">
+              <div style="font-size:12px; color:#5E5854; margin-top:2px;">
                 Deadline: ${l.deadline_date ? new Date(l.deadline_date).toLocaleDateString() : "—"} (${l.deadline_days || "?"} days per CCP § 999.1)
                 ${deadlineLabel ? " · " + deadlineLabel : ""}
               </div>
-              <div style="font-size:11px; color:#888; margin-top:2px;">
+              <div style="font-size:11px; color:#5E5854; margin-top:2px;">
                 ${(l.cases_cited || []).length} cases cited · $${Number(l.estimated_cost_usd || 0).toFixed(3)}
                 ${l.policy_limits_disclosed ? " · ✓ Limits disclosed: " + fmt$(l.disclosed_limits_amount) : ""}
                 ${l.carrier_tendered_limits ? " · ✓ TENDERED " + fmt$(l.tendered_amount) : ""}
@@ -4934,15 +4938,15 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
             </div>
             <a href="/admin/pi/case/${caseId}/demand/${l.id}" style="background:#2B2523; color:white; padding:6px 14px; border-radius:4px; text-decoration:none; font-size:12px; align-self:flex-start;">Open →</a>
           </div>
-          <div style="font-size:12px; color:#555; padding:10px; background:#FAF8F5; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${l.letter_text && l.letter_text.length > 300 ? "…" : ""}</div>
+          <div style="font-size:12px; color:#5E5854; padding:10px; background:#FAF8F5; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${l.letter_text && l.letter_text.length > 300 ? "…" : ""}</div>
         </div>`;
-    }).join("") : `<div style="text-align:center; padding:40px; color:#888;">No demand letters generated yet.</div>`;
+    }).join("") : `<div style="text-align:center; padding:40px; color:#5E5854;">No demand letters generated yet.</div>`;
 
     const canGenerate = caseData.insurance.length > 0 && verifiedPool.length >= 3;
     const warnHtml = !canGenerate ? `
-      <div style="background:#fff8e1; padding:14px 16px; border-radius:8px; border-left:4px solid #f57f17; margin-bottom:16px; font-size:13px;">
+      <div style="background:#FFF3E6; padding:14px 16px; border-radius:8px; border-left:4px solid #FF7B00; margin-bottom:16px; font-size:13px;">
         ${caseData.insurance.length === 0 ? "<strong>⚠ Add an insurance carrier first</strong> — go back to the case and add the adverse party's carrier before generating a demand.<br>" : ""}
-        ${verifiedPool.length < 3 ? `<strong>⚠ Only ${verifiedPool.length} verified PI case citations found</strong> — the generator includes 6 foundational bad faith cases automatically, but adding your firm's own demand letters to <a href="/admin/firm-documents" style="color:#f57f17;">/admin/firm-documents</a> improves quality.<br>` : ""}
+        ${verifiedPool.length < 3 ? `<strong>⚠ Only ${verifiedPool.length} verified PI case citations found</strong> — the generator includes 6 foundational bad faith cases automatically, but adding your firm's own demand letters to <a href="/admin/firm-documents" style="color:#A34C00;">/admin/firm-documents</a> improves quality.<br>` : ""}
       </div>` : "";
 
     const body = `
@@ -4951,38 +4955,38 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
         <a href="/admin/pi/case/${caseId}" class="back-link">← Back to case</a>
       </div>
 
-      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+      <div style="background:#F3EFE9; padding:14px 16px; border-radius:8px; border-left:4px solid #A34C00; margin-bottom:16px; font-size:13px;">
         <strong>Verified case law pool:</strong> ${verifiedPool.length} cases (${verifiedPool.filter(v => v.source === "foundational").length} foundational + ${verifiedPool.filter(v => v.source !== "foundational" && v.source !== "legal_citations table").length} from firm briefs + ${verifiedPool.filter(v => v.source === "legal_citations table").length} from legal_citations)
       </div>
 
       ${warnHtml}
 
-      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <h2 style="font-size:16px; margin:0 0 12px 0; color:#2B2523;">✨ Generate New Demand Letter</h2>
-        <p style="font-size:13px; color:#666; margin-bottom:12px;">
+        <p style="font-size:13px; color:#5E5854; margin-bottom:12px;">
           Time-limited policy limits demand compliant with CCP §§ 999-999.5. Auto-calculates the deadline (33 days if policy limits ≤ $250K, 60 days if > $250K, or 60 days if undisclosed). Uses only verified case law.
         </p>
         <div style="display:grid; grid-template-columns:1fr; gap:12px;">
           <div>
-            <label style="font-size:11px; color:#888; display:block; margin-bottom:4px;">Target insurance carrier</label>
-            <select id="target-insurance" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;" ${!canGenerate ? "disabled" : ""}>
+            <label style="font-size:11px; color:#5E5854; display:block; margin-bottom:4px;">Target insurance carrier</label>
+            <select id="target-insurance" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px;" ${!canGenerate ? "disabled" : ""}>
               ${carrierOpts || '<option value="">No carriers on file</option>'}
             </select>
           </div>
           <div>
-            <label style="font-size:11px; color:#888; display:block; margin-bottom:4px;">Additional direction for the AI (optional)</label>
-            <textarea id="additional-context" placeholder="e.g., 'stress permanent impairment', 'emphasize clear liability from police report', 'address argument that treatment was excessive'..." style="width:100%; min-height:80px; padding:10px; border:1px solid #ccc; border-radius:6px; font-size:13px; box-sizing:border-box;" ${!canGenerate ? "disabled" : ""}></textarea>
+            <label style="font-size:11px; color:#5E5854; display:block; margin-bottom:4px;">Additional direction for the AI (optional)</label>
+            <textarea id="additional-context" placeholder="e.g., 'stress permanent impairment', 'emphasize clear liability from police report', 'address argument that treatment was excessive'..." style="width:100%; min-height:80px; padding:10px; border:1px solid #CFC8BE; border-radius:6px; font-size:13px; box-sizing:border-box;" ${!canGenerate ? "disabled" : ""}></textarea>
           </div>
           <div>
-            <button onclick="generateDemand()" id="gen-btn" ${!canGenerate ? "disabled" : ""} style="background:${canGenerate ? "#A34C00" : "#ccc"}; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:${canGenerate ? "pointer" : "not-allowed"}; font-weight:600; font-size:14px;">
+            <button onclick="generateDemand()" id="gen-btn" ${!canGenerate ? "disabled" : ""} style="background:${canGenerate ? "#A34C00" : "#E8E3DC"}; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:${canGenerate ? "pointer" : "not-allowed"}; font-weight:600; font-size:14px;">
               📝 Generate Demand Letter
             </button>
-            <div id="gen-status" style="margin-top:10px; font-size:12px; color:#666;"></div>
+            <div id="gen-status" style="margin-top:10px; font-size:12px; color:#5E5854;"></div>
           </div>
         </div>
       </div>
 
-      <h3 style="margin:20px 0 12px 0; font-size:14px; color:#666; text-transform:uppercase; letter-spacing:0.05em;">Generated Letters (${letters.length})</h3>
+      <h3 style="margin:20px 0 12px 0; font-size:14px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">Generated Letters (${letters.length})</h3>
       ${lettersHtml}
 
       <script>
@@ -4994,7 +4998,7 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
           if (!targetId) { alert("Select a target insurance carrier"); return; }
           btn.disabled = true;
           btn.textContent = "⏳ Drafting (45-90s)…";
-          status.innerHTML = "<div style='color:#0061FF;'>Retrieving case facts, verified case law, and drafting CCP § 999.1-compliant demand…</div>";
+          status.innerHTML = "<div style='color:#A34C00;'>Retrieving case facts, verified case law, and drafting CCP § 999.1-compliant demand…</div>";
           try {
             const r = await fetch("/admin/pi/case/${caseId}/generate-demand", {
               method: "POST", headers: { "Content-Type": "application/json" },
@@ -5002,15 +5006,15 @@ app.get("/admin/pi/case/:id/demand", async (req, res) => {
             });
             const d = await r.json();
             if (d.ok) {
-              status.innerHTML = "<div style='color:#2e7d32;'>✅ Generated! Redirecting…</div>";
+              status.innerHTML = "<div style='color:#2F6B3F;'>✅ Generated! Redirecting…</div>";
               setTimeout(() => location.href = "/admin/pi/case/${caseId}/demand/" + d.id, 500);
             } else {
-              status.innerHTML = "<div style='color:#c62828;'>❌ " + (d.error || "Failed") + "</div>";
+              status.innerHTML = "<div style='color:#9C2B1E;'>❌ " + (d.error || "Failed") + "</div>";
               btn.disabled = false;
               btn.textContent = "📝 Generate Demand Letter";
             }
           } catch (e) {
-            status.innerHTML = "<div style='color:#c62828;'>❌ " + e.message + "</div>";
+            status.innerHTML = "<div style='color:#9C2B1E;'>❌ " + e.message + "</div>";
             btn.disabled = false;
             btn.textContent = "📝 Generate Demand Letter";
           }
@@ -5054,11 +5058,11 @@ app.get("/admin/pi/case/:caseId/demand/:demandId", async (req, res) => {
     const daysToDeadline = letter.deadline_date ? Math.ceil((new Date(letter.deadline_date) - new Date()) / 86400000) : null;
 
     const statusColors = {
-      draft: "#A34C00", sent: "#0061FF", carrier_responded: "#7c4dff",
-      limits_disclosed: "#00838f", tendered: "#2e7d32", rejected: "#c62828",
-      bad_faith_flagged: "#c62828", superseded: "#999",
+      draft: "#A34C00", sent: "#2B2523", carrier_responded: "#5E5854",
+      limits_disclosed: "#A34C00", tendered: "#2F6B3F", rejected: "#9C2B1E",
+      bad_faith_flagged: "#9C2B1E", superseded: "#5E5854",
     };
-    const color = statusColors[letter.status] || "#666";
+    const color = statusColors[letter.status] || "#5E5854";
 
     const body = `
       <div class="page-header">
@@ -5066,7 +5070,7 @@ app.get("/admin/pi/case/:caseId/demand/:demandId", async (req, res) => {
         <a href="/admin/pi/case/${req.params.caseId}/demand" class="back-link">← All demand letters</a>
       </div>
 
-      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; font-size:12px; color:#555; margin-bottom:16px; display:flex; gap:16px; flex-wrap:wrap;">
+      <div style="background:#F3EFE9; padding:14px 16px; border-radius:8px; font-size:12px; color:#5E5854; margin-bottom:16px; display:flex; gap:16px; flex-wrap:wrap;">
         <div><strong>Target:</strong> ${esc(letter.target_carrier_name || "?")}</div>
         ${letter.target_claim_number ? `<div><strong>Claim #:</strong> ${esc(letter.target_claim_number)}</div>` : ""}
         <div><strong>Generated:</strong> ${new Date(letter.generated_at).toLocaleString()}</div>
@@ -5078,29 +5082,29 @@ app.get("/admin/pi/case/:caseId/demand/:demandId", async (req, res) => {
 
       <!-- Deadline banner -->
       ${letter.deadline_date ? `
-      <div style="background:${daysToDeadline < 0 ? "#fee" : daysToDeadline <= 7 ? "#fff8e1" : "#e8f5e9"}; padding:14px 20px; border-radius:8px; border-left:4px solid ${daysToDeadline < 0 ? "#c62828" : daysToDeadline <= 7 ? "#f57f17" : "#2e7d32"}; margin-bottom:16px;">
-        <strong style="font-size:14px; color:${daysToDeadline < 0 ? "#c62828" : daysToDeadline <= 7 ? "#f57f17" : "#2e7d32"};">
+      <div style="background:${daysToDeadline < 0 ? "#FBEDEA" : daysToDeadline <= 7 ? "#FFF3E6" : "#EEF5EF"}; padding:14px 20px; border-radius:8px; border-left:4px solid ${daysToDeadline < 0 ? "#9C2B1E" : daysToDeadline <= 7 ? "#FF7B00" : "#2F6B3F"}; margin-bottom:16px;">
+        <strong style="font-size:14px; color:${daysToDeadline < 0 ? "#9C2B1E" : daysToDeadline <= 7 ? "#A34C00" : "#2F6B3F"};">
           ${daysToDeadline < 0
             ? `🚨 DEADLINE PASSED ${Math.abs(daysToDeadline)} DAYS AGO (${new Date(letter.deadline_date).toLocaleDateString()})`
             : daysToDeadline === 0
               ? `⚠ DEADLINE IS TODAY (${new Date(letter.deadline_date).toLocaleDateString()})`
               : `📅 Deadline: ${new Date(letter.deadline_date).toLocaleDateString()} — ${daysToDeadline} days remaining`}
         </strong>
-        <div style="font-size:12px; color:#666; margin-top:4px;">
+        <div style="font-size:12px; color:#5E5854; margin-top:4px;">
           ${letter.deadline_days}-day statutory minimum per CCP § 999.1 (policy limits ${letter.policy_limits_amount ? "= " + fmt$(letter.policy_limits_amount) : "undisclosed"})
         </div>
         ${daysToDeadline < 0 && !letter.carrier_tendered_limits && !letter.bad_faith_flagged ? `
         <div style="margin-top:8px; padding:10px; background:white; border-radius:6px;">
-          <strong style="color:#c62828;">⚠ Bad faith exposure preserved.</strong> The carrier had a valid CCP § 999.1 demand and failed to timely tender. Consider flagging for bad faith documentation.
-          <button onclick="flagBadFaith()" style="margin-left:8px; background:#c62828; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px;">🚩 Flag Bad Faith</button>
+          <strong style="color:#9C2B1E;">⚠ Bad faith exposure preserved.</strong> The carrier had a valid CCP § 999.1 demand and failed to timely tender. Consider flagging for bad faith documentation.
+          <button onclick="flagBadFaith()" style="margin-left:8px; background:#9C2B1E; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:12px;">🚩 Flag Bad Faith</button>
         </div>` : ""}
       </div>` : ""}
 
       <!-- Letter body -->
-      <div style="background:white; padding:40px 50px; border-radius:8px; border:1px solid #eee; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:14px; line-height:1.7; color:#2B2523; white-space:pre-wrap;" id="letter-text">${esc(displayText)}</div>
+      <div style="background:white; padding:40px 50px; border-radius:8px; border:1px solid #E8E3DC; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:14px; line-height:1.7; color:#2B2523; white-space:pre-wrap;" id="letter-text">${esc(displayText)}</div>
 
       <!-- Certificate of Service -->
-      <details style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-top:16px;">
+      <details style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-top:16px;">
         <summary style="cursor:pointer; font-weight:600; color:#2B2523;">📋 Certificate of Service (attach to sent letter)</summary>
         <pre style="margin-top:12px; padding:16px; background:#FAF8F5; border-radius:6px; white-space:pre-wrap; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6;">${esc(letter.certificate_of_service || "")}</pre>
       </details>
@@ -5109,35 +5113,35 @@ app.get("/admin/pi/case/:caseId/demand/:demandId", async (req, res) => {
       <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
         <button onclick="copyText()" style="background:#2B2523; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy letter</button>
         <button onclick="printLetter()" style="background:#A34C00; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
-        <button onclick="regenerate()" style="background:#7c4dff; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate</button>
-        <button onclick="markSent()" style="background:#0061FF; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📬 Mark Sent</button>
-        <button onclick="recordResponse()" style="background:#00838f; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📨 Record Response</button>
+        <button onclick="regenerate()" style="background:#5E5854; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate</button>
+        <button onclick="markSent()" style="background:#2B2523; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📬 Mark Sent</button>
+        <button onclick="recordResponse()" style="background:#2B2523; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📨 Record Response</button>
       </div>
 
       ${(letter.cases_cited || []).length > 0 ? `
-      <details style="margin-top:20px; background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
+      <details style="margin-top:20px; background:white; padding:16px 20px; border-radius:8px; border:1px solid #E8E3DC;">
         <summary style="cursor:pointer; font-weight:600; color:#2B2523;">📚 Cases cited (${letter.cases_cited.length})</summary>
-        <ul style="margin-top:10px; font-size:12px; color:#555; line-height:1.7;">
+        <ul style="margin-top:10px; font-size:12px; color:#5E5854; line-height:1.7;">
           ${letter.cases_cited.map(c => `<li>${esc(c)}</li>`).join("")}
         </ul>
       </details>` : ""}
 
       ${letter.response_summary ? `
-      <details style="margin-top:16px; background:#f5f9ff; padding:16px 20px; border-radius:8px; border-left:3px solid #0061FF;">
+      <details style="margin-top:16px; background:#F3EFE9; padding:16px 20px; border-radius:8px; border-left:3px solid #A34C00;">
         <summary style="cursor:pointer; font-weight:600;">📨 Carrier Response</summary>
-        <div style="margin-top:10px; font-size:13px; color:#555;">
+        <div style="margin-top:10px; font-size:13px; color:#5E5854;">
           <div><strong>Received:</strong> ${letter.response_received_date ? new Date(letter.response_received_date).toLocaleDateString() : "—"}</div>
           ${letter.policy_limits_disclosed ? `<div><strong>Policy limits disclosed:</strong> ${fmt$(letter.disclosed_limits_amount)}</div>` : "<div>Limits NOT disclosed</div>"}
-          ${letter.carrier_tendered_limits ? `<div style="color:#2e7d32;"><strong>✓ TENDERED:</strong> ${fmt$(letter.tendered_amount)}</div>` : ""}
+          ${letter.carrier_tendered_limits ? `<div style="color:#2F6B3F;"><strong>✓ TENDERED:</strong> ${fmt$(letter.tendered_amount)}</div>` : ""}
           ${letter.settlement_offered ? `<div><strong>Settlement offered:</strong> ${fmt$(letter.settlement_offered)} (${letter.settlement_offered_date ? new Date(letter.settlement_offered_date).toLocaleDateString() : "no date"})</div>` : ""}
           <div style="margin-top:8px; white-space:pre-wrap;">${esc(letter.response_summary)}</div>
         </div>
       </details>` : ""}
 
       ${letter.bad_faith_flagged ? `
-      <div style="background:#fee; padding:16px 20px; border-radius:8px; border-left:4px solid #c62828; margin-top:16px;">
-        <strong style="color:#c62828;">🚩 FLAGGED FOR BAD FAITH DOCUMENTATION</strong>
-        <div style="font-size:12px; color:#666; margin-top:6px;">Flagged on: ${letter.bad_faith_flag_date ? new Date(letter.bad_faith_flag_date).toLocaleDateString() : "—"}</div>
+      <div style="background:#FBEDEA; padding:16px 20px; border-radius:8px; border-left:4px solid #9C2B1E; margin-top:16px;">
+        <strong style="color:#9C2B1E;">🚩 FLAGGED FOR BAD FAITH DOCUMENTATION</strong>
+        <div style="font-size:12px; color:#5E5854; margin-top:6px;">Flagged on: ${letter.bad_faith_flag_date ? new Date(letter.bad_faith_flag_date).toLocaleDateString() : "—"}</div>
         ${letter.bad_faith_notes ? `<div style="margin-top:8px; font-size:13px; white-space:pre-wrap;">${esc(letter.bad_faith_notes)}</div>` : ""}
       </div>` : ""}
 
@@ -5318,40 +5322,40 @@ app.get("/admin/audit-trail", async (req, res) => {
       const dt = new Date(r.generated_at).toLocaleString();
       const preview = (r.preview || "").replace(/</g, "&lt;");
       const client = r.client_name ? `${r.client_name}${r.a_number ? " (" + r.a_number + ")" : ""}` : "(no client link)";
-      const color = statusColors[r.status] || "#666";
-      const flagIcon = (r.bar_complaint_related || r.malpractice_flag) ? '<span title="Flagged for compliance review" style="color:#c62828; font-size:16px;">⚠️</span> ' : "";
+      const color = statusColors[r.status] || "#5E5854";
+      const flagIcon = (r.bar_complaint_related || r.malpractice_flag) ? '<span title="Flagged for compliance review" style="color:#9C2B1E; font-size:16px;">⚠️</span> ' : "";
       const editIndicator = r.edit_char_delta ? ` · ${r.edit_char_delta >= 0 ? "+" : ""}${r.edit_char_delta} chars edited` : "";
       const deliveredIndicator = r.delivered_at ? ` · ✓ delivered via ${r.delivered_via || "?"}` : "";
       return `
         <tr>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top;">
             <div style="display:flex; align-items:center; gap:6px;">
               ${flagIcon}<strong style="color:#2B2523;">#${r.id}</strong>
               <span style="background:${color}; color:white; padding:2px 8px; border-radius:8px; font-size:10px; font-weight:600;">${r.status.toUpperCase()}</span>
             </div>
-            <div style="font-size:11px; color:#888; margin-top:2px;">${dt}</div>
+            <div style="font-size:11px; color:#5E5854; margin-top:2px;">${dt}</div>
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top;">
             <div style="font-weight:500; color:#2B2523;">${r.feature_type.replace(/_/g, " ")}</div>
-            <div style="font-size:11px; color:#888;">${(r.source_module || "").replace(".js", "")}</div>
+            <div style="font-size:11px; color:#5E5854;">${(r.source_module || "").replace(".js", "")}</div>
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:13px;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top; font-size:13px;">
             ${client}
-            <div style="font-size:11px; color:#888;">${r.matter_type || ""}</div>
+            <div style="font-size:11px; color:#5E5854;">${r.matter_type || ""}</div>
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:11px; color:#666;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top; font-size:11px; color:#5E5854;">
             ${r.model_used || "—"}<br>
-            <span style="color:#2e7d32;">$${Number(r.estimated_cost_usd || 0).toFixed(3)}</span><br>
+            <span style="color:#2F6B3F;">$${Number(r.estimated_cost_usd || 0).toFixed(3)}</span><br>
             ${r.output_length}ch${editIndicator}${deliveredIndicator}
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top; font-size:12px; color:#555; max-width:400px;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top; font-size:12px; color:#5E5854; max-width:400px;">
             <div style="font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${(r.output_length || 0) > 200 ? "…" : ""}</div>
           </td>
-          <td style="padding:12px; border-bottom:1px solid #eee; vertical-align:top;">
+          <td style="padding:12px; border-bottom:1px solid #E8E3DC; vertical-align:top;">
             <a href="/admin/audit-trail/${r.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
           </td>
         </tr>`;
-    }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#888;">No audit records match these filters.</td></tr>`;
+    }).join("") : `<tr><td colspan="6" style="padding:60px; text-align:center; color:#5E5854;">No audit records match these filters.</td></tr>`;
 
     const pageCount = Math.ceil(totalCount / 50);
     const currentPage = Math.floor(filters.offset / 50) + 1;
@@ -5359,82 +5363,82 @@ app.get("/admin/audit-trail", async (req, res) => {
     const body = `
       <div class="page-header">
         <h1>AI Audit Trail</h1>
-        <div style="font-size:12px; color:#666; margin-top:4px;">Immutable log of every AI output — malpractice + bar complaint defense</div>
+        <div style="font-size:12px; color:#5E5854; margin-top:4px;">Immutable log of every AI output — malpractice + bar complaint defense</div>
       </div>
 
       <!-- Stats grid -->
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:20px;">
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Pending review</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">Pending review</div>
           <div style="font-size:24px; font-weight:700; color:${(stats.pending_review || 0) > 0 ? "#A34C00" : "#2B2523"}; margin-top:4px;">${stats.pending_review || 0}</div>
         </div>
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Approved</div>
-          <div style="font-size:24px; font-weight:700; color:#2e7d32; margin-top:4px;">${stats.approved || 0}</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">Approved</div>
+          <div style="font-size:24px; font-weight:700; color:#2F6B3F; margin-top:4px;">${stats.approved || 0}</div>
         </div>
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Delivered</div>
-          <div style="font-size:24px; font-weight:700; color:#00695c; margin-top:4px;">${stats.delivered || 0}</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">Delivered</div>
+          <div style="font-size:24px; font-weight:700; color:#2F6B3F; margin-top:4px;">${stats.delivered || 0}</div>
         </div>
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Flagged</div>
-          <div style="font-size:24px; font-weight:700; color:${(stats.flagged || 0) > 0 ? "#c62828" : "#2B2523"}; margin-top:4px;">${stats.flagged || 0}</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">Flagged</div>
+          <div style="font-size:24px; font-weight:700; color:${(stats.flagged || 0) > 0 ? "#9C2B1E" : "#2B2523"}; margin-top:4px;">${stats.flagged || 0}</div>
         </div>
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Last 30 days</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">Last 30 days</div>
           <div style="font-size:24px; font-weight:700; color:#2B2523; margin-top:4px;">${stats.last_30_days || 0}</div>
-          <div style="font-size:11px; color:#2e7d32; margin-top:2px;">$${Number(stats.cost_last_30_days || 0).toFixed(2)}</div>
+          <div style="font-size:11px; color:#2F6B3F; margin-top:2px;">$${Number(stats.cost_last_30_days || 0).toFixed(2)}</div>
         </div>
-        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.05em;">Total all time</div>
+        <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">Total all time</div>
           <div style="font-size:24px; font-weight:700; color:#2B2523; margin-top:4px;">${stats.total_all_time || 0}</div>
-          <div style="font-size:11px; color:#2e7d32; margin-top:2px;">$${Number(stats.total_cost_all_time || 0).toFixed(2)}</div>
+          <div style="font-size:11px; color:#2F6B3F; margin-top:2px;">$${Number(stats.total_cost_all_time || 0).toFixed(2)}</div>
         </div>
       </div>
 
       <!-- Filters -->
-      <form method="GET" style="background:white; padding:16px; border-radius:8px; border:1px solid #eee; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+      <form method="GET" style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
         <div>
-          <label style="font-size:11px; color:#888; display:block; margin-bottom:2px;">Feature type</label>
-          <select name="feature_type" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+          <label style="font-size:11px; color:#5E5854; display:block; margin-bottom:2px;">Feature type</label>
+          <select name="feature_type" style="padding:6px; border:1px solid #CFC8BE; border-radius:4px;">
             <option value="">All types</option>
             ${featureOptsHtml}
           </select>
         </div>
         <div>
-          <label style="font-size:11px; color:#888; display:block; margin-bottom:2px;">Status</label>
-          <select name="status" style="padding:6px; border:1px solid #ccc; border-radius:4px;">
+          <label style="font-size:11px; color:#5E5854; display:block; margin-bottom:2px;">Status</label>
+          <select name="status" style="padding:6px; border:1px solid #CFC8BE; border-radius:4px;">
             <option value="">All statuses</option>
             ${statusOptsHtml}
           </select>
         </div>
         <div>
-          <label style="font-size:11px; color:#888; display:block; margin-bottom:2px;">A-Number</label>
-          <input type="text" name="a_number" value="${(filters.a_number || "").replace(/"/g, "&quot;")}" style="padding:6px; border:1px solid #ccc; border-radius:4px; width:140px;" placeholder="A123456789">
+          <label style="font-size:11px; color:#5E5854; display:block; margin-bottom:2px;">A-Number</label>
+          <input type="text" name="a_number" value="${(filters.a_number || "").replace(/"/g, "&quot;")}" style="padding:6px; border:1px solid #CFC8BE; border-radius:4px; width:140px;" placeholder="A123456789">
         </div>
         <div>
-          <label style="font-size:11px; color:#888; display:block; margin-bottom:2px;">
+          <label style="font-size:11px; color:#5E5854; display:block; margin-bottom:2px;">
             <input type="checkbox" name="flagged" value="1" ${filters.flagged_only ? "checked" : ""}> Flagged only
           </label>
         </div>
         <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Filter</button>
-        <a href="/admin/audit-trail" style="padding:8px 16px; color:#666; text-decoration:none; font-size:13px;">Clear</a>
+        <a href="/admin/audit-trail" style="padding:8px 16px; color:#5E5854; text-decoration:none; font-size:13px;">Clear</a>
       </form>
 
       <!-- Results table -->
-      <div style="background:white; border-radius:8px; border:1px solid #eee; overflow:hidden;">
-        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #eee; font-size:12px; color:#666;">
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden;">
+        <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #E8E3DC; font-size:12px; color:#5E5854;">
           Showing ${rows.length} of ${totalCount} records
         </div>
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
           <thead>
             <tr style="background:#FAF8F5;">
-              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">ID / Status</th>
-              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Feature</th>
-              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Client</th>
-              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Model / Cost</th>
-              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;">Preview</th>
-              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#666; text-transform:uppercase; border-bottom:1px solid #eee;"></th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">ID / Status</th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Feature</th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Client</th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Model / Cost</th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Preview</th>
+              <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;"></th>
             </tr>
           </thead>
           <tbody>${rowsHtml}</tbody>
@@ -5459,8 +5463,8 @@ app.get("/admin/audit-trail/:id", async (req, res) => {
 
     const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const statusColors = {
-      unreviewed: "#A34C00", reviewed: "#0061FF", approved: "#2e7d32",
-      delivered: "#00695c", withdrawn: "#999", flagged: "#c62828",
+      unreviewed: "#A34C00", reviewed: "#2B2523", approved: "#2F6B3F",
+      delivered: "#2F6B3F", withdrawn: "#5E5854", flagged: "#9C2B1E",
     };
 
     const body = `
@@ -5470,7 +5474,7 @@ app.get("/admin/audit-trail/:id", async (req, res) => {
       </div>
 
       <!-- Metadata block -->
-      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; font-size:13px;">
           <div><strong>Feature:</strong> ${esc(row.feature_type)}</div>
           <div><strong>Status:</strong> <span style="background:${statusColors[row.status]}; color:white; padding:2px 8px; border-radius:8px; font-size:11px; font-weight:600;">${esc(row.status).toUpperCase()}</span></div>
@@ -5487,47 +5491,47 @@ app.get("/admin/audit-trail/:id", async (req, res) => {
       </div>
 
       <!-- Integrity check -->
-      <div style="background:${integrity.tamper_detected ? "#fee" : "#e8f5e9"}; padding:14px 16px; border-radius:8px; border-left:4px solid ${integrity.tamper_detected ? "#c62828" : "#2e7d32"}; margin-bottom:16px; font-size:12px; font-family:ui-monospace, Menlo, monospace;">
+      <div style="background:${integrity.tamper_detected ? "#FBEDEA" : "#EEF5EF"}; padding:14px 16px; border-radius:8px; border-left:4px solid ${integrity.tamper_detected ? "#9C2B1E" : "#2F6B3F"}; margin-bottom:16px; font-size:12px; font-family:ui-monospace, Menlo, monospace;">
         <strong>🔒 Integrity check:</strong> ${integrity.tamper_detected ? "❌ TAMPERING DETECTED — hashes do not match" : "✓ PASSED — content matches stored hash"}<br>
-        <span style="color:#888;">Stored hash: ${integrity.stored_hash?.substring(0, 32) || "?"}…</span><br>
-        <span style="color:#888;">Computed:    ${integrity.computed_hash?.substring(0, 32) || "?"}…</span>
+        <span style="color:#5E5854;">Stored hash: ${integrity.stored_hash?.substring(0, 32) || "?"}…</span><br>
+        <span style="color:#5E5854;">Computed:    ${integrity.computed_hash?.substring(0, 32) || "?"}…</span>
       </div>
 
       <!-- Original AI output (immutable) -->
-      <details open style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <details open style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <summary style="cursor:pointer; font-weight:600; color:#2B2523;">📄 Original AI Output (${row.original_output ? row.original_output.length : 0} chars) — IMMUTABLE</summary>
         <pre style="margin-top:14px; padding:16px; background:#FAF8F5; border-radius:6px; white-space:pre-wrap; word-wrap:break-word; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6; max-height:600px; overflow-y:auto;">${esc(row.original_output)}</pre>
       </details>
 
       ${row.final_version ? `
-      <details style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <details style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <summary style="cursor:pointer; font-weight:600; color:#2B2523;">✏️ Final Version (after attorney edits)</summary>
         <pre style="margin-top:14px; padding:16px; background:#FAF8F5; border-radius:6px; white-space:pre-wrap; word-wrap:break-word; font-family:ui-serif, Georgia, serif; font-size:13px; line-height:1.6; max-height:600px; overflow-y:auto;">${esc(row.final_version)}</pre>
-        ${row.edit_diff ? `<div style="margin-top:10px; font-size:12px; color:#666;"><strong>Edit summary:</strong> ${esc((JSON.parse(row.edit_diff) || {}).summary || "")}</div>` : ""}
+        ${row.edit_diff ? `<div style="margin-top:10px; font-size:12px; color:#5E5854;"><strong>Edit summary:</strong> ${esc((JSON.parse(row.edit_diff) || {}).summary || "")}</div>` : ""}
       </details>` : ""}
 
       ${row.reviewer_notes ? `
-      <div style="background:#fff8ec; padding:14px 16px; border-radius:8px; border-left:3px solid #FF7B00; margin-bottom:16px; font-size:13px;">
+      <div style="background:#FAF8F5; padding:14px 16px; border-radius:8px; border-left:3px solid #FF7B00; margin-bottom:16px; font-size:13px;">
         <strong>📝 Reviewer notes:</strong><br>
         <div style="white-space:pre-wrap; margin-top:6px;">${esc(row.reviewer_notes)}</div>
       </div>` : ""}
 
       ${row.input_context_summary ? `
-      <details style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:3px solid #0061FF; margin-bottom:16px; font-size:12px;">
+      <details style="background:#F3EFE9; padding:14px 16px; border-radius:8px; border-left:3px solid #A34C00; margin-bottom:16px; font-size:12px;">
         <summary style="cursor:pointer; font-weight:600;">📥 Input context that produced this output</summary>
-        <div style="margin-top:8px; color:#555; white-space:pre-wrap;">${esc(row.input_context_summary)}</div>
-        ${row.input_context_hash ? `<div style="margin-top:6px; font-family:ui-monospace, Menlo, monospace; font-size:10px; color:#888;">Input hash: ${row.input_context_hash.substring(0, 48)}…</div>` : ""}
+        <div style="margin-top:8px; color:#5E5854; white-space:pre-wrap;">${esc(row.input_context_summary)}</div>
+        ${row.input_context_hash ? `<div style="margin-top:6px; font-family:ui-monospace, Menlo, monospace; font-size:10px; color:#5E5854;">Input hash: ${row.input_context_hash.substring(0, 48)}…</div>` : ""}
       </details>` : ""}
 
       <!-- Action buttons -->
-      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee;">
-        <h3 style="margin:0 0 12px 0; font-size:14px; color:#666;">Actions</h3>
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC;">
+        <h3 style="margin:0 0 12px 0; font-size:14px; color:#5E5854;">Actions</h3>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          ${row.status === "unreviewed" ? `<button onclick="markReviewed()" style="background:#0061FF; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Mark Reviewed</button>` : ""}
-          ${(row.status === "reviewed" || row.status === "unreviewed") ? `<button onclick="markApproved()" style="background:#2e7d32; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Approve</button>` : ""}
-          ${(row.status === "approved" || row.status === "reviewed") ? `<button onclick="markDelivered()" style="background:#00695c; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📬 Mark Delivered</button>` : ""}
-          <button onclick="flagRecord()" style="background:#c62828; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🚩 Flag</button>
-          <button onclick="withdrawRecord()" style="background:#999; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">↩️ Withdraw</button>
+          ${row.status === "unreviewed" ? `<button onclick="markReviewed()" style="background:#A34C00; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Mark Reviewed</button>` : ""}
+          ${(row.status === "reviewed" || row.status === "unreviewed") ? `<button onclick="markApproved()" style="background:#2F6B3F; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Approve</button>` : ""}
+          ${(row.status === "approved" || row.status === "reviewed") ? `<button onclick="markDelivered()" style="background:#2F6B3F; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📬 Mark Delivered</button>` : ""}
+          <button onclick="flagRecord()" style="background:#9C2B1E; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🚩 Flag</button>
+          <button onclick="withdrawRecord()" style="background:#5E5854; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">↩️ Withdraw</button>
           ${row.client_key ? `<a href="/admin/audit-trail/export/client/${encodeURIComponent(row.client_key)}" style="background:#2B2523; color:white; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600; text-decoration:none; margin-left:auto;">📥 Export full client trail</a>` : ""}
         </div>
       </div>
@@ -5704,12 +5708,12 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
     const hasRawNotes = (noteRow.hearing_summary_raw || "").trim().length > 0;
 
     const sourcesBlock = `
-      <div style="background:#fff8ec; padding:14px 16px; border-radius:8px; border-left:4px solid #FF7B00; margin-bottom:16px; font-size:13px;">
+      <div style="background:#FAF8F5; padding:14px 16px; border-radius:8px; border-left:4px solid #FF7B00; margin-bottom:16px; font-size:13px;">
         <strong>Sources that will feed into this closing:</strong>
-        <ul style="margin:8px 0 0 0; padding-left:20px; color:#555;">
+        <ul style="margin:8px 0 0 0; padding-left:20px; color:#5E5854;">
           ${examCount > 0
-            ? `<li>${examCount} witness examination${examCount === 1 ? "" : "s"} with ${qaCount} Q&A rows</li>${witnessSummary.map(w => `<li style="font-size:12px; color:#777; list-style:none; margin-left:-14px;">&nbsp;&nbsp;• ${w}</li>`).join("")}`
-            : `<li style="color:#c62828;">⚠ No witness examinations recorded yet — closing will be light on testimony grounding</li>`}
+            ? `<li>${examCount} witness examination${examCount === 1 ? "" : "s"} with ${qaCount} Q&A rows</li>${witnessSummary.map(w => `<li style="font-size:12px; color:#5E5854; list-style:none; margin-left:-14px;">&nbsp;&nbsp;• ${w}</li>`).join("")}`
+            : `<li style="color:#9C2B1E;">⚠ No witness examinations recorded yet — closing will be light on testimony grounding</li>`}
           ${hasPreNotes ? `<li>Attorney's pre-hearing notes / outline</li>` : ""}
           ${hasRawNotes ? `<li>Raw hearing notes / dictation</li>` : ""}
           <li>${verifiedPool.length} verified case citations from GOAT/MOAT + legal_citations</li>
@@ -5720,28 +5724,28 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
       const dt = new Date(a.generated_at).toLocaleString();
       const preview = (a.argument_text || "").substring(0, 300).replace(/</g, "&lt;");
       const status = a.status || "draft";
-      const statusColor = { draft: "#A34C00", finalized: "#0061FF", delivered: "#2e7d32", superseded: "#999" }[status] || "#666";
+      const statusColor = { draft: "#A34C00", finalized: "#2B2523", delivered: "#2F6B3F", superseded: "#5E5854" }[status] || "#5E5854";
       const parentLabel = a.parent_id ? ` · regenerated from #${a.parent_id}` : "";
       const witnessLabel = a.testimony_witness_count ? ` · ${a.testimony_witness_count} witness${a.testimony_witness_count === 1 ? "" : "es"} in record` : "";
       const ctxLabel = a.additional_context ? ` · custom context` : "";
       return `
-        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:10px;">
             <div style="flex:1;">
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 <strong style="color:#2B2523; font-size:15px;">Version ${a.version || 1}</strong>
                 <span style="background:${statusColor}; color:white; padding:2px 8px; border-radius:8px; font-size:10px;">${status.toUpperCase()}</span>
-                <span style="font-size:11px; color:#888;">#${a.id}</span>
+                <span style="font-size:11px; color:#5E5854;">#${a.id}</span>
               </div>
-              <div style="font-size:11px; color:#888; margin-top:4px;">${dt} · ${a.model} · $${Number(a.estimated_cost_usd || 0).toFixed(3)} · ${(a.cases_cited || []).length} cases${witnessLabel}${parentLabel}${ctxLabel}</div>
+              <div style="font-size:11px; color:#5E5854; margin-top:4px;">${dt} · ${a.model} · $${Number(a.estimated_cost_usd || 0).toFixed(3)} · ${(a.cases_cited || []).length} cases${witnessLabel}${parentLabel}${ctxLabel}</div>
             </div>
             <div style="display:flex; gap:6px; flex-shrink:0;">
               <a href="/admin/hearing/individual/${noteId}/closing/${a.id}" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px;">Open →</a>
             </div>
           </div>
-          <div style="font-size:12px; color:#555; padding:10px; background:#FAF8F5; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${a.argument_text && a.argument_text.length > 300 ? "…" : ""}</div>
+          <div style="font-size:12px; color:#5E5854; padding:10px; background:#FAF8F5; border-radius:6px; font-family:ui-serif, Georgia, serif; line-height:1.5;">${preview}${a.argument_text && a.argument_text.length > 300 ? "…" : ""}</div>
         </div>`;
-    }).join("") : `<div style="text-align:center; padding:40px; color:#888;">No closing arguments generated yet.</div>`;
+    }).join("") : `<div style="text-align:center; padding:40px; color:#5E5854;">No closing arguments generated yet.</div>`;
 
     const body = `
       <div class="page-header">
@@ -5749,27 +5753,27 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
         <a href="/admin/hearing/individual/${noteId}" class="back-link">← Back to hearing note</a>
       </div>
 
-      <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+      <div style="background:#F3EFE9; padding:14px 16px; border-radius:8px; border-left:4px solid #A34C00; margin-bottom:16px; font-size:13px;">
         <strong>Verified case law pool:</strong> ${verifiedPool.length} cases available from your firm's GOAT/MOAT + legal_citations.
-        ${verifiedPool.length < 5 ? `<span style="color:#c62828; font-weight:600;"> ⚠️ Need at least 5 asylum cases to generate. Add briefs at <a href="/admin/firm-documents" style="color:#c62828;">/admin/firm-documents</a>.</span>` : ""}
+        ${verifiedPool.length < 5 ? `<span style="color:#9C2B1E; font-weight:600;"> ⚠️ Need at least 5 asylum cases to generate. Add briefs at <a href="/admin/firm-documents" style="color:#9C2B1E;">/admin/firm-documents</a>.</span>` : ""}
       </div>
 
       ${sourcesBlock}
 
-      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
         <h2 style="font-size:16px; margin:0 0 12px 0; color:#2B2523;">✨ Generate New Closing Argument</h2>
-        <p style="font-size:13px; color:#666; margin-bottom:10px;">
+        <p style="font-size:13px; color:#5E5854; margin-bottom:10px;">
           This will draft a closing oral argument covering REAL ID Act, credibility, past persecution (including single-incident doctrine), and well-founded fear (subjective + objective prongs). Only cases from your verified pool will be cited.
         </p>
-        <label style="font-size:12px; color:#666; display:block; margin-bottom:4px;">Additional context for the AI (optional)</label>
-        <textarea id="additional-context" placeholder="e.g., 'emphasize country conditions evidence from Exhibit 12', 'address government's argument that harm was localized', 'client has minor inconsistencies about dates — explain via trauma'..." style="width:100%; min-height:80px; padding:10px; border:1px solid #ccc; border-radius:6px; font-family:inherit; font-size:13px; box-sizing:border-box;"></textarea>
-        <button onclick="generateClosing()" id="gen-btn" ${verifiedPool.length < 5 ? "disabled" : ""} style="margin-top:10px; background:${verifiedPool.length < 5 ? "#ccc" : "#A34C00"}; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:${verifiedPool.length < 5 ? "not-allowed" : "pointer"}; font-weight:600; font-size:14px;">
+        <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:4px;">Additional context for the AI (optional)</label>
+        <textarea id="additional-context" placeholder="e.g., 'emphasize country conditions evidence from Exhibit 12', 'address government's argument that harm was localized', 'client has minor inconsistencies about dates — explain via trauma'..." style="width:100%; min-height:80px; padding:10px; border:1px solid #CFC8BE; border-radius:6px; font-family:inherit; font-size:13px; box-sizing:border-box;"></textarea>
+        <button onclick="generateClosing()" id="gen-btn" ${verifiedPool.length < 5 ? "disabled" : ""} style="margin-top:10px; background:${verifiedPool.length < 5 ? "#E8E3DC" : "#A34C00"}; color:white; border:none; padding:12px 24px; border-radius:6px; cursor:${verifiedPool.length < 5 ? "not-allowed" : "pointer"}; font-weight:600; font-size:14px;">
           🏛️ Generate Closing Argument
         </button>
-        <div id="gen-status" style="margin-top:10px; font-size:12px; color:#666;"></div>
+        <div id="gen-status" style="margin-top:10px; font-size:12px; color:#5E5854;"></div>
       </div>
 
-      <h3 style="margin:20px 0 12px 0; font-size:14px; color:#666; text-transform:uppercase; letter-spacing:0.05em;">Generated Arguments (${args.length})</h3>
+      <h3 style="margin:20px 0 12px 0; font-size:14px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">Generated Arguments (${args.length})</h3>
       ${argsHtml}
 
       <script>
@@ -5779,7 +5783,7 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
           const ctx = document.getElementById("additional-context").value.trim();
           btn.disabled = true;
           btn.textContent = "⏳ Drafting (30-90s)…";
-          status.innerHTML = "<div style='color:#0061FF;'>Reading case facts, retrieving verified case law, drafting…</div>";
+          status.innerHTML = "<div style='color:#A34C00;'>Reading case facts, retrieving verified case law, drafting…</div>";
           try {
             const r = await fetch("/admin/hearing/individual/${noteId}/generate-closing", {
               method: "POST",
@@ -5788,15 +5792,15 @@ app.get("/admin/hearing/individual/:id/closing", async (req, res) => {
             });
             const d = await r.json();
             if (d.ok) {
-              status.innerHTML = "<div style='color:#2e7d32;'>✅ Generated! Redirecting…</div>";
+              status.innerHTML = "<div style='color:#2F6B3F;'>✅ Generated! Redirecting…</div>";
               setTimeout(() => location.href = "/admin/hearing/individual/${noteId}/closing/" + d.id, 500);
             } else {
-              status.innerHTML = "<div style='color:#c62828;'>❌ " + (d.error || "Failed") + "</div>";
+              status.innerHTML = "<div style='color:#9C2B1E;'>❌ " + (d.error || "Failed") + "</div>";
               btn.disabled = false;
               btn.textContent = "🏛️ Generate Closing Argument";
             }
           } catch (e) {
-            status.innerHTML = "<div style='color:#c62828;'>❌ " + e.message + "</div>";
+            status.innerHTML = "<div style='color:#9C2B1E;'>❌ " + e.message + "</div>";
             btn.disabled = false;
             btn.textContent = "🏛️ Generate Closing Argument";
           }
@@ -5868,7 +5872,7 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
         <a href="/admin/hearing/individual/${req.params.noteId}/closing" class="back-link">← All versions</a>
       </div>
 
-      <div style="background:#f5f9ff; padding:12px 14px; border-radius:8px; font-size:12px; color:#555; margin-bottom:16px; display:flex; gap:16px; flex-wrap:wrap;">
+      <div style="background:#F3EFE9; padding:12px 14px; border-radius:8px; font-size:12px; color:#5E5854; margin-bottom:16px; display:flex; gap:16px; flex-wrap:wrap;">
         <div><strong>Client:</strong> ${(closing.client_name || "").replace(/</g, "&lt;")}</div>
         ${closing.a_number ? `<div><strong>A#:</strong> ${closing.a_number.replace(/</g, "&lt;")}</div>` : ""}
         <div><strong>Generated:</strong> ${new Date(closing.generated_at).toLocaleString()}</div>
@@ -5876,29 +5880,29 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
         <div><strong>Cost:</strong> $${Number(closing.estimated_cost_usd || 0).toFixed(4)}</div>
         <div><strong>Cases cited:</strong> ${(closing.cases_cited || []).length}</div>
         <div><strong>Status:</strong> ${closing.status}</div>
-        ${closing.parent_id ? `<div><strong>Regenerated from:</strong> <a href="/admin/hearing/individual/${req.params.noteId}/closing/${closing.parent_id}" style="color:#0061FF;">Version ${closing.version - 1} (#${closing.parent_id})</a></div>` : ""}
+        ${closing.parent_id ? `<div><strong>Regenerated from:</strong> <a href="/admin/hearing/individual/${req.params.noteId}/closing/${closing.parent_id}" style="color:#A34C00;">Version ${closing.version - 1} (#${closing.parent_id})</a></div>` : ""}
       </div>
 
       ${closing.additional_context ? `
-      <details style="background:#fff8ec; padding:12px 16px; border-radius:8px; border-left:3px solid #FF7B00; margin-bottom:16px; font-size:12px;">
+      <details style="background:#FAF8F5; padding:12px 16px; border-radius:8px; border-left:3px solid #FF7B00; margin-bottom:16px; font-size:12px;">
         <summary style="cursor:pointer; font-weight:600; color:#2B2523;">📝 Attorney's context for this version</summary>
-        <div style="margin-top:8px; color:#555; white-space:pre-wrap;">${String(closing.additional_context).replace(/</g, "&lt;")}</div>
+        <div style="margin-top:8px; color:#5E5854; white-space:pre-wrap;">${String(closing.additional_context).replace(/</g, "&lt;")}</div>
       </details>` : ""}
 
-      <div style="background:white; padding:32px 40px; border-radius:8px; border:1px solid #eee; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:15px; line-height:1.75; color:#2B2523; white-space:pre-wrap;" id="argument-text">${escaped}</div>
+      <div style="background:white; padding:32px 40px; border-radius:8px; border:1px solid #E8E3DC; max-width:820px; font-family:ui-serif, Georgia, serif; font-size:15px; line-height:1.75; color:#2B2523; white-space:pre-wrap;" id="argument-text">${escaped}</div>
 
       <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
         <button onclick="copyText()" style="background:#2B2523; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">📋 Copy to clipboard</button>
         <button onclick="printArgument()" style="background:#A34C00; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🖨️ Print</button>
-        <button onclick="regenerate()" style="background:#7c4dff; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate (new version)</button>
-        <button onclick="markStatus('finalized')" style="background:#0061FF; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Mark finalized</button>
-        <button onclick="markStatus('delivered')" style="background:#2e7d32; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Mark delivered</button>
+        <button onclick="regenerate()" style="background:#5E5854; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate (new version)</button>
+        <button onclick="markStatus('finalized')" style="background:#2B2523; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">✓ Mark finalized</button>
+        <button onclick="markStatus('delivered')" style="background:#2F6B3F; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🎯 Mark delivered</button>
       </div>
 
       ${(closing.cases_cited || []).length > 0 ? `
-      <details style="margin-top:20px; background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
+      <details style="margin-top:20px; background:white; padding:16px 20px; border-radius:8px; border:1px solid #E8E3DC;">
         <summary style="cursor:pointer; font-weight:600; color:#2B2523;">📚 Cases cited in this closing (${closing.cases_cited.length})</summary>
-        <ul style="margin-top:10px; font-size:12px; color:#555; line-height:1.7;">
+        <ul style="margin-top:10px; font-size:12px; color:#5E5854; line-height:1.7;">
           ${closing.cases_cited.map(c => `<li>${String(c).replace(/</g, "&lt;")}</li>`).join("")}
         </ul>
       </details>` : ""}
@@ -5907,14 +5911,14 @@ app.get("/admin/hearing/individual/:noteId/closing/:closingId", async (req, res)
       <div id="regen-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; padding:20px;">
         <div style="background:white; padding:24px; border-radius:12px; max-width:520px; width:100%;">
           <h3 style="margin:0 0 12px 0; color:#2B2523;">🔄 Regenerate Closing</h3>
-          <p style="font-size:13px; color:#666; margin-bottom:12px;">
+          <p style="font-size:13px; color:#5E5854; margin-bottom:12px;">
             A new version will be created using the same hearing notes and testimony, plus any additional direction you provide below. The previous version stays saved.
           </p>
-          <label style="font-size:12px; color:#666; display:block; margin-bottom:4px;">What to change / emphasize (optional)</label>
-          <textarea id="regen-context" placeholder="e.g., 'make it more concise', 'emphasize country conditions', 'add more discussion of PSG', 'address the DHS argument about internal relocation'..." style="width:100%; min-height:100px; padding:10px; border:1px solid #ccc; border-radius:6px; font-family:inherit; font-size:13px; box-sizing:border-box;"></textarea>
+          <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:4px;">What to change / emphasize (optional)</label>
+          <textarea id="regen-context" placeholder="e.g., 'make it more concise', 'emphasize country conditions', 'add more discussion of PSG', 'address the DHS argument about internal relocation'..." style="width:100%; min-height:100px; padding:10px; border:1px solid #CFC8BE; border-radius:6px; font-family:inherit; font-size:13px; box-sizing:border-box;"></textarea>
           <div style="margin-top:14px; display:flex; gap:8px; justify-content:flex-end;">
-            <button onclick="closeRegenModal()" style="background:#eee; color:#555; border:none; padding:8px 16px; border-radius:6px; cursor:pointer;">Cancel</button>
-            <button onclick="doRegenerate()" id="regen-btn" style="background:#7c4dff; color:white; border:none; padding:8px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate</button>
+            <button onclick="closeRegenModal()" style="background:#F3EFE9; color:#5E5854; border:none; padding:8px 16px; border-radius:6px; cursor:pointer;">Cancel</button>
+            <button onclick="doRegenerate()" id="regen-btn" style="background:#5E5854; color:white; border:none; padding:8px 20px; border-radius:6px; cursor:pointer; font-weight:600;">🔄 Regenerate</button>
           </div>
         </div>
       </div>
@@ -6041,13 +6045,13 @@ app.get("/admin/panel/:tab", async (req, res) => {
         title: "Access Denied",
         activeItem: null,
         body: `
-          <div class="page-header"><h1 style="color:#c00;">Not Available</h1></div>
-          <div style="background:white; padding:24px; border-radius:8px; border:1px solid #eee; max-width:520px;">
+          <div class="page-header"><h1 style="color:#9C2B1E;">Not Available</h1></div>
+          <div style="background:white; padding:24px; border-radius:8px; border:1px solid #E8E3DC; max-width:520px;">
             <p style="margin-bottom:16px; font-size:14px; line-height:1.5;">
               This section is only available to Admin users. Your role
               (<strong>${req.user.r}</strong>) doesn't have access.
             </p>
-            <p style="margin-bottom:20px; font-size:13px; color:#666;">
+            <p style="margin-bottom:20px; font-size:13px; color:#5E5854;">
               If you think this is wrong, ask JJ to update your role via
               <a href="/admin/users" style="color:#A34C00;">Admin Users</a>.
             </p>
@@ -7250,12 +7254,12 @@ app.get("/admin/audit-log", auth.requireRole("admin"), async (req, res) => {
       res.status(500).send(hearingNotes.renderAdminChrome({
         title: "Audit Log Error",
         body: `
-          <div class="page-header"><h1 style="color:#c00;">Audit Log Error</h1></div>
-          <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:900px;">
+          <div class="page-header"><h1 style="color:#9C2B1E;">Audit Log Error</h1></div>
+          <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; max-width:900px;">
             <p>The audit log page failed to render. Details below (also logged server-side):</p>
-            <pre style="background:#fef3f0; padding:14px; border-radius:6px; overflow-x:auto; font-size:12px; border-left:3px solid #c00; color:#c00;">${String(err.message || err).replace(/</g, '&lt;')}</pre>
-            <details style="margin-top:12px;"><summary style="cursor:pointer; color:#666; font-size:13px;">Stack trace</summary>
-              <pre style="background:#f8f8f8; padding:12px; border-radius:6px; overflow-x:auto; font-size:11px; margin-top:8px;">${String(err.stack || '').replace(/</g, '&lt;')}</pre>
+            <pre style="background:#FBEDEA; padding:14px; border-radius:6px; overflow-x:auto; font-size:12px; border-left:3px solid #9C2B1E; color:#9C2B1E;">${String(err.message || err).replace(/</g, '&lt;')}</pre>
+            <details style="margin-top:12px;"><summary style="cursor:pointer; color:#5E5854; font-size:13px;">Stack trace</summary>
+              <pre style="background:#FAF8F5; padding:12px; border-radius:6px; overflow-x:auto; font-size:11px; margin-top:8px;">${String(err.stack || '').replace(/</g, '&lt;')}</pre>
             </details>
             <p style="margin-top:20px;"><a href="/admin/dashboard" style="color:#A34C00;">← Back to dashboard</a></p>
           </div>`,
@@ -7291,59 +7295,59 @@ app.get("/admin/reminders", auth.requireRole("admin"), async (req, res) => {
       const dt = new Date(r.sent_at).toLocaleString();
       const hearingDt = r.hearing_date ? new Date(r.hearing_date).toLocaleString() : "";
       const statusBadge = r.success
-        ? '<span style="background:#2e7d32; color:white; padding:2px 8px; border-radius:10px; font-size:10px;">✓ sent</span>'
+        ? '<span style="background:#2F6B3F; color:white; padding:2px 8px; border-radius:10px; font-size:10px;">✓ sent</span>'
         : r.channel === "skipped"
-        ? '<span style="background:#888; color:white; padding:2px 8px; border-radius:10px; font-size:10px;">⊙ skipped</span>'
-        : '<span style="background:#c00; color:white; padding:2px 8px; border-radius:10px; font-size:10px;">✕ failed</span>';
+        ? '<span style="background:#5E5854; color:white; padding:2px 8px; border-radius:10px; font-size:10px;">⊙ skipped</span>'
+        : '<span style="background:#9C2B1E; color:white; padding:2px 8px; border-radius:10px; font-size:10px;">✕ failed</span>';
       return `<tr>
-        <td style="font-size:11px; color:#666;">${dt}</td>
+        <td style="font-size:11px; color:#5E5854;">${dt}</td>
         <td>${r.client_name || ""}</td>
         <td>${hearingDt}</td>
         <td>${r.days_out}d</td>
         <td>${r.channel || ""}</td>
         <td>${statusBadge}</td>
-        <td style="font-size:11px; color:#c00;">${r.error_message || ""}</td>
+        <td style="font-size:11px; color:#9C2B1E;">${r.error_message || ""}</td>
       </tr>`;
     }).join("");
     const body = `
-      <div class="page-header"><h1>Hearing Reminders</h1><div style="font-size:13px; color:#666;">Automated reminders sent to clients before hearings. Runs daily at 7 AM Pacific.</div></div>
+      <div class="page-header"><h1>Hearing Reminders</h1><div style="font-size:13px; color:#5E5854;">Automated reminders sent to clients before hearings. Runs daily at 7 AM Pacific.</div></div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; margin-bottom:15px;">
-        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">Sent (all-time)</div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Sent (all-time)</div>
           <div style="font-size:22px; font-weight:600; color:#2B2523;">${stats.sent}</div>
         </div>
-        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">Last 7 days</div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Last 7 days</div>
           <div style="font-size:22px; font-weight:600; color:#2B2523;">${stats.last_7_days}</div>
         </div>
-        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">WhatsApp</div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">WhatsApp</div>
           <div style="font-size:22px; font-weight:600; color:#25D366;">${stats.whatsapp_sent}</div>
         </div>
-        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">SMS</div>
-          <div style="font-size:22px; font-weight:600; color:#0061FF;">${stats.sms_sent}</div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">SMS</div>
+          <div style="font-size:22px; font-weight:600; color:#A34C00;">${stats.sms_sent}</div>
         </div>
-        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">Skipped (no phone)</div>
-          <div style="font-size:22px; font-weight:600; color:#888;">${stats.skipped}</div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Skipped (no phone)</div>
+          <div style="font-size:22px; font-weight:600; color:#5E5854;">${stats.skipped}</div>
         </div>
-        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #eee;">
-          <div style="font-size:11px; color:#888; text-transform:uppercase;">Failed</div>
-          <div style="font-size:22px; font-weight:600; color:${stats.failed ? "#c00" : "#2B2523"};">${stats.failed}</div>
+        <div style="background:white; padding:14px; border-radius:6px; border:1px solid #E8E3DC;">
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Failed</div>
+          <div style="font-size:22px; font-weight:600; color:${stats.failed ? "#9C2B1E" : "#2B2523"};">${stats.failed}</div>
         </div>
       </div>
-      <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee;">
+      <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #E8E3DC;">
         <strong>Manual trigger:</strong>
         <button type="button" onclick="runNow()" style="background:#2B2523; color:white; padding:8px 14px; border:none; border-radius:3px; cursor:pointer; margin-left:10px;">🚀 Run reminders now</button>
-        <span style="font-size:12px; color:#666; margin-left:10px;">Sends any pending 7-day or 1-day reminders immediately.</span>
+        <span style="font-size:12px; color:#5E5854; margin-left:10px;">Sends any pending 7-day or 1-day reminders immediately.</span>
         <div id="run-status" style="margin-top:10px; font-size:13px;"></div>
       </div>
       <table style="background:white; width:100%; font-size:13px;">
         <thead>
           <tr><th>Sent at</th><th>Client</th><th>Hearing</th><th>Window</th><th>Channel</th><th>Status</th><th>Error</th></tr>
         </thead>
-        <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:#888; padding:20px;">No reminders sent yet.</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:#5E5854; padding:20px;">No reminders sent yet.</td></tr>'}</tbody>
       </table>
       <script>
         async function runNow() {
@@ -7353,13 +7357,13 @@ app.get("/admin/reminders", auth.requireRole("admin"), async (req, res) => {
             const r = await fetch("/admin/reminders/run-now", { method: "POST" });
             const d = await r.json();
             if (d.ok) {
-              s.innerHTML = '<span style="color:#2e7d32;">✓ Done — 7d: ' + d.result.sevenDay.sent + ' sent, 1d: ' + d.result.oneDay.sent + ' sent</span>';
+              s.innerHTML = '<span style="color:#2F6B3F;">✓ Done — 7d: ' + d.result.sevenDay.sent + ' sent, 1d: ' + d.result.oneDay.sent + ' sent</span>';
               setTimeout(() => location.reload(), 2000);
             } else {
-              s.innerHTML = '<span style="color:#c00;">❌ ' + d.error + '</span>';
+              s.innerHTML = '<span style="color:#9C2B1E;">❌ ' + d.error + '</span>';
             }
           } catch (e) {
-            s.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
+            s.innerHTML = '<span style="color:#9C2B1E;">❌ ' + e.message + '</span>';
           }
         }
       </script>`;
@@ -9347,13 +9351,13 @@ app.get("/legal/quickbooks-disconnected", (req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>QuickBooks disconnected — Tez Law P.C.</title>
 <style>
-  body { font: 16px/1.65 -apple-system, system-ui, Segoe UI, sans-serif; margin: 0; background: #FAF8F5; color: #1a1a1a; }
+  body { font: 16px/1.65 -apple-system, system-ui, Segoe UI, sans-serif; margin: 0; background: #FAF8F5; color: #2B2523; }
   main { max-width: 620px; margin: 0 auto; padding: 56px 20px 80px; }
   h1 { font-size: 24px; margin: 0 0 16px; color: #2B2523; }
   p { margin: 0 0 14px; }
-  .note { background: #fff8e1; border-left: 4px solid #f57f17; padding: 14px 16px; border-radius: 6px; font-size: 14px; }
+  .note { background: #FFF3E6; border-left: 4px solid #FF7B00; padding: 14px 16px; border-radius: 6px; font-size: 14px; }
   a { color: #9C2B1E; }
-  footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid #e0ddd6; color: #666; font-size: 13px; }
+  footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid #E8E3DC; color: #5E5854; font-size: 13px; }
 </style>
 <main>
   <h1>QuickBooks has been disconnected</h1>
@@ -9389,13 +9393,13 @@ app.get("/legal/terms", (req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Terms of Use — Tez Law P.C. internal systems</title>
 <style>
-  body { font: 16px/1.65 -apple-system, system-ui, Segoe UI, sans-serif; margin: 0; background: #FAF8F5; color: #1a1a1a; }
+  body { font: 16px/1.65 -apple-system, system-ui, Segoe UI, sans-serif; margin: 0; background: #FAF8F5; color: #2B2523; }
   main { max-width: 720px; margin: 0 auto; padding: 48px 20px 80px; }
   h1 { font-size: 26px; margin: 0 0 4px; color: #2B2523; }
   h2 { font-size: 17px; margin: 32px 0 8px; color: #2B2523; }
-  .sub { color: #666; font-size: 14px; margin-bottom: 28px; }
+  .sub { color: #5E5854; font-size: 14px; margin-bottom: 28px; }
   p { margin: 0 0 12px; }
-  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e0ddd6; color: #666; font-size: 13px; }
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #E8E3DC; color: #5E5854; font-size: 13px; }
   a { color: #9C2B1E; }
 </style>
 <main>
@@ -9735,86 +9739,86 @@ app.get("/admin/email-setup", async (req, res) => {
     const accounts = await paralegal.listAccounts();
 
     const accountsHtml = accounts.length ? accounts.map(a => `
-      <div style="background:white; padding:14px 16px; margin:8px 0; border-radius:8px; border:1px solid #eee; border-left: 4px solid ${a.active ? "#4CAF50" : "#999"};">
+      <div style="background:white; padding:14px 16px; margin:8px 0; border-radius:8px; border:1px solid #E8E3DC; border-left: 4px solid ${a.active ? "#2F6B3F" : "#CFC8BE"};">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
           <div>
             <strong style="color:#2B2523;">${a.email}</strong>
-            <div style="color:#666; font-size:12px; margin-top:2px;">${a.imap_host}:${a.imap_port}</div>
-            <div style="color:#888; font-size:11px; margin-top:4px;">Last scan: ${a.last_scan_at ? new Date(a.last_scan_at).toLocaleString() : "never"}</div>
-            ${a.last_error ? `<div style="color:#c00; font-size:11px; margin-top:4px;">Error: ${a.last_error}</div>` : ""}
+            <div style="color:#5E5854; font-size:12px; margin-top:2px;">${a.imap_host}:${a.imap_port}</div>
+            <div style="color:#5E5854; font-size:11px; margin-top:4px;">Last scan: ${a.last_scan_at ? new Date(a.last_scan_at).toLocaleString() : "never"}</div>
+            ${a.last_error ? `<div style="color:#9C2B1E; font-size:11px; margin-top:4px;">Error: ${a.last_error}</div>` : ""}
           </div>
         </div>
       </div>
-    `).join("") : `<div style="text-align:center; padding:20px; color:#888; font-style:italic;">No accounts linked yet.</div>`;
+    `).join("") : `<div style="text-align:center; padding:20px; color:#5E5854; font-style:italic;">No accounts linked yet.</div>`;
 
     const body = `
       <div class="page-header">
         <h1>Email Setup</h1>
-        <div style="font-size:13px; color:#666;">Configure IMAP credentials for accounts you want Zara to monitor.</div>
+        <div style="font-size:13px; color:#5E5854;">Configure IMAP credentials for accounts you want Zara to monitor.</div>
       </div>
 
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
         <!-- Left: Linked Accounts + Remove -->
         <div>
-          <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:16px;">
+          <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
             <h2 style="margin:0 0 12px 0; font-size:15px; color:#2B2523;">Linked Accounts</h2>
             ${accountsHtml}
           </div>
 
-          <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
+          <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #E8E3DC;">
             <h2 style="margin:0 0 12px 0; font-size:15px; color:#2B2523;">Remove Account</h2>
             <form method="POST" action="/admin/email-setup">
-              <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Email to remove</label>
-              <input type="email" name="email" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
-              <button type="submit" name="action" value="remove" style="background:#c00; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600;">Remove</button>
+              <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Email to remove</label>
+              <input type="email" name="email" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
+              <button type="submit" name="action" value="remove" style="background:#9C2B1E; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:600;">Remove</button>
             </form>
           </div>
         </div>
 
         <!-- Right: Add/Update Account -->
-        <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #eee;">
+        <div style="background:white; padding:16px 20px; border-radius:8px; border:1px solid #E8E3DC;">
           <h2 style="margin:0 0 12px 0; font-size:15px; color:#2B2523;">Add / Update Account</h2>
 
-          <div style="background:#fff3cd; padding:12px; border-left:4px solid #ffc107; margin-bottom:16px; border-radius:4px; font-size:12px; line-height:1.5;">
+          <div style="background:#FFF3E6; padding:12px; border-left:4px solid #FF7B00; margin-bottom:16px; border-radius:4px; font-size:12px; line-height:1.5;">
             <strong>⚠️ App passwords:</strong> For Gmail, Hotmail, and Google Workspace accounts with 2FA, use an <em>app-specific password</em> (not your login password).
             <br>• Gmail: <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a>
             <br>• Hotmail/Outlook: <a href="https://account.microsoft.com/security" target="_blank">account.microsoft.com/security</a> → App passwords
           </div>
 
           <form method="POST" action="/admin/email-setup">
-            <label style="font-size:12px; color:#666;">Email address</label>
-            <input type="email" name="email" required placeholder="jj@tezlawfirm.com" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
+            <label style="font-size:12px; color:#5E5854;">Email address</label>
+            <input type="email" name="email" required placeholder="jj@tezlawfirm.com" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
 
-            <label style="font-size:12px; color:#666;">Display name (optional)</label>
-            <input type="text" name="display_name" placeholder="Tez Law primary" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
+            <label style="font-size:12px; color:#5E5854;">Display name (optional)</label>
+            <input type="text" name="display_name" placeholder="Tez Law primary" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
 
-            <label style="font-size:12px; color:#666;">IMAP host</label>
-            <input type="text" name="imap_host" required placeholder="imap.secureserver.net" id="imap_host" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:6px;">
+            <label style="font-size:12px; color:#5E5854;">IMAP host</label>
+            <input type="text" name="imap_host" required placeholder="imap.secureserver.net" id="imap_host" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; margin-bottom:6px;">
 
             <div style="margin-bottom:10px;">
-              <small style="color:#888; font-size:11px;">Quick fill:</small>
-              <span onclick="fillPreset('imap.secureserver.net',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#eee; cursor:pointer; border-radius:3px; font-size:11px;">GoDaddy Workspace</span>
-              <span onclick="fillPreset('outlook.office365.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#eee; cursor:pointer; border-radius:3px; font-size:11px;">GoDaddy 365 / Hotmail / Outlook</span>
-              <span onclick="fillPreset('imap.gmail.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#eee; cursor:pointer; border-radius:3px; font-size:11px;">Gmail</span>
-              <span onclick="fillPreset('imap.mail.yahoo.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#eee; cursor:pointer; border-radius:3px; font-size:11px;">Yahoo</span>
-              <span onclick="fillPreset('imap.zoho.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#eee; cursor:pointer; border-radius:3px; font-size:11px;">Zoho</span>
+              <small style="color:#5E5854; font-size:11px;">Quick fill:</small>
+              <span onclick="fillPreset('imap.secureserver.net',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#F3EFE9; cursor:pointer; border-radius:3px; font-size:11px;">GoDaddy Workspace</span>
+              <span onclick="fillPreset('outlook.office365.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#F3EFE9; cursor:pointer; border-radius:3px; font-size:11px;">GoDaddy 365 / Hotmail / Outlook</span>
+              <span onclick="fillPreset('imap.gmail.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#F3EFE9; cursor:pointer; border-radius:3px; font-size:11px;">Gmail</span>
+              <span onclick="fillPreset('imap.mail.yahoo.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#F3EFE9; cursor:pointer; border-radius:3px; font-size:11px;">Yahoo</span>
+              <span onclick="fillPreset('imap.zoho.com',993)" style="display:inline-block; margin:3px; padding:3px 8px; background:#F3EFE9; cursor:pointer; border-radius:3px; font-size:11px;">Zoho</span>
             </div>
 
-            <label style="font-size:12px; color:#666;">IMAP port</label>
-            <input type="number" name="imap_port" value="993" id="imap_port" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
+            <label style="font-size:12px; color:#5E5854;">IMAP port</label>
+            <input type="number" name="imap_port" value="993" id="imap_port" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
 
-            <label style="font-size:12px; color:#666;">Username (usually same as email)</label>
-            <input type="text" name="imap_user" required placeholder="jj@tezlawfirm.com" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
+            <label style="font-size:12px; color:#5E5854;">Username (usually same as email)</label>
+            <input type="text" name="imap_user" required placeholder="jj@tezlawfirm.com" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
 
-            <label style="font-size:12px; color:#666;">Password (or app-specific password)</label>
-            <input type="password" name="password" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
+            <label style="font-size:12px; color:#5E5854;">Password (or app-specific password)</label>
+            <input type="password" name="password" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; margin-bottom:10px;">
 
             <label style="display:inline-flex; align-items:center; font-weight:normal; margin-bottom:16px;">
               <input type="checkbox" name="use_tls" value="1" checked style="margin-right:6px;"> Use TLS/SSL (recommended)
             </label>
 
             <div style="display:flex; gap:8px;">
-              <button type="submit" name="action" value="test" style="background:#eee; color:#333; border:none; padding:10px 16px; border-radius:4px; cursor:pointer; font-weight:600; flex:1;">Test connection</button>
+              <button type="submit" name="action" value="test" style="background:#F3EFE9; color:#2B2523; border:none; padding:10px 16px; border-radius:4px; cursor:pointer; font-weight:600; flex:1;">Test connection</button>
               <button type="submit" name="action" value="save" style="background:#A34C00; color:white; border:none; padding:10px 16px; border-radius:4px; cursor:pointer; font-weight:600; flex:1;">Test + Save</button>
             </div>
           </form>
@@ -9848,7 +9852,7 @@ app.post("/admin/email-setup", async (req, res) => {
       const removed = await paralegal.removeAccount(email);
       return res.send(wrap("Email Setup", `
         <div class="page-header"><h1>${removed ? "🗑️ Account Removed" : "Not Found"}</h1></div>
-        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:600px;">
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; max-width:600px;">
           ${removed
             ? `<p>Account <strong>${email}</strong> has been removed.</p>`
             : `<p><em>${email} was not in the account list.</em></p>`}
@@ -9865,14 +9869,14 @@ app.post("/admin/email-setup", async (req, res) => {
 
     if (!testResult.ok) {
       return res.send(wrap("Email Setup — Failed", `
-        <div class="page-header"><h1 style="color:#c00;">Connection Failed</h1></div>
-        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:700px;">
-          <div style="background:#fef3f0; padding:12px 16px; border-left:4px solid #c62828; border-radius:4px; margin-bottom:16px; font-family:monospace; font-size:12px;">
+        <div class="page-header"><h1 style="color:#9C2B1E;">Connection Failed</h1></div>
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; max-width:700px;">
+          <div style="background:#FBEDEA; padding:12px 16px; border-left:4px solid #9C2B1E; border-radius:4px; margin-bottom:16px; font-family:monospace; font-size:12px;">
             ${testResult.error}
           </div>
           <table style="font-size:13px;">
-            <tr><td style="padding:4px 12px 4px 0; color:#666;">Host:</td><td><code>${imap_host}:${imap_port}</code></td></tr>
-            <tr><td style="padding:4px 12px 4px 0; color:#666;">User:</td><td><code>${imap_user}</code></td></tr>
+            <tr><td style="padding:4px 12px 4px 0; color:#5E5854;">Host:</td><td><code>${imap_host}:${imap_port}</code></td></tr>
+            <tr><td style="padding:4px 12px 4px 0; color:#5E5854;">User:</td><td><code>${imap_user}</code></td></tr>
           </table>
           <h3 style="margin-top:20px; font-size:14px;">Common fixes</h3>
           <ul style="font-size:13px; line-height:1.7;">
@@ -9888,11 +9892,11 @@ app.post("/admin/email-setup", async (req, res) => {
 
     if (action === "test") {
       return res.send(wrap("Email Setup — Test OK", `
-        <div class="page-header"><h1 style="color:#4CAF50;">Connection Works</h1></div>
-        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:600px;">
+        <div class="page-header"><h1 style="color:#2F6B3F;">Connection Works</h1></div>
+        <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; max-width:600px;">
           <p>Successfully connected to <strong>${imap_host}:${imap_port}</strong> as <strong>${imap_user}</strong>.</p>
           <p>INBOX contains <strong>${testResult.messageCount}</strong> messages.</p>
-          <p style="color:#666; font-size:13px;">Click "Test + Save" if you're ready to store this account.</p>
+          <p style="color:#5E5854; font-size:13px;">Click "Test + Save" if you're ready to store this account.</p>
           <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#2B2523; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Back to setup</a></p>
         </div>
       `));
@@ -9906,8 +9910,8 @@ app.post("/admin/email-setup", async (req, res) => {
     });
 
     res.send(wrap("Email Setup — Saved", `
-      <div class="page-header"><h1 style="color:#4CAF50;">Saved</h1></div>
-      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:600px;">
+      <div class="page-header"><h1 style="color:#2F6B3F;">Saved</h1></div>
+      <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; max-width:600px;">
         <p>Account <strong>${account.email}</strong> is now linked to Zara (id: ${account.id}).</p>
         <p>${testResult.messageCount} messages in INBOX. Zara will scan every 30 min.</p>
         <p style="margin-top:20px;"><a href="/admin/email-setup" style="background:#2B2523; color:white; padding:8px 16px; border-radius:4px; text-decoration:none;">← Add another account</a></p>
@@ -9919,9 +9923,9 @@ app.post("/admin/email-setup", async (req, res) => {
       const hearingNotes = require("./hearing-notes");
       res.status(500).send(hearingNotes.renderAdminChrome({
         title: "Email Setup — Error",
-        body: `<div class="page-header"><h1 style="color:#c00;">Error</h1></div>
-               <div style="background:white; padding:20px; border-radius:8px; border:1px solid #eee; max-width:600px;">
-                 <p style="font-family:monospace; color:#c00;">${err.message}</p>
+        body: `<div class="page-header"><h1 style="color:#9C2B1E;">Error</h1></div>
+               <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; max-width:600px;">
+                 <p style="font-family:monospace; color:#9C2B1E;">${err.message}</p>
                  <p><a href="/admin/email-setup">← Back</a></p>
                </div>`,
         activeItem: null,
@@ -11145,7 +11149,7 @@ app.get("/admin/clients/:key/dropbox/debug", async (req, res) => {
 
     const escapeHtml = s => String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
     const scoreBadge = (n) => {
-      const color = n >= 70 ? "#4CAF50" : n >= 40 ? "#ff9800" : "#c00";
+      const color = n >= 70 ? "#2F6B3F" : n >= 40 ? "#A34C00" : "#9C2B1E";
       return `<span style="background:${color}; color:white; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">${n}</span>`;
     };
 
@@ -11155,57 +11159,57 @@ app.get("/admin/clients/:key/dropbox/debug", async (req, res) => {
         <a href="/admin/clients/${client.key}" class="back-link">← Back to client</a>
       </div>
 
-      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #eee; margin-bottom:15px;">
+      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #E8E3DC; margin-bottom:15px;">
         <h3 style="margin-top:0;">Client info Zara is matching on</h3>
         <table style="font-size:13px;">
           <tr><td style="padding:4px 15px 4px 0;"><strong>Name:</strong></td><td><code>${escapeHtml(client.client_name || "(none)")}</code></td></tr>
           <tr><td style="padding:4px 15px 4px 0;"><strong>A-Number:</strong></td><td><code>${escapeHtml(client.a_number || "(none)")}</code></td></tr>
           <tr><td style="padding:4px 15px 4px 0;"><strong>Client key:</strong></td><td><code>${escapeHtml(client.key)}</code></td></tr>
-          <tr><td style="padding:4px 15px 4px 0;"><strong>Name tokens (matcher uses these):</strong></td><td>${tokens.map(t => `<code style="background:#f0f0f0; padding:2px 6px; margin-right:4px;">${escapeHtml(t)}</code>`).join("") || "<em>none extracted</em>"}</td></tr>
+          <tr><td style="padding:4px 15px 4px 0;"><strong>Name tokens (matcher uses these):</strong></td><td>${tokens.map(t => `<code style="background:#F3EFE9; padding:2px 6px; margin-right:4px;">${escapeHtml(t)}</code>`).join("") || "<em>none extracted</em>"}</td></tr>
           <tr><td style="padding:4px 15px 4px 0;"><strong>A# digits (matcher uses):</strong></td><td>${aDigits ? `<code>${escapeHtml(aDigits)}</code>` : "<em>none</em>"}</td></tr>
         </table>
       </div>
 
-      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #eee; margin-bottom:15px;">
+      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #E8E3DC; margin-bottom:15px;">
         <h3 style="margin-top:0;">Current mapping in DB</h3>
         ${existingMapping
           ? `<div>Path: <code>${escapeHtml(existingMapping.dropbox_path)}</code></div>
-             <div style="font-size:12px; color:#666; margin-top:4px;">Resolved ${new Date(existingMapping.resolved_at).toLocaleString()} (${existingMapping.resolved_by})</div>
+             <div style="font-size:12px; color:#5E5854; margin-top:4px;">Resolved ${new Date(existingMapping.resolved_at).toLocaleString()} (${existingMapping.resolved_by})</div>
              <form method="POST" action="/admin/clients/${client.key}/dropbox/mapping" style="margin-top:10px;">
                <input type="hidden" name="path" value="">
-               <button type="submit" style="background:#c00; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">Clear this mapping & rescan</button>
+               <button type="submit" style="background:#9C2B1E; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:13px;">Clear this mapping & rescan</button>
              </form>`
           : `<em>No mapping yet — will auto-detect on next scan.</em>`}
       </div>
 
-      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #eee;">
+      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #E8E3DC;">
         <h3 style="margin-top:0;">Configured branches (${branches.length})</h3>
-        ${branches.length === 0 ? `<div style="color:#c00;">⚠️ No branches configured. Set DROPBOX_BRANCH_ROOTS env var in Render.</div>` : ""}
+        ${branches.length === 0 ? `<div style="color:#9C2B1E;">⚠️ No branches configured. Set DROPBOX_BRANCH_ROOTS env var in Render.</div>` : ""}
         ${branchDetails.map(bd => `
-          <div style="margin-bottom:20px; padding:12px; background:#f8f8f8; border-radius:4px;">
+          <div style="margin-bottom:20px; padding:12px; background:#FAF8F5; border-radius:4px;">
             <div style="font-weight:600; margin-bottom:6px;"><code>${escapeHtml(bd.branch)}</code></div>
             ${bd.error
-              ? `<div style="color:#c00;">❌ ${escapeHtml(bd.error)}</div>`
-              : `<div style="font-size:12px; color:#666; margin-bottom:8px;">${bd.subfolder_count} subfolders, ${bd.file_count} top-level files</div>
+              ? `<div style="color:#9C2B1E;">❌ ${escapeHtml(bd.error)}</div>`
+              : `<div style="font-size:12px; color:#5E5854; margin-bottom:8px;">${bd.subfolder_count} subfolders, ${bd.file_count} top-level files</div>
                  ${bd.scored && bd.scored.length ? `
                    <table style="width:100%; font-size:13px;">
-                     <thead><tr style="border-bottom:1px solid #ddd;"><th style="text-align:left; width:60px;">Score</th><th style="text-align:left;">Folder Name</th><th style="text-align:left;">Match reason</th><th></th></tr></thead>
+                     <thead><tr style="border-bottom:1px solid #E8E3DC;"><th style="text-align:left; width:60px;">Score</th><th style="text-align:left;">Folder Name</th><th style="text-align:left;">Match reason</th><th></th></tr></thead>
                      <tbody>
                        ${bd.scored.slice(0, 30).map(s => `
                          <tr>
                            <td>${scoreBadge(s.score)}</td>
                            <td><code>${escapeHtml(s.name)}</code></td>
-                           <td style="font-size:12px; color:#666;">${escapeHtml(s.reason || "—")}</td>
+                           <td style="font-size:12px; color:#5E5854;">${escapeHtml(s.reason || "—")}</td>
                            <td>
                              <form method="POST" action="/admin/clients/${client.key}/dropbox/mapping" style="margin:0; display:inline;">
                                <input type="hidden" name="path" value="${escapeHtml(s.path)}">
-                               <button type="submit" style="background:#0061FF; color:white; border:none; padding:3px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Use this</button>
+                               <button type="submit" style="background:#2B2523; color:white; border:none; padding:3px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Use this</button>
                              </form>
                            </td>
                          </tr>`).join("")}
                      </tbody>
                    </table>
-                   ${bd.scored.length > 30 ? `<div style="font-size:12px; color:#888; margin-top:6px;">Showing top 30 of ${bd.scored.length} folders</div>` : ""}
+                   ${bd.scored.length > 30 ? `<div style="font-size:12px; color:#5E5854; margin-top:6px;">Showing top 30 of ${bd.scored.length} folders</div>` : ""}
                  ` : `<em>No subfolders</em>`}`
             }
           </div>`).join("")}
@@ -11275,47 +11279,47 @@ app.get("/admin/dropbox/browse", async (req, res) => {
 
     let entriesHtml = "";
     if (error) {
-      entriesHtml = `<div style="background:#fef2f2; border-left:4px solid #c00; padding:15px; border-radius:4px;"><strong>Error listing this path:</strong><br><code>${escapeHtml(error)}</code></div>`;
+      entriesHtml = `<div style="background:#FBEDEA; border-left:4px solid #9C2B1E; padding:15px; border-radius:4px;"><strong>Error listing this path:</strong><br><code>${escapeHtml(error)}</code></div>`;
     } else if (!entries || !entries.length) {
-      entriesHtml = `<div style="color:#888; padding:20px; text-align:center;">(empty folder)</div>`;
+      entriesHtml = `<div style="color:#5E5854; padding:20px; text-align:center;">(empty folder)</div>`;
     } else {
       const folders = entries.filter(e => e[".tag"] === "folder");
       const files = entries.filter(e => e[".tag"] === "file");
       entriesHtml = `
         <table style="width:100%; font-size:13px;">
-          <thead><tr style="border-bottom:1px solid #eee;"><th style="text-align:left; width:30px;"></th><th style="text-align:left;">Name</th><th style="text-align:left;">Path</th></tr></thead>
+          <thead><tr style="border-bottom:1px solid #E8E3DC;"><th style="text-align:left; width:30px;"></th><th style="text-align:left;">Name</th><th style="text-align:left;">Path</th></tr></thead>
           <tbody>
             ${folders.map(f => `
               <tr>
                 <td>📁</td>
-                <td><a href="/admin/dropbox/browse?path=${encodeURIComponent(f.path_display)}" style="color:#0061FF; font-weight:600; text-decoration:none;">${escapeHtml(f.name)}</a></td>
-                <td style="font-family:monospace; font-size:11px; color:#666;">${escapeHtml(f.path_display)}</td>
+                <td><a href="/admin/dropbox/browse?path=${encodeURIComponent(f.path_display)}" style="color:#A34C00; font-weight:600; text-decoration:none;">${escapeHtml(f.name)}</a></td>
+                <td style="font-family:monospace; font-size:11px; color:#5E5854;">${escapeHtml(f.path_display)}</td>
               </tr>`).join("")}
             ${files.map(f => `
               <tr>
                 <td>📄</td>
                 <td>${escapeHtml(f.name)}</td>
-                <td style="font-family:monospace; font-size:11px; color:#666;">${escapeHtml(f.path_display)}</td>
+                <td style="font-family:monospace; font-size:11px; color:#5E5854;">${escapeHtml(f.path_display)}</td>
               </tr>`).join("")}
           </tbody>
         </table>
-        <div style="font-size:12px; color:#666; margin-top:8px;">${folders.length} folder(s), ${files.length} file(s)</div>`;
+        <div style="font-size:12px; color:#5E5854; margin-top:8px;">${folders.length} folder(s), ${files.length} file(s)</div>`;
     }
 
     const branchReportsHtml = branchReports.length ? `
-      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #eee; margin-bottom:15px;">
+      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #E8E3DC; margin-bottom:15px;">
         <h3 style="margin:0 0 10px 0;">Configured branch check</h3>
         ${branchReports.map(b => `
-          <div style="padding:8px; margin-bottom:6px; background:#f8f8f8; border-radius:4px;">
+          <div style="padding:8px; margin-bottom:6px; background:#FAF8F5; border-radius:4px;">
             <div><code style="font-weight:600;">${escapeHtml(b.path)}</code> — ${b.status}</div>
-            <div style="font-size:12px; color:#666; margin-top:4px;">${escapeHtml(b.detail)}</div>
+            <div style="font-size:12px; color:#5E5854; margin-top:4px;">${escapeHtml(b.detail)}</div>
           </div>`).join("")}
       </div>` : "";
 
     const breadcrumb = path
-      ? `<div style="margin-bottom:10px;"><a href="/admin/dropbox/browse" style="color:#0061FF;">📦 Root</a> ${path.split("/").filter(Boolean).map((seg, i, arr) => {
+      ? `<div style="margin-bottom:10px;"><a href="/admin/dropbox/browse" style="color:#A34C00;">📦 Root</a> ${path.split("/").filter(Boolean).map((seg, i, arr) => {
           const fullPath = "/" + arr.slice(0, i + 1).join("/");
-          return `/ <a href="/admin/dropbox/browse?path=${encodeURIComponent(fullPath)}" style="color:#0061FF;">${escapeHtml(seg)}</a>`;
+          return `/ <a href="/admin/dropbox/browse?path=${encodeURIComponent(fullPath)}" style="color:#A34C00;">${escapeHtml(seg)}</a>`;
         }).join(" ")}</div>`
       : `<div style="margin-bottom:10px;"><strong>📦 Dropbox Root</strong></div>`;
 
@@ -11324,9 +11328,9 @@ app.get("/admin/dropbox/browse", async (req, res) => {
         <h1>Dropbox Browser</h1>
         <a href="/admin/dropbox/setup" class="back-link">← Setup</a>
       </div>
-      <p style="color:#666;">This shows what Zara can actually see in your Dropbox. Use it to verify branch folder names and paths.</p>
+      <p style="color:#5E5854;">This shows what Zara can actually see in your Dropbox. Use it to verify branch folder names and paths.</p>
       ${branchReportsHtml}
-      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #eee;">
+      <div style="background:white; padding:15px; border-radius:4px; border:1px solid #E8E3DC;">
         ${breadcrumb}
         ${entriesHtml}
       </div>`;
@@ -11431,7 +11435,7 @@ app.get("/admin/dropbox/setup", async (req, res) => {
     let statusHtml = "";
     if (!configured) {
       statusHtml = `
-        <div style="background:#fef2f2; border-left:4px solid #c00; padding:15px; border-radius:4px;">
+        <div style="background:#FBEDEA; border-left:4px solid #9C2B1E; padding:15px; border-radius:4px;">
           <strong>⚠️ Not configured</strong>
           <p style="margin:8px 0 0 0;">Set these env vars in Render, then reload:</p>
           <ul style="margin:8px 0;">
@@ -11442,16 +11446,16 @@ app.get("/admin/dropbox/setup", async (req, res) => {
         </div>`;
     } else if (!authorized) {
       statusHtml = `
-        <div style="background:#fff8e1; border-left:4px solid #ff9800; padding:15px; border-radius:4px;">
+        <div style="background:#FFF3E6; border-left:4px solid #FF7B00; padding:15px; border-radius:4px;">
           <strong>Configured, but not yet authorized.</strong>
           <p style="margin:8px 0;">Click below to grant Zara access to your Dropbox.</p>
-          <a href="${dbx.authorizeUrl(DROPBOX_CALLBACK_URL)}" style="background:#0061FF; color:white; padding:10px 20px; border-radius:4px; text-decoration:none; display:inline-block; font-weight:600;">
+          <a href="${dbx.authorizeUrl(DROPBOX_CALLBACK_URL)}" style="background:#2B2523; color:white; padding:10px 20px; border-radius:4px; text-decoration:none; display:inline-block; font-weight:600;">
             📦 Authorize Dropbox
           </a>
         </div>`;
     } else {
       statusHtml = `
-        <div style="background:#e8f5e9; border-left:4px solid #4CAF50; padding:15px; border-radius:4px;">
+        <div style="background:#EEF5EF; border-left:4px solid #2F6B3F; padding:15px; border-radius:4px;">
           <strong>✅ Connected</strong>
           <div style="margin-top:8px; line-height:1.7;">
             Account: <strong>${settings.authorized_account_name || "-"}</strong> (${settings.authorized_email || ""})<br>
@@ -11459,14 +11463,14 @@ app.get("/admin/dropbox/setup", async (req, res) => {
             Last used: ${settings.last_used_at ? new Date(settings.last_used_at).toLocaleString() : "never"}
           </div>
           <div style="margin-top:12px;">
-            <a href="${dbx.authorizeUrl(DROPBOX_CALLBACK_URL)}" style="background:#eee; color:#333; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">Re-authorize</a>
+            <a href="${dbx.authorizeUrl(DROPBOX_CALLBACK_URL)}" style="background:#F3EFE9; color:#2B2523; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">Re-authorize</a>
           </div>
         </div>`;
     }
 
     const branchList = branches.length
       ? branches.map(b => `<li><code>${b}</code></li>`).join("")
-      : `<li style="color:#888;">None configured yet.</li>`;
+      : `<li style="color:#5E5854;">None configured yet.</li>`;
 
     const body = `
       <div class="page-header">
@@ -11476,13 +11480,13 @@ app.get("/admin/dropbox/setup", async (req, res) => {
 
       ${statusHtml}
 
-      <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-top:15px;">
+      <div style="background:white; padding:20px; border-radius:6px; border:1px solid #E8E3DC; margin-top:15px;">
         <h3 style="margin-top:0;">📁 Configured Branch Folders</h3>
-        <p style="color:#666; font-size:13px;">Zara looks for each client's folder inside these top-level branches (in order). Change the <code>DROPBOX_BRANCH_ROOTS</code> env var in Render to update.</p>
+        <p style="color:#5E5854; font-size:13px;">Zara looks for each client's folder inside these top-level branches (in order). Change the <code>DROPBOX_BRANCH_ROOTS</code> env var in Render to update.</p>
         <ul>${branchList}</ul>
       </div>
 
-      <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-top:15px;">
+      <div style="background:white; padding:20px; border-radius:6px; border:1px solid #E8E3DC; margin-top:15px;">
         <h3 style="margin-top:0;">How It Works</h3>
         <ol style="line-height:1.9;">
           <li>Client profiles auto-detect the matching Dropbox folder by searching branches for a folder named <code>Last, First</code>.</li>
@@ -11493,10 +11497,10 @@ app.get("/admin/dropbox/setup", async (req, res) => {
         </ol>
       </div>
 
-      <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-top:15px;">
+      <div style="background:white; padding:20px; border-radius:6px; border:1px solid #E8E3DC; margin-top:15px;">
         <h3 style="margin-top:0;">Callback URL</h3>
-        <p style="color:#666; font-size:13px;">Add this exact URL to your Dropbox app's "Redirect URIs" in the OAuth 2 settings:</p>
-        <code style="display:block; background:#f5f5f5; padding:10px; border-radius:4px; word-break:break-all;">${DROPBOX_CALLBACK_URL}</code>
+        <p style="color:#5E5854; font-size:13px;">Add this exact URL to your Dropbox app's "Redirect URIs" in the OAuth 2 settings:</p>
+        <code style="display:block; background:#FAF8F5; padding:10px; border-radius:4px; word-break:break-all;">${DROPBOX_CALLBACK_URL}</code>
       </div>`;
 
     res.send(hn.renderAdminChrome({ title: "Dropbox Setup", body, activeItem: "dropbox" }));
@@ -11864,10 +11868,10 @@ app.get("/admin/clients/i589/files", async (req, res) => {
       + "<title>I-589 &mdash; what is in the folder</title>"
       + "<style>body{font:14px/1.5 -apple-system,system-ui,sans-serif;margin:24px;max-width:900px}"
       + "table{border-collapse:collapse;width:100%;margin:8px 0 24px}"
-      + "td,th{border-bottom:1px solid #e5e5e5;padding:4px 8px;text-align:left;vertical-align:top}"
-      + "th{font-size:12px;color:#666;text-transform:uppercase}"
+      + "td,th{border-bottom:1px solid #E8E3DC;padding:4px 8px;text-align:left;vertical-align:top}"
+      + "th{font-size:12px;color:#5E5854;text-transform:uppercase}"
       + ".s{text-align:right;width:4em;font-variant-numeric:tabular-nums}"
-      + ".f{color:#666;font-size:12px}.t{background:#f3f8ff}.n{color:#999}"
+      + ".f{color:#5E5854;font-size:12px}.t{background:#F3EFE9}.n{color:#5E5854}"
       + "h2{font-size:15px;margin:24px 0 0}</style>"
       + "<p><a href=\"/admin/clients/i589\">&larr; back to the I-589 report</a></p>"
       + "<h1>What is actually in the folder</h1>"
@@ -12110,10 +12114,10 @@ function renderUnifiedHistory(rows) {
       <td>
         <a href="${r.edit_url}" style="color:#A34C00;">edit</a>
         &nbsp;·&nbsp;
-        <a href="#" onclick="delRow('${r.kind}', ${r.id}, ${JSON.stringify(r.client_name).replace(/"/g, '&quot;')}); return false;" style="color:#c00; font-size:12px;">🗑️</a>
+        <a href="#" onclick="delRow('${r.kind}', ${r.id}, ${JSON.stringify(r.client_name).replace(/"/g, '&quot;')}); return false;" style="color:#9C2B1E; font-size:12px;">🗑️</a>
       </td>
     </tr>`;
-  }).join("") : `<tr><td colspan="10" style="text-align:center; color:#888;">No hearing notes yet.</td></tr>`;
+  }).join("") : `<tr><td colspan="10" style="text-align:center; color:#5E5854;">No hearing notes yet.</td></tr>`;
 
   const body = `
     <div class="page-header">
@@ -12125,22 +12129,22 @@ function renderUnifiedHistory(rows) {
       </div>
     </div>
 
-    <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #eee;">
+    <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #E8E3DC;">
       <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
         <div style="flex:1; min-width:260px;">
           <input type="text" id="search-input" placeholder="🔍 Search by client name, A-Number, or judge..."
                  onkeyup="filterRows()"
-                 style="width:100%; padding:9px 12px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+                 style="width:100%; padding:9px 12px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
         </div>
         <div>
-          <select id="filter-kind" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+          <select id="filter-kind" onchange="filterRows()" style="padding:9px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
             <option value="">All hearings</option>
             <option value="master">Master hearings only</option>
             <option value="individual">Individual hearings only</option>
           </select>
         </div>
         <div>
-          <select id="filter-type" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+          <select id="filter-type" onchange="filterRows()" style="padding:9px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
             <option value="">All types</option>
             <option value="master">Master</option>
             <option value="individual">Individual</option>
@@ -12152,14 +12156,14 @@ function renderUnifiedHistory(rows) {
           </select>
         </div>
         <div>
-          <select id="filter-sent" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+          <select id="filter-sent" onchange="filterRows()" style="padding:9px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
             <option value="">All</option>
             <option value="sent">Sent ✅</option>
             <option value="unsent">Not sent</option>
           </select>
         </div>
         <div>
-          <select id="filter-lang" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+          <select id="filter-lang" onchange="filterRows()" style="padding:9px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
             <option value="">All languages</option>
             <option value="en">English</option>
             <option value="zh">Chinese</option>
@@ -12170,12 +12174,12 @@ function renderUnifiedHistory(rows) {
         </div>
         <div>
           <button type="button" onclick="clearFilters()"
-                  style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">
+                  style="padding:9px 14px; background:#F3EFE9; border:none; border-radius:4px; cursor:pointer; font-size:13px;">
             Clear
           </button>
         </div>
       </div>
-      <div id="row-count" style="margin-top:10px; font-size:13px; color:#666;">
+      <div id="row-count" style="margin-top:10px; font-size:13px; color:#5E5854;">
         Showing ${rows.length} note${rows.length === 1 ? "" : "s"}
       </div>
     </div>

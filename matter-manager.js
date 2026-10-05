@@ -23,19 +23,44 @@ const { requireAuth } = require("./admin");
 
 const router = express.Router();
 
-// ── Serve the dashboard UI at /admin/matters/ ────────────
-// Auth-protected: unauthenticated users redirect to /admin/login
+// ── The Matter Manager, inside Tara ───────────────────────
+// It used to be a page of its own, with its own masthead and no way to the
+// rest of the firm's pages but a link. It is now a Tara page: the sidebar and
+// heading are Tara's, and the docket runs in a frame beneath them. Same
+// matters, same deadlines, same API below, same address — the links in the
+// daily Telegram summary still land here.
+//
+//   /admin/matters/            the Tara page (?view=inbox|archive|courts|reference)
+//   /admin/matters/app         the docket itself, shown only inside that frame
+//   /admin/matters/v2          an unfinished preview that was never shipped → the Tara page
+const VIEWS = new Set(["active", "inbox", "archive", "courts", "reference"]);
 router.get("/", requireAuth, (req, res) => {
+  const view = VIEWS.has(String(req.query.view || "")) ? String(req.query.view) : "";
+  // The frame fills Tara's content area edge to edge (the docket has its own
+  // margins), below the top bar on a phone.
+  const body = `
+    <style>
+      .mm-frame { margin:-28px -32px -40px -32px; }
+      .mm-frame iframe { width:100%; height:100vh; border:0; display:block; background:#FAF8F5; }
+      @media (max-width: 768px) { .mm-frame { margin:-14px -12px -24px; } .mm-frame iframe { height:calc(100vh - 60px); height:calc(100dvh - 60px); } }
+    </style>
+    <div class="mm-frame">
+      <iframe src="/admin/matters/app${view ? "#" + view : ""}" id="matters-frame" title="Matter Manager"
+        allow="clipboard-read; clipboard-write"></iframe>
+    </div>`;
+  res.set("Cache-Control", "no-store");
+  res.send(require("./hearing-notes").renderAdminChrome({
+    title: "Matter Manager", body, activeItem: view === "inbox" ? "matters-inbox" : "matters",
+  }));
+});
+router.get("/app", requireAuth, (req, res) => {
+  // Never let a stale copy outlive a deploy inside the frame; and the page
+  // may be framed only by this site.
+  res.set("Cache-Control", "no-store");
+  res.set("Content-Security-Policy", "frame-ancestors 'self'");
   res.sendFile(path.join(__dirname, "matters.html"));
 });
-
-// ── v2 dashboard at /admin/matters/v2 ─────────────────────
-// Parallel new UI. The existing /admin/matters/ route is
-// unchanged; v2 is a feature-flag preview to test the new
-// case-card + checklists layout side-by-side before promoting.
-router.get("/v2", requireAuth, (req, res) => {
-  res.sendFile(path.join(__dirname, "matters-v2.html"));
-});
+router.get("/v2", requireAuth, (req, res) => res.redirect("/admin/matters/"));
 
 // ─────────────────────────────────────────────────────────────
 //  ORDER PARSER — Claude-powered deadline extraction

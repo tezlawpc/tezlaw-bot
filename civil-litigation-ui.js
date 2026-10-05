@@ -47,7 +47,7 @@ async function renderKanban(opts = {}) {
       <div style="font-family:Montserrat,sans-serif;font-size:13px;color:#2B2523;letter-spacing:1px;">
         Filtered to <strong style="color:${activeStage.color};">${esc(activeStage.label)}</strong>
       </div>
-      <a href="/admin/civil" style="font-size:12px;color:#B84200;text-decoration:none;font-weight:600;">Show all cases ×</a>
+      <a href="/admin/civil" style="font-size:12px;color:#A34C00;text-decoration:none;font-weight:600;">Show all cases ×</a>
     </div>` : "";
   // Cards are triaged, not just listed: a litigator scanning this board cares
   // first about what is about to blow up. Urgency = trial inside 60 days or
@@ -92,7 +92,7 @@ async function renderKanban(opts = {}) {
         `<span title="${esc(title)}" style="display:inline-block;padding:1px 4px;border-radius:3px;background:${color};color:#FAF8F5;font-size:9px;font-weight:700;line-height:1.4;white-space:nowrap;">${esc(label)}</span>`;
 
       const chips = [
-        c.files_archived_at ? chip("ARCHIVED", "#4B5563", "Case file archived — Dropbox sync paused") : "",
+        c.files_archived_at ? chip("ARCHIVED", "#5E5854", "Case file archived — Dropbox sync paused") : "",
         role ? `<span style="display:inline-block;padding:1px 4px;border:1px solid ${stage.color};border-radius:3px;color:${stage.color};font-size:9px;font-weight:600;line-height:1.4;">${esc(role)}</span>` : "",
         t !== null ? chip(t < 0 ? "TRIAL PAST" : "T-" + t + "d", t <= 60 ? "#9C2B1E" : t <= 120 ? "#FF7B00" : "#5E5854", "Trial: " + fmtDate(c.trial_date)) : "",
         sol !== null && sol <= 180 ? chip("SOL " + sol + "d", sol <= 90 ? "#9C2B1E" : "#A34C00", "SOL: " + fmtDate(c.statute_of_limitations)) : "",
@@ -123,7 +123,7 @@ async function renderKanban(opts = {}) {
           ${amt ? `<div style="flex-shrink:0;min-width:86px;text-align:right;font-size:11.5px;font-weight:700;color:#A34C00;">${esc(amt)}</div>` : ""}
         </a>
       `;
-    }).join("") || `<div style="text-align:center;padding:14px 4px;font-style:italic;color:#B0A188;font-size:11px;">—</div>`;
+    }).join("") || `<div style="text-align:center;padding:14px 4px;font-style:italic;color:#5E5854;font-size:11px;">—</div>`;
 
     // Empty columns recede so attention lands where the work actually is.
     const empty = cases.length === 0;
@@ -164,7 +164,7 @@ async function renderKanban(opts = {}) {
             ${totalActive} active case${totalActive === 1 ? "" : "s"} across ${board.stages.length} stages${totalUrgent ? ` · <strong style="color:#9C2B1E;font-style:normal;">${totalUrgent} need attention</strong>` : ""}
           </div>
         </div>
-        <a href="/admin/civil/new" style="padding:10px 18px;background:#FF7B00;color:#1E1B1A;border:1px solid #D96800;border-radius:6px;font-family:Montserrat,sans-serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-decoration:none;">+ NEW CASE</a>
+        <a href="/admin/civil/new" style="padding:10px 18px;background:#FF7B00;color:#1E1B1A;border:1px solid #FF7B00;border-radius:6px;font-family:Montserrat,sans-serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-decoration:none;">+ NEW CASE</a>
       </div>
       <!--CIVIL_FILTER_BANNER-->
       <!-- Stacked, not side by side. Nine columns sharing the width meant no
@@ -179,12 +179,12 @@ async function renderKanban(opts = {}) {
            screen together and you scroll inside whichever one you are
            working in. */
         .civil-col-scroll::-webkit-scrollbar { width: 9px; }
-        .civil-col-scroll::-webkit-scrollbar-track { background: #EFE3C6; }
-        .civil-col-scroll::-webkit-scrollbar-thumb { background: #C9B68C; border-radius: 5px; }
+        .civil-col-scroll::-webkit-scrollbar-track { background: #FFF3E6; }
+        .civil-col-scroll::-webkit-scrollbar-thumb { background: #CFC8BE; border-radius: 5px; }
         .civil-col-scroll::-webkit-scrollbar-thumb:hover { background: #A34C00; }
-        .civil-col-scroll { scrollbar-width: thin; scrollbar-color: #C9B68C #EFE3C6; }
+        .civil-col-scroll { scrollbar-width: thin; scrollbar-color: #CFC8BE #FFF3E6; }
         .civil-col > summary::-webkit-details-marker { display: none; }
-        .civil-col > summary:hover { background: #F7EFD9; }
+        .civil-col > summary:hover { background: #FAF8F5; }
       </style>
       <div style="max-width:1200px;">
         ${stagesHtml}
@@ -352,7 +352,7 @@ async function renderCaseDetail(id) {
   ` : "";
 
   const deadlinesHtml = deadlines.length ? deadlines.map(d => `
-    <tr style="border-bottom:1px solid #E5D5B8;">
+    <tr style="border-bottom:1px solid #E8E3DC;">
       <td style="padding:10px;">${fmtDate(d.due_date)}</td>
       <td style="padding:10px;">${esc(d.description)}</td>
       <td style="padding:10px;font-size:11px;color:#5E5854;">${esc(d.ccp_rule || "")}</td>
@@ -372,7 +372,7 @@ async function renderCaseDetail(id) {
       </summary>
       <table style="width:100%;border-collapse:collapse;">
         ${closedDeadlines.map(d => `
-          <tr style="border-top:1px solid #E5D5B8;${d.status === "dismissed" ? "opacity:.65;" : ""}">
+          <tr style="border-top:1px solid #E8E3DC;${d.status === "dismissed" ? "opacity:.65;" : ""}">
             <td style="padding:8px 10px;white-space:nowrap;text-decoration:line-through;color:#5E5854;">${fmtDate(d.due_date)}</td>
             <td style="padding:8px 10px;color:#2B2523;">${esc(d.description)}</td>
             <td style="padding:8px 10px;font-size:11px;color:#5E5854;white-space:nowrap;">
@@ -387,7 +387,7 @@ async function renderCaseDetail(id) {
     </details>` : "";
 
   const eventsHtml = events.length ? events.map(e => `
-    <tr style="border-bottom:1px solid #E5D5B8;">
+    <tr style="border-bottom:1px solid #E8E3DC;">
       <td style="padding:10px;font-size:11px;">${fmtDate(e.event_date || e.created_at)}</td>
       <td style="padding:10px;"><span style="padding:2px 6px;background:#5E5854;color:#FAF8F5;font-size:10px;border-radius:3px;">${esc(e.event_kind)}</span></td>
       <td style="padding:10px;font-weight:600;">${esc(e.title)}</td>
@@ -556,9 +556,9 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
              style="flex:1;min-width:260px;padding:8px;border:1px solid #E8E3DC;border-radius:5px;background:#FAF8F5;color:#2B2523;font-size:12px;">
       <button onclick="dbxSave(${id})" style="padding:8px 14px;background:#2B2523;color:#FAF8F5;border:1px solid #3A3330;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">${linked ? "UPDATE" : "LINK"} FOLDER</button>
       <button onclick="dbxSuggest(${id})" style="padding:8px 14px;background:#FAF8F5;color:#2B2523;border:1px solid #E8E3DC;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">SUGGEST</button>
-      ${linked ? "" : `<button onclick="dbxProvision(${id})" title="Create this matter's folder in the civil Dropbox root, with the standard subfolders, and link it" style="padding:8px 14px;background:#166534;color:#FAF8F5;border:1px solid #0F3D22;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">CREATE FOLDER</button>`}
-      ${linked ? `<button onclick="dbxSync(${id})" style="padding:8px 14px;background:#FF7B00;color:#1E1B1A;border:1px solid #D96800;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">SYNC NOW</button>` : ""}
-      ${linked ? `<button onclick="dbxArchive(${id}, ${archived ? "false" : "true"})" style="padding:8px 14px;background:${archived ? "#166534" : "#9C2B1E"};color:#FAF8F5;border:1px solid #3A3330;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">${archived ? "UNARCHIVE" : "ARCHIVE"}</button>` : ""}
+      ${linked ? "" : `<button onclick="dbxProvision(${id})" title="Create this matter's folder in the civil Dropbox root, with the standard subfolders, and link it" style="padding:8px 14px;background:#2F6B3F;color:#FAF8F5;border:1px solid #2F6B3F;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">CREATE FOLDER</button>`}
+      ${linked ? `<button onclick="dbxSync(${id})" style="padding:8px 14px;background:#FF7B00;color:#1E1B1A;border:1px solid #A34C00;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">SYNC NOW</button>` : ""}
+      ${linked ? `<button onclick="dbxArchive(${id}, ${archived ? "false" : "true"})" style="padding:8px 14px;background:${archived ? "#2F6B3F" : "#9C2B1E"};color:#FAF8F5;border:1px solid #3A3330;border-radius:5px;cursor:pointer;font-size:11px;font-family:Montserrat,sans-serif;letter-spacing:1px;">${archived ? "UNARCHIVE" : "ARCHIVE"}</button>` : ""}
     </div>
     <div id="dbx-msg" style="font-size:11px;color:#5E5854;margin-bottom:10px;">
       ${linked ? `Linked to <strong>${esc(summary.dropbox_path)}</strong> · last synced ${esc(synced)}${archived ? ` · <span style="color:#9C2B1E;font-weight:700;">ARCHIVED — sync paused</span>` : ""}` : "No Dropbox folder linked yet."}
@@ -629,7 +629,7 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
           label.textContent = sg.path;
           var use = document.createElement("a");
           use.href = "#";
-          use.style.cssText = "font-size:11px;color:#B84200;font-weight:600;text-decoration:none;white-space:nowrap;";
+          use.style.cssText = "font-size:11px;color:#A34C00;font-weight:600;text-decoration:none;white-space:nowrap;";
           use.textContent = "USE (score " + sg.score + ")";
           use.onclick = function (ev) {
             ev.preventDefault();
@@ -653,7 +653,7 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
         var ok = p.dropbox && (p.dropbox.created || p.dropbox.adopted || p.dropbox.linked);
         if (ok) {
           var el = document.getElementById("dbx-msg");
-          el.style.color = "#166534";
+          el.style.color = "#2F6B3F";
           el.textContent = p.summary + ". Reloading…";
           setTimeout(function () { location.reload(); }, 1100);
           return;
@@ -697,7 +697,7 @@ function renderDocumentsPanel(id, summary, files, cats, err) {
           <div style="font-size:10px;color:#5E5854;">${esc(cat.label)}${f.relative_folder ? " · " + esc(f.relative_folder) : ""}${kb ? " · " + kb : ""}${f.server_modified ? " · " + fmtDate(f.server_modified) : ""}</div>
         </div>
         ${f.archived ? `<span style="font-size:9px;font-weight:700;color:#5E5854;letter-spacing:1px;">ARCHIVED</span>` : ""}
-        <a href="#" onclick="dbxOpen(event, ${f.id})" style="flex-shrink:0;font-size:11px;color:#B84200;text-decoration:none;font-weight:600;">OPEN ↗</a>
+        <a href="#" onclick="dbxOpen(event, ${f.id})" style="flex-shrink:0;font-size:11px;color:#A34C00;text-decoration:none;font-weight:600;">OPEN ↗</a>
       </div>`;
   }).join("");
 

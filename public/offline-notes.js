@@ -205,8 +205,8 @@
   function offerDraft(form, key, draft) {
     var when = new Date(draft.at);
     var bar = document.createElement("div");
-    bar.style.cssText = "margin:0 0 16px;padding:12px 14px;border:1px solid #B45309;border-left:4px solid #B45309;"
-      + "background:#fffaf3;border-radius:6px;font-size:13px;color:#2B2523;line-height:1.6;";
+    bar.style.cssText = "margin:0 0 16px;padding:12px 14px;border:1px solid #FF7B00;border-left:4px solid #FF7B00;"
+      + "background:#FAF8F5;border-radius:6px;font-size:13px;color:#2B2523;line-height:1.6;";
     var msg = document.createElement("div");
     msg.textContent = "There is an unsent draft of this form from "
       + when.toLocaleString() + ", saved on this computer.";
@@ -329,7 +329,7 @@
       }
       if (stuck.length) {
         el.style.display = "block";
-        el.style.background = "#B45309";
+        el.style.background = "#A34C00";
         el.style.color = "#FAF8F5";
         el.textContent = stuck.length + " note(s) were refused by the server and need looking at: "
           + (stuck[0].error || "unknown reason");
@@ -337,7 +337,7 @@
       }
       if (queued.length || slices) {
         el.style.display = "block";
-        el.style.background = "#B45309";
+        el.style.background = "#A34C00";
         el.style.color = "#FAF8F5";
         el.textContent = "Back online — sending "
           + (slices ? slices + " audio piece(s) " : "")
@@ -385,8 +385,8 @@
 
   function saidQueued(form, label) {
     var box = document.createElement("div");
-    box.style.cssText = "margin:16px 0;padding:16px 18px;border:1px solid #2e7d32;border-left:4px solid #2e7d32;"
-      + "background:#f4faf5;border-radius:6px;font-size:14px;color:#2B2523;line-height:1.7;";
+    box.style.cssText = "margin:16px 0;padding:16px 18px;border:1px solid #2F6B3F;border-left:4px solid #2F6B3F;"
+      + "background:#EEF5EF;border-radius:6px;font-size:14px;color:#2B2523;line-height:1.7;";
     box.innerHTML = "<strong>Saved on this computer.</strong>";
     var p = document.createElement("div");
     p.style.cssText = "margin-top:6px;font-size:13px;color:#2B2523;";

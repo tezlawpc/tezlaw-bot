@@ -342,15 +342,15 @@ function renderDeniedPage({ userRole, permission, requiredRoles }) {
   const needs = requiredRoles ? `role: ${requiredRoles}` : `permission: ${permission}`;
   return `<!doctype html><html><head><meta charset="utf-8">
 <title>Access Denied</title>
-<style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f7f7f7;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+<style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#FAF8F5;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
 .card{background:white;padding:40px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.08);max-width:480px;text-align:center}
-h1{color:#c00;margin:0 0 12px 0}p{color:#555;line-height:1.5}
+h1{color:#9C2B1E;margin:0 0 12px 0}p{color:#5E5854;line-height:1.5}
 a{background:#2B2523;color:white;padding:10px 20px;text-decoration:none;border-radius:4px;display:inline-block;margin-top:16px}</style></head>
 <body><div class="card">
 <div style="font-size:48px; margin-bottom:12px;">🔒</div>
 <h1>Access Denied</h1>
 <p>Your role (<strong>${escapeHtml(userRole)}</strong>) doesn't have access to this feature.</p>
-<p style="font-size:12px; color:#888;">Required ${escapeHtml(needs)}</p>
+<p style="font-size:12px; color:#5E5854;">Required ${escapeHtml(needs)}</p>
 <a href="/admin/">← Back to Dashboard</a>
 </div></body></html>`;
 }
@@ -831,17 +831,17 @@ function renderSetupPage({ error = null, username = "", fullName = "" } = {}) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Setup — Tez Law Firm</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f7f7f7; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #FAF8F5; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
     .card { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: min(500px, 90vw); }
     h1 { color: #2B2523; margin: 0 0 6px 0; font-size: 26px; }
     .brand { color: #A34C00; font-size: 12px; letter-spacing: 2px; margin-bottom: 16px; font-weight: 600; }
-    .intro { background: #FAF8F5; border-left: 3px solid #FF7B00; padding: 12px 14px; border-radius: 4px; margin: 16px 0 20px 0; font-size: 13px; color: #555; }
-    label { display: block; margin: 12px 0 4px 0; color: #333; font-size: 13px; font-weight: 600; }
-    input[type="text"], input[type="password"] { width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 15px; box-sizing: border-box; }
+    .intro { background: #FAF8F5; border-left: 3px solid #FF7B00; padding: 12px 14px; border-radius: 4px; margin: 16px 0 20px 0; font-size: 13px; color: #5E5854; }
+    label { display: block; margin: 12px 0 4px 0; color: #2B2523; font-size: 13px; font-weight: 600; }
+    input[type="text"], input[type="password"] { width: 100%; padding: 10px 12px; border: 1px solid #CFC8BE; border-radius: 4px; font-size: 15px; box-sizing: border-box; }
     input:focus { outline: none; border-color: #FF7B00; }
-    .hint { font-size: 11px; color: #888; margin-top: 3px; }
+    .hint { font-size: 11px; color: #5E5854; margin-top: 3px; }
     button { width: 100%; padding: 12px; background: #2B2523; color: white; border: none; border-radius: 4px; font-size: 15px; cursor: pointer; margin-top: 20px; font-weight: 600; }
-    .err { background: #fee; color: #900; padding: 10px 12px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; border-left: 3px solid #c00; }
+    .err { background: #FBEDEA; color: #9C2B1E; padding: 10px 12px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; border-left: 3px solid #9C2B1E; }
   </style>
 </head>
 <body>
@@ -1051,7 +1051,7 @@ function mount(app) {
       name: payload.n,
       role: payload.r,
       role_label: ROLES[payload.r]?.label || payload.r,
-      role_color: ROLES[payload.r]?.color || "#666",
+      role_color: ROLES[payload.r]?.color || "#5E5854",
       permissions: perms,
     });
   });
@@ -1081,9 +1081,9 @@ function mount(app) {
       const reachable = (u) => !!signin.e164(u.phone) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(u.email || "").trim());
       const uncovered = users.filter(u => !u.disabled && !reachable(u));
       const signinCard = `
-        <div style="background:white; padding:16px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee; border-left:4px solid #FF7B00;">
+        <div style="background:white; padding:16px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #E8E3DC; border-left:4px solid #FF7B00;">
           <strong style="color:#2B2523;">Sign-in code</strong>
-          <div style="font-size:12.5px; color:#555; margin:4px 0 10px; line-height:1.55;">
+          <div style="font-size:12.5px; color:#5E5854; margin:4px 0 10px; line-height:1.55;">
             After the password, a 6-digit code goes to the phone (or email) on file for the person signing in.
             Someone with <em>no</em> phone and <em>no</em> email on file still signs in with the password alone &mdash;
             ${uncovered.length
@@ -1107,17 +1107,17 @@ function mount(app) {
             <span style="background:${roleInfo.color}; color:white; padding:3px 8px; border-radius:10px; font-size:11px; font-weight:600;">${escapeHtml(roleInfo.label)}</span>
           </td>
           <td style="white-space:nowrap;">
-            ${u.phone ? escapeHtml(u.phone) : (u.email ? '<span style="color:#888; font-style:italic;" title="Sign-in codes go to their email">none (code by email)</span>' : '<span style="color:#c60; font-style:italic;" title="No phone or email: signs in with the password alone">none &mdash; no code</span>')}
+            ${u.phone ? escapeHtml(u.phone) : (u.email ? '<span style="color:#5E5854; font-style:italic;" title="Sign-in codes go to their email">none (code by email)</span>' : '<span style="color:#A34C00; font-style:italic;" title="No phone or email: signs in with the password alone">none &mdash; no code</span>')}
             <button type="button" data-id="${u.id}" data-username="${escapeHtml(u.username)}" data-phone="${escapeHtml(u.phone || "")}" onclick="editPhone(this)" title="Set or change the phone number" style="background:none; border:none; color:#2B2523; cursor:pointer; font-size:11px; text-decoration:underline; padding:0 0 0 6px;">${u.phone ? "edit" : "add"}</button>
           </td>
-          <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '<span style="color:#c00; font-style:italic;">never</span>'}</td>
+          <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '<span style="color:#9C2B1E; font-style:italic;">never</span>'}</td>
           <td>${new Date(u.created_at).toLocaleDateString()}</td>
           <td>
             ${req.user && req.user.uid !== u.id
-              ? `<button type="button" onclick="editUser(${u.id}, '${escapeHtml(u.username)}', '${escapeHtml(u.role)}')" style="background:#eee; color:#333; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Edit role</button>
+              ? `<button type="button" onclick="editUser(${u.id}, '${escapeHtml(u.username)}', '${escapeHtml(u.role)}')" style="background:#F3EFE9; color:#2B2523; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Edit role</button>
                  <a href="/admin/users/${u.id}/permissions" style="background:#2B2523; color:white; text-decoration:none; padding:5px 10px; border-radius:3px; font-size:11px; margin-right:4px; display:inline-block;">🔐 Permissions</a>
                  <button type="button" onclick="resetUserPassword(${u.id}, '${escapeHtml(u.username)}')" style="background:#A34C00; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Reset password</button>
-                 <form method="POST" action="/admin/users/${u.id}/delete" style="display:inline;" onsubmit="return confirm('Delete user ${escapeHtml(u.username)}? This cannot be undone.');"><button type="submit" style="background:#c00; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Delete</button></form>`
+                 <form method="POST" action="/admin/users/${u.id}/delete" style="display:inline;" onsubmit="return confirm('Delete user ${escapeHtml(u.username)}? This cannot be undone.');"><button type="submit" style="background:#9C2B1E; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:11px;">Delete</button></form>`
               : `<a href="/admin/users/${u.id}/permissions" style="background:#2B2523; color:white; text-decoration:none; padding:5px 10px; border-radius:3px; font-size:11px; display:inline-block;">🔐 My permissions</a>`}
           </td>
         </tr>`;
@@ -1136,14 +1136,14 @@ function mount(app) {
           <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:8px;">
             <div>
               <strong style="color:#2B2523;">⚡ Quick-add Tez Law staff</strong>
-              <div style="font-size:12px; color:#666; margin-top:3px;">Click a name to pre-fill the form below. Set a strong temporary password and share with the person.</div>
+              <div style="font-size:12px; color:#5E5854; margin-top:3px;">Click a name to pre-fill the form below. Set a strong temporary password and share with the person.</div>
             </div>
           </div>
           <div style="display:flex; flex-wrap:wrap; gap:6px;">
             ${missingStaff.map(s => `
               <button type="button" onclick="quickAddStaff(${JSON.stringify(s).replace(/"/g, "&quot;")})" style="background:white; border:1px solid #FF7B00; color:#2B2523; padding:6px 10px; border-radius:4px; cursor:pointer; font-size:12px;">
                 <strong>${escapeHtml(s.full_name)}</strong>
-                <span style="color:#666; font-size:11px; margin-left:6px;">${escapeHtml(s.note)}</span>
+                <span style="color:#5E5854; font-size:11px; margin-left:6px;">${escapeHtml(s.note)}</span>
               </button>
             `).join("")}
           </div>
@@ -1152,13 +1152,13 @@ function mount(app) {
 
       // Role legend — helps JJ pick the right one
       const roleLegend = `
-        <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee;">
+        <div style="background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #E8E3DC;">
           <strong style="color:#2B2523;">📋 Role permissions</strong>
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px; margin-top:10px;">
             ${Object.entries(ROLES).map(([key, r]) => `
               <div style="border-left:3px solid ${r.color}; padding:8px 12px;">
                 <div style="font-weight:600; color:${r.color}; margin-bottom:3px; font-size:13px;">${escapeHtml(r.label)}</div>
-                <div style="font-size:11px; color:#666; line-height:1.4;">${escapeHtml(r.description)}</div>
+                <div style="font-size:11px; color:#5E5854; line-height:1.4;">${escapeHtml(r.description)}</div>
               </div>
             `).join("")}
           </div>
@@ -1198,55 +1198,55 @@ function mount(app) {
           <tbody>${rows}</tbody>
         </table>
 
-        <div style="background:white; padding:20px; border-radius:6px; margin-top:20px; border:1px solid #eee;">
+        <div style="background:white; padding:20px; border-radius:6px; margin-top:20px; border:1px solid #E8E3DC;">
           <h3 style="margin:0 0 12px 0; color:#2B2523;">➕ Add a user</h3>
           <form method="POST" action="/admin/users/new" onsubmit="return tezCheckNewUser()">
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
               <div>
-                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Full name</label>
-                <input type="text" name="full_name" id="new_full_name" required oninput="tezSuggestUsername()" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:3px;">Full name</label>
+                <input type="text" name="full_name" id="new_full_name" required oninput="tezSuggestUsername()" style="width:100%; padding:9px; border:1px solid #CFC8BE; border-radius:3px; box-sizing:border-box;">
               </div>
               <div>
-                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Username <span style="color:#999;">— what they type to sign in</span></label>
+                <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:3px;">Username <span style="color:#5E5854;">— what they type to sign in</span></label>
                 <input type="text" name="username" id="new_username" required minlength="2" maxlength="64"
                        autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"
                        oninput="tezUserTouched = true; tezShowUsername()"
-                       style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
-                <div id="new_username_hint" style="font-size:11px; color:#888; margin-top:4px;">Lowercase letters, numbers, dot, dash or underscore. Capitals and spaces are fixed for you.</div>
+                       style="width:100%; padding:9px; border:1px solid #CFC8BE; border-radius:3px; box-sizing:border-box;">
+                <div id="new_username_hint" style="font-size:11px; color:#5E5854; margin-top:4px;">Lowercase letters, numbers, dot, dash or underscore. Capitals and spaces are fixed for you.</div>
               </div>
               <div>
-                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Mobile phone <span style="color:#999;">— for sign-in codes and text alerts</span></label>
+                <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:3px;">Mobile phone <span style="color:#5E5854;">— for sign-in codes and text alerts</span></label>
                 <input type="tel" name="phone" id="new_phone" inputmode="tel" autocomplete="off" placeholder="626-555-0123"
-                       style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                       style="width:100%; padding:9px; border:1px solid #CFC8BE; border-radius:3px; box-sizing:border-box;">
               </div>
               <div>
-                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Email <span style="color:#999;">— optional</span></label>
+                <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:3px;">Email <span style="color:#5E5854;">— optional</span></label>
                 <input type="text" name="email" id="new_email" inputmode="email" autocapitalize="none" autocomplete="off"
-                       style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                       style="width:100%; padding:9px; border:1px solid #CFC8BE; border-radius:3px; box-sizing:border-box;">
               </div>
               <div>
-                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Password (min 8 chars)</label>
-                <input type="password" name="password" required minlength="8" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:3px;">Password (min 8 chars)</label>
+                <input type="password" name="password" required minlength="8" style="width:100%; padding:9px; border:1px solid #CFC8BE; border-radius:3px; box-sizing:border-box;">
               </div>
               <div>
-                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">Role</label>
-                <select name="role" id="new_role" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">${roleOptionsHTML}</select>
+                <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:3px;">Role</label>
+                <select name="role" id="new_role" style="width:100%; padding:9px; border:1px solid #CFC8BE; border-radius:3px; box-sizing:border-box;">${roleOptionsHTML}</select>
               </div>
               <div style="grid-column:1/-1;">
-                <label style="font-size:12px; color:#666; display:block; margin-bottom:3px;">
-                  Broker folder in Dropbox <span style="color:#999;">— required for the Consultant role, ignored for every other role</span>
+                <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:3px;">
+                  Broker folder in Dropbox <span style="color:#5E5854;">— required for the Consultant role, ignored for every other role</span>
                 </label>
                 ${brokerFolders.length
-                  ? `<select name="broker_folder" id="new_broker_folder" style="width:100%; padding:9px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                  ? `<select name="broker_folder" id="new_broker_folder" style="width:100%; padding:9px; border:1px solid #CFC8BE; border-radius:3px; box-sizing:border-box;">
                        <option value="">— none —</option>
                        ${brokerOptionsHTML}
                      </select>
-                     <div style="font-size:11px; color:#888; margin-top:4px;">
+                     <div style="font-size:11px; color:#5E5854; margin-top:4px;">
                        ${brokerFolders.length} broker folder${brokerFolders.length === 1 ? "" : "s"} found.
                        Clients already filed under the chosen folder are assigned to this consultant automatically.
                        A broker who is not listed needs a folder in Dropbox first.
                      </div>`
-                  : `<div style="padding:9px; border:1px dashed #c60; border-radius:3px; background:#fff8f0; font-size:12px; color:#a04;">
+                  : `<div style="padding:9px; border:1px dashed #FF7B00; border-radius:3px; background:#FAF8F5; font-size:12px; color:#9C2B1E;">
                        No broker folders could be read from Dropbox${brokerError ? ` (${escapeHtml(brokerError)})` : ""},
                        so a Consultant account cannot be created right now. Every other role still works.
                      </div>`}
@@ -1258,13 +1258,13 @@ function mount(app) {
           </form>
         </div>
 
-        <div style="background:#f9f9f9; padding:15px 20px; border-radius:6px; margin-top:20px; font-size:13px; color:#666; border-left:3px solid #FF7B00;">
+        <div style="background:#FAF8F5; padding:15px 20px; border-radius:6px; margin-top:20px; font-size:13px; color:#5E5854; border-left:3px solid #FF7B00;">
           <strong>🔑 Change your password:</strong>
           <form method="POST" action="/admin/users/change-password" style="display:inline-flex; gap:6px; align-items:center; margin-left:8px;">
-            <input type="password" name="new_password" placeholder="new password (min 8 chars)" required minlength="8" style="padding:6px 10px; border:1px solid #ccc; border-radius:3px; width:200px;">
+            <input type="password" name="new_password" placeholder="new password (min 8 chars)" required minlength="8" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:3px; width:200px;">
             <button type="submit" style="background:#A34C00; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:12px;">Change</button>
           </form>
-          <div style="font-size:11px; margin-top:4px; color:#888;">You'll be signed out and asked to log in again after changing.</div>
+          <div style="font-size:11px; margin-top:4px; color:#5E5854;">You'll be signed out and asked to log in again after changing.</div>
         </div>
 
         <script>
@@ -1280,9 +1280,9 @@ function mount(app) {
             var raw = document.getElementById("new_username").value;
             var clean = tezCleanUsername(raw);
             var hint = document.getElementById("new_username_hint");
-            if (!raw) { hint.style.color = "#888"; hint.textContent = "Lowercase letters, numbers, dot, dash or underscore. Capitals and spaces are fixed for you."; return clean; }
-            if (clean.length < 2) { hint.style.color = "#c00"; hint.textContent = "Use at least 2 letters or numbers (English letters only)."; return clean; }
-            hint.style.color = clean === raw ? "#888" : "#0a6";
+            if (!raw) { hint.style.color = "#5E5854"; hint.textContent = "Lowercase letters, numbers, dot, dash or underscore. Capitals and spaces are fixed for you."; return clean; }
+            if (clean.length < 2) { hint.style.color = "#9C2B1E"; hint.textContent = "Use at least 2 letters or numbers (English letters only)."; return clean; }
+            hint.style.color = clean === raw ? "#5E5854" : "#2F6B3F";
             hint.textContent = "They will sign in as: " + clean;
             return clean;
           }
@@ -1356,15 +1356,15 @@ function mount(app) {
               modal.innerHTML =
                 '<div style="background:white; padding:30px; border-radius:8px; max-width:480px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">' +
                   '<h2 style="margin:0 0 12px 0; color:#2B2523;">🔑 Password reset</h2>' +
-                  '<p style="color:#666; font-size:13px;">Share this temporary password with <strong>' + data.full_name + '</strong> (' + data.username + ') via a secure channel. It will only be shown once.</p>' +
+                  '<p style="color:#5E5854; font-size:13px;">Share this temporary password with <strong>' + data.full_name + '</strong> (' + data.username + ') via a secure channel. It will only be shown once.</p>' +
                   '<div style="background:#FAF8F5; padding:15px; border-radius:6px; text-align:center; margin:15px 0; border:2px solid #FF7B00;">' +
                     '<code style="font-size:22px; font-weight:600; color:#2B2523; letter-spacing:2px; font-family:monospace;">' + data.temporary_password + '</code>' +
                   '</div>' +
                   '<div style="display:flex; gap:8px; justify-content:flex-end;">' +
-                    '<button onclick="navigator.clipboard.writeText(\\'' + data.temporary_password + '\\'); this.textContent=\\'Copied\\';" style="background:#eee; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">📋 Copy</button>' +
+                    '<button onclick="navigator.clipboard.writeText(\\'' + data.temporary_password + '\\'); this.textContent=\\'Copied\\';" style="background:#F3EFE9; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">📋 Copy</button>' +
                     '<button onclick="this.closest(\\'div\\').parentElement.parentElement.remove()" style="background:#2B2523; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer;">Done</button>' +
                   '</div>' +
-                  '<div style="font-size:11px; color:#888; margin-top:12px;">The user should log in and immediately change their password via the "Change your password" box.</div>' +
+                  '<div style="font-size:11px; color:#5E5854; margin-top:12px;">The user should log in and immediately change their password via the "Change your password" box.</div>' +
                 '</div>';
               document.body.appendChild(modal);
             } catch (e) {
@@ -1628,7 +1628,7 @@ function mount(app) {
           <a href="/admin/users" class="back-link">← Users</a>
         </div>
 
-        <div style="background:#f5f9ff; padding:14px 16px; border-radius:8px; border-left:4px solid #0061FF; margin-bottom:16px; font-size:13px;">
+        <div style="background:#F3EFE9; padding:14px 16px; border-radius:8px; border-left:4px solid #A34C00; margin-bottom:16px; font-size:13px;">
           <strong>Role default:</strong> <span style="background:${roleInfo.color}; color:white; padding:2px 8px; border-radius:8px; font-size:11px; font-weight:600;">${escapeHtml(roleInfo.label)}</span>
           &nbsp;·&nbsp; Checkboxes below override the role default per-permission. <strong>Green rows</strong> = matches role default. <strong>Yellow rows</strong> = you've overridden. Unchecking a green box denies it; checking a red box grants it.
         </div>
@@ -1639,7 +1639,7 @@ function mount(app) {
           <div style="margin-top:20px; display:flex; gap:10px; align-items:center;">
             <button type="button" onclick="savePerms()" id="saveBtn" style="background:#2B2523; color:white; padding:12px 24px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">💾 Save Permissions</button>
             <button type="button" onclick="resetToRoleDefaults()" style="background:#F3EFE9; color:#2B2523; padding:12px 24px; border:1px solid #FF7B00; border-radius:6px; cursor:pointer;">↺ Reset to Role Defaults</button>
-            <span id="permStatus" style="color:#666; font-size:12px; margin-left:10px;"></span>
+            <span id="permStatus" style="color:#5E5854; font-size:12px; margin-left:10px;"></span>
           </div>
         </form>
 
@@ -1659,7 +1659,7 @@ function mount(app) {
               const d = await r.json();
               if (d.ok) {
                 document.getElementById("permStatus").textContent = "✓ Saved";
-                document.getElementById("permStatus").style.color = "#2e7d32";
+                document.getElementById("permStatus").style.color = "#2F6B3F";
                 setTimeout(() => location.reload(), 700);
               } else {
                 alert("Error: " + d.error);
@@ -1680,7 +1680,7 @@ function mount(app) {
       if (hearingNotes && hearingNotes.renderAdminChrome) {
         res.send(hearingNotes.renderAdminChrome({ title: "User Permissions", body, activeItem: "users" }));
       } else {
-        res.send(`<html><head><title>Permissions</title><style>body{font-family:system-ui;padding:20px;max-width:960px;margin:auto;background:#FAF8F5;} .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;} .back-link{color:#666;text-decoration:none;}</style></head><body>${body}</body></html>`);
+        res.send(`<html><head><title>Permissions</title><style>body{font-family:system-ui;padding:20px;max-width:960px;margin:auto;background:#FAF8F5;} .page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;} .back-link{color:#5E5854;text-decoration:none;}</style></head><body>${body}</body></html>`);
       }
     } catch (err) {
       console.error("[permissions page]:", err.message);
@@ -1694,29 +1694,29 @@ function mount(app) {
       const roleGranted = (PERMISSIONS[k] || []).includes(userRole);
       const hasOverride = overrides[k] !== undefined;
       const effective = hasOverride ? overrides[k] : roleGranted;
-      const bg = hasOverride ? "#fff8e1" : (effective ? "#e8f5e9" : "#FAF8F5");
+      const bg = hasOverride ? "#FFF3E6" : (effective ? "#EEF5EF" : "#FAF8F5");
       const explainer = hasOverride
         ? (effective ? "✎ Overridden ON" : "✎ Overridden OFF")
         : (effective ? "Role default: ON" : "Role default: OFF");
-      const explainerColor = hasOverride ? "#e65100" : (effective ? "#2e7d32" : "#999");
+      const explainerColor = hasOverride ? "#A34C00" : (effective ? "#2F6B3F" : "#5E5854");
       return `
         <tr style="background:${bg};">
-          <td style="padding:10px 14px; border-bottom:1px solid #eee;">
+          <td style="padding:10px 14px; border-bottom:1px solid #E8E3DC;">
             <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
               <input type="checkbox" data-perm-key="${escapeHtml(k)}" ${effective ? "checked" : ""} style="width:18px; height:18px; cursor:pointer;">
               <div>
                 <div style="font-size:13px; color:#2B2523;">${escapeHtml(PERMISSION_LABELS[k] || k)}</div>
-                <div style="font-size:10px; color:#888; font-family:ui-monospace, Menlo, monospace; margin-top:2px;">${escapeHtml(k)}</div>
+                <div style="font-size:10px; color:#5E5854; font-family:ui-monospace, Menlo, monospace; margin-top:2px;">${escapeHtml(k)}</div>
               </div>
             </label>
           </td>
-          <td style="padding:10px 14px; border-bottom:1px solid #eee; text-align:right; font-size:11px; color:${explainerColor}; font-weight:${hasOverride ? "600" : "400"};">
+          <td style="padding:10px 14px; border-bottom:1px solid #E8E3DC; text-align:right; font-size:11px; color:${explainerColor}; font-weight:${hasOverride ? "600" : "400"};">
             ${explainer}
           </td>
         </tr>`;
     }).join("");
     return `
-      <div style="background:white; border-radius:8px; border:1px solid #eee; margin-bottom:12px; overflow:hidden;">
+      <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px; overflow:hidden;">
         <div style="padding:10px 16px; background:#2B2523; color:white; font-weight:600; font-size:13px;">${escapeHtml(label)}</div>
         <table style="width:100%; border-collapse:collapse;">
           <tbody>${rows}</tbody>

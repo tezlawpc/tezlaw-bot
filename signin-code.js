@@ -223,6 +223,14 @@ async function sendEmail(to, userId) {
     to,
     subject: "Your sign-in code",
     text: `Your TEZ Law Firm sign-in code is ${code}.\n\nIt expires in ${TTL_MIN} minutes. If you did not just try to sign in, tell the firm: someone has your password.`,
+    html: require("./tez-email").wrap({
+      preheader: `Your sign-in code. It expires in ${TTL_MIN} minutes.`,
+      heading: "Your sign-in code",
+      body: `<p style="margin:0 0 6px;">Enter this code to finish signing in to Tara:</p>` +
+        `<p style="margin:0 0 16px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:32px;letter-spacing:.3em;font-weight:700;color:#1E1B1A;">${code}</p>` +
+        `<p style="margin:0 0 14px;">It expires in ${TTL_MIN} minutes.</p>`,
+      note: "If you did not just try to sign in, tell the firm: someone has your password.",
+    }),
   });
   return sha(code);
 }

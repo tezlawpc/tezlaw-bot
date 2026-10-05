@@ -12,7 +12,7 @@
   if (!host) return;
   var API = "/admin/court-mail/api";
   var C = { walnut: "#2B2523", mid: "#3A3330", gold: "#A34C00", ember: "#FF7B00", red: "#9C2B1E",
-    lit: "#FAF8F5", border: "#E8E3DC", muted: "#5E5854", green: "#166534" };
+    lit: "#FAF8F5", border: "#E8E3DC", muted: "#5E5854", green: "#2F6B3F" };
 
   function h(tag, attrs, kids) {
     var e = document.createElement(tag);
@@ -45,8 +45,8 @@
   }
   function chip(text, color) { return h("span", { text: text, style: "display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:#fff;background:" + color + ";" }); }
   function when(v) { try { return v ? new Date(v).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : ""; } catch (e) { return ""; } }
-  var STATUS = { done: [C.green, "done"], needs_review: [C.ember, "needs you"], error: [C.red, "error"], ignored: ["#999", "not court mail"],
-    handled: ["#777", "handled"], "new": [C.muted, "queued"], working: [C.muted, "reading…"] };
+  var STATUS = { done: [C.green, "done"], needs_review: [C.ember, "needs you"], error: [C.red, "error"], ignored: ["#5E5854", "not court mail"],
+    handled: ["#5E5854", "handled"], "new": [C.muted, "queued"], working: [C.muted, "reading…"] };
 
   var statusBox = h("div"), filterBar = h("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin:12px 0;" }), listBox = h("div");
   host.appendChild(statusBox); host.appendChild(filterBar); host.appendChild(listBox);
@@ -129,7 +129,7 @@
         .catch(function (e) { msg.style.color = C.red; msg.textContent = e.message; });
     }
     var actions = (m.actions || []).map(function (a, i) {
-      return h("div", { "data-action": i, style: "font-size:12.5px;padding:2px 0;" + (a.undone ? "text-decoration:line-through;color:#999;" : "") }, [
+      return h("div", { "data-action": i, style: "font-size:12.5px;padding:2px 0;" + (a.undone ? "text-decoration:line-through;color:#5E5854;" : "") }, [
         "• " + a.label + (a.undone ? " (undone)" : ""),
         !a.undone && a.type !== "file" ? h("a", { href: "#", text: "Undo", style: "margin-left:8px;font-size:11.5px;color:" + C.gold + ";",
           onclick: function (e) { e.preventDefault(); act(api("/" + m.id + "/undo/" + i, { method: "POST", body: {} }), "Undone."); } }) : null,

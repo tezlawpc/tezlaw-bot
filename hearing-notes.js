@@ -1493,9 +1493,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
   .deadline-row { display: flex; gap: 8px; margin: 6px 0; }
   .deadline-row input[type="date"] { flex: 0 0 160px; }
   .deadline-row input[type="text"] { flex: 1; }
-  .deadline-row button { flex: 0 0 auto; padding: 4px 10px; background: #eee; border: none; cursor: pointer; border-radius: 4px; }
-  .add-deadline { background: #eee; padding: 6px 12px; border: none; cursor: pointer; border-radius: 4px; font-size: 13px; }
-  .hint { color: #666; font-size: 12px; font-style: italic; margin: 2px 0; }
+  .deadline-row button { flex: 0 0 auto; padding: 4px 10px; background: #F3EFE9; border: none; cursor: pointer; border-radius: 4px; }
+  .add-deadline { background: #F3EFE9; padding: 6px 12px; border: none; cursor: pointer; border-radius: 4px; font-size: 13px; }
+  .hint { color: #5E5854; font-size: 12px; font-style: italic; margin: 2px 0; }
   table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px; background: white; border-radius: 4px; overflow: hidden; }
   th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--travertine); }
   th { background: #F3EFE9; color: var(--charcoal); font-weight: 600; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -1539,6 +1539,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
       <a href="/admin/transcripts" class="nav-link ${isActive('transcripts')}" data-perm="clients.read">
         <span class="nav-icon">◉</span><span class="nav-label">Transcripts</span>
+      </a>
+      <a href="/admin/esign" class="nav-link ${isActive('esign')}" data-perm="clients.read">
+        <span class="nav-icon">✎</span><span class="nav-label">E-Signature</span>
       </a>
       <a href="/admin/tasks" class="nav-link ${isActive('tasks')}" data-perm="tasks.read">
         <span class="nav-icon">▤</span><span class="nav-label">Task List</span>
@@ -1631,6 +1634,12 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       </a>
       <a href="/admin/federal?overdue=1" class="nav-link" data-perm="federal.read">
         <span class="nav-icon">⚠</span><span class="nav-label">Overdue Deadlines</span>
+      </a>
+      <a href="/admin/matters/" class="nav-link ${isActive('matters')}" data-perm="matters.access">
+        <span class="nav-icon">◇</span><span class="nav-label">Matter Manager</span>
+      </a>
+      <a href="/admin/matters/?view=inbox" class="nav-link ${isActive('matters-inbox')}" data-perm="matters.access">
+        <span class="nav-icon">✉</span><span class="nav-label">Docket Inbox</span>
       </a>
     </div>
 
@@ -1767,11 +1776,8 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <div class="nav-section-header">
         <span>Admin</span>
       </div>
-      <a href="/admin/matters/" class="nav-link" data-perm="matters.access">
-        <span class="nav-icon">◇</span><span class="nav-label">Matter Manager</span>
-      </a>
       <a href="/admin/templates" class="nav-link ${isActive('templates')}" data-perm="users.manage">
-        <span class="nav-icon">✍</span><span class="nav-label">Document Templates</span>
+        <span class="nav-icon">▣</span><span class="nav-label">Document Templates</span>
       </a>
       <a href="/admin/panel/prompt" class="nav-link" data-perm="users.manage">
         <span class="nav-icon">◘</span><span class="nav-label">System Prompt</span>
@@ -2036,20 +2042,20 @@ function renderAdminChrome({ title, body, activeItem = null }) {
         return;
       }
 
-      const priColor = { urgent: "#c62828", high: "#e65100", normal: "#0061FF", low: "#888" };
+      const priColor = { urgent: "#9C2B1E", high: "#A34C00", normal: "#2B2523", low: "#5E5854" };
       const rowsHtml = tasks.map((t, i) => \`
-        <div style="background:white; padding:12px 14px; border-radius:6px; border:1px solid #eee; margin-bottom:8px;">
+        <div style="background:white; padding:12px 14px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:8px;">
           <div style="display:flex; align-items:flex-start; gap:10px;">
             <input type="checkbox" id="tpm-task-\${i}" checked style="width:16px; height:16px; margin-top:3px; flex-shrink:0;">
             <div style="flex:1;">
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                 <strong style="color:#2B2523;">\${esc(t.title)}</strong>
-                <span style="background:\${priColor[t.priority] || '#666'}; color:white; padding:1px 8px; border-radius:8px; font-size:10px;">\${(t.priority || 'normal').toUpperCase()}</span>
+                <span style="background:\${priColor[t.priority] || '#5E5854'}; color:white; padding:1px 8px; border-radius:8px; font-size:10px;">\${(t.priority || 'normal').toUpperCase()}</span>
               </div>
-              <div style="font-size:11px; color:#666; margin-top:4px;">
+              <div style="font-size:11px; color:#5E5854; margin-top:4px;">
                 \${t.category ? esc(t.category.replace(/_/g, ' ')) : ''}\${t.matter_type ? ' · ' + esc(t.matter_type) : ''}\${t.due_date ? ' · 📆 <strong>' + esc(t.due_date) + '</strong>' : ''}\${t.client_name ? ' · 👤 ' + esc(t.client_name) : ''}\${t.a_number ? ' · 🆔 ' + esc(t.a_number) : ''}\${t.court ? ' · ⚖️ ' + esc(t.court) : ''}
               </div>
-              \${t.description ? '<div style="font-size:12px; color:#555; margin-top:6px; white-space:pre-wrap;">' + esc(t.description) + '</div>' : ''}
+              \${t.description ? '<div style="font-size:12px; color:#5E5854; margin-top:6px; white-space:pre-wrap;">' + esc(t.description) + '</div>' : ''}
             </div>
           </div>
         </div>
@@ -2060,22 +2066,22 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       modal.style.cssText = "position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; display:flex; align-items:flex-start; justify-content:center; padding:40px 20px; overflow-y:auto;";
       modal.innerHTML = \`
         <div style="background:white; border-radius:8px; max-width:720px; width:100%; max-height:calc(100vh - 80px); display:flex; flex-direction:column;">
-          <div style="padding:16px 20px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+          <div style="padding:16px 20px; border-bottom:1px solid #E8E3DC; display:flex; justify-content:space-between; align-items:center;">
             <div>
               <h2 style="margin:0; font-size:18px; color:#2B2523;">🤖 Suggested Tasks from Note</h2>
-              <div style="font-size:12px; color:#666; margin-top:2px;">\${source && source.client_name ? esc(source.client_name) + ' · ' : ''}Uncheck any you don't want, then Create.</div>
+              <div style="font-size:12px; color:#5E5854; margin-top:2px;">\${source && source.client_name ? esc(source.client_name) + ' · ' : ''}Uncheck any you don't want, then Create.</div>
             </div>
-            <button type="button" onclick="document.getElementById('task-preview-modal').remove()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#666;">✕</button>
+            <button type="button" onclick="document.getElementById('task-preview-modal').remove()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#5E5854;">✕</button>
           </div>
           <div style="padding:16px 20px; overflow-y:auto; flex:1; background:#FAF8F5;">
-            <div style="background:#e8f5e9; padding:10px 14px; border-radius:6px; border-left:4px solid #2e7d32; margin-bottom:12px; font-size:12px;">
-              <strong style="color:#2e7d32;">Claude extracted \${tasks.length} task\${tasks.length === 1 ? '' : 's'}.</strong> Each will be added to your Task List and fire Telegram reminders if urgent or approaching its due date.
+            <div style="background:#EEF5EF; padding:10px 14px; border-radius:6px; border-left:4px solid #2F6B3F; margin-bottom:12px; font-size:12px;">
+              <strong style="color:#2F6B3F;">Claude extracted \${tasks.length} task\${tasks.length === 1 ? '' : 's'}.</strong> Each will be added to your Task List and fire Telegram reminders if urgent or approaching its due date.
             </div>
             \${rowsHtml}
           </div>
-          <div style="padding:14px 20px; border-top:1px solid #eee; display:flex; gap:10px; justify-content:flex-end;">
-            <button type="button" onclick="document.getElementById('task-preview-modal').remove()" style="background:none; color:#666; padding:10px 20px; border:1px solid #ccc; border-radius:6px; cursor:pointer;">Cancel</button>
-            <button type="button" id="tpm-create-btn" onclick='window._createExtractedTasks(\${JSON.stringify(tasks).replace(/</g, "\\\\u003c").replace(/'/g, "&apos;")})' style="background:#2e7d32; color:white; padding:10px 20px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✓ Create Selected</button>
+          <div style="padding:14px 20px; border-top:1px solid #E8E3DC; display:flex; gap:10px; justify-content:flex-end;">
+            <button type="button" onclick="document.getElementById('task-preview-modal').remove()" style="background:none; color:#5E5854; padding:10px 20px; border:1px solid #CFC8BE; border-radius:6px; cursor:pointer;">Cancel</button>
+            <button type="button" id="tpm-create-btn" onclick='window._createExtractedTasks(\${JSON.stringify(tasks).replace(/</g, "\\\\u003c").replace(/'/g, "&apos;")})' style="background:#2F6B3F; color:white; padding:10px 20px; border:none; border-radius:6px; cursor:pointer; font-weight:600;">✓ Create Selected</button>
           </div>
         </div>
       \`;
@@ -2095,7 +2101,7 @@ function renderAdminChrome({ title, body, activeItem = null }) {
         const d = await r.json();
         if (d.ok) {
           const modal = document.getElementById("task-preview-modal");
-          if (modal) modal.innerHTML = '<div style="background:white; border-radius:8px; padding:40px; text-align:center; max-width:400px;"><h2 style="color:#2e7d32;">✓ Created ' + d.created_count + ' task' + (d.created_count === 1 ? '' : 's') + '</h2><p><a href="/admin/tasks" style="color:#0061FF;">View task list →</a></p><button onclick="this.closest(\\'#task-preview-modal\\').remove()" style="margin-top:10px; background:#2B2523; color:white; padding:8px 20px; border:none; border-radius:6px; cursor:pointer;">Close</button></div>';
+          if (modal) modal.innerHTML = '<div style="background:white; border-radius:8px; padding:40px; text-align:center; max-width:400px;"><h2 style="color:#2F6B3F;">✓ Created ' + d.created_count + ' task' + (d.created_count === 1 ? '' : 's') + '</h2><p><a href="/admin/tasks" style="color:#FF7B00;">View task list →</a></p><button onclick="this.closest(\\'#task-preview-modal\\').remove()" style="margin-top:10px; background:#2B2523; color:white; padding:8px 20px; border:none; border-radius:6px; cursor:pointer;">Close</button></div>';
         } else {
           alert("Error: " + d.error);
           if (btn) { btn.disabled = false; btn.textContent = "✓ Create Selected"; }
@@ -2214,18 +2220,18 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     </label>`).join("");
 
   const errorSection = error ? `
-    <div style="background:#ffebee; padding:15px; border-left:4px solid #c00; margin:15px 0; border-radius:4px;">
+    <div style="background:#FBEDEA; padding:15px; border-left:4px solid #9C2B1E; margin:15px 0; border-radius:4px;">
       <strong>⚠️ Error:</strong> ${escapeHtml(error)}
     </div>` : "";
 
   const previewSection = generated ? `
-    <div style="background:#f5f9ff; padding:20px; margin:20px 0; border-left:4px solid #2B2523; border-radius:4px;">
+    <div style="background:#F3EFE9; padding:20px; margin:20px 0; border-left:4px solid #2B2523; border-radius:4px;">
       <h2 style="margin-top:0;">📋 Paralegal Summary (English, detailed)</h2>
       <pre id="paralegal-content" style="white-space:pre-wrap; font-family:inherit; margin:0; background:white; padding:15px; border-radius:4px;">${escapeHtml(generated.paralegal_summary || "")}</pre>
       <div style="margin-top:12px;">
         <button type="button" onclick="copyContent('paralegal-content')" style="background:#2B2523; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Paralegal Summary</button>
         ${generated.id ? `
-        <button type="button" onclick="sendParalegal(${generated.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 Send to team group</button>
+        <button type="button" onclick="sendParalegal(${generated.id})" style="background:#2F6B3F; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 Send to team group</button>
         <button type="button" onclick="generateTasksFromNote('master', ${generated.id}, this)" style="background:#A34C00; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">🤖 Create Tasks</button>
         <span id="send-status" style="margin-left:12px; font-weight:bold;"></span>
         ` : ""}
@@ -2237,21 +2243,21 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       <pre id="client-content" style="white-space:pre-wrap; font-family:inherit; margin:0; background:white; padding:15px; border-radius:4px;">${escapeHtml(generated.client_summary || "")}</pre>
       <div style="margin-top:12px;">
         <button type="button" onclick="copyContent('client-content')" style="background:#A34C00; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy Client Summary</button>
-        <span style="margin-left:12px; color:#666; font-size:13px;">Paste into WhatsApp, Telegram, or email to send to client</span>
+        <span style="margin-left:12px; color:#5E5854; font-size:13px;">Paste into WhatsApp, Telegram, or email to send to client</span>
       </div>
     </div>
 
-    ${saved ? '<p style="color:#4CAF50; font-weight:bold;">✅ Saved to database.</p>' : ""}
-    ${merged ? '<div style="background:#fff8e1; border-left:4px solid #f9a825; padding:12px 16px; border-radius:4px; margin-bottom:10px; font-size:13px;"><strong>ℹ️ Merged with existing hearing note.</strong> Tara detected that a hearing note for this client at this time already existed (note #' + noteId + '). Instead of creating a duplicate, your changes were merged into the existing note. Scroll down to see revision history.</div>' : ""}
-    ${sent ? `<p style="color:#4CAF50; font-weight:bold;">📤 Sent to team group (${sent.chunks} message${sent.chunks > 1 ? "s" : ""}).</p>` : ""}
+    ${saved ? '<p style="color:#2F6B3F; font-weight:bold;">✅ Saved to database.</p>' : ""}
+    ${merged ? '<div style="background:#FFF3E6; border-left:4px solid #A34C00; padding:12px 16px; border-radius:4px; margin-bottom:10px; font-size:13px;"><strong>ℹ️ Merged with existing hearing note.</strong> Tara detected that a hearing note for this client at this time already existed (note #' + noteId + '). Instead of creating a duplicate, your changes were merged into the existing note. Scroll down to see revision history.</div>' : ""}
+    ${sent ? `<p style="color:#2F6B3F; font-weight:bold;">📤 Sent to team group (${sent.chunks} message${sent.chunks > 1 ? "s" : ""}).</p>` : ""}
   ` : "";
 
   // Revision history panel — only on edit mode
   const revisionsHtml = isEdit && revisions && revisions.length ? `
-    <details style="margin:20px 0; background:white; border:1px solid #eee; border-radius:6px;" ${revisions.length > 1 ? "" : "open"}>
-      <summary style="cursor:pointer; padding:12px 16px; background:#f8f8f8; border-radius:6px 6px 0 0; font-weight:600; color:#2B2523; display:flex; align-items:center; justify-content:space-between;">
+    <details style="margin:20px 0; background:white; border:1px solid #E8E3DC; border-radius:6px;" ${revisions.length > 1 ? "" : "open"}>
+      <summary style="cursor:pointer; padding:12px 16px; background:#FAF8F5; border-radius:6px 6px 0 0; font-weight:600; color:#2B2523; display:flex; align-items:center; justify-content:space-between;">
         <span>📜 Revision History (${revisions.length})</span>
-        <span style="font-size:11px; color:#888; font-weight:normal;">Click to ${revisions.length > 1 ? "expand" : "collapse"}</span>
+        <span style="font-size:11px; color:#5E5854; font-weight:normal;">Click to ${revisions.length > 1 ? "expand" : "collapse"}</span>
       </summary>
       <div style="padding:0;">
         ${revisions.map(r => {
@@ -2263,13 +2269,13 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
             "summaries_regenerated": "🔄 Summaries regenerated",
           }[r.revision_type] || r.revision_type;
           const fields = r.changed_fields && r.changed_fields.length
-            ? `<div style="font-size:11px; color:#888; margin-top:4px;">Changed: ${r.changed_fields.map(f => `<code style="background:#eee; padding:1px 4px; border-radius:2px; font-size:10px;">${escapeHtml(f)}</code>`).join(" ")}</div>`
+            ? `<div style="font-size:11px; color:#5E5854; margin-top:4px;">Changed: ${r.changed_fields.map(f => `<code style="background:#E8E3DC; padding:1px 4px; border-radius:2px; font-size:10px;">${escapeHtml(f)}</code>`).join(" ")}</div>`
             : "";
           return `
-            <div style="padding:10px 16px; border-bottom:1px solid #f0f0f0; font-size:12px;">
+            <div style="padding:10px 16px; border-bottom:1px solid #E8E3DC; font-size:12px;">
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span><strong>${typeLabel}</strong> ${r.username ? `by <span style="color:#2B2523;">${escapeHtml(r.username)}</span>` : ""}</span>
-                <span style="color:#888;">${dt}</span>
+                <span style="color:#5E5854;">${dt}</span>
               </div>
               ${fields}
             </div>`;
@@ -2286,10 +2292,10 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         🎙️ <span>Voice dictate ${isEdit ? "additional notes" : "this hearing"}</span>
       </button>
       ${isEdit ? `<a href="/admin/motions/new?hearing_note_id=${noteId}" style="text-decoration:none; background:#2B2523; color:white; padding:10px 16px; border-radius:6px; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:6px;">📜 Draft motion</a>` : ""}
-      ${!isEdit ? `<a href="/admin/hearing/notes/bulk-upload" style="text-decoration:none; background:#0061FF; color:white; padding:10px 16px; border-radius:6px; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:6px;">📚 Bulk upload</a>` : ""}
+      ${!isEdit ? `<a href="/admin/hearing/notes/bulk-upload" style="text-decoration:none; background:#A34C00; color:white; padding:10px 16px; border-radius:6px; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:6px;">📚 Bulk upload</a>` : ""}
     </div>
   </div>
-  <p style="margin-bottom:15px; color:#555;">Take notes during the hearing. Zara will clean them up and generate a paralegal summary + client-friendly summary in the client's language.</p>
+  <p style="margin-bottom:15px; color:#5E5854;">Take notes during the hearing. Zara will clean them up and generate a paralegal summary + client-friendly summary in the client's language.</p>
   ${isEdit ? `<div data-transcripts="note" data-note-type="master" data-note-id="${Number(noteId)}" style="margin-bottom:12px;"></div>${require("./client-script").clientScriptTag("transcripts-page.js")}` : ""}
 
   <!-- Dictation pill — shown while recording AND while transcribing.
@@ -2297,10 +2303,10 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
        are looking at. Hovering brings it up to full strength. -->
   <div id="dictation-widget" style="display:none;">
     <div style="display:flex; align-items:center; gap:9px;">
-      <div id="d-widget-dot" style="width:9px; height:9px; border-radius:50%; background:#c62828; animation:d-pulse 1.2s infinite; flex:none;"></div>
+      <div id="d-widget-dot" style="width:9px; height:9px; border-radius:50%; background:#9C2B1E; animation:d-pulse 1.2s infinite; flex:none;"></div>
       <div id="d-widget-timer" style="font-family:monospace; font-size:14px; font-weight:600; letter-spacing:1px;">00:00</div>
       <div id="d-widget-status" style="font-size:11px; color:#A34C00;">Recording</div>
-      <button type="button" id="d-widget-stop" onclick="dToggleRecording()" style="background:#c62828; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-size:12px; font-weight:600; flex:none;">Stop</button>
+      <button type="button" id="d-widget-stop" onclick="dToggleRecording()" style="background:#9C2B1E; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; font-size:12px; font-weight:600; flex:none;">Stop</button>
     </div>
     <div id="d-widget-bar" style="display:none; background:rgba(255,255,255,0.18); height:3px; border-radius:2px; overflow:hidden; margin-top:7px;">
       <div id="d-proc-progress" style="background:linear-gradient(to right, #A34C00, #E8E3DC); height:100%; width:0%; transition:width 0.4s;"></div>
@@ -2328,13 +2334,13 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
        rather than over the page: no backdrop, so the form stays usable and
        you can keep entering data while you read the transcript. -->
   <div id="dictation-modal" style="display:none; position:fixed; bottom:16px; right:16px; z-index:10000; width:430px; max-width:calc(100vw - 32px);">
-    <div style="background:white; padding:18px; border-radius:10px; max-height:72vh; overflow-y:auto; box-shadow:0 12px 40px rgba(0,0,0,0.28); border:1px solid #d9d2c2;">
+    <div style="background:white; padding:18px; border-radius:10px; max-height:72vh; overflow-y:auto; box-shadow:0 12px 40px rgba(0,0,0,0.28); border:1px solid #E8E3DC;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
         <div>
           <h2 style="margin:0 0 4px 0; color:#2B2523; font-size:17px;">🎙️ Voice Dictation</h2>
-          <div style="font-size:12px; color:#666;">Review before applying. The form stays editable.</div>
+          <div style="font-size:12px; color:#5E5854;">Review before applying. The form stays editable.</div>
         </div>
-        <button type="button" onclick="closeDictationModal()" style="background:transparent; border:none; font-size:20px; cursor:pointer; color:#888;">✕</button>
+        <button type="button" onclick="closeDictationModal()" style="background:transparent; border:none; font-size:20px; cursor:pointer; color:#5E5854;">✕</button>
       </div>
 
       <!-- Kept for the error path; progress itself now lives in the pill. -->
@@ -2345,21 +2351,21 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
 
       <!-- Result / apply preview -->
       <div id="d-result-panel" style="display:none;">
-        <div style="background:#e8f5e9; color:#2e7d32; padding:10px 14px; border-radius:4px; font-size:13px; margin-bottom:12px;">
+        <div style="background:#EEF5EF; color:#2F6B3F; padding:10px 14px; border-radius:4px; font-size:13px; margin-bottom:12px;">
           ✅ Transcription complete. Review before applying.
         </div>
-        <details style="background:#f8f8f8; padding:8px 12px; border-radius:4px; margin-bottom:12px; font-size:12px;">
+        <details style="background:#FAF8F5; padding:8px 12px; border-radius:4px; margin-bottom:12px; font-size:12px;">
           <summary style="cursor:pointer; font-weight:600;">📝 Full transcript</summary>
-          <div id="d-transcript" style="margin-top:8px; white-space:pre-wrap; max-height:200px; overflow-y:auto; color:#333;"></div>
+          <div id="d-transcript" style="margin-top:8px; white-space:pre-wrap; max-height:200px; overflow-y:auto; color:#2B2523;"></div>
         </details>
         <div id="d-extracted-preview" style="font-size:12px; margin-bottom:14px;"></div>
         <div style="display:flex; gap:8px;">
-          <button type="button" onclick="dDiscard()" style="background:#eee; color:#333; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; flex:1;">🗑️ Discard</button>
+          <button type="button" onclick="dDiscard()" style="background:#F3EFE9; color:#2B2523; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; flex:1;">🗑️ Discard</button>
           <button type="button" onclick="dApplyToForm()" style="background:#2B2523; color:white; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600; flex:1;">✓ Apply to form</button>
         </div>
       </div>
 
-      <div id="d-error-panel" style="display:none; background:#fee; color:#900; padding:12px; border-radius:4px; margin-top:10px; font-size:12px;">
+      <div id="d-error-panel" style="display:none; background:#FBEDEA; color:#9C2B1E; padding:12px; border-radius:4px; margin-top:10px; font-size:12px;">
         <strong>❌</strong> <span id="d-error-text"></span>
       </div>
     </div>
@@ -2375,10 +2381,10 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       <button type="button" onclick="document.getElementById('doc-upload').click()" style="background:#A34C00; color:white; padding:8px 18px; border:none; border-radius:4px; cursor:pointer; font-size:14px; margin-left:8px;">Choose file</button>
       <input type="file" id="doc-upload" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*" style="display:none;" onchange="uploadDocument(this.files[0])">
     </div>
-    <div style="font-size:12px; color:#666; margin-bottom:4px;">
+    <div style="font-size:12px; color:#5E5854; margin-bottom:4px;">
       Works with I-589, NTA, court notices, meeting notes, hearing orders, receipts, or <strong>handwritten hearing notes</strong> from covering counsel.
     </div>
-    <div style="font-size:12px; color:#666;">
+    <div style="font-size:12px; color:#5E5854;">
       Accepts PDF, JPG, PNG, WebP, HEIC · Max 32 MB · OCR takes ~30–60 seconds
     </div>
     <div id="doc-status" style="margin-top:12px; font-size:13px;"></div>
@@ -2497,7 +2503,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     <fieldset>
       <legend>Applications Requested</legend>
       <div style="display:flex; flex-wrap:wrap;">${applicationCheckboxes}</div>
-      <div style="margin-top:14px; padding-top:10px; border-top:1px solid #eee;">
+      <div style="margin-top:14px; padding-top:10px; border-top:1px solid #E8E3DC;">
         <label style="display:inline-flex; align-items:center; font-weight:normal; margin-right:20px;">
           <input type="checkbox" name="asylum_fee_needed" value="1" ${prev.asylum_fee_needed ? "checked" : ""}>
           Asylum fee needed ($100 as of 2025)
@@ -2585,8 +2591,8 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       ${isEdit ? `
         <button type="submit" name="action" value="update" style="background:#A34C00; color:white;">💾 Update</button>
         <button type="submit" name="action" value="update_and_regenerate" style="background:#2B2523; color:white;">💾 Update + Regenerate Summaries</button>
-        <a href="/admin/hearing/notes" style="background:#eee; color:#333; padding:12px 24px; border-radius:4px; text-decoration:none; font-size:15px;">+ New note</a>
-        <button type="button" onclick="deleteThisNote(${noteId}, ${JSON.stringify(prev.client_name || "").replace(/"/g, "&quot;")})" style="background:#c00; color:white; padding:12px 20px; border:none; border-radius:4px; cursor:pointer; font-size:14px; margin-left:auto;">🗑️ Delete note</button>
+        <a href="/admin/hearing/notes" style="background:#F3EFE9; color:#2B2523; padding:12px 24px; border-radius:4px; text-decoration:none; font-size:15px;">+ New note</a>
+        <button type="button" onclick="deleteThisNote(${noteId}, ${JSON.stringify(prev.client_name || "").replace(/"/g, "&quot;")})" style="background:#9C2B1E; color:white; padding:12px 20px; border:none; border-radius:4px; cursor:pointer; font-size:14px; margin-left:auto;">🗑️ Delete note</button>
       ` : `
         <button type="submit" name="action" value="preview">✨ Generate Summaries (Preview)</button>
         <button type="submit" name="action" value="save">💾 Generate + Save</button>
@@ -2597,12 +2603,12 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
 
   ${revisionsHtml}
 
-  <p style="margin-top:30px; color:#888; font-size:13px;">
+  <p style="margin-top:30px; color:#5E5854; font-size:13px;">
     <a href="/admin/hearing/history" class="back-link">View all hearing notes →</a>
     &nbsp;·&nbsp;
     <a href="/admin/hearing/notes/dictate" class="back-link" style="color:#A34C00;">🎙️ Voice dictate a hearing →</a>
     &nbsp;·&nbsp;
-    <a href="/admin/hearing/notes/bulk-upload" class="back-link" style="color:#0061FF;">📚 Bulk upload multiple documents →</a>
+    <a href="/admin/hearing/notes/bulk-upload" class="back-link" style="color:#A34C00;">📚 Bulk upload multiple documents →</a>
   </p>
 
   <script>
@@ -2757,7 +2763,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       w.style.display = "none";
       w.classList.remove("d-transcribing");
       const dot = document.getElementById("d-widget-dot");
-      if (dot) { dot.style.animation = ""; dot.style.background = "#c62828"; }
+      if (dot) { dot.style.animation = ""; dot.style.background = "#9C2B1E"; }
       const stop = document.getElementById("d-widget-stop");
       if (stop) stop.style.display = "";
       const timer = document.getElementById("d-widget-timer");
@@ -2785,11 +2791,11 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       if (e.next_hearing_date) rows.push(["Next hearing", new Date(e.next_hearing_date).toLocaleString()]);
       if (e.deadlines?.length) rows.push(["Deadlines", e.deadlines.length + " item(s)"]);
       const html = rows.map(([k, v]) =>
-        '<tr><td style="padding:3px 8px 3px 0; color:#666; white-space:nowrap; vertical-align:top;">' + k + '</td><td style="padding:3px 0; font-weight:500; color:#2B2523;">' + String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</td></tr>'
+        '<tr><td style="padding:3px 8px 3px 0; color:#5E5854; white-space:nowrap; vertical-align:top;">' + k + '</td><td style="padding:3px 0; font-weight:500; color:#2B2523;">' + String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</td></tr>'
       ).join("");
       document.getElementById("d-extracted-preview").innerHTML =
         rows.length ? '<div style="font-weight:600; margin-bottom:6px; color:#2B2523;">Extracted fields (will fill empty form fields):</div><table style="width:100%; font-size:12px;">' + html + '</table>'
-                    : '<div style="color:#c00;">⚠️ No fields extracted. Only transcript will be appended to raw notes.</div>';
+                    : '<div style="color:#9C2B1E;">⚠️ No fields extracted. Only transcript will be appended to raw notes.</div>';
     }
 
     function dDiscard() {
@@ -2854,7 +2860,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       }
       closeDictationModal();
       const toast = document.createElement("div");
-      toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2e7d32; color:white; padding:12px 20px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:10001; font-size:14px;";
+      toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2F6B3F; color:white; padding:12px 20px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:10001; font-size:14px;";
       toast.textContent = dTranscriptId ? "✅ Voice dictation applied — transcript #" + dTranscriptId + " saved to the client's file" : "✅ Voice dictation applied to form";
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 3000);
@@ -2887,7 +2893,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       navigator.clipboard.writeText(el.textContent);
       const status = document.createElement("span");
       status.textContent = " ✅ Copied";
-      status.style.color = "#4CAF50";
+      status.style.color = "#2F6B3F";
       status.style.marginLeft = "8px";
       el.parentElement.appendChild(status);
       setTimeout(() => status.remove(), 2000);
@@ -2896,20 +2902,20 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
     async function sendParalegal(id) {
       const status = document.getElementById("send-status");
       status.textContent = "Sending...";
-      status.style.color = "#666";
+      status.style.color = "#5E5854";
       try {
         const resp = await fetch("/admin/hearing/notes/" + id + "/send-paralegal", { method: "POST" });
         const data = await resp.json();
         if (data.ok) {
           status.textContent = "✅ Sent to team group";
-          status.style.color = "#4CAF50";
+          status.style.color = "#2F6B3F";
         } else {
           status.textContent = "❌ " + (data.error || "Send failed");
-          status.style.color = "#c00";
+          status.style.color = "#9C2B1E";
         }
       } catch (e) {
         status.textContent = "❌ " + e.message;
-        status.style.color = "#c00";
+        status.style.color = "#9C2B1E";
       }
     }
 
@@ -2934,7 +2940,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
 
     function handleDragOver(e) {
       e.preventDefault(); e.stopPropagation();
-      document.getElementById("upload-area").style.background = "#faedd5";
+      document.getElementById("upload-area").style.background = "#FFF3E6";
       document.getElementById("upload-area").style.borderColor = "#7A3900";
     }
     function handleDragLeave(e) {
@@ -2959,7 +2965,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       console.log("[uploadDocument] File:", { name: file.name, size: file.size, type: file.type, lastModified: file.lastModified });
 
       if (file.size > 32 * 1024 * 1024) {
-        statusEl.innerHTML = '<span style="color:#c00;">❌ File too large (max 32 MB). Try a smaller/lower-quality scan.</span>';
+        statusEl.innerHTML = '<span style="color:#9C2B1E;">❌ File too large (max 32 MB). Try a smaller/lower-quality scan.</span>';
         return;
       }
 
@@ -2968,11 +2974,11 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       const typeOk = (file.type || "").includes("pdf") || (file.type || "").startsWith("image/");
       if (!nameOk && !typeOk && file.type !== "" && file.type !== "application/octet-stream") {
         console.warn("[uploadDocument] Rejected file:", { name: file.name, type: file.type });
-        statusEl.innerHTML = '<span style="color:#c00;">❌ Unsupported file type "' + (file.type || file.name) + '". Use PDF, JPG, PNG, WebP, or HEIC.</span>';
+        statusEl.innerHTML = '<span style="color:#9C2B1E;">❌ Unsupported file type "' + (file.type || file.name) + '". Use PDF, JPG, PNG, WebP, or HEIC.</span>';
         return;
       }
 
-      statusEl.innerHTML = '<span style="color:#666;">⏳ Uploading and OCRing ' + escapeHTMLLocal(file.name) + ' — 30–60 seconds for a large scan...</span>';
+      statusEl.innerHTML = '<span style="color:#5E5854;">⏳ Uploading and OCRing ' + escapeHTMLLocal(file.name) + ' — 30–60 seconds for a large scan...</span>';
 
       // Rebuild the File with a sanitized name to avoid Safari FormData issues
       // with special chars, emoji, or non-ASCII filenames.
@@ -2993,7 +2999,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         formData.append("document", safeFile, safeFile.name || "upload");
       } catch (e) {
         console.error("[uploadDocument] FormData construction failed:", e);
-        statusEl.innerHTML = '<span style="color:#c00;">❌ FormData error: ' + e.message + '</span>';
+        statusEl.innerHTML = '<span style="color:#9C2B1E;">❌ FormData error: ' + e.message + '</span>';
         return;
       }
 
@@ -3005,7 +3011,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         });
       } catch (e) {
         console.error("[uploadDocument] fetch failed:", e);
-        statusEl.innerHTML = '<span style="color:#c00;">❌ Network error: ' + e.message + '. Check your connection or try a smaller file.</span>';
+        statusEl.innerHTML = '<span style="color:#9C2B1E;">❌ Network error: ' + e.message + '. Check your connection or try a smaller file.</span>';
         return;
       }
 
@@ -3016,18 +3022,18 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
           data = JSON.parse(text);
         } catch (parseErr) {
           console.error("[uploadDocument] Non-JSON response:", { status: resp.status, body: text.substring(0, 500) });
-          statusEl.innerHTML = '<span style="color:#c00;">❌ Server returned non-JSON response (HTTP ' + resp.status + '). Body starts with: ' + escapeHTMLLocal(text.substring(0, 200)) + '</span>';
+          statusEl.innerHTML = '<span style="color:#9C2B1E;">❌ Server returned non-JSON response (HTTP ' + resp.status + '). Body starts with: ' + escapeHTMLLocal(text.substring(0, 200)) + '</span>';
           return;
         }
       } catch (e) {
         console.error("[uploadDocument] Response read failed:", e);
-        statusEl.innerHTML = '<span style="color:#c00;">❌ Response error: ' + e.message + '</span>';
+        statusEl.innerHTML = '<span style="color:#9C2B1E;">❌ Response error: ' + e.message + '</span>';
         return;
       }
 
       try {
         if (!resp.ok || !data.ok) {
-          statusEl.innerHTML = '<span style="color:#c00;">❌ ' + (data.error || "Extraction failed (HTTP " + resp.status + ")") + '</span>';
+          statusEl.innerHTML = '<span style="color:#9C2B1E;">❌ ' + (data.error || "Extraction failed (HTTP " + resp.status + ")") + '</span>';
           return;
         }
 
@@ -3041,7 +3047,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
           if (!el) return false;
           if (el.value && el.value.trim()) return false;
           el.value = value;
-          el.style.backgroundColor = "#fffde7";
+          el.style.backgroundColor = "#FFF3E6";
           filled.push(fieldName);
           return true;
         }
@@ -3062,7 +3068,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
           const langEl = document.querySelector('[name="client_language"]');
           if (langEl && langEl.value === "en") {
             langEl.value = prefill.client_language;
-            langEl.style.backgroundColor = "#fffde7";
+            langEl.style.backgroundColor = "#FFF3E6";
             filled.push("client_language");
           }
         }
@@ -3074,7 +3080,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
             const match = Array.from(htEl.options).find(o => o.value.toLowerCase().includes(prefill.hearing_type.toLowerCase()));
             if (match) {
               htEl.value = match.value;
-              htEl.style.backgroundColor = "#fffde7";
+              htEl.style.backgroundColor = "#FFF3E6";
               filled.push("hearing_type");
             }
           }
@@ -3087,7 +3093,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
             // Chop off timezone/seconds to match datetime-local format
             const val = prefill.hearing_datetime.substring(0, 16);
             dtEl.value = val;
-            dtEl.style.backgroundColor = "#fffde7";
+            dtEl.style.backgroundColor = "#FFF3E6";
             filled.push("hearing_date");
           }
         }
@@ -3101,7 +3107,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
             notesEl.value = notesEl.value.trim()
               ? notesEl.value + "\\n\\n" + addition
               : addition;
-            notesEl.style.backgroundColor = "#fffde7";
+            notesEl.style.backgroundColor = "#FFF3E6";
             filled.push("raw_notes");
           }
         }
@@ -3130,16 +3136,16 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
         if (extra.spouse_name) extraLines.push("Spouse: " + extra.spouse_name);
         if (extra.children_count) extraLines.push("Children: " + extra.children_count);
 
-        const detectedLine = '<div style="font-size:12px; color:#666; margin-bottom:6px;">Detected: <strong>' + (docType || "unknown document") + '</strong></div>';
+        const detectedLine = '<div style="font-size:12px; color:#5E5854; margin-bottom:6px;">Detected: <strong>' + (docType || "unknown document") + '</strong></div>';
 
         if (filled.length === 0) {
-          statusEl.innerHTML = detectedLine + '<span style="color:#ff9800;">⚠️ No new fields filled. Form may already have values, or nothing extractable from this doc.</span>';
+          statusEl.innerHTML = detectedLine + '<span style="color:#A34C00;">⚠️ No new fields filled. Form may already have values, or nothing extractable from this doc.</span>';
         } else {
-          statusEl.innerHTML = detectedLine + '<span style="color:#4CAF50;">✅ Filled: ' + filled.join(", ") + '. Please verify highlighted fields.</span>';
+          statusEl.innerHTML = detectedLine + '<span style="color:#2F6B3F;">✅ Filled: ' + filled.join(", ") + '. Please verify highlighted fields.</span>';
         }
 
         if (extraLines.length) {
-          extractedEl.innerHTML = '<div style="background:white; padding:10px; border-radius:4px; margin-top:8px; font-size:13px; color:#333; border:1px solid #eee; text-align:left;">' +
+          extractedEl.innerHTML = '<div style="background:white; padding:10px; border-radius:4px; margin-top:8px; font-size:13px; color:#2B2523; border:1px solid #E8E3DC; text-align:left;">' +
             '<strong>Additional data extracted (for reference):</strong><br>' +
             extraLines.map(l => "• " + l).join("<br>") +
             '</div>';
@@ -3147,7 +3153,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
       } catch (e) {
         // Anything unexpected during the "fill fields" phase
         console.error("[uploadDocument] fill phase failed:", e);
-        statusEl.innerHTML = '<span style="color:#c00;">❌ Fill error: ' + e.message + '. Extraction may have succeeded — check server logs.</span>';
+        statusEl.innerHTML = '<span style="color:#9C2B1E;">❌ Fill error: ' + e.message + '. Extraction may have succeeded — check server logs.</span>';
       }
     }
 
@@ -3186,28 +3192,28 @@ function renderHistoryPage(notes) {
       <td>
         <a href="/admin/hearing/notes/${n.id}" style="color:#A34C00;">view</a>
         &nbsp;·&nbsp;
-        <a href="#" onclick="deleteRow(${n.id}, ${JSON.stringify(n.client_name).replace(/"/g, "&quot;")}); return false;" style="color:#c00; font-size:12px;">🗑️</a>
+        <a href="#" onclick="deleteRow(${n.id}, ${JSON.stringify(n.client_name).replace(/"/g, "&quot;")}); return false;" style="color:#9C2B1E; font-size:12px;">🗑️</a>
       </td>
     </tr>`;
-  }).join("") : `<tr id="no-data-row"><td colspan="11" style="text-align:center; color:#888;">No hearing notes yet.</td></tr>`;
+  }).join("") : `<tr id="no-data-row"><td colspan="11" style="text-align:center; color:#5E5854;">No hearing notes yet.</td></tr>`;
 
   const body = `
     <div class="page-header">
       <h1>Hearing Notes History</h1>
       <a href="/admin/hearing/notes" class="back-link">← Back to note-taking</a>
       &nbsp;·&nbsp;
-      <a href="/admin/hearing/notes/duplicates" class="back-link" style="color:#c62828;">🧹 Find duplicates</a>
+      <a href="/admin/hearing/notes/duplicates" class="back-link" style="color:#9C2B1E;">🧹 Find duplicates</a>
     </div>
 
-    <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #eee;">
+    <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #E8E3DC;">
       <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
         <div style="flex:1; min-width:260px;">
           <input type="text" id="search-input" placeholder="🔍 Search by client name or A-Number..."
                  onkeyup="filterRows()"
-                 style="width:100%; padding:9px 12px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+                 style="width:100%; padding:9px 12px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
         </div>
         <div>
-          <select id="filter-htype" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+          <select id="filter-htype" onchange="filterRows()" style="padding:9px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
             <option value="">All hearing types</option>
             <option value="master">Master</option>
             <option value="individual/merits">Individual/Merits</option>
@@ -3218,14 +3224,14 @@ function renderHistoryPage(notes) {
           </select>
         </div>
         <div>
-          <select id="filter-sent" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+          <select id="filter-sent" onchange="filterRows()" style="padding:9px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
             <option value="">All</option>
             <option value="sent">Sent to team ✅</option>
             <option value="unsent">Not sent</option>
           </select>
         </div>
         <div>
-          <select id="filter-lang" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+          <select id="filter-lang" onchange="filterRows()" style="padding:9px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
             <option value="">All languages</option>
             <option value="en">English</option>
             <option value="zh">Chinese</option>
@@ -3236,12 +3242,12 @@ function renderHistoryPage(notes) {
         </div>
         <div>
           <button type="button" onclick="clearFilters()"
-                  style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">
+                  style="padding:9px 14px; background:#F3EFE9; border:none; border-radius:4px; cursor:pointer; font-size:13px;">
             Clear
           </button>
         </div>
       </div>
-      <div id="row-count" style="margin-top:10px; font-size:13px; color:#666;">
+      <div id="row-count" style="margin-top:10px; font-size:13px; color:#5E5854;">
         Showing ${notes.length} note${notes.length === 1 ? "" : "s"}
       </div>
     </div>
@@ -3335,7 +3341,7 @@ function renderDetailPage(note) {
         &nbsp; · &nbsp;
         <a href="/admin/hearing/notes" class="back-link">New note</a>
         &nbsp; · &nbsp;
-        <a href="#" onclick="deleteNote(${note.id}, ${JSON.stringify(note.client_name).replace(/"/g, "&quot;")}); return false;" style="color:#c00; font-size:13px;">🗑️ Delete</a>
+        <a href="#" onclick="deleteNote(${note.id}, ${JSON.stringify(note.client_name).replace(/"/g, "&quot;")}); return false;" style="color:#9C2B1E; font-size:13px;">🗑️ Delete</a>
       </div>
     </div>
 
@@ -3361,18 +3367,18 @@ function renderDetailPage(note) {
     <h2 style="color:#A34C00; margin-top:30px;">Paralegal Summary</h2>
     <div style="margin-bottom:8px;">
       <button type="button" onclick="copyEl('paralegal-detail')" style="background:#2B2523; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">📋 Copy</button>
-      <button type="button" onclick="sendParalegalDetail(${note.id})" style="background:#4CAF50; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 ${note.sent_to_paralegal_at ? "Re-send" : "Send"} to team group</button>
+      <button type="button" onclick="sendParalegalDetail(${note.id})" style="background:#2F6B3F; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">📤 ${note.sent_to_paralegal_at ? "Re-send" : "Send"} to team group</button>
       <button type="button" onclick="generateTasksFromNote('master', ${note.id}, this)" style="background:#A34C00; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-left:8px;">🤖 Create Tasks</button>
       <span id="send-detail-status" style="margin-left:12px; font-weight:bold;"></span>
     </div>
-    <pre id="paralegal-detail" style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.paralegal_summary || "(none)")}</pre>
+    <pre id="paralegal-detail" style="background:white; padding:15px; border:1px solid #E8E3DC; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.paralegal_summary || "(none)")}</pre>
 
     <h2 style="color:#A34C00; margin-top:30px;">Client Summary (${note.client_language})</h2>
     <button type="button" onclick="copyEl('client-detail')" style="background:#A34C00; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-bottom:8px;">📋 Copy</button>
-    <pre id="client-detail" style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.client_summary || "(none)")}</pre>
+    <pre id="client-detail" style="background:white; padding:15px; border:1px solid #E8E3DC; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.client_summary || "(none)")}</pre>
 
     <h2 style="color:#A34C00; margin-top:30px;">Original Raw Notes</h2>
-    <pre style="background:white; padding:15px; border:1px solid #ddd; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.raw_notes || "(none)")}</pre>
+    <pre style="background:white; padding:15px; border:1px solid #E8E3DC; border-radius:4px; white-space:pre-wrap; font-family:inherit;">${escapeHtml(note.raw_notes || "(none)")}</pre>
 
     <script>
       function copyEl(id) {
@@ -3396,20 +3402,20 @@ function renderDetailPage(note) {
       async function sendParalegalDetail(id) {
         const status = document.getElementById("send-detail-status");
         status.textContent = "Sending...";
-        status.style.color = "#666";
+        status.style.color = "#5E5854";
         try {
           const resp = await fetch("/admin/hearing/notes/" + id + "/send-paralegal", { method: "POST" });
           const data = await resp.json();
           if (data.ok) {
             status.textContent = "✅ Sent to team group";
-            status.style.color = "#4CAF50";
+            status.style.color = "#2F6B3F";
           } else {
             status.textContent = "❌ " + (data.error || "Send failed");
-            status.style.color = "#c00";
+            status.style.color = "#9C2B1E";
           }
         } catch (e) {
           status.textContent = "❌ " + e.message;
-          status.style.color = "#c00";
+          status.style.color = "#9C2B1E";
         }
       }
     </script>`;
@@ -3577,9 +3583,9 @@ function renderDuplicatesPage(groups) {
       const dt = n.hearing_date ? new Date(n.hearing_date).toLocaleString() : "(no date)";
       const created = new Date(n.created_at).toLocaleString();
       return `
-        <tr style="${isKept ? 'background:#e8f5e9;' : ''}">
+        <tr style="${isKept ? 'background:#EEF5EF;' : ''}">
           <td style="padding:6px 10px;">
-            ${isKept ? '<strong style="color:#2e7d32;">✓ KEEP</strong>' : '<span style="color:#c62828;">DELETE</span>'}
+            ${isKept ? '<strong style="color:#2F6B3F;">✓ KEEP</strong>' : '<span style="color:#9C2B1E;">DELETE</span>'}
           </td>
           <td style="font-family:monospace; font-size:11px;">#${n.id}</td>
           <td style="font-size:11px;">${escapeHtml(n.hearing_type || "—")}</td>
@@ -3591,36 +3597,36 @@ function renderDuplicatesPage(groups) {
         </tr>`;
     }).join("");
     return `
-      <div style="background:white; padding:16px; border-radius:6px; border:1px solid #eee; margin-bottom:12px;">
+      <div style="background:white; padding:16px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:12px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
           <div>
             <strong style="font-size:14px;">${escapeHtml(g.notes[0].client_name)}</strong>
-            <span style="color:#888; font-size:12px; margin-left:8px;">${g.count} copies</span>
+            <span style="color:#5E5854; font-size:12px; margin-left:8px;">${g.count} copies</span>
           </div>
-          <button onclick="mergeGroup('${g.keep_id}', [${g.delete_ids.join(",")}])" style="background:#c62828; color:white; padding:6px 12px; border:none; border-radius:4px; cursor:pointer; font-size:12px;">
+          <button onclick="mergeGroup('${g.keep_id}', [${g.delete_ids.join(",")}])" style="background:#9C2B1E; color:white; padding:6px 12px; border:none; border-radius:4px; cursor:pointer; font-size:12px;">
             Merge (keep #${g.keep_id}, delete ${g.delete_ids.length})
           </button>
         </div>
         <table style="width:100%; font-size:12px;">
-          <thead style="background:#f8f8f8;">
+          <thead style="background:#FAF8F5;">
             <tr><th style="text-align:left; padding:4px 10px;">Action</th><th>ID</th><th>Type</th><th>Hearing Date</th><th>Created</th><th>📝</th><th>📄</th><th>📤</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`;
-  }).join("") : `<div style="background:white; padding:30px; text-align:center; border-radius:6px; color:#2e7d32;"><h2>🎉 No duplicates found!</h2><p style="color:#666;">Your hearing notes database is clean.</p></div>`;
+  }).join("") : `<div style="background:white; padding:30px; text-align:center; border-radius:6px; color:#2F6B3F;"><h2>🎉 No duplicates found!</h2><p style="color:#5E5854;">Your hearing notes database is clean.</p></div>`;
 
   const body = `
     <div class="page-header">
       <h1>Duplicate Hearing Notes</h1>
-      <div style="font-size:13px; color:#666;">
+      <div style="font-size:13px; color:#5E5854;">
         Zara found <strong>${dupCount}</strong> duplicate hearing note(s) across <strong>${groups.length}</strong> group(s).
         Each group shows notes that share the same client + hearing time + type.
         The row highlighted green is the canonical one (has the most data — original + notes + summary + sent status).
       </div>
     </div>
 
-    <div style="background:#fff8e1; border-left:4px solid #f9a825; padding:12px 16px; border-radius:4px; margin-bottom:20px; font-size:13px;">
+    <div style="background:#FFF3E6; border-left:4px solid #FF7B00; padding:12px 16px; border-radius:4px; margin-bottom:20px; font-size:13px;">
       <strong>ℹ️ How merge works:</strong> Zara deletes the extra rows but keeps ALL their revision history attached to the surviving canonical note. The canonical row is the one with the most content (raw notes + summary + team-sent status).
     </div>
 
@@ -3650,7 +3656,7 @@ function renderBulkUploadPage() {
   const body = `
 <div class="page-header">
   <h1>Bulk Upload Master Hearing Notes</h1>
-  <div style="font-size:13px; color:#666;">
+  <div style="font-size:13px; color:#5E5854;">
     Drop or select multiple photos/PDFs from a day of court. Zara extracts fields for each in parallel, then you review + create the drafts.
   </div>
 </div>
@@ -3663,31 +3669,31 @@ function renderBulkUploadPage() {
      onclick="document.getElementById('bulk-file-input').click()">
   <div style="font-size:40px; margin-bottom:8px;">📚</div>
   <strong style="font-size:16px;">Drop multiple documents here — or click to select</strong>
-  <div style="font-size:12px; color:#666; margin-top:6px;">
+  <div style="font-size:12px; color:#5E5854; margin-top:6px;">
     PDF, JPG, PNG, WebP, or HEIC. Up to 20 files at a time. Each processes in parallel (~30–60 sec each).
   </div>
   <input type="file" id="bulk-file-input" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,application/pdf,image/*" style="display:none;" onchange="handleBulkFiles(this.files)">
 </div>
 
-<div id="bulk-progress-bar" style="display:none; background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #eee;">
+<div id="bulk-progress-bar" style="display:none; background:white; padding:15px 20px; border-radius:6px; margin-bottom:15px; border:1px solid #E8E3DC;">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
     <strong id="bulk-progress-label" style="color:#2B2523;">Processing…</strong>
-    <span id="bulk-progress-count" style="font-size:13px; color:#666;">0 of 0</span>
+    <span id="bulk-progress-count" style="font-size:13px; color:#5E5854;">0 of 0</span>
   </div>
-  <div style="background:#eee; height:8px; border-radius:4px; overflow:hidden;">
+  <div style="background:#F3EFE9; height:8px; border-radius:4px; overflow:hidden;">
     <div id="bulk-progress-fill" style="background:linear-gradient(to right, #A34C00, #E8E3DC); height:100%; width:0%; transition:width 0.3s;"></div>
   </div>
 </div>
 
 <div id="bulk-cards-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:15px;"></div>
 
-<div id="bulk-actions-bar" style="display:none; position:sticky; bottom:0; background:white; padding:15px 20px; border-radius:6px; border:1px solid #eee; margin-top:20px; box-shadow:0 -4px 12px rgba(0,0,0,.05); display:none;">
+<div id="bulk-actions-bar" style="display:none; position:sticky; bottom:0; background:white; padding:15px 20px; border-radius:6px; border:1px solid #E8E3DC; margin-top:20px; box-shadow:0 -4px 12px rgba(0,0,0,.05); display:none;">
   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
     <div>
-      <span id="bulk-ready-count" style="font-size:13px; color:#666;">0 ready</span>
+      <span id="bulk-ready-count" style="font-size:13px; color:#5E5854;">0 ready</span>
     </div>
     <div style="display:flex; gap:8px;">
-      <button type="button" onclick="discardAllPending()" style="background:#eee; color:#333; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Discard all pending</button>
+      <button type="button" onclick="discardAllPending()" style="background:#F3EFE9; color:#2B2523; padding:9px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Discard all pending</button>
       <button type="button" onclick="createAllAsDrafts()" id="bulk-create-all-btn" style="background:#2B2523; color:white; padding:9px 16px; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">Create all as drafts</button>
     </div>
   </div>
@@ -3702,7 +3708,7 @@ let inFlight = 0;
 function handleBulkDrag(e, on) {
   e.preventDefault(); e.stopPropagation();
   const el = document.getElementById("bulk-upload-area");
-  el.style.background = on ? "#faedd5" : "#FAF8F5";
+  el.style.background = on ? "#FFF3E6" : "#FAF8F5";
   el.style.borderColor = on ? "#7A3900" : "#A34C00";
 }
 function handleBulkDrop(e) {
@@ -3791,7 +3797,7 @@ function renderCard(cardId) {
   if (!card) {
     card = document.createElement("div");
     card.id = cardId;
-    card.style.cssText = "background:white; border-radius:6px; padding:15px; border:1px solid #eee; box-shadow:0 1px 3px rgba(0,0,0,.04);";
+    card.style.cssText = "background:white; border-radius:6px; padding:15px; border:1px solid #E8E3DC; box-shadow:0 1px 3px rgba(0,0,0,.04);";
     grid.appendChild(card);
   }
 
@@ -3812,18 +3818,18 @@ function renderCard(cardId) {
 
   let content = '';
   content += '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">';
-  content +=   '<div style="font-size:12px; color:#666; font-family:monospace; overflow:hidden; text-overflow:ellipsis;" title="' + escapeHTMLLocal2(filename) + '">📄 ' + escapeHTMLLocal2(shortName) + '</div>';
+  content +=   '<div style="font-size:12px; color:#5E5854; font-family:monospace; overflow:hidden; text-overflow:ellipsis;" title="' + escapeHTMLLocal2(filename) + '">📄 ' + escapeHTMLLocal2(shortName) + '</div>';
   content +=   '<span style="background:' + s.color + '; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">' + s.emoji + ' ' + s.text + '</span>';
   content += '</div>';
 
   if (c.status === "error") {
-    content += '<div style="background:#fee; color:#900; padding:8px; border-radius:3px; font-size:12px; margin-bottom:8px;">' + escapeHTMLLocal2(c.error) + '</div>';
-    content += '<button type="button" onclick="retryCard(\\'' + cardId + '\\')" style="background:#eee; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Retry</button>';
-    content += '<button type="button" onclick="discardCard(\\'' + cardId + '\\')" style="background:#eee; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; font-size:11px;">Discard</button>';
+    content += '<div style="background:#FBEDEA; color:#9C2B1E; padding:8px; border-radius:3px; font-size:12px; margin-bottom:8px;">' + escapeHTMLLocal2(c.error) + '</div>';
+    content += '<button type="button" onclick="retryCard(\\'' + cardId + '\\')" style="background:#F3EFE9; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; font-size:11px; margin-right:4px;">Retry</button>';
+    content += '<button type="button" onclick="discardCard(\\'' + cardId + '\\')" style="background:#F3EFE9; padding:5px 10px; border:none; border-radius:3px; cursor:pointer; font-size:11px;">Discard</button>';
   } else if (c.status === "ready") {
     const e = c.extraction || {};
     content += '<div style="font-size:13px; line-height:1.5;">';
-    content += e.client_name ? '<div><strong>Client:</strong> ' + escapeHTMLLocal2(e.client_name) + '</div>' : '<div style="color:#c00;">⚠️ No client name extracted</div>';
+    content += e.client_name ? '<div><strong>Client:</strong> ' + escapeHTMLLocal2(e.client_name) + '</div>' : '<div style="color:#9C2B1E;">⚠️ No client name extracted</div>';
     if (e.a_number) content += '<div><strong>A#:</strong> ' + escapeHTMLLocal2(e.a_number) + '</div>';
     if (e.hearing_datetime) content += '<div><strong>Hearing:</strong> ' + escapeHTMLLocal2(new Date(e.hearing_datetime).toLocaleString()) + '</div>';
     if (e.next_hearing_date) {
@@ -3833,27 +3839,27 @@ function renderCard(cardId) {
       content += '<div style="color:#A34C00;"><strong>➡️ Next hearing:</strong> ' + nhdStr + nhtLabel + '</div>';
     }
     if (e.judge_name) content += '<div><strong>Judge:</strong> ' + escapeHTMLLocal2(e.judge_name) + '</div>';
-    if (e.case_type) content += '<div style="font-size:12px; color:#666;"><strong>Type:</strong> ' + escapeHTMLLocal2(e.case_type) + '</div>';
-    if (e.hearing_type) content += '<div style="font-size:12px; color:#666;"><strong>Master/Individual:</strong> ' + escapeHTMLLocal2(e.hearing_type) + '</div>';
+    if (e.case_type) content += '<div style="font-size:12px; color:#5E5854;"><strong>Type:</strong> ' + escapeHTMLLocal2(e.case_type) + '</div>';
+    if (e.hearing_type) content += '<div style="font-size:12px; color:#5E5854;"><strong>Master/Individual:</strong> ' + escapeHTMLLocal2(e.hearing_type) + '</div>';
     if (e.narrative_notes) {
       const short = e.narrative_notes.length > 120 ? e.narrative_notes.substring(0, 120) + "…" : e.narrative_notes;
-      content += '<div style="font-size:11px; color:#888; margin-top:4px; font-style:italic;">' + escapeHTMLLocal2(short) + '</div>';
+      content += '<div style="font-size:11px; color:#5E5854; margin-top:4px; font-style:italic;">' + escapeHTMLLocal2(short) + '</div>';
     }
     content += '</div>';
     content += '<div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">';
     content +=   '<button type="button" onclick="createDraft(\\'' + cardId + '\\')" style="background:#2B2523; color:white; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:11px; font-weight:600;">💾 Create draft</button>';
-    content +=   '<button type="button" onclick="discardCard(\\'' + cardId + '\\')" style="background:#eee; color:#666; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:11px;">Discard</button>';
+    content +=   '<button type="button" onclick="discardCard(\\'' + cardId + '\\')" style="background:#F3EFE9; color:#5E5854; padding:6px 12px; border:none; border-radius:3px; cursor:pointer; font-size:11px;">Discard</button>';
     content += '</div>';
   } else if (c.status === "created") {
-    content += '<div style="background:#e8f5e9; color:#2e7d32; padding:8px; border-radius:3px; font-size:12px;">';
+    content += '<div style="background:#EEF5EF; color:#2F6B3F; padding:8px; border-radius:3px; font-size:12px;">';
     content +=   '<strong>Draft created!</strong> ' + (c.extraction?.client_name ? escapeHTMLLocal2(c.extraction.client_name) : "");
     content += '</div>';
     content += '<a href="/admin/hearing/notes/' + c.noteId + '" target="_blank" style="display:inline-block; margin-top:8px; background:#2B2523; color:white; padding:6px 12px; text-decoration:none; border-radius:3px; font-size:11px; font-weight:600;">Open to edit →</a>';
   } else if (c.status === "discarded") {
-    content += '<div style="color:#888; font-size:12px; font-style:italic;">Discarded</div>';
+    content += '<div style="color:#5E5854; font-size:12px; font-style:italic;">Discarded</div>';
   } else {
     // uploading / extracting / queued
-    content += '<div style="text-align:center; padding:20px 0; color:#888;">';
+    content += '<div style="text-align:center; padding:20px 0; color:#5E5854;">';
     content += '<div style="font-size:24px;">' + s.emoji + '</div>';
     content += '<div style="font-size:12px; margin-top:6px;">' + s.text + '</div>';
     content += '</div>';

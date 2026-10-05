@@ -22,7 +22,7 @@
 
   var C = {
     walnut: "#2B2523", walnutMid: "#3A3330", gold: "#A34C00", ember: "#FF7B00", red: "#9C2B1E",
-    parch: "#F3EFE9", lit: "#FAF8F5", border: "#E8E3DC", muted: "#5E5854", green: "#166534",
+    parch: "#F3EFE9", lit: "#FAF8F5", border: "#E8E3DC", muted: "#5E5854", green: "#2F6B3F",
   };
   var BASE = "/admin/esign/api";
   var META = null;
@@ -62,13 +62,14 @@
   }
   function btn(label, onclick, kind) {
     var bg = kind === "primary" ? C.walnutMid : kind === "danger" ? C.red : kind === "go" ? C.ember : C.lit;
-    var fg = kind === "primary" || kind === "danger" || kind === "go" ? C.lit : C.walnut;
+    // Dark ink on Seal Orange (the brand's readable pairing); light on the dark buttons.
+    var fg = kind === "primary" || kind === "danger" ? C.lit : kind === "go" ? "#1E1B1A" : C.walnut;
     return h("button", { type: "button", onclick: onclick, text: label,
       style: "padding:7px 13px;background:" + bg + ";color:" + fg + ";border:1px solid " + (kind ? C.gold : C.border) +
              ";border-radius:5px;cursor:pointer;font-size:11.5px;font-family:Montserrat,sans-serif;letter-spacing:.8px;" });
   }
   function chip(text, color) {
-    return h("span", { text: text, style: "display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:#fff;background:" + color + ";" });
+    return h("span", { text: text, style: "display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:" + (color === C.ember ? "#1E1B1A" : "#fff") + ";background:" + color + ";" });
   }
   function note(text, color) { return h("div", { text: text, style: "color:" + (color || C.muted) + ";font-size:12.5px;font-style:italic;padding:6px 0;" }); }
   function field(label, input, hint) {
@@ -98,8 +99,8 @@
     try { return new Date(v).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return String(v); }
   }
   function statusChip(s) {
-    var map = { draft: [C.muted, "draft"], active: [C.green, "active"], archived: ["#888", "archived"],
-      sent: [C.ember, "out for signature"], completed: [C.green, "signed"], cancelled: ["#888", "cancelled"], declined: [C.red, "declined"] };
+    var map = { draft: [C.muted, "draft"], active: [C.green, "active"], archived: ["#5E5854", "archived"],
+      sent: [C.ember, "out for signature"], completed: [C.green, "signed"], cancelled: ["#5E5854", "cancelled"], declined: [C.red, "declined"] };
     var m = map[s] || [C.muted, s];
     return chip(m[1], m[0]);
   }
@@ -108,11 +109,11 @@
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, function () { window.prompt("Copy this link:", text); });
     else window.prompt("Copy this link:", text);
   }
-  var PREVIEW_CSS = "background:#fff;border:1px solid " + C.border + ";border-radius:6px;padding:22px 26px;max-height:520px;overflow:auto;font-family:'Times New Roman',serif;font-size:14px;line-height:1.45;color:#111;";
+  var PREVIEW_CSS = "background:#fff;border:1px solid " + C.border + ";border-radius:6px;padding:22px 26px;max-height:520px;overflow:auto;font-family:'Times New Roman',serif;font-size:14px;line-height:1.45;color:#2B2523;";
   function styleSpots(root) {
     root.querySelectorAll(".esign-spot").forEach(function (s) {
-      s.style.cssText = "background:#F3E3B0;border:1px dashed " + C.gold + ";border-radius:3px;padding:0 5px;font-family:Arial,sans-serif;font-size:11.5px;color:" + C.walnut + ";";
-      if (s.classList.contains("esign-sig")) s.style.background = "#FFE08A";
+      s.style.cssText = "background:#FFF3E6;border:1px dashed " + C.gold + ";border-radius:3px;padding:0 5px;font-family:Arial,sans-serif;font-size:11.5px;color:" + C.walnut + ";";
+      if (s.classList.contains("esign-sig")) s.style.background = "#FFF3E6";
     });
   }
 
@@ -241,7 +242,7 @@
           h("div", {}, [h("span", { text: t.name, style: "font-family:Cormorant Garamond,Georgia,serif;font-size:16px;color:" + C.walnut + ";margin-right:8px;" }), statusChip(t.status)]),
           btn("Close", function () { clear(detail); }),
         ]),
-        (t.notes || []).length ? h("div", { style: "background:#FFF6DB;border:1px solid " + C.gold + ";border-radius:5px;padding:8px 10px;margin-bottom:12px;font-size:12.5px;" },
+        (t.notes || []).length ? h("div", { style: "background:#FFF3E6;border:1px solid " + C.gold + ";border-radius:5px;padding:8px 10px;margin-bottom:12px;font-size:12.5px;" },
           [h("div", { text: "Zara's notes — check these:", style: "font-weight:600;margin-bottom:3px;" })].concat((t.notes || []).map(function (n) { return h("div", { text: "• " + n }); }))) : null,
         h("div", { style: "display:grid;grid-template-columns:2fr 1fr;gap:10px;" }, [field("Template name", name), field("Type", cat)]),
         field("What it is / when it is used", desc),
@@ -289,10 +290,13 @@
     var form = h("div");
     var tplLink = h("span");
     clear(host).appendChild(h("div", { style: "display:flex;justify-content:space-between;align-items:center;margin:22px 0 8px;flex-wrap:wrap;gap:8px;" }, [
-      h("h3", { text: "✍ DOCUMENTS FOR SIGNATURE", style: "margin:0;font-family:Cormorant Garamond,Georgia,serif;font-size:14px;letter-spacing:1.5px;color:" + C.walnut + ";" }),
+      h("h3", { text: "DOCUMENTS FOR SIGNATURE", style: "margin:0;font-family:Cormorant Garamond,Georgia,serif;font-size:14px;letter-spacing:1.5px;color:" + C.walnut + ";" }),
       h("div", { style: "display:flex;gap:8px;align-items:center;" }, [
         tplLink,
-        btn("+ PREPARE DOCUMENT", function () { prepare(); }, "primary"),
+        // Any document — a PDF, a scan — not only the firm's templates (esign-pdf.js).
+        h("a", { href: "/admin/esign?" + (caseId ? "case=" + encodeURIComponent(caseId) : "client=" + encodeURIComponent(clientKey)), text: "UPLOAD A DOCUMENT",
+          style: "padding:7px 13px;background:" + C.lit + ";color:" + C.walnut + ";border:1px solid " + C.gold + ";border-radius:5px;font-size:11.5px;font-family:Montserrat,sans-serif;letter-spacing:.8px;text-decoration:none;" }),
+        btn("FROM A TEMPLATE", function () { prepare(); }, "primary"),
       ]),
     ]));
     host.appendChild(form);
@@ -323,7 +327,7 @@
       }
       var signers = p.signers.map(function (s) {
         var st = s.status === "signed" ? "✓ signed " + when(s.signed_at) + (s.typed_name && s.typed_name !== s.name ? " as “" + s.typed_name + "”" : "")
-          : s.status === "declined" ? "✋ declined" + (s.decline_reason ? ": " + s.decline_reason : "")
+          : s.status === "declined" ? "declined" + (s.decline_reason ? ": " + s.decline_reason : "")
           : s.status === "viewed" ? "opened " + when(s.viewed_at)
           : s.status === "sent" ? "sent " + when(s.sent_at) + (s.sent_via && s.sent_via !== "link" ? " by " + s.sent_via.replace("+", " & ") : " — link not emailed or texted")
           : p.status === "sent" ? "waiting for earlier signers" : "not sent yet";
@@ -357,12 +361,16 @@
         p.finalize_error ? note("Note: " + p.finalize_error, C.red) : null,
         p.dropbox_pdf ? note("Filed in Dropbox: " + p.dropbox_pdf, C.green) : null,
         h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center;" }, [
-          p.status === "draft" ? btn("Send for signature", function () { act(api("/packets/" + p.id + "/send", { method: "POST", body: {} }), "Sent."); }, "go") : null,
+          // An uploaded document (esign-pdf.js) is finished on its own page: signers and fields.
+          p.status === "draft" && p.kind === "upload" ? h("a", { href: "/admin/esign/prepare/" + p.id, text: "Continue preparing",
+            style: "font-size:11.5px;padding:7px 13px;border:1px solid " + C.gold + ";border-radius:5px;color:#1E1B1A;text-decoration:none;background:" + C.ember + ";font-family:Montserrat,sans-serif;letter-spacing:.8px;" }) : null,
+          p.status === "draft" && p.kind !== "upload" ? btn("Send for signature", function () { act(api("/packets/" + p.id + "/send", { method: "POST", body: {} }), "Sent."); }, "go") : null,
           p.status === "completed" ? dl("signed-pdf", "⬇ Signed PDF") : null,
           p.status === "completed" && (p.finalize_error || !p.dropbox_pdf) ? btn("File to Dropbox again", function () {
             act(api("/packets/" + p.id + "/refile", { method: "POST", body: {} }), "Filed.");
           }) : null,
-          p.status === "completed" ? dl("signed-docx", "⬇ Signed Word") : dl("unsigned", "⬇ Word (unsigned)"),
+          p.kind === "upload" ? (p.status === "completed" ? null : dl("unsigned", "⬇ Original PDF"))
+            : p.status === "completed" ? dl("signed-docx", "⬇ Signed Word") : dl("unsigned", "⬇ Word (unsigned)"),
           p.status === "draft" || p.status === "sent" ? btn("Cancel", function () {
             if (confirm("Cancel this document? Signing links stop working.")) act(api("/packets/" + p.id + "/cancel", { method: "POST", body: {} }), "Cancelled.");
           }) : null,

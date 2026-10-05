@@ -482,11 +482,15 @@ function mailTransport() {
 async function sendEmail(row) {
   const m = mailTransport();
   if (!m) throw new Error("email is not configured on the server (SMTP_* or GMAIL_*)");
+  const mail = require("./tez-email");
   await m.t.sendMail({
-    from: `"Tez Law P.C." <${m.from}>`,
+    from: `"TEZ Law Firm" <${m.from}>`,
     to: row.address,
     subject: row.subject || "Update on your client",
     text: row.body,
+    // The same words, in the firm's design. Nothing is added: an alert
+    // carries its headline and its link, and no more.
+    html: mail.wrap({ heading: row.subject || "Update on your client", body: mail.paragraphs(row.body) }),
   });
 }
 

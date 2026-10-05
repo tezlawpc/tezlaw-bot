@@ -15,7 +15,7 @@
   function say(el, text, kind) {
     if (!el) return;
     el.textContent = text;
-    el.style.color = kind === "error" ? "#c62828" : kind === "ok" ? "#2e7d32" : "#666";
+    el.style.color = kind === "error" ? "#9C2B1E" : kind === "ok" ? "#2F6B3F" : "#5E5854";
   }
 
   function busy(button, on, labelWhenBusy) {

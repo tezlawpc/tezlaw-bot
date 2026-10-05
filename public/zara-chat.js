@@ -121,7 +121,7 @@
           : m.taught.lesson
             ? "✓ Saved for review: “" + m.taught.lesson + "”"
             : "✓ " + (m.taught.note || "Saved."),
-        style: "color:#166534;line-height:1.45;",
+        style: "color:#2F6B3F;line-height:1.45;",
       }));
       if (m.taught.live && m.taught.id && !m.taught.undone) {
         wrap.appendChild(h("a", {
@@ -216,7 +216,7 @@
       "data-zara-proposal": p.id,
       style: "align-self:flex-start;max-width:88%;width:88%;box-sizing:border-box;background:#fff;border:1px solid " +
              (p.state === "applied" ? "#86C29A" : C.gold) + ";border-left:4px solid " +
-             (p.state === "applied" ? "#166534" : p.state === "discarded" ? C.border : C.gold) +
+             (p.state === "applied" ? "#2F6B3F" : p.state === "discarded" ? C.border : C.gold) +
              ";border-radius:7px;padding:8px 10px;font-size:12px;line-height:1.45;color:" + C.walnut +
              (p.state === "discarded" ? ";opacity:.6" : "") + ";",
     });
@@ -228,7 +228,7 @@
     var status = h("div", { style: "margin-top:5px;" });
     if (p.state === "applied") {
       status.textContent = "✓ Applied" + (p.note ? " — " + p.note : "") + ".";
-      status.style.color = "#166534";
+      status.style.color = "#2F6B3F";
       if (document.querySelector("[data-case-id]")) {
         status.appendChild(document.createTextNode(" "));
         status.appendChild(h("a", { href: "#", text: "Reload page to see it", style: "color:" + C.muted + ";",

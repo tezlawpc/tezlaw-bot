@@ -371,40 +371,40 @@ function renderTemplatesPage(templates, motionTypes) {
     const detected = t.placeholders_found?.detected || [];
     const missing = KNOWN_PLACEHOLDERS.filter(p => !detected.includes(p));
     const detectedHtml = detected.length
-      ? detected.map(p => `<span style="background:#e8f5e9; color:#2e7d32; padding:2px 6px; border-radius:3px; font-size:10px; margin:1px;">{{${p}}}</span>`).join(" ")
-      : '<span style="color:#c00; font-size:11px;">⚠️ No placeholders detected</span>';
+      ? detected.map(p => `<span style="background:#EEF5EF; color:#2F6B3F; padding:2px 6px; border-radius:3px; font-size:10px; margin:1px;">{{${p}}}</span>`).join(" ")
+      : '<span style="color:#9C2B1E; font-size:11px;">⚠️ No placeholders detected</span>';
     const missingHtml = missing.length
-      ? '<div style="margin-top:6px; font-size:11px; color:#888;">Not used: ' + missing.map(p => `<span style="color:#aaa;">{{${p}}}</span>`).join(", ") + '</div>'
+      ? '<div style="margin-top:6px; font-size:11px; color:#5E5854;">Not used: ' + missing.map(p => `<span style="color:#5E5854;">{{${p}}}</span>`).join(", ") + '</div>'
       : "";
     const typesForThis = t.motion_types || [];
     const typeLabels = typesForThis.length
       ? typesForThis.map(mt => (motionTypes[mt]?.short || mt)).join(", ")
       : "All motion types (default)";
     return `
-      <div style="background:white; border:1px solid #e0e0e0; border-radius:8px; padding:16px; margin-bottom:12px;">
+      <div style="background:white; border:1px solid #E8E3DC; border-radius:8px; padding:16px; margin-bottom:12px;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start;">
           <div>
             <div style="display:flex; align-items:center; gap:8px;">
               <h3 style="margin:0; color:${brand.navy};">${escapeHtml(t.name)}</h3>
               ${t.is_default ? '<span style="background:' + brand.gold + '; color:white; padding:3px 8px; border-radius:12px; font-size:10px; font-weight:600;">DEFAULT</span>' : ""}
             </div>
-            <div style="font-size:12px; color:#666; margin-top:4px;">
+            <div style="font-size:12px; color:#5E5854; margin-top:4px;">
               📎 ${escapeHtml(t.original_filename || "template.docx")} · ${(t.file_size_bytes / 1024).toFixed(1)} KB · Uploaded ${new Date(t.created_at).toLocaleDateString()}
             </div>
-            <div style="font-size:12px; color:#666; margin-top:4px;">
+            <div style="font-size:12px; color:#5E5854; margin-top:4px;">
               Used for: <b>${escapeHtml(typeLabels)}</b>
             </div>
-            ${t.description ? `<div style="font-size:12px; color:#555; margin-top:6px; font-style:italic;">${escapeHtml(t.description)}</div>` : ""}
+            ${t.description ? `<div style="font-size:12px; color:#5E5854; margin-top:6px; font-style:italic;">${escapeHtml(t.description)}</div>` : ""}
             <div style="margin-top:10px;">
-              <div style="font-size:11px; color:#666; margin-bottom:4px;"><b>Placeholders found in template:</b></div>
+              <div style="font-size:11px; color:#5E5854; margin-bottom:4px;"><b>Placeholders found in template:</b></div>
               <div>${detectedHtml}</div>
               ${missingHtml}
             </div>
           </div>
           <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
-            <a href="/admin/motions/templates/${t.id}/download" style="background:#eee; color:#333; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:11px;">💾 Download</a>
+            <a href="/admin/motions/templates/${t.id}/download" style="background:#F3EFE9; color:#2B2523; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:11px;">💾 Download</a>
             ${!t.is_default ? `<button onclick="setDefault(${t.id})" style="background:${brand.gold}; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:11px;">Set as default</button>` : ""}
-            <button onclick="deleteTemplate(${t.id})" style="background:transparent; color:#c00; border:1px solid #ffe0e0; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:11px;">🗑 Delete</button>
+            <button onclick="deleteTemplate(${t.id})" style="background:transparent; color:#9C2B1E; border:1px solid #FBEDEA; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:11px;">🗑 Delete</button>
           </div>
         </div>
       </div>`;
@@ -418,43 +418,43 @@ function renderTemplatesPage(templates, motionTypes) {
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
       <h1 style="margin:0;">Motion Templates</h1>
-      <div style="font-size:12px; color:#666; margin-top:4px;">Pleading paper templates that Claude uses when drafting motions.</div>
+      <div style="font-size:12px; color:#5E5854; margin-top:4px;">Pleading paper templates that Claude uses when drafting motions.</div>
     </div>
     <a href="/admin/motions" class="back-link">← Back to motions</a>
   </div>
 
   <!-- Instructions box -->
-  <div style="background:#fff8e1; border-left:4px solid ${brand.gold}; padding:14px 18px; border-radius:4px; margin:16px 0; font-size:13px; line-height:1.6;">
+  <div style="background:#FFF3E6; border-left:4px solid ${brand.gold}; padding:14px 18px; border-radius:4px; margin:16px 0; font-size:13px; line-height:1.6;">
     <div style="font-weight:600; color:${brand.navy}; margin-bottom:6px;">📖 How to prepare your template</div>
     <p style="margin:0 0 8px 0;">Upload a .docx file with your firm's pleading paper (caption, line numbers, margins, signature block, etc.). Add these placeholders where content should appear:</p>
     <ul style="margin:0 0 8px 20px; padding:0;">
-      <li><code style="background:#f0f0f0; padding:1px 5px; border-radius:3px;">{{CONTENT}}</code> — <b>required.</b> Where Claude's motion body goes (put on its own line, unformatted).</li>
-      <li><code style="background:#f0f0f0; padding:1px 5px; border-radius:3px;">{{TITLE}}</code> — motion title (e.g. "MOTION FOR CONTINUANCE")</li>
-      <li><code style="background:#f0f0f0; padding:1px 5px; border-radius:3px;">{{CLIENT_NAME}}</code>, <code style="background:#f0f0f0; padding:1px 5px; border-radius:3px;">{{A_NUMBER}}</code></li>
-      <li><code style="background:#f0f0f0; padding:1px 5px; border-radius:3px;">{{COURT_NAME}}</code>, <code style="background:#f0f0f0; padding:1px 5px; border-radius:3px;">{{JUDGE_NAME}}</code></li>
-      <li><code style="background:#f0f0f0; padding:1px 5px; border-radius:3px;">{{DATE}}</code>, <code style="background:#f0f0f0; padding:1px 5px; border-radius:3px;">{{FILING_DEADLINE}}</code></li>
+      <li><code style="background:#F3EFE9; padding:1px 5px; border-radius:3px;">{{CONTENT}}</code> — <b>required.</b> Where Claude's motion body goes (put on its own line, unformatted).</li>
+      <li><code style="background:#F3EFE9; padding:1px 5px; border-radius:3px;">{{TITLE}}</code> — motion title (e.g. "MOTION FOR CONTINUANCE")</li>
+      <li><code style="background:#F3EFE9; padding:1px 5px; border-radius:3px;">{{CLIENT_NAME}}</code>, <code style="background:#F3EFE9; padding:1px 5px; border-radius:3px;">{{A_NUMBER}}</code></li>
+      <li><code style="background:#F3EFE9; padding:1px 5px; border-radius:3px;">{{COURT_NAME}}</code>, <code style="background:#F3EFE9; padding:1px 5px; border-radius:3px;">{{JUDGE_NAME}}</code></li>
+      <li><code style="background:#F3EFE9; padding:1px 5px; border-radius:3px;">{{DATE}}</code>, <code style="background:#F3EFE9; padding:1px 5px; border-radius:3px;">{{FILING_DEADLINE}}</code></li>
     </ul>
-    <p style="margin:0; font-size:12px; color:#666;">💡 <b>Tip:</b> Type placeholders without bold/italic in the middle of the text. If Word red-underlines them, right-click → "Add to dictionary" so Word doesn't split them across runs. After upload, we detect which placeholders you used and only fill those.</p>
+    <p style="margin:0; font-size:12px; color:#5E5854;">💡 <b>Tip:</b> Type placeholders without bold/italic in the middle of the text. If Word red-underlines them, right-click → "Add to dictionary" so Word doesn't split them across runs. After upload, we detect which placeholders you used and only fill those.</p>
   </div>
 
   <!-- Upload form -->
-  <div style="background:white; border:1px solid #e0e0e0; border-radius:8px; padding:20px; margin-bottom:20px;">
+  <div style="background:white; border:1px solid #E8E3DC; border-radius:8px; padding:20px; margin-bottom:20px;">
     <h3 style="margin-top:0; color:${brand.navy};">📤 Upload new template</h3>
     <form id="upload-template-form" onsubmit="uploadTemplate(event)" enctype="multipart/form-data">
       <div style="margin-bottom:12px;">
-        <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Template file (.docx) *</label>
-        <input type="file" name="template_file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+        <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Template file (.docx) *</label>
+        <input type="file" name="template_file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px;">
       </div>
       <div style="margin-bottom:12px;">
-        <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Template name *</label>
-        <input type="text" name="name" required placeholder="e.g. Immigration Pleading Paper — 28 lines" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+        <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Template name *</label>
+        <input type="text" name="name" required placeholder="e.g. Immigration Pleading Paper — 28 lines" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
       </div>
       <div style="margin-bottom:12px;">
-        <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Description (optional)</label>
-        <input type="text" name="description" placeholder="Notes about when/how to use this template" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+        <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Description (optional)</label>
+        <input type="text" name="description" placeholder="Notes about when/how to use this template" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
       </div>
       <div style="margin-bottom:12px;">
-        <label style="display:block; font-size:12px; color:#666; margin-bottom:6px;">Use for which motion types? (leave all unchecked to apply to all)</label>
+        <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:6px;">Use for which motion types? (leave all unchecked to apply to all)</label>
         <div>${motionTypeCheckboxes}</div>
       </div>
       <div style="margin-bottom:16px;">
@@ -467,7 +467,7 @@ function renderTemplatesPage(templates, motionTypes) {
   </div>
 
   <!-- Existing templates -->
-  ${templates.length ? `<h3 style="color:${brand.navy};">Your templates (${templates.length})</h3>${rows}` : `<div style="text-align:center; padding:40px; color:#888; background:white; border-radius:8px; border:1px dashed #ccc;">No templates yet. Upload your first pleading paper above to get started.<br><br>Motions will still generate without a template — they'll just use plain formatting.</div>`}
+  ${templates.length ? `<h3 style="color:${brand.navy};">Your templates (${templates.length})</h3>${rows}` : `<div style="text-align:center; padding:40px; color:#5E5854; background:white; border-radius:8px; border:1px dashed #CFC8BE;">No templates yet. Upload your first pleading paper above to get started.<br><br>Motions will still generate without a template — they'll just use plain formatting.</div>`}
 
   <script>
     async function uploadTemplate(e) {

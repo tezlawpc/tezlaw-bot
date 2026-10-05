@@ -98,8 +98,8 @@ const fakeDb = {
         status: "waiting", expires_at: new Date(Date.now() + 30 * 86400000) });
       return { rows: [] };
     }
-    if (/^SELECT \* FROM esign_packets WHERE id = \$1/.test(q)) return { rows: T.pk.filter(p => p.id === v[0]).map(p => ({ ...p })) };
-    if (/^SELECT \* FROM esign_signers WHERE packet_id = \$1/.test(q)) return { rows: T.sg.filter(s => s.packet_id === v[0]).sort((a, b) => a.sign_order - b.sign_order || a.id - b.id).map(s => ({ ...s })) };
+    if (/^SELECT [\s\S]+? FROM esign_packets WHERE id = \$1/.test(q)) return { rows: T.pk.filter(p => p.id === v[0]).map(p => ({ ...p })) };
+    if (/^SELECT [\s\S]+? FROM esign_signers WHERE packet_id = \$1/.test(q)) return { rows: T.sg.filter(s => s.packet_id === v[0]).sort((a, b) => a.sign_order - b.sign_order || a.id - b.id).map(s => ({ ...s })) };
     if (/^SELECT id FROM esign_packets/.test(q)) return { rows: T.pk.filter(p => !v.length || (/client_key = \$1/.test(q) ? p.client_key === v[0] : p.case_id === v[0])).reverse().map(p => ({ id: p.id })) };
     if (/^UPDATE esign_packets SET status = 'sent'.*AND status = 'draft' RETURNING id/.test(q)) {
       const p = T.pk.find(x => x.id === v[0] && x.status === "draft");
@@ -119,21 +119,29 @@ const fakeDb = {
       return { rows: x ? [{ id: x.id }] : [] };
     }
     if (/^UPDATE esign_packets SET status = 'cancelled'/.test(q)) { T.pk.find(p => p.id === v[0]).status = "cancelled"; return { rows: [] }; }
-    if (/^UPDATE esign_packets SET status = 'declined'/.test(q)) { T.pk.find(p => p.id === v[0]).status = "declined"; return { rows: [] }; }
+    if (/^UPDATE esign_packets SET status = 'declined'/.test(q)) { const pk = T.pk.find(p => p.id === v[0]); if (pk.status === "sent") pk.status = "declined"; return { rows: [] }; }
     if (/^UPDATE esign_packets SET signed_pdf/.test(q)) { Object.assign(T.pk.find(p => p.id === v[0]), { signed_pdf: v[1], dropbox_docx: v[2], dropbox_pdf: v[3], finalize_error: v[4] }); return { rows: [] }; }
     if (/^UPDATE esign_signers SET status = CASE WHEN status = 'waiting'/.test(q)) {
       const s = T.sg.find(x => x.id === v[0]); if (s.status === "waiting") s.status = "sent"; s.sent_at = s.sent_at || now(); s.sent_via = v[1]; s.delivery_error = v[2]; return { rows: [] };
     }
-    if (/^SELECT \* FROM esign_signers WHERE (id|token) = \$1/.test(q)) return { rows: T.sg.filter(s => (/token/.test(q) ? s.token : s.id) === v[0]).map(s => ({ ...s })) };
+    if (/^SELECT status FROM esign_signers WHERE id = \$1/.test(q)) return { rows: T.sg.filter(x => x.id === v[0]).map(x => ({ status: x.status })) };
+    if (/^SELECT (\*|id, packet_id) FROM esign_signers WHERE (id|token) = \$1/.test(q)) return { rows: T.sg.filter(s => (/token/.test(q) ? s.token : s.id) === v[0]).map(s => ({ ...s })) };
     if (/^UPDATE esign_signers SET expires_at/.test(q)) return { rows: [] };
     if (/^UPDATE esign_signers SET viewed_at/.test(q)) { const s = T.sg.find(x => x.id === v[0]); s.viewed_at = now(); if (["waiting", "sent"].includes(s.status)) s.status = "viewed"; return { rows: [] }; }
     if (/^UPDATE esign_signers SET status = 'signed'/.test(q)) {
-      const s = T.sg.find(x => x.id === v[0] && x.status !== "signed");
+      // the statement's own conditions: not signed, not declined, and the document still out for signature
+      const s = T.sg.find(x => x.id === v[0] && x.status !== "signed" && x.status !== "declined"
+        && (T.pk.find(p => p.id === x.packet_id) || {}).status === "sent");
       if (!s) return { rows: [] };
       Object.assign(s, { status: "signed", signed_at: now(), typed_name: v[1], signature_png: v[2], consent_text: v[3], ip: v[4], user_agent: v[5] });
       return { rows: [{ id: s.id }] };
     }
-    if (/^UPDATE esign_signers SET status = 'declined'/.test(q)) { Object.assign(T.sg.find(x => x.id === v[0]), { status: "declined", decline_reason: v[1] }); return { rows: [] }; }
+    if (/^UPDATE esign_signers SET status = 'declined'/.test(q)) {
+      // the statement itself refuses a signer who has already signed or declined
+      const row = T.sg.find(x => x.id === v[0]);
+      if (!row || row.status === "signed" || row.status === "declined") return { rows: [] };
+      Object.assign(row, { status: "declined", decline_reason: v[1] }); return { rows: [{ id: row.id }] };
+    }
     if (/^INSERT INTO esign_events/.test(q)) { T.ev.push({ id: seq++, packet_id: v[0], signer_id: v[1], event: v[2], detail: v[3], ip: v[4], at: now() }); return { rows: [] }; }
     if (/^SELECT \* FROM esign_events/.test(q)) return { rows: T.ev.filter(e => e.packet_id === v[0]) };
     if (/FROM civil_hearings/.test(q)) return { rows: [{ hearing_date: new Date("2026-10-14T00:00:00Z"), hearing_time: "8:30 AM", hearing_type: "Motion hearing", department: "8D", status: "scheduled" }] };
@@ -435,6 +443,26 @@ const es = require("../esign");
   check("a signer can decline, with a reason, and the document stops", () => T.pk.find(p => p.id === p4.id).status === "declined" && T.sg.find(x => x.id === c4.id).decline_reason === "The fee is wrong");
   v = await es.signerView(c4.token);
   check("…after which the link says so", () => !v.ok && /declined/.test(v.error));
+  const again = await es.decline(c4.token, { reason: "again" }).then(() => "it went through", e => e.status);
+  check("declining twice is refused, and changes nothing", () => again === 409 && T.sg.find(x => x.id === c4.id).decline_reason === "The fee is wrong");
+  check("a refusal is claimed in one statement, as a signature is (the two cannot both go through)", () => {
+    const src = fs.readFileSync(path.join(__dirname, "..", "esign.js"), "utf8");
+    return /SET status = 'declined', decline_reason = \$2\s+WHERE id = \$1 AND status NOT IN \('signed', 'declined'\) RETURNING id/.test(src)
+      && /UPDATE esign_packets SET status = 'declined' WHERE id = \$1 AND status = 'sent'/.test(src)
+      && /WHERE id = \$1 AND status NOT IN \('signed', 'declined'\)\s+AND EXISTS \(SELECT 1 FROM esign_packets p WHERE p\.id = esign_signers\.packet_id AND p\.status = 'sent'\)/.test(src);
+  });
+  const late = await es.sign(c4.token, { typed_name: c4.name, signature: PNG_URL, consent: true }).then(() => "it went through", e => e.status);
+  check("a signature that arrives after the same signer's refusal does not count", () =>
+    late === 409 && T.sg.find(x => x.id === c4.id).status === "declined" && !T.sg.find(x => x.id === c4.id).signature_png);
+  check("a signing link goes to one address only (a list, or a line break, is refused)", () =>
+    es.oneAddress("li@example.com") === "li@example.com" && es.oneAddress("a@x.com,b@y.com") === null
+    && es.oneAddress("Li <li@x.com>") === null && es.oneAddress("a@x.com\r\nBcc: z@z.com") === null);
+  const listed = await es.sendSigningLink({ via: "email", email: "a@x.com, b@y.com", title: "T", url: "https://x/y" });
+  check("…and nothing is sent when it is not one address", () => listed.status === "email_failed" && /one email address/.test(listed.error));
+  check("a picture that declares itself enormous is refused before anything draws it", () => {
+    const mk = (w, h) => { const b = Buffer.alloc(40); b.writeUInt32BE(0x89504e47, 0); b.writeUInt32BE(13, 8); b.write("IHDR", 12, "latin1"); b.writeUInt32BE(w, 16); b.writeUInt32BE(h, 20); return b; };
+    return es.pngFits(mk(1800, 660)) && !es.pngFits(mk(10000, 10000)) && !es.pngFits(mk(3000, 3000)) && !es.pngFits(Buffer.alloc(10));
+  });
   const p5 = await es.createPacket({ templateId: handMade.id, caseId: 223, values: { client_name: "Jing Liu" }, signers: rp.signers, user: { uid: 1 } });
   await es.sendPacket(p5.id, {});
   await es.cancelPacket(p5.id, { user: { n: "JJ" } });
@@ -610,7 +638,7 @@ const es = require("../esign");
   await new Promise(r => setTimeout(r, 40));
   const d2 = w2.document;
   check("the case page lists documents out for signature, and who has signed", () => /Retainer — Liu/.test(d2.body.textContent) && /✓ signed/.test(d2.body.textContent) && /link not emailed or texted/.test(d2.body.textContent));
-  [...d2.querySelectorAll("button")].find(b => /PREPARE DOCUMENT/.test(b.textContent)).click();
+  [...d2.querySelectorAll("button")].find(b => /FROM A TEMPLATE/.test(b.textContent)).click();
   await new Promise(r => setTimeout(r, 30));
   const pick = d2.querySelector("select");
   check("only ACTIVE templates can be picked", () => [...pick.options].map(o => o.textContent).some(t => /Retainer/.test(t)) && ![...pick.options].some(o => /Draft one/.test(o.textContent)));

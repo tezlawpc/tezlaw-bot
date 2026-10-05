@@ -115,6 +115,22 @@ jobs:
       - name: Public intake form
         run: node scripts/check-web-intake.js
 
+      # A document uploaded for signature: the fields a signer fills must land
+      # where staff placed them, on rotated and cropped pages too, and nobody
+      # outside the client's team may open the packet.
+      - name: E-sign, uploaded documents
+        run: node scripts/check-esign-upload.js
+
+      # The Matter Manager lives inside Tara. Its old addresses must keep
+      # working (reminder emails link to them) and it must stay admin-only.
+      - name: Matter Manager in Tara
+        run: node scripts/check-matters-in-tara.js
+
+      # The admin pages in the firm's colours, and readable: no white words on
+      # Seal Orange, no colour of the old palettes written back in by hand.
+      - name: Brand pass
+        run: node scripts/check-brand-pass.js
+
       # Every link the court calendar emits, checked against the route table
       # read out of server.js. Three of its five destinations were paths that
       # had never existed, so clicking a merits hearing or an EOIR notice
@@ -128,6 +144,12 @@ jobs:
       # calendar fills with duplicates overnight.
       - name: Calendar feeds
         run: node scripts/check-calendar-feeds.js
+
+      # A page's script must never be replaced by a server file of the same
+      # name. calendar-feeds.js is both, and the boot-time rescue of misplaced
+      # uploads copied the server module over the page's script on every start.
+      - name: Bundle names
+        run: node scripts/check-bundle-names.js
 
       # Court mail that cannot be understood must still reach a person. A
       # pre-hearing order from an immigration judge became "Error: Zara did

@@ -228,23 +228,23 @@ function renderDocumentsSection({ clientKey, documents, aNumber }) {
         <div style="font-weight:600;">
           <a href="/admin/clients/${encodeURIComponent(clientKey)}/documents/${d.id}/download" style="color:#2B2523; text-decoration:none;">${escapeHtml(d.filename)}</a>
         </div>
-        ${d.description ? `<div style="font-size:12px; color:#666; margin-top:2px;">${escapeHtml(d.description)}</div>` : ""}
+        ${d.description ? `<div style="font-size:12px; color:#5E5854; margin-top:2px;">${escapeHtml(d.description)}</div>` : ""}
       </td>
       <td style="font-size:12px;">${d.category ? `<span style="background:#FAF8F5; color:#A34C00; padding:2px 8px; border-radius:10px; font-size:11px; white-space:nowrap;">${escapeHtml(d.category)}</span>` : "—"}</td>
-      <td style="font-size:12px; color:#666; white-space:nowrap;">${formatBytes(d.size_bytes)}</td>
-      <td style="font-size:12px; color:#666; white-space:nowrap;">${new Date(d.uploaded_at).toLocaleDateString()}</td>
+      <td style="font-size:12px; color:#5E5854; white-space:nowrap;">${formatBytes(d.size_bytes)}</td>
+      <td style="font-size:12px; color:#5E5854; white-space:nowrap;">${new Date(d.uploaded_at).toLocaleDateString()}</td>
       <td style="white-space:nowrap;">
         <a href="/admin/clients/${encodeURIComponent(clientKey)}/documents/${d.id}/download" style="color:#A34C00; font-size:13px;">📥</a>
         &nbsp;
-        <a href="#" onclick="deleteDoc(${d.id}, ${JSON.stringify(d.filename).replace(/"/g, '&quot;')}); return false;" style="color:#c00; font-size:13px;">🗑️</a>
+        <a href="#" onclick="deleteDoc(${d.id}, ${JSON.stringify(d.filename).replace(/"/g, '&quot;')}); return false;" style="color:#9C2B1E; font-size:13px;">🗑️</a>
       </td>
     </tr>
-  `).join("") : `<tr><td colspan="6" style="text-align:center; color:#888; padding:20px;">No documents yet. Upload the client's passport, birth certificate, court orders, etc. above.</td></tr>`;
+  `).join("") : `<tr><td colspan="6" style="text-align:center; color:#5E5854; padding:20px;">No documents yet. Upload the client's passport, birth certificate, court orders, etc. above.</td></tr>`;
 
   const categorySuggestions = CATEGORY_SUGGESTIONS.map(c => `<option value="${escapeAttr(c)}">`).join("");
 
   return `
-    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
+    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:15px;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
         <h3 style="margin:0; color:#2B2523;">📁 Documents (${documents.length})</h3>
         <button type="button" onclick="toggleUploadForm()" style="background:#A34C00; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">+ Upload Document</button>
@@ -257,24 +257,24 @@ function renderDocumentsSection({ clientKey, documents, aNumber }) {
              onclick="document.getElementById('doc-file-input').click()">
           <div style="font-size:36px; margin-bottom:8px;">📄</div>
           <div><strong>Drop a file here or click to browse</strong></div>
-          <div style="font-size:12px; color:#666; margin-top:4px;">PDF, images, Word docs, etc. Max 25 MB.</div>
+          <div style="font-size:12px; color:#5E5854; margin-top:4px;">PDF, images, Word docs, etc. Max 25 MB.</div>
           <input type="file" id="doc-file-input" style="display:none;" onchange="handleFileSelected(this.files[0])">
           <div id="doc-selected" style="margin-top:8px; font-size:13px; color:#2B2523;"></div>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
           <div style="flex:1; min-width:200px;">
-            <label style="font-size:12px; color:#666; display:block; margin-bottom:2px;">Category (optional)</label>
-            <input list="doc-cat-suggestions" id="doc-category" placeholder="e.g. Passport, I-94, Medical Records" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+            <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:2px;">Category (optional)</label>
+            <input list="doc-cat-suggestions" id="doc-category" placeholder="e.g. Passport, I-94, Medical Records" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px;">
             <datalist id="doc-cat-suggestions">${categorySuggestions}</datalist>
           </div>
         </div>
         <div style="margin-bottom:10px;">
-          <label style="font-size:12px; color:#666; display:block; margin-bottom:2px;">Notes (optional)</label>
-          <textarea id="doc-description" rows="2" placeholder="e.g. Valid until 2028, filed with I-589" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; font-family:inherit;"></textarea>
+          <label style="font-size:12px; color:#5E5854; display:block; margin-bottom:2px;">Notes (optional)</label>
+          <textarea id="doc-description" rows="2" placeholder="e.g. Valid until 2028, filed with I-589" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; font-family:inherit;"></textarea>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
           <button type="button" onclick="uploadDoc()" id="doc-upload-btn" style="background:#A34C00; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">📤 Upload</button>
-          <button type="button" onclick="toggleUploadForm()" style="background:#eee; color:#333; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Cancel</button>
+          <button type="button" onclick="toggleUploadForm()" style="background:#F3EFE9; color:#2B2523; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Cancel</button>
           <span id="doc-upload-status" style="font-size:13px;"></span>
         </div>
       </div>
@@ -282,7 +282,7 @@ function renderDocumentsSection({ clientKey, documents, aNumber }) {
       <!-- Category filter -->
       ${cats.length > 1 ? `
       <div style="margin-bottom:10px;">
-        <select id="doc-cat-filter" onchange="filterDocs()" style="padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+        <select id="doc-cat-filter" onchange="filterDocs()" style="padding:6px; border:1px solid #CFC8BE; border-radius:4px; font-size:13px;">
           <option value="">All categories (${documents.length})</option>
           ${catFilterOptions}
         </select>
@@ -291,7 +291,7 @@ function renderDocumentsSection({ clientKey, documents, aNumber }) {
       <div style="overflow-x:auto;">
         <table style="width:100%; font-size:13px;">
           <thead>
-            <tr style="border-bottom:1px solid #eee;">
+            <tr style="border-bottom:1px solid #E8E3DC;">
               <th></th>
               <th style="text-align:left;">Filename</th>
               <th style="text-align:left;">Category</th>
@@ -327,10 +327,10 @@ function renderDocumentsSection({ clientKey, documents, aNumber }) {
         const sizeMB = (file.size / 1024 / 1024).toFixed(1);
         document.getElementById("doc-selected").textContent = "✓ " + file.name + " (" + sizeMB + " MB)";
         if (file.size > 25 * 1024 * 1024) {
-          document.getElementById("doc-selected").innerHTML += ' <span style="color:#c00;">— exceeds 25MB limit</span>';
+          document.getElementById("doc-selected").innerHTML += ' <span style="color:#9C2B1E;">— exceeds 25MB limit</span>';
         }
       }
-      function dragOver(e) { e.preventDefault(); e.stopPropagation(); document.getElementById("doc-dropzone").style.background = "#faedd5"; }
+      function dragOver(e) { e.preventDefault(); e.stopPropagation(); document.getElementById("doc-dropzone").style.background = "#FFF3E6"; }
       function dragLeave(e) { e.preventDefault(); e.stopPropagation(); document.getElementById("doc-dropzone").style.background = "white"; }
       function dropFile(e) {
         e.preventDefault(); e.stopPropagation();
@@ -344,7 +344,7 @@ function renderDocumentsSection({ clientKey, documents, aNumber }) {
         const status = document.getElementById("doc-upload-status");
         btn.disabled = true;
         status.textContent = "⏳ Uploading...";
-        status.style.color = "#666";
+        status.style.color = "#5E5854";
         try {
           const fd = new FormData();
           // Sanitize filename for HTTP header safety
@@ -364,17 +364,17 @@ function renderDocumentsSection({ clientKey, documents, aNumber }) {
           catch { data = { ok: false, error: "Server returned invalid response (" + resp.status + ")" }; }
           if (data.ok) {
             status.textContent = "✅ Uploaded";
-            status.style.color = "#4CAF50";
+            status.style.color = "#2F6B3F";
             setTimeout(() => window.location.reload(), 700);
           } else {
             btn.disabled = false;
             status.textContent = "❌ " + (data.error || "Upload failed");
-            status.style.color = "#c00";
+            status.style.color = "#9C2B1E";
           }
         } catch (e) {
           btn.disabled = false;
           status.textContent = "❌ " + e.message;
-          status.style.color = "#c00";
+          status.style.color = "#9C2B1E";
         }
       }
       async function deleteDoc(id, filename) {

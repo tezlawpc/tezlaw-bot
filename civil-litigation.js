@@ -21,10 +21,10 @@ const db = require("./db");
 const jurisdictions = require("./civil-jurisdictions");
 
 const STAGES = [
-  { key: "intake",      label: "Intake / Assessment",  color: "#7B5330", order: 1 },
-  { key: "pre_filing",  label: "Pre-Filing",           color: "#B8891E", order: 2 },
-  { key: "pleadings",   label: "Pleadings",            color: "#D97706", order: 3 },
-  { key: "discovery",   label: "Discovery",            color: "#0284C7", order: 4 },
+  { key: "intake",      label: "Intake / Assessment",  color: "#5E5854", order: 1 },
+  { key: "pre_filing",  label: "Pre-Filing",           color: "#A34C00", order: 2 },
+  { key: "pleadings",   label: "Pleadings",            color: "#B45309", order: 3 },
+  { key: "discovery",   label: "Discovery",            color: "#0369A1", order: 4 },
   { key: "motions",     label: "Motion Practice",      color: "#7C3AED", order: 5 },
   { key: "trial_prep",  label: "Trial Prep",           color: "#DC2626", order: 6 },
   { key: "trial",       label: "Trial",                color: "#991B1B", order: 7 },

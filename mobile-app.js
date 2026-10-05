@@ -393,9 +393,9 @@ function renderMobileSearchPage() {
     --canvas: #F3EFE9;
     --card: #ffffff;
     --text: #2B2523;
-    --muted: #6b6b6b;
-    --danger: #c62828;
-    --success: #2e7d32;
+    --muted: #5E5854;
+    --danger: #9C2B1E;
+    --success: #2F6B3F;
     --safe-top: env(safe-area-inset-top);
     --safe-bottom: env(safe-area-inset-bottom);
   }
@@ -471,8 +471,8 @@ function renderMobileSearchPage() {
     position: absolute;
     right: 12px; top: 50%;
     transform: translateY(-50%);
-    background: #e0e0e0;
-    color: #666;
+    background: #F3EFE9;
+    color: #5E5854;
     border: 0;
     width: 22px; height: 22px;
     border-radius: 50%;
@@ -507,7 +507,7 @@ function renderMobileSearchPage() {
   }
   .result-card:active {
     transform: scale(0.98);
-    background: #fafafa;
+    background: #FAF8F5;
   }
   .result-name {
     font-size: 16px;
@@ -523,7 +523,7 @@ function renderMobileSearchPage() {
     font-family: ui-monospace, Menlo, monospace;
     font-size: 11px;
     color: var(--muted);
-    background: #f3ede1;
+    background: #FAF8F5;
     padding: 2px 8px;
     border-radius: 8px;
     flex-shrink: 0;
@@ -546,8 +546,8 @@ function renderMobileSearchPage() {
     color: var(--navy);
   }
   .result-hearing.past {
-    background: #f5f5f5;
-    border-left-color: #999;
+    background: #FAF8F5;
+    border-left-color: #CFC8BE;
     color: var(--muted);
   }
   .badge {
@@ -577,7 +577,7 @@ function renderMobileSearchPage() {
   .spinner {
     display: inline-block;
     width: 24px; height: 24px;
-    border: 3px solid #e0e0e0;
+    border: 3px solid #E8E3DC;
     border-top-color: var(--gold);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
@@ -589,7 +589,7 @@ function renderMobileSearchPage() {
     position: fixed;
     bottom: 0; left: 0; right: 0;
     background: white;
-    border-top: 1px solid #e5e5e5;
+    border-top: 1px solid #E8E3DC;
     display: flex;
     padding: 8px 0 calc(8px + var(--safe-bottom));
     z-index: 100;
@@ -714,7 +714,7 @@ function renderMobileSearchPage() {
 
   function renderResults(items) {
     if (!items.length) {
-      results.innerHTML = '<div class="empty"><div class="empty-icon">🕵️</div><div>No matches</div><div style="font-size:12px; margin-top:4px; color:#999;">Try a shorter or different keyword</div></div>';
+      results.innerHTML = '<div class="empty"><div class="empty-icon">🕵️</div><div>No matches</div><div style="font-size:12px; margin-top:4px; color:#5E5854;">Try a shorter or different keyword</div></div>';
       return;
     }
     results.innerHTML = items.map(c => renderCard(c)).join("");
@@ -819,7 +819,7 @@ function renderMobileClientPage(client) {
     --canvas: #F3EFE9;
     --card: #ffffff;
     --text: #2B2523;
-    --muted: #6b6b6b;
+    --muted: #5E5854;
     --safe-top: env(safe-area-inset-top);
     --safe-bottom: env(safe-area-inset-bottom);
   }
@@ -900,7 +900,7 @@ function renderMobileClientPage(client) {
     box-shadow: 0 1px 3px rgba(0,0,0,.04);
     border: 1px solid rgba(0,0,0,.04);
   }
-  .card:active { background: #fafafa; }
+  .card:active { background: #FAF8F5; }
 
   /* ── Contact action buttons ── */
   .contact-grid {
@@ -921,7 +921,7 @@ function renderMobileClientPage(client) {
     border: 1px solid rgba(0,0,0,.05);
     transition: transform .1s;
   }
-  .contact-btn:active { transform: scale(.94); background: #fafafa; }
+  .contact-btn:active { transform: scale(.94); background: #FAF8F5; }
   .contact-btn.disabled { opacity: 0.3; pointer-events: none; }
   .contact-icon {
     font-size: 22px;
@@ -942,7 +942,7 @@ function renderMobileClientPage(client) {
     align-items: stretch;
   }
   .hearing-date {
-    background: linear-gradient(180deg, #FAF8F5 0%, #f7ede0 100%);
+    background: linear-gradient(180deg, #FAF8F5 0%, #FAF8F5 100%);
     border-radius: 8px;
     padding: 6px 8px;
     text-align: center;
@@ -1077,9 +1077,9 @@ function renderMobileClientPage(client) {
           <div style="display:flex; justify-content:space-between; gap:8px;">
             <div style="flex:1;">
               <div style="font-weight:600; font-size:13px;">${escapeHtml(d.description || "")}</div>
-              <div style="font-size:11px; color:#888;">${dt.toLocaleDateString()}</div>
+              <div style="font-size:11px; color:#5E5854;">${dt.toLocaleDateString()}</div>
             </div>
-            <div style="font-size:12px; font-weight:600; color:${overdue ? "#c62828" : "#666"}; white-space:nowrap;">
+            <div style="font-size:12px; font-weight:600; color:${overdue ? "#9C2B1E" : "#5E5854"}; white-space:nowrap;">
               ${overdue ? Math.abs(diff) + "d late" : diff === 0 ? "TODAY" : diff + "d"}
             </div>
           </div>
@@ -1123,7 +1123,7 @@ function renderMobileClientPage(client) {
 // Shared mobile chrome with bottom tab bar. Every mobile page uses this.
 function renderMobileChrome({ title = "TEZ", body, activeTab = "home", user = {} }) {
   const tab = (key, href, icon, label) => `
-    <a href="${href}" style="flex:1; text-align:center; padding:8px 4px; text-decoration:none; color:${activeTab === key ? '#A34C00' : '#666'}; font-size:10px; font-weight:${activeTab === key ? '700' : '500'};">
+    <a href="${href}" style="flex:1; text-align:center; padding:8px 4px; text-decoration:none; color:${activeTab === key ? '#A34C00' : '#5E5854'}; font-size:10px; font-weight:${activeTab === key ? '700' : '500'};">
       <div style="font-size:22px; line-height:1;">${icon}</div>
       <div style="margin-top:3px;">${label}</div>
     </a>`;
@@ -1141,7 +1141,7 @@ function renderMobileChrome({ title = "TEZ", body, activeTab = "home", user = {}
   <link rel="apple-touch-icon" href="/wp-content/uploads/2025/12/cropped-Orange_Logo-removebg-preview.png">
   <title>${escapeHtml(title)} — TEZ</title>
   <style>
-    :root { --gold: #A34C00; --navy: #2B2523; --light: #FAF8F5; --border: #e5e5e5; }
+    :root { --gold: #A34C00; --navy: #2B2523; --light: #FAF8F5; --border: #E8E3DC; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { margin: 0; padding: 0; background: var(--light); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--navy); overscroll-behavior: none; }
     header.appbar { position: sticky; top: 0; z-index: 100; background: var(--navy); color: white; padding: 12px 16px; padding-top: calc(12px + env(safe-area-inset-top)); display: flex; align-items: center; gap: 10px; }
@@ -1153,22 +1153,22 @@ function renderMobileChrome({ title = "TEZ", body, activeTab = "home", user = {}
     .card-tap { display: block; text-decoration: none; color: inherit; }
     .card-tap:active { background: #F3EFE9; }
     .stat-tile { background: white; border-radius: 12px; padding: 14px; text-align: center; }
-    .stat-tile .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-tile .label { font-size: 10px; color: #5E5854; text-transform: uppercase; letter-spacing: 0.5px; }
     .stat-tile .value { font-size: 28px; font-weight: 700; color: var(--navy); margin-top: 4px; }
     .btn { display: block; width: 100%; padding: 14px; background: var(--gold); color: white; text-align: center; text-decoration: none; border-radius: 10px; font-weight: 600; font-size: 15px; border: none; cursor: pointer; margin-bottom: 10px; }
-    .btn:active { background: #a08a55; }
+    .btn:active { background: #5E5854; }
     .btn-secondary { background: white; color: var(--navy); border: 1px solid var(--border); }
     .btn-secondary:active { background: #F3EFE9; }
-    .section-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin: 20px 0 8px; font-weight: 600; }
+    .section-title { font-size: 12px; color: #5E5854; text-transform: uppercase; letter-spacing: 0.5px; margin: 20px 0 8px; font-weight: 600; }
     .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; color: white; }
-    .badge-urgent { background: #c62828; }
-    .badge-high { background: #e65100; }
-    .badge-normal { background: #0061FF; }
-    .badge-low { background: #888; }
-    .empty { text-align: center; color: #999; padding: 40px 20px; font-size: 14px; }
+    .badge-urgent { background: #9C2B1E; }
+    .badge-high { background: #A34C00; }
+    .badge-normal { background: #2B2523; }
+    .badge-low { background: #CFC8BE; }
+    .empty { text-align: center; color: #5E5854; padding: 40px 20px; font-size: 14px; }
     input, textarea, select { width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 16px; font-family: inherit; background: white; }
     input:focus, textarea:focus, select:focus { outline: none; border-color: var(--gold); }
-    label { display: block; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.4px; margin: 12px 0 4px; }
+    label { display: block; font-size: 11px; color: #5E5854; text-transform: uppercase; letter-spacing: 0.4px; margin: 12px 0 4px; }
   </style>
 </head>
 <body>
@@ -1240,7 +1240,7 @@ async function renderMobileHome(user = {}) {
           <span class="badge badge-${priBadge}">${(t.priority || "normal").toUpperCase()}</span>
           <div style="flex:1;">
             <div style="font-weight:600; font-size:14px; color:var(--navy);">${escapeHtml(t.title)}</div>
-            <div style="font-size:12px; color:#666; margin-top:2px;">${dueLabel}${t.client_name ? " · 👤 " + escapeHtml(t.client_name) : ""}</div>
+            <div style="font-size:12px; color:#5E5854; margin-top:2px;">${dueLabel}${t.client_name ? " · 👤 " + escapeHtml(t.client_name) : ""}</div>
           </div>
         </div>
       </a>`;
@@ -1249,24 +1249,24 @@ async function renderMobileHome(user = {}) {
   const hearingsHtml = upcomingHearings.length ? upcomingHearings.map(h => `
     <div class="card">
       <div style="font-weight:600; font-size:14px; color:var(--navy);">${escapeHtml(h.client_name || "(unnamed)")}</div>
-      <div style="font-size:12px; color:#666; margin-top:2px;">${new Date(h.hearing_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}${h.hearing_type ? " · " + escapeHtml(h.hearing_type) : ""}</div>
-      ${h.court_name ? `<div style="font-size:11px; color:#888; margin-top:2px;">${escapeHtml(h.court_name)}</div>` : ""}
+      <div style="font-size:12px; color:#5E5854; margin-top:2px;">${new Date(h.hearing_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}${h.hearing_type ? " · " + escapeHtml(h.hearing_type) : ""}</div>
+      ${h.court_name ? `<div style="font-size:11px; color:#5E5854; margin-top:2px;">${escapeHtml(h.court_name)}</div>` : ""}
     </div>`).join("") : `<div class="card empty">No hearings this week.</div>`;
 
   return `
     <div style="margin-bottom:14px;">
-      <div style="font-size:13px; color:#666;">${greeting}${greetName ? ", " + escapeHtml(greetName) : ""}</div>
+      <div style="font-size:13px; color:#5E5854;">${greeting}${greetName ? ", " + escapeHtml(greetName) : ""}</div>
       <div style="font-size:16px; color:var(--navy); font-weight:600;">${now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
     </div>
 
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
       <a href="/admin/mobile/tasks?filter=today" class="stat-tile" style="text-decoration:none;">
         <div class="label">Due Today</div>
-        <div class="value" style="color:${stats.tasks_today > 0 ? '#e65100' : 'var(--navy)'};">${stats.tasks_today}</div>
+        <div class="value" style="color:${stats.tasks_today > 0 ? '#A34C00' : 'var(--navy)'};">${stats.tasks_today}</div>
       </a>
       <a href="/admin/mobile/tasks?filter=overdue" class="stat-tile" style="text-decoration:none;">
         <div class="label">Overdue</div>
-        <div class="value" style="color:${stats.tasks_overdue > 0 ? '#c62828' : 'var(--navy)'};">${stats.tasks_overdue}</div>
+        <div class="value" style="color:${stats.tasks_overdue > 0 ? '#9C2B1E' : 'var(--navy)'};">${stats.tasks_overdue}</div>
       </a>
       <a href="/admin/mobile/calendar" class="stat-tile" style="text-decoration:none;">
         <div class="label">Hearings This Week</div>
@@ -1299,12 +1299,12 @@ async function renderMobileTasks(query = {}) {
 
   const rowsHtml = items.length ? items.map(t => {
     const priBadge = t.priority === "urgent" ? "urgent" : t.priority === "high" ? "high" : t.priority === "low" ? "low" : "normal";
-    let dueColor = "#666", dueLabel = "";
+    let dueColor = "#5E5854", dueLabel = "";
     if (t.due_date && t.days_until_due != null) {
       const d = new Date(t.due_date).toLocaleDateString();
-      if (t.days_until_due < 0) { dueColor = "#c62828"; dueLabel = `⚠ ${Math.abs(t.days_until_due)}d overdue`; }
-      else if (t.days_until_due === 0) { dueColor = "#c62828"; dueLabel = "📌 Today"; }
-      else if (t.days_until_due <= 7) { dueColor = "#e65100"; dueLabel = `${d} (${t.days_until_due}d)`; }
+      if (t.days_until_due < 0) { dueColor = "#9C2B1E"; dueLabel = `⚠ ${Math.abs(t.days_until_due)}d overdue`; }
+      else if (t.days_until_due === 0) { dueColor = "#9C2B1E"; dueLabel = "📌 Today"; }
+      else if (t.days_until_due <= 7) { dueColor = "#A34C00"; dueLabel = `${d} (${t.days_until_due}d)`; }
       else dueLabel = `${d}`;
     }
     return `
@@ -1313,10 +1313,10 @@ async function renderMobileTasks(query = {}) {
         <a href="/admin/mobile/task/${t.id}" style="flex:1; text-decoration:none; color:inherit;">
           <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:2px;">
             <span class="badge badge-${priBadge}">${(t.priority || "normal").toUpperCase()}</span>
-            ${t.matter_type ? `<span style="font-size:10px; color:#888;">${escapeHtml(t.matter_type)}</span>` : ""}
+            ${t.matter_type ? `<span style="font-size:10px; color:#5E5854;">${escapeHtml(t.matter_type)}</span>` : ""}
           </div>
           <div style="font-weight:600; font-size:14px; color:var(--navy);">${escapeHtml(t.title)}</div>
-          <div style="font-size:11px; color:${dueColor}; margin-top:3px; font-weight:${dueColor === "#c62828" ? "600" : "400"};">${dueLabel}${t.client_name ? " · 👤 " + escapeHtml(t.client_name) : ""}</div>
+          <div style="font-size:11px; color:${dueColor}; margin-top:3px; font-weight:${dueColor === "#9C2B1E" ? "600" : "400"};">${dueLabel}${t.client_name ? " · 👤 " + escapeHtml(t.client_name) : ""}</div>
         </a>
       </div>`;
   }).join("") : `<div class="card empty">No tasks match. <a href="/admin/mobile/tasks" style="color:var(--gold);">Show all →</a></div>`;
@@ -1423,17 +1423,17 @@ async function renderMobileTaskDetail(id) {
   ]);
 
   const priBadge = task.priority === "urgent" ? "urgent" : task.priority === "high" ? "high" : task.priority === "low" ? "low" : "normal";
-  const statusColor = { pending: "#A34C00", in_progress: "#0061FF", completed: "#2e7d32", cancelled: "#999" }[task.status] || "#666";
+  const statusColor = { pending: "#A34C00", in_progress: "#2B2523", completed: "#2F6B3F", cancelled: "#5E5854" }[task.status] || "#5E5854";
 
   const mHtml = mList.length ? mList.map(m => {
     const isDone = m.status === "completed";
     const isSkipped = m.status === "skipped";
     const isActive = m.status === "in_progress";
-    const bg = isDone ? "#e8f5e9" : isActive ? "#e3f2fd" : isSkipped ? "#f5f5f5" : "white";
-    const strike = isDone || isSkipped ? "text-decoration:line-through; color:#888;" : "";
+    const bg = isDone ? "#EEF5EF" : isActive ? "#F3EFE9" : isSkipped ? "#FAF8F5" : "white";
+    const strike = isDone || isSkipped ? "text-decoration:line-through; color:#5E5854;" : "";
     return `
       <div style="background:${bg}; padding:10px 12px; border-radius:8px; margin-bottom:5px; display:flex; align-items:center; gap:10px;">
-        <div style="width:24px; height:24px; border-radius:12px; background:${isDone ? "#2e7d32" : isActive ? "#0061FF" : "#ddd"}; color:white; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; flex-shrink:0;">${isDone ? "✓" : isSkipped ? "⊘" : m.order_num}</div>
+        <div style="width:24px; height:24px; border-radius:12px; background:${isDone ? "#2F6B3F" : isActive ? "#2B2523" : "#F3EFE9"}; color:white; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; flex-shrink:0;">${isDone ? "✓" : isSkipped ? "⊘" : m.order_num}</div>
         <div style="flex:1; font-size:13px; color:var(--navy); ${strike}">${escapeHtml(m.title)}</div>
         <select onchange="updateMs(${m.id}, this.value)" style="padding:4px 6px; border:1px solid var(--border); border-radius:4px; font-size:11px; width:auto;">
           <option value="pending" ${m.status === "pending" ? "selected" : ""}>Pending</option>
@@ -1447,12 +1447,12 @@ async function renderMobileTaskDetail(id) {
   const actHtml = activity.slice(-8).reverse().map(a => {
     const icons = { created: "＋", status_changed: "↻", assigned: "👤", note_added: "💬", completed: "✓", edited: "✎" };
     return `
-      <div style="display:flex; gap:8px; padding:8px 0; border-bottom:1px solid #f0f0f0; font-size:12px;">
+      <div style="display:flex; gap:8px; padding:8px 0; border-bottom:1px solid #E8E3DC; font-size:12px;">
         <div style="width:20px; text-align:center; color:var(--gold);">${icons[a.action] || "•"}</div>
         <div style="flex:1;">
           <div>${a.action === "status_changed" ? `${escapeHtml(a.old_value || "")} → <strong>${escapeHtml(a.new_value || "")}</strong>` : escapeHtml(a.action.replace(/_/g, " "))}</div>
-          ${a.note ? `<div style="color:#666; margin-top:2px;">${escapeHtml(a.note)}</div>` : ""}
-          <div style="color:#999; font-size:10px;">${new Date(a.created_at).toLocaleString()}</div>
+          ${a.note ? `<div style="color:#5E5854; margin-top:2px;">${escapeHtml(a.note)}</div>` : ""}
+          <div style="color:#5E5854; font-size:10px;">${new Date(a.created_at).toLocaleString()}</div>
         </div>
       </div>`;
   }).join("");
@@ -1463,14 +1463,14 @@ async function renderMobileTaskDetail(id) {
       <span class="badge badge-${priBadge}" style="margin-left:4px;">${(task.priority || "normal").toUpperCase()}</span>
     </div>
     <h2 style="margin:6px 0 8px; font-size:18px; color:var(--navy);">${escapeHtml(task.title)}</h2>
-    ${task.client_name ? `<div style="font-size:13px; color:#666; margin-bottom:8px;">👤 ${escapeHtml(task.client_name)}${task.a_number ? " · " + escapeHtml(task.a_number) : ""}</div>` : ""}
-    ${task.due_date ? `<div style="font-size:13px; color:#666; margin-bottom:12px;">📅 Due ${new Date(task.due_date).toLocaleDateString()}</div>` : ""}
+    ${task.client_name ? `<div style="font-size:13px; color:#5E5854; margin-bottom:8px;">👤 ${escapeHtml(task.client_name)}${task.a_number ? " · " + escapeHtml(task.a_number) : ""}</div>` : ""}
+    ${task.due_date ? `<div style="font-size:13px; color:#5E5854; margin-bottom:12px;">📅 Due ${new Date(task.due_date).toLocaleDateString()}</div>` : ""}
     ${task.description ? `<div class="card" style="white-space:pre-wrap; font-size:13px; line-height:1.5;">${escapeHtml(task.description)}</div>` : ""}
 
     ${mList.length ? `
     <div class="section-title">✅ Progress (${mProgress.percent}%)</div>
-    <div style="background:#eee; border-radius:4px; height:6px; margin-bottom:10px; overflow:hidden;">
-      <div style="background:linear-gradient(90deg, var(--gold), #2e7d32); height:100%; width:${mProgress.percent}%;"></div>
+    <div style="background:#F3EFE9; border-radius:4px; height:6px; margin-bottom:10px; overflow:hidden;">
+      <div style="background:linear-gradient(90deg, var(--gold), #2F6B3F); height:100%; width:${mProgress.percent}%;"></div>
     </div>
     ${mHtml}` : ""}
 
@@ -1551,13 +1551,13 @@ async function renderMobileCalendar(query = {}) {
       const dateLabel = dateObj.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
       return `
         <div style="margin-bottom:14px;">
-          <div style="font-size:12px; color:#666; font-weight:600; margin-bottom:6px; text-transform:uppercase;">${dateLabel}</div>
+          <div style="font-size:12px; color:#5E5854; font-weight:600; margin-bottom:6px; text-transform:uppercase;">${dateLabel}</div>
           ${groups[d].map(h => `
             <div class="card">
               <div style="font-weight:600; color:var(--navy);">${escapeHtml(h.client_name || "(unnamed)")}</div>
-              ${h.a_number ? `<div style="font-size:11px; color:#888;">${escapeHtml(h.a_number)}</div>` : ""}
-              ${h.hearing_type ? `<div style="font-size:12px; color:#666; margin-top:2px;">${escapeHtml(h.hearing_type)}</div>` : ""}
-              ${h.court_name ? `<div style="font-size:11px; color:#888; margin-top:2px;">${escapeHtml(h.court_name)}</div>` : ""}
+              ${h.a_number ? `<div style="font-size:11px; color:#5E5854;">${escapeHtml(h.a_number)}</div>` : ""}
+              ${h.hearing_type ? `<div style="font-size:12px; color:#5E5854; margin-top:2px;">${escapeHtml(h.hearing_type)}</div>` : ""}
+              ${h.court_name ? `<div style="font-size:11px; color:#5E5854; margin-top:2px;">${escapeHtml(h.court_name)}</div>` : ""}
             </div>`).join("")}
         </div>`;
     }).join("") : `<div class="card empty">No hearings scheduled in the next 30 days.</div>`;
@@ -1569,14 +1569,14 @@ async function renderMobileCalendar(query = {}) {
       const dateLabel = dateObj.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
       return `
         <div style="margin-bottom:14px;">
-          <div style="font-size:12px; color:${isOverdue ? '#c62828' : '#666'}; font-weight:600; margin-bottom:6px; text-transform:uppercase;">${dateLabel}${isOverdue ? ' ⚠ OVERDUE' : ''}</div>
+          <div style="font-size:12px; color:${isOverdue ? '#9C2B1E' : '#5E5854'}; font-weight:600; margin-bottom:6px; text-transform:uppercase;">${dateLabel}${isOverdue ? ' ⚠ OVERDUE' : ''}</div>
           ${groups[d].map(dl => {
             const pri = dl.priority === "urgent" ? "urgent" : dl.priority === "high" ? "high" : "normal";
             return `
             <div class="card">
-              <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;"><span class="badge badge-${pri}">${(dl.priority || "normal").toUpperCase()}</span>${dl.source_type ? `<span style="font-size:10px; color:#888;">${escapeHtml(dl.source_type)}</span>` : ""}</div>
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;"><span class="badge badge-${pri}">${(dl.priority || "normal").toUpperCase()}</span>${dl.source_type ? `<span style="font-size:10px; color:#5E5854;">${escapeHtml(dl.source_type)}</span>` : ""}</div>
               <div style="font-weight:600; color:var(--navy); font-size:14px;">${escapeHtml(dl.description)}</div>
-              ${dl.client_name ? `<div style="font-size:11px; color:#666; margin-top:2px;">👤 ${escapeHtml(dl.client_name)}</div>` : ""}
+              ${dl.client_name ? `<div style="font-size:11px; color:#5E5854; margin-top:2px;">👤 ${escapeHtml(dl.client_name)}</div>` : ""}
             </div>`;
           }).join("")}
         </div>`;
@@ -1598,9 +1598,9 @@ function renderMobileMore(user = {}) {
       <div style="font-size:24px; width:40px; text-align:center;">${icon}</div>
       <div style="flex:1;">
         <div style="font-weight:600; color:var(--navy); font-size:14px;">${label}</div>
-        ${subtitle ? `<div style="font-size:11px; color:#888; margin-top:2px;">${subtitle}</div>` : ""}
+        ${subtitle ? `<div style="font-size:11px; color:#5E5854; margin-top:2px;">${subtitle}</div>` : ""}
       </div>
-      <div style="color:#ccc; font-size:20px;">›</div>
+      <div style="color:#5E5854; font-size:20px;">›</div>
     </a>`;
 
   return `
@@ -1617,12 +1617,12 @@ function renderMobileMore(user = {}) {
 
     <div class="section-title">ACCOUNT</div>
     <div class="card" style="padding:14px;">
-      <div style="font-size:12px; color:#888; text-transform:uppercase;">Signed in as</div>
+      <div style="font-size:12px; color:#5E5854; text-transform:uppercase;">Signed in as</div>
       <div style="font-weight:600; color:var(--navy); margin-top:2px;">${escapeHtml(user.name || user.username || "?")}</div>
-      <div style="font-size:11px; color:#888; margin-top:2px;">${escapeHtml(user.role_label || user.r || "")}</div>
+      <div style="font-size:11px; color:#5E5854; margin-top:2px;">${escapeHtml(user.role_label || user.r || "")}</div>
     </div>
     <form method="POST" action="/admin/logout" style="margin:0;">
-      <button type="submit" class="btn btn-secondary" style="color:#c62828;">Sign out</button>
+      <button type="submit" class="btn btn-secondary" style="color:#9C2B1E;">Sign out</button>
     </form>`;
 }
 
@@ -1654,9 +1654,9 @@ function renderMobileClients() {
           results.innerHTML = d.results.map(c => \`
             <a href="/admin/mobile/client/\${encodeURIComponent(c.key)}" class="card card-tap">
               <div style="font-weight:600; color:#2B2523; font-size:14px;">\${escapeHtml(c.client_name || "(unnamed)")}</div>
-              \${c.a_number ? '<div style="font-size:11px; color:#888;">' + escapeHtml(c.a_number) + '</div>' : ''}
-              \${c.upcoming_hearing_date ? '<div style="font-size:12px; color:#0061FF; margin-top:3px;">📅 Next: ' + new Date(c.upcoming_hearing_date).toLocaleDateString() + ' — ' + escapeHtml(c.upcoming_hearing_type || '') + '</div>' : ''}
-              <div style="font-size:11px; color:#666; margin-top:2px;">\${c.total_hearings} hearing\${c.total_hearings === 1 ? '' : 's'}</div>
+              \${c.a_number ? '<div style="font-size:11px; color:#5E5854;">' + escapeHtml(c.a_number) + '</div>' : ''}
+              \${c.upcoming_hearing_date ? '<div style="font-size:12px; color:#A34C00; margin-top:3px;">📅 Next: ' + new Date(c.upcoming_hearing_date).toLocaleDateString() + ' — ' + escapeHtml(c.upcoming_hearing_type || '') + '</div>' : ''}
+              <div style="font-size:11px; color:#5E5854; margin-top:2px;">\${c.total_hearings} hearing\${c.total_hearings === 1 ? '' : 's'}</div>
             </a>\`).join("");
         } catch (e) { results.innerHTML = '<div class="empty">Error: ' + e.message + '</div>'; }
       }

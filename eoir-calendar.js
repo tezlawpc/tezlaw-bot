@@ -24,7 +24,7 @@ const EVENT_COLORS = {
   hearing_past:       "#8ea6c9",   // muted blue - past hearings
   hearing_notice:     "#00a86b",   // green - notices from Dropbox
   individual_hearing: "#9c27b0",   // purple - merits/individual
-  deadline:           "#f9a825",   // yellow - deadlines
+  deadline:           "#B45309",   // amber - deadlines (dark enough to carry white text)
   deadline_overdue:   "#c62828",   // red - overdue deadlines
   outlook_event:      "#0078d4",   // Microsoft blue - Outlook events
 };
@@ -438,14 +438,14 @@ function renderCalendarPage({ events, stats, filters, view, monthYear, feeds }) 
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
       <h1 style="margin:0;">EOIR Calendar</h1>
-      <div style="font-size:12px; color:#666; margin-top:4px;">Unified view of hearings, notices, individual/merits, and deadlines.</div>
+      <div style="font-size:12px; color:#5E5854; margin-top:4px;">Unified view of hearings, notices, individual/merits, and deadlines.</div>
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
       <a href="/admin/calendars" style="background:#0078d4; color:white; border:none; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:600;">🗓 Calendars</a>
       <button onclick="scanAllNotices()" id="scan-notices-btn" style="background:${brand.gold}; color:white; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600;">🔄 Update from Dropbox</button>
-      <div style="background:#f0f0f0; border-radius:6px; padding:2px; display:inline-flex;">
-        <button onclick="switchView('list')" id="view-list-btn" style="background:${activeView === 'list' ? brand.navy : 'transparent'}; color:${activeView === 'list' ? 'white' : '#666'}; padding:6px 14px; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">📋 List</button>
-        <button onclick="switchView('month')" id="view-month-btn" style="background:${activeView === 'month' ? brand.navy : 'transparent'}; color:${activeView === 'month' ? 'white' : '#666'}; padding:6px 14px; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">📅 Month</button>
+      <div style="background:#F3EFE9; border-radius:6px; padding:2px; display:inline-flex;">
+        <button onclick="switchView('list')" id="view-list-btn" style="background:${activeView === 'list' ? brand.navy : 'transparent'}; color:${activeView === 'list' ? 'white' : '#5E5854'}; padding:6px 14px; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">📋 List</button>
+        <button onclick="switchView('month')" id="view-month-btn" style="background:${activeView === 'month' ? brand.navy : 'transparent'}; color:${activeView === 'month' ? 'white' : '#5E5854'}; padding:6px 14px; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">📅 Month</button>
       </div>
     </div>
   </div>
@@ -456,15 +456,15 @@ function renderCalendarPage({ events, stats, filters, view, monthYear, feeds }) 
       <div style="text-align:center; margin-bottom:16px;">
         <div style="font-size:40px;">🔄</div>
         <div id="scan-status-title" style="font-size:16px; font-weight:600; color:${brand.navy}; margin-top:8px;">Scanning Dropbox for new EOIR notices…</div>
-        <div id="scan-status-detail" style="font-size:12px; color:#666; margin-top:6px;">This scans every client's Dropbox folder. Please wait — may take 1-5 minutes.</div>
+        <div id="scan-status-detail" style="font-size:12px; color:#5E5854; margin-top:6px;">This scans every client's Dropbox folder. Please wait — may take 1-5 minutes.</div>
       </div>
-      <div style="background:#eee; height:6px; border-radius:3px; overflow:hidden;">
+      <div style="background:#F3EFE9; height:6px; border-radius:3px; overflow:hidden;">
         <div id="scan-bar" style="background:linear-gradient(to right, ${brand.gold}, #E8E3DC); height:100%; width:5%; transition:width 0.5s;"></div>
       </div>
       <div id="scan-results" style="margin-top:20px; display:none; font-size:13px;"></div>
       <div id="scan-cancel-wrap" style="margin-top:20px; text-align:center; display:none;">
-        <button onclick="cancelScan()" id="scan-cancel-btn" style="background:#c62828; color:white; padding:10px 24px; border:none; border-radius:4px; cursor:pointer; font-weight:600; font-size:14px;">🛑 Cancel Scan</button>
-        <div style="font-size:11px; color:#888; margin-top:6px;">Will finish current client, then stop.</div>
+        <button onclick="cancelScan()" id="scan-cancel-btn" style="background:#9C2B1E; color:white; padding:10px 24px; border:none; border-radius:4px; cursor:pointer; font-weight:600; font-size:14px;">🛑 Cancel Scan</button>
+        <div style="font-size:11px; color:#5E5854; margin-top:6px;">Will finish current client, then stop.</div>
       </div>
       <div id="scan-close-wrap" style="margin-top:20px; text-align:right; display:none;">
         <button onclick="closeScanModal()" style="background:${brand.navy}; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-weight:600;">Close & refresh</button>
@@ -474,62 +474,62 @@ function renderCalendarPage({ events, stats, filters, view, monthYear, feeds }) 
 
   <!-- Stats bar -->
   <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin:16px 0;">
-    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #e0e0e0; border-left:4px solid ${EVENT_COLORS.hearing};">
-      <div style="font-size:11px; color:#666;">HEARINGS TODAY</div>
+    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; border-left:4px solid ${EVENT_COLORS.hearing};">
+      <div style="font-size:11px; color:#5E5854;">HEARINGS TODAY</div>
       <div style="font-size:24px; font-weight:700; color:${brand.navy}; margin-top:4px;">${stats.hearings_today}</div>
     </div>
-    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #e0e0e0; border-left:4px solid ${EVENT_COLORS.hearing};">
-      <div style="font-size:11px; color:#666;">NEXT 7 DAYS</div>
+    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; border-left:4px solid ${EVENT_COLORS.hearing};">
+      <div style="font-size:11px; color:#5E5854;">NEXT 7 DAYS</div>
       <div style="font-size:24px; font-weight:700; color:${brand.navy}; margin-top:4px;">${stats.upcoming_week}</div>
     </div>
-    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #e0e0e0; border-left:4px solid ${EVENT_COLORS.hearing};">
-      <div style="font-size:11px; color:#666;">NEXT 30 DAYS</div>
+    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; border-left:4px solid ${EVENT_COLORS.hearing};">
+      <div style="font-size:11px; color:#5E5854;">NEXT 30 DAYS</div>
       <div style="font-size:24px; font-weight:700; color:${brand.navy}; margin-top:4px;">${stats.upcoming_month}</div>
     </div>
-    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #e0e0e0; border-left:4px solid ${EVENT_COLORS.hearing};">
-      <div style="font-size:11px; color:#666;">NEXT 60 DAYS</div>
+    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; border-left:4px solid ${EVENT_COLORS.hearing};">
+      <div style="font-size:11px; color:#5E5854;">NEXT 60 DAYS</div>
       <div style="font-size:24px; font-weight:700; color:${brand.navy}; margin-top:4px;">${stats.upcoming_60}</div>
     </div>
-    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #e0e0e0; border-left:4px solid ${EVENT_COLORS.deadline};">
-      <div style="font-size:11px; color:#666;">PENDING DEADLINES</div>
+    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; border-left:4px solid ${EVENT_COLORS.deadline};">
+      <div style="font-size:11px; color:#5E5854;">PENDING DEADLINES</div>
       <div style="font-size:24px; font-weight:700; color:${brand.navy}; margin-top:4px;">${stats.pending_deadlines}</div>
     </div>
     ${stats.past_due_deadlines > 0 ? `
-    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #e0e0e0; border-left:4px solid ${EVENT_COLORS.deadline_overdue};">
+    <div style="background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; border-left:4px solid ${EVENT_COLORS.deadline_overdue};">
       <div style="font-size:11px; color:${EVENT_COLORS.deadline_overdue}; font-weight:600;">⚠️ PAST DUE</div>
       <div style="font-size:24px; font-weight:700; color:${EVENT_COLORS.deadline_overdue}; margin-top:4px;">${stats.past_due_deadlines}</div>
     </div>` : ""}
   </div>
 
   <!-- Filters -->
-  <form method="GET" style="background:#f8f8f8; padding:12px; border-radius:6px; margin-bottom:16px; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+  <form method="GET" style="background:#FAF8F5; padding:12px; border-radius:6px; margin-bottom:16px; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
     <input type="hidden" name="view" value="${activeView}">
     <div>
-      <label style="display:block; font-size:11px; color:#666;">From</label>
-      <input type="date" name="from" value="${escapeHtml(filters.from_date_str || "")}" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+      <label style="display:block; font-size:11px; color:#5E5854;">From</label>
+      <input type="date" name="from" value="${escapeHtml(filters.from_date_str || "")}" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px;">
     </div>
     <div>
-      <label style="display:block; font-size:11px; color:#666;">To</label>
-      <input type="date" name="to" value="${escapeHtml(filters.to_date_str || "")}" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+      <label style="display:block; font-size:11px; color:#5E5854;">To</label>
+      <input type="date" name="to" value="${escapeHtml(filters.to_date_str || "")}" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px;">
     </div>
     <div>
-      <label style="display:block; font-size:11px; color:#666;">Client / A#</label>
-      <input type="text" name="client" value="${escapeHtml(filters.client_search || "")}" placeholder="Search..." style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; width:180px;">
+      <label style="display:block; font-size:11px; color:#5E5854;">Client / A#</label>
+      <input type="text" name="client" value="${escapeHtml(filters.client_search || "")}" placeholder="Search..." style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px; width:180px;">
     </div>
     <div>
-      <label style="display:block; font-size:11px; color:#666;">Court</label>
-      <input type="text" name="court" value="${escapeHtml(filters.court || "")}" placeholder="e.g. LA" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; width:120px;">
+      <label style="display:block; font-size:11px; color:#5E5854;">Court</label>
+      <input type="text" name="court" value="${escapeHtml(filters.court || "")}" placeholder="e.g. LA" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px; width:120px;">
     </div>
     <div>
-      <label style="display:block; font-size:11px; color:#666;">Judge</label>
-      <input type="text" name="judge" value="${escapeHtml(filters.judge || "")}" placeholder="e.g. Riley" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; width:120px;">
+      <label style="display:block; font-size:11px; color:#5E5854;">Judge</label>
+      <input type="text" name="judge" value="${escapeHtml(filters.judge || "")}" placeholder="e.g. Riley" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px; width:120px;">
     </div>
     <button type="submit" style="background:${brand.navy}; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
-    <a href="/admin/calendar?view=${activeView}" style="padding:8px 16px; color:#666; text-decoration:none; font-size:13px;">Reset</a>
+    <a href="/admin/calendar?view=${activeView}" style="padding:8px 16px; color:#5E5854; text-decoration:none; font-size:13px;">Reset</a>
   </form>
 
   <!-- Legend -->
-  <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px; font-size:11px; color:#666;">
+  <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px; font-size:11px; color:#5E5854;">
     ${(() => {
       const subscribed = feedLegend(events, feeds);
       return subscribed.length
@@ -563,12 +563,12 @@ function renderCalendarPage({ events, stats, filters, view, monthYear, feeds }) 
         listBtn.style.background = "${brand.navy}";
         listBtn.style.color = "white";
         monthBtn.style.background = "transparent";
-        monthBtn.style.color = "#666";
+        monthBtn.style.color = "#5E5854";
       } else {
         listEl.style.display = "none";
         monthEl.style.display = "block";
         listBtn.style.background = "transparent";
-        listBtn.style.color = "#666";
+        listBtn.style.color = "#5E5854";
         monthBtn.style.background = "${brand.navy}";
         monthBtn.style.color = "white";
       }
@@ -742,35 +742,35 @@ function renderCalendarPage({ events, stats, filters, view, monthYear, feeds }) 
         title.textContent = "✅ Scan complete";
       }
       detail.textContent = "";
-      let html = '<div style="background:#f8f8f8; padding:14px; border-radius:6px; margin-bottom:10px;">';
+      let html = '<div style="background:#FAF8F5; padding:14px; border-radius:6px; margin-bottom:10px;">';
       html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:13px;">';
       html += '<div><b>Clients scanned:</b> ' + (res.scanned || 0) + ' / ' + (res.total_clients || 0) + '</div>';
       html += '<div><b>Skipped (no folder):</b> ' + (res.skipped_no_folder || 0) + '</div>';
-      html += '<div style="color:' + ((res.new_notices || 0) > 0 ? '#2e7d32' : '#666') + ';"><b>New notices found:</b> ' + (res.new_notices || 0) + '</div>';
-      html += '<div style="color:#0061FF;"><b>Updated notices:</b> ' + (res.updated_notices || 0) + '</div>';
-      html += '<div style="color:#666;"><b>Files processed:</b> ' + (res.total_files_processed || 0) + '</div>';
-      html += '<div style="color:#2e7d32;"><b>Est. cost:</b> $' + (res.estimated_cost_usd || 0).toFixed(2) + '</div>';
-      if ((res.errors || 0) > 0) html += '<div style="color:#c62828;"><b>Errors:</b> ' + res.errors + '</div>';
-      if ((res.timeout_clients || []).length > 0) html += '<div style="color:#f9a825; grid-column:1/-1; font-size:11px;"><b>⏱ Timed out:</b> ' + res.timeout_clients.join(", ") + '</div>';
+      html += '<div style="color:' + ((res.new_notices || 0) > 0 ? '#2F6B3F' : '#5E5854') + ';"><b>New notices found:</b> ' + (res.new_notices || 0) + '</div>';
+      html += '<div style="color:#A34C00;"><b>Updated notices:</b> ' + (res.updated_notices || 0) + '</div>';
+      html += '<div style="color:#5E5854;"><b>Files processed:</b> ' + (res.total_files_processed || 0) + '</div>';
+      html += '<div style="color:#2F6B3F;"><b>Est. cost:</b> $' + (res.estimated_cost_usd || 0).toFixed(2) + '</div>';
+      if ((res.errors || 0) > 0) html += '<div style="color:#9C2B1E;"><b>Errors:</b> ' + res.errors + '</div>';
+      if ((res.timeout_clients || []).length > 0) html += '<div style="color:#A34C00; grid-column:1/-1; font-size:11px;"><b>⏱ Timed out:</b> ' + res.timeout_clients.join(", ") + '</div>';
       html += '</div></div>';
 
       if (d.error) {
-        html += '<div style="background:#ffebee; color:#c62828; padding:10px 14px; border-radius:6px; margin-bottom:10px; font-size:12px;">' + escape(d.error) + '</div>';
+        html += '<div style="background:#FBEDEA; color:#9C2B1E; padding:10px 14px; border-radius:6px; margin-bottom:10px; font-size:12px;">' + escape(d.error) + '</div>';
       }
 
       if (res.per_client && res.per_client.length > 0) {
-        html += '<div style="max-height:250px; overflow-y:auto; border:1px solid #eee; border-radius:6px;">';
-        html += '<div style="padding:10px 12px; background:#f8f8f8; font-size:12px; font-weight:600; color:#666; border-bottom:1px solid #eee;">Details:</div>';
+        html += '<div style="max-height:250px; overflow-y:auto; border:1px solid #E8E3DC; border-radius:6px;">';
+        html += '<div style="padding:10px 12px; background:#FAF8F5; font-size:12px; font-weight:600; color:#5E5854; border-bottom:1px solid #E8E3DC;">Details:</div>';
         for (const c of res.per_client) {
           if (c.error) {
-            html += '<div style="padding:8px 12px; border-bottom:1px solid #f5f5f5; font-size:12px; color:#c00;">';
+            html += '<div style="padding:8px 12px; border-bottom:1px solid #E8E3DC; font-size:12px; color:#9C2B1E;">';
             html += '⚠️ ' + escape(c.client) + ': ' + escape(c.error);
             html += '</div>';
           } else {
-            html += '<div style="padding:8px 12px; border-bottom:1px solid #f5f5f5; font-size:12px;">';
+            html += '<div style="padding:8px 12px; border-bottom:1px solid #E8E3DC; font-size:12px;">';
             html += '<b>' + escape(c.client) + '</b>';
-            if (c.a_number) html += ' <span style="color:#888; font-family:monospace; font-size:11px;">' + escape(c.a_number) + '</span>';
-            html += '<span style="float:right; color:#2e7d32;">';
+            if (c.a_number) html += ' <span style="color:#5E5854; font-family:monospace; font-size:11px;">' + escape(c.a_number) + '</span>';
+            html += '<span style="float:right; color:#2F6B3F;">';
             if (c.new > 0) html += '+' + c.new + ' new ';
             if (c.updated > 0) html += '↻ ' + c.updated + ' updated';
             html += '</span></div>';
@@ -778,7 +778,7 @@ function renderCalendarPage({ events, stats, filters, view, monthYear, feeds }) 
         }
         html += '</div>';
       } else if ((res.new_notices || 0) === 0 && (res.updated_notices || 0) === 0) {
-        html += '<div style="text-align:center; padding:16px; color:#666; font-size:13px;">No new notices found — calendar is up to date.</div>';
+        html += '<div style="text-align:center; padding:16px; color:#5E5854; font-size:13px;">No new notices found — calendar is up to date.</div>';
       }
 
       results.innerHTML = html;
@@ -821,7 +821,7 @@ function renderCalendarPage({ events, stats, filters, view, monthYear, feeds }) 
 
 function renderListView(groups) {
   if (!groups.length) {
-    return `<div style="text-align:center; padding:60px 20px; color:#888; background:white; border-radius:8px; border:1px dashed #ccc;">
+    return `<div style="text-align:center; padding:60px 20px; color:#5E5854; background:white; border-radius:8px; border:1px dashed #CFC8BE;">
       No events in this date range. Try widening the filters or check back after new hearings are added.
     </div>`;
   }
@@ -839,12 +839,12 @@ function renderListView(groups) {
     const dateLabel = isToday ? "Today"
                     : isTomorrow ? "Tomorrow"
                     : dt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-    const relLabel = isToday || isTomorrow ? `<span style="color:#888; font-weight:normal;"> · ${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>` : "";
+    const relLabel = isToday || isTomorrow ? `<span style="color:#5E5854; font-weight:normal;"> · ${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>` : "";
 
     return `
     <div style="margin-bottom:24px;">
-      <h3 style="margin:0 0 8px 0; padding-bottom:6px; border-bottom:2px solid ${isToday ? brand.gold : '#e0e0e0'}; color:${isPast ? '#888' : brand.navy}; font-size:14px; letter-spacing:0.5px;">
-        ${dateLabel}${relLabel} ${g.events.length > 1 ? `<span style="font-size:11px; color:#888; font-weight:normal; margin-left:8px;">(${g.events.length} events)</span>` : ""}
+      <h3 style="margin:0 0 8px 0; padding-bottom:6px; border-bottom:2px solid ${isToday ? brand.gold : '#E8E3DC'}; color:${isPast ? '#5E5854' : brand.navy}; font-size:14px; letter-spacing:0.5px;">
+        ${dateLabel}${relLabel} ${g.events.length > 1 ? `<span style="font-size:11px; color:#5E5854; font-weight:normal; margin-left:8px;">(${g.events.length} events)</span>` : ""}
       </h3>
       ${g.events.map(e => renderEventCard(e, isPast)).join("")}
     </div>`;
@@ -908,7 +908,7 @@ function renderEventCard(event, isPast) {
     : [SOURCE_LABELS[event.source] || event.source];
 
   const href = eventHref(event);
-  const cardCss = `display:block; background:white; padding:12px 14px; border-radius:6px; border:1px solid #eee; border-left:4px solid ${color}; margin-bottom:6px; text-decoration:none; color:inherit; opacity:${opacity}; transition:box-shadow .1s;`;
+  const cardCss = `display:block; background:white; padding:12px 14px; border-radius:6px; border:1px solid #E8E3DC; border-left:4px solid ${color}; margin-bottom:6px; text-decoration:none; color:inherit; opacity:${opacity}; transition:box-shadow .1s;`;
   const hover = ` onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)';" onmouseout="this.style.boxShadow='none';"`;
   const cardOpen = href
     ? `<a href="${href}" style="${cardCss} cursor:pointer;"${hover}>`
@@ -921,18 +921,18 @@ function renderEventCard(event, isPast) {
         <div style="flex:1;">
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
             <span style="font-weight:600; color:${brand.navy};">${escapeHtml(event.client_name || "(no name)")}</span>
-            ${event.a_number ? `<span style="font-size:11px; color:#888; font-family:monospace;">${escapeHtml(event.a_number)}</span>` : ""}
+            ${event.a_number ? `<span style="font-size:11px; color:#5E5854; font-family:monospace;">${escapeHtml(event.a_number)}</span>` : ""}
             ${event.event_subtype ? `<span style="background:${color}; color:white; padding:2px 7px; border-radius:10px; font-size:10px; font-weight:600;">${escapeHtml(event.event_subtype)}</span>` : ""}
           </div>
-          <div style="font-size:12px; color:#666; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap;">
+          <div style="font-size:12px; color:#5E5854; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap;">
             ${event.court_name ? `<span>📍 ${escapeHtml(event.court_name)}</span>` : ""}
             ${event.judge_name ? `<span>⚖️ ${escapeHtml(event.judge_name)}</span>` : ""}
           </div>
-          ${event.description ? `<div style="font-size:12px; color:#555; margin-top:6px; font-style:italic;">${escapeHtml(event.description.substring(0, 200))}${event.description.length > 200 ? '…' : ''}</div>` : ""}
-          <div style="font-size:10px; color:#aaa; margin-top:6px;">${sourceLabels.join(" · ")}</div>
+          ${event.description ? `<div style="font-size:12px; color:#5E5854; margin-top:6px; font-style:italic;">${escapeHtml(event.description.substring(0, 200))}${event.description.length > 200 ? '…' : ''}</div>` : ""}
+          <div style="font-size:10px; color:#5E5854; margin-top:6px;">${sourceLabels.join(" · ")}</div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:15px; font-weight:600; color:${isPast ? '#888' : brand.navy};">${timeStr}</div>
+          <div style="font-size:15px; font-weight:600; color:${isPast ? '#5E5854' : brand.navy};">${timeStr}</div>
         </div>
       </div>
     ${cardClose}`;
@@ -966,7 +966,7 @@ function renderMonthView(events, monthYear) {
   // Weekday headers
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const weekdayCells = weekdays.map(w => `
-    <div style="padding:8px; text-align:center; font-size:11px; color:#666; font-weight:600; letter-spacing:0.5px; background:#f8f8f8;">
+    <div style="padding:8px; text-align:center; font-size:11px; color:#5E5854; font-weight:600; letter-spacing:0.5px; background:#FAF8F5;">
       ${w}
     </div>
   `).join("");
@@ -975,7 +975,7 @@ function renderMonthView(events, monthYear) {
   const cells = [];
   // Empty cells for the start of the month
   for (let i = 0; i < startWeekday; i++) {
-    cells.push(`<div style="background:#fafafa; min-height:110px;"></div>`);
+    cells.push(`<div style="background:#FAF8F5; min-height:110px;"></div>`);
   }
 
   const todayDate = now.getDate();
@@ -1005,7 +1005,7 @@ function renderMonthView(events, monthYear) {
     // reach them. Both it and the date now open that one day in the list view.
     const dayHref = dayListHref(currentYear, currentMonth, day);
     const overflowLabel = dayEvents.length > 4
-      ? `<a href="${dayHref}" style="display:block; font-size:10px; color:#666; font-weight:600; text-decoration:none; margin-top:2px;">+${dayEvents.length - 4} more ›</a>`
+      ? `<a href="${dayHref}" style="display:block; font-size:10px; color:#5E5854; font-weight:600; text-decoration:none; margin-top:2px;">+${dayEvents.length - 4} more ›</a>`
       : "";
     const dayLabel = `${day}${isToday ? " \u00b7 Today" : ""}`;
     const dayNumHtml = dayEvents.length
@@ -1013,8 +1013,8 @@ function renderMonthView(events, monthYear) {
       : dayLabel;
 
     cells.push(`
-      <div style="background:white; padding:6px; min-height:110px; border:1px solid #f0f0f0; ${isToday ? `background:#fff8e1; border:2px solid ${brand.gold};` : ""} display:flex; flex-direction:column;">
-        <div style="font-size:12px; color:${isToday ? brand.gold : '#333'}; font-weight:${isToday ? '700' : '500'}; margin-bottom:4px;">${dayNumHtml}</div>
+      <div style="background:white; padding:6px; min-height:110px; border:1px solid #E8E3DC; ${isToday ? `background:#FFF3E6; border:2px solid ${brand.gold};` : ""} display:flex; flex-direction:column;">
+        <div style="font-size:12px; color:${isToday ? brand.gold : '#2B2523'}; font-weight:${isToday ? '700' : '500'}; margin-bottom:4px;">${dayNumHtml}</div>
         <div style="flex:1; overflow:hidden;">
           ${eventsHtml}
           ${overflowLabel}
@@ -1027,7 +1027,7 @@ function renderMonthView(events, monthYear) {
   const totalCells = startWeekday + daysInMonth;
   const trailing = (7 - (totalCells % 7)) % 7;
   for (let i = 0; i < trailing; i++) {
-    cells.push(`<div style="background:#fafafa; min-height:110px;"></div>`);
+    cells.push(`<div style="background:#FAF8F5; min-height:110px;"></div>`);
   }
 
   return `
@@ -1040,7 +1040,7 @@ function renderMonthView(events, monthYear) {
         </div>
         <button onclick="navMonth(1)" style="background:rgba(255,255,255,.1); color:white; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:14px;">Next ›</button>
       </div>
-      <div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:1px; background:#e0e0e0;">
+      <div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:1px; background:#F3EFE9;">
         ${weekdayCells}
         ${cells.join("")}
       </div>

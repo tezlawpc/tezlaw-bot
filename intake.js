@@ -165,9 +165,9 @@ async function notifyEmail(data) {
   });
 
   const html = `
-  <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#0C1C36">
-    <div style="background:#0C1C36;padding:20px 24px">
-      <h2 style="color:#B79C62;margin:0">📋 New Client Intake — Tez Law P.C.</h2>
+  <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#2B2523">
+    <div style="background:#2B2523;padding:20px 24px;border-bottom:4px solid #FF7B00">
+      <h2 style="color:#FAF8F5;margin:0">New client intake</h2>
     </div>
     <div style="padding:24px;background:#f9f9f9">
       <table style="width:100%;border-collapse:collapse">
@@ -179,8 +179,8 @@ async function notifyEmail(data) {
         <tr style="background:#fff"><td style="padding:10px;font-weight:bold">Time</td><td style="padding:10px">${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT</td></tr>
       </table>
     </div>
-    <div style="background:#0C1C36;padding:14px 24px;text-align:center">
-      <p style="color:#B79C62;margin:0;font-size:12px">TEZ Law P.C. &nbsp;·&nbsp; Zara Intake System &nbsp;·&nbsp; 626-678-8677</p>
+    <div style="background:#2B2523;padding:14px 24px;text-align:center">
+      <p style="color:#E8E3DC;margin:0;font-size:12px">TEZ Law Firm &nbsp;·&nbsp; Zara intake &nbsp;·&nbsp; 626-678-8677</p>
     </div>
   </div>`;
 

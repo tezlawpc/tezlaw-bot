@@ -528,9 +528,9 @@ function renderDashboard(data) {
         <div style="flex:1; min-width:200px;">
           <div style="font-weight:600; color:${brand.navy}; font-size:13px;">
             <a href="/admin/clients/${clientKey}" style="color:${brand.navy}; text-decoration:none;">${escapeHtml(h.client_name || "(unnamed)")}</a>
-            ${h.a_number ? `<span style="color:#888; font-weight:normal; font-size:11px; margin-left:4px;">${escapeHtml(h.a_number)}</span>` : ""}
+            ${h.a_number ? `<span style="color:#5E5854; font-weight:normal; font-size:11px; margin-left:4px;">${escapeHtml(h.a_number)}</span>` : ""}
           </div>
-          <div style="font-size:11px; color:#666;">
+          <div style="font-size:11px; color:#5E5854;">
             ${sourceIcon} ${escapeHtml(h.hearing_type || "hearing")} · ${timeStr}
             ${h.judge_name ? ` · Judge ${escapeHtml(h.judge_name)}` : ""}
           </div>
@@ -541,92 +541,92 @@ function renderDashboard(data) {
 
   const upcomingHtml = buckets.length ? buckets.map(b => `
     <div style="margin-bottom:16px;">
-      <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; font-weight:600;">${escapeHtml(b.label)} (${b.entries.length})</div>
+      <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; font-weight:600;">${escapeHtml(b.label)} (${b.entries.length})</div>
       ${b.entries.map(renderHearingRow).join("")}
     </div>
-  `).join("") : `<div style="text-align:center; padding:30px; color:#888;">No upcoming hearings in the next 14 days.</div>`;
+  `).join("") : `<div style="text-align:center; padding:30px; color:#5E5854;">No upcoming hearings in the next 14 days.</div>`;
 
   const unnotifiedHtml = unnotified.length ? unnotified.map(n => {
     const dt = new Date(n.hearing_date);
     const clientKey = n.client_key || (n.a_number ? "a-" + String(n.a_number).toLowerCase().replace(/[^\w]/g, "") : "n-" + String(n.client_name || "").toLowerCase().replace(/[^\w]+/g, "-"));
     return `
-      <div style="padding:8px 12px; background:#fef3f0; border-left:3px solid #c62828; border-radius:4px; margin-bottom:6px;">
+      <div style="padding:8px 12px; background:#FBEDEA; border-left:3px solid #9C2B1E; border-radius:4px; margin-bottom:6px;">
         <div style="font-weight:600; font-size:13px;">
           <a href="/admin/clients/${clientKey}" style="color:${brand.navy}; text-decoration:none;">${escapeHtml(n.client_name || "(unnamed)")}</a>
         </div>
-        <div style="font-size:11px; color:#666;">${escapeHtml(n.hearing_type || "hearing")} · ${dt.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div>
+        <div style="font-size:11px; color:#5E5854;">${escapeHtml(n.hearing_type || "hearing")} · ${dt.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div>
       </div>`;
-  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">All notices sent ✓</div>`;
+  }).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">All notices sent ✓</div>`;
 
   const recentHtml = recent.length ? recent.map(r => {
     const dt = new Date(r.hearing_datetime);
     const link = r.source === "master" ? `/admin/hearing/notes/${r.id}` : `/admin/hearing/individual/${r.id}`;
     return `
-      <div style="padding:6px 0; border-bottom:1px solid #eee; font-size:12px; display:flex; justify-content:space-between; gap:8px;">
+      <div style="padding:6px 0; border-bottom:1px solid #E8E3DC; font-size:12px; display:flex; justify-content:space-between; gap:8px;">
         <div>
           <strong>${escapeHtml(r.client_name)}</strong>
-          <span style="color:#888; margin-left:4px;">${escapeHtml(r.hearing_type || "")}</span>
+          <span style="color:#5E5854; margin-left:4px;">${escapeHtml(r.hearing_type || "")}</span>
         </div>
         <div style="text-align:right;">
-          <span style="color:#666; font-size:11px;">${dt.toLocaleDateString()}</span>
+          <span style="color:#5E5854; font-size:11px;">${dt.toLocaleDateString()}</span>
           <a href="${link}" style="color:${brand.gold}; margin-left:8px; text-decoration:none; font-size:11px;">view →</a>
         </div>
       </div>`;
-  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No recent hearings</div>`;
+  }).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">No recent hearings</div>`;
 
   // ── Intake block ──
-  const urgencyColors = { emergency: "#c62828", high: "#f9a825", medium: "#0061FF", low: "#666" };
+  const urgencyColors = { emergency: "#9C2B1E", high: "#A34C00", medium: "#2B2523", low: "#5E5854" };
   const intakeHtml = intakes.length ? intakes.slice(0, 8).map(i => {
     const dt = new Date(i.created_at);
     const relTime = timeAgo(dt);
-    const urgencyColor = urgencyColors[i.urgency] || "#666";
+    const urgencyColor = urgencyColors[i.urgency] || "#5E5854";
     return `
-      <div style="padding:8px 12px; background:#f5f9ff; border-left:3px solid ${urgencyColor}; border-radius:4px; margin-bottom:6px;">
+      <div style="padding:8px 12px; background:#F3EFE9; border-left:3px solid ${urgencyColor}; border-radius:4px; margin-bottom:6px;">
         <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
           <div style="flex:1; min-width:0;">
             <div style="font-weight:600; font-size:13px; color:${brand.navy};">
               ${escapeHtml(i.client_name || "(no name)")}
-              ${!i.notified_jj ? '<span style="background:#f9a825; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">NEW</span>' : ''}
+              ${!i.notified_jj ? '<span style="background:#A34C00; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">NEW</span>' : ''}
             </div>
-            <div style="font-size:11px; color:#666; margin-top:2px;">
+            <div style="font-size:11px; color:#5E5854; margin-top:2px;">
               ${i.practice_area ? `<span style="background:${brand.gold}; color:white; padding:1px 6px; border-radius:8px; font-size:10px;">${escapeHtml(i.practice_area)}</span>` : ""}
               ${i.urgency ? `<span style="color:${urgencyColor}; font-weight:600; margin-left:4px;">${escapeHtml(i.urgency)}</span>` : ""}
-              <span style="color:#999; margin-left:4px;">${escapeHtml(relTime)}</span>
+              <span style="color:#5E5854; margin-left:4px;">${escapeHtml(relTime)}</span>
             </div>
-            ${i.case_description ? `<div style="font-size:11px; color:#555; margin-top:4px; font-style:italic; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(i.case_description.substring(0, 120))}${i.case_description.length > 120 ? "…" : ""}</div>` : ""}
+            ${i.case_description ? `<div style="font-size:11px; color:#5E5854; margin-top:4px; font-style:italic; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(i.case_description.substring(0, 120))}${i.case_description.length > 120 ? "…" : ""}</div>` : ""}
           </div>
         </div>
-        <div style="font-size:10px; color:#888; margin-top:4px;">
+        <div style="font-size:10px; color:#5E5854; margin-top:4px;">
           ${i.client_phone ? `📞 ${escapeHtml(i.client_phone)}` : ""}
           ${i.client_email ? ` · ✉️ ${escapeHtml(i.client_email)}` : ""}
           ${i.language && i.language !== "en" ? ` · 🌐 ${escapeHtml(i.language)}` : ""}
         </div>
       </div>`;
-  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No recent intakes.</div>`;
+  }).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">No recent intakes.</div>`;
 
   // ── Motions block ──
   const motionsHtml = motions.length ? motions.slice(0, 8).map(m => {
     const isDue = m.filing_deadline && new Date(m.filing_deadline) < new Date(Date.now() + 7 * 86400000);
     const isOverdue = m.filing_deadline && new Date(m.filing_deadline) < new Date();
-    const dueColor = isOverdue ? "#c62828" : isDue ? "#f9a825" : "#666";
-    const statusBadge = m.status === "reviewed" ? '<span style="background:#0061FF; color:white; padding:1px 6px; border-radius:8px; font-size:9px;">REVIEWED</span>' : '<span style="background:#A34C00; color:white; padding:1px 6px; border-radius:8px; font-size:9px;">DRAFT</span>';
+    const dueColor = isOverdue ? "#9C2B1E" : isDue ? "#A34C00" : "#5E5854";
+    const statusBadge = m.status === "reviewed" ? '<span style="background:#2B2523; color:white; padding:1px 6px; border-radius:8px; font-size:9px;">REVIEWED</span>' : '<span style="background:#A34C00; color:white; padding:1px 6px; border-radius:8px; font-size:9px;">DRAFT</span>';
     return `
-      <div style="padding:8px 12px; background:#fdfaf3; border-left:3px solid ${isOverdue ? '#c62828' : brand.gold}; border-radius:4px; margin-bottom:6px;">
+      <div style="padding:8px 12px; background:#FAF8F5; border-left:3px solid ${isOverdue ? '#9C2B1E' : brand.gold}; border-radius:4px; margin-bottom:6px;">
         <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
           <div style="flex:1;">
             <div style="font-weight:600; font-size:12px; color:${brand.navy};">
               <a href="/admin/motions/${m.id}" style="color:${brand.navy}; text-decoration:none;">${escapeHtml(m.title || m.motion_type)}</a>
               ${statusBadge}
             </div>
-            <div style="font-size:11px; color:#666; margin-top:2px;">
+            <div style="font-size:11px; color:#5E5854; margin-top:2px;">
               ${escapeHtml(m.client_name || "(no client)")}
-              ${m.a_number ? `<span style="color:#999; font-family:monospace; font-size:10px; margin-left:4px;">${escapeHtml(m.a_number)}</span>` : ""}
+              ${m.a_number ? `<span style="color:#5E5854; font-family:monospace; font-size:10px; margin-left:4px;">${escapeHtml(m.a_number)}</span>` : ""}
               ${m.filing_deadline ? ` · <span style="color:${dueColor};">Due ${new Date(m.filing_deadline).toLocaleDateString()}</span>` : ""}
             </div>
           </div>
         </div>
       </div>`;
-  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No pending motions.</div>`;
+  }).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">No pending motions.</div>`;
 
   // ── Deadlines block ──
   const deadlineHtml = deadlines.length ? deadlines.slice(0, 10).map(d => {
@@ -640,25 +640,25 @@ function renderDashboard(data) {
                 : isToday ? "Today"
                 : isTomorrow ? "Tomorrow"
                 : `${diffDays}d`;
-    const color = isOverdue ? "#c62828" : isToday ? "#f9a825" : isTomorrow ? "#f9a825" : "#666";
+    const color = isOverdue ? "#9C2B1E" : isToday ? "#A34C00" : isTomorrow ? "#A34C00" : "#5E5854";
     return `
-      <div style="padding:6px 10px; border-left:3px solid ${color}; background:${isOverdue ? '#fef3f0' : '#f8f8f8'}; border-radius:4px; margin-bottom:4px; display:flex; justify-content:space-between; gap:8px; align-items:center;">
+      <div style="padding:6px 10px; border-left:3px solid ${color}; background:${isOverdue ? '#FBEDEA' : '#FAF8F5'}; border-radius:4px; margin-bottom:4px; display:flex; justify-content:space-between; gap:8px; align-items:center;">
         <div style="flex:1; min-width:0;">
           <div style="font-size:12px; font-weight:600; color:${brand.navy}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(d.description || "(no description)")}</div>
-          <div style="font-size:11px; color:#666;">${escapeHtml(d.client_name || "")}</div>
+          <div style="font-size:11px; color:#5E5854;">${escapeHtml(d.client_name || "")}</div>
         </div>
         <div style="font-size:11px; font-weight:600; color:${color}; white-space:nowrap;">${escapeHtml(label)}</div>
       </div>`;
-  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No urgent deadlines ✓</div>`;
+  }).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">No urgent deadlines ✓</div>`;
 
   // ── System health tiles ──
   const healthPill = (label, status, lastAt, url) => {
-    const colors = { ok: "#2e7d32", running: "#0061FF", error: "#c62828" };
-    const color = colors[status] || "#999";
+    const colors = { ok: "#2F6B3F", running: "#A34C00", error: "#9C2B1E" };
+    const color = colors[status] || "#5E5854";
     const rel = lastAt ? timeAgo(new Date(lastAt)) : "never";
     return `<a href="${url}" style="display:block; padding:8px 10px; background:white; border-left:3px solid ${color}; text-decoration:none; color:inherit; border-radius:4px; margin-bottom:4px; font-size:11px;">
       <div style="font-weight:600; color:${brand.navy};">${label}</div>
-      <div style="color:#666;">${escapeHtml(status || "never")} · <span style="color:#999;">${rel}</span></div>
+      <div style="color:#5E5854;">${escapeHtml(status || "never")} · <span style="color:#5E5854;">${rel}</span></div>
     </a>`;
   };
 
@@ -670,38 +670,38 @@ function renderDashboard(data) {
     const langCount = Object.keys(wpIds).length;
     const isAuto = p.published_by === "autoposter";
     return `
-      <div style="padding:8px 12px; background:#fdfaf3; border-left:3px solid ${isAuto ? "#2e7d32" : brand.gold}; border-radius:4px; margin-bottom:6px;">
+      <div style="padding:8px 12px; background:#FAF8F5; border-left:3px solid ${isAuto ? "#2F6B3F" : brand.gold}; border-radius:4px; margin-bottom:6px;">
         <div style="font-weight:600; font-size:12px; color:${brand.navy}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           ${escapeHtml(p.title || p.topic || "(untitled)")}
-          ${isAuto ? '<span style="background:#2e7d32; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">AUTO</span>' : '<span style="background:#A34C00; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">MANUAL</span>'}
+          ${isAuto ? '<span style="background:#2F6B3F; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">AUTO</span>' : '<span style="background:#A34C00; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">MANUAL</span>'}
         </div>
-        <div style="font-size:11px; color:#666; margin-top:2px;">
+        <div style="font-size:11px; color:#5E5854; margin-top:2px;">
           ${p.practice_area ? `<span style="color:${brand.gold}; font-weight:600;">${escapeHtml(p.practice_area)}</span> · ` : ""}
           ${langCount > 0 ? `${langCount} language${langCount === 1 ? "" : "s"} · ` : ""}
-          <span style="color:#999;">${escapeHtml(relTime)}</span>
+          <span style="color:#5E5854;">${escapeHtml(relTime)}</span>
         </div>
       </div>`;
-  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No posts published yet.</div>`;
+  }).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">No posts published yet.</div>`;
 
   // ── Drip pipeline block ──
   const dripHtml = drips.length ? drips.slice(0, 6).map(d => {
     const dt = new Date(d.started_at);
     const progress = d.msg_total > 0 ? Math.round((d.msg_sent / d.msg_total) * 100) : 0;
     return `
-      <div style="padding:8px 12px; background:#f5f9ff; border-left:3px solid #0061FF; border-radius:4px; margin-bottom:6px;">
+      <div style="padding:8px 12px; background:#F3EFE9; border-left:3px solid #A34C00; border-radius:4px; margin-bottom:6px;">
         <div style="font-weight:600; font-size:12px; color:${brand.navy};">
           ${escapeHtml(d.client_name || "(anon)")}
-          <span style="font-size:10px; color:#888; margin-left:4px;">${escapeHtml(d.platform || "")}</span>
+          <span style="font-size:10px; color:#5E5854; margin-left:4px;">${escapeHtml(d.platform || "")}</span>
         </div>
-        <div style="font-size:11px; color:#666; margin-top:2px;">
+        <div style="font-size:11px; color:#5E5854; margin-top:2px;">
           ${escapeHtml(d.case_type || "")} · ${d.msg_sent}/${d.msg_total} sent
-          ${d.msg_pending > 0 ? ` · <span style="color:#f9a825;">${d.msg_pending} queued</span>` : ""}
+          ${d.msg_pending > 0 ? ` · <span style="color:#A34C00;">${d.msg_pending} queued</span>` : ""}
         </div>
-        <div style="background:#eee; height:3px; border-radius:2px; margin-top:4px; overflow:hidden;">
-          <div style="width:${progress}%; height:100%; background:#0061FF;"></div>
+        <div style="background:#F3EFE9; height:3px; border-radius:2px; margin-top:4px; overflow:hidden;">
+          <div style="width:${progress}%; height:100%; background:#2B2523;"></div>
         </div>
       </div>`;
-  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No active drip campaigns.</div>`;
+  }).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">No active drip campaigns.</div>`;
 
   // ── SoL deadlines block ──
   const solHtml = sols.length ? sols.slice(0, 6).map(s => {
@@ -712,41 +712,41 @@ function renderDashboard(data) {
                 : diffDays === 0 ? "TODAY"
                 : diffDays <= 30 ? `${diffDays}d`
                 : dueDate.toLocaleDateString();
-    const color = isOverdue ? "#c62828" : diffDays <= 7 ? "#c62828" : diffDays <= 30 ? "#f9a825" : "#666";
+    const color = isOverdue ? "#9C2B1E" : diffDays <= 7 ? "#9C2B1E" : diffDays <= 30 ? "#A34C00" : "#5E5854";
     return `
-      <div style="padding:6px 10px; border-left:3px solid ${color}; background:${isOverdue ? '#fef3f0' : '#f8f8f8'}; border-radius:4px; margin-bottom:4px; display:flex; justify-content:space-between; gap:8px; align-items:center;">
+      <div style="padding:6px 10px; border-left:3px solid ${color}; background:${isOverdue ? '#FBEDEA' : '#FAF8F5'}; border-radius:4px; margin-bottom:4px; display:flex; justify-content:space-between; gap:8px; align-items:center;">
         <div style="flex:1; min-width:0;">
           <div style="font-size:12px; font-weight:600; color:${brand.navy};">${escapeHtml(s.client_name || "(no client)")}</div>
-          <div style="font-size:11px; color:#666;">${escapeHtml(s.case_type || "")}</div>
+          <div style="font-size:11px; color:#5E5854;">${escapeHtml(s.case_type || "")}</div>
         </div>
         <div style="font-size:11px; font-weight:600; color:${color}; white-space:nowrap;">${escapeHtml(label)}</div>
       </div>`;
-  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No SoL deadlines tracked ✓</div>`;
+  }).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">No SoL deadlines tracked ✓</div>`;
 
   // ── Legal research block ──
   const researchHtml = pendingResearch.length ? pendingResearch.slice(0, 5).map(r => {
     return `
-      <div style="padding:8px 12px; background:#FAF8F5; border-left:3px solid #f9a825; border-radius:4px; margin-bottom:6px;">
+      <div style="padding:8px 12px; background:#FAF8F5; border-left:3px solid #FF7B00; border-radius:4px; margin-bottom:6px;">
         <div style="font-weight:600; font-size:12px; color:${brand.navy}; overflow:hidden; text-overflow:ellipsis;">
           ${escapeHtml(r.question ? r.question.substring(0, 80) + (r.question.length > 80 ? "…" : "") : "(no question)")}
         </div>
-        <div style="font-size:11px; color:#666; margin-top:2px;">
+        <div style="font-size:11px; color:#5E5854; margin-top:2px;">
           ${r.opinion_title ? `<span style="color:${brand.gold};">${escapeHtml(r.opinion_title.substring(0, 50))}${r.opinion_title.length > 50 ? "…" : ""}</span>` : ""}
           ${r.opinion_court ? ` · ${escapeHtml(r.opinion_court)}` : ""}
         </div>
       </div>`;
-  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">Nothing pending review ✓</div>`;
+  }).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">Nothing pending review ✓</div>`;
 
   const citationsHtml = citations.length ? citations.slice(0, 5).map(c => `
-    <div style="padding:5px 10px; font-size:12px; border-bottom:1px solid #f5f5f5;">
+    <div style="padding:5px 10px; font-size:12px; border-bottom:1px solid #E8E3DC;">
       ${c.url ? `<a href="${escapeHtml(c.url)}" target="_blank" style="color:${brand.navy}; text-decoration:none; font-weight:600;">${escapeHtml(c.case_name || c.citation || "(unnamed)")}</a>`
              : `<strong>${escapeHtml(c.case_name || c.citation || "(unnamed)")}</strong>`}
-      <div style="font-size:10px; color:#888;">
+      <div style="font-size:10px; color:#5E5854;">
         ${c.court ? escapeHtml(c.court) : ""}
         ${c.date_filed ? ` · ${escapeHtml(c.date_filed)}` : ""}
         ${c.citation && c.case_name ? ` · ${escapeHtml(c.citation)}` : ""}
       </div>
-    </div>`).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No recent citations.</div>`;
+    </div>`).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">No recent citations.</div>`;
 
   // ── USPTO matches block ──
   const usptoHtml = usptoMatches.length ? usptoMatches.slice(0, 6).map(m => {
@@ -755,46 +755,46 @@ function renderDashboard(data) {
       <div style="padding:8px 12px; background:#FAF8F5; border-left:3px solid ${brand.gold}; border-radius:4px; margin-bottom:6px;">
         <div style="font-weight:600; font-size:12px; color:${brand.navy};">
           ${escapeHtml(m.mark_text || m.serial_number || "(no mark)")}
-          <span style="background:#f9a825; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">NEW</span>
+          <span style="background:#A34C00; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">NEW</span>
         </div>
-        <div style="font-size:11px; color:#666; margin-top:2px;">
+        <div style="font-size:11px; color:#5E5854; margin-top:2px;">
           Watch: <em>${escapeHtml(m.search_term || "")}</em>
           ${m.owner_name ? ` · ${escapeHtml(m.owner_name)}` : ""}
         </div>
-        <div style="font-size:10px; color:#888; margin-top:2px;">
+        <div style="font-size:10px; color:#5E5854; margin-top:2px;">
           ${escapeHtml(m.serial_number || "")}
           ${m.status_desc ? ` · ${escapeHtml(m.status_desc)}` : ""}
           · ${timeAgo(dt)}
         </div>
       </div>`;
-  }).join("") : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">No new USPTO matches ✓</div>`;
+  }).join("") : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">No new USPTO matches ✓</div>`;
 
   // ── Moat update block ──
   const moatHtml = moat ? (() => {
     const dt = new Date(moat.started_at);
-    const statusColor = moat.status === "success" || moat.status === "completed" ? "#2e7d32"
-                      : moat.status === "running" ? "#0061FF"
-                      : moat.status === "failed" || moat.status === "error" ? "#c62828"
-                      : "#666";
+    const statusColor = moat.status === "success" || moat.status === "completed" ? "#2F6B3F"
+                      : moat.status === "running" ? "#A34C00"
+                      : moat.status === "failed" || moat.status === "error" ? "#9C2B1E"
+                      : "#5E5854";
     const delta = moat.delta || {};
     const deltaLines = Object.entries(delta).slice(0, 4).map(([k, v]) =>
-      `<div style="font-size:11px; color:#666;">${escapeHtml(k)}: <strong style="color:${brand.navy};">${escapeHtml(String(v))}</strong></div>`
+      `<div style="font-size:11px; color:#5E5854;">${escapeHtml(k)}: <strong style="color:${brand.navy};">${escapeHtml(String(v))}</strong></div>`
     ).join("");
     return `
-      <div style="padding:10px 12px; background:#f5f9ff; border-left:3px solid ${statusColor}; border-radius:4px;">
+      <div style="padding:10px 12px; background:#F3EFE9; border-left:3px solid ${statusColor}; border-radius:4px;">
         <div style="font-weight:600; font-size:12px; color:${brand.navy};">
           Last run: ${dt.toLocaleDateString()}
           <span style="background:${statusColor}; color:white; padding:1px 6px; border-radius:8px; font-size:9px; margin-left:6px;">${escapeHtml(moat.status || "?")}</span>
         </div>
-        ${deltaLines || `<div style="font-size:11px; color:#888; font-style:italic; margin-top:4px;">No changes detected</div>`}
-        ${moat.cost_usd ? `<div style="font-size:10px; color:#999; margin-top:4px;">Cost: $${Number(moat.cost_usd).toFixed(2)}</div>` : ""}
+        ${deltaLines || `<div style="font-size:11px; color:#5E5854; font-style:italic; margin-top:4px;">No changes detected</div>`}
+        ${moat.cost_usd ? `<div style="font-size:10px; color:#5E5854; margin-top:4px;">Cost: $${Number(moat.cost_usd).toFixed(2)}</div>` : ""}
       </div>`;
-  })() : `<div style="color:#888; font-size:12px; font-style:italic; padding:10px 0;">Moat update never run.</div>`;
+  })() : `<div style="color:#5E5854; font-size:12px; font-style:italic; padding:10px 0;">Moat update never run.</div>`;
 
   const body = `
     <div class="page-header">
       <h1>Triage Dashboard</h1>
-      <div style="font-size:13px; color:#666;">Everything demanding your attention across the firm.</div>
+      <div style="font-size:13px; color:#5E5854;">Everything demanding your attention across the firm.</div>
     </div>
 
     <!-- ── Section 1: LEGAL PRACTICE ── -->
@@ -805,18 +805,18 @@ function renderDashboard(data) {
     <!-- Top-line stats: color-coded urgency -->
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
       ${statCard("Upcoming Hearings", upcoming.length, `${clientStats.master_clients + clientStats.indiv_clients} total clients`, brand.gold, "/admin/calendar")}
-      ${statCard("New Intakes (7d)", intakeStats.this_week, `${intakeStats.urgent_this_week} urgent · ${intakeStats.unreviewed_this_week} unreviewed`, intakeStats.urgent_this_week ? "#c62828" : "#0061FF", "/admin/panel/intakes")}
-      ${statCard("Motions Pending", motionStats.drafts + motionStats.reviewed, `${motionStats.past_due} past due · ${motionStats.filed_this_month} filed 30d`, motionStats.past_due ? "#c62828" : brand.gold, "/admin/motions")}
-      ${statCard("Deadlines", deadlineStats.total_pending, `${deadlineStats.past_due} past due · ${deadlineStats.due_this_week} this week`, deadlineStats.past_due ? "#c62828" : "#f9a825", "/admin/deadlines")}
-      ${statCard("Unnotified Notices", unnotified.length, "Clients need to know", unnotified.length ? "#c62828" : "#2e7d32", "/admin/calendar")}
-      ${statCard("Reminders (7d)", reminderStats.sent_this_week, reminderStats.failed_this_week ? `${reminderStats.failed_this_week} failed` : "all delivered", reminderStats.failed_this_week ? "#c62828" : "#2e7d32", "/admin/reminders")}
+      ${statCard("New Intakes (7d)", intakeStats.this_week, `${intakeStats.urgent_this_week} urgent · ${intakeStats.unreviewed_this_week} unreviewed`, intakeStats.urgent_this_week ? "#9C2B1E" : "#A34C00", "/admin/panel/intakes")}
+      ${statCard("Motions Pending", motionStats.drafts + motionStats.reviewed, `${motionStats.past_due} past due · ${motionStats.filed_this_month} filed 30d`, motionStats.past_due ? "#9C2B1E" : brand.gold, "/admin/motions")}
+      ${statCard("Deadlines", deadlineStats.total_pending, `${deadlineStats.past_due} past due · ${deadlineStats.due_this_week} this week`, deadlineStats.past_due ? "#9C2B1E" : "#A34C00", "/admin/deadlines")}
+      ${statCard("Unnotified Notices", unnotified.length, "Clients need to know", unnotified.length ? "#9C2B1E" : "#2F6B3F", "/admin/calendar")}
+      ${statCard("Reminders (7d)", reminderStats.sent_this_week, reminderStats.failed_this_week ? `${reminderStats.failed_this_week} failed` : "all delivered", reminderStats.failed_this_week ? "#9C2B1E" : "#2F6B3F", "/admin/reminders")}
     </div>
 
     <!-- Main content grid: 3 columns on wide screens -->
     <div class="dashboard-grid" style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:15px; margin-bottom:25px;">
       <!-- Column 1: Upcoming hearings + Notifications -->
       <div>
-        <div style="background:white; padding:18px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+        <div style="background:white; padding:18px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
           <h2 style="margin:0 0 15px 0; font-size:15px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>📅 Upcoming Hearings</span>
             <a href="/admin/calendar" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">Full calendar →</a>
@@ -824,8 +824,8 @@ function renderDashboard(data) {
           ${upcomingHtml}
         </div>
 
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
-          <h3 style="margin:0 0 10px 0; font-size:14px; color:#c62828; display:flex; justify-content:space-between; align-items:center;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC;">
+          <h3 style="margin:0 0 10px 0; font-size:14px; color:#9C2B1E; display:flex; justify-content:space-between; align-items:center;">
             <span>⚠️ Needs Client Notification (${unnotified.length})</span>
             <a href="/admin/calendar" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All notices →</a>
           </h3>
@@ -835,7 +835,7 @@ function renderDashboard(data) {
 
       <!-- Column 2: Intake + Motions -->
       <div>
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>🆕 Recent Intakes</span>
             <a href="/admin/panel/intakes" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
@@ -843,7 +843,7 @@ function renderDashboard(data) {
           ${intakeHtml}
         </div>
 
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>📜 Pending Motions</span>
             <a href="/admin/motions" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
@@ -854,7 +854,7 @@ function renderDashboard(data) {
 
       <!-- Column 3: Deadlines + Recent + System -->
       <div>
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>⏰ Urgent Deadlines</span>
             <a href="/admin/deadlines" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
@@ -862,12 +862,12 @@ function renderDashboard(data) {
           ${deadlineHtml}
         </div>
 
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy};">📚 Recent Hearings</h3>
           ${recentHtml}
         </div>
 
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC;">
           <h3 style="margin:0 0 10px 0; font-size:13px; color:${brand.navy};">🩺 System</h3>
           ${healthPill("💾 Last backup", health.last_backup_status, health.last_backup, "/admin/backups")}
           ${healthPill("🔄 Dropbox scan", health.last_scan_status, health.last_scan, "/admin/calendar")}
@@ -883,18 +883,18 @@ function renderDashboard(data) {
 
     <!-- Content stat cards -->
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
-      ${statCard("Blog Posts (30d)", postStats.this_month, `${postStats.auto_total} auto · ${postStats.manual_total} manual`, "#2e7d32", "/admin/panel/post")}
-      ${statCard("Active Drip Campaigns", dripStats.active, `${dripStats.sent_this_week} sent this week · ${dripStats.pending_msgs} pending`, "#0061FF", "/admin/panel/drip")}
-      ${statCard("Research Pending", researchStats.pending_review, `${researchStats.citations_this_week} citations added 7d`, researchStats.pending_review > 0 ? "#f9a825" : "#666", "/admin/panel/research")}
-      ${statCard("USPTO New Matches", usptoStats.unnotified, `${usptoStats.active_watches} active watches · ${usptoStats.new_this_week} new 7d`, usptoStats.unnotified > 0 ? "#c62828" : "#666", "/admin/uspto")}
-      ${statCard("SoL Deadlines", solStats.next_30d, `${solStats.past_due} past due · ${solStats.next_90d} in 90d`, solStats.past_due > 0 ? "#c62828" : solStats.next_30d > 0 ? "#f9a825" : "#666", "/admin/panel/sol")}
+      ${statCard("Blog Posts (30d)", postStats.this_month, `${postStats.auto_total} auto · ${postStats.manual_total} manual`, "#2F6B3F", "/admin/panel/post")}
+      ${statCard("Active Drip Campaigns", dripStats.active, `${dripStats.sent_this_week} sent this week · ${dripStats.pending_msgs} pending`, "#A34C00", "/admin/panel/drip")}
+      ${statCard("Research Pending", researchStats.pending_review, `${researchStats.citations_this_week} citations added 7d`, researchStats.pending_review > 0 ? "#A34C00" : "#5E5854", "/admin/panel/research")}
+      ${statCard("USPTO New Matches", usptoStats.unnotified, `${usptoStats.active_watches} active watches · ${usptoStats.new_this_week} new 7d`, usptoStats.unnotified > 0 ? "#9C2B1E" : "#5E5854", "/admin/uspto")}
+      ${statCard("SoL Deadlines", solStats.next_30d, `${solStats.past_due} past due · ${solStats.next_90d} in 90d`, solStats.past_due > 0 ? "#9C2B1E" : solStats.next_30d > 0 ? "#A34C00" : "#5E5854", "/admin/panel/sol")}
     </div>
 
     <!-- Content detail grid -->
     <div class="dashboard-grid" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:15px;">
       <!-- Column 1: Posts + Moat -->
       <div>
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>✍️ Recent Blog Posts</span>
             <a href="/admin/panel/post" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
@@ -902,7 +902,7 @@ function renderDashboard(data) {
           ${postsHtml}
         </div>
 
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>🏰 Moat Update</span>
             <a href="/admin/panel/research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">History →</a>
@@ -913,7 +913,7 @@ function renderDashboard(data) {
 
       <!-- Column 2: Drips + SoL -->
       <div>
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>💧 Drip Pipeline</span>
             <a href="/admin/panel/drip" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
@@ -921,7 +921,7 @@ function renderDashboard(data) {
           ${dripHtml}
         </div>
 
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>⚖️ SoL Deadlines</span>
             <a href="/admin/panel/sol" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
@@ -932,18 +932,18 @@ function renderDashboard(data) {
 
       <!-- Column 3: Research + USPTO -->
       <div>
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee; margin-bottom:12px;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>🔬 Research Digest</span>
             <a href="/admin/panel/research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
           </h3>
-          <div style="font-size:11px; color:#666; margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Pending Review</div>
+          <div style="font-size:11px; color:#5E5854; margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Pending Review</div>
           ${researchHtml}
-          <div style="font-size:11px; color:#666; margin:12px 0 6px 0; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Recent Citations</div>
+          <div style="font-size:11px; color:#5E5854; margin:12px 0 6px 0; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Recent Citations</div>
           ${citationsHtml}
         </div>
 
-        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #eee;">
+        <div style="background:white; padding:15px 20px; border-radius:8px; border:1px solid #E8E3DC;">
           <h3 style="margin:0 0 10px 0; font-size:14px; color:${brand.navy}; display:flex; justify-content:space-between; align-items:center;">
             <span>®️ USPTO Watches</span>
             <a href="/admin/panel/research" style="font-size:11px; color:${brand.gold}; text-decoration:none; font-weight:normal;">All →</a>
@@ -967,10 +967,10 @@ function renderDashboard(data) {
 
 // Helper: colored stat card
 function statCard(label, value, sublabel, color, url) {
-  return `<a href="${url}" style="display:block; background:white; padding:14px; border-radius:8px; border:1px solid #eee; border-top:3px solid ${color}; text-decoration:none; color:inherit; transition:transform .1s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-    <div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600; letter-spacing:0.03em;">${label}</div>
+  return `<a href="${url}" style="display:block; background:white; padding:14px; border-radius:8px; border:1px solid #E8E3DC; border-top:3px solid ${color}; text-decoration:none; color:inherit; transition:transform .1s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+    <div style="font-size:11px; color:#5E5854; text-transform:uppercase; font-weight:600; letter-spacing:0.03em;">${label}</div>
     <div style="font-size:28px; font-weight:700; color:#2B2523; margin-top:4px; line-height:1;">${value}</div>
-    ${sublabel ? `<div style="font-size:10px; color:#666; margin-top:6px;">${sublabel}</div>` : ""}
+    ${sublabel ? `<div style="font-size:10px; color:#5E5854; margin-top:6px;">${sublabel}</div>` : ""}
   </a>`;
 }
 

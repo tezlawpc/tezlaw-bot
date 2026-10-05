@@ -664,18 +664,18 @@ function renderMotionListPage(motions, filters = {}) {
   const rows = motions.map(m => {
     const type = MOTION_TYPES[m.motion_type]?.short || m.motion_type;
     const dt = new Date(m.created_at).toLocaleDateString();
-    const statusColor = m.status === "filed" ? "#2e7d32"
-                       : m.status === "reviewed" ? "#0061FF"
+    const statusColor = m.status === "filed" ? "#2F6B3F"
+                       : m.status === "reviewed" ? "#A34C00"
                        : "#A34C00";
     return `
-      <tr style="border-bottom:1px solid #eee;">
+      <tr style="border-bottom:1px solid #E8E3DC;">
         <td style="padding:10px 12px;"><a href="/admin/motions/${m.id}" style="color:${brand.gold}; font-weight:600; text-decoration:none;">${escapeHtml(m.title || type)}</a></td>
-        <td style="padding:10px 12px;">${escapeHtml(m.client_name || "-")} ${m.a_number ? `<span style="color:#888; font-size:11px;">(${escapeHtml(m.a_number)})</span>` : ""}</td>
+        <td style="padding:10px 12px;">${escapeHtml(m.client_name || "-")} ${m.a_number ? `<span style="color:#5E5854; font-size:11px;">(${escapeHtml(m.a_number)})</span>` : ""}</td>
         <td style="padding:10px 12px;"><span style="background:${statusColor}; color:white; padding:2px 8px; border-radius:4px; font-size:11px;">${m.status}</span></td>
-        <td style="padding:10px 12px; color:#666; font-size:12px;">${dt}</td>
+        <td style="padding:10px 12px; color:#5E5854; font-size:12px;">${dt}</td>
         <td style="padding:10px 12px; font-size:12px;">
-          ${m.dropbox_path ? `<span style="color:#0061FF;">📁 Dropbox</span>` : ""}
-          ${m.filed_at ? `<span style="color:#2e7d32;">✅ Filed</span>` : ""}
+          ${m.dropbox_path ? `<span style="color:#A34C00;">📁 Dropbox</span>` : ""}
+          ${m.filed_at ? `<span style="color:#2F6B3F;">✅ Filed</span>` : ""}
         </td>
       </tr>`;
   }).join("");
@@ -688,26 +688,26 @@ function renderMotionListPage(motions, filters = {}) {
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <h1 style="margin:0;">Court Motions</h1>
     <div style="display:flex; gap:8px;">
-      <a href="/admin/motions/templates" style="background:#eee; color:#333; padding:9px 16px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px;">📋 Templates</a>
+      <a href="/admin/motions/templates" style="background:#F3EFE9; color:#2B2523; padding:9px 16px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px;">📋 Templates</a>
       <a href="/admin/motions/new" style="background:${brand.gold}; color:white; padding:9px 16px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px;">+ New motion</a>
     </div>
   </div>
 
-  <form method="GET" style="background:#f8f8f8; padding:12px; border-radius:6px; margin:16px 0; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+  <form method="GET" style="background:#FAF8F5; padding:12px; border-radius:6px; margin:16px 0; display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
     <div>
-      <label style="display:block; font-size:11px; color:#666;">Client / A#</label>
-      <input type="text" name="client" value="${escapeHtml(filters.client_name || "")}" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; width:200px;">
+      <label style="display:block; font-size:11px; color:#5E5854;">Client / A#</label>
+      <input type="text" name="client" value="${escapeHtml(filters.client_name || "")}" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px; width:200px;">
     </div>
     <div>
-      <label style="display:block; font-size:11px; color:#666;">Motion type</label>
-      <select name="type" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+      <label style="display:block; font-size:11px; color:#5E5854;">Motion type</label>
+      <select name="type" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px;">
         <option value="">All</option>
         ${motionTypeOptions}
       </select>
     </div>
     <div>
-      <label style="display:block; font-size:11px; color:#666;">Status</label>
-      <select name="status" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+      <label style="display:block; font-size:11px; color:#5E5854;">Status</label>
+      <select name="status" style="padding:6px 10px; border:1px solid #CFC8BE; border-radius:4px;">
         <option value="">All</option>
         <option value="draft" ${filters.status === "draft" ? "selected" : ""}>Draft</option>
         <option value="reviewed" ${filters.status === "reviewed" ? "selected" : ""}>Reviewed</option>
@@ -715,21 +715,21 @@ function renderMotionListPage(motions, filters = {}) {
       </select>
     </div>
     <button type="submit" style="background:${brand.navy}; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Filter</button>
-    <a href="/admin/motions" style="padding:8px 16px; color:#666; text-decoration:none; font-size:13px;">Reset</a>
+    <a href="/admin/motions" style="padding:8px 16px; color:#5E5854; text-decoration:none; font-size:13px;">Reset</a>
   </form>
 
-  <div style="background:white; border:1px solid #e0e0e0; border-radius:6px; overflow:hidden;">
+  <div style="background:white; border:1px solid #E8E3DC; border-radius:6px; overflow:hidden;">
     <table style="width:100%; border-collapse:collapse;">
-      <thead style="background:#f8f8f8;">
+      <thead style="background:#FAF8F5;">
         <tr>
-          <th style="padding:10px 12px; text-align:left; font-size:12px; color:#666;">Motion</th>
-          <th style="padding:10px 12px; text-align:left; font-size:12px; color:#666;">Client</th>
-          <th style="padding:10px 12px; text-align:left; font-size:12px; color:#666;">Status</th>
-          <th style="padding:10px 12px; text-align:left; font-size:12px; color:#666;">Created</th>
-          <th style="padding:10px 12px; text-align:left; font-size:12px; color:#666;">Actions</th>
+          <th style="padding:10px 12px; text-align:left; font-size:12px; color:#5E5854;">Motion</th>
+          <th style="padding:10px 12px; text-align:left; font-size:12px; color:#5E5854;">Client</th>
+          <th style="padding:10px 12px; text-align:left; font-size:12px; color:#5E5854;">Status</th>
+          <th style="padding:10px 12px; text-align:left; font-size:12px; color:#5E5854;">Created</th>
+          <th style="padding:10px 12px; text-align:left; font-size:12px; color:#5E5854;">Actions</th>
         </tr>
       </thead>
-      <tbody>${rows || `<tr><td colspan="5" style="text-align:center; padding:30px; color:#888;">No motions yet. Click <b>+ New motion</b> to draft one.</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="5" style="text-align:center; padding:30px; color:#5E5854;">No motions yet. Click <b>+ New motion</b> to draft one.</td></tr>`}</tbody>
     </table>
   </div>`;
 }
@@ -745,71 +745,71 @@ function renderNewMotionForm(prefill = {}) {
     <a href="/admin/motions" class="back-link">← All motions</a>
   </div>
 
-  <p style="color:#666; margin-bottom:20px;">Fill in the details below. Claude Sonnet drafts the motion using client history from hearing notes, and you can edit before finalizing.</p>
+  <p style="color:#5E5854; margin-bottom:20px;">Fill in the details below. Claude Sonnet drafts the motion using client history from hearing notes, and you can edit before finalizing.</p>
 
   <form id="new-motion-form" onsubmit="submitNewMotion(event)" style="max-width:720px;">
-    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:16px;">
+    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
       <h3 style="margin-top:0; color:${brand.navy};">Motion type</h3>
-      <select name="motion_type" required style="width:100%; padding:10px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+      <select name="motion_type" required style="width:100%; padding:10px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
         <option value="">-- Choose --</option>
         ${motionOptions}
       </select>
     </div>
 
-    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:16px;">
+    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
       <h3 style="margin-top:0; color:${brand.navy};">Client</h3>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
         <div>
-          <label style="display:block; font-size:12px; color:#666;">Client name *</label>
-          <input type="text" name="client_name" required autocomplete="off" value="${escapeHtml(prefill.client_name || "")}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <label style="display:block; font-size:12px; color:#5E5854;">Client name *</label>
+          <input type="text" name="client_name" required autocomplete="off" value="${escapeHtml(prefill.client_name || "")}" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
         </div>
         <div>
-          <label style="display:block; font-size:12px; color:#666;">A-number</label>
-          <input type="text" name="a_number" autocomplete="off" value="${escapeHtml(prefill.a_number || "")}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <label style="display:block; font-size:12px; color:#5E5854;">A-number</label>
+          <input type="text" name="a_number" autocomplete="off" value="${escapeHtml(prefill.a_number || "")}" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
         </div>
       </div>
       <div style="margin-top:10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <button type="button" onclick="doClientLookup()" style="background:${brand.gold}; color:white; padding:7px 14px; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">🔍 Look up client info</button>
-        <span style="font-size:11px; color:#888;">Fills court/judge automatically from prior hearings</span>
+        <span style="font-size:11px; color:#5E5854;">Fills court/judge automatically from prior hearings</span>
       </div>
-      <div id="client-suggestions" style="display:none; margin-top:10px; background:#f8f8f8; border:1px solid #ddd; border-radius:4px; padding:8px; max-height:280px; overflow-y:auto;"></div>
+      <div id="client-suggestions" style="display:none; margin-top:10px; background:#FAF8F5; border:1px solid #E8E3DC; border-radius:4px; padding:8px; max-height:280px; overflow-y:auto;"></div>
       <div id="lookup-status" style="font-size:11px; color:${brand.gold}; margin-top:6px; display:none;"></div>
       ${prefill.hearing_note_id ? `<input type="hidden" name="hearing_note_id" value="${prefill.hearing_note_id}"><div style="font-size:11px; color:${brand.gold}; margin-top:8px;">✓ Linked to hearing note #${prefill.hearing_note_id}</div>` : ""}
     </div>
 
-    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:16px;">
+    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
       <h3 style="margin-top:0; color:${brand.navy};">Court info</h3>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
         <div>
-          <label style="display:block; font-size:12px; color:#666;">Court name</label>
-          <input type="text" name="court_name" value="${escapeHtml(prefill.court_name || "")}" placeholder="e.g. Los Angeles Immigration Court" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <label style="display:block; font-size:12px; color:#5E5854;">Court name</label>
+          <input type="text" name="court_name" value="${escapeHtml(prefill.court_name || "")}" placeholder="e.g. Los Angeles Immigration Court" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
         </div>
         <div>
-          <label style="display:block; font-size:12px; color:#666;">Judge</label>
-          <input type="text" name="judge_name" value="${escapeHtml(prefill.judge_name || "")}" placeholder="e.g. Hon. Kevin Riley" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
+          <label style="display:block; font-size:12px; color:#5E5854;">Judge</label>
+          <input type="text" name="judge_name" value="${escapeHtml(prefill.judge_name || "")}" placeholder="e.g. Hon. Kevin Riley" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
         </div>
         <div>
-          <label style="display:block; font-size:12px; color:#666;">Filing deadline</label>
-          <input type="date" name="filing_deadline" value="${prefill.filing_deadline || ""}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box;">
-          <div style="font-size:10px; color:#888; margin-top:2px;">Optional — leave blank if unknown</div>
+          <label style="display:block; font-size:12px; color:#5E5854;">Filing deadline</label>
+          <input type="date" name="filing_deadline" value="${prefill.filing_deadline || ""}" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
+          <div style="font-size:10px; color:#5E5854; margin-top:2px;">Optional — leave blank if unknown</div>
         </div>
       </div>
     </div>
 
-    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:16px;">
+    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
       <h3 style="margin-top:0; color:${brand.navy};">Grounds for motion *</h3>
-      <p style="font-size:12px; color:#666; margin-bottom:8px;">Explain WHY this motion should be granted. Be specific — Claude will apply legal standards to these facts.</p>
-      <textarea name="grounds" required rows="6" placeholder="e.g. Respondent needs additional time to gather country conditions evidence and locate expert witness on gang violence in El Salvador. Prior counsel had not requested this evidence. Client is diligently working with new counsel and expert has confirmed availability in 60 days." style="width:100%; padding:10px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit; font-size:13px;"></textarea>
+      <p style="font-size:12px; color:#5E5854; margin-bottom:8px;">Explain WHY this motion should be granted. Be specific — Claude will apply legal standards to these facts.</p>
+      <textarea name="grounds" required rows="6" placeholder="e.g. Respondent needs additional time to gather country conditions evidence and locate expert witness on gang violence in El Salvador. Prior counsel had not requested this evidence. Client is diligently working with new counsel and expert has confirmed availability in 60 days." style="width:100%; padding:10px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:inherit; font-size:13px;"></textarea>
     </div>
 
-    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:16px;">
+    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
       <h3 style="margin-top:0; color:${brand.navy};">Additional facts (optional)</h3>
-      <p style="font-size:12px; color:#666; margin-bottom:8px;">Anything else Claude should know — client's specific situation, prior counsel history, procedural quirks, etc.</p>
-      <textarea name="additional_facts" rows="4" style="width:100%; padding:10px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:inherit; font-size:13px;"></textarea>
+      <p style="font-size:12px; color:#5E5854; margin-bottom:8px;">Anything else Claude should know — client's specific situation, prior counsel history, procedural quirks, etc.</p>
+      <textarea name="additional_facts" rows="4" style="width:100%; padding:10px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:inherit; font-size:13px;"></textarea>
     </div>
 
     <div style="display:flex; gap:8px;">
-      <a href="/admin/motions" style="flex:1; padding:12px; background:#eee; color:#333; text-align:center; border:none; border-radius:4px; text-decoration:none; font-weight:600;">Cancel</a>
+      <a href="/admin/motions" style="flex:1; padding:12px; background:#F3EFE9; color:#2B2523; text-align:center; border:none; border-radius:4px; text-decoration:none; font-weight:600;">Cancel</a>
       <button type="submit" id="generate-btn" style="flex:2; padding:12px; background:${brand.navy}; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:600; font-size:14px;">🤖 Generate motion with Claude</button>
     </div>
   </form>
@@ -818,11 +818,11 @@ function renderNewMotionForm(prefill = {}) {
     <div style="background:white; padding:30px; border-radius:10px; text-align:center; max-width:400px;">
       <div style="font-size:40px; margin-bottom:12px;">🧠</div>
       <div style="font-size:16px; font-weight:600; color:${brand.navy}; margin-bottom:8px;">Claude is drafting your motion…</div>
-      <div id="gen-progress" style="font-size:12px; color:#666;">Analyzing case history…</div>
-      <div style="background:#eee; height:5px; border-radius:3px; margin-top:16px; overflow:hidden;">
+      <div id="gen-progress" style="font-size:12px; color:#5E5854;">Analyzing case history…</div>
+      <div style="background:#F3EFE9; height:5px; border-radius:3px; margin-top:16px; overflow:hidden;">
         <div id="gen-bar" style="background:linear-gradient(to right, ${brand.gold}, #E8E3DC); height:100%; width:10%; transition:width 0.5s;"></div>
       </div>
-      <div style="font-size:11px; color:#888; margin-top:14px;">Usually takes 15-45 seconds.</div>
+      <div style="font-size:11px; color:#5E5854; margin-top:14px;">Usually takes 15-45 seconds.</div>
     </div>
   </div>
 
@@ -837,46 +837,46 @@ function renderNewMotionForm(prefill = {}) {
 
       if (query.length < 2) {
         statusEl.textContent = "⚠️ Enter at least 2 characters in client name or A#";
-        statusEl.style.color = "#c00";
+        statusEl.style.color = "#9C2B1E";
         statusEl.style.display = "block";
         setTimeout(() => { statusEl.style.display = "none"; statusEl.style.color = "${brand.gold}"; }, 3500);
         return;
       }
 
-      suggestionsEl.innerHTML = '<div style="text-align:center; color:#888; padding:14px; font-size:12px;">🔍 Searching…</div>';
+      suggestionsEl.innerHTML = '<div style="text-align:center; color:#5E5854; padding:14px; font-size:12px;">🔍 Searching…</div>';
       suggestionsEl.style.display = "block";
 
       try {
         const r = await fetch("/admin/motions/lookup-client?q=" + encodeURIComponent(query));
         const d = await r.json();
         if (!d.ok) {
-          suggestionsEl.innerHTML = '<div style="color:#c00; padding:10px; font-size:12px;">Lookup failed: ' + (d.error || "unknown") + '</div>';
+          suggestionsEl.innerHTML = '<div style="color:#9C2B1E; padding:10px; font-size:12px;">Lookup failed: ' + (d.error || "unknown") + '</div>';
           return;
         }
         if (!d.matches || d.matches.length === 0) {
-          suggestionsEl.innerHTML = '<div style="color:#666; padding:10px; font-size:12px;">No matching clients found in hearing notes or notices. Enter court/judge manually.</div>';
+          suggestionsEl.innerHTML = '<div style="color:#5E5854; padding:10px; font-size:12px;">No matching clients found in hearing notes or notices. Enter court/judge manually.</div>';
           setTimeout(() => { suggestionsEl.style.display = "none"; }, 4000);
           return;
         }
         renderSuggestions(d.matches);
       } catch (e) {
-        suggestionsEl.innerHTML = '<div style="color:#c00; padding:10px; font-size:12px;">Lookup error: ' + e.message + '</div>';
+        suggestionsEl.innerHTML = '<div style="color:#9C2B1E; padding:10px; font-size:12px;">Lookup error: ' + e.message + '</div>';
       }
     }
 
     function renderSuggestions(matches) {
       const suggestionsEl = document.getElementById("client-suggestions");
-      let html = '<div style="font-size:11px; color:#666; margin-bottom:6px;">💡 Found ' + matches.length + ' client' + (matches.length > 1 ? 's' : '') + ' — click to auto-fill court/judge:</div>';
+      let html = '<div style="font-size:11px; color:#5E5854; margin-bottom:6px;">💡 Found ' + matches.length + ' client' + (matches.length > 1 ? 's' : '') + ' — click to auto-fill court/judge:</div>';
       for (let i = 0; i < matches.length; i++) {
         const m = matches[i];
         const escStr = (s) => String(s || "").replace(/'/g, "\\\\'").replace(/&/g, "&amp;").replace(/</g, "&lt;");
-        html += '<div onclick="selectClient(' + i + ')" style="padding:8px 10px; margin-bottom:4px; background:white; border:1px solid #ddd; border-radius:4px; cursor:pointer; font-size:12px;" onmouseover="this.style.background=\\'#fffbe6\\'" onmouseout="this.style.background=\\'white\\'">';
-        html +=   '<div style="font-weight:600; color:#2B2523;">' + escStr(m.client_name || "(no name)") + (m.a_number ? ' <span style="color:#888; font-size:11px;">' + escStr(m.a_number) + '</span>' : '') + '</div>';
-        if (m.court_name) html += '<div style="color:#666; margin-top:2px;">📍 ' + escStr(m.court_name) + '</div>';
-        if (m.judge_name) html += '<div style="color:#666;">⚖️ ' + escStr(m.judge_name) + '</div>';
+        html += '<div onclick="selectClient(' + i + ')" style="padding:8px 10px; margin-bottom:4px; background:white; border:1px solid #E8E3DC; border-radius:4px; cursor:pointer; font-size:12px;" onmouseover="this.style.background=\\'#FFF3E6\\'" onmouseout="this.style.background=\\'white\\'">';
+        html +=   '<div style="font-weight:600; color:#2B2523;">' + escStr(m.client_name || "(no name)") + (m.a_number ? ' <span style="color:#5E5854; font-size:11px;">' + escStr(m.a_number) + '</span>' : '') + '</div>';
+        if (m.court_name) html += '<div style="color:#5E5854; margin-top:2px;">📍 ' + escStr(m.court_name) + '</div>';
+        if (m.judge_name) html += '<div style="color:#5E5854;">⚖️ ' + escStr(m.judge_name) + '</div>';
         if (m.last_hearing_date) {
           const dt = new Date(m.last_hearing_date).toLocaleDateString();
-          html += '<div style="color:#888; font-size:10px; margin-top:2px;">Last hearing: ' + dt + ' (' + escStr(m.last_hearing_type || "hearing") + ')</div>';
+          html += '<div style="color:#5E5854; font-size:10px; margin-top:2px;">Last hearing: ' + dt + ' (' + escStr(m.last_hearing_type || "hearing") + ')</div>';
         }
         html += '</div>';
       }
@@ -944,62 +944,62 @@ function renderMotionEditor(motion) {
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
       <h1 style="margin:0;">${escapeHtml(cfg.label || motion.motion_type)} — ${escapeHtml(motion.client_name || "unnamed")}</h1>
-      <div style="font-size:12px; color:#666; margin-top:4px;">
+      <div style="font-size:12px; color:#5E5854; margin-top:4px;">
         ${motion.a_number ? "A#: " + escapeHtml(motion.a_number) + " · " : ""}${escapeHtml(motion.court_name || "")}${motion.judge_name ? " · " + escapeHtml(motion.judge_name) : ""} · Status: <b>${motion.status}</b>
       </div>
     </div>
     <div style="display:flex; gap:6px;">
       <a href="/admin/motions/${motion.id}/download" style="background:${brand.gold}; color:white; padding:9px 14px; border-radius:6px; text-decoration:none; font-weight:600; font-size:13px;">💾 Download .docx</a>
-      <button onclick="uploadDropbox(${motion.id})" style="background:#0061FF; color:white; padding:9px 14px; border:none; border-radius:6px; cursor:pointer; font-weight:600; font-size:13px;">☁️ Upload to Dropbox</button>
+      <button onclick="uploadDropbox(${motion.id})" style="background:#2B2523; color:white; padding:9px 14px; border:none; border-radius:6px; cursor:pointer; font-weight:600; font-size:13px;">☁️ Upload to Dropbox</button>
       <a href="/admin/motions" class="back-link" style="padding:9px 14px;">← All motions</a>
     </div>
   </div>
 
   <div style="display:grid; grid-template-columns:2fr 1fr; gap:16px; margin-top:20px;">
     <div>
-      <div style="background:white; padding:16px; border-radius:8px; border:1px solid #e0e0e0;">
+      <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
           <h3 style="margin:0; color:${brand.navy};">Motion draft (markdown)</h3>
           <button onclick="saveContent()" style="background:${brand.navy}; color:white; padding:6px 12px; border:none; border-radius:4px; cursor:pointer; font-size:12px;">💾 Save</button>
         </div>
-        <textarea id="motion-content" style="width:100%; min-height:600px; padding:16px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:'Courier New', monospace; font-size:13px; line-height:1.6;">${escapedContent}</textarea>
-        <div style="font-size:11px; color:#888; margin-top:6px;">Use ## for section headers, **bold** for emphasis, *italic* for case names.</div>
+        <textarea id="motion-content" style="width:100%; min-height:600px; padding:16px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:'Courier New', monospace; font-size:13px; line-height:1.6;">${escapedContent}</textarea>
+        <div style="font-size:11px; color:#5E5854; margin-top:6px;">Use ## for section headers, **bold** for emphasis, *italic* for case names.</div>
       </div>
     </div>
 
     <div>
-      <div style="background:white; padding:16px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:12px;">
+      <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
         <h3 style="margin-top:0; color:${brand.navy};">Status</h3>
-        <select id="status-select" onchange="updateStatus(this.value)" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+        <select id="status-select" onchange="updateStatus(this.value)" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px;">
           <option value="draft" ${motion.status === "draft" ? "selected" : ""}>📝 Draft</option>
           <option value="reviewed" ${motion.status === "reviewed" ? "selected" : ""}>✅ Reviewed</option>
           <option value="filed" ${motion.status === "filed" ? "selected" : ""}>📤 Filed</option>
         </select>
       </div>
 
-      <div style="background:white; padding:16px; border-radius:8px; border:1px solid #e0e0e0; margin-bottom:12px;">
+      <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:12px;">
         <h3 style="margin-top:0; color:${brand.navy};">Metadata</h3>
-        <div style="font-size:12px; color:#666; line-height:1.6;">
+        <div style="font-size:12px; color:#5E5854; line-height:1.6;">
           <div><b>Type:</b> ${escapeHtml(cfg.label || motion.motion_type)}</div>
           <div><b>Citation:</b> ${escapeHtml(cfg.citation || "-")}</div>
           <div><b>Created:</b> ${new Date(motion.created_at).toLocaleString()}</div>
           ${motion.filing_deadline ? `<div><b>Filing deadline:</b> ${new Date(motion.filing_deadline).toLocaleDateString()}</div>` : ""}
           ${motion.dropbox_path ? `<div style="margin-top:6px;"><b>Dropbox:</b> <code style="font-size:11px; word-break:break-all;">${escapeHtml(motion.dropbox_path)}</code></div>` : ""}
-          ${motion.filed_at ? `<div style="color:#2e7d32; margin-top:6px;"><b>✅ Filed:</b> ${new Date(motion.filed_at).toLocaleString()}</div>` : ""}
+          ${motion.filed_at ? `<div style="color:#2F6B3F; margin-top:6px;"><b>✅ Filed:</b> ${new Date(motion.filed_at).toLocaleString()}</div>` : ""}
         </div>
       </div>
 
-      <div style="background:#f8f8f8; padding:12px; border-radius:6px; border:1px solid #e0e0e0;">
-        <div style="font-size:11px; color:#666; margin-bottom:6px;">⚠️ Legal review required</div>
-        <div style="font-size:11px; color:#666;">Claude drafts are FIRST DRAFTS. Attorney must review every citation, fact, and application of law before filing. Verify all bracketed placeholders are filled.</div>
+      <div style="background:#FAF8F5; padding:12px; border-radius:6px; border:1px solid #E8E3DC;">
+        <div style="font-size:11px; color:#5E5854; margin-bottom:6px;">⚠️ Legal review required</div>
+        <div style="font-size:11px; color:#5E5854;">Claude drafts are FIRST DRAFTS. Attorney must review every citation, fact, and application of law before filing. Verify all bracketed placeholders are filled.</div>
       </div>
 
-      <div style="background:#fff8e1; padding:10px 12px; border-radius:6px; border:1px solid #ffe082; margin-top:10px; font-size:11px; color:#555;">
+      <div style="background:#FFF3E6; padding:10px 12px; border-radius:6px; border:1px solid #FF7B00; margin-top:10px; font-size:11px; color:#5E5854;">
         <div style="font-weight:600; color:${brand.navy}; margin-bottom:4px;">📋 Pleading paper</div>
         Downloaded .docx will use your uploaded template if one exists. <a href="/admin/motions/templates" style="color:${brand.gold};">Manage templates →</a>
       </div>
 
-      <button onclick="deleteMotion(${motion.id})" style="width:100%; margin-top:12px; padding:10px; background:#fee; color:#c00; border:1px solid #ffe0e0; border-radius:4px; cursor:pointer; font-size:12px;">🗑 Delete this motion</button>
+      <button onclick="deleteMotion(${motion.id})" style="width:100%; margin-top:12px; padding:10px; background:#FBEDEA; color:#9C2B1E; border:1px solid #FBEDEA; border-radius:4px; cursor:pointer; font-size:12px;">🗑 Delete this motion</button>
     </div>
   </div>
 
@@ -1011,7 +1011,7 @@ function renderMotionEditor(motion) {
         const d = await r.json();
         if (d.ok) {
           const toast = document.createElement("div");
-          toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2e7d32; color:white; padding:12px 20px; border-radius:6px; z-index:10001; font-size:14px;";
+          toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2F6B3F; color:white; padding:12px 20px; border-radius:6px; z-index:10001; font-size:14px;";
           toast.textContent = "✅ Saved";
           document.body.appendChild(toast);
           setTimeout(() => toast.remove(), 2000);

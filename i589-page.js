@@ -45,17 +45,17 @@ function row(p) {
   const notes = Array.isArray(p.notes) ? p.notes : [];
 
   const cell = (label, onFile, onForm, take, isConflict) => {
-    if (!onForm) return `<div style="font-size:12px;color:#aaa;">${label}: nothing on the form</div>`;
+    if (!onForm) return `<div style="font-size:12px;color:#5E5854;">${label}: nothing on the form</div>`;
     const same = String(onFile || "").replace(/\W+/g, "").toLowerCase()
               === String(onForm).replace(/\W+/g, "").toLowerCase();
-    if (same) return `<div style="font-size:12px;color:#888;">${label}: already matches</div>`;
+    if (same) return `<div style="font-size:12px;color:#5E5854;">${label}: already matches</div>`;
     return `
       <div style="font-size:12px; margin:3px 0;">
         <label style="display:flex; gap:6px; align-items:flex-start; cursor:pointer;">
           <input type="checkbox" name="${take}" value="1" ${applied ? "disabled" : (isConflict ? "" : "checked")} style="margin-top:3px;">
           <span>
             <strong>${label}:</strong> ${esc(onForm)}
-            ${onFile ? `<div style="color:${isConflict ? "#B45309" : "#888"};">
+            ${onFile ? `<div style="color:${isConflict ? "#A34C00" : "#5E5854"};">
               ${isConflict ? "differs from" : "replaces"} what is on file: ${esc(onFile)}</div>` : ""}
           </span>
         </label>
@@ -66,15 +66,15 @@ function row(p) {
   const addrConflict = conflicts.some(c => c.field === "address");
 
   return `
-  <tr style="border-bottom:1px solid #eee; ${applied ? "opacity:.55;" : ""}">
+  <tr style="border-bottom:1px solid #E8E3DC; ${applied ? "opacity:.55;" : ""}">
     <td style="padding:10px 8px; vertical-align:top;">
       <strong>${esc(p.client_name || p.client_key)}</strong>
       <div style="font-size:11px;">
         <span style="color:${st.color}; font-weight:600;">${st.label}</span>
-        ${p.method ? `<span style="color:#888;"> · read from ${METHOD[p.method] || esc(p.method)}</span>` : ""}
+        ${p.method ? `<span style="color:#5E5854;"> · read from ${METHOD[p.method] || esc(p.method)}</span>` : ""}
       </div>
-      ${p.form_path ? `<div style="font-size:11px; color:#888; word-break:break-all;">${esc(p.form_path)}</div>` : ""}
-      ${p.form_modified ? `<div style="font-size:11px; color:#888;">dated ${esc(String(p.form_modified).slice(0, 10))}</div>` : ""}
+      ${p.form_path ? `<div style="font-size:11px; color:#5E5854; word-break:break-all;">${esc(p.form_path)}</div>` : ""}
+      ${p.form_modified ? `<div style="font-size:11px; color:#5E5854;">dated ${esc(String(p.form_modified).slice(0, 10))}</div>` : ""}
       <div style="font-size:11px; margin-top:3px;"><a href="/admin/clients/i589/files?key=${encodeURIComponent(p.client_key || "")}" style="color:#9C2B1E;">see what is in the folder</a></div>
     </td>
     <td style="padding:10px 8px; vertical-align:top;">
@@ -84,10 +84,10 @@ function row(p) {
           ${cell("Phone", p.current_phone, p.found_phone, "take_phone", phoneConflict)}
           ${cell("Address", p.current_address, p.found_address, "take_address", addrConflict)}
           ${applied
-            ? `<div style="font-size:11px; color:#2e7d32; margin-top:4px;">Applied ${esc(String(p.applied_at).slice(0, 10))}${p.applied_by ? " by " + esc(p.applied_by) : ""}</div>`
+            ? `<div style="font-size:11px; color:#2F6B3F; margin-top:4px;">Applied ${esc(String(p.applied_at).slice(0, 10))}${p.applied_by ? " by " + esc(p.applied_by) : ""}</div>`
             : `<button type="submit" style="margin-top:6px; padding:5px 12px; background:#FF7B00;color:#1E1B1A; border:1px solid #9C2B1E; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">Apply to profile</button>`}
         </form>`
-        : `<div style="font-size:12px; color:#888;">
+        : `<div style="font-size:12px; color:#5E5854;">
              ${p.partial ? `Partly read: ${esc(p.partial)}<br>` : ""}
              ${notes.length ? esc(notes.join("; ")) : "—"}
            </div>`}
@@ -106,10 +106,10 @@ function render({ prog, rows, ran, mode = null }) {
 <style>
  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#FAF8F5;color:#2B2523;margin:0;}
  main{max-width:1100px;margin:24px auto;padding:0 20px;}
- h1{font-size:24px;margin:0 0 4px;} .sub{color:#666;font-size:13px;margin-bottom:18px;}
- .card{background:#fff;border:1px solid #eee;border-radius:8px;padding:18px;margin-bottom:18px;}
+ h1{font-size:24px;margin:0 0 4px;} .sub{color:#5E5854;font-size:13px;margin-bottom:18px;}
+ .card{background:#fff;border:1px solid #E8E3DC;border-radius:8px;padding:18px;margin-bottom:18px;}
  table{width:100%;border-collapse:collapse;}
- th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#888;padding:0 8px 8px;border-bottom:2px solid #eee;}
+ th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#5E5854;padding:0 8px 8px;border-bottom:2px solid #E8E3DC;}
 </style></head><body><main>
   <h1>I-589 addresses</h1>
   <div class="sub">Item 8 (where the client lives) from each client's most recent I-589.
@@ -120,11 +120,11 @@ function render({ prog, rows, ran, mode = null }) {
 
   ${ran !== null && ran !== undefined
     ? (Number(ran) > 0
-        ? `<div class="card" style="border-left:4px solid #2e7d32;background:#f4faf5;">Looked at ${esc(ran)} client folder(s) &mdash; the results are below.</div>`
+        ? `<div class="card" style="border-left:4px solid #2F6B3F;background:#EEF5EF;">Looked at ${esc(ran)} client folder(s) &mdash; the results are below.</div>`
         : (mode === "retry"
-            ? `<div class="card" style="border-left:4px solid #B45309;background:#fffaf3;">
+            ? `<div class="card" style="border-left:4px solid #FF7B00;background:#FAF8F5;">
                  <strong>Nothing left to re-read.</strong>
-                 <div style="font-size:13px;color:#555;margin-top:6px;line-height:1.6;">
+                 <div style="font-size:13px;color:#5E5854;margin-top:6px;line-height:1.6;">
                    No rows are sitting at &ldquo;unreadable&rdquo;, &ldquo;error&rdquo; or
                    &ldquo;no I-589&rdquo;. A &ldquo;no I-589&rdquo; row IS re-read: it means nothing in
                    the folder matched the rules for recognising the form, and those rules change
@@ -133,9 +133,9 @@ function render({ prog, rows, ran, mode = null }) {
                    is left alone, since there is no folder to look in.
                  </div>
                </div>`
-            : `<div class="card" style="border-left:4px solid #B45309;background:#fffaf3;">
+            : `<div class="card" style="border-left:4px solid #FF7B00;background:#FAF8F5;">
                  <strong>Nothing to scan.</strong>
-                 <div style="font-size:13px;color:#555;margin-top:6px;line-height:1.6;">
+                 <div style="font-size:13px;color:#5E5854;margin-top:6px;line-height:1.6;">
                    Every client has already been looked at, or no clients were found at all.
                    Clients come from the hearing notes, so a client with no hearing note anywhere
                    will not appear here. To read the ones that came back unreadable, use
@@ -147,21 +147,21 @@ function render({ prog, rows, ran, mode = null }) {
 
   <div class="card">
     <div style="margin-bottom:10px;">
-      ${pill(prog.mapped, "clients", "#eef2f7", "#2B2523")}
-      ${pill(prog.scanned, "looked at", "#e8f5e9", "#2e7d32")}
-      ${pill(prog.remaining, "not yet", "#fff4e5", "#B45309")}
-      ${prog.stale ? `<span title="Rows from the first version of this sweep, which read the Dropbox mapping cache as if it were the client roster. They are harmless, and they are not counted above." style="display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; margin-right:6px; background:#f4f4f4; color:#888;">${prog.stale} from an earlier scan</span>` : ""}
+      ${pill(prog.mapped, "clients", "#F3EFE9", "#2B2523")}
+      ${pill(prog.scanned, "looked at", "#EEF5EF", "#2F6B3F")}
+      ${pill(prog.remaining, "not yet", "#FFF3E6", "#A34C00")}
+      ${prog.stale ? `<span title="Rows from the first version of this sweep, which read the Dropbox mapping cache as if it were the client roster. They are harmless, and they are not counted above." style="display:inline-block; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; margin-right:6px; background:#FAF8F5; color:#5E5854;">${prog.stale} from an earlier scan</span>` : ""}
     </div>
     <div style="margin-bottom:12px;">
-      ${pill(s.found, "read", "#e8f5e9", "#2e7d32")}
-      ${pill(s.unreadable, "unreadable", "#fff4e5", "#B45309")}
-      ${pill(s.no_form, "no I-589", "#f4f4f4", "#666")}
-      ${pill(s.no_folder, "no folder", "#f4f4f4", "#666")}
-      ${pill(s.error, "errors", "#fdecea", "#9C2B1E")}
+      ${pill(s.found, "read", "#EEF5EF", "#2F6B3F")}
+      ${pill(s.unreadable, "unreadable", "#FFF3E6", "#A34C00")}
+      ${pill(s.no_form, "no I-589", "#FAF8F5", "#5E5854")}
+      ${pill(s.no_folder, "no folder", "#FAF8F5", "#5E5854")}
+      ${pill(s.error, "errors", "#FBEDEA", "#9C2B1E")}
     </div>
     ${s.no_form ? `<div style="margin-bottom:12px; font-size:13px;">
       <a href="/admin/clients/i589/files?status=no_form&limit=10" style="color:#9C2B1E; font-weight:600;">Look inside the ${s.no_form} folders with no I-589 &rarr;</a>
-      <div style="color:#888; font-size:12px; margin-top:2px;">
+      <div style="color:#5E5854; font-size:12px; margin-top:2px;">
         Lists the real filenames and the folder each client was matched to. Nothing is downloaded or read.
         A folder auto-matched on the name alone can belong to a different client &mdash; which looks
         exactly like a missing form on this report.
@@ -169,25 +169,25 @@ function render({ prog, rows, ran, mode = null }) {
     </div>` : ""}
     <form method="POST" action="/admin/clients/i589/scan" style="display:flex; gap:8px; align-items:center;">
       <label style="font-size:13px;">Look at
-        <select name="limit" style="padding:5px 8px; border:1px solid #ccc; border-radius:4px;">
+        <select name="limit" style="padding:5px 8px; border:1px solid #CFC8BE; border-radius:4px;">
           <option value="20">20</option><option value="50">50</option><option value="100">100</option>
         </select>
         more client folders</label>
       <button type="submit" style="padding:6px 14px; background:#2B2523; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:13px;">Scan</button>
-      <span style="font-size:12px; color:#888;">Reads only &mdash; nothing changes on a client record until you press Apply on a row.
+      <span style="font-size:12px; color:#5E5854;">Reads only &mdash; nothing changes on a client record until you press Apply on a row.
         The first pass also has to find each client&rsquo;s Dropbox folder, so give it a minute.</span>
     </form>
 
     ${prog.retryable
-      ? `<form method="POST" action="/admin/clients/i589/scan" style="display:flex; gap:8px; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid #eee;">
+      ? `<form method="POST" action="/admin/clients/i589/scan" style="display:flex; gap:8px; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid #E8E3DC;">
            <input type="hidden" name="retry" value="1">
            <label style="font-size:13px;">Re-read
-             <select name="limit" style="padding:5px 8px; border:1px solid #ccc; border-radius:4px;">
+             <select name="limit" style="padding:5px 8px; border:1px solid #CFC8BE; border-radius:4px;">
                <option value="20">20</option><option value="50">50</option><option value="100">100</option>
              </select>
              of the ${prog.retryable} row(s) that could not be read</label>
-           <button type="submit" style="padding:6px 14px; background:#B45309; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:13px;">Re-read</button>
-           <span style="font-size:12px; color:#888;">A normal scan skips anything already looked at, so rows that failed
+           <button type="submit" style="padding:6px 14px; background:#A34C00; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:13px;">Re-read</button>
+           <span style="font-size:12px; color:#5E5854;">A normal scan skips anything already looked at, so rows that failed
              under an older reader need this to be tried again.</span>
          </form>`
       : ""}
@@ -197,7 +197,7 @@ function render({ prog, rows, ran, mode = null }) {
     <table>
       <thead><tr><th>Client and form &mdash; most recently looked at first</th><th>What item 8 says</th></tr></thead>
       <tbody>${rows.length ? rows.map(row).join("") :
-        `<tr><td colspan="2" style="padding:14px; color:#888; font-size:13px;">Nothing scanned yet. Press Scan above to look at the first batch.</td></tr>`}</tbody>
+        `<tr><td colspan="2" style="padding:14px; color:#5E5854; font-size:13px;">Nothing scanned yet. Press Scan above to look at the first batch.</td></tr>`}</tbody>
     </table>
   </div>
 </main></body></html>`;

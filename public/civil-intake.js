@@ -24,7 +24,7 @@
   var C = {
     walnut: "#2B2523", walnutMid: "#3A3330", gold: "#A34C00",
     parchment: "#F3EFE9", parchmentLit: "#FAF8F5", border: "#E8E3DC",
-    muted: "#5E5854", waxRed: "#9C2B1E", green: "#166534",
+    muted: "#5E5854", waxRed: "#9C2B1E", green: "#2F6B3F",
   };
 
   function h(tag, attrs, kids) {
@@ -310,7 +310,7 @@
         }
         // A brief highlight, so it is obvious which boxes the machine touched.
         el.style.transition = "background-color .4s";
-        el.style.backgroundColor = "#EFE3BE";
+        el.style.backgroundColor = "#FFF3E6";
         setTimeout(function () { el.style.backgroundColor = ""; }, 1400);
         filled.push(LABELS[k] || k);
       });

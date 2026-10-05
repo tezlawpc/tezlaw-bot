@@ -3,62 +3,61 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>TEZ Law Firm — Matter Manager</title>
+<title>Matter Manager — Tara · TEZ Law Firm</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=JetBrains+Mono:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
+  /* TEZ brand: Charcoal ink on Marble, Travertine rules, Ember for accents in
+     text, Seal Orange for marks. --accent stays a red: here it means "urgent"
+     and "overdue", which must not look like decoration. */
   :root {
-    --ink:        #0f1419;
-    --ink-2:      #2a2f36;
-    --paper:      #f4f1ea;
-    --paper-2:    #ebe6dc;
-    --paper-3:    #e2dccd;
-    --rule:       #bcb59f;
-    --rule-soft:  #d6cfbb;
-    --accent:     #7a1d1d;
-    --accent-2:   #a23030;
-    --gold:       #8a6a1f;
-    --green:      #2f5d3b;
-    --amber:      #b87333;
-    --muted:      #6b6557;
-    --shadow:     0 1px 0 rgba(15,20,25,.04), 0 10px 30px -12px rgba(15,20,25,.18);
-    --serif:      'Cormorant Garamond', Georgia, serif;
-    --sans:       'Inter Tight', system-ui, sans-serif;
-    --mono:       'JetBrains Mono', 'SF Mono', Menlo, monospace;
+    --ink:        #1E1B1A;
+    --ink-2:      #2B2523;
+    --paper:      #FAF8F5;
+    --paper-2:    #F3EFE9;
+    --paper-3:    #E8E3DC;
+    --rule:       #CFC8BE;
+    --rule-soft:  #E8E3DC;
+    --accent:     #9C2B1E;
+    --accent-2:   #B23A2B;
+    --brand:      #A34C00;
+    --mark:       #FF7B00;
+    --gold:       #A34C00;
+    --green:      #2F6B3F;
+    --amber:      #A34C00;
+    --muted:      #5E5854;
+    --shadow:     0 1px 0 rgba(30,27,26,.04), 0 10px 30px -12px rgba(30,27,26,.18);
+    --serif:      'Cormorant Garamond', 'Noto Serif SC', Georgia, 'Times New Roman', serif;
+    --sans:       Montserrat, 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    /* Labels were set in a monospace; the brand's label is Montserrat, wide-tracked caps. */
+    --mono:       Montserrat, 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
   }
   * { box-sizing: border-box; }
-  html, body { margin:0; padding:0; background:var(--paper); color:var(--ink); font-family:var(--sans); font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased; }
-  body::before {
-    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
-    background:
-      radial-gradient(circle at 20% 10%, rgba(138,106,31,.04), transparent 40%),
-      radial-gradient(circle at 80% 60%, rgba(122,29,29,.03), transparent 50%),
-      repeating-linear-gradient(0deg, transparent 0, transparent 2px, rgba(0,0,0,.012) 2px, rgba(0,0,0,.012) 3px);
-  }
+  html, body { margin:0; padding:0; background:var(--paper); color:var(--ink); font-family:var(--sans); font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased; font-variant-numeric:tabular-nums lining-nums; }
   .app { position:relative; z-index:1; max-width:1400px; margin:0 auto; padding:28px 36px 80px; }
 
   /* Masthead */
   .masthead { border-top:3px double var(--ink); border-bottom:3px double var(--ink); padding:18px 0 14px; margin-bottom:22px;
     display:flex; justify-content:space-between; align-items:baseline; gap:24px; flex-wrap:wrap; }
   .masthead h1 { font-family:var(--serif); font-weight:600; font-size:38px; letter-spacing:.02em; margin:0; line-height:1; }
-  .masthead h1 .amp { font-style:italic; color:var(--accent); font-weight:500; padding:0 4px; }
-  .masthead .meta { font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.18em; color:var(--muted); text-align:right; }
+  .masthead h1 .amp { font-style:italic; color:var(--brand); font-weight:500; padding:0 4px; }
+  .masthead .meta { font-family:var(--mono); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:var(--muted); text-align:right; }
   .masthead .meta .firm { color:var(--ink); font-weight:600; }
   .masthead .meta .live::before { content:"●"; color:var(--green); margin-right:6px; animation:pulse 2s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 
   /* Nav */
   .nav { display:flex; gap:0; border-bottom:1px solid var(--rule); margin-bottom:28px; overflow-x:auto; }
-  .nav-btn { appearance:none; background:transparent; border:none; border-bottom:2px solid transparent;
-    padding:14px 22px 12px; font-family:var(--serif); font-size:18px; color:var(--muted); cursor:pointer;
-    transition:color .15s, border-color .15s; white-space:nowrap; letter-spacing:.01em; }
+  .nav-btn { appearance:none; background:transparent; border:none; border-bottom:3px solid transparent;
+    padding:13px 18px 11px; font-family:var(--sans); font-size:12px; font-weight:600; color:var(--muted); cursor:pointer;
+    transition:color .15s, border-color .15s; white-space:nowrap; letter-spacing:.1em; text-transform:uppercase; }
   .nav-btn:hover { color:var(--ink); }
-  .nav-btn.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+  .nav-btn.active { color:var(--ink-2); border-bottom-color:var(--mark); }
   .nav-btn .badge { display:inline-block; font-family:var(--mono); font-size:10px;
-    background:var(--ink); color:var(--paper); padding:1px 7px; margin-left:8px; border-radius:10px;
-    vertical-align:middle; font-weight:500; letter-spacing:.06em; }
-  .nav-btn.active .badge { background:var(--accent); }
+    background:var(--ink-2); color:var(--paper); padding:1px 7px; margin-left:8px; border-radius:10px;
+    vertical-align:middle; font-weight:600; letter-spacing:0; }
+  .nav-btn.active .badge { background:var(--mark); color:var(--ink); }
   .nav-btn.nav-link-admin { margin-left:auto; text-decoration:none; font-size:14px;
     color:var(--muted); opacity:.75; border-left:1px dotted var(--rule); padding-left:18px; }
   .nav-btn.nav-link-admin:hover { color:var(--ink); opacity:1; }
@@ -70,23 +69,23 @@
   /* Page header */
   .page-head { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:24px; gap:16px; flex-wrap:wrap; }
   .page-head h2 { font-family:var(--serif); font-size:32px; margin:0; letter-spacing:.01em; }
-  .page-head .sub { font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:.16em; text-transform:uppercase; margin-top:6px; }
+  .page-head .sub { font-family:var(--mono); font-weight:600; font-size:11px; color:var(--muted); letter-spacing:.16em; text-transform:uppercase; margin-top:6px; }
   .page-head .actions { display:flex; gap:10px; flex-wrap:wrap; }
 
-  .btn { appearance:none; background:var(--ink); color:var(--paper); border:none;
-    padding:10px 18px; font-family:var(--mono); font-size:10px;
-    text-transform:uppercase; letter-spacing:.18em; cursor:pointer; transition:background .15s; }
-  .btn:hover { background:var(--accent); }
-  .btn.ghost { background:transparent; color:var(--ink); border:1px solid var(--ink); }
-  .btn.ghost:hover { background:var(--ink); color:var(--paper); }
+  .btn { appearance:none; background:var(--ink-2); color:var(--paper); border:1px solid var(--ink-2); border-radius:3px;
+    padding:10px 18px; font-family:var(--sans); font-size:11px; font-weight:600;
+    text-transform:uppercase; letter-spacing:.1em; cursor:pointer; transition:background .15s, box-shadow .15s; }
+  .btn:hover { background:var(--ink); box-shadow:inset 0 -3px 0 var(--mark); }
+  .btn.ghost { background:#fff; color:var(--ink-2); border:1px solid var(--ink-2); }
+  .btn.ghost:hover { background:var(--paper-2); color:var(--ink-2); box-shadow:none; }
   .btn.danger { background:transparent; color:var(--accent); border:1px solid var(--accent); }
-  .btn.danger:hover { background:var(--accent); color:var(--paper); }
-  .btn.small { padding:6px 12px; font-size:9px; }
+  .btn.danger:hover { background:var(--accent); color:#fff; box-shadow:none; }
+  .btn.small { padding:7px 12px; font-size:10px; }
 
   /* Stats */
   .stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:14px; margin-bottom:28px; }
   .stat { background:#fff; border:1px solid var(--rule); padding:16px 20px; box-shadow:var(--shadow); }
-  .stat .lbl { font-family:var(--mono); font-size:9px; letter-spacing:.2em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
+  .stat .lbl { font-family:var(--mono); font-weight:600; font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
   .stat .val { font-family:var(--serif); font-size:34px; font-weight:600; line-height:1; }
   .stat .val.alarm { color:var(--accent); }
   .stat .val.safe { color:var(--green); }
@@ -97,12 +96,12 @@
   .matter-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); gap:18px; }
   .matter-card { background:#fff; border:1px solid var(--rule); padding:20px 22px; position:relative; cursor:pointer;
     transition:transform .15s, box-shadow .15s, border-color .15s; box-shadow:var(--shadow); }
-  .matter-card:hover { transform:translateY(-2px); box-shadow:0 1px 0 rgba(15,20,25,.04), 0 18px 40px -16px rgba(15,20,25,.28); border-color:var(--ink); }
-  .matter-card .court { font-family:var(--mono); font-size:9px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); margin-bottom:6px; }
+  .matter-card:hover { transform:translateY(-2px); box-shadow:0 1px 0 rgba(30,27,26,.04), 0 18px 40px -16px rgba(30,27,26,.28); border-color:var(--ink); }
+  .matter-card .court { font-family:var(--mono); font-weight:600; font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--brand); margin-bottom:6px; }
   .matter-card h3 { font-family:var(--serif); font-size:22px; font-style:italic; margin:0 0 4px; line-height:1.2; }
   .matter-card .casenum { font-family:var(--mono); font-size:11px; color:var(--muted); margin-bottom:14px; }
   .matter-card .next { border-top:1px dashed var(--rule); padding-top:12px; display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
-  .matter-card .next-label { font-family:var(--mono); font-size:9px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); }
+  .matter-card .next-label { font-family:var(--mono); font-weight:600; font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
   .matter-card .next-title { font-family:var(--serif); font-size:15px; font-style:italic; flex:1; margin:0 8px; }
   .matter-card .next-days { font-family:var(--serif); font-size:28px; font-weight:600; line-height:1; }
   .matter-card .next-days.urgent { color:var(--accent); }
@@ -116,14 +115,14 @@
   /* New matter form */
   .new-matter { background:var(--paper-2); border:1px solid var(--rule); padding:24px 28px; margin-bottom:24px; box-shadow:var(--shadow); }
   .new-matter h3 { font-family:var(--serif); font-size:22px; margin:0 0 4px; }
-  .new-matter .hint { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; margin-bottom:18px; }
+  .new-matter .hint { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; margin-bottom:18px; }
   .new-matter .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; }
 
   /* NEF intake (paste an email to auto-populate) */
   .nef-intake { background:var(--paper-3); border:1px dashed var(--rule); padding:16px 18px; margin-bottom:20px; }
   .nef-intake .nef-label { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;
-    font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:var(--ink); }
-  .nef-intake .nef-hint { font-size:9px; color:var(--muted); letter-spacing:.12em; }
+    font-family:var(--mono); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:var(--ink); }
+  .nef-intake .nef-hint { font-size:10px; color:var(--muted); letter-spacing:.12em; }
   .nef-intake textarea { width:100%; min-height:80px; border:1px solid var(--rule); background:var(--paper);
     padding:10px 12px; font-family:var(--mono); font-size:11px; line-height:1.5; color:var(--ink-2);
     resize:vertical; }
@@ -133,10 +132,10 @@
   .nef-intake #nm-nef-status.success { color:var(--green); }
   .nef-intake #nm-nef-status.error { color:var(--accent); }
   .nef-intake .field-flash { animation:flashFill 1.2s ease; }
-  .uspto-intake { border-style:dashed; border-color:rgba(120,90,40,.5); background:rgba(245,225,180,.18); margin-top:10px; }
-  .uspto-intake .nef-label span:first-child { color:#7a4d10; }
+  .uspto-intake { border-style:dashed; border-color:var(--rule); background:#fff; margin-top:10px; }
+  .uspto-intake .nef-label span:first-child { color:var(--brand); }
   @keyframes flashFill {
-    0% { background:rgba(122,29,29,.18); }
+    0% { background:rgba(255,123,0,.22); }
     100% { background:transparent; }
   }
 
@@ -144,7 +143,7 @@
   .order-parser { background:var(--paper-2); border:1px solid var(--rule); padding:22px 26px;
     margin-top:24px; box-shadow:var(--shadow); }
   .order-parser h4 { font-family:var(--serif); font-size:19px; margin:0 0 4px; }
-  .order-parser .sub-cite { font-family:var(--mono); font-size:10px; color:var(--muted);
+  .order-parser .sub-cite { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted);
     letter-spacing:.12em; text-transform:uppercase; margin-bottom:14px; }
   .order-parser textarea { width:100%; min-height:120px; border:1px solid var(--rule); background:var(--paper);
     padding:12px; font-family:var(--mono); font-size:11px; line-height:1.5; color:var(--ink-2); resize:vertical; }
@@ -159,31 +158,31 @@
   .op-prop .op-prop-main h5 { font-family:var(--serif); font-size:17px; margin:0 0 4px; }
   .op-prop .op-prop-meta { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.04em; }
   .op-prop .op-prop-excerpt { font-style:italic; font-size:13px; color:var(--ink-2); margin-top:6px; line-height:1.4; }
-  .op-prop .op-prop-conf { display:inline-block; padding:2px 6px; font-family:var(--mono); font-size:9px;
+  .op-prop .op-prop-conf { display:inline-block; padding:2px 6px; font-family:var(--mono); font-weight:600; font-size:10px;
     text-transform:uppercase; letter-spacing:.12em; border:1px solid var(--rule); margin-left:6px; }
   .op-prop .op-prop-conf.high { color:var(--green); border-color:var(--green); }
   .op-prop .op-prop-conf.medium { color:var(--amber); border-color:var(--amber); }
   .op-prop .op-prop-conf.low { color:var(--accent); border-color:var(--accent); }
   .op-prop.no-date { background:linear-gradient(to right, var(--paper-3) 0%, #fff 50%); border-left:3px solid var(--amber); }
-  .op-prop .op-prop-no-date-hint { font-family:var(--mono); font-size:9px; color:var(--amber);
+  .op-prop .op-prop-no-date-hint { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--amber);
     letter-spacing:.12em; text-transform:uppercase; margin-top:6px; }
   .op-prop .op-date-picker { display:flex; gap:6px; align-items:center; margin-top:4px; }
   .op-prop .op-date-picker input[type=date] { font-family:var(--mono); font-size:11px; padding:5px 8px;
     border:1px solid var(--rule); background:#fff; }
   .op-prop .op-date-picker input[type=date]:focus { outline:none; border-color:var(--ink); }
-  .op-prop .op-date-picker .btn { padding:4px 10px; font-size:9px; }
-  .op-prop .op-set-date-btn { background:var(--amber); color:var(--ink); border-color:var(--amber); }
-  .op-prop .op-set-date-btn:hover { background:#b87410; color:#fff; }
+  .op-prop .op-date-picker .btn { padding:4px 10px; font-size:10px; }
+  .op-prop .op-set-date-btn { background:var(--mark); color:var(--ink); border-color:var(--mark); }
+  .op-prop .op-set-date-btn:hover { background:#FF8D1F; color:var(--ink); box-shadow:none; }
 
   /* Inbox tab */
   .nav-btn .badge.inbox-badge { background:var(--paper-3); color:var(--ink); }
   .nav-btn .badge.inbox-badge.has-items { background:var(--accent); color:#fff; animation:pulse 2s ease-in-out infinite; }
-  .nav-btn.active .badge.inbox-badge.has-items { background:#fff; color:var(--accent); }
+  .nav-btn.active .badge.inbox-badge.has-items { background:var(--accent); color:#fff; }
 
   .inbox-paste-bar { background:var(--paper-2); border:1px solid var(--rule); padding:18px 22px;
     margin-bottom:24px; box-shadow:var(--shadow); }
   .inbox-paste-bar h4 { font-family:var(--serif); font-size:18px; margin:0 0 4px; }
-  .inbox-paste-bar .sub-cite { font-family:var(--mono); font-size:10px; color:var(--muted);
+  .inbox-paste-bar .sub-cite { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted);
     letter-spacing:.12em; text-transform:uppercase; margin-bottom:12px; }
   .inbox-paste-bar textarea { width:100%; min-height:80px; border:1px solid var(--rule); background:var(--paper);
     padding:10px 12px; font-family:var(--mono); font-size:11px; line-height:1.5; color:var(--ink-2); resize:vertical; }
@@ -197,10 +196,10 @@
   .inbox-group .group-head { background:var(--paper-2); padding:14px 22px; border-bottom:1px solid var(--rule);
     display:flex; justify-content:space-between; align-items:baseline; }
   .inbox-group .group-head .group-title { font-family:var(--serif); font-size:18px; }
-  .inbox-group .group-head .group-title em { color:var(--accent); font-style:italic; }
-  .inbox-group .group-head .group-meta { font-family:var(--mono); font-size:10px; color:var(--muted);
+  .inbox-group .group-head .group-title em { color:var(--brand); font-style:italic; }
+  .inbox-group .group-head .group-meta { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted);
     letter-spacing:.12em; text-transform:uppercase; }
-  .inbox-group .group-head .open-matter { font-family:var(--mono); font-size:10px;
+  .inbox-group .group-head .open-matter { font-family:var(--mono); font-weight:600; font-size:10px;
     color:var(--accent); cursor:pointer; letter-spacing:.1em; text-transform:uppercase; }
   .inbox-group .group-head .open-matter:hover { text-decoration:underline; }
 
@@ -209,49 +208,49 @@
   .inbox-prop:last-child { border-bottom:none; }
   .inbox-prop .prop-kind-icon { font-size:22px; line-height:1; margin-top:2px; }
   .inbox-prop .prop-body h5 { font-family:var(--serif); font-size:17px; margin:0 0 4px; line-height:1.3; }
-  .inbox-prop .prop-body h5 em { color:var(--accent); font-style:italic; }
+  .inbox-prop .prop-body h5 em { color:var(--brand); font-style:italic; }
   .inbox-prop .prop-meta { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.04em;
     margin-top:2px; }
-  .inbox-prop .prop-conf { display:inline-block; padding:1px 6px; font-family:var(--mono); font-size:9px;
+  .inbox-prop .prop-conf { display:inline-block; padding:1px 6px; font-family:var(--mono); font-weight:600; font-size:10px;
     text-transform:uppercase; letter-spacing:.12em; border:1px solid var(--rule); margin-left:6px; }
   .inbox-prop .prop-conf.high { color:var(--green); border-color:var(--green); }
   .inbox-prop .prop-conf.medium { color:var(--amber); border-color:var(--amber); }
   .inbox-prop .prop-conf.low { color:var(--accent); border-color:var(--accent); }
   .inbox-prop .prop-detail { font-family:var(--serif); font-size:14px; color:var(--ink-2); margin-top:8px;
     padding:8px 12px; background:var(--paper); border-left:2px solid var(--rule); }
-  .inbox-prop .prop-detail dt { font-family:var(--mono); font-size:9px; text-transform:uppercase;
+  .inbox-prop .prop-detail dt { font-family:var(--mono); font-weight:600; font-size:10px; text-transform:uppercase;
     letter-spacing:.12em; color:var(--muted); margin-top:6px; }
   .inbox-prop .prop-detail dt:first-child { margin-top:0; }
   .inbox-prop .prop-detail dd { margin:0 0 4px 0; }
   .inbox-prop .prop-excerpt { font-style:italic; font-size:12px; color:var(--muted); margin-top:8px;
     line-height:1.4; max-height:60px; overflow:hidden; }
   .inbox-prop .prop-actions { display:flex; flex-direction:column; gap:6px; align-items:stretch; min-width:90px; }
-  .inbox-prop .prop-actions button { padding:6px 10px; font-size:9px; }
+  .inbox-prop .prop-actions button { padding:6px 10px; font-size:10px; }
 
   /* Matter-card inbox badge */
   .matter-card .matter-inbox-badge { position:absolute; top:14px; right:14px;
     background:var(--accent); color:#fff; padding:2px 8px;
-    font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    font-family:var(--mono); font-weight:600; font-size:10px; letter-spacing:.1em; text-transform:uppercase;
     border-radius:0; animation:pulse 2s ease-in-out infinite; }
-  .field label { display:block; font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:.18em; color:var(--muted); margin-bottom:4px; }
+  .field label { display:block; font-family:var(--mono); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.14em; color:var(--muted); margin-bottom:4px; }
   .field input, .field select, .field textarea { width:100%; border:1px solid var(--rule); background:var(--paper); padding:8px 10px;
     font-family:var(--sans); font-size:13px; outline:none; }
   .field input:focus, .field select:focus, .field textarea:focus { border-color:var(--ink); }
   .new-matter .actions { margin-top:18px; display:flex; gap:10px; }
 
   /* Matter detail */
-  .back-link { display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:10px;
-    color:var(--muted); letter-spacing:.18em; text-transform:uppercase; cursor:pointer;
+  .back-link { display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-weight:600; font-size:10px;
+    color:var(--muted); letter-spacing:.14em; text-transform:uppercase; cursor:pointer;
     margin-bottom:16px; background:none; border:none; padding:0; }
-  .back-link:hover { color:var(--accent); }
+  .back-link:hover { color:var(--brand); }
   .matter-head { background:var(--paper-2); border:1px solid var(--rule); padding:24px 28px; margin-bottom:24px; position:relative; box-shadow:var(--shadow); }
   .matter-head::before { content:""; position:absolute; inset:6px; border:1px solid var(--rule-soft); pointer-events:none; }
-  .matter-head .court-line { font-family:var(--mono); font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); margin-bottom:6px; }
+  .matter-head .court-line { font-family:var(--mono); font-weight:600; font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--brand); margin-bottom:6px; }
   .matter-head h2 { font-family:var(--serif); font-size:34px; font-style:italic; margin:0 0 6px; line-height:1.1; }
   .matter-head .casenum { font-family:var(--mono); font-size:12px; color:var(--muted); }
   .matter-head .info-grid { margin-top:18px; padding-top:18px; border-top:1px solid var(--rule-soft);
     display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px 28px; }
-  .matter-head .info-grid dt { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.16em; color:var(--muted); margin-bottom:2px; }
+  .matter-head .info-grid dt { font-family:var(--mono); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.16em; color:var(--muted); margin-bottom:2px; }
   .matter-head .info-grid dd { margin:0; font-family:var(--serif); font-size:16px; }
   .matter-head .head-actions { position:absolute; top:18px; right:18px; display:flex; gap:8px; z-index:1; flex-wrap:wrap; justify-content:flex-end; max-width:50%; }
 
@@ -259,15 +258,15 @@
   .section-title { font-family:var(--serif); font-size:24px; margin:32px 0 14px; padding-bottom:8px; border-bottom:1px solid var(--rule);
     display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   .section-title .right { display:flex; align-items:center; gap:12px; }
-  .section-title .ord { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.2em; text-transform:uppercase; }
+  .section-title .ord { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; }
 
   /* Deadlines */
   .deadlines { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:16px; }
   .deadline { background:#fff; border:1px solid var(--rule); padding:18px 20px 16px; position:relative;
     transition:transform .15s, box-shadow .15s; box-shadow:var(--shadow); }
-  .deadline:hover { transform:translateY(-2px); box-shadow:0 1px 0 rgba(15,20,25,.04), 0 18px 40px -16px rgba(15,20,25,.28); }
-  .deadline .pill { position:absolute; top:-10px; left:16px; font-family:var(--mono); font-size:9px; text-transform:uppercase;
-    letter-spacing:.2em; background:var(--paper); border:1px solid var(--rule); padding:3px 10px; color:var(--ink); }
+  .deadline:hover { transform:translateY(-2px); box-shadow:0 1px 0 rgba(30,27,26,.04), 0 18px 40px -16px rgba(30,27,26,.28); }
+  .deadline .pill { position:absolute; top:-10px; left:16px; font-family:var(--mono); font-weight:600; font-size:10px; text-transform:uppercase;
+    letter-spacing:.14em; background:var(--paper); border:1px solid var(--rule); padding:3px 10px; color:var(--ink); }
   .deadline .pill.us { background:var(--accent); color:#fff; border-color:var(--accent); }
   .deadline .pill.them { background:var(--ink-2); color:var(--paper); border-color:var(--ink-2); }
   .deadline .pill.court { background:var(--gold); color:#fff; border-color:var(--gold); }
@@ -280,7 +279,7 @@
   .deadline .date { font-family:var(--mono); font-size:20px; font-weight:600; }
   .deadline .countdown { margin-top:10px; padding-top:10px; border-top:1px dashed var(--rule); display:flex; gap:12px; align-items:baseline; }
   .deadline .days { font-family:var(--serif); font-size:38px; font-weight:600; line-height:1; color:var(--green); }
-  .deadline .days-label { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.18em; color:var(--muted); }
+  .deadline .days-label { font-family:var(--mono); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.14em; color:var(--muted); }
   .deadline.urgent .days { color:var(--accent); animation:throb 1.6s ease-in-out infinite; }
   .deadline.warn .days { color:var(--amber); }
   /* Informational: Govt/Opp deadlines you track but don't action.
@@ -293,7 +292,7 @@
   .deadline.informational:not(.done) { border-left:1px solid var(--rule); background:var(--paper-3); }
   /* Past-due but NOT marked complete = URGENT, not faded.
      Apply only when the card is NOT also .done (when done, the .done rule below softens it). */
-  .deadline.passed:not(.done) { border-left:3px solid var(--accent); background:linear-gradient(to right, rgba(180,90,60,.06), #fff 60%); }
+  .deadline.passed:not(.done) { border-left:3px solid var(--accent); background:linear-gradient(to right, rgba(156,43,30,.06), #fff 60%); }
   .deadline.passed:not(.done) .days { color:var(--accent); animation:throb 1.6s ease-in-out infinite; }
   .deadline.passed:not(.done) .days-label { color:var(--accent); font-weight:600; }
   /* Only struck-through when actually marked done */
@@ -304,7 +303,7 @@
   .deadline .note { margin-top:10px; font-size:12px; color:var(--muted); font-style:italic; line-height:1.4; }
   .deadline .actions { margin-top:12px; display:flex; gap:6px; flex-wrap:wrap; }
   .deadline .actions button { appearance:none; background:transparent; border:1px solid var(--rule); padding:4px 10px;
-    font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.12em; color:var(--muted);
+    font-family:var(--mono); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.12em; color:var(--muted);
     cursor:pointer; transition:all .15s; }
   .deadline .actions button:hover { background:var(--ink); color:var(--paper); border-color:var(--ink); }
 
@@ -315,7 +314,7 @@
   /* Cards */
   .card { background:#fff; border:1px solid var(--rule); padding:22px 26px; box-shadow:var(--shadow); }
   .card h4 { font-family:var(--serif); font-size:19px; margin:0 0 4px; }
-  .card .sub-cite { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; margin-bottom:16px; }
+  .card .sub-cite { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; margin-bottom:16px; }
 
   /* Checklist */
   ul.check { list-style:none; padding:0; margin:0; }
@@ -333,7 +332,7 @@
   .notes-area textarea { width:100%; min-height:180px; border:1px dashed var(--rule); background:var(--paper); padding:12px;
     font-family:var(--serif); font-size:16px; line-height:1.5; resize:vertical; outline:none; color:var(--ink); }
   .notes-area textarea:focus { border-color:var(--ink); }
-  .saved-tag { font-family:var(--mono); font-size:9px; color:var(--green); letter-spacing:.18em; text-transform:uppercase; opacity:0; transition:opacity .3s; }
+  .saved-tag { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--green); letter-spacing:.14em; text-transform:uppercase; opacity:0; transition:opacity .3s; }
   .saved-tag.show { opacity:1; }
 
   /* Client status summary card */
@@ -341,33 +340,33 @@
   .cs-card .cs-head { background:var(--paper-2); padding:12px 18px; border-bottom:1px solid var(--rule);
     display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
   .cs-card .cs-head-title { font-family:var(--serif); font-size:17px; }
-  .cs-card .cs-head-meta { font-family:var(--mono); font-size:9px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; }
+  .cs-card .cs-head-meta { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; }
   .cs-card .cs-head-actions { display:flex; gap:6px; flex-wrap:wrap; }
   .cs-card .cs-body { padding:18px 22px; }
   .cs-card .cs-subject { font-family:var(--mono); font-size:11px; color:var(--ink); margin-bottom:12px; padding:8px 12px;
     background:var(--paper-3); border-left:2px solid var(--rule); }
-  .cs-card .cs-subject .cs-subject-label { color:var(--muted); letter-spacing:.14em; text-transform:uppercase; font-size:9px; margin-right:6px; }
+  .cs-card .cs-subject .cs-subject-label { color:var(--muted); letter-spacing:.14em; text-transform:uppercase; font-size:10px; margin-right:6px; }
   .cs-tabs { display:flex; gap:0; border-bottom:1px solid var(--rule); margin-bottom:14px; }
   .cs-tab { background:transparent; border:none; border-bottom:2px solid transparent; padding:8px 16px;
     font-family:var(--serif); font-size:14px; color:var(--muted); cursor:pointer; letter-spacing:.02em; }
   .cs-tab:hover { color:var(--ink); }
-  .cs-tab.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+  .cs-tab.active { color:var(--ink-2); border-bottom-color:var(--mark); font-weight:600; }
   .cs-pane { display:none; }
   .cs-pane.active { display:block; }
   .cs-pane textarea { width:100%; min-height:340px; border:1px solid var(--rule); background:var(--paper); padding:14px 16px;
     font-family:var(--serif); font-size:14px; line-height:1.6; color:var(--ink); resize:vertical; outline:none; box-sizing:border-box; }
   .cs-pane textarea:focus { border-color:var(--ink); }
   .cs-pane .cs-copy { margin-top:10px; }
-  .cs-warnings { background:#fff4d6; border-left:3px solid var(--amber); padding:10px 14px; margin-top:12px;
-    font-family:var(--mono); font-size:10px; color:#7a4d10; line-height:1.5; }
+  .cs-warnings { background:#FFF3E6; border-left:3px solid var(--amber); padding:10px 14px; margin-top:12px;
+    font-family:var(--mono); font-size:11px; color:var(--ink-2); line-height:1.5; }
   .cs-warnings .cs-warn-title { font-weight:600; letter-spacing:.1em; text-transform:uppercase; margin-bottom:4px; }
   .cs-warnings ul { margin:4px 0 0; padding-left:18px; }
-  .cs-loading { padding:30px; text-align:center; font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; }
+  .cs-loading { padding:30px; text-align:center; font-family:var(--mono); font-weight:600; font-size:11px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; }
 
   /* IP Lifecycle buttons */
   #ip-lifecycle-buttons { display:flex; flex-wrap:wrap; gap:10px; padding:18px; }
   .lc-btn-group { display:flex; flex-direction:column; gap:6px; padding:12px 14px; border:1px solid var(--rule); background:var(--paper); min-width:240px; flex:1; }
-  .lc-btn-group .lc-label { font-family:var(--mono); font-size:9px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; }
+  .lc-btn-group .lc-label { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; }
   .lc-btn-group .lc-title { font-family:var(--serif); font-size:14px; color:var(--ink); margin-bottom:6px; }
   .lc-btn-group .lc-action { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
   .lc-btn-group input[type="date"] { font-family:var(--mono); font-size:11px; padding:5px 8px; border:1px solid var(--rule); background:var(--paper); }
@@ -385,7 +384,7 @@
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .files-card .link-row .meta .url { font-family:var(--mono); font-size:10px; color:var(--muted);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .files-card .link-row a.open { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.16em;
+  .files-card .link-row a.open { font-family:var(--mono); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.16em;
     text-decoration:none; color:var(--ink); border:1px solid var(--ink); padding:5px 12px; transition:all .15s; }
   .files-card .link-row a.open:hover { background:var(--ink); color:var(--paper); }
   .files-card .link-row button.del { appearance:none; background:transparent; border:none; color:var(--muted); cursor:pointer;
@@ -397,10 +396,10 @@
   /* Court access */
   .court-access { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px; }
   .court-link { background:#fff; border:1px solid var(--rule); padding:14px 18px; text-decoration:none; color:var(--ink); display:block; transition:all .15s; }
-  .court-link:hover { border-color:var(--accent); transform:translateY(-1px); }
+  .court-link:hover { border-color:var(--brand); transform:translateY(-1px); }
   .court-link .court-name { font-family:var(--serif); font-size:17px; font-weight:600; margin-bottom:4px; }
   .court-link .court-sub { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.04em; }
-  .court-link .court-url { font-family:var(--mono); font-size:10px; color:var(--accent); margin-top:6px;
+  .court-link .court-url { font-family:var(--mono); font-size:10px; color:var(--brand); margin-top:6px;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
   /* Add deadline form */
@@ -415,7 +414,7 @@
   .dl-calc-head:hover { background:var(--paper-3); }
   .dl-calc.open .dl-calc-head { border-bottom-color:var(--rule); }
   .dl-calc-title { font-family:var(--serif); font-size:15px; font-weight:600; color:var(--ink); }
-  .dl-calc-hint { font-family:var(--mono); font-size:9px; color:var(--muted); letter-spacing:.08em;
+  .dl-calc-hint { font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted); letter-spacing:.08em;
     text-transform:uppercase; flex:1; }
   .dl-calc-chev { font-family:var(--mono); font-size:14px; color:var(--muted); transition:transform .2s; }
   .dl-calc.open .dl-calc-chev { transform:rotate(180deg); }
@@ -424,7 +423,7 @@
   .dl-calc-grid { display:grid; grid-template-columns:1.1fr 1.1fr 0.7fr 1.6fr; gap:12px; align-items:end;
     margin-bottom:12px; }
   @media (max-width: 800px) { .dl-calc-grid { grid-template-columns:1fr 1fr; } }
-  .dl-calc-field label { display:block; font-family:var(--mono); font-size:9px; color:var(--muted);
+  .dl-calc-field label { display:block; font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted);
     letter-spacing:.12em; text-transform:uppercase; margin-bottom:4px; }
   .dl-calc-field input[type=date],
   .dl-calc-field input[type=number],
@@ -447,11 +446,11 @@
   .dlc-result-explain b { color:var(--ink); font-weight:600; }
   .dlc-result-actions { display:flex; gap:8px; }
 
-  .dl-calc-disclaimer { font-family:var(--mono); font-size:9px; color:var(--amber); letter-spacing:.06em;
+  .dl-calc-disclaimer { font-family:var(--mono); font-size:10px; color:var(--amber); letter-spacing:.06em;
     line-height:1.5; margin-top:10px; padding-top:10px; border-top:1px dotted var(--rule-soft); }
 
   /* Modal */
-  .modal-bg { position:fixed; inset:0; background:rgba(15,20,25,.55); z-index:100; display:none;
+  .modal-bg { position:fixed; inset:0; background:rgba(30,27,26,.55); z-index:100; display:none;
     align-items:center; justify-content:center; backdrop-filter:blur(2px); }
   .modal-bg.open { display:flex; }
   .modal { background:var(--paper); border:1px solid var(--ink); max-width:560px; width:90%; padding:32px;
@@ -459,9 +458,9 @@
   .modal h3 { font-family:var(--serif); font-size:24px; margin:0 0 8px; }
   .modal p { color:var(--muted); margin-bottom:14px; }
   .modal .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
-  .modal .info-section { background:var(--paper-2); border-left:3px solid var(--accent); padding:14px 18px; margin:14px 0;
+  .modal .info-section { background:var(--paper-2); border-left:3px solid var(--mark); padding:14px 18px; margin:14px 0;
     font-family:var(--serif); font-size:15px; line-height:1.55; color:var(--ink); }
-  .modal .info-section strong { font-family:var(--sans); font-size:13px; text-transform:uppercase; letter-spacing:.12em; color:var(--accent); display:block; margin-bottom:6px; }
+  .modal .info-section strong { font-family:var(--sans); font-size:13px; text-transform:uppercase; letter-spacing:.12em; color:var(--brand); display:block; margin-bottom:6px; }
   .modal ol { padding-left:22px; margin:6px 0; }
   .modal ol li { margin-bottom:6px; font-family:var(--serif); font-size:15px; }
 
@@ -471,12 +470,12 @@
 
   /* Reference panel */
   .ref-body { font-family:var(--serif); font-size:15px; line-height:1.6; }
-  .ref-body h5 { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.2em; color:var(--accent); margin:18px 0 6px; }
+  .ref-body h5 { font-family:var(--mono); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.14em; color:var(--brand); margin:18px 0 6px; }
   .ref-body ul { padding-left:18px; margin:0; }
   .ref-body li { margin-bottom:4px; }
 
   footer { margin-top:60px; padding-top:20px; border-top:1px solid var(--rule);
-    font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; text-align:center; }
+    font-family:var(--mono); font-weight:600; font-size:10px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; text-align:center; }
   footer .links { margin-top:6px; }
 
   /* ─── Mobile (≤ 700px) ──────────────────────────────────── */
@@ -596,6 +595,16 @@
     .matter-card h3 { font-size: 20px; }
     .matter-head h2 { font-size: 22px; }
   }
+
+  /* Inside Tara the page is a frame within the firm's chrome: the sidebar and
+     the heading are outside, so the old masthead is not drawn. */
+  html.embed .masthead { display:none; }
+  html.embed .app { max-width:none; padding:8px 32px 60px; }
+  .matter-card .next { flex-wrap:wrap; }
+  .matter-card .next-days { white-space:nowrap; }
+  :focus-visible { outline:2px solid var(--mark); outline-offset:2px; }
+  input:focus, select:focus, textarea:focus { box-shadow:0 0 0 3px rgba(255,123,0,.22); }
+  @media (max-width: 720px) { html.embed .app { padding:14px 14px 50px; } }
 </style>
 </head>
 <body>
@@ -613,11 +622,10 @@
   <!-- Nav -->
   <div class="nav">
     <button class="nav-btn active" data-view="active">Active Matters <span class="badge" id="badge-active">0</span></button>
-    <button class="nav-btn" data-view="inbox">📬 Inbox <span class="badge inbox-badge" id="badge-inbox">0</span></button>
+    <button class="nav-btn" data-view="inbox">Inbox <span class="badge inbox-badge" id="badge-inbox">0</span></button>
     <button class="nav-btn" data-view="archive">Archive <span class="badge" id="badge-archive">0</span></button>
     <button class="nav-btn" data-view="courts">Court Access</button>
     <button class="nav-btn" data-view="reference">Authorities</button>
-    <a href="/admin/" class="nav-btn nav-link-admin" title="Switch to Zara Admin Panel">📊 → Admin</a>
   </div>
 
   <!-- ACTIVE MATTERS -->
@@ -644,12 +652,12 @@
 
         <div class="nef-intake">
           <div class="nef-label">
-            <span>📋 Paste NEF / BIA decision / court email here to auto-populate fields</span>
+            <span>Paste NEF / BIA decision / court email here to auto-populate fields</span>
             <span class="nef-hint">optional · review fields before saving</span>
           </div>
           <textarea id="nm-nef-text" placeholder="Paste the full Notice of Electronic Filing email, BIA decision text, or court order here. Claude will extract case name, number, court, type, dates, and custody."></textarea>
           <div class="nef-actions">
-            <button class="btn small" id="nm-nef-parse">⚡ Parse &amp; Populate</button>
+            <button class="btn small" id="nm-nef-parse">Parse &amp; Populate</button>
             <button class="btn ghost small" id="nm-nef-clear">Clear</button>
             <span id="nm-nef-status"></span>
           </div>
@@ -657,12 +665,12 @@
 
         <div class="nef-intake uspto-intake">
           <div class="nef-label">
-            <span>™️ Paste USPTO / USCO email here (Trademark · Patent · Copyright)</span>
+            <span>Paste USPTO / USCO email here (Trademark · Patent · Copyright)</span>
             <span class="nef-hint">filing receipt · office action · NOA · etc.</span>
           </div>
           <textarea id="nm-uspto-text" placeholder="Paste the full USPTO filing receipt, office action, notice of allowance, or USCO certificate. Claude will extract mark, serial number, owner, filing basis, class, and dates."></textarea>
           <div class="nef-actions">
-            <button class="btn small" id="nm-uspto-parse">⚡ Parse USPTO Email</button>
+            <button class="btn small" id="nm-uspto-parse">Parse USPTO Email</button>
             <button class="btn ghost small" id="nm-uspto-clear">Clear</button>
             <span id="nm-uspto-status"></span>
           </div>
@@ -765,7 +773,7 @@
       <div class="sub-cite">Forward or paste the body of a Notice of Electronic Filing. Claude proposes — you review.</div>
       <textarea id="inbox-paste-text" placeholder="Paste the full body of a CM/ECF email here…"></textarea>
       <div class="parser-actions">
-        <button class="btn small" id="inbox-paste-btn">⚡ Ingest</button>
+        <button class="btn small" id="inbox-paste-btn">Ingest</button>
         <button class="btn ghost small" id="inbox-paste-clear">Clear</button>
         <span id="inbox-paste-status"></span>
       </div>
@@ -791,7 +799,7 @@
     <!-- DEADLINE CALCULATOR -->
     <div class="dl-calc" id="dl-calc">
       <div class="dl-calc-head" id="dl-calc-toggle">
-        <span class="dl-calc-title">🧮 Deadline Calculator</span>
+        <span class="dl-calc-title">Deadline Calculator</span>
         <span class="dl-calc-hint">Fed. R. Civ. P. 6 / Fed. R. App. P. 26 — federal default rules · click to expand</span>
         <span class="dl-calc-chev" id="dl-calc-chev">▾</span>
       </div>
@@ -834,7 +842,7 @@
           <div class="dlc-result-date" id="dlc-result-date"></div>
           <div class="dlc-result-explain" id="dlc-result-explain"></div>
           <div class="dlc-result-actions">
-            <button class="btn ghost small" id="dlc-copy">📋 Copy date</button>
+            <button class="btn ghost small" id="dlc-copy">Copy date</button>
             <button class="btn small" id="dlc-use">↓ Use in add-deadline form below</button>
           </div>
         </div>
@@ -883,7 +891,7 @@
     <div class="section-title">
       <span>Client Communication</span>
       <div class="right">
-        <button class="btn small" id="gen-client-summary">📝 Generate Client Status Update</button>
+        <button class="btn small" id="gen-client-summary">Generate Client Status Update</button>
         <span class="ord">Drafts only — copy &amp; forward via your own channel</span>
       </div>
     </div>
@@ -897,11 +905,11 @@
     </div>
 
     <div class="order-parser">
-      <h4>⚡ Parse Court Order</h4>
+      <h4>Parse Court Order</h4>
       <div class="sub-cite">Paste a scheduling order, NEF, BIA decision, or court text — Claude proposes deadlines you can review and add</div>
       <textarea id="op-text" placeholder="Paste the order text here. Claude will extract every date-certain deadline, identify who must act (us / govt / court), and cite the rule."></textarea>
       <div class="parser-actions">
-        <button class="btn small" id="op-parse">⚡ Analyze</button>
+        <button class="btn small" id="op-parse">Analyze</button>
         <button class="btn ghost small" id="op-clear">Clear</button>
         <span id="op-status"></span>
       </div>
@@ -1075,7 +1083,7 @@
         <strong>Google Calendar</strong>
         <ol>
           <li>Open Google Calendar in a browser.</li>
-          <li><em>Settings (⚙) → Import &amp; export → Import</em>.</li>
+          <li><em>Settings () → Import &amp; export → Import</em>.</li>
           <li>Select the <code>.ics</code> file and the target calendar.</li>
         </ol>
       </div>
@@ -1102,6 +1110,16 @@
 </div>
 
 <script>
+// ── Where this page lives ───────────────────────────────────
+// It is shown inside Tara, at /admin/matters/, in a frame. Opened by itself
+// (an old bookmark to the frame's own address) it goes to the Tara page.
+(function () {
+  var framed = false;
+  try { framed = window.top !== window.self; } catch (e) { framed = true; }
+  if (!framed) { location.replace('/admin/matters/' + location.hash); return; }
+  document.documentElement.classList.add('embed');
+})();
+
 // ============================================================
 // STORAGE — API-backed (Tez Law backend)
 // ============================================================
@@ -1123,11 +1141,22 @@ async function api(path, opts = {}) {
     init.body = JSON.stringify(init.body);
   }
   const r = await fetch(API_BASE + path, init);
-  if (r.status === 401) { location.href = '/admin/login'; return null; }
+  if (r.status === 401) { (window.top || window).location.href = '/admin/login?next=' + encodeURIComponent('/admin/matters/'); return null; }
   const text = await r.text();
   let data; try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
+}
+
+// A calendar date as the day it names: "2026-08-01", whatever time zone the
+// server or this browser is in.
+function dayOnly(v) { const d = v ? String(v).slice(0, 10) : ''; return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : ''; }
+function localDay(dt) { return isNaN(dt) ? '' : dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0'); }
+function dayLabel(v) {
+  const d = dayOnly(v);
+  if (!d) return '—';
+  const [y, m, dd] = d.split('-').map(Number);
+  return new Date(y, m - 1, dd).toLocaleDateString('en-US');
 }
 
 // Map a DB matter row (with deadlines/files/notes/checklists nested)
@@ -1201,8 +1230,8 @@ function mapMatterFromDb(dbm, deadlines, files, notes, checklists) {
     court: dbm.court || '',
     type: typeKey,
     casenum: dbm.matter_ref || '',
-    created: dbm.opened_date || (dbm.created_at ? dbm.created_at.slice(0,10) : ''),
-    trigger: dbm.triggering_date || '',
+    created: dayOnly(dbm.opened_date) || (dbm.created_at ? localDay(new Date(dbm.created_at)) : ''),
+    trigger: dayOnly(dbm.triggering_date),
     detained: dbm.custody_location ? 'yes' : 'no',
     detentionFacility: dbm.custody_location || '',
     dropbox: dbm.dropbox_url || '',
@@ -1518,6 +1547,7 @@ function showView(view) {
   renderOverviewStats(); renderBadges();
 }
 document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+const START_VIEW = (location.hash || '').replace('#', '');
 
 // ============================================================
 // MATTER LIST
@@ -1592,7 +1622,7 @@ function matterCardHTML(m, next, isArchived) {
     </div>`;
   const inboxCount = (state.proposalCounts?.by_matter?.[m.id]) || 0;
   const inboxBadge = inboxCount > 0
-    ? `<div class="matter-inbox-badge" title="${inboxCount} pending proposal${inboxCount === 1 ? '' : 's'} from CM/ECF">📬 ${inboxCount}</div>`
+    ? `<div class="matter-inbox-badge" title="${inboxCount} pending proposal${inboxCount === 1 ? '' : 's'} from CM/ECF">${inboxCount}</div>`
     : '';
   return `
     <div class="matter-card ${isArchived ? 'archived' : ''}" data-id="${m.id}">
@@ -2073,21 +2103,21 @@ function renderMatterDetail() {
     const fmtCommerce = m.relief ? m.relief : '—';
     const filingBasisLabel = m.filing_basis ? `§ ${m.filing_basis}` : '—';
     infoGrid = `
-      <div><dt>${m.type === 'Trademark' ? 'Filed' : 'Filed / Recorded'}</dt><dd>${m.trigger ? new Date(m.trigger).toLocaleDateString('en-US') : (m.created ? new Date(m.created).toLocaleDateString('en-US') : '—')}</dd></div>
+      <div><dt>${m.type === 'Trademark' ? 'Filed' : 'Filed / Recorded'}</dt><dd>${m.trigger ? dayLabel(m.trigger) : (m.created ? dayLabel(m.created) : '—')}</dd></div>
       ${m.serial_number ? `<div><dt>Serial / App / Reg</dt><dd>${escapeHtml(m.serial_number)}</dd></div>` : ''}
       ${m.intl_class ? `<div><dt>Int'l Class</dt><dd>${escapeHtml(m.intl_class)}</dd></div>` : ''}
       ${m.filing_basis ? `<div><dt>Filing Basis</dt><dd>${filingBasisLabel}</dd></div>` : ''}
       ${m.mark_format ? `<div><dt>Mark Format</dt><dd>${escapeHtml(m.mark_format)}</dd></div>` : ''}
-      ${m.owner_email ? `<div><dt>Owner Email</dt><dd><a href="mailto:${escapeAttr(m.owner_email)}" style="color:var(--accent);">${escapeHtml(m.owner_email)}</a></dd></div>` : ''}
+      ${m.owner_email ? `<div><dt>Owner Email</dt><dd><a href="mailto:${escapeAttr(m.owner_email)}" style="color:var(--brand);">${escapeHtml(m.owner_email)}</a></dd></div>` : ''}
       ${m.relief ? `<div><dt>Goods / Services</dt><dd>${escapeHtml(m.relief)}</dd></div>` : ''}
-      <div><dt>Dropbox</dt><dd>${m.dropbox ? `<a href="${escapeAttr(m.dropbox)}" target="_blank" rel="noopener" style="color:var(--accent);">Open folder ↗</a>` : '<span style="color:var(--muted); font-style:italic;">none linked</span>'}</dd></div>
+      <div><dt>Dropbox</dt><dd>${m.dropbox ? `<a href="${escapeAttr(m.dropbox)}" target="_blank" rel="noopener" style="color:var(--brand);">Open folder ↗</a>` : '<span style="color:var(--muted); font-style:italic;">none linked</span>'}</dd></div>
       ${m.archived ? `<div><dt>Closed</dt><dd>${new Date(m.archivedDate).toLocaleDateString('en-US')}</dd></div>` : ''}`;
   } else {
     infoGrid = `
-      <div><dt>Opened</dt><dd>${m.created ? new Date(m.created).toLocaleDateString('en-US') : '—'}</dd></div>
-      <div><dt>Triggering Date</dt><dd>${m.trigger ? new Date(m.trigger).toLocaleDateString('en-US') : '—'}</dd></div>
+      <div><dt>Opened</dt><dd>${m.created ? dayLabel(m.created) : '—'}</dd></div>
+      <div><dt>Triggering Date</dt><dd>${m.trigger ? dayLabel(m.trigger) : '—'}</dd></div>
       <div><dt>Custody</dt><dd>${m.detained === 'yes' ? (m.detentionFacility || 'Detained') : (m.detained === 'no' ? 'At liberty' : 'N/A')}</dd></div>
-      <div><dt>Dropbox</dt><dd>${m.dropbox ? `<a href="${escapeAttr(m.dropbox)}" target="_blank" rel="noopener" style="color:var(--accent);">Open folder ↗</a>` : '<span style="color:var(--muted); font-style:italic;">none linked</span>'}</dd></div>
+      <div><dt>Dropbox</dt><dd>${m.dropbox ? `<a href="${escapeAttr(m.dropbox)}" target="_blank" rel="noopener" style="color:var(--brand);">Open folder ↗</a>` : '<span style="color:var(--muted); font-style:italic;">none linked</span>'}</dd></div>
       ${m.archived ? `<div><dt>Closed</dt><dd>${new Date(m.archivedDate).toLocaleDateString('en-US')}</dd></div>` : ''}`;
   }
 
@@ -2160,7 +2190,7 @@ function renderIpLifecycle(m) {
     buttons.push({
       event: 'tm_examination',
       label: 'Filing Watch',
-      title: '🔍 Add Examination Watch Events',
+      title: 'Add Examination Watch Events',
       hint: 'Informational events: expected OA, publication, opposition window',
       defaultAnchor: m.trigger || m.created || ''
     });
@@ -2169,7 +2199,7 @@ function renderIpLifecycle(m) {
       buttons.push({
         event: 'tm_noa',
         label: 'NOA Received',
-        title: '📬 Record NOA Date',
+        title: 'Record NOA Date',
         hint: 'Generates 6 SOU/extension deadlines (6, 12, 18, 24, 30, 36 mo from NOA)',
         defaultAnchor: ''
       });
@@ -2177,7 +2207,7 @@ function renderIpLifecycle(m) {
     buttons.push({
       event: 'tm_registration',
       label: 'Registered',
-      title: '📜 Record Registration Date',
+      title: 'Record Registration Date',
       hint: 'Generates § 8 (yr 5-6) and § 8/§ 9 renewal (yr 9-10) deadlines',
       defaultAnchor: ''
     });
@@ -2185,28 +2215,28 @@ function renderIpLifecycle(m) {
     buttons.push({
       event: 'pat_examination',
       label: 'Filing Watch',
-      title: '🔍 Add Examination Watch Events',
+      title: 'Add Examination Watch Events',
       hint: 'Informational: 18-mo publication, expected first OA',
       defaultAnchor: m.trigger || m.created || ''
     });
     buttons.push({
       event: 'pat_first_oa',
       label: 'OA Received',
-      title: '📋 Record First Office Action Date',
+      title: 'Record First Office Action Date',
       hint: '3-mo statutory response + 6-mo final extension',
       defaultAnchor: ''
     });
     buttons.push({
       event: 'pat_noa',
       label: 'NOA Received',
-      title: '📬 Record Patent NOA Date',
+      title: 'Record Patent NOA Date',
       hint: '⚠ 3-month NON-EXTENDABLE issue fee deadline',
       defaultAnchor: ''
     });
     buttons.push({
       event: 'pat_issue',
       label: 'Patent Issued',
-      title: '📜 Record Issue Date',
+      title: 'Record Issue Date',
       hint: 'Maintenance fees at 3.5, 7.5, 11.5 years',
       defaultAnchor: ''
     });
@@ -2214,7 +2244,7 @@ function renderIpLifecycle(m) {
     buttons.push({
       event: 'cr_registration',
       label: 'Registered',
-      title: '📜 Record Registration Date',
+      title: 'Record Registration Date',
       hint: 'Termination of transfer right (yr 35-40)',
       defaultAnchor: ''
     });
@@ -2445,7 +2475,7 @@ function renderFiles(m) {
   if (m.dropbox) {
     folderRow = `
       <div class="link-row">
-        <div class="icon">📁</div>
+        <div class="icon"></div>
         <div class="meta">
           <div class="name">Main Dropbox Folder</div>
           <div class="url">${escapeHtml(m.dropbox)}</div>
@@ -2877,7 +2907,7 @@ function renderOpProposals() {
 
     // Right-side action area depends on state:
     //   1. Has date            → green "+ Add" button (immediate add)
-    //   2. No date, no picker  → amber "📅 Set Date" button (reveal picker)
+    //   2. No date, no picker  → amber "Set Date" button (reveal picker)
     //   3. No date, picker shown → date input + "Add" button (user types date, then add)
     let actionHtml;
     if (noDate && showPicker) {
@@ -2888,7 +2918,7 @@ function renderOpProposals() {
         <button class="btn small op-add-with-date-btn" data-idx="${idx}">Add</button>
       </div>`;
     } else if (noDate) {
-      actionHtml = `<button class="btn small op-set-date-btn" data-idx="${idx}">📅 Set Date</button>`;
+      actionHtml = `<button class="btn small op-set-date-btn" data-idx="${idx}">Set Date</button>`;
     } else {
       actionHtml = `<button class="btn small op-add-btn" data-idx="${idx}">+ Add</button>`;
     }
@@ -3257,7 +3287,7 @@ document.getElementById('gen-client-summary').addEventListener('click', async ()
   const container = document.getElementById('client-summary-container');
   const btn = document.getElementById('gen-client-summary');
   container.style.display = 'block';
-  container.innerHTML = '<div class="cs-card"><div class="cs-loading">⏳ Generating summary… (~10-15 sec)</div></div>';
+  container.innerHTML = '<div class="cs-card"><div class="cs-loading">Generating summary… (~10-15 sec)</div></div>';
   btn.disabled = true;
   const origText = btn.textContent;
   btn.textContent = 'Generating…';
@@ -3282,13 +3312,13 @@ function renderClientSummary(r) {
   const subject = r.subject_line || 'Status Update';
   const englishHtml = `<textarea class="cs-text-en">${escapeHtml(r.english || '')}</textarea>
     <div class="cs-copy">
-      <button class="btn small cs-copy-btn" data-pane="en">📋 Copy English</button>
-      <button class="btn ghost small cs-copy-btn" data-pane="en-subject">📋 Copy Subject + Body</button>
+      <button class="btn small cs-copy-btn" data-pane="en">Copy English</button>
+      <button class="btn ghost small cs-copy-btn" data-pane="en-subject">Copy Subject + Body</button>
     </div>`;
   const mandarinHtml = r.mandarin
     ? `<textarea class="cs-text-zh">${escapeHtml(r.mandarin)}</textarea>
        <div class="cs-copy">
-         <button class="btn small cs-copy-btn" data-pane="zh">📋 复制中文</button>
+         <button class="btn small cs-copy-btn" data-pane="zh">复制中文</button>
        </div>`
     : `<div style="padding:20px; color:var(--muted); font-style:italic;">No Mandarin version generated.</div>`;
 
@@ -3308,7 +3338,7 @@ function renderClientSummary(r) {
           <div class="cs-head-meta">Edit before forwarding · attorney-client privileged</div>
         </div>
         <div class="cs-head-actions">
-          <button class="btn ghost small" id="cs-regenerate">🔄 Regenerate</button>
+          <button class="btn ghost small" id="cs-regenerate">Regenerate</button>
           <button class="btn ghost small" id="cs-close">✕ Close</button>
         </div>
       </div>
@@ -3383,7 +3413,7 @@ async function renderInbox() {
     inboxProposals = r.proposals || [];
 
     if (inboxProposals.length === 0) {
-      c.innerHTML = `<div class="empty">📭 Inbox is empty. Paste a CM/ECF email above to ingest.</div>`;
+      c.innerHTML = `<div class="empty">Inbox is empty. Paste a CM/ECF email above to ingest.</div>`;
       return;
     }
 
@@ -3457,12 +3487,12 @@ async function renderInbox() {
 
 function renderInboxProp(p) {
   const data = (typeof p.proposed_data === 'string') ? JSON.parse(p.proposed_data) : p.proposed_data;
-  let icon = '📋';
+  let icon = '';
   let title = 'Unknown proposal';
   let detail = '';
 
   if (p.kind === 'deadline') {
-    icon = '⏰';
+    icon = '';
     title = `<em>Deadline:</em> ${escapeHtml(data.title || 'Untitled')}`;
     detail = `<dl>
       <dt>Due</dt><dd>${escapeHtml(data.due_date || '—')}</dd>
@@ -3470,7 +3500,7 @@ function renderInboxProp(p) {
       ${data.citation ? `<dt>Citation</dt><dd>${escapeHtml(data.citation)}</dd>` : ''}
     </dl>`;
   } else if (p.kind === 'new_matter') {
-    icon = '📁';
+    icon = '';
     const caption = data.client_name || data.petitioner_name || 'Unknown';
     title = `<em>New Matter:</em> ${escapeHtml(caption)}`;
     detail = `<dl>
@@ -3484,7 +3514,7 @@ function renderInboxProp(p) {
       ${data.notes ? `<dt>Summary</dt><dd>${escapeHtml(data.notes)}</dd>` : ''}
     </dl>`;
   } else if (p.kind === 'field_update') {
-    icon = '✏️';
+    icon = '';
     title = `<em>Field Update</em> proposed`;
     const dt = Object.entries(data)
       .filter(([k, v]) => v != null && v !== '')
@@ -3589,10 +3619,12 @@ document.getElementById('inbox-refresh').addEventListener('click', async () => {
 // INIT
 // ============================================================
 (async () => {
+  if (!document.documentElement.classList.contains('embed')) return;   // on its way to the Tara page
   await loadState();
   await loadProposalCounts();
   renderOverviewStats(); renderBadges();
   renderMatterList(); renderCourtLinks();
+  if (START_VIEW && START_VIEW !== 'detail' && document.getElementById('view-' + START_VIEW)) showView(START_VIEW);
 })();
 </script>
 </body>

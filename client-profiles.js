@@ -314,11 +314,11 @@ function renderClientList(clients) {
       ? `<span style="background:#A34C00; color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Next: ${escapeHtml(c.upcoming[0].type)} ${new Date(c.upcoming[0].date).toLocaleDateString()}</span>`
       : "";
     const sourceTag = c.dropbox_only
-      ? `<span style="background:#0061FF; color:white; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;" title="Imported from Dropbox — no hearings recorded yet">📦 Dropbox</span>`
+      ? `<span style="background:#2B2523; color:white; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;" title="Imported from Dropbox — no hearings recorded yet">📦 Dropbox</span>`
       : "";
     const brokerCell = c.broker
       ? `<span style="color:#A34C00; font-weight:600; font-size:12px;">🤝 ${escapeHtml(c.broker)}</span>`
-      : `<span style="color:#ccc;">—</span>`;
+      : `<span style="color:#5E5854;">—</span>`;
     return `
     <tr class="c-row"
         data-name="${escapeAttr((c.client_name || "").toLowerCase())}"
@@ -340,7 +340,7 @@ function renderClientList(clients) {
       <td>${brokerCell}</td>
       <td><a href="/admin/clients/${c.key}" style="color:#2B2523;">view →</a></td>
     </tr>`;
-  }).join("") : `<tr><td colspan="9" style="text-align:center; color:#888;">No clients yet. Create a hearing note or bulk import from Dropbox to populate this list.</td></tr>`;
+  }).join("") : `<tr><td colspan="9" style="text-align:center; color:#5E5854;">No clients yet. Create a hearing note or bulk import from Dropbox to populate this list.</td></tr>`;
 
   const totalUpcoming = clients.filter(c => c.upcoming.length).length;
   const totalDropboxOnly = clients.filter(c => c.dropbox_only).length;
@@ -348,25 +348,25 @@ function renderClientList(clients) {
   const body = `
     <div class="page-header">
       <h1>Client Profiles</h1>
-      <div style="font-size:13px; color:#666;">${clients.length} clients · ${totalUpcoming} with upcoming hearings${totalDropboxOnly ? ` · ${totalDropboxOnly} from Dropbox` : ""}</div>
+      <div style="font-size:13px; color:#5E5854;">${clients.length} clients · ${totalUpcoming} with upcoming hearings${totalDropboxOnly ? ` · ${totalDropboxOnly} from Dropbox` : ""}</div>
     </div>
 
-    <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #eee;">
+    <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #E8E3DC;">
       <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
         <div style="flex:1; min-width:280px;">
           <input type="text" id="search-input" placeholder="🔍 Search by name, A-Number, email, or case type..."
                  onkeyup="filterRows()"
-                 style="width:100%; padding:9px 12px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+                 style="width:100%; padding:9px 12px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
         </div>
         <div>
-          <select id="filter-upcoming" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+          <select id="filter-upcoming" onchange="filterRows()" style="padding:9px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
             <option value="">All clients</option>
             <option value="yes">Has upcoming hearing</option>
             <option value="no">No upcoming hearing</option>
           </select>
         </div>
         <div>
-          <select id="filter-lang" onchange="filterRows()" style="padding:9px; border:1px solid #ccc; border-radius:4px; font-size:14px;">
+          <select id="filter-lang" onchange="filterRows()" style="padding:9px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px;">
             <option value="">All languages</option>
             <option value="en">English</option>
             <option value="zh">Chinese</option>
@@ -376,16 +376,16 @@ function renderClientList(clients) {
           </select>
         </div>
         <div>
-          <button type="button" onclick="clearFilters()" style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Clear</button>
+          <button type="button" onclick="clearFilters()" style="padding:9px 14px; background:#F3EFE9; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Clear</button>
         </div>
-        <div style="border-left:1px solid #eee; padding-left:12px;">
+        <div style="border-left:1px solid #E8E3DC; padding-left:12px;">
           <button type="button" onclick="showAddContactModal()" title="Add a new client contact record (no case yet)" style="padding:9px 14px; background:#FF7B00;color:#1E1B1A; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">➕ Add Client</button>
           <a href="/admin/clients/i589" title="Read each client's address and phone from item 8 of their most recent I-589" style="padding:9px 14px; background:#fff; color:#2B2523; border:1px solid #E8E3DC; border-radius:4px; text-decoration:none; font-size:13px; font-weight:600; display:inline-block;">📄 I-589 addresses</a>
-          <button type="button" onclick="bulkImportDropbox(true)" title="Preview what would be imported (no changes)" style="padding:9px 14px; background:#eee; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">👁 Preview import</button>
-          <button type="button" onclick="bulkImportDropbox(false)" title="Scan Dropbox and add all client folders as clients" style="padding:9px 14px; background:#0061FF; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">📥 Import from Dropbox</button>
+          <button type="button" onclick="bulkImportDropbox(true)" title="Preview what would be imported (no changes)" style="padding:9px 14px; background:#F3EFE9; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">👁 Preview import</button>
+          <button type="button" onclick="bulkImportDropbox(false)" title="Scan Dropbox and add all client folders as clients" style="padding:9px 14px; background:#2B2523; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:4px;">📥 Import from Dropbox</button>
         </div>
       </div>
-      <div id="row-count" style="margin-top:10px; font-size:13px; color:#666;">Showing ${clients.length} client${clients.length === 1 ? "" : "s"}</div>
+      <div id="row-count" style="margin-top:10px; font-size:13px; color:#5E5854;">Showing ${clients.length} client${clients.length === 1 ? "" : "s"}</div>
       <div id="import-status" style="margin-top:10px; font-size:13px;"></div>
     </div>
 
@@ -474,11 +474,11 @@ function renderClientList(clients) {
           +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Phone</label><input id="ac_phone" type="tel" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:14px;" placeholder="626-555-0100"></div>'
           +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Email</label><input id="ac_email" type="email" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:14px;"></div>'
           +     '<div><label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">A-Number</label><input id="ac_anumber" type="text" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:14px;" placeholder="A200-000-000"></div>'
-          +     '<div style="grid-column:1/-1;border-top:1px solid #E2CFA2;margin-top:4px;padding-top:12px;">'
+          +     '<div style="grid-column:1/-1;border-top:1px solid #E8E3DC;margin-top:4px;padding-top:12px;">'
           +       '<label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Signed retainer or fee agreement</label>'
           +       '<div style="font-size:12px;color:#5E5854;margin-bottom:8px;">Upload the PDF and the details are read off it for you to check. Nothing is saved until you tick it.</div>'
           +       '<input id="ac_file" type="file" accept="application/pdf" style="display:none;" onchange="acExtract(this)">'
-          +       '<button type="button" id="ac_upload_btn" onclick="acPickFile()" style="width:100%;padding:10px;border:1.5px dashed #A34C00;border-radius:6px;background:rgba(184,137,30,0.07);color:#7B5810;cursor:pointer;font-size:13px;font-weight:600;">Choose a PDF</button>'
+          +       '<button type="button" id="ac_upload_btn" onclick="acPickFile()" style="width:100%;padding:10px;border:1.5px dashed #A34C00;border-radius:6px;background:rgba(184,137,30,0.07);color:#7A3900;cursor:pointer;font-size:13px;font-weight:600;">Choose a PDF</button>'
           +       '<div id="ac_review" style="display:none;margin-top:12px;"></div>'
           +     '</div>'
           +     '<div style="grid-column:1/-1;">'
@@ -499,7 +499,7 @@ function renderClientList(clients) {
           +     '<div style="grid-column:1/-1;"><label style="display:block;font-size:11px;font-weight:600;color:#2B2523;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">Notes</label><textarea id="ac_notes" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:14px;min-height:60px;font-family:inherit;" placeholder="Anything you want to remember about this client..."></textarea></div>'
           +   '</div>'
           +   '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">'
-          +     '<button type="button" onclick="closeAddContactModal()" style="padding:10px 20px;background:transparent;border:1.5px solid #A34C00;color:#7B5810;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-weight:500;letter-spacing:1px;text-transform:uppercase;font-size:12px;">Cancel</button>'
+          +     '<button type="button" onclick="closeAddContactModal()" style="padding:10px 20px;background:transparent;border:1.5px solid #A34C00;color:#7A3900;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-weight:500;letter-spacing:1px;text-transform:uppercase;font-size:12px;">Cancel</button>'
           +     '<button type="button" id="ac_submit" onclick="submitAddContact()" style="padding:10px 24px;background:#FF7B00;color:#1E1B1A;border:2px solid #9C2B1E;border-radius:6px;cursor:pointer;font-family:Montserrat,sans-serif;font-weight:700;letter-spacing:2px;text-transform:uppercase;font-size:12px;box-shadow:0 3px 10px rgba(184,66,0,0.3);">Save Client</button>'
           +   '</div>'
           + '</div>';
@@ -666,7 +666,7 @@ function renderClientList(clients) {
                 + '<div style="font-size:12px;color:#5E5854;margin-bottom:6px;">' + sub + '</div>';
           for (var i = 0; i < list.length; i++) {
             var k = list[i][0], c = list[i][1];
-            h += '<label style="display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid #E2CFA2;border-radius:6px;background:#FFF;margin-bottom:6px;cursor:pointer;">'
+            h += '<label style="display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid #E8E3DC;border-radius:6px;background:#FFF;margin-bottom:6px;cursor:pointer;">'
                +   '<input type="checkbox" data-ac-field="' + acEsc(k) + '"' + (checked ? ' checked' : '') + ' style="margin-top:3px;">'
                +   '<span style="flex:1;">'
                +     '<span style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#5E5854;">' + acEsc(acLabel(k)) + '</span>'
@@ -749,7 +749,7 @@ function renderClientList(clients) {
           html += '<div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#2B2523;margin:14px 0 4px;">Is the client one of these?</div>'
                 + '<div style="font-size:12px;color:#5E5854;margin-bottom:8px;">Closest first. Picking one files the client there.</div>';
           for (var i = 0; i < cands.length; i++) {
-            html += '<button type="button" onclick="acfAdopt(this)" data-path="' + acEsc(cands[i].path) + '" style="display:block;width:100%;text-align:left;padding:9px 11px;border:1px solid #E2CFA2;border-radius:6px;background:#FFF;margin-bottom:6px;cursor:pointer;">'
+            html += '<button type="button" onclick="acfAdopt(this)" data-path="' + acEsc(cands[i].path) + '" style="display:block;width:100%;text-align:left;padding:9px 11px;border:1px solid #E8E3DC;border-radius:6px;background:#FFF;margin-bottom:6px;cursor:pointer;">'
                  +   '<span style="display:block;font-weight:600;color:#2B2523;font-size:14px;">' + acEsc(cands[i].name) + '</span>'
                  +   '<span style="display:block;font-size:11px;color:#5E5854;">' + acEsc(cands[i].path) + '</span>'
                  + '</button>';
@@ -874,32 +874,32 @@ function renderClientList(clients) {
 
       async function bulkImportDropbox(dryRun) {
         const status = document.getElementById("import-status");
-        status.innerHTML = '<span style="color:#666;">⏳ Scanning Dropbox for client folders (this may take 20-90 seconds depending on folder count)…</span>';
+        status.innerHTML = '<span style="color:#5E5854;">⏳ Scanning Dropbox for client folders (this may take 20-90 seconds depending on folder count)…</span>';
         try {
           const url = "/admin/clients/bulk-import-dropbox" + (dryRun ? "?dry=1" : "");
           const resp = await fetch(url, { method: "POST" });
           const data = await resp.json();
           if (!data.ok) {
-            status.innerHTML = '<span style="color:#c00;">❌ ' + (data.error || "Import failed") + '</span>';
+            status.innerHTML = '<span style="color:#9C2B1E;">❌ ' + (data.error || "Import failed") + '</span>';
             return;
           }
           const label = dryRun ? "Would import" : "✅ Imported";
           const foundList = (data.imported || []).slice(0, 20).map(c =>
             '<li style="font-family:monospace; font-size:12px;">' +
               (c.client_name || "(no name)") + (c.a_number ? " · " + c.a_number : "") +
-              '<span style="color:#888;"> — ' + c.dropbox_path + '</span>' +
+              '<span style="color:#5E5854;"> — ' + c.dropbox_path + '</span>' +
             '</li>'
           ).join("");
-          const more = data.imported.length > 20 ? '<li style="color:#888;">…and ' + (data.imported.length - 20) + ' more</li>' : "";
+          const more = data.imported.length > 20 ? '<li style="color:#5E5854;">…and ' + (data.imported.length - 20) + ' more</li>' : "";
           status.innerHTML =
-            '<div style="background:#f0f8ff; padding:12px; border-radius:4px; border-left:3px solid #0061FF;">' +
+            '<div style="background:#F3EFE9; padding:12px; border-radius:4px; border-left:3px solid #A34C00;">' +
               '<strong>' + label + ' ' + data.imported.length + ' clients</strong>' +
-              (data.errors && data.errors.length ? '<div style="color:#c00; font-size:12px; margin-top:4px;">' + data.errors.length + ' errors — check console</div>' : "") +
+              (data.errors && data.errors.length ? '<div style="color:#9C2B1E; font-size:12px; margin-top:4px;">' + data.errors.length + ' errors — check console</div>' : "") +
               '<ul style="margin:8px 0 0 0; padding-left:20px;">' + foundList + more + '</ul>' +
-              (!dryRun ? '<div style="margin-top:10px;"><a href="/admin/clients" style="background:#0061FF; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:13px;">🔄 Reload page to see them</a></div>' : '') +
+              (!dryRun ? '<div style="margin-top:10px;"><a href="/admin/clients" style="background:#2B2523; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:13px;">🔄 Reload page to see them</a></div>' : '') +
             '</div>';
         } catch (e) {
-          status.innerHTML = '<span style="color:#c00;">❌ ' + e.message + '</span>';
+          status.innerHTML = '<span style="color:#9C2B1E;">❌ ' + e.message + '</span>';
         }
       }
     </script>`;
@@ -932,7 +932,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
   }
   if (phoneDigits) {
     contactActions.push(`<a href="tel:+${phoneDigits}" style="background:#2B2523; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">📞 Call</a>`);
-    contactActions.push(`<a href="https://wa.me/${phoneDigits}" target="_blank" rel="noopener" style="background:#25D366; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">💬 WhatsApp</a>`);
+    contactActions.push(`<a href="https://wa.me/${phoneDigits}" target="_blank" rel="noopener" style="background:#25D366; color:#1E1B1A; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">💬 WhatsApp</a>`);
   }
 
   // Hearing rows
@@ -950,14 +950,14 @@ function renderClientDetail(client, { documents = [] } = {}) {
         <td>${h.sent ? "✅" : "—"}</td>
         <td><a href="${h.edit_url}" style="color:#A34C00;">edit</a></td>
       </tr>`;
-  }).join("") : `<tr><td colspan="7" style="text-align:center; color:#888;">No hearings recorded.</td></tr>`;
+  }).join("") : `<tr><td colspan="7" style="text-align:center; color:#5E5854;">No hearings recorded.</td></tr>`;
 
   // Upcoming hearings section
   const upcomingSection = client.upcoming.length ? `
-    <div style="background:#fef8e7; border-left:4px solid #FF7B00; padding:15px; border-radius:4px; margin:15px 0;">
+    <div style="background:#FAF8F5; border-left:4px solid #FF7B00; padding:15px; border-radius:4px; margin:15px 0;">
       <h3 style="margin:0 0 8px 0; color:#2B2523;">🗓️ Upcoming Hearings</h3>
       <ul style="margin:0; padding-left:20px;">
-        ${client.upcoming.map(u => `<li><strong>${escapeHtml(u.type)}</strong> — ${new Date(u.date).toLocaleString()} <span style="color:#666; font-size:12px;">(from ${u.from_kind} note #${u.from_id})</span></li>`).join("")}
+        ${client.upcoming.map(u => `<li><strong>${escapeHtml(u.type)}</strong> — ${new Date(u.date).toLocaleString()} <span style="color:#5E5854; font-size:12px;">(from ${u.from_kind} note #${u.from_id})</span></li>`).join("")}
       </ul>
     </div>` : "";
 
@@ -977,7 +977,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
     </div>
 
     <!-- Client info card -->
-    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
+    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:15px;">
       <div style="display:flex; gap:30px; flex-wrap:wrap;">
         <div style="flex:1; min-width:280px;">
           <h3 style="margin:0 0 12px 0; color:#A34C00; font-size:14px; text-transform:uppercase; letter-spacing:0.5px;">Client Info</h3>
@@ -1012,36 +1012,36 @@ function renderClientDetail(client, { documents = [] } = {}) {
           </div>
         </div>
       </div>
-      ${contactActions.length ? `<div style="margin-top:15px; padding-top:15px; border-top:1px solid #eee; display:flex; gap:8px; flex-wrap:wrap;">${contactActions.join("")}</div>` : ""}
+      ${contactActions.length ? `<div style="margin-top:15px; padding-top:15px; border-top:1px solid #E8E3DC; display:flex; gap:8px; flex-wrap:wrap;">${contactActions.join("")}</div>` : ""}
     </div>
 
     ${upcomingSection}
 
     <!-- Detected hearing notices from Dropbox scan -->
-    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;" id="hearing-notices-section">
+    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:15px;" id="hearing-notices-section">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-        <h3 style="margin:0; color:#2B2523;">🗓️ Hearing Notices <span id="hn-count" style="color:#888; font-weight:normal; font-size:14px;"></span></h3>
+        <h3 style="margin:0; color:#2B2523;">🗓️ Hearing Notices <span id="hn-count" style="color:#5E5854; font-weight:normal; font-size:14px;"></span></h3>
         <button type="button" onclick="scanForNotices()" id="hn-scan-btn" style="background:#2B2523; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🔍 Scan Dropbox for notices</button>
       </div>
-      <div id="hn-status" style="font-size:13px; color:#666; margin-bottom:10px;">Click "Scan Dropbox" to detect hearing notices in this client's folder.</div>
+      <div id="hn-status" style="font-size:13px; color:#5E5854; margin-bottom:10px;">Click "Scan Dropbox" to detect hearing notices in this client's folder.</div>
       <div id="hn-list"></div>
     </div>
 
     <!-- Court email matched to this client — every one, hearing or not -->
-    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;" id="court-mail-section">
-      <h3 style="margin:0 0 12px; color:#2B2523;">📨 Court Mail <span id="cm-count" style="color:#888; font-weight:normal; font-size:14px;"></span></h3>
-      <div id="cm-status" style="font-size:13px; color:#666;">Loading…</div>
+    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:15px;" id="court-mail-section">
+      <h3 style="margin:0 0 12px; color:#2B2523;">📨 Court Mail <span id="cm-count" style="color:#5E5854; font-weight:normal; font-size:14px;"></span></h3>
+      <div id="cm-status" style="font-size:13px; color:#5E5854;">Loading…</div>
       <div id="cm-list"></div>
     </div>
 
     <!-- Voice transcripts (transcripts.js) — drawn by transcripts-page.js -->
-    <div style="background:white; padding:4px 20px 12px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
+    <div style="background:white; padding:4px 20px 12px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:15px;">
       <div data-transcripts="client" data-client-key="${escapeAttr(client.key)}"></div>
     </div>
     ${require("./client-script").clientScriptTag("transcripts-page.js")}
 
     <!-- Documents out for e-signature (esign.js) — drawn by /static/esign-admin.js -->
-    <div style="background:white; padding:4px 20px 12px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
+    <div style="background:white; padding:4px 20px 12px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:15px;">
       <div data-esign="client" data-esign-client="${escapeAttr(client.key)}"></div>
     </div>
     ${require("./client-script").clientScriptTag("esign-admin.js")}
@@ -1049,42 +1049,42 @@ function renderClientDetail(client, { documents = [] } = {}) {
     ${require("./client-documents").renderDocumentsSection({ clientKey: client.key, documents, aNumber: client.a_number })}
 
     <!-- Dropbox Documents section (lazy-loaded via JS) -->
-    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;" id="dropbox-section">
+    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:15px;" id="dropbox-section">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-        <h3 style="margin:0; color:#2B2523;">📦 Dropbox <span id="dbx-count" style="color:#888; font-weight:normal;"></span></h3>
+        <h3 style="margin:0; color:#2B2523;">📦 Dropbox <span id="dbx-count" style="color:#5E5854; font-weight:normal;"></span></h3>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button type="button" onclick="dbxToggleUpload()" id="dbx-upload-btn" style="background:#0061FF; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; display:none;">+ Upload to Dropbox</button>
-          <button type="button" onclick="dbxChangeFolder()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">📁 Change folder</button>
-          <button type="button" onclick="dbxRefresh(true)" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🔄 Refresh</button>
-          <a href="/admin/clients/${client.key}/dropbox/debug" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; text-decoration:none;">🔍 Debug</a>
+          <button type="button" onclick="dbxToggleUpload()" id="dbx-upload-btn" style="background:#2B2523; color:white; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; display:none;">+ Upload to Dropbox</button>
+          <button type="button" onclick="dbxChangeFolder()" style="background:#F3EFE9; color:#2B2523; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">📁 Change folder</button>
+          <button type="button" onclick="dbxRefresh(true)" style="background:#F3EFE9; color:#2B2523; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🔄 Refresh</button>
+          <a href="/admin/clients/${client.key}/dropbox/debug" style="background:#F3EFE9; color:#2B2523; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px; text-decoration:none;">🔍 Debug</a>
         </div>
       </div>
-      <div id="dbx-folder-info" style="font-size:12px; color:#666; margin-bottom:10px;"></div>
+      <div id="dbx-folder-info" style="font-size:12px; color:#5E5854; margin-bottom:10px;"></div>
 
       <!-- Upload form (hidden) -->
-      <div id="dbx-upload-form" style="display:none; background:#f5f9ff; padding:15px; border-radius:4px; margin-bottom:12px; border:1px dashed #0061FF;">
+      <div id="dbx-upload-form" style="display:none; background:#F3EFE9; padding:15px; border-radius:4px; margin-bottom:12px; border:1px dashed #A34C00;">
         <div id="dbx-dropzone"
              ondragover="dbxDragOver(event)" ondragleave="dbxDragLeave(event)" ondrop="dbxDropFile(event)"
              onclick="document.getElementById('dbx-file-input').click()"
-             style="border:2px dashed #0061FF; padding:20px; border-radius:6px; text-align:center; background:white; margin-bottom:12px; cursor:pointer;">
+             style="border:2px dashed #A34C00; padding:20px; border-radius:6px; text-align:center; background:white; margin-bottom:12px; cursor:pointer;">
           <div style="font-size:36px; margin-bottom:8px;">📦</div>
           <div><strong>Drop a file here or click to browse</strong></div>
-          <div style="font-size:12px; color:#666; margin-top:4px;">Uploads directly to this client's Dropbox folder. Max 25 MB.</div>
+          <div style="font-size:12px; color:#5E5854; margin-top:4px;">Uploads directly to this client's Dropbox folder. Max 25 MB.</div>
           <input type="file" id="dbx-file-input" style="display:none;" onchange="dbxHandleFileSelected(this.files[0])">
           <div id="dbx-selected" style="margin-top:8px; font-size:13px; color:#2B2523;"></div>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
-          <button type="button" onclick="dbxUpload()" id="dbx-upload-do-btn" style="background:#0061FF; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">📤 Upload to Dropbox</button>
-          <button type="button" onclick="dbxToggleUpload()" style="background:#eee; color:#333; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Cancel</button>
+          <button type="button" onclick="dbxUpload()" id="dbx-upload-do-btn" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">📤 Upload to Dropbox</button>
+          <button type="button" onclick="dbxToggleUpload()" style="background:#F3EFE9; color:#2B2523; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Cancel</button>
           <span id="dbx-upload-status" style="font-size:13px;"></span>
         </div>
       </div>
 
-      <div id="dbx-status" style="padding:20px; text-align:center; color:#666;">Loading Dropbox files…</div>
+      <div id="dbx-status" style="padding:20px; text-align:center; color:#5E5854;">Loading Dropbox files…</div>
       <div id="dbx-files" style="display:none;">
         <table style="width:100%; font-size:13px;">
           <thead>
-            <tr style="border-bottom:1px solid #eee;">
+            <tr style="border-bottom:1px solid #E8E3DC;">
               <th></th>
               <th style="text-align:left;">Filename</th>
               <th style="text-align:left;">Size</th>
@@ -1132,8 +1132,8 @@ function renderClientDetail(client, { documents = [] } = {}) {
           const resp = await fetch("/admin/clients/" + encodeURIComponent(DBX_CLIENT_KEY) + "/dropbox/files" + (fresh ? "?fresh=1" : ""));
           const data = await resp.json();
           if (!data.ok) {
-            status.innerHTML = '<span style="color:#c00;">❌ ' + dbxEscape(data.error || "Failed to load") + '</span>' +
-              (data.error && data.error.includes("not authorized") ? '<br><br><a href="/admin/dropbox/setup" style="color:#0061FF;">→ Connect Dropbox first</a>' : "");
+            status.innerHTML = '<span style="color:#9C2B1E;">❌ ' + dbxEscape(data.error || "Failed to load") + '</span>' +
+              (data.error && data.error.includes("not authorized") ? '<br><br><a href="/admin/dropbox/setup" style="color:#A34C00;">→ Connect Dropbox first</a>' : "");
             return;
           }
           if (!data.resolved || !data.folder) {
@@ -1143,20 +1143,20 @@ function renderClientDetail(client, { documents = [] } = {}) {
               suggHtml = '<div style="margin-top:15px; text-align:left; max-width:520px; margin-left:auto; margin-right:auto;">' +
                 '<div style="font-weight:600; margin-bottom:8px; color:#2B2523;">💡 Did you mean one of these?</div>' +
                 suggestions.map(function(s) {
-                  const reason = s.reason ? '<span style="color:#888; font-size:11px; margin-left:6px;">(' + dbxEscape(s.reason) + ')</span>' : '';
+                  const reason = s.reason ? '<span style="color:#5E5854; font-size:11px; margin-left:6px;">(' + dbxEscape(s.reason) + ')</span>' : '';
                   const escapedPath = JSON.stringify(s.path).replace(/"/g,"&quot;");
-                  return '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:#f8f8f8; border-radius:4px; margin-bottom:4px;">' +
+                  return '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:#FAF8F5; border-radius:4px; margin-bottom:4px;">' +
                     '<div style="font-family:monospace; font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + dbxEscape(s.path) + reason + '</div>' +
-                    '<button type="button" onclick="dbxUseSuggestion(' + escapedPath + '); return false;" style="background:#0061FF; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:12px; margin-left:8px; flex-shrink:0;">Use this</button>' +
+                    '<button type="button" onclick="dbxUseSuggestion(' + escapedPath + '); return false;" style="background:#2B2523; color:white; border:none; padding:4px 10px; border-radius:3px; cursor:pointer; font-size:12px; margin-left:8px; flex-shrink:0;">Use this</button>' +
                     '</div>';
                 }).join('') +
-                '<div style="margin-top:10px; text-align:center;"><button type="button" onclick="dbxChangeFolder()" style="background:#eee; color:#333; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Or enter folder path manually</button></div>' +
+                '<div style="margin-top:10px; text-align:center;"><button type="button" onclick="dbxChangeFolder()" style="background:#F3EFE9; color:#2B2523; padding:8px 14px; border:none; border-radius:4px; cursor:pointer; font-size:13px;">Or enter folder path manually</button></div>' +
                 '</div>';
             } else {
-              suggHtml = '<div style="margin-top:15px;"><button type="button" onclick="dbxChangeFolder()" style="background:#0061FF; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Set folder manually</button></div>';
+              suggHtml = '<div style="margin-top:15px;"><button type="button" onclick="dbxChangeFolder()" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Set folder manually</button></div>';
             }
-            status.innerHTML = '<span style="color:#ff9800;">⚠️ No exact match found for this client in configured branches.</span><br>' +
-              '<span style="font-size:12px; color:#666;">Searched for "' +
+            status.innerHTML = '<span style="color:#A34C00;">⚠️ No exact match found for this client in configured branches.</span><br>' +
+              '<span style="font-size:12px; color:#5E5854;">Searched for "' +
               dbxEscape(${JSON.stringify(client.client_name || "")}) + '"' +
               (${JSON.stringify(client.a_number || "")} ? ' / A#' + dbxEscape(${JSON.stringify(client.a_number || "")}) : "") +
               '</span>' + suggHtml;
@@ -1164,16 +1164,16 @@ function renderClientDetail(client, { documents = [] } = {}) {
             uploadBtn.style.display = "none";
             return;
           }
-          folderInfo.innerHTML = '📁 <code>' + dbxEscape(data.folder) + '</code>' + (data.cached ? ' <span style="color:#888;">(cached)</span>' : '');
+          folderInfo.innerHTML = '📁 <code>' + dbxEscape(data.folder) + '</code>' + (data.cached ? ' <span style="color:#5E5854;">(cached)</span>' : '');
           countEl.textContent = "(" + (data.files || []).length + ")";
           uploadBtn.style.display = "";
           if (data.folder_missing) {
-            status.innerHTML = '<span style="color:#ff9800;">⚠️ Folder path is stored but doesn\\'t exist in Dropbox: ' + dbxEscape(data.folder) + '</span>';
+            status.innerHTML = '<span style="color:#A34C00;">⚠️ Folder path is stored but doesn\\'t exist in Dropbox: ' + dbxEscape(data.folder) + '</span>';
             return;
           }
           const files = data.files || [];
           if (!files.length) {
-            status.innerHTML = '<span style="color:#888;">Folder is empty. Upload to add files.</span>';
+            status.innerHTML = '<span style="color:#5E5854;">Folder is empty. Upload to add files.</span>';
             return;
           }
           // Render files
@@ -1182,19 +1182,19 @@ function renderClientDetail(client, { documents = [] } = {}) {
             '<tr>' +
               '<td style="width:30px; text-align:center; font-size:18px;">' + dbxIconFor(f.name) + '</td>' +
               '<td><a href="/admin/clients/' + encodeURIComponent(DBX_CLIENT_KEY) + '/dropbox/download?path=' + encodeURIComponent(f.path) + '" target="_blank" style="color:#2B2523; text-decoration:none; font-weight:600;">' + dbxEscape(f.name) + '</a></td>' +
-              '<td style="font-size:12px; color:#666; white-space:nowrap;">' + dbxFmtSize(f.size) + '</td>' +
-              '<td style="font-size:12px; color:#666; white-space:nowrap;">' + (f.server_modified ? new Date(f.server_modified).toLocaleDateString() : "-") + '</td>' +
+              '<td style="font-size:12px; color:#5E5854; white-space:nowrap;">' + dbxFmtSize(f.size) + '</td>' +
+              '<td style="font-size:12px; color:#5E5854; white-space:nowrap;">' + (f.server_modified ? new Date(f.server_modified).toLocaleDateString() : "-") + '</td>' +
               '<td style="white-space:nowrap;">' +
-                '<a href="/admin/clients/' + encodeURIComponent(DBX_CLIENT_KEY) + '/dropbox/download?path=' + encodeURIComponent(f.path) + '" target="_blank" style="color:#0061FF; font-size:13px;">📥</a>' +
+                '<a href="/admin/clients/' + encodeURIComponent(DBX_CLIENT_KEY) + '/dropbox/download?path=' + encodeURIComponent(f.path) + '" target="_blank" style="color:#A34C00; font-size:13px;">📥</a>' +
                 ' &nbsp; ' +
-                '<a href="#" onclick="dbxDelete(' + JSON.stringify(f.path).replace(/"/g,"&quot;") + ', ' + JSON.stringify(f.name).replace(/"/g,"&quot;") + '); return false;" style="color:#c00; font-size:13px;">🗑️</a>' +
+                '<a href="#" onclick="dbxDelete(' + JSON.stringify(f.path).replace(/"/g,"&quot;") + ', ' + JSON.stringify(f.name).replace(/"/g,"&quot;") + '); return false;" style="color:#9C2B1E; font-size:13px;">🗑️</a>' +
               '</td>' +
             '</tr>'
           ).join("");
           status.style.display = "none";
           filesDiv.style.display = "";
         } catch (e) {
-          status.innerHTML = '<span style="color:#c00;">❌ ' + dbxEscape(e.message) + '</span>';
+          status.innerHTML = '<span style="color:#9C2B1E;">❌ ' + dbxEscape(e.message) + '</span>';
         }
       }
 
@@ -1214,10 +1214,10 @@ function renderClientDetail(client, { documents = [] } = {}) {
         const sizeMB = (file.size / 1024 / 1024).toFixed(1);
         document.getElementById("dbx-selected").textContent = "✓ " + file.name + " (" + sizeMB + " MB)";
         if (file.size > 25 * 1024 * 1024) {
-          document.getElementById("dbx-selected").innerHTML += ' <span style="color:#c00;">— exceeds 25MB limit</span>';
+          document.getElementById("dbx-selected").innerHTML += ' <span style="color:#9C2B1E;">— exceeds 25MB limit</span>';
         }
       }
-      function dbxDragOver(e) { e.preventDefault(); e.stopPropagation(); document.getElementById("dbx-dropzone").style.background = "#f0f8ff"; }
+      function dbxDragOver(e) { e.preventDefault(); e.stopPropagation(); document.getElementById("dbx-dropzone").style.background = "#F3EFE9"; }
       function dbxDragLeave(e) { e.preventDefault(); e.stopPropagation(); document.getElementById("dbx-dropzone").style.background = "white"; }
       function dbxDropFile(e) {
         e.preventDefault(); e.stopPropagation();
@@ -1231,7 +1231,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
         const status = document.getElementById("dbx-upload-status");
         btn.disabled = true;
         status.textContent = "⏳ Uploading to Dropbox...";
-        status.style.color = "#666";
+        status.style.color = "#5E5854";
         try {
           const fd = new FormData();
           const safeName = dbxSelectedFile.name.replace(/[^\\w.\\-]/g, "_");
@@ -1244,17 +1244,17 @@ function renderClientDetail(client, { documents = [] } = {}) {
           const data = await resp.json();
           if (data.ok) {
             status.textContent = "✅ Uploaded";
-            status.style.color = "#4CAF50";
+            status.style.color = "#2F6B3F";
             setTimeout(() => { dbxToggleUpload(); dbxRefresh(true); }, 700);
           } else {
             btn.disabled = false;
             status.textContent = "❌ " + (data.error || "Upload failed");
-            status.style.color = "#c00";
+            status.style.color = "#9C2B1E";
           }
         } catch (e) {
           btn.disabled = false;
           status.textContent = "❌ " + e.message;
-          status.style.color = "#c00";
+          status.style.color = "#9C2B1E";
         }
       }
       async function dbxDelete(path, name) {
@@ -1328,30 +1328,30 @@ function renderClientDetail(client, { documents = [] } = {}) {
               ? when.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
               : "";
             var kind = m.kind
-              ? '<span style="background:#eef2f7; color:#2B2523; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">' + dbxEscape(m.kind) + '</span>'
+              ? '<span style="background:#F3EFE9; color:#2B2523; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">' + dbxEscape(m.kind) + '</span>'
               : "";
             var docs = (m.documents || []).length
-              ? '<div style="margin-top:6px; font-size:12px; color:#555;">📎 ' +
+              ? '<div style="margin-top:6px; font-size:12px; color:#5E5854;">📎 ' +
                 (m.documents || []).map(function (d) { return dbxEscape(d.label || d.path || "document"); }).join("<br>📎 ") +
                 '</div>'
-              : '<div style="margin-top:6px; font-size:12px; color:#999;">No attachment — the email itself was filed.</div>';
+              : '<div style="margin-top:6px; font-size:12px; color:#5E5854;">No attachment — the email itself was filed.</div>';
             var dated = (m.hearings || []).concat(m.deadlines || []);
             var datedHtml = dated.length
-              ? '<div style="margin-top:6px; font-size:12px; color:#2e7d32;">🗓️ ' + dated.map(dbxEscape).join(" · ") + '</div>'
+              ? '<div style="margin-top:6px; font-size:12px; color:#2F6B3F;">🗓️ ' + dated.map(dbxEscape).join(" · ") + '</div>'
               : "";
             var todo = (m.action_items || []).length
-              ? '<div style="margin-top:6px; font-size:12px; color:#8a6d3b;">To do: ' +
+              ? '<div style="margin-top:6px; font-size:12px; color:#7A3900;">To do: ' +
                 (m.action_items || []).map(dbxEscape).join("; ") + '</div>'
               : "";
             var needs = m.status === "needs_review"
-              ? '<span style="background:#fff3e0; color:#e65100; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">needs review</span>'
+              ? '<span style="background:#FFF3E6; color:#A34C00; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">needs review</span>'
               : "";
-            return '<div style="border-left:4px solid #2B2523; background:#f7f9fb; padding:12px; border-radius:4px; margin-bottom:8px;">' +
+            return '<div style="border-left:4px solid #2B2523; background:#FAF8F5; padding:12px; border-radius:4px; margin-bottom:8px;">' +
               '<div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:flex-start;">' +
                 '<div style="font-weight:600; color:#2B2523; flex:1; min-width:200px;">' + dbxEscape(m.title) + needs + '</div>' +
-                '<div style="font-size:12px; color:#888; white-space:nowrap;">' + dateStr + ' ' + kind + '</div>' +
+                '<div style="font-size:12px; color:#5E5854; white-space:nowrap;">' + dateStr + ' ' + kind + '</div>' +
               '</div>' +
-              (m.summary ? '<div style="margin-top:6px; font-size:13px; color:#444; line-height:1.5;">' + dbxEscape(m.summary) + '</div>' : "") +
+              (m.summary ? '<div style="margin-top:6px; font-size:13px; color:#2B2523; line-height:1.5;">' + dbxEscape(m.summary) + '</div>' : "") +
               datedHtml + docs + todo +
               '<div style="margin-top:8px;"><a href="' + dbxEscape(m.url) + '" style="font-size:12px; color:#A34C00; font-weight:600; text-decoration:none;">Open in Court Mail →</a></div>' +
             '</div>';
@@ -1388,29 +1388,29 @@ function renderClientDetail(client, { documents = [] } = {}) {
             ? '<span style="background:#FAF8F5; color:#A34C00; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">' + dbxEscape(n.notice_type) + '</span>'
             : "";
           const confidenceBadge = n.confidence === "low"
-            ? '<span style="background:#fff3e0; color:#e65100; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">low confidence — verify</span>'
+            ? '<span style="background:#FFF3E6; color:#A34C00; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">low confidence — verify</span>'
             : "";
           const notifiedBadge = n.notified_at
-            ? '<span style="background:#e8f5e9; color:#2e7d32; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">✓ notified ' + new Date(n.notified_at).toLocaleDateString() + '</span>'
+            ? '<span style="background:#EEF5EF; color:#2F6B3F; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;">✓ notified ' + new Date(n.notified_at).toLocaleDateString() + '</span>'
             : "";
           const links = n.contact_links || {};
           const btn = (href, channel, label, color) => href
             ? '<a href="' + href + '" target="_blank" rel="noopener" onclick="markNotified(' + n.id + ', \\'' + channel + '\\')" style="background:' + color + '; color:white; padding:6px 12px; border-radius:4px; text-decoration:none; font-size:12px; margin-right:4px;">' + label + '</a>'
-            : '<span style="background:#eee; color:#999; padding:6px 12px; border-radius:4px; font-size:12px; margin-right:4px;">' + label + ' (no contact)</span>';
+            : '<span style="background:#F3EFE9; color:#5E5854; padding:6px 12px; border-radius:4px; font-size:12px; margin-right:4px;">' + label + ' (no contact)</span>';
           return '<div style="border-left:4px solid #FF7B00; background:#FAF8F5; padding:12px; border-radius:4px; margin-bottom:8px;">' +
             '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">' +
               '<div style="flex:1; min-width:250px;">' +
                 '<div style="font-size:15px; font-weight:600; color:#2B2523;">' + dbxEscape(dateStr) + '</div>' +
-                '<div style="margin-top:4px; font-size:13px; color:#333;">' + noticeTypeBadge + confidenceBadge + notifiedBadge + '</div>' +
-                (n.court_name ? '<div style="font-size:12px; color:#666; margin-top:4px;">📍 ' + dbxEscape(n.court_name) + '</div>' : "") +
-                (n.court_address ? '<div style="font-size:12px; color:#666;">📌 ' + dbxEscape(n.court_address) + '</div>' : "") +
-                (n.judge_name ? '<div style="font-size:12px; color:#666;">⚖️ ' + dbxEscape(n.judge_name) + '</div>' : "") +
+                '<div style="margin-top:4px; font-size:13px; color:#2B2523;">' + noticeTypeBadge + confidenceBadge + notifiedBadge + '</div>' +
+                (n.court_name ? '<div style="font-size:12px; color:#5E5854; margin-top:4px;">📍 ' + dbxEscape(n.court_name) + '</div>' : "") +
+                (n.court_address ? '<div style="font-size:12px; color:#5E5854;">📌 ' + dbxEscape(n.court_address) + '</div>' : "") +
+                (n.judge_name ? '<div style="font-size:12px; color:#5E5854;">⚖️ ' + dbxEscape(n.judge_name) + '</div>' : "") +
               '</div>' +
               '<div style="display:flex; gap:4px; flex-wrap:wrap;">' +
                 btn(links.email,     "email",    "✉️ Email",      "#2B2523") +
                 btn(links.whatsapp,  "whatsapp", "💬 WhatsApp",    "#25D366") +
-                btn(links.sms,       "sms",      "📱 SMS",         "#0061FF") +
-                '<button type="button" onclick="dismissNotice(' + n.id + ')" title="Dismiss (hide this notice)" style="background:#eee; color:#666; padding:6px 10px; border:none; border-radius:4px; cursor:pointer; font-size:12px;">✕</button>' +
+                btn(links.sms,       "sms",      "📱 SMS",         "#A34C00") +
+                '<button type="button" onclick="dismissNotice(' + n.id + ')" title="Dismiss (hide this notice)" style="background:#F3EFE9; color:#5E5854; padding:6px 10px; border:none; border-radius:4px; cursor:pointer; font-size:12px;">✕</button>' +
               '</div>' +
             '</div>' +
           '</div>';
@@ -1431,10 +1431,10 @@ function renderClientDetail(client, { documents = [] } = {}) {
             status.textContent = "✅ Scanned " + (data.scanned || 0) + " new file(s), skipped " + (data.skipped || 0) + " already-scanned, found " + foundCount + " new notice(s)";
             await loadHearingNotices();
           } else {
-            status.innerHTML = '<span style="color:#c00;">❌ ' + dbxEscape(data.error || "Scan failed") + '</span>';
+            status.innerHTML = '<span style="color:#9C2B1E;">❌ ' + dbxEscape(data.error || "Scan failed") + '</span>';
           }
         } catch (e) {
-          status.innerHTML = '<span style="color:#c00;">❌ ' + dbxEscape(e.message) + '</span>';
+          status.innerHTML = '<span style="color:#9C2B1E;">❌ ' + dbxEscape(e.message) + '</span>';
         } finally {
           btn.disabled = false;
           btn.textContent = "🔍 Scan Dropbox for notices";
@@ -1462,7 +1462,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
     </script>
 
     <!-- Hearings history -->
-    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #eee; margin-bottom:15px;">
+    <div style="background:white; padding:20px; border-radius:6px; border:1px solid #E8E3DC; margin-bottom:15px;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
         <h3 style="margin:0; color:#2B2523;">📚 All Hearings (${client.hearing_count})</h3>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">${createLinks}</div>

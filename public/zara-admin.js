@@ -30,7 +30,7 @@
     gold: "#A34C00", goldBright: "#FF7B00",
     ember: "#FF7B00", waxRed: "#9C2B1E",
     parchment: "#F3EFE9", parchmentLit: "#FAF8F5", border: "#E8E3DC",
-    green: "#166534", muted: "#5E5854",
+    green: "#2F6B3F", muted: "#5E5854",
   };
 
   function api(path, opts) {

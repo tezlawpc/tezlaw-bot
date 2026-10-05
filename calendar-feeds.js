@@ -319,37 +319,37 @@ function escapeHtml(s) {
 
 function statusChip(feed) {
   const map = {
-    ok:          ["#e8f5e9", "#2e7d32", "Synced"],
-    partial:     ["#fff8e1", "#f57f17", "Synced with warnings"],
-    error:       ["#ffebee", "#c62828", "Failed"],
-    in_progress: ["#e3f2fd", "#1565c0", "Syncing…"],
+    ok:          ["#EEF5EF", "#2F6B3F", "Synced"],
+    partial:     ["#FFF3E6", "#A34C00", "Synced with warnings"],
+    error:       ["#FBEDEA", "#9C2B1E", "Failed"],
+    in_progress: ["#F3EFE9", "#A34C00", "Syncing…"],
   };
-  const [bg, fg, label] = map[feed.last_sync_status] || ["#f5f5f5", "#777", "Never synced"];
+  const [bg, fg, label] = map[feed.last_sync_status] || ["#FAF8F5", "#5E5854", "Never synced"];
   const when = feed.last_synced_at ? ` · ${new Date(feed.last_synced_at).toLocaleString()}` : "";
   return `<span style="background:${bg}; color:${fg}; padding:2px 7px; border-radius:3px; font-size:10px; font-weight:600;">${label}</span>
-          <span style="font-size:10px; color:#999;">${escapeHtml(when)}</span>`;
+          <span style="font-size:10px; color:#5E5854;">${escapeHtml(when)}</span>`;
 }
 
 function feedRow(feed) {
   const url = feed.ical_url || "";
   return `
-  <div class="feed-row" data-id="${feed.id}" style="border:1px solid #eee; border-left:5px solid ${escapeHtml(feed.color)}; border-radius:6px; padding:14px 16px; margin-bottom:10px; background:white;">
+  <div class="feed-row" data-id="${feed.id}" style="border:1px solid #E8E3DC; border-left:5px solid ${escapeHtml(feed.color)}; border-radius:6px; padding:14px 16px; margin-bottom:10px; background:white;">
     <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
       <div style="flex:1; min-width:240px;">
-        <input class="f-name" value="${escapeHtml(feed.name)}" style="font-size:15px; font-weight:600; color:${brand.navy}; border:none; border-bottom:1px solid transparent; padding:2px 0; width:100%; background:transparent;" onfocus="this.style.borderBottomColor='#ddd'" onblur="this.style.borderBottomColor='transparent'">
+        <input class="f-name" value="${escapeHtml(feed.name)}" style="font-size:15px; font-weight:600; color:${brand.navy}; border:none; border-bottom:1px solid transparent; padding:2px 0; width:100%; background:transparent;" onfocus="this.style.borderBottomColor='#E8E3DC'" onblur="this.style.borderBottomColor='transparent'">
         <div style="margin-top:6px;">${statusChip(feed)}</div>
-        <div style="font-size:11px; color:#888; margin-top:4px;">${feed.event_count} event(s) stored${feed.last_sync_errors ? ` · <span style="color:#c62828;">${escapeHtml(String(feed.last_sync_errors).split("\n")[0])}</span>` : ""}</div>
+        <div style="font-size:11px; color:#5E5854; margin-top:4px;">${feed.event_count} event(s) stored${feed.last_sync_errors ? ` · <span style="color:#9C2B1E;">${escapeHtml(String(feed.last_sync_errors).split("\n")[0])}</span>` : ""}</div>
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
-        <input class="f-color" type="color" value="${escapeHtml(feed.color)}" title="Colour on the calendar" style="width:38px; height:30px; border:1px solid #ddd; border-radius:4px; padding:1px; background:white; cursor:pointer;">
-        <label style="font-size:11px; color:#555; display:flex; align-items:center; gap:4px; cursor:pointer;">
+        <input class="f-color" type="color" value="${escapeHtml(feed.color)}" title="Colour on the calendar" style="width:38px; height:30px; border:1px solid #E8E3DC; border-radius:4px; padding:1px; background:white; cursor:pointer;">
+        <label style="font-size:11px; color:#5E5854; display:flex; align-items:center; gap:4px; cursor:pointer;">
           <input class="f-enabled" type="checkbox" ${feed.enabled ? "checked" : ""}> Show
         </label>
       </div>
     </div>
 
     <div style="margin-top:10px;">
-      <input class="f-url" value="${escapeHtml(url)}" placeholder="https://… or webcal://… calendar URL" style="width:100%; padding:7px 9px; border:1px solid #ddd; border-radius:4px; font-size:12px; font-family:monospace;">
+      <input class="f-url" value="${escapeHtml(url)}" placeholder="https://… or webcal://… calendar URL" style="width:100%; padding:7px 9px; border:1px solid #E8E3DC; border-radius:4px; font-size:12px; font-family:monospace;">
     </div>
 
     <div style="margin-top:10px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-size:12px;">
@@ -359,13 +359,13 @@ function feedRow(feed) {
       <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
         <input class="f-mode" type="radio" name="mode-${feed.id}" value="all" ${feed.filter_mode === "all" ? "checked" : ""}> Everything on this calendar
       </label>
-      <input class="f-keywords" value="${escapeHtml(feed.keyword_filter || DEFAULT_KEYWORDS)}" placeholder="hearing|merits|…" style="flex:1; min-width:200px; padding:6px 8px; border:1px solid #ddd; border-radius:4px; font-size:11px; font-family:monospace;">
+      <input class="f-keywords" value="${escapeHtml(feed.keyword_filter || DEFAULT_KEYWORDS)}" placeholder="hearing|merits|…" style="flex:1; min-width:200px; padding:6px 8px; border:1px solid #E8E3DC; border-radius:4px; font-size:11px; font-family:monospace;">
     </div>
 
     <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
       <button onclick="saveFeed(${feed.id})" style="background:${brand.navy}; color:white; border:none; padding:6px 14px; border-radius:4px; font-size:12px; cursor:pointer;">Save</button>
       <button onclick="syncFeed(${feed.id})" style="background:${brand.gold}; color:white; border:none; padding:6px 14px; border-radius:4px; font-size:12px; cursor:pointer;">Sync now</button>
-      <button onclick="removeFeed(${feed.id}, this)" style="background:white; color:#c62828; border:1px solid #f0c9c9; padding:6px 14px; border-radius:4px; font-size:12px; cursor:pointer; margin-left:auto;">Remove</button>
+      <button onclick="removeFeed(${feed.id}, this)" style="background:white; color:#9C2B1E; border:1px solid #f0c9c9; padding:6px 14px; border-radius:4px; font-size:12px; cursor:pointer; margin-left:auto;">Remove</button>
     </div>
   </div>`;
 }
@@ -375,12 +375,12 @@ function renderFeedsPage(feeds) {
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
       <h1 style="margin:0;">Calendars</h1>
-      <div style="font-size:12px; color:#666; margin-top:4px;">Every calendar the court calendar pulls from. Each one keeps its own colour and decides what it contributes.</div>
+      <div style="font-size:12px; color:#5E5854; margin-top:4px;">Every calendar the court calendar pulls from. Each one keeps its own colour and decides what it contributes.</div>
     </div>
     <a href="/admin/calendar" class="back-link">← Back to calendar</a>
   </div>
 
-  <div style="background:#fff8e1; border-left:4px solid ${brand.gold}; padding:14px 18px; border-radius:4px; margin:16px 0; font-size:13px; line-height:1.6;">
+  <div style="background:#FFF3E6; border-left:4px solid ${brand.gold}; padding:14px 18px; border-radius:4px; margin:16px 0; font-size:13px; line-height:1.6;">
     <div style="font-weight:600; color:${brand.navy}; margin-bottom:6px;">Where a calendar URL comes from</div>
     <p style="margin:0 0 6px 0;"><b>Outlook / Microsoft 365:</b> Calendar → Settings → Shared calendars → publish the calendar, permission "Can view all details", then copy the ICS link.</p>
     <p style="margin:0 0 6px 0;"><b>MyCase:</b> Calendar → the subscribe or feed option → copy the iCal URL it gives you.</p>
@@ -388,21 +388,21 @@ function renderFeedsPage(feeds) {
     <p style="margin:0; color:#8a6d00;"><b>Treat these URLs as passwords.</b> Anyone holding one can read the whole calendar without signing in, so paste them here rather than into email or chat, and re-publish to rotate one if it gets out.</p>
   </div>
 
-  <div style="background:#f8f8f8; border:1px solid #eee; border-radius:4px; padding:12px 16px; margin:16px 0; font-size:12px; color:#555; line-height:1.6;">
+  <div style="background:#FAF8F5; border:1px solid #E8E3DC; border-radius:4px; padding:12px 16px; margin:16px 0; font-size:12px; color:#5E5854; line-height:1.6;">
     <b>Only matching events</b> keeps what the words on the right match — how the firm calendar has always worked, so hearings come through and the rest of the day does not.
     <b>Everything on this calendar</b> contributes every event it publishes, which is usually what you want from a practice-management calendar.
   </div>
 
   <div id="feeds">
-    ${feeds.map(feedRow).join("") || `<div style="padding:28px; text-align:center; color:#888; background:white; border:1px dashed #ddd; border-radius:6px;">No calendars yet. Add one below.</div>`}
+    ${feeds.map(feedRow).join("") || `<div style="padding:28px; text-align:center; color:#5E5854; background:white; border:1px dashed #E8E3DC; border-radius:6px;">No calendars yet. Add one below.</div>`}
   </div>
 
-  <div style="background:white; border:1px solid #eee; border-radius:6px; padding:16px; margin-top:18px;">
+  <div style="background:white; border:1px solid #E8E3DC; border-radius:6px; padding:16px; margin-top:18px;">
     <div style="font-weight:600; color:${brand.navy}; margin-bottom:10px;">Add a calendar</div>
     <div style="display:flex; gap:10px; flex-wrap:wrap;">
-      <input id="new-name" placeholder="Name, e.g. MyCase" style="flex:1; min-width:160px; padding:8px 10px; border:1px solid #ddd; border-radius:4px; font-size:13px;">
-      <input id="new-url" placeholder="https://… calendar URL" style="flex:2; min-width:240px; padding:8px 10px; border:1px solid #ddd; border-radius:4px; font-size:13px; font-family:monospace;">
-      <select id="new-mode" style="padding:8px 10px; border:1px solid #ddd; border-radius:4px; font-size:13px;">
+      <input id="new-name" placeholder="Name, e.g. MyCase" style="flex:1; min-width:160px; padding:8px 10px; border:1px solid #E8E3DC; border-radius:4px; font-size:13px;">
+      <input id="new-url" placeholder="https://… calendar URL" style="flex:2; min-width:240px; padding:8px 10px; border:1px solid #E8E3DC; border-radius:4px; font-size:13px; font-family:monospace;">
+      <select id="new-mode" style="padding:8px 10px; border:1px solid #E8E3DC; border-radius:4px; font-size:13px;">
         <option value="all">Everything on it</option>
         <option value="keywords">Only matching events</option>
       </select>

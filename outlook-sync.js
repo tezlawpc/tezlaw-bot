@@ -499,26 +499,26 @@ function renderSettingsPage(config, recentEvents) {
   const lastSync = config?.last_synced_at
     ? new Date(config.last_synced_at).toLocaleString()
     : "Never";
-  const statusColor = config?.last_sync_status === "ok" ? "#2e7d32"
-                    : config?.last_sync_status === "error" ? "#c62828"
-                    : config?.last_sync_status === "partial" ? "#f9a825"
-                    : "#888";
+  const statusColor = config?.last_sync_status === "ok" ? "#2F6B3F"
+                    : config?.last_sync_status === "error" ? "#9C2B1E"
+                    : config?.last_sync_status === "partial" ? "#A34C00"
+                    : "#5E5854";
 
   const eventRows = recentEvents.slice(0, 30).map(e => {
     const dt = new Date(e.start_datetime);
     const dtStr = dt.toLocaleString();
     const matched = e.matched_client_name || e.matched_a_number;
     return `
-      <div style="padding:10px 12px; border-bottom:1px solid #f0f0f0; font-size:12px;">
+      <div style="padding:10px 12px; border-bottom:1px solid #E8E3DC; font-size:12px;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
           <div style="flex:1;">
             <div style="font-weight:600; color:${brand.navy};">${escapeHtml(e.subject || "(no subject)")}</div>
-            <div style="color:#666; margin-top:2px;">${escapeHtml(dtStr)}${e.location ? ` · 📍 ${escapeHtml(e.location)}` : ""}</div>
+            <div style="color:#5E5854; margin-top:2px;">${escapeHtml(dtStr)}${e.location ? ` · 📍 ${escapeHtml(e.location)}` : ""}</div>
             <div style="margin-top:4px;">
               ${matched
-                ? `<span style="background:#e8f5e9; color:#2e7d32; padding:2px 6px; border-radius:3px; font-size:10px;">✓ Matched: ${escapeHtml(matched)}</span>`
-                : `<span style="background:#fff3e0; color:#e65100; padding:2px 6px; border-radius:3px; font-size:10px;">⚠️ Unmatched (still shown in calendar)</span>`}
-              ${e.matched_hearing_type ? `<span style="background:#e3f2fd; color:#1565c0; padding:2px 6px; border-radius:3px; font-size:10px; margin-left:4px;">${escapeHtml(e.matched_hearing_type)}</span>` : ""}
+                ? `<span style="background:#EEF5EF; color:#2F6B3F; padding:2px 6px; border-radius:3px; font-size:10px;">✓ Matched: ${escapeHtml(matched)}</span>`
+                : `<span style="background:#FFF3E6; color:#A34C00; padding:2px 6px; border-radius:3px; font-size:10px;">⚠️ Unmatched (still shown in calendar)</span>`}
+              ${e.matched_hearing_type ? `<span style="background:#F3EFE9; color:#A34C00; padding:2px 6px; border-radius:3px; font-size:10px; margin-left:4px;">${escapeHtml(e.matched_hearing_type)}</span>` : ""}
             </div>
           </div>
         </div>
@@ -529,13 +529,13 @@ function renderSettingsPage(config, recentEvents) {
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
       <h1 style="margin:0;">Outlook Sync</h1>
-      <div style="font-size:12px; color:#666; margin-top:4px;">Pull merits hearings and other events from your Outlook calendar into Zara.</div>
+      <div style="font-size:12px; color:#5E5854; margin-top:4px;">Pull merits hearings and other events from your Outlook calendar into Zara.</div>
     </div>
     <a href="/admin/calendar" class="back-link">← Back to calendar</a>
   </div>
 
   <!-- How-to instructions -->
-  <div style="background:#fff8e1; border-left:4px solid ${brand.gold}; padding:14px 18px; border-radius:4px; margin:16px 0; font-size:13px; line-height:1.6;">
+  <div style="background:#FFF3E6; border-left:4px solid ${brand.gold}; padding:14px 18px; border-radius:4px; margin:16px 0; font-size:13px; line-height:1.6;">
     <div style="font-weight:600; color:${brand.navy}; margin-bottom:6px;">📖 How to get your Outlook iCal URL</div>
     <p style="margin:0 0 8px 0;"><b>Outlook Web (Microsoft 365):</b></p>
     <ol style="margin:0 0 8px 20px; padding:0;">
@@ -547,19 +547,19 @@ function renderSettingsPage(config, recentEvents) {
       <li>Click Publish → copy the <b>ICS link</b></li>
       <li>Paste into the field below</li>
     </ol>
-    <p style="margin:8px 0 0 0; font-size:11px; color:#666;">⚠️ If your org disabled publishing, use the "Upload .ics" option below to import a one-time snapshot.</p>
+    <p style="margin:8px 0 0 0; font-size:11px; color:#5E5854;">⚠️ If your org disabled publishing, use the "Upload .ics" option below to import a one-time snapshot.</p>
   </div>
 
   <!-- Configuration -->
-  <div style="background:white; border:1px solid #e0e0e0; border-radius:8px; padding:20px; margin-bottom:16px;">
+  <div style="background:white; border:1px solid #E8E3DC; border-radius:8px; padding:20px; margin-bottom:16px;">
     <h3 style="margin-top:0; color:${brand.navy};">🔗 iCal URL (auto-sync every hour)</h3>
     <form id="config-form" onsubmit="saveConfig(event)">
       <div style="margin-bottom:12px;">
-        <input type="url" name="ical_url" value="${escapeHtml(config?.ical_url || "")}" placeholder="https://outlook.office365.com/owa/calendar/xxx/calendar.ics" style="width:100%; padding:10px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:monospace; font-size:12px;">
+        <input type="url" name="ical_url" value="${escapeHtml(config?.ical_url || "")}" placeholder="https://outlook.office365.com/owa/calendar/xxx/calendar.ics" style="width:100%; padding:10px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:monospace; font-size:12px;">
       </div>
       <div style="margin-bottom:12px;">
-        <label style="display:block; font-size:12px; color:#666; margin-bottom:4px;">Keyword filter — only events matching these keywords appear as hearings (case-insensitive, separate with |):</label>
-        <input type="text" name="keyword_filter" value="${escapeHtml(config?.keyword_filter || "hearing|merits|individual|MCH|master calendar|MTR|EOIR")}" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-family:monospace; font-size:12px;">
+        <label style="display:block; font-size:12px; color:#5E5854; margin-bottom:4px;">Keyword filter — only events matching these keywords appear as hearings (case-insensitive, separate with |):</label>
+        <input type="text" name="keyword_filter" value="${escapeHtml(config?.keyword_filter || "hearing|merits|individual|MCH|master calendar|MTR|EOIR")}" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box; font-family:monospace; font-size:12px;">
       </div>
       <div style="margin-bottom:16px;">
         <label style="display:inline-flex; align-items:center; font-weight:normal;">
@@ -574,33 +574,33 @@ function renderSettingsPage(config, recentEvents) {
   </div>
 
   <!-- Alternative: upload .ics -->
-  <div style="background:white; border:1px solid #e0e0e0; border-radius:8px; padding:20px; margin-bottom:16px;">
+  <div style="background:white; border:1px solid #E8E3DC; border-radius:8px; padding:20px; margin-bottom:16px;">
     <h3 style="margin-top:0; color:${brand.navy};">📎 Or upload .ics file (one-time)</h3>
-    <p style="font-size:12px; color:#666; margin-top:0;">If your org blocks calendar publishing, export from Outlook (File → Save Calendar → .ics) and upload here.</p>
+    <p style="font-size:12px; color:#5E5854; margin-top:0;">If your org blocks calendar publishing, export from Outlook (File → Save Calendar → .ics) and upload here.</p>
     <form id="upload-form" onsubmit="uploadIcs(event)" enctype="multipart/form-data">
-      <input type="file" name="ics_file" accept=".ics,text/calendar" required style="padding:8px; border:1px solid #ccc; border-radius:4px;">
+      <input type="file" name="ics_file" accept=".ics,text/calendar" required style="padding:8px; border:1px solid #CFC8BE; border-radius:4px;">
       <button type="submit" style="background:${brand.navy}; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer; font-weight:600; margin-left:8px;">Upload & import</button>
     </form>
   </div>
 
   <!-- Sync status -->
-  <div style="background:white; border:1px solid #e0e0e0; border-radius:8px; padding:20px; margin-bottom:16px;">
+  <div style="background:white; border:1px solid #E8E3DC; border-radius:8px; padding:20px; margin-bottom:16px;">
     <h3 style="margin-top:0; color:${brand.navy};">🩺 Last sync</h3>
     <div style="font-size:13px; line-height:1.8;">
       <div><b>Status:</b> <span style="color:${statusColor};">${escapeHtml(config?.last_sync_status || "never synced")}</span></div>
       <div><b>Last sync:</b> ${lastSync}</div>
       <div><b>Events imported/updated:</b> ${config?.last_sync_events || 0}</div>
-      ${config?.last_sync_errors ? `<div style="color:#c62828; margin-top:6px;"><b>Errors:</b> <code style="font-size:11px;">${escapeHtml(config.last_sync_errors)}</code></div>` : ""}
+      ${config?.last_sync_errors ? `<div style="color:#9C2B1E; margin-top:6px;"><b>Errors:</b> <code style="font-size:11px;">${escapeHtml(config.last_sync_errors)}</code></div>` : ""}
     </div>
   </div>
 
   <!-- Recent events preview -->
-  <div style="background:white; border:1px solid #e0e0e0; border-radius:8px; padding:0; overflow:hidden;">
-    <div style="padding:14px 18px; border-bottom:1px solid #eee; background:#f8f8f8; display:flex; justify-content:space-between; align-items:center;">
+  <div style="background:white; border:1px solid #E8E3DC; border-radius:8px; padding:0; overflow:hidden;">
+    <div style="padding:14px 18px; border-bottom:1px solid #E8E3DC; background:#FAF8F5; display:flex; justify-content:space-between; align-items:center;">
       <h3 style="margin:0; color:${brand.navy};">📋 Recently synced events (${recentEvents.length})</h3>
-      ${recentEvents.length > 0 ? `<button onclick="purgeEvents()" style="background:transparent; color:#c00; border:1px solid #ffe0e0; padding:5px 10px; border-radius:4px; cursor:pointer; font-size:11px;">🗑 Purge all</button>` : ""}
+      ${recentEvents.length > 0 ? `<button onclick="purgeEvents()" style="background:transparent; color:#9C2B1E; border:1px solid #FBEDEA; padding:5px 10px; border-radius:4px; cursor:pointer; font-size:11px;">🗑 Purge all</button>` : ""}
     </div>
-    ${recentEvents.length > 0 ? eventRows : '<div style="padding:30px; text-align:center; color:#888;">No events synced yet. Configure the iCal URL or upload a file above.</div>'}
+    ${recentEvents.length > 0 ? eventRows : '<div style="padding:30px; text-align:center; color:#5E5854;">No events synced yet. Configure the iCal URL or upload a file above.</div>'}
   </div>
 
   <script>
@@ -617,7 +617,7 @@ function renderSettingsPage(config, recentEvents) {
         const d = await r.json();
         if (d.ok) {
           const toast = document.createElement("div");
-          toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2e7d32; color:white; padding:12px 20px; border-radius:6px; z-index:10001; font-size:14px;";
+          toast.style.cssText = "position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#2F6B3F; color:white; padding:12px 20px; border-radius:6px; z-index:10001; font-size:14px;";
           toast.textContent = "✅ Configuration saved";
           document.body.appendChild(toast);
           setTimeout(() => toast.remove(), 2500);

@@ -51,6 +51,7 @@ const CLIENT_BUNDLES = [
   "civil-docs.js",
   "esign-admin.js",
   "esign-sign.js",
+  "esign-prepare.js",
   "court-mail-page.js",
   "transcripts-page.js",
   "consultant-clients.js",
@@ -69,6 +70,14 @@ function healOne(file) {
   if (!fs.existsSync(stray)) return false;
   const target = path.join(PUBLIC_DIR, base);
   try {
+    // A file at the root with a bundle's name is not always a stray upload.
+    // calendar-feeds.js is two files: the server's routes at the root and the
+    // page's script in public/. Treating the first as a misplaced copy of the
+    // second replaced the page's script with the server module on every boot
+    // — the Calendars page loaded code written for Node and did nothing, and
+    // /static/ handed the server's source to anyone who asked. Code written
+    // for Node is never the browser's copy, whatever it is called.
+    if (isServerModule(stray)) return false;
     // A root copy only ever exists because GitHub's web upload flattened a
     // NEW version of the file. So when public/ also has one and they differ,
     // the public/ copy is the stale one: the root copy wins. (This is what
@@ -86,6 +95,16 @@ function healOne(file) {
     return true;
   } catch (e) {
     console.error(`[client-script] could not rescue ${base} from the root: ${e.message}`);
+    return false;
+  }
+}
+
+/** Written for Node (it requires, or it exports): not something a browser can run. */
+function isServerModule(file) {
+  try {
+    const src = fs.readFileSync(file, "utf8");
+    return /\bmodule\.exports\b/.test(src) || /\brequire\(\s*["'`]/.test(src);
+  } catch (e) {
     return false;
   }
 }

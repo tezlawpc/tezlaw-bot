@@ -35,17 +35,17 @@ function row(r) {
   const st = STATE[r.status] || { label: r.status, color: "#666" };
   const who = [r.client_name, r.a_number].filter(Boolean).join(" · ");
   return `
-  <tr style="border-bottom:1px solid #eee;">
+  <tr style="border-bottom:1px solid #E8E3DC;">
     <td style="padding:10px 8px; vertical-align:top;">
       <strong>${esc(who || "(no client given)")}</strong>
-      <div style="font-size:11px; color:#888;">
+      <div style="font-size:11px; color:#5E5854;">
         ${esc(ago(r.created_at))}${r.recorded_by ? " · " + esc(r.recorded_by) : ""}${r.bytes ? " · " + mb(r.bytes) : ""}
       </div>
-      ${r.hearing_type ? `<div style="font-size:11px; color:#888;">${esc(r.hearing_type)}</div>` : ""}
+      ${r.hearing_type ? `<div style="font-size:11px; color:#5E5854;">${esc(r.hearing_type)}</div>` : ""}
     </td>
     <td style="padding:10px 8px; vertical-align:top;">
       <span style="color:${st.color}; font-weight:600; font-size:12px;">${st.label}</span>
-      ${r.attempts > 1 ? `<span style="color:#888; font-size:11px;"> (${r.attempts} tries)</span>` : ""}
+      ${r.attempts > 1 ? `<span style="color:#5E5854; font-size:11px;"> (${r.attempts} tries)</span>` : ""}
       ${r.error ? `<div style="font-size:11px; color:#9C2B1E; margin-top:3px;">${esc(r.error)}</div>` : ""}
       ${r.status === "done" && r.note_id
         ? `<div style="font-size:12px; margin-top:4px;"><a href="/admin/hearing/notes/${r.note_id}">Open the draft note &rarr;</a></div>` : ""}
@@ -59,8 +59,8 @@ function row(r) {
                ${r.status === "failed" ? "Try again" : "Transcribe now"}</button>
            </form>`
         : r.status === "working"
-          ? `<span style="font-size:12px; color:#888;">in progress</span>`
-          : `<span style="font-size:12px; color:#888;">&#10003;</span>`}
+          ? `<span style="font-size:12px; color:#5E5854;">in progress</span>`
+          : `<span style="font-size:12px; color:#5E5854;">&#10003;</span>`}
     </td>
   </tr>`;
 }
@@ -75,25 +75,25 @@ function render({ rows, counts, done, failed }) {
 <style>
  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#FAF8F5;color:#2B2523;margin:0;}
  main{max-width:960px;margin:24px auto;padding:0 20px;}
- h1{font-size:24px;margin:0 0 4px;} .sub{color:#666;font-size:13px;margin-bottom:18px;}
- .card{background:#fff;border:1px solid #eee;border-radius:8px;padding:18px;margin-bottom:18px;}
+ h1{font-size:24px;margin:0 0 4px;} .sub{color:#5E5854;font-size:13px;margin-bottom:18px;}
+ .card{background:#fff;border:1px solid #E8E3DC;border-radius:8px;padding:18px;margin-bottom:18px;}
  table{width:100%;border-collapse:collapse;}
- th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#888;padding:0 8px 8px;border-bottom:2px solid #eee;}
+ th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#5E5854;padding:0 8px 8px;border-bottom:2px solid #E8E3DC;}
 </style></head><body><main>
   <h1>Recordings</h1>
   <div class="sub">Every dictation is saved here the moment it is uploaded, before any transcribing.
     You can close the laptop as soon as it says saved.
     <a href="/admin/hearing/notes/dictate" style="margin-left:10px;">&larr; Record</a></div>
 
-  ${done ? `<div class="card" style="border-left:4px solid #2e7d32;background:#f4faf5;">Transcribed. <a href="/admin/hearing/notes/${esc(done)}">Open the draft note &rarr;</a></div>` : ""}
-  ${failed ? `<div class="card" style="border-left:4px solid #9C2B1E;background:#fdf3f2;">That one did not transcribe — the reason is on the row. The recording is still here and can be tried again.</div>` : ""}
+  ${done ? `<div class="card" style="border-left:4px solid #2F6B3F;background:#EEF5EF;">Transcribed. <a href="/admin/hearing/notes/${esc(done)}">Open the draft note &rarr;</a></div>` : ""}
+  ${failed ? `<div class="card" style="border-left:4px solid #9C2B1E;background:#FBEDEA;">That one did not transcribe — the reason is on the row. The recording is still here and can be tried again.</div>` : ""}
 
   <div class="card">
-    ${pill(counts.saved, "waiting", "#fff4e5", "#B45309")}
-    ${pill(counts.working, "in progress", "#e7f0ff", "#0061FF")}
-    ${pill(counts.done, "transcribed", "#e8f5e9", "#2e7d32")}
-    ${pill(counts.failed, "failed", "#fdecea", "#9C2B1E")}
-    <div style="font-size:12px; color:#888; margin-top:8px;">
+    ${pill(counts.saved, "waiting", "#FFF3E6", "#A34C00")}
+    ${pill(counts.working, "in progress", "#F3EFE9", "#A34C00")}
+    ${pill(counts.done, "transcribed", "#EEF5EF", "#2F6B3F")}
+    ${pill(counts.failed, "failed", "#FBEDEA", "#9C2B1E")}
+    <div style="font-size:12px; color:#5E5854; margin-top:8px;">
       Waiting recordings are transcribed automatically every few minutes. The button is for when you want one now.
     </div>
   </div>
@@ -102,7 +102,7 @@ function render({ rows, counts, done, failed }) {
     <table>
       <thead><tr><th>Recording</th><th>State</th><th></th></tr></thead>
       <tbody>${rows.length ? rows.map(row).join("") :
-        `<tr><td colspan="3" style="padding:14px; color:#888; font-size:13px;">Nothing recorded yet.</td></tr>`}</tbody>
+        `<tr><td colspan="3" style="padding:14px; color:#5E5854; font-size:13px;">Nothing recorded yet.</td></tr>`}</tbody>
     </table>
   </div>
 </main></body></html>`;

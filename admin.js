@@ -278,44 +278,42 @@ router.get("/login", (req, res) => {
 // Post-login chooser
 router.get("/choose", requireAuth, (req, res) => {
   res.send(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>TEZ Law — Choose Panel</title>
+<html><head><meta charset="utf-8"><title>Choose a workspace — Tara · TEZ Law Firm</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
-  body { margin:0; min-height:100vh; background:#f4ede0;
-    font-family:'Inter Tight', sans-serif; color:#2a2520;
-    display:flex; align-items:center; justify-content:center;
-    background-image:radial-gradient(circle at 20% 30%, rgba(180,90,60,.04) 0%, transparent 60%),
-                     radial-gradient(circle at 80% 70%, rgba(60,80,120,.04) 0%, transparent 60%); }
+  body { margin:0; min-height:100vh; background:#FAF8F5;
+    font-family:Montserrat, -apple-system, 'Segoe UI', Arial, sans-serif; color:#2B2523;
+    display:flex; align-items:center; justify-content:center; }
   .container { max-width:760px; width:90%; padding:48px 36px; }
   .header { text-align:center; margin-bottom:48px; }
   h1 { font-family:'Cormorant Garamond', serif; font-size:48px; font-weight:600; margin:0 0 12px;
     letter-spacing:-.5px; }
-  .sub { font-family:'JetBrains Mono', monospace; font-size:11px; color:#665d52;
+  .sub { font-family:Montserrat, Arial, sans-serif; font-weight:600; font-size:11px; color:#5E5854;
     letter-spacing:.18em; text-transform:uppercase; }
   .panels { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
   @media (max-width:700px) { .panels { grid-template-columns:1fr; } }
-  .panel-card { background:#fbf6ec; border:1px solid #c8bda8; padding:36px 30px;
+  .panel-card { background:#FAF8F5; border:1px solid #CFC8BE; padding:36px 30px;
     text-decoration:none; color:inherit;
     box-shadow:0 1px 0 rgba(0,0,0,.04), 0 8px 24px -10px rgba(0,0,0,.08);
     transition:transform .15s, box-shadow .15s, border-color .15s; }
-  .panel-card:hover { transform:translateY(-3px); border-color:#8a7a5e;
+  .panel-card:hover { transform:translateY(-3px); border-color:#5E5854;
     box-shadow:0 4px 0 rgba(0,0,0,.04), 0 16px 36px -10px rgba(0,0,0,.14); }
   .panel-card .icon { font-size:42px; line-height:1; margin-bottom:14px; }
   .panel-card h2 { font-family:'Cormorant Garamond', serif; font-size:26px; margin:0 0 8px;
     font-weight:600; }
-  .panel-card .meta { font-family:'JetBrains Mono', monospace; font-size:10px; color:#8a7a5e;
+  .panel-card .meta { font-family:Montserrat, Arial, sans-serif; font-weight:600; font-size:10px; color:#5E5854;
     letter-spacing:.15em; text-transform:uppercase; margin-bottom:14px; }
-  .panel-card p { font-size:14px; line-height:1.5; color:#4a4239; margin:0 0 14px; }
-  .panel-card .enter { font-family:'JetBrains Mono', monospace; font-size:11px;
-    letter-spacing:.12em; text-transform:uppercase; color:#2a2520; }
-  .panel-card.matters { border-left:3px solid #8a4f3a; }
-  .panel-card.admin { border-left:3px solid #3a4a6a; }
-  .footer { text-align:center; margin-top:36px; font-family:'JetBrains Mono', monospace;
-    font-size:10px; color:#8a7a5e; letter-spacing:.14em; }
-  .footer a { color:#8a4f3a; text-decoration:none; }
+  .panel-card p { font-size:14px; line-height:1.5; color:#5E5854; margin:0 0 14px; }
+  .panel-card .enter { font-family:Montserrat, Arial, sans-serif; font-weight:600; font-size:11px;
+    letter-spacing:.12em; text-transform:uppercase; color:#2B2523; }
+  .panel-card.matters { border-left:3px solid #FF7B00; }
+  .panel-card.admin { border-left:3px solid #2B2523; }
+  .footer { text-align:center; margin-top:36px; font-family:Montserrat, Arial, sans-serif; font-weight:600;
+    font-size:10px; color:#5E5854; letter-spacing:.14em; }
+  .footer a { color:#7A3900; text-decoration:none; }
   .footer a:hover { text-decoration:underline; }
 </style></head>
 <body>
@@ -326,15 +324,13 @@ router.get("/choose", requireAuth, (req, res) => {
     </div>
     <div class="panels">
       <a href="/admin/matters/" class="panel-card matters">
-        <div class="icon">⚖️</div>
-        <div class="meta">Practice management</div>
+                <div class="meta">Practice management</div>
         <h2>Matter Manager</h2>
         <p>Active matters, deadlines, court parsers, CM/ECF inbox, calendar feed.</p>
         <div class="enter">Enter →</div>
       </a>
       <a href="/admin/" class="panel-card admin">
-        <div class="icon">📊</div>
-        <div class="meta">Zara &amp; firm analytics</div>
+                <div class="meta">Zara &amp; firm analytics</div>
         <h2>Admin Panel</h2>
         <p>Leads, conflicts, SOL tracker, drip campaigns, intake compliance, prompt history.</p>
         <div class="enter">Enter →</div>
@@ -1015,10 +1011,10 @@ function loginPageHtml() {
       --parchment-lit: #FAF8F5;
       --gold: #A34C00;
       --gold-bright: #FF7B00;
-      --gold-deep: #7B5810;
+      --gold-deep: #7A3900;
       --ember: #FF7B00;
       --ember-bright: #FF7B00;
-      --ember-deep: #B84200;
+      --ember-deep: #A34C00;
       --wax-red: #9C2B1E;
       --border-hair: #E8E3DC;
     }
@@ -1175,8 +1171,8 @@ function loginPageHtml() {
     }
     .status.success {
       background: rgba(0,102,0,0.10);
-      color: #005500;
-      border: 1px solid #007700;
+      color: #2F6B3F;
+      border: 1px solid #2F6B3F;
       display: block;
     }
 
@@ -1322,17 +1318,17 @@ function dashboardHtml(opts = {}) {
       --walnut-mid: #3A3330;
       --walnut-light: #5E5854;
       --ink: #1E1B1A;
-      --ink-body: #4A3020;
+      --ink-body: #2B2523;
       --sandstone: #FAF8F5;
       --sandstone-lit: #FAF8F5;
       --parchment: #FAF8F5;
       --parchment-lit: #FAF8F5;
       --gold: #A34C00;
       --gold-bright: #FF7B00;
-      --gold-deep: #7B5810;
+      --gold-deep: #7A3900;
       --ember: #FF7B00;
       --ember-bright: #FF7B00;
-      --ember-deep: #B84200;
+      --ember-deep: #A34C00;
       --wax-red: #9C2B1E;
       --border-hair: #E8E3DC;
     }
@@ -1501,7 +1497,7 @@ function dashboardHtml(opts = {}) {
     }
     .save-btn:hover { background: var(--ember-deep); }
     .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .save-msg { display: inline-block; margin-left: 12px; font-size: 13px; color: #006600; }
+    .save-msg { display: inline-block; margin-left: 12px; font-size: 13px; color: #2F6B3F; }
 
     /* Tables */
     table {
@@ -1531,11 +1527,11 @@ function dashboardHtml(opts = {}) {
       border-radius: 12px; font-size: 11px;
       font-family: Montserrat, sans-serif; font-weight: 600;
     }
-    .badge-tg { background: #e8f4ff; color: #0066cc; }
-    .badge-wa { background: #e8fff0; color: #006633; }
-    .badge-web { background: #fff0e8; color: #993300; }
-    .badge-wc { background: #f0e8ff; color: #660099; }
-    .badge-ms { background: #e8eeff; color: #003399; }
+    .badge-tg { background: #F3EFE9; color: #A34C00; }
+    .badge-wa { background: #EEF5EF; color: #2F6B3F; }
+    .badge-web { background: #FFF3E6; color: #7A3900; }
+    .badge-wc { background: #F3EFE9; color: #5E5854; }
+    .badge-ms { background: #F3EFE9; color: #A34C00; }
 
     /* Analytics entries */
     .analytics-entry {
@@ -1572,7 +1568,7 @@ function dashboardHtml(opts = {}) {
       transition: all 0.2s;
     }
     .action-btn:hover { background: var(--walnut-mid); border-color: var(--gold-bright); }
-    .action-btn.success { background: #005500; color: #fff; border-color: #003300; }
+    .action-btn.success { background: #2F6B3F; color: #fff; border-color: #2F6B3F; }
 
     /* Loading */
     .loading {
@@ -1617,17 +1613,17 @@ function dashboardHtml(opts = {}) {
     .kanban-count{background:var(--walnut);color:var(--gold-bright);border-radius:10px;padding:1px 7px;font-size:11px;font-family:Montserrat,sans-serif;font-weight:700}
     .lead-card{background:var(--parchment-lit);border-radius:8px;padding:12px;margin-bottom:8px;box-shadow:0 1px 4px rgba(43,37,35,0.10);border-left:3px solid var(--border-hair);transition:box-shadow .2s}
     .lead-card:hover{box-shadow:0 3px 10px rgba(43,37,35,0.20)}
-    .lead-card.stale-warn{border-left-color:var(--ember)}.lead-card.stale-crit{border-left-color:var(--wax-red)}.lead-card.unacknowledged{border-left-color:var(--gold-bright);background:#FFFEF0}
+    .lead-card.stale-warn{border-left-color:var(--ember)}.lead-card.stale-crit{border-left-color:var(--wax-red)}.lead-card.unacknowledged{border-left-color:var(--gold-bright);background:#FAF8F5}
     .lead-name{font-weight:600;font-size:13px;color:var(--walnut);margin-bottom:3px;font-family:Montserrat,sans-serif}
     .lead-meta{font-size:11px;color:var(--walnut-light);margin-bottom:6px}
     .lead-case{display:inline-block;font-size:10px;padding:2px 7px;border-radius:10px;background:rgba(255,123,0,0.2);color:var(--walnut);font-weight:600;margin-bottom:6px}
     .lead-time{font-size:10px;color:var(--walnut-light)}.lead-time.warn{color:var(--ember);font-weight:bold}.lead-time.crit{color:var(--wax-red);font-weight:bold}
     .stage-select{width:100%;font-size:11px;padding:4px 6px;border-radius:5px;border:1px solid var(--border-hair);margin-top:6px;background:var(--parchment);cursor:pointer;font-family:Montserrat,sans-serif}
-    .disp-pending{background:#fff3cd;color:#856404}.disp-possible{background:#f8d7da;color:#721c24}.disp-cleared{background:#d4edda;color:#155724}.disp-denied{background:#e2e3e5;color:#383d41}
+    .disp-pending{background:#FFF3E6;color:#7A3900}.disp-possible{background:#FBEDEA;color:#9C2B1E}.disp-cleared{background:#EEF5EF;color:#2F6B3F}.disp-denied{background:#F3EFE9;color:#2B2523}
     .disp-btn{font-size:11px;padding:3px 10px;border:none;border-radius:10px;cursor:pointer;font-weight:bold;margin-right:4px}
     .score-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:bold}
-    .score-high{background:#d4edda;color:#155724}.score-mid{background:#fff3cd;color:#856404}.score-low{background:#f8d7da;color:#721c24}
-    .needs-review{border-left-color:#cc0000!important;background:#fff8f8!important}
+    .score-high{background:#EEF5EF;color:#2F6B3F}.score-mid{background:#FFF3E6;color:#7A3900}.score-low{background:#FBEDEA;color:#9C2B1E}
+    .needs-review{border-left-color:#9C2B1E!important;background:#FBEDEA!important}
     @media (max-width: 768px) {
       .sidebar { width: 56px; padding: 0; }
       .sidebar-logo { padding: 14px 8px; text-align: center; border-bottom: 1px solid rgba(255,123,0,.3); }
@@ -1771,7 +1767,7 @@ function dashboardHtml(opts = {}) {
     </div>
     <div class="card">
       <h3>✏️ Edit Zara's System Prompt</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:12px">
+      <p style="font-size:13px;color:#5E5854;margin-bottom:12px">
         Changes apply <strong>immediately</strong> — no GitHub or Render deploy needed.
         Each save is versioned in the database.
       </p>
@@ -1783,7 +1779,7 @@ function dashboardHtml(opts = {}) {
     </div>
     <div class="card">
       <h3>🕐 Version History</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:12px">Every save is versioned. Click Restore to roll back instantly.</p>
+      <p style="font-size:13px;color:#5E5854;margin-bottom:12px">Every save is versioned. Click Restore to roll back instantly.</p>
       <div id="promptHistory"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
   </div>
@@ -1820,7 +1816,7 @@ function dashboardHtml(opts = {}) {
     </div>
     <div class="card">
       <h3>⚖️ Flagged Responses</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">
+      <p style="font-size:13px;color:#5E5854;margin-bottom:16px">
         Zara responses that contained definitive legal conclusions, guarantees, or UPL risk.
         A correction was automatically sent to the client for each entry.
       </p>
@@ -1836,35 +1832,35 @@ function dashboardHtml(opts = {}) {
     </div>
     <div class="card">
       <h3>🤖 Run Analysis Now</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">
+      <p style="font-size:13px;color:#5E5854;margin-bottom:16px">
         Analyzes the last 7 days of conversations and emails a report to jj@tezlawfirm.com.
       </p>
       <button class="action-btn" id="runAnalyticsBtn" onclick="runAnalytics()">
         ▶ Run Analytics Now
       </button>
-      <span id="analyticsMsg" style="margin-left:12px;font-size:13px;color:#006600"></span>
+      <span id="analyticsMsg" style="margin-left:12px;font-size:13px;color:#2F6B3F"></span>
     </div>
     <div class="card">
       <h3>📝 Auto-Poster</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">Manually run the WordPress auto-poster. Will not duplicate already-published posts.</p>
+      <p style="font-size:13px;color:#5E5854;margin-bottom:16px">Manually run the WordPress auto-poster. Will not duplicate already-published posts.</p>
       <button class="action-btn" id="runAutoposterBtn" onclick="runAutoposter()">▶ Run Auto-Poster Now</button>
-      <span id="autoposterMsg" style="margin-left:12px;font-size:13px;color:#006600"></span>
+      <span id="autoposterMsg" style="margin-left:12px;font-size:13px;color:#2F6B3F"></span>
     </div>
     <div class="card">
       <h3>✍️ Post Custom Topic</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">
+      <p style="font-size:13px;color:#5E5854;margin-bottom:16px">
         Write a post on any topic or news link. Zara will research, write, and publish to WordPress with Chinese and Spanish translations — just like the daily auto-poster.
       </p>
       <div style="display:grid;gap:10px;max-width:700px">
         <div>
-          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Topic or News Headline <span style="color:#cc0000">*</span></label>
+          <label style="font-size:12px;color:#5E5854;display:block;margin-bottom:4px">Topic or News Headline <span style="color:#9C2B1E">*</span></label>
           <input id="customTopic" placeholder="e.g. New USCIS fee increases 2026, or Trump immigration enforcement update"
-            style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+            style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px">
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
-            <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Practice Area</label>
-            <select id="customArea" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;background:#fff">
+            <label style="font-size:12px;color:#5E5854;display:block;margin-bottom:4px">Practice Area</label>
+            <select id="customArea" style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px;background:#fff">
               <option value="Immigration Law">Immigration Law</option>
               <option value="Personal Injury">Personal Injury</option>
               <option value="Business Law">Business Law</option>
@@ -1876,21 +1872,21 @@ function dashboardHtml(opts = {}) {
             </select>
           </div>
           <div>
-            <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Source URL (optional)</label>
+            <label style="font-size:12px;color:#5E5854;display:block;margin-bottom:4px">Source URL (optional)</label>
             <input id="customUrl" placeholder="https://uscis.gov/news/..."
-              style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+              style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px">
           </div>
         </div>
         <div>
-          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Additional Notes (optional)</label>
+          <label style="font-size:12px;color:#5E5854;display:block;margin-bottom:4px">Additional Notes (optional)</label>
           <input id="customNotes" placeholder="e.g. Focus on how this affects clients in California, mention consult availability"
-            style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+            style="width:100%;padding:9px 12px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px">
         </div>
         <div>
           <button class="action-btn" id="customPostBtn" onclick="submitCustomPost()" style="padding:10px 24px">
             ✍️ Generate &amp; Publish Post
           </button>
-          <span id="customPostMsg" style="margin-left:12px;font-size:13px;color:#006600"></span>
+          <span id="customPostMsg" style="margin-left:12px;font-size:13px;color:#2F6B3F"></span>
         </div>
       </div>
     </div>
@@ -1904,8 +1900,8 @@ function dashboardHtml(opts = {}) {
   <!-- Pipeline -->
   <div class="page" id="page-pipeline">
     <div class="page-header"><h1>Lead Pipeline</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
-    <div style="margin-bottom:12px"><label style="font-size:13px;color:#666">Show:
-      <select id="pipelineFilter" onchange="loadPipeline()" style="margin-left:6px;padding:4px 8px;border-radius:6px;border:1px solid #ddd">
+    <div style="margin-bottom:12px"><label style="font-size:13px;color:#5E5854">Show:
+      <select id="pipelineFilter" onchange="loadPipeline()" style="margin-left:6px;padding:4px 8px;border-radius:6px;border:1px solid #E8E3DC">
         <option value="active">Active only</option><option value="all">All leads</option>
       </select></label></div>
     <div id="pipelineBoard" style="overflow-x:auto"><div class="loading"><span class="spinner"></span> Loading...</div></div>
@@ -1914,7 +1910,7 @@ function dashboardHtml(opts = {}) {
   <div class="page" id="page-conflicts">
     <div class="page-header"><h1>Conflict Checks</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
     <div class="card"><h3>⚠️ Potential Conflicts</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">Auto-generated when a new intake name matches an existing client.</p>
+      <p style="font-size:13px;color:#5E5854;margin-bottom:16px">Auto-generated when a new intake name matches an existing client.</p>
       <div id="conflictsTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
   </div>
@@ -1922,7 +1918,7 @@ function dashboardHtml(opts = {}) {
   <div class="page" id="page-questions">
     <div class="page-header"><h1>Knowledge Gaps</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
     <div class="card"><h3>📊 Top Gaps This Week</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">Questions Zara failed — fix in System Prompt.</p>
+      <p style="font-size:13px;color:#5E5854;margin-bottom:16px">Questions Zara failed — fix in System Prompt.</p>
       <div id="questionsWeekly"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
     <div class="card"><h3>❓ All Open Questions</h3>
@@ -1933,7 +1929,7 @@ function dashboardHtml(opts = {}) {
   <div class="page" id="page-audit">
     <div class="page-header"><h1>Audit Log</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
     <div class="card"><h3>📜 All Admin Actions</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">Every login, prompt edit, lead move — ABA compliance record.</p>
+      <p style="font-size:13px;color:#5E5854;margin-bottom:16px">Every login, prompt edit, lead move — ABA compliance record.</p>
       <div id="auditTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
   </div>
@@ -1944,20 +1940,20 @@ function dashboardHtml(opts = {}) {
     <div class="page-header"><h1>Post Creator</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
     <div class="card">
       <h3>📝 Create a Post</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:20px">
+      <p style="font-size:13px;color:#5E5854;margin-bottom:20px">
         Enter a topic, paste a news link, upload a document, or paste an article you wrote.
         It is published to WordPress like the daily posts, and the social drafts then come to you in Telegram for approval before Postiz sends them.
       </p>
       <div style="display:grid;gap:14px">
         <div>
-          <label style="font-size:12px;font-weight:bold;color:#2B2523;display:block;margin-bottom:6px">Topic, news link, or title <span style="font-weight:normal;color:#888">(optional when you upload a document)</span></label>
+          <label style="font-size:12px;font-weight:bold;color:#2B2523;display:block;margin-bottom:6px">Topic, news link, or title <span style="font-weight:normal;color:#5E5854">(optional when you upload a document)</span></label>
           <textarea id="postTopic" placeholder="e.g. &#39;New USCIS fee increase effective January 2026&#39; or paste a URL like https://uscis.gov/news/..." 
-            style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:13px;height:80px;resize:vertical;font-family:Arial"></textarea>
+            style="width:100%;padding:10px;border:1px solid #E8E3DC;border-radius:8px;font-size:13px;height:80px;resize:vertical;font-family:Arial"></textarea>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
           <div>
             <label style="font-size:12px;font-weight:bold;color:#2B2523;display:block;margin-bottom:6px">Practice Area</label>
-            <select id="postArea" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+            <select id="postArea" style="width:100%;padding:9px;border:1px solid #E8E3DC;border-radius:8px;font-size:13px">
               <option value="Immigration Law">Immigration Law</option>
               <option value="Personal Injury">Personal Injury</option>
               <option value="Business Law">Business Law</option>
@@ -1969,7 +1965,7 @@ function dashboardHtml(opts = {}) {
           </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#2B2523;display:block;margin-bottom:6px">Language</label>
-            <select id="postLang" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+            <select id="postLang" style="width:100%;padding:9px;border:1px solid #E8E3DC;border-radius:8px;font-size:13px">
               <option value="english">English only</option>
               <option value="all">English + Chinese + Spanish</option>
               <option value="chinese">English + Chinese</option>
@@ -1978,7 +1974,7 @@ function dashboardHtml(opts = {}) {
           </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#2B2523;display:block;margin-bottom:6px">Research Web</label>
-            <select id="postSearch" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+            <select id="postSearch" style="width:100%;padding:9px;border:1px solid #E8E3DC;border-radius:8px;font-size:13px">
               <option value="true">Yes — search for latest info</option>
               <option value="false">No — use topic as-is</option>
             </select>
@@ -1987,39 +1983,39 @@ function dashboardHtml(opts = {}) {
         <div>
           <label style="font-size:12px;font-weight:bold;color:#2B2523;display:block;margin-bottom:6px">Additional Context (optional)</label>
           <input id="postContext" placeholder="Any extra details, key points to include, or specific angle..." 
-            style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+            style="width:100%;padding:9px;border:1px solid #E8E3DC;border-radius:8px;font-size:13px">
         </div>
-        <div style="border:1px dashed #E8E3DC;border-radius:8px;padding:14px;background:#FFFDF8">
+        <div style="border:1px dashed #E8E3DC;border-radius:8px;padding:14px;background:#FAF8F5">
           <label style="font-size:12px;font-weight:bold;color:#2B2523;display:block;margin-bottom:6px">Source document (optional)</label>
-          <div style="font-size:12px;color:#666;margin-bottom:10px">
+          <div style="font-size:12px;color:#5E5854;margin-bottom:10px">
             Upload a decision, order, notice or memo &mdash; or your own draft. PDF, Word (.docx) or text, up to 15 MB.
             The file is read for this post only and is not stored.
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <input type="file" id="postFile" accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onchange="onPostFile(this)" style="font-size:13px">
-            <button type="button" id="postFileClear" onclick="clearPostFile()" style="display:none;background:#eee;border:none;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer">Remove</button>
+            <button type="button" id="postFileClear" onclick="clearPostFile()" style="display:none;background:#F3EFE9;border:none;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer">Remove</button>
           </div>
-          <div id="postFileMsg" style="font-size:12px;margin-top:8px;color:#666"></div>
-          <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:12px;color:#333;cursor:pointer">
+          <div id="postFileMsg" style="font-size:12px;margin-top:8px;color:#5E5854"></div>
+          <label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:12px;color:#2B2523;cursor:pointer">
             <input type="checkbox" id="postAnon" checked style="margin-top:2px">
             <span><strong>Leave out names and identifying details</strong> of clients and parties (recommended). Untick only for a public decision where naming the parties is appropriate.</span>
           </label>
         </div>
         <div>
           <label style="font-size:12px;font-weight:bold;color:#2B2523;display:block;margin-bottom:6px">Who writes it</label>
-          <select id="postMode" onchange="onPostMode()" style="width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+          <select id="postMode" onchange="onPostMode()" style="width:100%;padding:9px;border:1px solid #E8E3DC;border-radius:8px;font-size:13px">
             <option value="write">Zara writes the article (from the topic, the link, or the uploaded document)</option>
             <option value="as_written">I wrote it &mdash; publish my text as written</option>
           </select>
           <div id="postOwnWrap" style="display:none;margin-top:10px">
-            <textarea id="postOwnText" placeholder="Paste your article here. Leave a blank line between paragraphs. A short line on its own becomes a heading. Or leave this empty and upload the article as a Word file above." style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:13px;height:220px;resize:vertical;font-family:Arial"></textarea>
-            <div style="font-size:12px;color:#666;margin-top:6px">Your wording is not changed. The title comes from the box at the top, or from the first line of your text. The usual author footer is added, and the same Rule 7.1 check runs before it goes live.</div>
+            <textarea id="postOwnText" placeholder="Paste your article here. Leave a blank line between paragraphs. A short line on its own becomes a heading. Or leave this empty and upload the article as a Word file above." style="width:100%;padding:10px;border:1px solid #E8E3DC;border-radius:8px;font-size:13px;height:220px;resize:vertical;font-family:Arial"></textarea>
+            <div style="font-size:12px;color:#5E5854;margin-top:6px">Your wording is not changed. The title comes from the box at the top, or from the first line of your text. The usual author footer is added, and the same Rule 7.1 check runs before it goes live.</div>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
           <button class="action-btn" id="postBtn" onclick="submitManualPost()">🚀 Generate &amp; Publish</button>
-          <button class="action-btn" style="background:#555" id="previewBtn" onclick="previewManualPost()">👁 Preview First</button>
-          <span id="postMsg" style="font-size:13px;color:#006600"></span>
+          <button class="action-btn" style="background:#5E5854" id="previewBtn" onclick="previewManualPost()">👁 Preview First</button>
+          <span id="postMsg" style="font-size:13px;color:#2F6B3F"></span>
         </div>
       </div>
     </div>
@@ -2027,10 +2023,10 @@ function dashboardHtml(opts = {}) {
     <!-- Preview panel -->
     <div class="card" id="postPreviewCard" style="display:none">
       <h3>👁 Preview — Review Before Publishing</h3>
-      <div id="postPreviewContent" style="font-size:13px;line-height:1.7;color:#333;white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:12px;background:#fafafa;border-radius:6px;border:1px solid #eee"></div>
+      <div id="postPreviewContent" style="font-size:13px;line-height:1.7;color:#2B2523;white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:12px;background:#FAF8F5;border-radius:6px;border:1px solid #E8E3DC"></div>
       <div style="margin-top:14px;display:flex;gap:10px">
         <button class="action-btn" id="publishBtn" onclick="publishPreview()">✅ Publish Now</button>
-        <button class="action-btn" style="background:#cc0000" onclick="cancelPreview()">✕ Cancel</button>
+        <button class="action-btn" style="background:#9C2B1E" onclick="cancelPreview()">✕ Cancel</button>
       </div>
     </div>
 
@@ -2045,7 +2041,7 @@ function dashboardHtml(opts = {}) {
     <div class="page-header"><h1>Conversation Scores</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
     <div class="card">
       <h3>🚨 Needs Review</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">Conversations flagged for low quality, UPL risk, or missing disclaimers.</p>
+      <p style="font-size:13px;color:#5E5854;margin-bottom:16px">Conversations flagged for low quality, UPL risk, or missing disclaimers.</p>
       <div id="scoresFlagged"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
     <div class="card">
@@ -2060,10 +2056,10 @@ function dashboardHtml(opts = {}) {
     <div class="card">
       <h3>➕ Add Deadline Manually</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:8px">
-        <div><label style="font-size:12px;color:#666">Client Name</label><br>
-          <input id="solName" placeholder="Full name" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px"></div>
-        <div><label style="font-size:12px;color:#666">Case Type</label><br>
-          <select id="solType" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+        <div><label style="font-size:12px;color:#5E5854">Client Name</label><br>
+          <input id="solName" placeholder="Full name" style="width:100%;padding:8px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px"></div>
+        <div><label style="font-size:12px;color:#5E5854">Case Type</label><br>
+          <select id="solType" style="width:100%;padding:8px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px">
             <option value="personal_injury">Personal Injury</option>
             <option value="car_accident">Car Accident</option>
             <option value="slip_and_fall">Slip & Fall</option>
@@ -2075,17 +2071,17 @@ function dashboardHtml(opts = {}) {
             <option value="fraud">Fraud</option>
             <option value="defamation">Defamation</option>
           </select></div>
-        <div><label style="font-size:12px;color:#666">Incident Date</label><br>
-          <input id="solDate" type="date" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px"></div>
-        <div><label style="font-size:12px;color:#666">Notes</label><br>
-          <input id="solNotes" placeholder="Optional notes" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px"></div>
+        <div><label style="font-size:12px;color:#5E5854">Incident Date</label><br>
+          <input id="solDate" type="date" style="width:100%;padding:8px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px"></div>
+        <div><label style="font-size:12px;color:#5E5854">Notes</label><br>
+          <input id="solNotes" placeholder="Optional notes" style="width:100%;padding:8px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px"></div>
         <button class="action-btn" onclick="addSolDeadline()" style="padding:9px 16px;white-space:nowrap">+ Add</button>
       </div>
       <div id="solResult" style="font-size:13px;margin-top:8px"></div>
     </div>
     <div class="card">
       <h3>⚖️ Active Deadlines</h3>
-      <p style="font-size:12px;color:#666;margin-bottom:12px">Alerts sent via Telegram at 90 / 30 / 7 / 1 days before deadline.</p>
+      <p style="font-size:12px;color:#5E5854;margin-bottom:12px">Alerts sent via Telegram at 90 / 30 / 7 / 1 days before deadline.</p>
       <div id="solTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
   </div>
@@ -2095,7 +2091,7 @@ function dashboardHtml(opts = {}) {
     <div class="page-header"><h1>Drip Campaigns</h1><button class="logout-btn" onclick="logout()">Logout</button></div>
     <div class="card">
       <h3>💧 Active Campaigns</h3>
-      <p style="font-size:13px;color:#666;margin-bottom:16px">Auto-started after intake. Sends follow-ups at 1hr / 24hr / 3day / 7day. Stops when client responds or signs.</p>
+      <p style="font-size:13px;color:#5E5854;margin-bottom:16px">Auto-started after intake. Sends follow-ups at 1hr / 24hr / 3day / 7day. Stops when client responds or signs.</p>
       <div id="dripTable"><div class="loading"><span class="spinner"></span> Loading...</div></div>
     </div>
   </div>
@@ -2127,17 +2123,17 @@ function dashboardHtml(opts = {}) {
         <!-- Search panel -->
         <div class="card" id="cases-search-panel">
           <h3>⚖️ Caselaw Search</h3>
-          <p style="font-size:11px;color:#666;margin-bottom:12px">CourtListener REST v4 with caching and judge cross-reference</p>
+          <p style="font-size:11px;color:#5E5854;margin-bottom:12px">CourtListener REST v4 with caching and judge cross-reference</p>
 
           <div style="display:flex;gap:10px;margin-bottom:10px">
             <input id="cs-query" placeholder="e.g. asylum nexus 9th circuit, demurrer breach contract..."
-              style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
+              style="flex:1;padding:10px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px"
               onkeydown="if(event.key==='Enter') runCaseSearch()">
             <button class="action-btn" onclick="runCaseSearch()">Search</button>
           </div>
 
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:11px">
-            <select id="cs-area" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:11px">
+            <select id="cs-area" style="padding:6px;border:1px solid #E8E3DC;border-radius:4px;font-size:11px">
               <option value="">All practice areas</option>
               <option value="immigration">Immigration (BIA + 9th)</option>
               <option value="pi">Personal Injury (CA)</option>
@@ -2146,7 +2142,7 @@ function dashboardHtml(opts = {}) {
               <option value="estate">Estate / Probate</option>
               <option value="public_entity">Public Entity / SEC</option>
             </select>
-            <select id="cs-court-level" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:11px">
+            <select id="cs-court-level" style="padding:6px;border:1px solid #E8E3DC;border-radius:4px;font-size:11px">
               <option value="">Any court level</option>
               <option value="scotus">SCOTUS only</option>
               <option value="federal_appeals">Federal Appeals (all circuits)</option>
@@ -2154,19 +2150,19 @@ function dashboardHtml(opts = {}) {
               <option value="california_state">California state courts</option>
               <option value="immigration">BIA + AG</option>
             </select>
-            <input id="cs-date-from" type="date" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:11px" placeholder="From">
-            <input id="cs-date-to" type="date" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:11px" placeholder="To">
-            <input id="cs-judge" placeholder="Judge name (optional)" style="padding:6px;border:1px solid #ddd;border-radius:4px;font-size:11px;width:160px">
+            <input id="cs-date-from" type="date" style="padding:6px;border:1px solid #E8E3DC;border-radius:4px;font-size:11px" placeholder="From">
+            <input id="cs-date-to" type="date" style="padding:6px;border:1px solid #E8E3DC;border-radius:4px;font-size:11px" placeholder="To">
+            <input id="cs-judge" placeholder="Judge name (optional)" style="padding:6px;border:1px solid #E8E3DC;border-radius:4px;font-size:11px;width:160px">
           </div>
 
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-            <span style="font-size:10px;color:#888;align-self:center">Quick:</span>
+            <span style="font-size:10px;color:#5E5854;align-self:center">Quick:</span>
             ${['asylum nexus particular social group','adverse credibility BIA','demurrer breach of contract','unlawful detainer notice','anti-SLAPP motion','VAWA self petition','dog bite strict liability'].map(q =>
               `<span onclick="document.getElementById('cs-query').value='${q.replace(/'/g, "\\'")}';runCaseSearch()" style="font-size:10px;background:#F3EFE9;padding:3px 8px;border-radius:10px;cursor:pointer;color:#2B2523">${q}</span>`
             ).join('')}
           </div>
 
-          <div id="cs-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Searching...</div>
+          <div id="cs-loading" style="display:none;color:#5E5854;font-size:13px;padding:10px"><span class="spinner"></span> Searching...</div>
           <div id="cs-results"></div>
         </div>
 
@@ -2179,9 +2175,9 @@ function dashboardHtml(opts = {}) {
                 <div>
                   <h3 id="cd-case-name" style="margin-bottom:4px"></h3>
                   <div id="cd-citation" style="font-size:12px;color:#A34C00;background:rgba(255,123,0,.1);display:inline-block;padding:3px 10px;border-radius:4px;margin-bottom:6px"></div>
-                  <div id="cd-meta" style="font-size:11px;color:#888"></div>
+                  <div id="cd-meta" style="font-size:11px;color:#5E5854"></div>
                 </div>
-                <button onclick="closeCaseDetail()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#888">✕</button>
+                <button onclick="closeCaseDetail()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#5E5854">✕</button>
               </div>
 
               <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
@@ -2191,13 +2187,13 @@ function dashboardHtml(opts = {}) {
                 <a id="cd-cl-link" href="#" target="_blank" class="action-btn" style="font-size:11px;padding:6px 12px;background:#2B2523;color:#FF7B00;text-decoration:none">🔗 CourtListener →</a>
               </div>
 
-              <div id="cd-fulltext" style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;padding:14px;max-height:500px;overflow-y:auto;font-size:13px;line-height:1.6;color:#2a2a2a;font-family:Georgia,serif"></div>
+              <div id="cd-fulltext" style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;padding:14px;max-height:500px;overflow-y:auto;font-size:13px;line-height:1.6;color:#2B2523;font-family:Georgia,serif"></div>
 
               <h4 style="margin-top:18px;margin-bottom:8px;color:#2B2523;font-size:13px">📚 Authorities Cited</h4>
-              <div id="cd-authorities" style="font-size:12px;color:#555"></div>
+              <div id="cd-authorities" style="font-size:12px;color:#5E5854"></div>
 
               <h4 style="margin-top:18px;margin-bottom:8px;color:#2B2523;font-size:13px">📈 Cited By</h4>
-              <div id="cd-citedby" style="font-size:12px;color:#555"></div>
+              <div id="cd-citedby" style="font-size:12px;color:#5E5854"></div>
             </div>
 
             <!-- Right rail: Judge Intelligence (THE MOAT, always visible) -->
@@ -2216,7 +2212,7 @@ function dashboardHtml(opts = {}) {
 
                 <button onclick="runJudgeIntel()" style="width:100%;background:#FF7B00;color:#2B2523;border:none;padding:8px;border-radius:4px;font-weight:bold;font-size:12px;cursor:pointer;margin-bottom:12px">Analyze Against Current Case</button>
 
-                <div id="ji-results" style="font-size:11px;color:#f5f0e0">
+                <div id="ji-results" style="font-size:11px;color:#FAF8F5">
                   <div style="background:rgba(255,255,255,.06);border-radius:4px;padding:10px;font-size:11px;line-height:1.5;color:rgba(245,240,224,.7)">
                     Type a judge name above to see:<br>
                     <ul style="margin:6px 0 0 14px;padding:0">
@@ -2240,7 +2236,7 @@ function dashboardHtml(opts = {}) {
     <div id="rsub-statutes" style="display:none">
       <div class="card">
         <h3>📚 Statute Lookup</h3>
-        <p style="font-size:11px;color:#666;margin-bottom:14px">California codes (leginfo + Justia mirror) · U.S. Code · CFR · Federal Register</p>
+        <p style="font-size:11px;color:#5E5854;margin-bottom:14px">California codes (leginfo + Justia mirror) · U.S. Code · CFR · Federal Register</p>
 
         <div style="display:flex;gap:6px;margin-bottom:12px;font-size:12px">
           <button onclick="setStatuteType('ca')" id="stype-ca" class="action-btn" style="padding:6px 12px;font-size:11px">CA Code</button>
@@ -2252,7 +2248,7 @@ function dashboardHtml(opts = {}) {
         <!-- CA Code form -->
         <div id="sform-ca">
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-            <select id="ca-code" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;min-width:200px">
+            <select id="ca-code" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px;min-width:200px">
               <option value="CCP">CCP — Code of Civil Procedure</option>
               <option value="CIV">CIV — Civil Code</option>
               <option value="EVID">EVID — Evidence Code</option>
@@ -2272,11 +2268,11 @@ function dashboardHtml(opts = {}) {
               <option value="PUC">PUC — Public Utilities</option>
               <option value="RTC">RTC — Revenue & Taxation</option>
             </select>
-            <input id="ca-section" placeholder="Section (e.g. 335.1)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:140px">
+            <input id="ca-section" placeholder="Section (e.g. 335.1)" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px;width:140px">
             <button class="action-btn" onclick="lookupStatute()">Look up</button>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <span style="font-size:10px;color:#888;align-self:center">Quick:</span>
+            <span style="font-size:10px;color:#5E5854;align-self:center">Quick:</span>
             ${[['CCP','335.1'],['CCP','425.16'],['CCP','430.10'],['CCP','437c'],['CIV','3342'],['CIV','3294'],['CIV','1714'],['CIV','1946.2'],['PROB','16002'],['PEN','273.5'],['BPC','16600'],['LAB','2802']].map(([c,s]) =>
               `<span onclick="document.getElementById('ca-code').value='${c}';document.getElementById('ca-section').value='${s}';lookupStatute()" style="font-size:10px;background:#F3EFE9;padding:3px 8px;border-radius:10px;cursor:pointer;color:#2B2523">${c} §${s}</span>`
             ).join('')}
@@ -2286,12 +2282,12 @@ function dashboardHtml(opts = {}) {
         <!-- USC form -->
         <div id="sform-usc" style="display:none">
           <div style="display:flex;gap:8px;margin-bottom:10px">
-            <input id="usc-title" placeholder="Title (e.g. 8)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:120px">
-            <input id="usc-section" placeholder="Section (e.g. 1158)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:160px">
+            <input id="usc-title" placeholder="Title (e.g. 8)" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px;width:120px">
+            <input id="usc-section" placeholder="Section (e.g. 1158)" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px;width:160px">
             <button class="action-btn" onclick="lookupStatute()">Look up</button>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <span style="font-size:10px;color:#888;align-self:center">Quick:</span>
+            <span style="font-size:10px;color:#5E5854;align-self:center">Quick:</span>
             ${[['8','1158','asylum'],['8','1229a','removal proceedings'],['8','1101','definitions'],['28','1331','federal question jx'],['42','1983','civil rights']].map(([t,s,desc]) =>
               `<span onclick="document.getElementById('usc-title').value='${t}';document.getElementById('usc-section').value='${s}';lookupStatute()" style="font-size:10px;background:#F3EFE9;padding:3px 8px;border-radius:10px;cursor:pointer;color:#2B2523" title="${desc}">${t} USC § ${s}</span>`
             ).join('')}
@@ -2301,13 +2297,13 @@ function dashboardHtml(opts = {}) {
         <!-- CFR form -->
         <div id="sform-cfr" style="display:none">
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-            <input id="cfr-title" placeholder="Title (e.g. 8)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:120px">
-            <input id="cfr-part" placeholder="Part (e.g. 208)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:120px">
-            <input id="cfr-section" placeholder="Section (optional)" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;width:160px">
+            <input id="cfr-title" placeholder="Title (e.g. 8)" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px;width:120px">
+            <input id="cfr-part" placeholder="Part (e.g. 208)" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px;width:120px">
+            <input id="cfr-section" placeholder="Section (optional)" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px;width:160px">
             <button class="action-btn" onclick="lookupStatute()">Look up</button>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <span style="font-size:10px;color:#888;align-self:center">Quick:</span>
+            <span style="font-size:10px;color:#5E5854;align-self:center">Quick:</span>
             ${[['8','208','asylum'],['8','1003','BIA appeals'],['8','236','custody'],['8','1240','removal'],['8','274a','employment'],['28','1','federal procedure']].map(([t,p,desc]) =>
               `<span onclick="document.getElementById('cfr-title').value='${t}';document.getElementById('cfr-part').value='${p}';document.getElementById('cfr-section').value='';lookupStatute()" style="font-size:10px;background:#F3EFE9;padding:3px 8px;border-radius:10px;cursor:pointer;color:#2B2523" title="${desc}">${t} CFR ${p}</span>`
             ).join('')}
@@ -2317,20 +2313,20 @@ function dashboardHtml(opts = {}) {
         <!-- Federal Register form -->
         <div id="sform-fr" style="display:none">
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-            <input id="fr-query" placeholder="Search term" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px;flex:1"
+            <input id="fr-query" placeholder="Search term" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px;flex:1"
               onkeydown="if(event.key==='Enter') lookupStatute()">
-            <select id="fr-type" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px">
+            <select id="fr-type" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px">
               <option value="">All types</option>
               <option value="RULE">Final Rules</option>
               <option value="PRORULE">Proposed Rules</option>
               <option value="NOTICE">Notices</option>
             </select>
-            <input id="fr-from" type="date" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px">
+            <input id="fr-from" type="date" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px">
             <button class="action-btn" onclick="lookupStatute()">Search</button>
           </div>
         </div>
 
-        <div id="stat-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Fetching...</div>
+        <div id="stat-loading" style="display:none;color:#5E5854;font-size:13px;padding:10px"><span class="spinner"></span> Fetching...</div>
         <div id="stat-result" style="margin-top:14px"></div>
       </div>
     </div>
@@ -2341,15 +2337,15 @@ function dashboardHtml(opts = {}) {
     <div id="rsub-verify" style="display:none">
       <div class="card">
         <h3>✅ Citation Verifier</h3>
-        <p style="font-size:11px;color:#666;margin-bottom:14px">Check citations against CourtListener (~9M opinions) + eyecite parser. Defends against AI hallucinations.</p>
+        <p style="font-size:11px;color:#5E5854;margin-bottom:14px">Check citations against CourtListener (~9M opinions) + eyecite parser. Defends against AI hallucinations.</p>
 
         <div style="margin-bottom:14px">
           <textarea id="vf-text" rows="6" placeholder="Paste a paragraph, brief excerpt, or single citation. eyecite will find every cite and verify each one against CourtListener."
-            style="width:100%;padding:12px;border:1px solid #ddd;border-radius:6px;font-size:13px;resize:vertical;font-family:Georgia,serif"></textarea>
+            style="width:100%;padding:12px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px;resize:vertical;font-family:Georgia,serif"></textarea>
           <button class="action-btn" onclick="runVerifyCitation()" style="margin-top:10px">Verify All Citations</button>
         </div>
 
-        <div id="vf-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Parsing and verifying...</div>
+        <div id="vf-loading" style="display:none;color:#5E5854;font-size:13px;padding:10px"><span class="spinner"></span> Parsing and verifying...</div>
         <div id="vf-results"></div>
       </div>
     </div>
@@ -2361,14 +2357,14 @@ function dashboardHtml(opts = {}) {
     <div id="rsub-judge" style="display:none">
       <div class="card">
         <h3>📊 Judge Intelligence Workspace</h3>
-        <p style="font-size:11px;color:#666;margin-bottom:14px">Cross-reference Layer 1 judge data — what authorities a judge relies on, how they treat specific cases, what they co-cite.</p>
+        <p style="font-size:11px;color:#5E5854;margin-bottom:14px">Cross-reference Layer 1 judge data — what authorities a judge relies on, how they treat specific cases, what they co-cite.</p>
 
         <div style="display:flex;gap:8px;margin-bottom:14px">
           <input id="jw-judge" placeholder="Judge name (e.g. Wardlaw, Malphrus, Owen)" list="jw-judge-list"
-            style="flex:1;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px"
+            style="flex:1;padding:10px;border:1px solid #E8E3DC;border-radius:6px;font-size:13px"
             onkeydown="if(event.key==='Enter') runJudgeWorkspace()">
           <datalist id="jw-judge-list"></datalist>
-          <select id="jw-motion" style="padding:9px;border:1px solid #ddd;border-radius:4px;font-size:12px">
+          <select id="jw-motion" style="padding:9px;border:1px solid #E8E3DC;border-radius:4px;font-size:12px">
             <option value="">Any motion type</option>
             <option value="Asylum">Asylum</option>
             <option value="Continuance">Continuance</option>
@@ -2382,17 +2378,17 @@ function dashboardHtml(opts = {}) {
           <button class="action-btn" onclick="runJudgeWorkspace()">Analyze</button>
         </div>
 
-        <div id="jw-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Querying moat...</div>
+        <div id="jw-loading" style="display:none;color:#5E5854;font-size:13px;padding:10px"><span class="spinner"></span> Querying moat...</div>
         <div id="jw-results"></div>
       </div>
 
       <div class="card" style="margin-top:14px">
         <h3>🎯 Predict Treatment</h3>
-        <p style="font-size:11px;color:#666;margin-bottom:12px">Given a judge and a case you're considering citing, predict how that judge would likely treat it.</p>
+        <p style="font-size:11px;color:#5E5854;margin-bottom:12px">Given a judge and a case you're considering citing, predict how that judge would likely treat it.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input id="pt-judge" placeholder="Judge" style="padding:9px;border:1px solid #ddd;border-radius:6px;font-size:12px;width:160px">
-          <input id="pt-case" placeholder="Case name (e.g. Cardoza-Fonseca)" style="padding:9px;border:1px solid #ddd;border-radius:6px;font-size:12px;flex:1;min-width:200px">
-          <input id="pt-motion" placeholder="Motion type (optional)" style="padding:9px;border:1px solid #ddd;border-radius:6px;font-size:12px;width:160px">
+          <input id="pt-judge" placeholder="Judge" style="padding:9px;border:1px solid #E8E3DC;border-radius:6px;font-size:12px;width:160px">
+          <input id="pt-case" placeholder="Case name (e.g. Cardoza-Fonseca)" style="padding:9px;border:1px solid #E8E3DC;border-radius:6px;font-size:12px;flex:1;min-width:200px">
+          <input id="pt-motion" placeholder="Motion type (optional)" style="padding:9px;border:1px solid #E8E3DC;border-radius:6px;font-size:12px;width:160px">
           <button class="action-btn" onclick="runPredictTreatment()">Predict</button>
         </div>
         <div id="pt-result" style="margin-top:14px"></div>
@@ -2405,20 +2401,20 @@ function dashboardHtml(opts = {}) {
     <div id="rsub-saved" style="display:none">
       <div class="card">
         <h3>⭐ Saved Research</h3>
-        <p style="font-size:11px;color:#666;margin-bottom:14px">Cases, statutes, and other research saved during searches.</p>
+        <p style="font-size:11px;color:#5E5854;margin-bottom:14px">Cases, statutes, and other research saved during searches.</p>
 
         <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-          <select id="saved-filter-type" onchange="loadSaved()" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px">
+          <select id="saved-filter-type" onchange="loadSaved()" style="padding:8px;border:1px solid #E8E3DC;border-radius:6px;font-size:12px">
             <option value="">All types</option>
             <option value="case">Cases</option>
             <option value="statute">Statutes</option>
             <option value="reg">Regulations</option>
           </select>
-          <input id="saved-filter-tag" placeholder="Filter by tag" onkeyup="if(event.key==='Enter')loadSaved()" style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;width:160px">
+          <input id="saved-filter-tag" placeholder="Filter by tag" onkeyup="if(event.key==='Enter')loadSaved()" style="padding:8px;border:1px solid #E8E3DC;border-radius:6px;font-size:12px;width:160px">
           <button class="action-btn" onclick="loadSaved()" style="font-size:11px">Refresh</button>
         </div>
 
-        <div id="saved-loading" style="display:none;color:#999;font-size:13px;padding:10px"><span class="spinner"></span> Loading...</div>
+        <div id="saved-loading" style="display:none;color:#5E5854;font-size:13px;padding:10px"><span class="spinner"></span> Loading...</div>
         <div id="saved-results"></div>
       </div>
     </div>
@@ -2481,11 +2477,11 @@ async function runCaseSearch() {
     const results = data.results || [];
 
     document.getElementById('cs-results').innerHTML = results.length
-      ? '<div style="font-size:11px;color:#888;margin-bottom:8px">Showing ' + results.length + ' of ' + (data.total || results.length) + ' results</div>'
+      ? '<div style="font-size:11px;color:#5E5854;margin-bottom:8px">Showing ' + results.length + ' of ' + (data.total || results.length) + ' results</div>'
         + results.map(r => renderResultCard(r)).join('')
-      : '<p style="color:#999;font-size:13px;padding:12px">No results. Try broader terms or remove filters.</p>';
+      : '<p style="color:#5E5854;font-size:13px;padding:12px">No results. Try broader terms or remove filters.</p>';
   } catch (err) {
-    document.getElementById('cs-results').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
+    document.getElementById('cs-results').innerHTML = '<p style="color:#9C2B1E;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
   } finally {
     document.getElementById('cs-loading').style.display = 'none';
   }
@@ -2496,8 +2492,8 @@ function renderResultCard(r) {
   return '<div onclick="openCaseDetail(\\'' + id + '\\')" style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:8px;padding:14px;margin-bottom:10px;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor=\\'#A34C00\\'" onmouseout="this.style.borderColor=\\'#E8E3DC\\'">'
     + '<div style="font-weight:bold;color:#2B2523;margin-bottom:4px">' + esc(r.case_name || 'Unknown') + '</div>'
     + (r.citation ? '<div style="font-size:11px;color:#A34C00;background:rgba(255,123,0,.1);display:inline-block;padding:2px 8px;border-radius:4px;margin-bottom:6px">' + esc(r.citation) + '</div>' : '')
-    + '<div style="font-size:11px;color:#888;margin-bottom:6px">🏛️ ' + esc(r.court_id || r.court || '') + ' · 📅 ' + esc(r.date_filed || '') + (r.judge ? ' · 👨‍⚖️ ' + esc(r.judge) : '') + (r.cite_count ? ' · 📈 cited ' + r.cite_count + 'x' : '') + '</div>'
-    + (r.snippet ? '<div style="font-size:12px;color:#555;font-style:italic;border-left:2px solid #FF7B00;padding-left:8px;margin-bottom:4px">"' + esc(r.snippet.substring(0, 220)) + '..."</div>' : '')
+    + '<div style="font-size:11px;color:#5E5854;margin-bottom:6px">🏛️ ' + esc(r.court_id || r.court || '') + ' · 📅 ' + esc(r.date_filed || '') + (r.judge ? ' · 👨‍⚖️ ' + esc(r.judge) : '') + (r.cite_count ? ' · 📈 cited ' + r.cite_count + 'x' : '') + '</div>'
+    + (r.snippet ? '<div style="font-size:12px;color:#5E5854;font-style:italic;border-left:2px solid #FF7B00;padding-left:8px;margin-bottom:4px">"' + esc(r.snippet.substring(0, 220)) + '..."</div>' : '')
     + '</div>';
 }
 
@@ -2523,21 +2519,21 @@ async function openCaseDetail(clusterId) {
       const cleanText = data.full_text.replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();
       ft.textContent = cleanText.substring(0, 8000) + (cleanText.length > 8000 ? '… (truncated, view full on CourtListener)' : '');
     } else {
-      ft.innerHTML = '<p style="color:#999">No full text available — ' + (data.url ? '<a href="' + data.url + '" target="_blank">view on CourtListener</a>' : 'try CourtListener directly') + '</p>';
+      ft.innerHTML = '<p style="color:#5E5854">No full text available — ' + (data.url ? '<a href="' + data.url + '" target="_blank">view on CourtListener</a>' : 'try CourtListener directly') + '</p>';
     }
 
     // Authorities (cited by this case)
     const auth = data.authorities || [];
     document.getElementById('cd-authorities').innerHTML = auth.length
       ? auth.slice(0, 20).map(a => '<div style="padding:4px 0;border-bottom:1px solid #F3EFE9">' + esc(a.cited_opinion__cluster__case_name || a.case_name || 'Unknown') + '</div>').join('')
-      : '<span style="color:#999">No authorities indexed</span>';
+      : '<span style="color:#5E5854">No authorities indexed</span>';
 
     // Cited by
     const cb = data.cited_by || [];
     document.getElementById('cd-citedby').innerHTML = (cb.length || data.cite_count)
       ? '<div style="margin-bottom:8px"><strong>' + (data.cite_count || cb.length) + ' citing opinions</strong></div>'
         + cb.slice(0, 10).map(c => '<div style="padding:4px 0;border-bottom:1px solid #F3EFE9">' + esc(c.citing_opinion__cluster__case_name || c.case_name || 'Unknown') + '</div>').join('')
-      : '<span style="color:#999">Not cited yet by other indexed opinions</span>';
+      : '<span style="color:#5E5854">Not cited yet by other indexed opinions</span>';
 
     // Show detail panel
     document.getElementById('case-detail-panel').style.display = 'block';
@@ -2550,7 +2546,7 @@ async function openCaseDetail(clusterId) {
       ji.innerHTML = '<div style="font-size:11px;color:rgba(245,240,224,.7);margin-bottom:8px">📍 <strong>' + firmJudges.length + ' judges in firm DB</strong> have cited this case:</div>'
         + firmJudges.slice(0, 5).map(j =>
           '<div onclick="document.getElementById(\\'ji-judge-name\\').value=\\'' + j.judge_name.replace(/\\\\/g,'\\\\\\\\').replace(/\\'/g,"\\\\\\'") + '\\';runJudgeIntel()" style="background:rgba(255,255,255,.06);padding:8px;border-radius:4px;margin-bottom:6px;cursor:pointer;border-left:3px solid #FF7B00">'
-          + '<div style="font-weight:bold;color:#f5f0e0">' + esc(j.judge_name) + '</div>'
+          + '<div style="font-weight:bold;color:#FAF8F5">' + esc(j.judge_name) + '</div>'
           + '<div style="font-size:10px;color:rgba(245,240,224,.7);margin-top:2px">cited <strong>' + j.citation_count + '×</strong>'
           + (j.positive_count > 0 ? ' · ✓ ' + j.positive_count + ' positive' : '')
           + (j.distinguishes_count > 0 ? ' · ⚠️ ' + j.distinguishes_count + ' distinguished' : '')
@@ -2658,7 +2654,7 @@ async function runJudgeIntel() {
     if ((tc.cases || []).length > 0) {
       html += '<div style="font-size:11px;color:rgba(245,240,224,.7);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Top Authorities (this judge cites)</div>';
       html += (tc.cases || []).slice(0, 5).map(c =>
-        '<div style="background:rgba(255,255,255,.06);padding:7px 8px;border-radius:4px;margin-bottom:5px;font-size:11px"><strong style="color:#f5f0e0">' + esc(c.cited_case_name || '') + '</strong>'
+        '<div style="background:rgba(255,255,255,.06);padding:7px 8px;border-radius:4px;margin-bottom:5px;font-size:11px"><strong style="color:#FAF8F5">' + esc(c.cited_case_name || '') + '</strong>'
         + (c.cited_case_citation ? '<div style="color:rgba(245,240,224,.6);font-size:10px">' + esc(c.cited_case_citation) + '</div>' : '')
         + '<div style="color:#A34C00;font-size:10px;margin-top:2px">cited ' + c.times_cited + '×</div></div>'
       ).join('');
@@ -2728,16 +2724,16 @@ async function lookupStatute() {
     if (statuteType === 'fr') {
       const docs = data.results || [];
       document.getElementById('stat-result').innerHTML = docs.length
-        ? '<div style="font-size:11px;color:#888;margin-bottom:8px">' + docs.length + ' results</div>'
+        ? '<div style="font-size:11px;color:#5E5854;margin-bottom:8px">' + docs.length + ' results</div>'
           + docs.slice(0, 15).map(d =>
             '<div style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;padding:12px;margin-bottom:8px">'
             + '<div style="font-weight:bold;color:#2B2523;margin-bottom:3px">' + esc(d.title || '') + '</div>'
-            + '<div style="font-size:10px;color:#888;margin-bottom:6px">' + esc(d.publication_date || '') + ' · ' + esc(d.type || '') + ' · ' + esc((d.agencies || []).map(a=>a.name).join(', ')) + '</div>'
-            + '<div style="font-size:12px;color:#555">' + esc((d.abstract || '').substring(0, 240)) + '</div>'
+            + '<div style="font-size:10px;color:#5E5854;margin-bottom:6px">' + esc(d.publication_date || '') + ' · ' + esc(d.type || '') + ' · ' + esc((d.agencies || []).map(a=>a.name).join(', ')) + '</div>'
+            + '<div style="font-size:12px;color:#5E5854">' + esc((d.abstract || '').substring(0, 240)) + '</div>'
             + '<a href="' + esc(d.html_url || '#') + '" target="_blank" style="font-size:11px;background:#2B2523;color:#FF7B00;padding:4px 10px;border-radius:4px;text-decoration:none;display:inline-block;margin-top:8px">📄 Read →</a>'
             + '</div>'
           ).join('')
-        : '<p style="color:#999;font-size:13px">No results.</p>';
+        : '<p style="color:#5E5854;font-size:13px">No results.</p>';
     } else {
       // CA / USC / CFR statute display
       const text = data.text || data.title_text || '(no text — try official URL)';
@@ -2745,7 +2741,7 @@ async function lookupStatute() {
       document.getElementById('stat-result').innerHTML =
         '<div style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:8px;padding:18px">'
         + '<div style="font-weight:bold;color:#A34C00;font-size:14px;margin-bottom:8px">📚 ' + esc(data.title || data.code_name || '') + '</div>'
-        + (data.breadcrumbs ? '<div style="font-size:10px;color:#888;margin-bottom:10px;font-style:italic">' + esc(data.breadcrumbs) + '</div>' : '')
+        + (data.breadcrumbs ? '<div style="font-size:10px;color:#5E5854;margin-bottom:10px;font-style:italic">' + esc(data.breadcrumbs) + '</div>' : '')
         + '<div style="white-space:pre-wrap;font-family:Georgia,serif;font-size:13px;color:#2B2523;line-height:1.7;border-left:3px solid #FF7B00;padding-left:14px;margin-bottom:14px">' + esc(text.substring(0, 8000)) + (text.length > 8000 ? '…' : '') + '</div>'
         + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
         + (officialUrl ? '<a href="' + esc(officialUrl) + '" target="_blank" style="font-size:11px;background:#2B2523;color:#FF7B00;padding:5px 12px;border-radius:4px;text-decoration:none">🔗 Official source →</a>' : '')
@@ -2753,11 +2749,11 @@ async function lookupStatute() {
         + (data.cornell_url ? '<a href="' + esc(data.cornell_url) + '" target="_blank" style="font-size:11px;background:#F3EFE9;color:#2B2523;padding:5px 12px;border-radius:4px;text-decoration:none">📖 Cornell LII →</a>' : '')
         + '<button onclick="navigator.clipboard.writeText(' + JSON.stringify(text.substring(0,5000)) + ')" style="font-size:11px;background:#F3EFE9;color:#2B2523;border:none;padding:5px 12px;border-radius:4px;cursor:pointer">📋 Copy text</button>'
         + '</div>'
-        + (data.note ? '<p style="font-size:10px;color:#aaa;margin-top:10px">' + esc(data.note) + '</p>' : '')
+        + (data.note ? '<p style="font-size:10px;color:#5E5854;margin-top:10px">' + esc(data.note) + '</p>' : '')
         + '</div>';
     }
   } catch (err) {
-    document.getElementById('stat-result').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
+    document.getElementById('stat-result').innerHTML = '<p style="color:#9C2B1E;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
   } finally {
     document.getElementById('stat-loading').style.display = 'none';
   }
@@ -2788,7 +2784,7 @@ async function runVerifyCitation() {
     let html = '<div style="background:#FAF8F5;border-radius:8px;padding:14px;margin-bottom:14px"><strong>Found ' + verified.length + ' citation' + (verified.length === 1 ? '' : 's') + '</strong></div>';
 
     if (verified.length === 0) {
-      html += '<p style="color:#999;font-size:13px;padding:12px">No citations matched in CourtListener. Either none present in the text, or none recognizable to the citation parser.</p>';
+      html += '<p style="color:#5E5854;font-size:13px;padding:12px">No citations matched in CourtListener. Either none present in the text, or none recognizable to the citation parser.</p>';
     } else {
       html += verified.map(v => {
         const found = (v.clusters || []).length > 0;
@@ -2800,9 +2796,9 @@ async function runVerifyCitation() {
           + '<strong style="font-family:monospace">' + esc(v.citation || '') + '</strong>'
           + (cluster
               ? '<div style="margin-top:6px"><div>' + esc(cluster.case_name || '') + '</div>'
-                + '<div style="font-size:11px;color:#888">' + esc(cluster.court || '') + ' · ' + esc(cluster.date_filed || '') + '</div>'
+                + '<div style="font-size:11px;color:#5E5854">' + esc(cluster.court || '') + ' · ' + esc(cluster.date_filed || '') + '</div>'
                 + '<a href="https://www.courtlistener.com/opinion/' + cluster.id + '/" target="_blank" style="font-size:11px;color:#2B2523;text-decoration:underline">View →</a></div>'
-              : '<div style="margin-top:6px;font-size:11px;color:#cc0000">⚠️ Not found in CourtListener — verify before filing</div>'
+              : '<div style="margin-top:6px;font-size:11px;color:#9C2B1E">⚠️ Not found in CourtListener — verify before filing</div>'
             )
           + '</div>';
       }).join('');
@@ -2813,16 +2809,16 @@ async function runVerifyCitation() {
       html += '<div style="font-size:11px;margin-top:8px">' + extracted.slice(0, 20).map(c =>
         '<div style="padding:4px 0">'
         + '<span style="font-family:monospace">' + esc(c.cite || '') + '</span>'
-        + ' <span style="color:#888;font-size:10px">[' + esc(c.type || '') + (c.year ? ', ' + c.year : '') + ']</span>'
-        + (c.parenthetical ? '<div style="color:#555;font-style:italic;margin-left:14px">"' + esc(c.parenthetical) + '"</div>' : '')
-        + (c.treatment && c.treatment !== 'neutral' ? '<span style="font-size:10px;background:' + (c.treatment === 'positive' ? '#d4edda' : '#fff3cd') + ';padding:2px 6px;border-radius:3px;margin-left:6px">' + esc(c.treatment) + '</span>' : '')
+        + ' <span style="color:#5E5854;font-size:10px">[' + esc(c.type || '') + (c.year ? ', ' + c.year : '') + ']</span>'
+        + (c.parenthetical ? '<div style="color:#5E5854;font-style:italic;margin-left:14px">"' + esc(c.parenthetical) + '"</div>' : '')
+        + (c.treatment && c.treatment !== 'neutral' ? '<span style="font-size:10px;background:' + (c.treatment === 'positive' ? '#EEF5EF' : '#FFF3E6') + ';padding:2px 6px;border-radius:3px;margin-left:6px">' + esc(c.treatment) + '</span>' : '')
         + '</div>'
       ).join('') + '</div></div>';
     }
 
     document.getElementById('vf-results').innerHTML = html;
   } catch (err) {
-    document.getElementById('vf-results').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
+    document.getElementById('vf-results').innerHTML = '<p style="color:#9C2B1E;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
   } finally {
     document.getElementById('vf-loading').style.display = 'none';
   }
@@ -2862,7 +2858,7 @@ async function runJudgeWorkspace() {
     let html = '<div style="background:#FAF8F5;border-radius:8px;padding:14px;margin-bottom:14px"><strong>' + cases.length + ' authorities</strong> ' + esc(judge) + ' relies on most' + (motion ? ' for <em>' + esc(motion) + '</em>' : '') + '</div>';
 
     if (cases.length === 0) {
-      html += '<p style="color:#999;font-size:13px;padding:12px">No data for this judge yet. Layer 1 may not have indexed their rulings, or the motion type filter is too restrictive.</p>';
+      html += '<p style="color:#5E5854;font-size:13px;padding:12px">No data for this judge yet. Layer 1 may not have indexed their rulings, or the motion type filter is too restrictive.</p>';
     } else {
       html += cases.map((c, i) =>
         '<div style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;padding:12px;margin-bottom:8px">'
@@ -2874,7 +2870,7 @@ async function runJudgeWorkspace() {
         + '<div style="text-align:right;font-size:12px;color:#2B2523;font-weight:bold;background:rgba(255,123,0,.15);padding:4px 10px;border-radius:4px">cited ' + c.times_cited + '×</div>'
         + '</div>'
         + (c.sample_parentheticals && c.sample_parentheticals.length
-          ? '<div style="margin-top:8px;font-size:11px;font-style:italic;color:#555;border-left:2px solid #FF7B00;padding-left:8px">"' + esc(c.sample_parentheticals[0].substring(0, 200)) + '..."</div>'
+          ? '<div style="margin-top:8px;font-size:11px;font-style:italic;color:#5E5854;border-left:2px solid #FF7B00;padding-left:8px">"' + esc(c.sample_parentheticals[0].substring(0, 200)) + '..."</div>'
           : '')
         + (c.cited_cluster_id
           ? '<div style="margin-top:8px"><a onclick="openCaseDetail(\\'' + c.cited_cluster_id + '\\');showResearchTab(\\'cases\\')" style="font-size:11px;color:#2B2523;cursor:pointer;text-decoration:underline">View case →</a></div>'
@@ -2885,7 +2881,7 @@ async function runJudgeWorkspace() {
 
     document.getElementById('jw-results').innerHTML = html;
   } catch (err) {
-    document.getElementById('jw-results').innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
+    document.getElementById('jw-results').innerHTML = '<p style="color:#9C2B1E;font-size:13px;padding:12px">❌ ' + esc(err.message) + '</p>';
   } finally {
     document.getElementById('jw-loading').style.display = 'none';
   }
@@ -2898,7 +2894,7 @@ async function runPredictTreatment() {
   if (!judge || !caseName) return;
 
   const out = document.getElementById('pt-result');
-  out.innerHTML = '<div style="color:#999;font-size:13px"><span class="spinner"></span> Predicting...</div>';
+  out.innerHTML = '<div style="color:#5E5854;font-size:13px"><span class="spinner"></span> Predicting...</div>';
 
   try {
     const resp = await fetch(RES_API + '/predict-treatment', {
@@ -2908,24 +2904,24 @@ async function runPredictTreatment() {
     });
     const data = await resp.json();
 
-    const colors = { HIGH: '#27ae60', MEDIUM: '#f39c12', LOW: '#999' };
+    const colors = { HIGH: '#2F6B3F', MEDIUM: '#A34C00', LOW: '#5E5854' };
     out.innerHTML =
       '<div style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:8px;padding:14px">'
       + '<div style="display:flex;justify-content:space-between;margin-bottom:10px"><strong>Prediction</strong>'
-      + '<span style="background:' + (colors[data.confidence] || '#999') + ';color:white;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:bold">' + (data.confidence || 'LOW') + '</span></div>'
+      + '<span style="background:' + (colors[data.confidence] || '#5E5854') + ';color:white;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:bold">' + (data.confidence || 'LOW') + '</span></div>'
       + '<p style="font-size:13px;color:#2B2523;margin-bottom:12px">' + esc(data.summary || '') + '</p>'
       + (data.prior_citations && data.prior_citations.length
         ? '<div style="margin-top:10px"><strong style="font-size:12px">Prior citations:</strong><div style="font-size:11px;margin-top:6px">'
           + data.prior_citations.slice(0, 3).map(p =>
             '<div style="padding:6px 8px;background:white;border-radius:4px;margin-bottom:4px">'
-            + (p.parenthetical ? '<em>"' + esc(p.parenthetical) + '"</em>' : '<span style="color:#888">no parenthetical</span>')
+            + (p.parenthetical ? '<em>"' + esc(p.parenthetical) + '"</em>' : '<span style="color:#5E5854">no parenthetical</span>')
             + (p.treatment ? '<div style="font-size:10px;color:#A34C00;margin-top:2px">' + esc(p.treatment) + '</div>' : '')
             + '</div>'
           ).join('') + '</div></div>'
         : '')
       + '</div>';
   } catch (err) {
-    out.innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + esc(err.message) + '</p>';
+    out.innerHTML = '<p style="color:#9C2B1E;font-size:13px">❌ ' + esc(err.message) + '</p>';
   }
 }
 
@@ -2953,17 +2949,17 @@ async function loadSaved() {
           return '<div style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;padding:12px;margin-bottom:8px">'
             + '<div style="display:flex;justify-content:space-between;margin-bottom:6px">'
             + '<div style="font-weight:bold;color:#2B2523">' + ico + ' ' + esc(it.cached_title || it.resource_id) + '</div>'
-            + '<button onclick="deleteSaved(' + it.id + ')" style="background:none;border:none;color:#cc0000;cursor:pointer;font-size:11px">✕ Delete</button>'
+            + '<button onclick="deleteSaved(' + it.id + ')" style="background:none;border:none;color:#9C2B1E;cursor:pointer;font-size:11px">✕ Delete</button>'
             + '</div>'
             + (it.cached_citation ? '<div style="font-size:11px;color:#A34C00;margin-bottom:4px">' + esc(it.cached_citation) + '</div>' : '')
             + ((it.tags || []).length ? '<div style="margin-bottom:6px">' + it.tags.map(t => '<span style="font-size:10px;background:#F3EFE9;color:#2B2523;padding:2px 8px;border-radius:10px;margin-right:4px">' + esc(t) + '</span>').join('') + '</div>' : '')
-            + (it.notes_md ? '<div style="font-size:11px;color:#555;font-style:italic">' + esc(it.notes_md) + '</div>' : '')
+            + (it.notes_md ? '<div style="font-size:11px;color:#5E5854;font-style:italic">' + esc(it.notes_md) + '</div>' : '')
             + (it.cached_url ? '<div style="margin-top:8px"><a href="' + esc(it.cached_url) + '" target="_blank" style="font-size:11px;color:#2B2523;text-decoration:underline">View →</a>' + (it.resource_type === 'case' ? '<a onclick="openCaseDetail(\\'' + it.resource_id + '\\');showResearchTab(\\'cases\\')" style="font-size:11px;color:#2B2523;text-decoration:underline;cursor:pointer;margin-left:10px">Open in research →</a>' : '') + '</div>' : '')
             + '</div>';
         }).join('')
-      : '<p style="color:#999;font-size:13px;padding:12px">No saved items. Click ⭐ Save on any case detail view to save it here.</p>';
+      : '<p style="color:#5E5854;font-size:13px;padding:12px">No saved items. Click ⭐ Save on any case detail view to save it here.</p>';
   } catch (err) {
-    document.getElementById('saved-results').innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + esc(err.message) + '</p>';
+    document.getElementById('saved-results').innerHTML = '<p style="color:#9C2B1E;font-size:13px">❌ ' + esc(err.message) + '</p>';
   } finally {
     document.getElementById('saved-loading').style.display = 'none';
   }

@@ -639,7 +639,7 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
   ];
 
   const previewSection = generated ? `
-    <div style="background:#f9f9f9; padding:20px; margin:20px 0; border-left:4px solid #FF7B00;">
+    <div style="background:#FAF8F5; padding:20px; margin:20px 0; border-left:4px solid #FF7B00;">
       <h2 style="margin-top:0;">📧 Generated Email Preview</h2>
       <div style="background:white; padding:15px; border-radius:4px;">
         <strong>Subject:</strong> ${escapeHtml(generated.subject)}
@@ -648,9 +648,9 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
       </div>
       <div style="margin-top:15px;">
         <button type="button" onclick="copyToClipboard()" style="background:#2B2523; color:white; padding:12px 30px; border:none; border-radius:4px; font-size:16px; cursor:pointer;">📋 Copy Email To Clipboard</button>
-        <span id="copy-status" style="margin-left:15px; color:#4CAF50; font-weight:bold;"></span>
+        <span id="copy-status" style="margin-left:15px; color:#2F6B3F; font-weight:bold;"></span>
       </div>
-      ${saved ? '<p style="color:#4CAF50; margin-top:10px;">✅ Record saved to database.</p>' : ""}
+      ${saved ? '<p style="color:#2F6B3F; margin-top:10px;">✅ Record saved to database.</p>' : ""}
     </div>
     <script>
       function copyToClipboard() {
@@ -666,7 +666,7 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
   ` : "";
 
   const errorSection = error ? `
-    <div style="background:#ffebee; padding:15px; border-left:4px solid #c00; margin:15px 0;">
+    <div style="background:#FBEDEA; padding:15px; border-left:4px solid #9C2B1E; margin:15px 0;">
       <strong>⚠️ Error:</strong> ${escapeHtml(error)}
     </div>
   ` : "";
@@ -678,13 +678,13 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
   <title>Master Hearing Form — Tez Law Zara</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 800px; margin: 30px auto; padding: 20px; color: #333; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 800px; margin: 30px auto; padding: 20px; color: #2B2523; }
     h1 { color: #2B2523; border-bottom: 3px solid #FF7B00; padding-bottom: 10px; }
     h2 { color: #A34C00; }
     label { display: block; margin: 12px 0 4px; font-weight: 600; }
     input[type="text"], input[type="datetime-local"], select, textarea {
       width: 100%; padding: 10px; margin: 4px 0; box-sizing: border-box;
-      border: 1px solid #ccc; border-radius: 4px; font-size: 14px;
+      border: 1px solid #CFC8BE; border-radius: 4px; font-size: 14px;
       font-family: inherit;
     }
     textarea { min-height: 80px; }
@@ -697,13 +697,13 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
     }
     button[type="submit"] { background: #A34C00; color: white; }
     button[type="submit"]:hover { background: #7A3900; }
-    button.secondary { background: #eee; color: #333; }
+    button.secondary { background: #F3EFE9; color: #2B2523; }
     .warn {
-      background: #fff3cd; padding: 12px; border-left: 4px solid #ffc107;
+      background: #FFF3E6; padding: 12px; border-left: 4px solid #FF7B00;
       margin: 15px 0; border-radius: 4px;
     }
-    .hint { color: #666; font-size: 13px; font-style: italic; margin: 2px 0; }
-    fieldset { border: 1px solid #ddd; padding: 15px; margin: 15px 0; border-radius: 4px; }
+    .hint { color: #5E5854; font-size: 13px; font-style: italic; margin: 2px 0; }
+    fieldset { border: 1px solid #E8E3DC; padding: 15px; margin: 15px 0; border-radius: 4px; }
     legend { font-weight: 600; color: #2B2523; padding: 0 8px; }
   </style>
 </head>
@@ -796,7 +796,7 @@ function renderAdminForm({ generated = null, saved = false, error = null, previo
     </div>
   </form>
 
-  <p style="margin-top:30px; color:#888; font-size:13px;">
+  <p style="margin-top:30px; color:#5E5854; font-size:13px;">
     <a href="/admin/hearing/master/history">View past hearings →</a>
   </p>
 
@@ -827,7 +827,7 @@ function renderHistoryPage(hearings) {
       <td>${new Date(h.created_at).toLocaleDateString()}</td>
       <td><a href="/admin/hearing/master/${h.id}">view</a></td>
     </tr>
-  `).join("") : `<tr><td colspan="9" style="text-align:center; color:#888;">No hearings recorded yet.</td></tr>`;
+  `).join("") : `<tr><td colspan="9" style="text-align:center; color:#5E5854;">No hearings recorded yet.</td></tr>`;
 
   return `
 <!DOCTYPE html>
@@ -838,9 +838,9 @@ function renderHistoryPage(hearings) {
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 1100px; margin: 30px auto; padding: 20px; }
     h1 { color: #2B2523; border-bottom: 3px solid #FF7B00; padding-bottom: 10px; }
     table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; }
-    th { background: #f5f5f5; color: #2B2523; }
-    tr:hover { background: #fafafa; }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #E8E3DC; }
+    th { background: #FAF8F5; color: #2B2523; }
+    tr:hover { background: #FAF8F5; }
     a.button { display: inline-block; padding: 10px 20px; background: #A34C00; color: white; text-decoration: none; border-radius: 4px; }
   </style>
 </head>
@@ -875,9 +875,9 @@ function renderDetailPage(hearing) {
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 800px; margin: 30px auto; padding: 20px; }
     h1 { color: #2B2523; border-bottom: 3px solid #FF7B00; padding-bottom: 10px; }
-    .meta { background: #f5f5f5; padding: 15px; border-radius: 4px; margin: 15px 0; }
+    .meta { background: #FAF8F5; padding: 15px; border-radius: 4px; margin: 15px 0; }
     .meta div { margin: 4px 0; }
-    pre { background: white; padding: 15px; border: 1px solid #ddd; border-radius: 4px;
+    pre { background: white; padding: 15px; border: 1px solid #E8E3DC; border-radius: 4px;
           white-space: pre-wrap; font-family: inherit; }
     a { color: #A34C00; }
     button { background: #2B2523; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }

@@ -22,7 +22,7 @@
   var C = {
     walnut: "#2B2523", walnutMid: "#3A3330", gold: "#A34C00",
     parchment: "#F3EFE9", parchmentLit: "#FAF8F5", border: "#E8E3DC",
-    muted: "#5E5854", waxRed: "#9C2B1E", green: "#166534",
+    muted: "#5E5854", waxRed: "#9C2B1E", green: "#2F6B3F",
   };
   var MAX = 20;
 

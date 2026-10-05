@@ -410,7 +410,7 @@ async function notifyTeam(subject, body, recipients = []) {
       to,
       subject: `[Zara Paralegal] ${subject}`,
       text:    body,
-      html:    `<pre style="font-family:Arial,sans-serif;font-size:14px;">${body}</pre>`,
+      html:    require("./tez-email").wrap({ heading: subject, body: require("./tez-email").paragraphs(body) }),
     });
     console.log(`[paralegal] ✅ Team email sent → ${to}`);
     return true;

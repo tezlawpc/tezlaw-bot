@@ -6987,42 +6987,12 @@ function registerAppApi(app) {
       );
       const signUrl = `${process.env.RENDER_EXTERNAL_URL || 'https://tezlaw-bot.onrender.com'}/sign/${token}`;
       // Send via email or SMS
-      let deliveryStatus = "not_sent";
-      let deliveryError = null;
-      const message = `Tez Law P.C. — please sign the document "${doc.title}". Open this secure link to review + sign: ${signUrl}\n\nThis link expires in ${parseInt(expires_days, 10) || 14} days.`;
-      if (via === "sms" && recipient_phone) {
-        try {
-          const twilio = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-          await twilio.messages.create({
-            body: message,
-            from: process.env.TWILIO_PHONE_NUMBER,
-            to: recipient_phone,
-          });
-          deliveryStatus = "sms_sent";
-        } catch (e) { deliveryError = e.message; deliveryStatus = "sms_failed"; console.warn("[sign sms]:", e.message); }
-      }
-      if (via === "email" && recipient_email) {
-        try {
-          const emailMod = require("./email-sender");  // if exists
-          if (emailMod && typeof emailMod.sendEmail === "function") {
-            await emailMod.sendEmail({
-              to: recipient_email,
-              subject: `Please sign: ${doc.title}`,
-              text: message,
-              html: `<p>Hello${recipient_name ? ' ' + recipient_name : ''},</p>
-<p>Tez Law P.C. has sent you a document to review and sign:</p>
-<p><strong>${doc.title}</strong></p>
-<p><a href="${signUrl}" style="display:inline-block;padding:12px 24px;background:#B79C62;color:#0C1C36;text-decoration:none;border-radius:4px;font-weight:bold;">Review + Sign Document</a></p>
-<p>Or copy this link: ${signUrl}</p>
-<p>This link expires in ${parseInt(expires_days, 10) || 14} days.</p>
-<p>Contact Tez Law at 626-678-8677 with any questions.</p>`,
-            });
-            deliveryStatus = "email_sent";
-          } else {
-            deliveryError = "Email sender not configured";
-          }
-        } catch (e) { deliveryError = e.message; deliveryStatus = "email_failed"; console.warn("[sign email]:", e.message); }
-      }
+      // One email or one text with the link, in the firm's design (esign.js).
+      // This used to call a mail module that was never in the repo and the
+      // `twilio` package that is not installed, so nothing was ever sent.
+      const sentLink = await require("./esign").sendSigningLink({
+        via, name: recipient_name, email: recipient_email, phone: recipient_phone, title: doc.title, url: signUrl, days: expires_days });
+      const deliveryStatus = sentLink.status, deliveryError = sentLink.error;
       res.json({ ok: true, signature_request: r.rows[0], sign_url: signUrl, delivery_status: deliveryStatus, delivery_error: deliveryError });
     } catch (err) {
       console.error("[send for signature]:", err.message);
@@ -8704,29 +8674,9 @@ ${groups.map(g => `
         ]
       );
       const signUrl = `${process.env.RENDER_EXTERNAL_URL || 'https://tezlaw-bot.onrender.com'}/sign/${token}`;
-      const message = `Tez Law P.C. — please sign the document "${doc.title}". Open this secure link to review + sign: ${signUrl}\n\nThis link expires in ${parseInt(expires_days, 10) || 14} days.`;
-      let deliveryStatus = "not_sent", deliveryError = null;
-      if (via === "sms" && recipient_phone) {
-        try {
-          const twilio = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-          await twilio.messages.create({ body: message, from: process.env.TWILIO_PHONE_NUMBER, to: recipient_phone });
-          deliveryStatus = "sms_sent";
-        } catch (e) { deliveryError = e.message; deliveryStatus = "sms_failed"; }
-      }
-      if (via === "email" && recipient_email) {
-        try {
-          const emailMod = require("./email-sender");
-          if (emailMod?.sendEmail) {
-            await emailMod.sendEmail({
-              to: recipient_email,
-              subject: `Please sign: ${doc.title}`,
-              text: message,
-              html: `<p>Hello${recipient_name ? ' ' + recipient_name : ''},</p><p>Tez Law P.C. has sent you "${doc.title}" for signature.</p><p><a href="${signUrl}" style="display:inline-block;padding:12px 24px;background:#B79C62;color:#0C1C36;text-decoration:none;border-radius:4px;font-weight:bold;">Review + Sign</a></p><p>Link: ${signUrl}</p>`,
-            });
-            deliveryStatus = "email_sent";
-          } else { deliveryError = "Email sender not configured"; }
-        } catch (e) { deliveryError = e.message; deliveryStatus = "email_failed"; }
-      }
+      const sentLink = await require("./esign").sendSigningLink({
+        via, name: recipient_name, email: recipient_email, phone: recipient_phone, title: doc.title, url: signUrl, days: expires_days });
+      const deliveryStatus = sentLink.status, deliveryError = sentLink.error;
       res.json({ ok: true, signature_request: r.rows[0], sign_url: signUrl, delivery_status: deliveryStatus, delivery_error: deliveryError });
     } catch (err) {
       console.error("[consultant send for sig]:", err.message);

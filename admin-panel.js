@@ -94,13 +94,13 @@
 
     document.getElementById('platformBar').innerHTML = data.byPlatform.map(p =>
       `<div class="platform-stat"><div class="n">${Number(p.messages).toLocaleString()}</div><div class="p">${p.platform}</div></div>`
-    ).join('') || '<p style="color:#999;font-size:13px">No data yet</p>';
+    ).join('') || '<p style="color:#5E5854;font-size:13px">No data yet</p>';
 
     document.getElementById('caseTypeBar').innerHTML = data.weekIntakeTypes.length
       ? `<table><thead><tr><th>Case Type</th><th>Count</th></tr></thead><tbody>${
           data.weekIntakeTypes.map(r => `<tr><td>${r.case_type||'Unknown'}</td><td>${r.n}</td></tr>`).join('')
         }</tbody></table>`
-      : '<p style="color:#999;font-size:13px">No intakes this week yet</p>';
+      : '<p style="color:#5E5854;font-size:13px">No intakes this week yet</p>';
   }
 
   // Prompt editor
@@ -128,7 +128,7 @@
       msg.textContent = '✅ Saved and live!';
       setTimeout(() => msg.textContent = '', 3000);
     } else {
-      msg.style.color = '#cc0000';
+      msg.style.color = '#9C2B1E';
       msg.textContent = '❌ Save failed';
     }
   }
@@ -149,7 +149,7 @@
             <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.issue||''}">${r.issue||'—'}</td>
           </tr>`).join('')}</tbody>
         </table>`
-      : '<p style="color:#999;font-size:13px;padding:12px">No intakes yet.</p>';
+      : '<p style="color:#5E5854;font-size:13px;padding:12px">No intakes yet.</p>';
   }
 
   // Messages
@@ -166,7 +166,7 @@
             <td style="max-width:400px;font-size:13px">${r.content.substring(0,200)}${r.content.length>200?'…':''}</td>
           </tr>`).join('')}</tbody>
         </table>`
-      : '<p style="color:#999;font-size:13px;padding:12px">No messages yet.</p>';
+      : '<p style="color:#5E5854;font-size:13px;padding:12px">No messages yet.</p>';
   }
 
   // Compliance
@@ -185,12 +185,12 @@
           <tbody>${data.map(r => `<tr>
             <td style="white-space:nowrap;font-size:11px">${new Date(r.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
             <td>${platBadge(r.platform)}</td>
-            <td><span style="font-size:11px;font-weight:bold;padding:3px 8px;border-radius:12px;background:#fff0f0;color:${typeColors[r.violation_type]||'#cc0000'}">${r.violation_type}</span></td>
-            <td style="max-width:260px;font-size:12px;color:#333" title="${(r.zara_response||'').replace(/"/g,'&quot;')}">${(r.zara_response||'').substring(0,120)}${(r.zara_response||'').length>120?'…':''}</td>
-            <td style="max-width:220px;font-size:12px;color:#006600" title="${(r.correction_sent||'').replace(/"/g,'&quot;')}">${(r.correction_sent||'').substring(0,100)}${(r.correction_sent||'').length>100?'…':''}</td>
+            <td><span style="font-size:11px;font-weight:bold;padding:3px 8px;border-radius:12px;background:#FBEDEA;color:${typeColors[r.violation_type]||'#9C2B1E'}">${r.violation_type}</span></td>
+            <td style="max-width:260px;font-size:12px;color:#2B2523" title="${(r.zara_response||'').replace(/"/g,'&quot;')}">${(r.zara_response||'').substring(0,120)}${(r.zara_response||'').length>120?'…':''}</td>
+            <td style="max-width:220px;font-size:12px;color:#2F6B3F" title="${(r.correction_sent||'').replace(/"/g,'&quot;')}">${(r.correction_sent||'').substring(0,100)}${(r.correction_sent||'').length>100?'…':''}</td>
           </tr>`).join('')}</tbody>
         </table>`
-      : '<p style="color:#006600;font-size:13px;padding:12px">✅ No compliance violations logged. Zara is clean!</p>';
+      : '<p style="color:#2F6B3F;font-size:13px;padding:12px">✅ No compliance violations logged. Zara is clean!</p>';
   }
 
   // Analytics
@@ -202,10 +202,10 @@
       ? entries.map(([week, entry]) => `
           <div class="analytics-entry">
             <div class="analytics-week">📅 ${week.replace('-', ' ').replace('W', 'Week ')}</div>
-            <div style="font-size:11px;color:#999;margin-bottom:8px">Run at: ${new Date(entry.ranAt).toLocaleString('en-US')}</div>
+            <div style="font-size:11px;color:#5E5854;margin-bottom:8px">Run at: ${new Date(entry.ranAt).toLocaleString('en-US')}</div>
             <div class="analytics-summary">${entry.summary}</div>
           </div>`).join('')
-      : '<p style="color:#999;font-size:13px">No analytics runs yet.</p>';
+      : '<p style="color:#5E5854;font-size:13px">No analytics runs yet.</p>';
   }
 
   async function submitCustomPost() {
@@ -217,14 +217,14 @@
     var notes = document.getElementById('customNotes').value.trim();
 
     if (!topic) {
-      msg.style.color = '#cc0000';
+      msg.style.color = '#9C2B1E';
       msg.textContent = '❌ Please enter a topic or headline.';
       return;
     }
 
     btn.disabled = true;
     btn.textContent = 'Generating...';
-    msg.style.color = '#006600';
+    msg.style.color = '#2F6B3F';
     msg.textContent = '⏳ Writing and publishing — this takes ~1-2 minutes...';
 
     var res = await api('/api/autoposter/custom', {
@@ -242,7 +242,7 @@
       document.getElementById('customNotes').value = '';
       setTimeout(function(){ msg.textContent = ''; }, 15000);
     } else {
-      msg.style.color = '#cc0000';
+      msg.style.color = '#9C2B1E';
       msg.textContent = '❌ Failed to start. Check Render logs.';
     }
   }
@@ -298,7 +298,7 @@ async function loadPipeline() {
   var filter = filterEl ? filterEl.value : 'active';
   var data = await api(filter === 'all' ? '/api/leads/all' : '/api/leads');
   var board = document.getElementById('pipelineBoard');
-  if (!data) { board.innerHTML = '<p style="color:#cc0000;padding:12px">Failed to load — check DB</p>'; return; }
+  if (!data) { board.innerHTML = '<p style="color:#9C2B1E;padding:12px">Failed to load — check DB</p>'; return; }
 
   var byStage = {};
   STAGES.forEach(function(s){ byStage[s.key] = []; });
@@ -309,7 +309,7 @@ async function loadPipeline() {
     var leads = byStage[s.key] || [];
     html += '<div class="kanban-col">';
     html += '<div class="kanban-col-header">' + s.label + ' <span class="kanban-count">' + leads.length + '</span></div>';
-    if (!leads.length) html += '<p style="font-size:12px;color:#aaa;text-align:center;padding:8px">Empty</p>';
+    if (!leads.length) html += '<p style="font-size:12px;color:#5E5854;text-align:center;padding:8px">Empty</p>';
     leads.forEach(function(lead) {
       var hrs = parseFloat(lead.hours_in_stage || 0);
       var sc = hrs > 168 ? 'stale-crit' : hrs > 72 ? 'stale-warn' : '';
@@ -354,7 +354,7 @@ async function loadConflicts() {
   var data = await api('/api/conflicts');
   var el = document.getElementById('conflictsTable');
   if (!data) return;
-  if (!data.length) { el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No conflicts yet.</p>'; return; }
+  if (!data.length) { el.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">No conflicts yet.</p>'; return; }
   var dc = {pending:'disp-pending',possible:'disp-possible',cleared:'disp-cleared',denied:'disp-denied'};
   var rows = '';
   data.forEach(function(r) {
@@ -395,7 +395,7 @@ async function loadQuestions() {
     });
     we.innerHTML = '<table><thead><tr><th>Question</th><th>Count</th><th>Last Seen</th></tr></thead><tbody>'+wr+'</tbody></table>';
   } else {
-    we.innerHTML = '<p style="color:#006600;font-size:13px;padding:12px">No gaps this week!</p>';
+    we.innerHTML = '<p style="color:#2F6B3F;font-size:13px;padding:12px">No gaps this week!</p>';
   }
   if (all && all.length) {
     var ar = '';
@@ -403,12 +403,12 @@ async function loadQuestions() {
       ar += '<tr><td style="font-size:11px">'+new Date(r.created_at).toLocaleDateString('en-US')+'</td>'
           + '<td>'+platBadge(r.platform)+'</td>'
           + '<td style="font-size:12px">'+r.question.substring(0,100)+(r.question.length>100?'...':'')+'</td>'
-          + '<td style="font-size:11px;color:#999">'+(r.zara_response||'').substring(0,80)+'...</td>'
+          + '<td style="font-size:11px;color:#5E5854">'+(r.zara_response||'').substring(0,80)+'...</td>'
           + '<td><button class="action-btn" style="font-size:11px;padding:4px 10px" data-qid="'+r.id+'" onclick="resolveQuestion(this.getAttribute(\'data-qid\'),this)">Resolved</button></td></tr>';
     });
     ae.innerHTML = '<table><thead><tr><th>Date</th><th>Platform</th><th>Question</th><th>Zara Said</th><th>Action</th></tr></thead><tbody>'+ar+'</tbody></table>';
   } else {
-    ae.innerHTML = '<p style="color:#006600;font-size:13px;padding:12px">No open questions!</p>';
+    ae.innerHTML = '<p style="color:#2F6B3F;font-size:13px;padding:12px">No open questions!</p>';
   }
 }
 
@@ -424,7 +424,7 @@ async function loadAudit() {
   var data = await api('/api/audit');
   var el = document.getElementById('auditTable');
   if (!data) return;
-  if (!data.length) { el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No events yet.</p>'; return; }
+  if (!data.length) { el.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">No events yet.</p>'; return; }
   var rows = '';
   data.forEach(function(r) {
     var t = new Date(r.created_at).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
@@ -433,9 +433,9 @@ async function loadAudit() {
       +'<td style="font-size:11px;white-space:nowrap">'+t+'</td>'
       +'<td style="font-weight:bold;font-size:12px">'+r.actor+'</td>'
       +'<td style="font-size:12px">'+r.action+'</td>'
-      +'<td style="font-size:11px;color:#666">'+(r.target||'—')+'</td>'
+      +'<td style="font-size:11px;color:#5E5854">'+(r.target||'—')+'</td>'
       +'<td style="font-size:11px">'+ch+'</td>'
-      +'<td style="font-size:10px;color:#aaa">'+(r.ip_address||'—')+'</td>'
+      +'<td style="font-size:10px;color:#5E5854">'+(r.ip_address||'—')+'</td>'
       +'</tr>';
   });
   el.innerHTML = '<table><thead><tr><th>Time (PT)</th><th>Actor</th><th>Action</th><th>Target</th><th>Change</th><th>IP</th></tr></thead><tbody>'+rows+'</tbody></table>';
@@ -450,7 +450,7 @@ async function runAutoposter() {
   var res = await api('/api/autoposter/run', {method:'POST'});
   btn.disabled = false; btn.textContent = '▶ Run Auto-Poster Now';
   if (res && res.ok) { msg.textContent = '✅ ' + res.message; setTimeout(function(){ msg.textContent=''; }, 10000); }
-  else { msg.style.color = '#cc0000'; msg.textContent = '❌ Failed to start'; }
+  else { msg.style.color = '#9C2B1E'; msg.textContent = '❌ Failed to start'; }
 }
 
 // ── Wave 2: Conversation Scores ───────────────────────────
@@ -471,7 +471,7 @@ async function loadScores() {
 
   var fe = document.getElementById('scoresFlagged');
   var ae = document.getElementById('scoresAll');
-  if (!flagged && !all) { fe.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Setting up — will populate after first conversations.</p>'; ae.innerHTML = ''; return; }
+  if (!flagged && !all) { fe.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">Setting up — will populate after first conversations.</p>'; ae.innerHTML = ''; return; }
 
   if (flagged && flagged.length) {
     var fr = '';
@@ -482,12 +482,12 @@ async function loadScores() {
         + '<td>' + scoreBadge(r.score_accuracy,'Acc') + scoreBadge(r.score_tone,'Tone') + scoreBadge(r.score_disclaimer,'Disc') + '</td>'
         + '<td><span class="score-badge score-low">UPL: ' + r.score_upl_risk + '</span></td>'
         + '<td><span class="score-badge ' + scoreColor(r.score_overall) + '">Overall: ' + r.score_overall + '</span></td>'
-        + '<td style="font-size:12px;max-width:300px;color:#333">' + (r.summary||'').substring(0,150) + '</td>'
+        + '<td style="font-size:12px;max-width:300px;color:#2B2523">' + (r.summary||'').substring(0,150) + '</td>'
         + '</tr>';
     });
     fe.innerHTML = '<table><thead><tr><th>Date</th><th>Platform</th><th>Scores</th><th>UPL</th><th>Overall</th><th>Summary</th></tr></thead><tbody>' + fr + '</tbody></table>';
   } else {
-    fe.innerHTML = '<p style="color:#006600;font-size:13px;padding:12px">✅ No conversations flagged for review!</p>';
+    fe.innerHTML = '<p style="color:#2F6B3F;font-size:13px;padding:12px">✅ No conversations flagged for review!</p>';
   }
 
   if (all && all.length) {
@@ -499,12 +499,12 @@ async function loadScores() {
         + '<td style="font-size:11px">' + r.message_count + ' msgs</td>'
         + '<td>' + scoreBadge(r.score_accuracy,'Acc') + scoreBadge(r.score_tone,'Tone') + scoreBadge(r.score_disclaimer,'Disc') + '</td>'
         + '<td><span class="score-badge ' + scoreColor(r.score_overall) + '">' + r.score_overall + '/10</span></td>'
-        + '<td style="font-size:12px;max-width:200px;color:#666">' + (r.summary||'').substring(0,100) + '</td>'
+        + '<td style="font-size:12px;max-width:200px;color:#5E5854">' + (r.summary||'').substring(0,100) + '</td>'
         + '</tr>';
     });
     ae.innerHTML = '<table><thead><tr><th>Date</th><th>Platform</th><th>Msgs</th><th>Scores</th><th>Overall</th><th>Summary</th></tr></thead><tbody>' + ar + '</tbody></table>';
   } else {
-    ae.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No scored conversations yet — scores generate automatically after each session ends.</p>';
+    ae.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">No scored conversations yet — scores generate automatically after each session ends.</p>';
   }
 }
 
@@ -513,9 +513,9 @@ async function loadScores() {
 async function loadSol() {
   var data = await api('/api/sol');
   var el = document.getElementById('solTable');
-  if (!data) { el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Setting up — DB tables initializing on next deploy.</p>'; return; }
+  if (!data) { el.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">Setting up — DB tables initializing on next deploy.</p>'; return; }
   if (!data.length) {
-    el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No deadlines tracked yet. Add one above or they auto-create from intake.</p>';
+    el.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">No deadlines tracked yet. Add one above or they auto-create from intake.</p>';
     return;
   }
   var rows = '';
@@ -535,8 +535,8 @@ async function loadSol() {
       + (r.alerted_7  ? '✅' : '⬜') + '7d '
       + (r.alerted_1  ? '✅' : '⬜') + '1d'
       + '</td>'
-      + '<td style="font-size:11px;color:#999">' + (r.notes||'') + '</td>'
-      + '<td><button class="action-btn" style="font-size:11px;padding:3px 10px;background:#cc0000" data-sid="' + r.id + '" onclick="deleteSol(this.getAttribute(\'data-sid\'))">Delete</button></td>'
+      + '<td style="font-size:11px;color:#5E5854">' + (r.notes||'') + '</td>'
+      + '<td><button class="action-btn" style="font-size:11px;padding:3px 10px;background:#9C2B1E" data-sid="' + r.id + '" onclick="deleteSol(this.getAttribute(\'data-sid\'))">Delete</button></td>'
       + '</tr>';
   });
   el.innerHTML = '<table><thead><tr><th>Client</th><th>Case Type</th><th>Incident</th><th>Deadline</th><th>Time Left</th><th>Alerts</th><th>Notes</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
@@ -549,17 +549,17 @@ async function addSolDeadline() {
   var notes     = document.getElementById('solNotes').value.trim();
   var resultEl  = document.getElementById('solResult');
 
-  if (!name || !date) { resultEl.innerHTML = '<span style="color:#cc0000">Please fill in client name and incident date.</span>'; return; }
+  if (!name || !date) { resultEl.innerHTML = '<span style="color:#9C2B1E">Please fill in client name and incident date.</span>'; return; }
 
   var res = await api('/api/sol', { method: 'POST', body: JSON.stringify({ clientName: name, caseType, incidentDate: date, notes }) });
   if (res && res.ok) {
-    resultEl.innerHTML = '<span style="color:#006600">✅ Deadline added: <strong>' + res.deadline + '</strong> (' + res.years + ' yr SOL, ' + res.daysLeft + ' days left)</span>';
+    resultEl.innerHTML = '<span style="color:#2F6B3F">✅ Deadline added: <strong>' + res.deadline + '</strong> (' + res.years + ' yr SOL, ' + res.daysLeft + ' days left)</span>';
     document.getElementById('solName').value = '';
     document.getElementById('solDate').value = '';
     document.getElementById('solNotes').value = '';
     loadSol();
   } else {
-    resultEl.innerHTML = '<span style="color:#cc0000">❌ Failed to add deadline</span>';
+    resultEl.innerHTML = '<span style="color:#9C2B1E">❌ Failed to add deadline</span>';
   }
 }
 
@@ -574,14 +574,14 @@ async function deleteSol(id) {
 async function loadDrip() {
   var data = await api('/api/drip');
   var el = document.getElementById('dripTable');
-  if (!data) { el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Setting up — DB tables initializing on next deploy.</p>'; return; }
+  if (!data) { el.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">Setting up — DB tables initializing on next deploy.</p>'; return; }
   if (!data.length) {
-    el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No drip campaigns yet — they start automatically after intake completion.</p>';
+    el.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">No drip campaigns yet — they start automatically after intake completion.</p>';
     return;
   }
   var rows = '';
   data.forEach(function(r) {
-    var statusColor = r.status === 'active' ? '#006600' : '#999';
+    var statusColor = r.status === 'active' ? '#2F6B3F' : '#5E5854';
     var sentPct = r.total_msgs > 0 ? Math.round((r.sent_msgs / r.total_msgs) * 100) : 0;
     rows += '<tr>'
       + '<td style="font-weight:bold">' + (r.client_name||'Unknown') + '</td>'
@@ -590,9 +590,9 @@ async function loadDrip() {
       + '<td><span style="color:' + statusColor + ';font-weight:bold;font-size:12px">' + r.status.toUpperCase() + '</span></td>'
       + '<td style="font-size:12px">' + r.sent_msgs + ' / ' + r.total_msgs + ' sent (' + sentPct + '%)</td>'
       + '<td style="font-size:11px;white-space:nowrap">' + new Date(r.started_at).toLocaleDateString('en-US') + '</td>'
-      + '<td style="font-size:11px;color:#999">' + (r.stop_reason||'') + '</td>'
+      + '<td style="font-size:11px;color:#5E5854">' + (r.stop_reason||'') + '</td>'
       + '<td>' + (r.status === 'active'
-        ? '<button class="action-btn" style="font-size:11px;padding:3px 10px;background:#cc0000" data-did="' + r.id + '" onclick="stopDrip(this.getAttribute(\'data-did\'))">Stop</button>'
+        ? '<button class="action-btn" style="font-size:11px;padding:3px 10px;background:#9C2B1E" data-did="' + r.id + '" onclick="stopDrip(this.getAttribute(\'data-did\'))">Stop</button>'
         : '') + '</td>'
       + '</tr>';
   });
@@ -612,7 +612,7 @@ async function loadPromptHistory() {
   var el = document.getElementById('promptHistory');
   if (!el) return;
   if (!data || !data.length) {
-    el.innerHTML = '<p style="color:#999;font-size:13px">No version history yet.</p>';
+    el.innerHTML = '<p style="color:#5E5854;font-size:13px">No version history yet.</p>';
     return;
   }
   var rows = '';
@@ -620,7 +620,7 @@ async function loadPromptHistory() {
     var time = new Date(r.updated_at).toLocaleString('en-US', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     rows += '<tr>'
       + '<td style="font-size:11px;white-space:nowrap">' + time + '</td>'
-      + '<td style="font-size:11px;color:#666">' + (r.updated_by||'admin') + '</td>'
+      + '<td style="font-size:11px;color:#5E5854">' + (r.updated_by||'admin') + '</td>'
       + '<td style="font-size:12px;max-width:400px;font-family:monospace">' + (r.preview||'').substring(0,120) + '...</td>'
       + '<td><button class="action-btn" style="font-size:11px;padding:3px 10px" data-vid="' + r.id + '" onclick="rollbackPrompt(this.getAttribute(\'data-vid\'))">Restore</button></td>'
       + '</tr>';
@@ -661,7 +661,7 @@ async function postApi(path, body) {
 
 function postSay(text, color) {
   var msg = document.getElementById('postMsg');
-  msg.style.color = color || '#666'; msg.textContent = text || '';
+  msg.style.color = color || '#5E5854'; msg.textContent = text || '';
 }
 
 function onPostMode() {
@@ -683,23 +683,23 @@ function onPostFile(input) {
   document.getElementById('postFileClear').style.display = 'none';
   if (!f) { note.textContent = ''; return; }
   if (f.size > 15 * 1024 * 1024) {
-    note.style.color = '#cc0000';
+    note.style.color = '#9C2B1E';
     note.textContent = 'That file is ' + (f.size / 1048576).toFixed(1) + ' MB. The limit is 15 MB.';
     input.value = ''; return;
   }
-  note.style.color = '#666'; note.textContent = 'Reading ' + f.name + '...';
+  note.style.color = '#5E5854'; note.textContent = 'Reading ' + f.name + '...';
   var reader = new FileReader();
-  reader.onerror = function () { note.style.color = '#cc0000'; note.textContent = 'Could not read the file from your computer.'; };
+  reader.onerror = function () { note.style.color = '#9C2B1E'; note.textContent = 'Could not read the file from your computer.'; };
   reader.onload = async function () {
     var b64 = String(reader.result || '');
     b64 = b64.substring(b64.indexOf(',') + 1);
     var res = await postApi('/api/post/extract', { filename: f.name, content_base64: b64 });
     if (!res.ok) {
-      note.style.color = '#cc0000'; note.textContent = res.error || 'Could not read that file.';
+      note.style.color = '#9C2B1E'; note.textContent = res.error || 'Could not read that file.';
       input.value = ''; return;
     }
     _postDoc = { name: res.name, text: res.text, html: res.html || '', truncated: !!res.truncated };
-    note.style.color = '#006600';
+    note.style.color = '#2F6B3F';
     note.textContent = 'Read ' + res.name + ': ' + Number(res.chars).toLocaleString('en-US') + ' characters'
       + (res.pages ? ', ' + res.pages + ' page' + (res.pages === 1 ? '' : 's') : '') + '.'
       + (res.warning ? ' ' + res.warning : '');
@@ -777,7 +777,7 @@ function resetPostForm() {
 async function previewManualPost() {
   var btn = document.getElementById('previewBtn');
   var payload = postPayload();
-  if (payload.error) { postSay(payload.error, '#cc0000'); return; }
+  if (payload.error) { postSay(payload.error, '#9C2B1E'); return; }
 
   btn.disabled = true; btn.textContent = '⏳ Generating...';
   postSay(payload.mode === 'as_written' ? 'Preparing your article...'
@@ -787,7 +787,7 @@ async function previewManualPost() {
   var res = await postApi('/api/post/generate', payload);
 
   btn.disabled = false; btn.textContent = '👁 Preview First';
-  if (!res.ok) { postSay('❌ ' + (res.error || 'Generation failed.'), '#cc0000'); return; }
+  if (!res.ok) { postSay('❌ ' + (res.error || 'Generation failed.'), '#9C2B1E'); return; }
   postSay('');
   showPostPreview(res.post, res.issues, res.privacy);
 }
@@ -806,20 +806,20 @@ async function publishPreview() {
   btn.disabled = false; btn.textContent = '✅ Publish Now';
 
   if (res.ok) {
-    postSay('✅ ' + describePublish(res), '#006600');
+    postSay('✅ ' + describePublish(res), '#2F6B3F');
     document.getElementById('postPreviewCard').style.display = 'none';
     resetPostForm();
     _previewPost = null;
     loadManualPost();
   } else {
-    postSay('❌ Publish failed: ' + (res.error || 'unknown error'), '#cc0000');
+    postSay('❌ Publish failed: ' + (res.error || 'unknown error'), '#9C2B1E');
   }
 }
 
 async function submitManualPost() {
   var btn = document.getElementById('postBtn');
   var payload = postPayload();
-  if (payload.error) { postSay(payload.error, '#cc0000'); return; }
+  if (payload.error) { postSay(payload.error, '#9C2B1E'); return; }
 
   // Anything built from an uploaded document or from your own text is shown
   // to you first. One click must not put a client's order on the website.
@@ -835,7 +835,7 @@ async function submitManualPost() {
   var genRes = await postApi('/api/post/generate', payload);
   if (!genRes.ok) {
     btn.disabled = false; btn.textContent = '🚀 Generate & Publish';
-    postSay('❌ ' + (genRes.error || 'Generation failed'), '#cc0000');
+    postSay('❌ ' + (genRes.error || 'Generation failed'), '#9C2B1E');
     return;
   }
 
@@ -844,11 +844,11 @@ async function submitManualPost() {
 
   btn.disabled = false; btn.textContent = '🚀 Generate & Publish';
   if (pubRes.ok) {
-    postSay('✅ ' + describePublish(pubRes), '#006600');
+    postSay('✅ ' + describePublish(pubRes), '#2F6B3F');
     resetPostForm();
     loadManualPost();
   } else {
-    postSay('❌ Publish failed: ' + (pubRes.error || 'unknown error'), '#cc0000');
+    postSay('❌ Publish failed: ' + (pubRes.error || 'unknown error'), '#9C2B1E');
   }
 }
 
@@ -863,7 +863,7 @@ async function loadManualPost() {
   var data = await api('/api/post/history');
   var el = document.getElementById('postHistory');
   if (!data || !data.length) {
-    el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">No manual posts yet. Create your first one above!</p>';
+    el.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">No manual posts yet. Create your first one above!</p>';
     return;
   }
   var rows = '';
@@ -874,7 +874,7 @@ async function loadManualPost() {
       + '<td style="font-size:11px;white-space:nowrap">' + new Date(r.created_at).toLocaleDateString('en-US') + '</td>'
       + '<td style="font-weight:bold;font-size:13px">' + (r.title || '—') + '</td>'
       + '<td style="font-size:12px">' + (r.practice_area || '—') + '</td>'
-      + '<td style="font-size:12px;max-width:250px;color:#666">' + (r.topic || '').substring(0, 80) + '</td>'
+      + '<td style="font-size:12px;max-width:250px;color:#5E5854">' + (r.topic || '').substring(0, 80) + '</td>'
       + '<td style="font-size:11px">' + ids.length + ' post(s)</td>'
       + '</tr>';
   });
@@ -916,7 +916,7 @@ async function runAdminCLSearch() {
 
   if (!q) {
     var resultsEl = document.getElementById('cl-results');
-    if (resultsEl) resultsEl.innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">Please enter a search query.</p>';
+    if (resultsEl) resultsEl.innerHTML = '<p style="color:#9C2B1E;font-size:13px;padding:12px">Please enter a search query.</p>';
     return;
   }
 
@@ -951,10 +951,10 @@ async function runAdminCLSearch() {
     if (resultsEl) {
       resultsEl.innerHTML = results.length
         ? results.map(function(r) { return renderCaseCard(r); }).join('')
-        : '<p style="color:#999;font-size:13px;padding:12px">No results. Try broader terms.</p>';
+        : '<p style="color:#5E5854;font-size:13px;padding:12px">No results. Try broader terms.</p>';
     }
   } catch(err) {
-    if (resultsEl) resultsEl.innerHTML = '<p style="color:#cc0000;font-size:13px;padding:12px">❌ ' + err.message + '</p>';
+    if (resultsEl) resultsEl.innerHTML = '<p style="color:#9C2B1E;font-size:13px;padding:12px">❌ ' + err.message + '</p>';
   } finally {
     if (loadingEl) loadingEl.style.display = 'none';
   }
@@ -993,10 +993,10 @@ async function runAdminImmSearch() {
     if (resultsEl) {
       resultsEl.innerHTML = results.length
         ? results.map(function(r) { return renderCaseCard(r); }).join('')
-        : '<p style="color:#999;font-size:13px;padding:12px">No results found.</p>';
+        : '<p style="color:#5E5854;font-size:13px;padding:12px">No results found.</p>';
     }
   } catch(err) {
-    if (resultsEl) resultsEl.innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + err.message + '</p>';
+    if (resultsEl) resultsEl.innerHTML = '<p style="color:#9C2B1E;font-size:13px">❌ ' + err.message + '</p>';
   } finally {
     if (loadingEl) loadingEl.style.display = 'none';
   }
@@ -1013,8 +1013,8 @@ function renderCaseCard(r) {
 
   return '<div style="background:#fff;border:1px solid #E8E3DC;border-radius:8px;padding:14px;margin-bottom:12px">'
     + '<div style="font-weight:bold;color:#2B2523;font-size:14px;margin-bottom:4px">' + name + '</div>'
-    + '<div style="font-size:12px;color:#666;margin-bottom:6px">' + citation + ' • ' + court + ' • ' + (date ? new Date(date).toLocaleDateString('en-US') : '') + '</div>'
-    + (snippet ? '<div style="font-size:13px;color:#333;margin-bottom:8px;line-height:1.4">' + snippet + '...</div>' : '')
+    + '<div style="font-size:12px;color:#5E5854;margin-bottom:6px">' + citation + ' • ' + court + ' • ' + (date ? new Date(date).toLocaleDateString('en-US') : '') + '</div>'
+    + (snippet ? '<div style="font-size:13px;color:#2B2523;margin-bottom:8px;line-height:1.4">' + snippet + '...</div>' : '')
     + '<a href="' + url + '" target="_blank" style="color:#A34C00;font-size:12px;font-weight:bold;text-decoration:none">📄 Read full opinion →</a>'
     + '</div>';
 }
@@ -1041,15 +1041,15 @@ async function runStatuteSearch() {
       if (res && res.text) {
         resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #E8E3DC;border-radius:8px;padding:16px">'
           + '<div style="font-weight:bold;color:#2B2523;font-size:15px;margin-bottom:8px">' + esc(code) + ' § ' + esc(section) + '</div>'
-          + '<div style="font-size:13px;color:#333;line-height:1.5;white-space:pre-wrap">' + esc(res.text) + '</div>'
+          + '<div style="font-size:13px;color:#2B2523;line-height:1.5;white-space:pre-wrap">' + esc(res.text) + '</div>'
           + (res.url ? '<a href="' + esc(res.url) + '" target="_blank" style="display:inline-block;margin-top:10px;color:#A34C00;font-size:12px;font-weight:bold;text-decoration:none">📄 View on leginfo.ca.gov →</a>' : '')
           + '</div>';
       } else {
-        resultsEl.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Statute not found. Verify the code and section number.</p>';
+        resultsEl.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">Statute not found. Verify the code and section number.</p>';
       }
     }
   } catch(err) {
-    if (resultsEl) resultsEl.innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + err.message + '</p>';
+    if (resultsEl) resultsEl.innerHTML = '<p style="color:#9C2B1E;font-size:13px">❌ ' + err.message + '</p>';
   } finally {
     if (loadingEl) loadingEl.style.display = 'none';
   }
@@ -1075,22 +1075,22 @@ async function verifyCitation() {
 
     if (resultsEl) {
       if (res && res.found) {
-        var statusColor = res.valid ? '#006600' : '#cc6600';
+        var statusColor = res.valid ? '#2F6B3F' : '#A34C00';
         var statusIcon = res.valid ? '✅' : '⚠️';
         resultsEl.innerHTML = '<div style="background:#fff;border:1px solid #E8E3DC;border-radius:8px;padding:16px">'
           + '<div style="font-size:15px;font-weight:bold;color:' + statusColor + ';margin-bottom:8px">' + statusIcon + ' ' + esc(res.status || 'Found') + '</div>'
           + '<div style="font-size:14px;color:#2B2523;font-weight:bold;margin-bottom:6px">' + esc(res.caseName || citation) + '</div>'
-          + (res.court ? '<div style="font-size:12px;color:#666;margin-bottom:4px">Court: ' + esc(res.court) + '</div>' : '')
-          + (res.date ? '<div style="font-size:12px;color:#666;margin-bottom:4px">Decided: ' + esc(res.date) + '</div>' : '')
-          + (res.treatment ? '<div style="font-size:12px;color:#666;margin-bottom:8px">Subsequent treatment: ' + esc(res.treatment) + '</div>' : '')
+          + (res.court ? '<div style="font-size:12px;color:#5E5854;margin-bottom:4px">Court: ' + esc(res.court) + '</div>' : '')
+          + (res.date ? '<div style="font-size:12px;color:#5E5854;margin-bottom:4px">Decided: ' + esc(res.date) + '</div>' : '')
+          + (res.treatment ? '<div style="font-size:12px;color:#5E5854;margin-bottom:8px">Subsequent treatment: ' + esc(res.treatment) + '</div>' : '')
           + (res.url ? '<a href="' + esc(res.url) + '" target="_blank" style="color:#A34C00;font-size:12px;font-weight:bold">📄 Read opinion →</a>' : '')
           + '</div>';
       } else {
-        resultsEl.innerHTML = '<div style="background:#fff5f5;border:1px solid #ffcccc;border-radius:8px;padding:16px"><span style="color:#cc0000;font-weight:bold">⚠️ Citation not found</span><br><span style="font-size:13px;color:#666">Verify the citation manually before relying on it.</span></div>';
+        resultsEl.innerHTML = '<div style="background:#FBEDEA;border:1px solid #FBEDEA;border-radius:8px;padding:16px"><span style="color:#9C2B1E;font-weight:bold">⚠️ Citation not found</span><br><span style="font-size:13px;color:#5E5854">Verify the citation manually before relying on it.</span></div>';
       }
     }
   } catch(err) {
-    if (resultsEl) resultsEl.innerHTML = '<p style="color:#cc0000;font-size:13px">❌ ' + err.message + '</p>';
+    if (resultsEl) resultsEl.innerHTML = '<p style="color:#9C2B1E;font-size:13px">❌ ' + err.message + '</p>';
   } finally {
     if (loadingEl) loadingEl.style.display = 'none';
   }
@@ -1103,7 +1103,7 @@ async function loadCacheStats() {
 
   var data = await api('/api/research/cache-stats');
   if (!data) {
-    el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Cache stats not available.</p>';
+    el.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">Cache stats not available.</p>';
     return;
   }
 
@@ -1115,7 +1115,7 @@ async function loadCacheStats() {
     +   '<div class="stat-card"><div class="stat-num">' + (data.cacheHits || 0) + '</div><div class="stat-label">Cache Hits</div></div>'
     +   '<div class="stat-card"><div class="stat-num">' + hitRate + '%</div><div class="stat-label">Hit Rate</div></div>'
     + '</div>'
-    + (data.estimatedSavings ? '<div style="background:#fffbf0;border:1px solid #E8E3DC;border-radius:8px;padding:12px;margin-top:14px"><strong>💰 Estimated savings:</strong> $' + data.estimatedSavings.toFixed(2) + ' this month</div>' : '')
+    + (data.estimatedSavings ? '<div style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:8px;padding:12px;margin-top:14px"><strong>💰 Estimated savings:</strong> $' + data.estimatedSavings.toFixed(2) + ' this month</div>' : '')
     + (data.recentEntries && data.recentEntries.length
         ? '<h3 style="margin-top:16px;font-size:14px;color:#2B2523">Recent Cache Entries</h3>'
           + '<table style="margin-top:8px"><thead><tr><th>Question</th><th>Practice Area</th><th>Hits</th><th>Last Used</th></tr></thead><tbody>'
@@ -1123,7 +1123,7 @@ async function loadCacheStats() {
               return '<tr><td style="font-size:12px;max-width:300px">' + esc((r.question||'').substring(0,80)) + '</td>'
                 + '<td style="font-size:12px">' + esc(r.practice_area||'—') + '</td>'
                 + '<td style="text-align:center;font-weight:bold">' + (r.hit_count||0) + '</td>'
-                + '<td style="font-size:11px;color:#666">' + (r.last_used ? new Date(r.last_used).toLocaleDateString('en-US') : '—') + '</td></tr>';
+                + '<td style="font-size:11px;color:#5E5854">' + (r.last_used ? new Date(r.last_used).toLocaleDateString('en-US') : '—') + '</td></tr>';
             }).join('')
           + '</tbody></table>'
         : '');
@@ -1134,11 +1134,11 @@ async function loadJudgesIndex() {
   var el = document.getElementById('judgesIndex');
   if (!el) return;
 
-  el.innerHTML = '<p style="color:#666;font-size:13px;padding:12px">Loading judge database...</p>';
+  el.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">Loading judge database...</p>';
 
   var data = await api('/api/research/judges');
   if (!data) {
-    el.innerHTML = '<p style="color:#999;font-size:13px;padding:12px">Judge database not yet populated. Run: <code>node judge-scanner.js --scan-all</code></p>';
+    el.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">Judge database not yet populated. Run: <code>node judge-scanner.js --scan-all</code></p>';
     return;
   }
 
@@ -1149,7 +1149,7 @@ async function loadJudgesIndex() {
     + '</div>';
 
   html += '<div style="margin-top:16px;display:flex;gap:8px">'
-    + '<input type="text" id="judge-search-input" placeholder="Search by judge name (e.g. Wardlaw, Kronstadt)" style="flex:1;padding:8px 12px;border:1px solid #d4c08c;border-radius:6px;font-size:13px" onkeydown="if(event.key===\'Enter\')searchJudge()" />'
+    + '<input type="text" id="judge-search-input" placeholder="Search by judge name (e.g. Wardlaw, Kronstadt)" style="flex:1;padding:8px 12px;border:1px solid #CFC8BE;border-radius:6px;font-size:13px" onkeydown="if(event.key===\'Enter\')searchJudge()" />'
     + '<button class="action-btn" onclick="searchJudge()" style="font-size:12px;padding:8px 16px">🔍 Look Up</button>'
     + '</div>';
 
@@ -1163,7 +1163,7 @@ async function loadJudgesIndex() {
       html += '<td style="font-weight:bold;color:#2B2523">' + esc(j.judge_name) + '</td>';
       html += '<td style="font-size:12px">' + esc(j.court) + '</td>';
       html += '<td style="text-align:center;font-weight:bold;color:#A34C00">' + (j.total_rulings || 0) + '</td>';
-      html += '<td style="font-size:11px;color:#666">' + (j.last_updated ? new Date(j.last_updated).toLocaleDateString('en-US') : '—') + '</td>';
+      html += '<td style="font-size:11px;color:#5E5854">' + (j.last_updated ? new Date(j.last_updated).toLocaleDateString('en-US') : '—') + '</td>';
       html += '</tr>';
     });
     html += '</tbody></table>';
@@ -1180,11 +1180,11 @@ async function searchJudge() {
   var resultsEl = document.getElementById('judge-search-results');
   if (!resultsEl) return;
 
-  resultsEl.innerHTML = '<p style="color:#666;font-size:13px;padding:12px">Looking up ' + esc(name) + '...</p>';
+  resultsEl.innerHTML = '<p style="color:#5E5854;font-size:13px;padding:12px">Looking up ' + esc(name) + '...</p>';
 
   var data = await api('/api/research/judges/' + encodeURIComponent(name));
   if (!data || !data.found) {
-    resultsEl.innerHTML = '<div style="background:#fff5f5;border:1px solid #ffcccc;border-radius:8px;padding:16px"><span style="color:#cc0000;font-weight:bold">No profile found for "' + esc(name) + '"</span><br><span style="font-size:13px;color:#666;margin-top:8px;display:block">The judge may not yet be indexed. Continue running the scanner: <code>node judge-scanner.js --scan-all</code></span></div>';
+    resultsEl.innerHTML = '<div style="background:#FBEDEA;border:1px solid #FBEDEA;border-radius:8px;padding:16px"><span style="color:#9C2B1E;font-weight:bold">No profile found for "' + esc(name) + '"</span><br><span style="font-size:13px;color:#5E5854;margin-top:8px;display:block">The judge may not yet be indexed. Continue running the scanner: <code>node judge-scanner.js --scan-all</code></span></div>';
     return;
   }
 

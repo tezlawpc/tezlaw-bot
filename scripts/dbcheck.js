@@ -319,6 +319,129 @@ async function exercises({ tok, cookie }) {
   r = await fetch(BASE + "/api/auth/staff/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: "dbc.attorney", password: "Dbcheck-Pass-1234", supports_code: true }) });
   const j = await r.json().catch(() => ({}));
   note("the phone app is asked for a code too, and gets no token until it has one", r.status === 200 && j.needs_code === true && !!j.pending && !j.token, JSON.stringify(j).slice(0, 160));
+
+  // Upload a document and send it for signature (esign-pdf.js), start to
+  // finish: draft → signers and fields → sent → each signs in turn → the
+  // signed PDF with its certificate. A document that belongs to no client
+  // is its sender's; nobody else on staff opens it, and no consultant does.
+  {
+    const { PDFDocument, degrees } = require("pdf-lib");
+    const made = await PDFDocument.create();
+    made.addPage([612, 792]); made.addPage([612, 792]).setRotation(degrees(90));
+    const bytes = Buffer.from(await made.save());
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const upload = async (who, name) => {
+      const fd = new FormData(); fd.append("file", new Blob([bytes], { type: "application/pdf" }), name);
+      const res = await fetch(BASE + "/admin/esign/api/uploads", { method: "POST", headers: { cookie: `${cookie}=${tok[who]}` }, body: fd });
+      const text = await res.text(); let json = null; try { json = JSON.parse(text); } catch (_) {}
+      return { status: res.status, text, json };
+    };
+    const pub = async (method, url, body) => {
+      const res = await fetch(BASE + url, { method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+      const buf = Buffer.from(await res.arrayBuffer()); let json = null; try { json = JSON.parse(buf.toString("utf8")); } catch (_) {}
+      return { status: res.status, json, buf, type: res.headers.get("content-type") || "" };
+    };
+    const A = "/admin/esign/api";
+    r = await upload("paralegal", "Lease Agreement.pdf");
+    const id = r.json && r.json.packet && r.json.packet.id;
+    note("a document can be uploaded for signature; it starts as a draft", r.status === 200 && r.json.packet.kind === "upload" && r.json.packet.status === "draft" &&
+      r.json.packet.title === "Lease Agreement" && (r.json.packet.pages || []).length === 2 && r.json.packet.pages[1].w === 792, r.text);
+    if (id) {
+      r = await send("attorney", "GET", `${A}/packets/${id}`);
+      note("…that belongs to no client, so other staff cannot open it", r.status === 403, r.status);
+      r = await send("admin", "GET", `${A}/packets/${id}/prepare`);
+      note("…but an admin can", r.status === 200 && r.json.packet.id === id, r.text);
+      r = await send("consultant", "GET", "/admin/esign");
+      note("a consultant does not get the e-signature pages", r.status !== 200, r.status);
+      const signers = [{ name: "Li Wang", email: "", sign_order: 1 }, { name: "Pat Paralegal", sign_order: 2 }];
+      const sig = (signer) => ({ type: "signature", signer, page: 0, x: 0.2, y: 0.6 + signer * 0.1, w: 0.3, h: 0.05 });
+      r = await send("paralegal", "POST", `${A}/packets/${id}/prepare`, { signers, fields: [sig(0)], send: true }, "json");
+      note("it cannot be sent while a signer has nowhere to sign", r.status === 400 && /no signature field/.test(r.text), r.text);
+      r = await send("paralegal", "GET", `${A}/packets/${id}`);
+      note("…and stays a draft, with what was saved", r.status === 200 && r.json.packet.status === "draft" && r.json.packet.signers.length === 2 && r.json.packet.fields.length === 1, r.text);
+      const fields = [sig(0), { type: "text", signer: 0, page: 1, x: 0.2, y: 0.3, w: 0.3, h: 0.03, label: "City" },
+        { type: "initials", signer: 0, page: 1, x: 0.8, y: 0.9, w: 0.08, h: 0.05 }, { type: "date", signer: 0, page: 0, x: 0.6, y: 0.6, w: 0.15, h: 0.03 }, sig(1)];
+      r = await send("paralegal", "POST", `${A}/packets/${id}/prepare`, { title: "Lease", message: "Please sign.", signers, fields, send: true }, "json");
+      note("with a signature field for each, it is sent — to the first signer only", r.status === 200 && r.json.packet.status === "sent" && (r.json.delivered || []).length === 1 && r.json.delivered[0].name === "Li Wang", r.text);
+      r = await send("paralegal", "POST", `${A}/packets/${id}/prepare`, { signers, fields }, "json");
+      note("once sent it can no longer be changed", r.status === 409, r.status);
+      r = await send("paralegal", "GET", `${A}/packets/${id}/links`);
+      const links = (r.json && r.json.links || []).map(l => l.url.split("/sign/e/")[1]);
+      note("each signer has a private link", links.length === 2 && links.every(Boolean) && links[0] !== links[1], r.text);
+      const [t1, t2] = links;
+      r = await pub("GET", `/api/public/esign/${t1}`);
+      note("the first signer's link shows their fields, and only the outline of the other's", r.status === 200 && r.json.kind === "upload" && r.json.your_turn === true &&
+        r.json.fields.filter(f => f.mine).length === 4 && r.json.fields.filter(f => !f.mine).every(f => !f.id && !f.label), JSON.stringify(r.json).slice(0, 200));
+      r = await pub("GET", `/api/public/esign/${t1}/pdf`);
+      note("…and serves the document itself", r.status === 200 && /application\/pdf/.test(r.type) && r.buf.slice(0, 5).toString() === "%PDF-", r.status);
+      r = await pub("GET", `/api/public/esign/${t2}`);
+      note("the second signer is told it is not their turn", r.status === 200 && r.json.your_turn === false, JSON.stringify(r.json).slice(0, 160));
+      r = await pub("POST", `/api/public/esign/${t2}/sign`, { typed_name: "Pat Paralegal", signature: png, consent: true });
+      note("…and cannot sign early", r.status === 409, r.status);
+      r = await pub("POST", `/api/public/esign/${t1}/sign`, { typed_name: "Li Wang", signature: png, initials: png, consent: true, values: {} });
+      note("a required box left empty stops the signature", r.status === 400 && /Fill in/.test(r.json && r.json.error || ""), JSON.stringify(r.json));
+      const textId = "f2";
+      r = await pub("POST", `/api/public/esign/${t1}/sign`, { typed_name: "王丽", signature: png, initials: png, consent: true, lang: "zh", mode: "typed",
+        values: { [textId]: "阿卡迪亚" }, images: { [textId]: png, __name: png } });
+      note("the first signer signs — in Chinese, with what they typed", r.status === 200 && r.json.ok && r.json.completed === false, JSON.stringify(r.json));
+      r = await pub("POST", `/api/public/esign/${t1}/sign`, { typed_name: "Li Wang", signature: png, initials: png, consent: true, values: { [textId]: "x" } });
+      note("a signature cannot be given twice", r.status === 409, r.status);
+      r = await pub("POST", `/api/public/esign/${t2}/sign`, { typed_name: "Pat Paralegal", signature: png, consent: true });
+      note("the second signer signs, and that completes it", r.status === 200 && r.json.completed === true, JSON.stringify(r.json));
+      let done = null;
+      for (let i = 0; i < 40 && !(done && (done.has_signed_pdf || done.finalize_error)); i++) { await sleep(250); done = (await send("paralegal", "GET", `${A}/packets/${id}`)).json.packet; }
+      note("the signed PDF is made and kept, even with no Dropbox to file it in", !!done && done.status === "completed" && done.has_signed_pdf === true, JSON.stringify(done && { s: done.status, e: done.finalize_error }));
+      const dl = await fetch(BASE + `${A}/packets/${id}/download/signed-pdf`, { headers: { cookie: `${cookie}=${tok.paralegal}` } });
+      const signedPdf = Buffer.from(await dl.arrayBuffer());
+      let pageCount = 0; try { pageCount = (await PDFDocument.load(signedPdf)).getPageCount(); } catch (_) {}
+      note("…the document's two pages followed by the certificate of signature", dl.status === 200 && pageCount >= 3, [dl.status, pageCount]);
+      r = await pub("GET", `/api/public/esign/${t1}/pdf?download=1`);
+      note("a signer can download the finished copy from their own link", r.status === 200 && r.buf.length === signedPdf.length, [r.status, r.buf.length, signedPdf.length]);
+      const row = (await db.query(`SELECT s.lang, s.consent_text, s.initials_png IS NOT NULL AS ini, s.field_values FROM esign_signers s WHERE s.packet_id = $1 ORDER BY s.sign_order`, [id])).rows;
+      note("what was typed, the initials and the language of the page are on record", row.length === 2 && row[0].ini === true && row[0].lang === "zh" &&
+        /Chinese translation/.test(row[0].consent_text) && row[0].field_values.values[textId] === "阿卡迪亚" && row[1].lang === "en", JSON.stringify(row).slice(0, 200));
+      r = await send("paralegal", "GET", `${A}/documents`);
+      const mineList = (r.json && r.json.documents || []).map(d => d.id);
+      r = await send("attorney", "GET", `${A}/documents`);
+      const theirs = (r.json && r.json.documents || []).map(d => d.id);
+      note("the list shows it to its sender and not to other staff", mineList.includes(id) && !theirs.includes(id), [mineList, theirs]);
+    }
+    r = await upload("paralegal", "Throwaway.pdf");
+    const id2 = r.json && r.json.packet && r.json.packet.id;
+    r = await send("paralegal", "POST", `${A}/packets/${id2}/discard`, {}, "json");
+    const gone = await send("paralegal", "GET", `${A}/packets/${id2}`);
+    note("a draft never sent can be discarded", r.status === 200 && gone.status === 404, [r.status, gone.status]);
+    r = await send("paralegal", "POST", `${A}/packets/${id}/discard`, {}, "json");
+    note("…a signed document cannot", r.status === 409, r.status);
+    for (const page of ["/admin/esign", `/admin/esign/prepare/${id}`]) {
+      r = await send("paralegal", "GET", page);
+      note(`the page ${page.replace(/\d+$/, ":id")} opens`, r.status === 200 && /esign-prepare\.js/.test(r.text), r.status);
+    }
+  }
+
+  // The Matter Manager, now a Tara page: the page, the frame inside it, and
+  // the docket's own API against real tables.
+  {
+    r = await send("admin", "GET", "/admin/matters/");
+    note("the Matter Manager opens inside Tara", r.status === 200 && /id="matters-frame"/.test(r.text) && /nav-label">Matter Manager/.test(r.text), r.status);
+    const fr = await fetch(BASE + "/admin/matters/app", { headers: { cookie: `${cookie}=${tok.admin}` } });
+    const frText = await fr.text();
+    note("…with the docket in its frame, framable by this site only", fr.status === 200 && /frame-ancestors 'self'/.test(fr.headers.get("content-security-policy") || "") && /API_BASE = '\/admin\/matters\/api'/.test(frText), fr.status);
+    r = await send("admin", "GET", "/admin/matters/v2");
+    note("the old preview address goes to it", r.status === 302 && r.location === "/admin/matters/", [r.status, r.location]);
+    r = await send("attorney", "GET", "/admin/matters/");
+    note("it stays closed to everyone but an admin", r.status === 403, r.status);
+    r = await send("admin", "POST", "/admin/matters/api/matters", { client_name: "Lu, Guangfeng", matter_ref: "25-1234", court: "9th Cir.", case_type: "PFR", opened_date: "2026-08-01" }, "json");
+    const mid = r.json && r.json.matter && r.json.matter.id;
+    note("a matter can be opened", r.status < 300 && !!mid, r.text);
+    r = await send("admin", "POST", `/admin/matters/api/matters/${mid}/deadlines`, { title: "Opening brief", citation: "FRAP 31(a)", due_date: "2027-01-15", party: "us" }, "json");
+    note("…a deadline put on it", r.status < 300 && r.json && r.json.deadline && r.json.deadline.title === "Opening brief", r.text);
+    r = await send("admin", "GET", `/admin/matters/api/matters/${mid}`);
+    note("…and read back with its deadline and the day it was opened", r.status === 200 && (r.json.deadlines || r.json.matter.deadlines || []).length === 1 &&
+      /^2026-0(7-31|8-01)/.test(String(r.json.matter.opened_date)), r.text.slice(0, 300));
+    r = await send("admin", "GET", "/admin/matters/api/matters");
+    note("the list of matters loads", r.status === 200 && (r.json.matters || []).some(m => m.id === mid), r.text.slice(0, 200));
+  }
   return results;
 }
 
