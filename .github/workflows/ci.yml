@@ -207,6 +207,12 @@ jobs:
       - name: Court mail: hearings off calendar
         run: node scripts/check-court-mail-vacate.js
 
+      # One address holding every court notice, with the deadline reading
+      # attached. The guard that matters: copying to the mailbox being read
+      # would forward every message to itself, forever.
+      - name: Court mail: the docket mailbox
+        run: node scripts/check-court-mail-docket.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never

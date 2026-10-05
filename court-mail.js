@@ -65,14 +65,32 @@ function config() {
 // subdomains only — "mycourtnotice.xyz" is not a court. More can be added
 // with COURT_MAIL_EXTRA_DOMAINS (comma-separated).
 const COURT_DOMAINS = [
-  "uscourts.gov",                                   // CM/ECF — every federal court
-  "courts.ca.gov", "lacourt.org", "lacourt.ca.gov", "occourts.org", "sb-court.org", "sftc.org",
-  "scscourt.org", "saccourt.ca.gov", "sdcourt.ca.gov", "riverside.courts.ca.gov", "ventura.courts.ca.gov",
-  "usdoj.gov", "justice.gov",                       // EOIR / ECAS
-  "dhs.gov",                                        // USCIS, ICE (uscis.dhs.gov …)
+  // Federal. One entry covers every district, bankruptcy and circuit court,
+  // because CM/ECF sends from <court>.uscourts.gov and ecf.<court>.uscourts.gov.
+  "uscourts.gov",
+  "pacer.gov",                                      // PACER is its own domain, not a uscourts.gov subdomain
+  "supremecourt.gov",
+
+  // California state. The Judicial Council domains cover the Courts of Appeal
+  // and the Supreme Court's own notices; the rest are the trial courts the
+  // firm appears in.
+  "courts.ca.gov", "courtinfo.ca.gov", "jud.ca.gov", "calcourts.gov",
+  "lacourt.org", "lacourt.ca.gov", "lasuperiorcourt.org",
+  "occourts.org", "sb-court.org", "sbcourt.org", "riverside.courts.ca.gov",
+  "sftc.org", "scscourt.org", "saccourt.ca.gov", "sdcourt.ca.gov", "ventura.courts.ca.gov",
+
+  // Immigration. EOIR, the BIA and ECAS all send from the Department of
+  // Justice; USCIS has its own domain as well as its DHS one, and mail from
+  // uscis.gov would otherwise not be recognised at all.
+  "usdoj.gov", "justice.gov",
+  "dhs.gov", "uscis.gov", "ice.gov", "cbp.gov",
+
   "uspto.gov",
+
+  // E-filing and e-service, which is how most state court documents arrive.
   "onelegal.com", "firstlegal.com", "tylertech.com", "tylertech.cloud", "tylerhost.net",
   "fileandservexpress.com", "casefilexpress.com", "greenfiling.com", "journaltech.com",
+  "odysseyefileca.com", "efilingmail.com", "proofserve.com", "nationwidelegal.com",
 ];
 
 /** The address of "Name <addr>" or addr, lower-cased; the domain is after the LAST @. */
@@ -162,6 +180,10 @@ function initTables() {
         created_at       TIMESTAMPTZ DEFAULT NOW()
       )`);
     await db.query(`ALTER TABLE court_mail ADD COLUMN IF NOT EXISTS retries INTEGER DEFAULT 0`).catch(() => {});
+    // When this email was copied to the docket mailbox. A row re-read or
+    // re-assigned by hand must not send a second copy.
+    await db.query(`ALTER TABLE court_mail ADD COLUMN IF NOT EXISTS forwarded_at TIMESTAMPTZ`).catch(() => {});
+    await db.query(`ALTER TABLE court_mail ADD COLUMN IF NOT EXISTS forward_error TEXT`).catch(() => {});
     // 'ping'   — JJ was told about this one the moment it was filed.
     // 'digest' — a routine EOIR receipt; it waits for the daily roll-up.
     await db.query(`ALTER TABLE court_mail ADD COLUMN IF NOT EXISTS notify_mode TEXT`).catch(() => {});
@@ -994,6 +1016,125 @@ async function calendar(target, reading, row, filed, record) {
   return { actions: added, notes };
 }
 
+// ── The docket mailbox ──────────────────────────────────────
+//
+// One address that holds every court notice the firm receives — state,
+// immigration, district, appellate — with the deadline reading attached to
+// each. JJ registers it with the courts and the e-filing services, and it
+// becomes the firm's docket of record.
+//
+// Set COURT_MAIL_COPY_TO to turn it on. Left unset, nothing is forwarded.
+//
+// WHY THE SELF-LOOP GUARD MATTERS MORE THAN ANYTHING ELSE HERE
+// If the address being copied to is also the mailbox being read, every
+// message forwards itself, is collected again, and forwards again. That is
+// not a slow leak: it is an unbounded loop that fills a mailbox, burns the
+// provider's send quota and buries the real notices inside hours. So the
+// forward refuses when the two addresses match, and says why.
+function docketAddress() {
+  const a = String(process.env.COURT_MAIL_COPY_TO || "").trim().toLowerCase();
+  if (!a) return null;
+  // One address, no list, no line break — the same rule the firm's other
+  // outbound mail uses before handing anything to a mail server.
+  return /^[^\s@,;:<>()"'\\]+@[^\s@,;:<>()"'\\]+\.[^\s@,;:<>()"'\\]{2,}$/.test(a) && a.length <= 200 ? a : null;
+}
+
+/** Why this email will not be copied to the docket, or null if it will be. */
+function docketRefusal(row) {
+  const raw = String(process.env.COURT_MAIL_COPY_TO || "").trim();
+  if (!raw) return "COURT_MAIL_COPY_TO is not set";
+  const to = docketAddress();
+  if (!to) return "COURT_MAIL_COPY_TO is not one email address";
+  const cfg = config();
+  if (cfg.user && cfg.user.trim().toLowerCase() === to) {
+    return "the docket address is the mailbox being read — copying to it would loop";
+  }
+  if (row && row.forwarded_at) return "already copied to the docket";
+  return null;
+}
+
+/**
+ * Copy one court email to the docket mailbox, with the reading attached.
+ *
+ * The original goes as a .eml attachment rather than being re-typed into the
+ * body: that keeps the court's own headers, its PDFs and its formatting
+ * exactly as sent, which is what makes the docket copy worth anything if it
+ * is ever the version somebody has to rely on.
+ *
+ * Never throws. A mail failure is recorded on the row; the email is already
+ * filed, calendared and notified by the time this runs.
+ */
+async function forwardToDocket(row, reading) {
+  const refusal = docketRefusal(row);
+  if (refusal) return { sent: false, reason: refusal };
+  const to = docketAddress();
+
+  let m;
+  try { m = require("./esign").mailer(); } catch (e) { m = null; }
+  if (!m) return { sent: false, reason: "email is not set up on the server (SMTP_* or GMAIL_* settings)" };
+
+  const r = reading || row.reading || {};
+  const when = row.received_at ? new Date(row.received_at).toISOString().slice(0, 10) : "";
+  const lines = [
+    r.title || row.subject || "Court email",
+    r.court ? `Court: ${r.court}` : null,
+    r.case_numbers && r.case_numbers.length ? `Case: ${r.case_numbers.join(", ")}` : null,
+    r.a_numbers && r.a_numbers.length ? `A-number: ${r.a_numbers.join(", ")}` : null,
+    row.client_key ? `Client: ${row.client_key}` : null,
+    "",
+    r.summary || "",
+    "",
+    r.hearings && r.hearings.length
+      ? "HEARINGS\n" + r.hearings.map(h => `• ${h.date}${h.time ? " " + h.time : ""} — ${h.type}${h.location ? " · " + h.location : ""}`).join("\n")
+      : null,
+    r.vacated && r.vacated.length
+      ? "OFF CALENDAR\n" + r.vacated.map(v => `• ${v.date} — ${v.disposition}${v.replaced_by ? " → " + v.replaced_by : ""}`).join("\n")
+      : null,
+    r.deadlines && r.deadlines.length
+      ? "DEADLINES\n" + r.deadlines.map(d => `• ${d.date} — ${d.description}${d.rule ? " (" + d.rule + ")" : ""}`).join("\n")
+      : null,
+    // Kept separate and labelled, because these are not on anybody's
+    // calendar and a docket copy that blurred the two would be worse than
+    // one that showed neither.
+    r.suggested && r.suggested.length
+      ? "SUGGESTED, NOT CALENDARED (calculated, or not stated in the document)\n" +
+        r.suggested.map(d => `• ${d.date} — ${d.description}${d.rule ? " (" + d.rule + ")" : ""}`).join("\n")
+      : null,
+    r.action_items && r.action_items.length ? "TO DO\n" + r.action_items.map(a => `• ${a}`).join("\n") : null,
+    "",
+    "Read automatically from the original, which is attached. Verify every date against the document.",
+    pageUrl(row.id),
+  ].filter(x => x !== null);
+
+  const attachments = [];
+  if (row.raw && row.raw.length) {
+    attachments.push({
+      filename: `${when ? when + " " : ""}${String(row.subject || "court-email").replace(/[\/\\:?*"<>|]+/g, " ").trim().slice(0, 80) || "court-email"}.eml`,
+      content: row.raw,
+      contentType: "message/rfc822",
+    });
+  }
+
+  try {
+    await m.t.sendMail({
+      from: `"TEZ Law Firm docket" <${m.from}>`,
+      to,
+      // The original sender and subject are preserved in the subject line so
+      // the docket mailbox can be searched the way the courts address things.
+      subject: `[Docket] ${r.title || row.subject || "Court email"}`,
+      text: lines.join("\n"),
+      replyTo: row.original_from || row.from_addr || undefined,
+      attachments,
+    });
+    await db.query(`UPDATE court_mail SET forwarded_at = NOW(), forward_error = NULL WHERE id = $1`, [row.id]);
+    return { sent: true, to };
+  } catch (e) {
+    console.warn("[court-mail] docket copy failed:", e.message);
+    await db.query(`UPDATE court_mail SET forward_error = $2 WHERE id = $1`, [row.id, e.message]).catch(() => {});
+    return { sent: false, reason: e.message };
+  }
+}
+
 async function tellJJ(text) {
   // Court & deadlines topic, falling back to the direct message when no
   // group is configured. See tg-route.js.
@@ -1169,6 +1310,15 @@ async function processMail(id, { target = null, think = null, by = null, notify 
               error = NULL, processed_at = NOW(), handled_by = $7 WHERE id = $1`,
       [row.id, match.caseId || null, match.clientKey || null, match.by, JSON.stringify(actions), note, by]);
 
+    // A copy to the docket mailbox, if one is configured. Deliberately after
+    // the row is marked done: the filing, the calendar entries and the record
+    // are what matter, and a mail server having a bad afternoon must not undo
+    // any of them. The failure is recorded on the row instead.
+    try {
+      const fresh = (await db.query(`SELECT * FROM court_mail WHERE id = $1`, [row.id])).rows[0] || row;
+      await forwardToDocket(fresh, reading);
+    } catch (e) { console.warn("[court-mail] docket copy:", e.message); }
+
     if (notify && digested) {
       // Filed and recorded; it will appear as one line in the daily digest.
       await db.query(`UPDATE court_mail SET notify_mode = 'digest' WHERE id = $1`, [row.id]);
@@ -1319,6 +1469,11 @@ async function status() {
   return {
     configured: cfg.configured, mailbox: cfg.user || null, host: cfg.host || null, every_minutes: cfg.everyMinutes,
     forwarders: cfg.forwarders, last_check_at: await getState("last_check_at"), last_error: await getState("last_error"),
+    // Whether court mail is being copied to a docket mailbox — and if not,
+    // the reason, so this is diagnosable from the admin page rather than
+    // from the server log.
+    docket_to: docketAddress(),
+    docket_refusal: docketRefusal(null),
     counts: Object.fromEntries(counts.map(c => [c.status, c.n])),
   };
 }
@@ -1463,5 +1618,6 @@ module.exports = {
   caseKey, aDigits, matchReading, matchByName, suggestClients, learnANumber,
   processMail, undoAction, markHandled, list, forClient, status, runOnce, start,
   eoirReading, pendingDigest, sendDigest,
+  forwardToDocket, docketAddress, docketRefusal,
   readWithModel, attachmentText,
 };
