@@ -42,6 +42,77 @@ function trustCaption(trust) {
   }
 }
 
+// ─── The second figure ──────────────────────────────────────
+//
+// Client trust is recorded in two places that have never been joined. The
+// staff app writes trust_transactions; the accounting module writes
+// accounting_trust_ledger and reconciles only that one. So the RRC 1.15
+// figure on this page has been computed from one of the firm's two trust
+// records, and nothing on screen said which.
+//
+// Both are now shown side by side, and neither is presented as the answer.
+// Merging them for real means deciding which rows are the same transaction
+// recorded twice, and that is a judgement about the firm's money that an
+// attorney makes, not one this page should make quietly. Until then: two
+// columns, the difference named, and the duplicates it would have to resolve
+// listed out.
+
+/** Cents to a plain $ string, for figures that come from trust-ledger. */
+const c$ = cents => cents == null ? "—" : (cents < 0 ? "-$" : "$") +
+  (Math.abs(cents) / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+/**
+ * The merged ledger, or a reason it is missing.
+ *
+ * trust-ledger reads both tables and writes nothing. It is wrapped here
+ * because this page's whole job is the reconciliation the accounting side
+ * already computes — a second opinion failing must not take that away.
+ */
+async function bothLedgers() {
+  try {
+    return { ok: true, data: await require("./trust-ledger").allClients() };
+  } catch (e) {
+    console.warn("[accounting-ui] merged trust ledger unavailable:", e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+const PROBLEM_LABEL = {
+  possible_duplicate: "Possibly the same transaction in both ledgers",
+  balance_mismatch: "A stored running balance disagrees with date order",
+  negative_balance: "A client's balance goes below zero",
+};
+
+/**
+ * What the merge found. Duplicates first: they are the reason the combined
+ * figure may be overstated, so they are what makes the difference between
+ * the two columns readable rather than alarming.
+ */
+function mergeProblems(data) {
+  const problems = (data && data.problems) || [];
+  if (!problems.length) return "";
+  const byKind = {};
+  for (const p of problems) (byKind[p.kind] = byKind[p.kind] || []).push(p);
+  const order = ["possible_duplicate", "balance_mismatch", "negative_balance"];
+  const kinds = [...order.filter(k => byKind[k]), ...Object.keys(byKind).filter(k => !order.includes(k))];
+
+  return `
+    <div style="background:#FBEDEA; padding:16px 18px; border-radius:8px; border-left:4px solid #9C2B1E; margin-bottom:20px;">
+      <strong style="color:#9C2B1E;">${problems.length} thing${problems.length === 1 ? "" : "s"} to resolve before these two ledgers can be merged</strong>
+      ${kinds.map(kind => {
+        const rows = byKind[kind];
+        return `
+        <div style="margin-top:12px;">
+          <div style="font-size:12px; font-weight:600; color:#2B2523;">${esc(PROBLEM_LABEL[kind] || kind)} (${rows.length})</div>
+          <ul style="margin:6px 0 0 0; padding-left:20px; font-size:12px; color:#2B2523; line-height:1.7;">
+            ${rows.slice(0, 12).map(p => `<li>${p.client_key ? `<a href="/admin/accounting/trust/${encodeURIComponent(p.client_key)}" style="color:#9C2B1E;">${esc(p.client_key)}</a> — ` : ""}${esc(p.detail || "")}</li>`).join("")}
+            ${rows.length > 12 ? `<li style="color:#5E5854;">…and ${rows.length - 12} more</li>` : ""}
+          </ul>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
 function trustStatusLine(trust) {
   if (!trust) return "—";
   switch (trust.reconcile_status) {
@@ -534,14 +605,85 @@ async function renderBalanceSheet(query) {
 async function renderTrustReconciliation(query) {
   const today = new Date().toISOString().split("T")[0];
   const asOf = query.as_of || today;
-  const trust = await accounting.getTrustReconciliation(asOf);
+  const [trust, both] = await Promise.all([
+    accounting.getTrustReconciliation(asOf),
+    bothLedgers(),
+  ]);
+  const merged = both.ok ? both.data : null;
 
-  const clientRows = trust.client_balances.length ? trust.client_balances.map(c => `
-    <tr>
-      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; font-size:13px;"><a href="/admin/accounting/trust/${encodeURIComponent(c.client_key)}" style="color:#2B2523; text-decoration:none; font-weight:500;">${esc(c.client_name || c.client_key)}</a></td>
-      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; text-align:right; font-family:ui-monospace, Menlo, monospace;">${fmt$(c.balance)}</td>
-    </tr>
-  `).join("") : `<tr><td colspan="2" style="padding:20px; text-align:center; color:#5E5854; font-style:italic;">No client trust balances</td></tr>`;
+  // Per client, the accounting ledger's figure beside the two ledgers
+  // together. Built from the union of both key sets: a client the accounting
+  // ledger has never seen is precisely the case worth looking at, and it
+  // would be missing from a table built off the accounting side alone.
+  const acctByKey = new Map(trust.client_balances.map(c => [c.client_key, c]));
+  const mergedByKey = new Map((merged ? merged.clients : []).map(c => [c.client_key, c]));
+  const allKeys = [...new Set([...acctByKey.keys(), ...mergedByKey.keys()])].sort((a, b) => {
+    const na = (acctByKey.get(a) || mergedByKey.get(a) || {}).client_name || a;
+    const nb = (acctByKey.get(b) || mergedByKey.get(b) || {}).client_name || b;
+    return String(na).localeCompare(String(nb));
+  });
+
+  const clientRows = allKeys.length ? allKeys.map(key => {
+    const a = acctByKey.get(key);
+    const m = mergedByKey.get(key);
+    const name = (a && a.client_name) || (m && m.client_name) || key;
+    const acctCents = a ? Math.round(Number(a.balance) * 100) : null;
+    const bothCents = m ? m.balance_cents : null;
+    const differs = acctCents != null && bothCents != null && acctCents !== bothCents;
+    const onlyIn = acctCents == null ? "the staff app only" : bothCents == null ? "the accounting ledger only" : null;
+    return `
+    <tr${differs || onlyIn ? ' style="background:#FFFBF5;"' : ""}>
+      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; font-size:13px;">
+        <a href="/admin/accounting/trust/${encodeURIComponent(key)}" style="color:#2B2523; text-decoration:none; font-weight:500;">${esc(name)}</a>
+        ${onlyIn ? `<div style="font-size:11px; color:#A34C00; margin-top:2px;">In ${esc(onlyIn)}</div>` : ""}
+      </td>
+      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; text-align:right; font-family:ui-monospace, Menlo, monospace;">${acctCents == null ? '<span style="color:#5E5854;">—</span>' : fmt$(a.balance)}</td>
+      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; text-align:right; font-family:ui-monospace, Menlo, monospace; ${differs ? "color:#9C2B1E; font-weight:600;" : ""}">${bothCents == null ? '<span style="color:#5E5854;">—</span>' : c$(bothCents)}</td>
+      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; text-align:right; font-size:12px; color:#5E5854;">${m ? `${m.counts.accounting} + ${m.counts.app}` : "—"}</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="4" style="padding:20px; text-align:center; color:#5E5854; font-style:italic;">No client trust balances in either ledger</td></tr>`;
+
+  // The second comparison, against the same bank balance. Stated, never
+  // substituted: the status above stays the accounting ledger's answer until
+  // somebody decides how the two records combine.
+  const appSrc = merged ? merged.sources.app : null;
+  const acctSrc = merged ? merged.sources["accounting"] : null;
+  const bankCents = Math.round((Number(trust.bank_balance) || 0) * 100);
+  const mergedVariance = merged ? bankCents - merged.total_liability_cents : null;
+  const bothPanel = !both.ok ? `
+    <div style="background:#FAF8F5; padding:14px 18px; border-radius:8px; border-left:4px solid #5E5854; margin-bottom:20px; font-size:13px;">
+      The staff app's trust ledger could not be read, so only the accounting ledger is shown above.
+      <code style="font-size:12px;">${esc(both.error || "")}</code>
+    </div>` : `
+    <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; border-left:4px solid #A34C00; margin-bottom:20px;">
+      <div style="font-size:13px; color:#2B2523; margin-bottom:14px; line-height:1.6;">
+        <strong>Both ledgers together.</strong> Client trust is recorded in two places that have never been joined —
+        the staff app (${appSrc.rows} transaction${appSrc.rows === 1 ? "" : "s"})
+        and the accounting ledger (${acctSrc.rows}).
+        The figures above come from the accounting ledger alone, which is what the status is based on.
+        These are the two together, in date order, for comparison only.
+        ${!appSrc.available ? `<br><span style="color:#9C2B1E;">The staff app's table could not be read: ${esc(appSrc.error || "")}</span>` : ""}
+        ${!acctSrc.available ? `<br><span style="color:#9C2B1E;">The accounting table could not be read: ${esc(acctSrc.error || "")}</span>` : ""}
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:20px;">
+        <div>
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Client liability, both ledgers</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523; margin-top:4px;">${c$(merged.total_liability_cents)}</div>
+          <div style="font-size:11px; color:#5E5854; margin-top:2px;">${merged.clients.length} client${merged.clients.length === 1 ? "" : "s"}</div>
+        </div>
+        <div>
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Against bank (1020)</div>
+          <div style="font-size:22px; font-weight:700; color:${Math.abs(mergedVariance) < 1 ? "#2F6B3F" : "#9C2B1E"}; margin-top:4px;">${c$(mergedVariance)}</div>
+          <div style="font-size:11px; color:#5E5854; margin-top:2px;">Accounting ledger alone: ${fmt$(trust.variance)}</div>
+        </div>
+        <div>
+          <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Transactions</div>
+          <div style="font-size:22px; font-weight:700; color:#2B2523; margin-top:4px;">${acctSrc.rows + appSrc.rows}</div>
+          <div style="font-size:11px; color:#5E5854; margin-top:2px;">accounting + app</div>
+        </div>
+      </div>
+    </div>
+    ${mergeProblems(merged)}`;
 
   return `
     <div class="page-header">
@@ -586,14 +728,19 @@ async function renderTrustReconciliation(query) {
       <button type="submit" style="background:#2B2523; color:white; padding:8px 16px; border:none; border-radius:4px; cursor:pointer;">Update</button>
     </form>
 
+    ${bothPanel}
+
     <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden;">
       <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #E8E3DC;">
-        <strong style="color:#2B2523;">Per-Client Trust Balances (${trust.client_balances.length})</strong>
+        <strong style="color:#2B2523;">Per-Client Trust Balances (${allKeys.length})</strong>
+        <span style="font-size:11px; color:#5E5854; margin-left:8px;">A highlighted row is one the two ledgers disagree about, or that only one of them has.</span>
       </div>
       <table style="width:100%; border-collapse:collapse;">
         <thead><tr style="background:#FAF8F5;">
           <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Client</th>
-          <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Balance</th>
+          <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Accounting ledger</th>
+          <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Both ledgers</th>
+          <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Txns</th>
         </tr></thead>
         <tbody>${clientRows}</tbody>
       </table>
@@ -647,7 +794,16 @@ async function renderChartOfAccounts(query = {}) {
 // ─── Client Trust Ledger ────────────────────────────────
 
 async function renderClientTrustLedger(clientKey) {
-  const entries = await accounting.getClientTrustLedger(clientKey);
+  const [entries, ledger] = await Promise.all([
+    accounting.getClientTrustLedger(clientKey),
+    (async () => {
+      try { return { ok: true, data: await require("./trust-ledger").forClient(clientKey) }; }
+      catch (e) {
+        console.warn("[accounting-ui] merged client ledger unavailable:", e.message);
+        return { ok: false, error: e.message };
+      }
+    })(),
+  ]);
   const clientName = entries[0]?.client_name || clientKey;
 
   const rows = entries.length ? entries.map(e => `
@@ -661,6 +817,7 @@ async function renderClientTrustLedger(clientKey) {
   `).join("") : `<tr><td colspan="5" style="padding:40px; text-align:center; color:#5E5854;">No trust transactions</td></tr>`;
 
   const currentBalance = entries.length ? Number(entries[entries.length - 1].running_balance) : 0;
+  const bothTable = renderBothLedgers(ledger);
 
   return `
     <div class="page-header">
@@ -671,10 +828,14 @@ async function renderClientTrustLedger(clientKey) {
     <div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px;">
       <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Current Trust Balance</div>
       <div style="font-size:32px; font-weight:700; color:${currentBalance > 0 ? "#2F6B3F" : "#2B2523"}; margin-top:4px;">${fmt$(currentBalance)}</div>
-      <div style="font-size:12px; color:#5E5854; margin-top:4px;">${entries.length} transactions</div>
+      <div style="font-size:12px; color:#5E5854; margin-top:4px;">${entries.length} transaction${entries.length === 1 ? "" : "s"} on the accounting ledger${ledger.ok && ledger.data.counts.app ? `, and ${ledger.data.counts.app} more in the staff app` : ""}</div>
     </div>
 
     <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; overflow:hidden;">
+      <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #E8E3DC;">
+        <strong style="color:#2B2523;">Accounting ledger</strong>
+        <span style="font-size:11px; color:#5E5854; margin-left:8px;">accounting_trust_ledger only — the figures the reconciliation uses</span>
+      </div>
       <table style="width:100%; border-collapse:collapse;">
         <thead><tr style="background:#FAF8F5;">
           <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Date</th>
@@ -685,7 +846,77 @@ async function renderClientTrustLedger(clientKey) {
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
+    </div>
+
+    ${bothTable}`;
+}
+
+/**
+ * The same client, both ledgers, in date order with every row's source named.
+ *
+ * Shown beneath the accounting ledger rather than instead of it, because the
+ * two answer different questions: the table above is what the reconciliation
+ * is computed from, and this one is what the client's money actually did
+ * across both records.
+ *
+ * The balance column is recomputed in date order. The app stores its own
+ * running balance taken from the most recently *entered* row rather than the
+ * preceding one by date, so a back-dated transaction leaves the stored
+ * figures wrong from that point on — which is exactly the kind of thing this
+ * column exists to expose, and why a mismatch is flagged rather than hidden.
+ */
+function renderBothLedgers(ledger) {
+  if (!ledger.ok) {
+    return `
+    <div style="background:#FAF8F5; padding:14px 18px; border-radius:8px; border-left:4px solid #5E5854; margin-top:20px; font-size:13px;">
+      The staff app's trust ledger could not be read, so only the accounting ledger is shown.
+      <code style="font-size:12px;">${esc(ledger.error || "")}</code>
     </div>`;
+  }
+  const d = ledger.data;
+  const SRC = {
+    app: { label: "App", color: "#0061FF" },
+    accounting: { label: "Accounting", color: "#A34C00" },
+  };
+  const rows = d.rows.length ? d.rows.map(r => {
+    const src = SRC[r.source] || { label: r.source, color: "#5E5854" };
+    const mismatch = r.balance_mismatch_cents != null;
+    return `
+    <tr${r.reversed ? ' style="opacity:.55;"' : mismatch ? ' style="background:#FFFBF5;"' : ""}>
+      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; font-size:12px;">${esc(String(r.date || "").slice(0, 10))}</td>
+      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC;">
+        <span style="display:inline-block; padding:1px 5px; border-radius:3px; background:${src.color}; color:#FAF8F5; font-size:9px; font-weight:700;">${esc(src.label)}</span>
+      </td>
+      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; font-size:13px;">${esc(r.description || "")}${r.reference ? ` <span style="color:#5E5854; font-size:11px;">[${esc(r.reference)}]</span>` : ""}${r.reversed ? ' <span style="color:#9C2B1E; font-size:11px; font-weight:600;">REVERSED</span>' : ""}</td>
+      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; text-align:right; font-size:13px; font-family:ui-monospace, Menlo, monospace; color:${r.deposit_cents > 0 ? "#2F6B3F" : "#5E5854"};">${r.deposit_cents > 0 ? "+" + c$(r.deposit_cents) : ""}</td>
+      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; text-align:right; font-size:13px; font-family:ui-monospace, Menlo, monospace; color:${r.disburse_cents > 0 ? "#9C2B1E" : "#5E5854"};">${r.disburse_cents > 0 ? "−" + c$(r.disburse_cents) : ""}</td>
+      <td style="padding:10px 12px; border-bottom:1px solid #E8E3DC; text-align:right; font-size:13px; font-family:ui-monospace, Menlo, monospace; font-weight:600; color:${r.computed_balance_cents < 0 ? "#9C2B1E" : "#2B2523"};">${c$(r.computed_balance_cents)}${mismatch ? `<div style="font-size:10px; font-weight:400; color:#A34C00;">stored ${c$(r.stored_balance_cents)}</div>` : ""}</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="6" style="padding:30px; text-align:center; color:#5E5854; font-style:italic;">No trust transactions in either ledger</td></tr>`;
+
+  return `
+    <div style="background:white; border-radius:8px; border:1px solid #E8E3DC; border-left:4px solid #A34C00; overflow:hidden; margin-top:20px;">
+      <div style="padding:12px 16px; background:#FAF8F5; border-bottom:1px solid #E8E3DC;">
+        <strong style="color:#2B2523;">Both ledgers together</strong>
+        <span style="font-size:11px; color:#5E5854; margin-left:8px;">${d.counts.accounting} accounting + ${d.counts.app} app, in date order. Balance recomputed; not merged.</span>
+      </div>
+      <table style="width:100%; border-collapse:collapse;">
+        <thead><tr style="background:#FAF8F5;">
+          <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Date</th>
+          <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">From</th>
+          <th style="padding:10px 12px; text-align:left; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Description</th>
+          <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Deposit</th>
+          <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Disburse</th>
+          <th style="padding:10px 12px; text-align:right; font-size:11px; color:#5E5854; text-transform:uppercase; border-bottom:1px solid #E8E3DC;">Balance</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="padding:12px 16px; background:#FAF8F5; border-top:1px solid #E8E3DC; display:flex; gap:24px; flex-wrap:wrap; font-size:12px;">
+        <div><span style="color:#5E5854;">Closing balance, both ledgers:</span> <strong>${c$(d.closing_balance_cents)}</strong></div>
+        ${d.lowest_balance_cents < 0 ? `<div style="color:#9C2B1E;"><strong>Lowest: ${c$(d.lowest_balance_cents)}</strong> on ${esc(d.lowest_balance_date || "")} — a client trust balance may never go below zero (RRC 1.15)</div>` : ""}
+      </div>
+    </div>
+    ${mergeProblems(d)}`;
 }
 
 // ─── New manual entry form ──────────────────────────────
@@ -877,4 +1108,6 @@ module.exports = {
   renderChartOfAccounts,
   renderClientTrustLedger,
   renderNewEntry,
+  // Pure, so a check can prove what the second figure renders as.
+  renderBothLedgers, mergeProblems, c$,
 };

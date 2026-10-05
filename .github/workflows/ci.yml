@@ -216,6 +216,12 @@ jobs:
       - name: "Court mail: the docket mailbox"
         run: node scripts/check-court-mail-docket.js
 
+      # Client trust is recorded in two tables that have never been joined.
+      # Both figures are shown side by side; merging them means deciding which
+      # rows are the same transaction twice, which is an attorney judgement.
+      - name: Trust: both figures
+        run: node scripts/check-trust-both-figures.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never
