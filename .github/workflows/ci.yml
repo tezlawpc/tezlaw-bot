@@ -184,6 +184,12 @@ jobs:
       - name: QuickBooks panel
         run: node scripts/check-qbo-panel.js
 
+      # A mistyped or stale admin URL used to land on express
+      # \"Cannot GET /x\". /admin/trust is the Tara app path for the
+      # trust page; this server calls it /admin/accounting/trust.
+      - name: Admin 404 and path aliases
+        run: node scripts/check-admin-404.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

@@ -13143,6 +13143,96 @@ app.post("/voice/transfer",          (req, res) => handleTransfer(req, res));
 app.post("/voice/transfer-fallback", (req, res) => handleTransferFallback(req, res));
 app.post("/voice/transcribe",        (req, res) => handleTranscription(req, res));
 
+// ─── Admin: a 404 that is not a dead end ──────────────────────────────────
+//
+// "/admin/accounting/trust i get Cannot GET /admin/trust".
+//
+// Nothing in this repository links to /admin/trust. That path belongs to the
+// OTHER surface. The Tara app's trust screen is app/(firm)/admin/trust.tsx,
+// and Expo Router drops the (firm) group from the URL, so the app's own route
+// for trust accounting is /admin/trust while this server's is
+// /admin/accounting/trust. One page, two names, one shared hostname in
+// everybody's head — so the wrong one gets tried here, and express answers
+// with a bare "Cannot GET".
+//
+// Two fixes, and the second matters more than the first:
+//
+//   · ADMIN_ALIASES sends the names people actually try to the real page. It
+//     is hand-kept and short on purpose, and it is NOT a fuzzy search:
+//     guessing which page somebody meant and sending them there would be
+//     worse than saying the page does not exist, because these pages show
+//     money and the trust pages show client money.
+//
+//   · Everything else gets a real page inside the admin chrome, with the nav
+//     intact. "Cannot GET /admin/trust" tells a paralegal nothing — not that
+//     they are signed in, not that the page lives under another name, not how
+//     to get back. It cost a round trip to diagnose for that exact reason.
+//
+// Registered here, last, so it only ever sees requests no route matched. It
+// sits BELOW app.use("/admin", auth.requireAdminAuth), which is deliberate: a
+// stranger is bounced to the login page and never learns from a 404 which
+// admin pages do and do not exist.
+const ADMIN_ALIASES = {
+  "/admin/trust": "/admin/accounting/trust",          // the Tara app's path
+  "/admin/accounting/trust-reconciliation": "/admin/accounting/trust",
+  "/admin/iolta": "/admin/accounting/trust",          // what the nav calls it
+};
+
+app.use((req, res, next) => {
+  // Only the admin surface. The public site, the APIs the app talks to and the
+  // signing links have their own error handling, and a stray HTML page inside
+  // a JSON response is worse than a 404.
+  if (!req.path.startsWith("/admin")) return next();
+
+  // A mistyped POST falls through to express. Rendering a page for it would
+  // dress a write that never happened up as a page somebody visited.
+  if (req.method !== "GET" && req.method !== "HEAD") return next();
+
+  const want = req.path.replace(/\/+$/, "") || "/admin";
+
+  const alias = ADMIN_ALIASES[want] || ADMIN_ALIASES[want.toLowerCase()];
+  if (alias) {
+    // 302, never 301: a permanent redirect is cached by the browser past any
+    // later change to where the page lives, and that is unfixable from here.
+    const q = req.originalUrl.indexOf("?");
+    return res.redirect(302, alias + (q > -1 ? req.originalUrl.slice(q) : ""));
+  }
+
+  // A fetch() asking for JSON must not be handed markup: it would fail parsing
+  // on "<" and report a syntax error instead of a missing endpoint.
+  if (req.path.startsWith("/admin/api") || !req.accepts("html")) {
+    return res.status(404).json({ ok: false, error: `No such endpoint: ${want}` });
+  }
+
+  // req.path comes off the wire and goes into HTML.
+  const safe = want.replace(/[<>&"']/g, "").slice(0, 200);
+  const hearingNotes = require("./hearing-notes");
+  res.status(404).send(hearingNotes.renderAdminChrome({
+    title: "Page not found",
+    activeItem: "",
+    body: `
+      <div style="max-width:640px;">
+        <h1 style="font-size:22px; margin:0 0 10px;">There is no page at that address</h1>
+        <p style="color:#5E5854; font-size:14px; line-height:1.6;">
+          You are signed in — this is not a permissions problem. The address
+          <code style="background:#F3EFE9; padding:2px 6px; border-radius:3px;">${safe}</code>
+          does not match any page on this server.
+        </p>
+        <p style="color:#5E5854; font-size:14px; line-height:1.6;">
+          If you followed a bookmark, the page may have moved — or it may belong
+          to the Tara app rather than to this server. Trust accounting, for one,
+          is at <a href="/admin/accounting/trust" style="color:#9C2B1E; font-weight:600;">/admin/accounting/trust</a>
+          here and at <code>/admin/trust</code> in the app.
+        </p>
+        <p style="margin-top:22px;">
+          <a href="/admin/hearing/notes" style="background:#2B2523; color:white; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px;">Hearing Notes</a>
+          <a href="/admin/accounting" style="background:#F3EFE9; color:#2B2523; padding:10px 16px; border-radius:6px; text-decoration:none; font-size:13px; margin-left:8px;">Accounting</a>
+        </p>
+        <p style="color:#5E5854; font-size:12px; margin-top:18px;">Everything the firm uses is in the sidebar.</p>
+      </div>`,
+  }));
+});
+
 app.listen(PORT, async () => {
   console.log(`🚀 Zara running on port ${PORT}`);
 
