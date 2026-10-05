@@ -111,13 +111,16 @@ function describe() {
     const env = route().TOPICS[r.topic].env;
     let where;
     if (r.via === "topic")      where = `its own topic in the group (thread ${r.message_thread_id})`;
+    else if (r.via === "parent") where = `the ${route().TOPICS[r.parent].label} topic for now. Set ${env} to give it its own topic.`;
     else if (r.via === "group") where = `the group, with no topic. Set ${env} to the topic's thread id.`;
     else if (r.via === "dm")    where = "JJ's direct messages, because no group is set";
     else                        where = "NOWHERE. Neither a group nor JJ's id is set.";
-    lines.push(`${r.label}: ${where}`);
+    lines.push(`${r.parent ? "   " : ""}${r.label}: ${where}`);
   }
   lines.push("");
   lines.push(group ? `Group: ${group}` : "Group: not set (TG_OPS_CHAT_ID). Send /whereami inside the group to get its id.");
+  lines.push("");
+  lines.push("Court notices are sorted by the court they come from. One that names no court stays in Court & deadlines.");
   lines.push("");
   lines.push("Always direct to JJ, never the group: distress alerts and admin sign-in approvals.");
   lines.push("");
@@ -131,8 +134,11 @@ async function test() {
   for (const r of rows) {
     if (r.via === "none") { out.push(`${r.label}: not sent, nothing is configured`); continue; }
     const ok = await route().send(r.topic,
-      `Routing test for ${r.label}. If you are reading this in the ${r.label} topic, it is set up correctly.`);
+      r.via === "parent"
+        ? `Routing test for ${r.label}. It has no topic of its own yet, so it arrives here.`
+        : `Routing test for ${r.label}. If you are reading this in the ${r.label} topic, it is set up correctly.`);
     out.push(`${r.label}: ${ok ? "sent" : "FAILED, see the server log for [tg-route]"}` +
+             (ok && r.via === "parent" ? ` (to ${route().TOPICS[r.parent].label}, its own topic is not set yet)` : "") +
              (ok && r.via === "group" ? " (to the group itself, no topic set)" : "") +
              (ok && r.via === "dm" ? " (to JJ's direct messages, no group set)" : ""));
   }

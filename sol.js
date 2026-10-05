@@ -50,7 +50,7 @@ function calculateDeadline(incidentDate, caseType) {
 }
 
 async function sendTelegramAlert(text) {
-  await require("./tg-route").send("court", text, { parse_mode: "Markdown" });
+  await require("./tg-route").send("state", text, { parse_mode: "Markdown" });
 }
 
 async function checkSolAlerts() {

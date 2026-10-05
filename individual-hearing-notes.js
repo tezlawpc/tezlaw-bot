@@ -888,7 +888,7 @@ async function sendToTeamGroup(id) {
     try {
       await axios.post(
         `https://api.telegram.org/bot${telegramToken}/sendMessage`,
-        { ...(require("./tg-route").target("court") || { chat_id: chatId }),
+        { ...(require("./tg-route").target("eoir") || { chat_id: chatId }),
           text: chunk, parse_mode: "Markdown" },
         { timeout: 15000 }
       );

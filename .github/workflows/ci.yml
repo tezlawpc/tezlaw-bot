@@ -121,6 +121,11 @@ jobs:
       - name: Ops group rules
         run: node scripts/check-ops-chat.js
 
+      # A notice in the wrong topic is a notice somebody did not read. The
+      # court sorter, and its fallback while a topic does not exist yet.
+      - name: Court topics
+        run: node scripts/check-court-topics.js
+
       # A document uploaded for signature: the fields a signer fills must land
       # where staff placed them, on rotated and cropped pages too, and nobody
       # outside the client's team may open the packet.

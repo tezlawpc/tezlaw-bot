@@ -53,6 +53,7 @@ const tasks = require(path.join(ROOT, "tasks.js"));
 const social = require(path.join(ROOT, "social-resend.js"));
 
 const KEYS = ["TG_OPS_CHAT_ID", "TG_TOPIC_COURT", "TG_TOPIC_SOCIAL", "TG_TOPIC_LEADS", "TG_TOPIC_OPS",
+              "TG_TOPIC_STATE", "TG_TOPIC_EOIR", "TG_TOPIC_FEDERAL", "TG_TOPIC_USPTO",
               "JJ_TELEGRAM_ID", "RECIPIENT_JJ_TELEGRAM_ID", "RECIPIENT_JUE_TELEGRAM_ID", "TG_APPROVER_IDS",
               "TELEGRAM_TOKEN", "TELEGRAM_BOT_TOKEN"];
 async function withEnv(vars, fn) {
@@ -147,11 +148,21 @@ check("/routing with no group says alerts still reach JJ", () => withEnv({ JJ_TE
 }));
 check("/routing test posts one line into each topic, then reports", () => withEnv(GROUP, async () => {
   await ops.handleRouting(inGroup("/routing test", 14));
-  assert.strictEqual(posts.length, 5);
-  assert.deepStrictEqual(posts.slice(0, 4).map(p => p.message_thread_id), [11, 12, 13, 14]);
-  assert.ok(posts.slice(0, 4).every(p => p.chat_id === "-1009"));
-  assert.strictEqual(posts[4].message_thread_id, 14);                    // the report, where it was asked
-  assert.strictEqual((posts[4].text.match(/: sent/g) || []).length, 4);
+  // Court & deadlines, its four divisions (no topic of their own here, so they
+  // arrive in Court & deadlines and say so), then the other three.
+  assert.strictEqual(posts.length, 9);
+  assert.deepStrictEqual(posts.slice(0, 8).map(p => p.message_thread_id), [11, 11, 11, 11, 11, 12, 13, 14]);
+  assert.ok(posts.slice(0, 8).every(p => p.chat_id === "-1009"));
+  assert.ok(/no topic of its own yet/.test(posts[1].text), posts[1].text);
+  assert.strictEqual(posts[8].message_thread_id, 14);                    // the report, where it was asked
+  assert.strictEqual((posts[8].text.match(/: sent/g) || []).length, 8);
+  assert.strictEqual((posts[8].text.match(/its own topic is not set yet/g) || []).length, 4);
+}));
+check("/routing test reaches each court topic once it has its own thread", () => withEnv(
+  { ...GROUP, TG_TOPIC_STATE: "21", TG_TOPIC_EOIR: "22", TG_TOPIC_FEDERAL: "23", TG_TOPIC_USPTO: "24" }, async () => {
+  await ops.handleRouting(inGroup("/routing test", 14));
+  assert.deepStrictEqual(posts.slice(0, 8).map(p => p.message_thread_id), [11, 21, 22, 23, 24, 12, 13, 14]);
+  assert.ok(!/not set yet/.test(posts[8].text), posts[8].text);
 }));
 check("something that is not /routing is left for the rest of the bot", () => withEnv(GROUP, async () => {
   assert.strictEqual(await ops.handleRouting(inDm("/routingx", 555)), false);
@@ -232,8 +243,9 @@ check("server.js: task commands and task buttons check for staff first", () => {
   assert.ok(at("if (!tgOps.mayUseStaffCommands(msg.from, chatId))") < at("tasks.handleTelegramCommand("));
   assert.ok(at("if (!tgOps.mayUseStaffCommands(cb.from, cbChatId))") < at("tasks.handleTelegramCallback("));
 });
-check("server.js: the deadline summary and trademark alerts follow the Court topic", () => {
-  assert.strictEqual(server.split('await tgSendTopic("court", text);').length - 1, 3);
+check("server.js: the deadline summary and trademark alerts follow the court topics", () => {
+  assert.strictEqual(server.split('await tgSendTopic(B.topic, text);').length - 1, 2);
+  assert.strictEqual(server.split('await tgSendTopic("uspto", text);').length - 1, 1);
   assert.ok(!/tgSend\(String\(JJ_TELEGRAM_ID\)/.test(server), "something still writes to JJ's chat id directly");
 });
 check("what is private stays private: distress alerts and admin sign-in go to JJ alone", () => {
