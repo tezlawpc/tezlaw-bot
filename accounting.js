@@ -1021,6 +1021,69 @@ async function getBalanceSheet(asOfDate = null, company_id = null) {
  * that refuses, because it is the screen somebody checks to confirm client
  * funds are intact.
  */
+/**
+ * Which of the four reconciliation states these figures are in.
+ *
+ * Pure, and exported, because this is the decision the whole trust display
+ * hangs off and it has to be checkable without a database standing by. The
+ * four states and why they are four rather than two:
+ *
+ *   reconciled   the arithmetic balances AND there is activity behind it.
+ *                The only state that earns a green tick.
+ *   variance     there is activity and the two sides disagree. The books are
+ *                wrong and somebody has to find out why, today.
+ *   no_data      nothing has been recorded. Says nothing about whether the
+ *                trust account balances, because nothing is known.
+ *   unverified   the staff app holds trust transactions the accounting ledger
+ *                has never seen — it reads accounting_trust_ledger, the app
+ *                writes trust_transactions. There IS client money moving and
+ *                this reconciliation cannot see it.
+ *
+ * The one rule: zero minus zero is zero, so the arithmetic alone cannot be
+ * allowed to assert reconciliation.
+ */
+function trustStatus({ bank_balance = 0, sum_of_client_balances = 0, ledger_entry_count = 0, app_transaction_count = null } = {}) {
+  const bank = Number(bank_balance) || 0;
+  const sum = Number(sum_of_client_balances) || 0;
+  const ledgerRows = Number(ledger_entry_count) || 0;
+  const appRows = Number(app_transaction_count) || 0;
+
+  const arithmetic_balanced = Math.abs(bank - sum) < 0.01;
+  const has_activity = Math.abs(bank) >= 0.01 || Math.abs(sum) >= 0.01 || ledgerRows > 0 || appRows > 0;
+  const app_only = ledgerRows === 0 && Math.abs(bank) < 0.01 && Math.abs(sum) < 0.01 && appRows > 0;
+
+  let status = "variance", note = null;
+  if (app_only) {
+    status = "unverified";
+    note = `The staff app has recorded ${appRows} client trust transaction(s) that are not on the accounting ledger, so this reconciliation cannot be carried out. Nothing on this page says the trust account balances.`;
+  } else if (!has_activity) {
+    status = "no_data";
+    note = "No client trust activity has been recorded on these books, so there is nothing to reconcile. This is not a statement that the trust account balances.";
+  } else if (arithmetic_balanced) {
+    status = "reconciled";
+  }
+
+  return {
+    reconcile_status: status,
+    reconcile_note: note,
+    has_activity,
+    arithmetic_balanced,
+    // Fail-safe. Every existing caller reads this field, and none of them may
+    // claim reconciliation without evidence, so only the one status earns it.
+    is_reconciled: status === "reconciled",
+  };
+}
+
+// What each reconciliation status is called, in one place, so the dashboard,
+// the trust page and the Excel export cannot drift into saying different
+// things about the same figures.
+const TRUST_STATUS_LABEL = {
+  reconciled: "RECONCILED ✓",
+  variance:   "NOT RECONCILED ✗",
+  no_data:    "NOT RECONCILED — no trust activity recorded",
+  unverified: "NOT RECONCILED — cannot be verified from these books",
+};
+
 async function getTrustReconciliation(asOfDate = null) {
   await initTables();
   const firm = await lawFirmCompany();
@@ -1046,14 +1109,70 @@ async function getTrustReconciliation(asOfDate = null) {
     client_key: c.client_key, client_name: c.client_name, balance: +Number(c.balance).toFixed(2),
   }));
   const sumOfClients = +clientTotals.reduce((s, c) => s + c.balance, 0).toFixed(2);
+  const bank = Number(bankBalance) || 0;
+
+  // ─── Is there anything here to reconcile at all? ────────
+  //
+  // Both sides of that comparison start at zero, so an empty ledger satisfies
+  // it exactly — and the dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled"
+  // for a trust account it had never seen one transaction for.
+  //
+  // That is the one claim on these screens that must never be made without
+  // evidence behind it. A green tick beside a trust balance is read as "the
+  // three-way reconciliation was performed and it balanced", which is the
+  // RRC 1.15 duty itself, not as "there was no data to perform it on".
+  //
+  // So reconciliation is only asserted when the arithmetic balances AND there
+  // is activity behind it. Two further states have to be distinguishable,
+  // because they call for completely different work:
+  //
+  //   no_data     nothing recorded anywhere. Say so and claim nothing.
+  //   unverified  the staff app holds trust transactions this reconciliation
+  //               cannot see — it reads accounting_trust_ledger, while the
+  //               app writes trust_transactions. Not balanced, not empty:
+  //               unverifiable until the two ledgers are brought together.
+  let ledgerRowCount = 0;
+  try {
+    const r = await db.query(
+      `SELECT COUNT(*)::int AS n FROM accounting_trust_ledger
+        WHERE transaction_date <= $1 AND company_id = $2`,
+      [asOf, cid]
+    );
+    ledgerRowCount = r.rows[0] ? Number(r.rows[0].n) || 0 : 0;
+  } catch (e) {
+    // Counting failed, so emptiness is not established. Left at 0 and caught
+    // by the bank balance / app count below; never upgraded to "reconciled".
+    console.warn("[accounting] trust ledger row count failed:", e.message);
+  }
+
+  // The staff app's own trust table: firm-wide (it carries no company_id) and
+  // absent on a fresh database, so a failure here reads as unknown, not zero.
+  let appRowCount = null;
+  try {
+    const r = await db.query(
+      `SELECT COUNT(*)::int AS n FROM trust_transactions WHERE transaction_date <= $1`,
+      [asOf]
+    );
+    appRowCount = r.rows[0] ? Number(r.rows[0].n) || 0 : 0;
+  } catch (e) {
+    appRowCount = null;
+  }
+
   return {
     company_id: cid,
     as_of: asOf,
     bank_balance: bankBalance,
     client_balances: clientTotals,
     sum_of_client_balances: sumOfClients,
-    variance: +(bankBalance - sumOfClients).toFixed(2),
-    is_reconciled: Math.abs(bankBalance - sumOfClients) < 0.01,
+    variance: +(bank - sumOfClients).toFixed(2),
+    ledger_entry_count: ledgerRowCount,
+    app_transaction_count: appRowCount,
+    ...trustStatus({
+      bank_balance: bank,
+      sum_of_client_balances: sumOfClients,
+      ledger_entry_count: ledgerRowCount,
+      app_transaction_count: appRowCount,
+    }),
   };
 }
 
@@ -1226,7 +1345,8 @@ async function exportToExcel({ from_date, to_date, filters = {} } = {}) {
     { Item: "Bank balance (IOLTA Trust Account)", Amount: trust.bank_balance },
     { Item: "Sum of client trust balances", Amount: trust.sum_of_client_balances },
     { Item: "Variance", Amount: trust.variance },
-    { Item: `Reconciled: ${trust.is_reconciled ? "YES ✓" : "NO ✗"}`, Amount: null },
+    { Item: `Status: ${TRUST_STATUS_LABEL[trust.reconcile_status] || "UNKNOWN"}`, Amount: null },
+    ...(trust.reconcile_note ? [{ Item: trust.reconcile_note, Amount: null }] : []),
     { Item: "", Amount: null },
     { Item: "PER-CLIENT BALANCES", Amount: null },
     ...trust.client_balances.map(c => ({ Item: `  ${c.client_name}`, Amount: c.balance })),
@@ -1362,6 +1482,7 @@ module.exports = {
   syncFromPI,
   // Reports
   getAccountBalance, getIncomeStatement, getBalanceSheet, getTrustReconciliation,
+  TRUST_STATUS_LABEL, trustStatus,
   getLedger, getClientTrustLedger, getStats,
   // Exports
   exportToExcel, exportToIIF, exportToCSV,

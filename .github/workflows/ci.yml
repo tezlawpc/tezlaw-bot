@@ -181,6 +181,14 @@ jobs:
       - name: QuickBooks panel
         run: node scripts/check-qbo-panel.js
 
+      # An empty trust ledger satisfies bank-minus-clients exactly, so the
+      # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
+      # it had never seen a transaction for. RRC 1.15 is the rule the State Bar
+      # takes licences over; this is the one claim that may not be made
+      # without evidence behind it.
+      - name: Trust reconciliation claim
+        run: node scripts/check-trust-reconciled-claim.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never

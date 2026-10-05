@@ -14,6 +14,45 @@ const fmt$ = n => {
 };
 const fmtDate = d => d ? new Date(d).toLocaleDateString() : "—";
 
+// ─── Saying the trust status honestly ───────────────────────
+//
+// Green beside IOLTA TRUST is read as "the three-way reconciliation was done
+// and it balanced" — the RRC 1.15 duty itself. So green is reserved for the
+// one status that earns it. The two states where no claim can be made are
+// grey, not red: red says the books disagree, which is a different and
+// separately urgent problem, and dressing "no data" up as a variance would
+// send somebody hunting for a discrepancy that does not exist.
+const TRUST_GREEN = "#2F6B3F", TRUST_RED = "#9C2B1E", TRUST_GREY = "#5E5854";
+
+function trustColor(trust) {
+  if (!trust) return TRUST_GREY;
+  if (trust.reconcile_status === "reconciled") return TRUST_GREEN;
+  if (trust.reconcile_status === "variance") return TRUST_RED;
+  return TRUST_GREY;   // no_data, unverified, or a shape we do not recognise
+}
+
+function trustCaption(trust) {
+  if (!trust) return "No trust reconciliation available";
+  switch (trust.reconcile_status) {
+    case "reconciled": return "✓ Reconciled";
+    case "variance":   return "⚠ Variance " + fmt$(Math.abs(trust.variance || 0));
+    case "no_data":    return "No trust activity recorded";
+    case "unverified": return "Not verified — app transactions are not on the ledger";
+    default:           return "Reconciliation status unknown";
+  }
+}
+
+function trustStatusLine(trust) {
+  if (!trust) return "—";
+  switch (trust.reconcile_status) {
+    case "reconciled": return "✓ RECONCILED";
+    case "variance":   return "⚠ NOT RECONCILED";
+    case "no_data":    return "NOTHING TO RECONCILE";
+    case "unverified": return "CANNOT BE VERIFIED";
+    default:           return "STATUS UNKNOWN";
+  }
+}
+
 /**
  * The company switcher.
  *
@@ -117,9 +156,16 @@ async function renderDashboard(query = {}) {
 
   // `trust` is null on a non-law-firm entity, which has no trust account to
   // reconcile. Without the guard this throws on the business's dashboard.
-  const trustBanner = trust && !trust.is_reconciled && trust.bank_balance > 0 ? `
+  //
+  // The banner also fires on "unverified" — the staff app holding trust
+  // transactions the accounting ledger has never seen. The bank balance is
+  // zero in that case, so the old `bank_balance > 0` guard hid precisely the
+  // situation most worth surfacing.
+  const trustBanner = trust && !trust.is_reconciled && (trust.bank_balance > 0 || trust.reconcile_status === "unverified") ? `
     <div style="background:#FBEDEA; padding:14px 18px; border-radius:8px; border-left:4px solid #9C2B1E; margin-bottom:16px; font-size:13px;">
-      <strong style="color:#9C2B1E;">⚠ Trust account NOT RECONCILED</strong> — bank shows ${fmt$(trust.bank_balance)} but sum of client balances is ${fmt$(trust.sum_of_client_balances)} (variance: ${fmt$(trust.variance)})
+      <strong style="color:#9C2B1E;">⚠ Trust account ${trust.reconcile_status === "unverified" ? "CANNOT BE RECONCILED" : "NOT RECONCILED"}</strong> — ${trust.reconcile_note
+        ? esc(trust.reconcile_note)
+        : `bank shows ${fmt$(trust.bank_balance)} but sum of client balances is ${fmt$(trust.sum_of_client_balances)} (variance: ${fmt$(trust.variance)})`}
       <a href="/admin/accounting/trust" style="color:#9C2B1E; margin-left:10px; font-weight:600;">Investigate →</a>
     </div>` : "";
 
@@ -150,8 +196,8 @@ async function renderDashboard(query = {}) {
         ${stats.trust_balance === null
           ? `<div style="font-size:15px; font-weight:600; color:#5E5854; margin-top:8px;">Not applicable</div>
              <div style="font-size:11px; color:#5E5854;">Client trust is on the law firm's books only</div>`
-          : `<div style="font-size:22px; font-weight:700; color:${trust && trust.is_reconciled ? "#2F6B3F" : "#9C2B1E"}; margin-top:4px;">${fmt$(stats.trust_balance)}</div>`}
-        <div style="font-size:11px; color:${trust.is_reconciled ? "#2F6B3F" : "#9C2B1E"}; margin-top:2px;">${trust.is_reconciled ? "✓ Reconciled" : "⚠ Variance " + fmt$(Math.abs(trust.variance))}</div>
+          : `<div style="font-size:22px; font-weight:700; color:${trustColor(trust)}; margin-top:4px;">${fmt$(stats.trust_balance)}</div>
+             <div style="font-size:11px; color:${trustColor(trust)}; margin-top:2px;">${trustCaption(trust)}</div>`}
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
         <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">YTD Revenue</div>
@@ -491,7 +537,12 @@ async function renderTrustReconciliation(query) {
       <strong>CA Bar RRC 1.15:</strong> Trust account bank balance must always equal the sum of all client trust balances. Any variance requires immediate investigation.
     </div>
 
-    <div style="background:${trust.is_reconciled ? "#EEF5EF" : "#FBEDEA"}; padding:20px; border-radius:8px; border-left:4px solid ${trust.is_reconciled ? "#2F6B3F" : "#9C2B1E"}; margin-bottom:20px;">
+    ${trust.reconcile_note ? `
+    <div style="background:#FAF8F5; padding:14px 18px; border-radius:8px; border-left:4px solid #5E5854; margin-bottom:16px; font-size:13px; color:#2B2523;">
+      ${esc(trust.reconcile_note)}
+    </div>` : ""}
+
+    <div style="background:${trust.reconcile_status === "reconciled" ? "#EEF5EF" : trust.reconcile_status === "variance" ? "#FBEDEA" : "#F3EFE9"}; padding:20px; border-radius:8px; border-left:4px solid ${trustColor(trust)}; margin-bottom:20px;">
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:20px;">
         <div>
           <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Bank Balance (1020)</div>
@@ -503,12 +554,12 @@ async function renderTrustReconciliation(query) {
         </div>
         <div>
           <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Variance</div>
-          <div style="font-size:22px; font-weight:700; color:${trust.is_reconciled ? "#2F6B3F" : "#9C2B1E"}; margin-top:4px;">${fmt$(trust.variance)}</div>
+          <div style="font-size:22px; font-weight:700; color:${trustColor(trust)}; margin-top:4px;">${fmt$(trust.variance)}</div>
         </div>
         <div>
           <div style="font-size:11px; color:#5E5854; text-transform:uppercase;">Status</div>
-          <div style="font-size:18px; font-weight:700; color:${trust.is_reconciled ? "#2F6B3F" : "#9C2B1E"}; margin-top:6px;">
-            ${trust.is_reconciled ? "✓ RECONCILED" : "⚠ NOT RECONCILED"}
+          <div style="font-size:18px; font-weight:700; color:${trustColor(trust)}; margin-top:6px;">
+            ${trustStatusLine(trust)}
           </div>
         </div>
       </div>
@@ -799,6 +850,9 @@ async function renderCompanies(query = {}) {
 
 module.exports = {
   renderDashboard,
+  // Pure, so a check can prove what each reconciliation status renders as
+  // without booting a server or standing up a database.
+  trustColor, trustCaption, trustStatusLine,
   renderCompanies,
   renderLedger,
   renderIncomeStatement,
