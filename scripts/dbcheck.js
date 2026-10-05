@@ -429,11 +429,18 @@ async function exercises({ tok, cookie }) {
     note("…with the docket in its frame, framable by this site only", fr.status === 200 && /frame-ancestors 'self'/.test(fr.headers.get("content-security-policy") || "") && /API_BASE = '\/admin\/matters\/api'/.test(frText), fr.status);
     r = await send("admin", "GET", "/admin/matters/v2");
     note("the old preview address goes to it", r.status === 302 && r.location === "/admin/matters/", [r.status, r.location]);
+    // Staff with the Federal & TM permission see trademark matters only
+    // (matter-manager.js, "Who may use the Matter Manager"). Everything
+    // else in here is still JJ's.
     r = await send("attorney", "GET", "/admin/matters/");
-    note("it stays closed to everyone but an admin", r.status === 403, r.status);
+    note("staff are sent to the trademark view and nowhere else", r.status === 302 && r.location === "/admin/matters/?view=trademarks", [r.status, r.location]);
+    r = await send("attorney", "GET", "/admin/matters/api/proposals");
+    note("…the docket inbox stays closed to them", r.status === 403, r.status);
     r = await send("admin", "POST", "/admin/matters/api/matters", { client_name: "Lu, Guangfeng", matter_ref: "25-1234", court: "9th Cir.", case_type: "PFR", opened_date: "2026-08-01" }, "json");
     const mid = r.json && r.json.matter && r.json.matter.id;
     note("a matter can be opened", r.status < 300 && !!mid, r.text);
+    r = await send("attorney", "GET", `/admin/matters/api/matters/${mid}`);
+    note("…and one that is not a trademark matter is not there for staff", r.status === 404, r.status);
     r = await send("admin", "POST", `/admin/matters/api/matters/${mid}/deadlines`, { title: "Opening brief", citation: "FRAP 31(a)", due_date: "2027-01-15", party: "us" }, "json");
     note("…a deadline put on it", r.status < 300 && r.json && r.json.deadline && r.json.deadline.title === "Opening brief", r.text);
     r = await send("admin", "GET", `/admin/matters/api/matters/${mid}`);
