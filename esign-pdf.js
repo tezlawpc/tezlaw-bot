@@ -438,35 +438,106 @@ async function pdfForSigner(token) {
 
 // ── Finishing ───────────────────────────────────────────────
 
+/**
+ * Where the firm's own copy of a signed document goes.
+ *
+ * Not the creating user's `admin_users.email`, which is what this used to be.
+ * JJ's admin record carries a personal Hotmail address, so every signed fee
+ * agreement, retainer and release the firm produced was being delivered into
+ * consumer webmail — and what he received there was the letter written for
+ * clients, not one written for the firm.
+ *
+ * Overridable with ESIGN_FIRM_COPY_EMAIL so this is a setting rather than a
+ * fact about one person.
+ */
+const FIRM_DOMAIN = "tezlawfirm.com";
+function firmCopyAddress() {
+  const a = String(process.env.ESIGN_FIRM_COPY_EMAIL || "jj@" + FIRM_DOMAIN).trim().toLowerCase();
+  return E().oneAddress(a) ? a : "jj@" + FIRM_DOMAIN;
+}
+
+/**
+ * The signed copy, to the signers and to the firm — as two different letters,
+ * because they are written to two different audiences.
+ *
+ * A signer gets their own signed copy and nothing more. When they signed they
+ * were told the firm would send a copy once everyone had signed, so the
+ * arrival of the copy is the whole message. Announcing "Everyone has signed"
+ * reports on the other parties' conduct, which is not this signer's business
+ * — and on a document with an opposing party on it, saying so is a disclosure
+ * about someone else that the firm never meant to make.
+ *
+ * The firm gets the completion notice, with who signed and when, at a firm
+ * address.
+ */
 async function emailCopies(p, pdf) {
   const m = E().mailer();
   const sent = [], errors = [];
   if (!m) return { sent, errors: ["email is not set up on the server, so no copies were emailed"] };
-  const to = new Map();
-  for (const s of p.signers) if (s.email) to.set(s.email.toLowerCase(), s.name);
+
+  const signers = new Map();
+  for (const s of p.signers) {
+    const a = s.email && String(s.email).trim().toLowerCase();
+    if (a) signers.set(a, s.name || "");
+  }
+
+  const firmTo = new Set([firmCopyAddress()]);
+  // Whoever prepared it gets their own copy too, but only at a firm address.
+  // A member of staff using personal webmail is not a reason to send client
+  // documents there.
   try {
     if (p.created_by_uid) {
-      const r = await db.query(`SELECT email, full_name FROM admin_users WHERE id = $1`, [p.created_by_uid]);
-      if (r.rows[0] && r.rows[0].email) to.set(String(r.rows[0].email).toLowerCase(), r.rows[0].full_name || "");
+      const r = await db.query(`SELECT email FROM admin_users WHERE id = $1`, [p.created_by_uid]);
+      const a = r.rows[0] && String(r.rows[0].email || "").trim().toLowerCase();
+      if (a && a.endsWith("@" + FIRM_DOMAIN)) firmTo.add(a);
     }
-  } catch (e) { /* the sender can download it */ }
+  } catch (e) { /* the firm address still gets it */ }
+
+  // Nobody receives both letters. A firm address that is also a signer is
+  // staff signing on the firm's behalf, and the firm letter is the fuller one.
+  for (const a of firmTo) signers.delete(a);
+
   const filename = E().fileBase(p) + ".pdf";
   const mail = require("./tez-email");
-  for (const [address, name] of to) {
+  const attachments = [{ filename, content: pdf, contentType: "application/pdf" }];
+
+  for (const [address, name] of signers) {
+    try {
+      await m.t.sendMail({
+        from: `"TEZ Law Firm" <${m.from}>`, to: address,
+        subject: `Your signed copy: ${p.title}`,
+        text: `Hello${name ? " " + name : ""},\n\nAttached is your signed copy of "${p.title}", with a certificate of signature on its last page.\n\n` +
+          `Please keep it for your records. Questions: 626-678-8677.\n\nTEZ Law Firm`,
+        html: mail.wrap({
+          heading: "Your signed copy",
+          body: `<p>Hello${name ? " " + mail.esc(name) : ""},</p>` +
+            `<p>Attached is your signed copy of <strong>${mail.esc(p.title)}</strong>, with a certificate of signature on its last page.</p>` +
+            `<p>Please keep it for your records.</p>`,
+        }),
+        attachments,
+      });
+      sent.push(address);
+    } catch (e) { errors.push(`copy to ${address} failed: ${e.message}`); }
+  }
+
+  const roll = p.signers
+    .map(s => `${s.label || s.role}: ${s.typed_name || s.name}${s.signed_at ? " — " + E().stampPT(s.signed_at) : ""}`);
+  for (const address of firmTo) {
     try {
       await m.t.sendMail({
         from: `"TEZ Law Firm" <${m.from}>`, to: address,
         subject: `Signed: ${p.title}`,
-        text: `Hello${name ? " " + name : ""},\n\nEveryone has signed "${p.title}". The signed copy is attached, with a certificate of signature on its last page.\n\n` +
-          `Please keep it for your records. Questions: 626-678-8677.\n\nTEZ Law Firm`,
+        text: `"${p.title}" is fully signed. The signed copy is attached, with the certificate of signature on its last page.\n\n` +
+          roll.join("\n") + `\n\nTEZ Law Firm`,
         html: mail.wrap({
-          heading: "Everyone has signed",
-          body: `<p>Hello${name ? " " + mail.esc(name) : ""},</p><p>Everyone has signed <strong>${mail.esc(p.title)}</strong>. The signed copy is attached, with a certificate of signature on its last page.</p><p>Please keep it for your records.</p>`,
+          heading: "Fully signed",
+          body: `<p><strong>${mail.esc(p.title)}</strong> is fully signed. The signed copy is attached, with the certificate of signature on its last page.</p>` +
+            `<p style="margin:0;white-space:pre-wrap;">${mail.esc(roll.join("\n"))}</p>`,
         }),
-        attachments: [{ filename, content: pdf, contentType: "application/pdf" }],
+        attachments,
       });
       sent.push(address);
-    } catch (e) { errors.push(`copy to ${address} failed: ${e.message}`); }
+    } catch (e) { errors.push(`firm copy to ${address} failed: ${e.message}`); }
   }
   return { sent, errors };
 }
@@ -566,4 +637,6 @@ module.exports = {
   MAX_BYTES, MAX_PAGES, MAX_FIELDS, MAX_SIGNERS, FIELD_TYPES, AUTO_TYPES,
   sniff, normalize, cleanFields, cleanSigners, createDraft, savePrepared, readyToSend,
   viewFor, checkSubmission, nameImage, place, offset, stamp, pdfForSigner, finalize, emailCopies, listAll, discardDraft, plain, dateOf,
+  // For the check: where the firm's copy goes, without a database or a mail server.
+  firmCopyAddress, FIRM_DOMAIN,
 };

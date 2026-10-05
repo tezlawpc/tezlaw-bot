@@ -1006,6 +1006,19 @@ async function finalize(id) {
       errors.push(...filed.errors);
     } catch (e) { errors.push(e.message); }
   }
+  // The signed copy goes out from here too, not only on the uploaded-PDF
+  // path. A client who signs a fee agreement is entitled to a copy of it, and
+  // a document generated from a template was silently the one kind that never
+  // sent one — the `email_copies` flag was only ever honoured by esign-pdf.
+  let copies = { sent: [], errors: [] };
+  if (p.email_copies !== false) {
+    try {
+      copies = await require("./esign-pdf").emailCopies(done, pdf);
+      errors.push(...copies.errors);
+      if (copies.sent.length) await logEvent(p.id, "copies_sent", { detail: `Signed copy emailed to ${copies.sent.join(", ")}` });
+    } catch (e) { errors.push("signed copies were not emailed: " + e.message); }
+  }
+
   await db.query(`UPDATE esign_packets SET signed_pdf = $2, dropbox_docx = $3, dropbox_pdf = $4, finalize_error = $5 WHERE id = $1`,
     [p.id, pdf, docxPath, pdfPath, errors.join("; ") || null]);
   await notify(done, `"${p.title}" is fully signed${pdfPath ? " and filed in Dropbox" : ""}`);

@@ -184,18 +184,65 @@ async function balanceSheetPanel(query = {}) {
   });
 }
 
+/**
+ * A tile for a figure looked up by account mapping.
+ *
+ * `figure` is { cents, reason, label }. When there is no figure, the tile says
+ * which of the two things is missing — the mapping, or the line on the report
+ * — because those need different fixes and neither is "the balance is zero".
+ */
+const MISSING = {
+  not_mapped: {
+    short: "Account not mapped",
+    help: `Tell tezlaw-bot which QuickBooks account this is: <a href="/admin/accounting/quickbooks" style="color:${brand.gold};">account mapping</a>.`,
+  },
+  not_on_report: {
+    short: "Not on the balance sheet",
+    help: "The mapped QuickBooks account did not appear on this balance sheet. It may have been renamed, merged or made inactive in QuickBooks.",
+  },
+  no_amount: {
+    short: "No amount reported",
+    help: "QuickBooks listed the account on the balance sheet without a figure.",
+  },
+};
+
+function mappedTile(label, figure, accent) {
+  if (figure && figure.cents != null) {
+    return `
+      <div style="flex:1; min-width:150px; background:white; border:1px solid #eee; border-top:3px solid ${accent}; border-radius:6px; padding:14px 16px;">
+        <div style="font-size:11px; color:#777; text-transform:uppercase; letter-spacing:.5px;">${esc(label)}</div>
+        <div style="font-size:21px; font-weight:600; color:${brand.navy}; margin-top:6px;">${money(figure.cents)}</div>
+        ${figure.label ? `<div style="font-size:11px; color:#999; margin-top:3px;">${esc(figure.label)}</div>` : ""}
+      </div>`;
+  }
+  const m = MISSING[(figure && figure.reason) || ""] || { short: "Not available", help: "" };
+  return `
+    <div style="flex:1; min-width:150px; background:#FAFAFA; border:1px solid #eee; border-top:3px solid #bbb; border-radius:6px; padding:14px 16px;">
+      <div style="font-size:11px; color:#777; text-transform:uppercase; letter-spacing:.5px;">${esc(label)}</div>
+      <div style="font-size:21px; font-weight:600; color:#999; margin-top:6px;">—</div>
+      <div style="font-size:11px; color:#777; margin-top:3px;">${esc(m.short)}</div>
+    </div>`;
+}
+
 /** Compact: headline figures only, for the dashboard. */
 async function dashboardPanel(query = {}) {
   const reports = require("./qbo-reports");
-  const pl = await safely(() => reports.profitAndLoss({}, { force: query.refresh === "1" }));
-  const bs = await safely(() => reports.balanceSheet({}, { force: query.refresh === "1" }));
+  const force = query.refresh === "1";
+  const pl = await safely(() => reports.profitAndLoss({}, { force }));
+  const bs = await safely(() => reports.balanceSheet({}, { force }));
+  const kf = await safely(() => reports.keyFigures({ force }));
 
-  // One shared failure message rather than the same banner twice.
+  // One shared failure message rather than the same banner three times.
   if (pl.ok === false && bs.ok === false) {
     return renderPanel({ title: "From QuickBooks", result: pl, headline: [] });
   }
 
   const tiles = [
+    // Cash and receivables first: this is the half of the dashboard that used
+    // to read $0.00 while the firm's bank accounts were not empty.
+    kf.ok === false ? "" : mappedTile("Operating cash", kf.operating, "#0061FF"),
+    kf.ok === false ? "" : mappedTile("IOLTA trust (bank)", kf.trust, "#6a1b9a"),
+    kf.ok === false ? "" : mappedTile("Accounts receivable", kf.receivable, brand.gold),
     pl.ok === false ? "" : tile("Income, year to date", pl.income_cents, "#2e7d32"),
     pl.ok === false ? "" : tile("Expenses, year to date", pl.expenses_cents, "#c62828"),
     pl.ok === false ? "" : tile("Net income", pl.net_income_cents, brand.gold),
@@ -203,12 +250,22 @@ async function dashboardPanel(query = {}) {
     bs.ok === false ? "" : tile("Liabilities", bs.liabilities_cents, "#6a1b9a"),
   ].filter(Boolean).join("");
 
+  // Say it once, for whichever tiles are short, rather than on each tile.
+  const reasons = new Set();
+  if (kf.ok !== false) for (const k of ["operating", "trust", "receivable"]) {
+    const r = kf[k] && kf[k].reason;
+    if (r && MISSING[r]) reasons.add(r);
+  }
+  const help = [...reasons].map(r => `<div style="margin-top:4px;">${MISSING[r].help}</div>`).join("");
+
   return `
     <h2 style="margin:22px 0 10px 0; font-size:16px; color:${brand.navy};">From QuickBooks</h2>
     <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:6px;">${tiles}</div>
     <div style="font-size:11px; color:#999; margin-bottom:16px;">
-      Your books, read from QuickBooks. The figures below this come from tezlaw-bot's own ledger, which is what pushes entries into QuickBooks.
+      Your books, as QuickBooks reports them${kf.ok !== false && kf.as_of ? ` &middot; as of ${esc(kf.as_of)}` : ""}.
       <a href="/admin/accounting/income-statement" style="color:${brand.gold};">Full profit and loss</a>
+      &middot; <a href="?refresh=1" style="color:${brand.gold};">Refresh</a>
+      ${help}
     </div>`;
 }
 
@@ -218,6 +275,8 @@ module.exports = {
   balanceSheetPanel,
   dashboardPanel,
   // Pure, for the checks.
+  mappedTile,
+  MISSING,
   money,
   lineRows,
   esc,

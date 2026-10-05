@@ -189,6 +189,12 @@ jobs:
       - name: Trust reconciliation claim
         run: node scripts/check-trust-reconciled-claim.js
 
+      # Signed client documents were being delivered to a personal Hotmail
+      # address, and signers were told that every other party had signed.
+      # Two letters, two audiences, and the firm copy at a firm address.
+      - name: Signed-copy delivery
+        run: node scripts/check-esign-copies.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never

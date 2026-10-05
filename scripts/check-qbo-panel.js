@@ -19,7 +19,8 @@ require("./lib/stub-pg").install();
 
 const ROOT = path.join(__dirname, "..");
 const P = require(path.join(ROOT, "qbo-panel.js"));
-const { renderPanel, money, esc } = P;
+const { renderPanel, money, esc, mappedTile, MISSING } = P;
+const R = require(path.join(ROOT, "qbo-reports.js"));
 
 let passed = 0;
 function check(name, fn) {
@@ -225,6 +226,129 @@ check("a panel failure cannot take the page down", () => {
   assert.ok(/async function safely/.test(src));
   assert.ok(/catch \(e\)/.test(src),
     "every fetch is caught: a QuickBooks outage must not break a page that still has local content");
+});
+
+
+// ── Cash, trust and receivables: the half that read zero ───
+//
+// Income and expenses came from the profit-and-loss panel. Operating cash,
+// the IOLTA trust bank balance and receivables are not on that report, so
+// they kept reading tezlaw-bot's own empty journal and showing $0.00 — an
+// operating account with money in it, displayed as empty, directly above
+// a correct seven-figure income figure.
+//
+// They are now looked up on the balance sheet by QUICKBOOKS ACCOUNT ID, from
+// the mapping staff set up. Never by account name: the names are the firm's
+// own wording and get edited in QuickBooks without anybody telling this app.
+
+const BS_LINES = [
+  { label: "Checking - Operating", amount_cents: 48210055, depth: 2, kind: "line", account_id: "35" },
+  { label: "TEZ IOLTA Client Trust", amount_cents: 12750000, depth: 2, kind: "line", account_id: "36" },
+  { label: "Accounts Receivable (A/R)", amount_cents: 9340012, depth: 2, kind: "line", account_id: "84" },
+  { label: "Undeposited Funds", amount_cents: 125000, depth: 2, kind: "line", account_id: "91" },
+];
+const MAP = { "1010": "35", "1020": "36", "1100": "84" };
+
+check("a mapped account is found by id, not by name", () => {
+  const f = R.pickByMapping(BS_LINES, MAP, "1010");
+  assert.strictEqual(f.cents, 48210055);
+  assert.strictEqual(f.reason, null);
+  assert.strictEqual(f.label, "Checking - Operating",
+    "the QuickBooks account name is worth showing, but it is not what we matched on");
+});
+
+check("the trust bank balance comes from QuickBooks", () => {
+  assert.strictEqual(R.pickByMapping(BS_LINES, MAP, "1020").cents, 12750000);
+});
+
+check("receivables come from QuickBooks", () => {
+  assert.strictEqual(R.pickByMapping(BS_LINES, MAP, "1100").cents, 9340012);
+});
+
+check("a renamed QuickBooks account is still found", () => {
+  // The whole point of matching on the id.
+  const renamed = BS_LINES.map(l => l.account_id === "35" ? { ...l, label: "Business Checking 4471" } : l);
+  assert.strictEqual(R.pickByMapping(renamed, MAP, "1010").cents, 48210055);
+});
+
+check("an unmapped account says so rather than reporting zero", () => {
+  const f = R.pickByMapping(BS_LINES, {}, "1010");
+  assert.strictEqual(f.cents, null);
+  assert.strictEqual(f.reason, "not_mapped");
+});
+
+check("a mapped account missing from the report says so rather than reporting zero", () => {
+  const f = R.pickByMapping(BS_LINES, { "1010": "999" }, "1010");
+  assert.strictEqual(f.cents, null);
+  assert.strictEqual(f.reason, "not_on_report");
+});
+
+check("a line with no amount is not read as zero", () => {
+  const f = R.pickByMapping([{ label: "Checking", amount_cents: null, account_id: "35" }], MAP, "1010");
+  assert.strictEqual(f.cents, null);
+  assert.strictEqual(f.reason, "no_amount");
+});
+
+// ── and the tiles that render them ─────────────────────────
+
+check("a found figure is shown", () => {
+  const html = mappedTile("Operating cash", { cents: 48210055, label: "Checking - Operating" }, "#0061FF");
+  assert.ok(html.includes("$482,100.55"));
+  assert.ok(html.includes("Checking - Operating"), "naming the QuickBooks account makes the figure checkable");
+});
+
+check("a genuine zero balance is shown as a figure", () => {
+  const html = mappedTile("Operating cash", { cents: 0, label: "Checking" }, "#0061FF");
+  assert.ok(hasMoney(html), "QuickBooks reporting zero is a fact about the account");
+});
+
+check("every missing reason renders a dash and names the problem", () => {
+  for (const reason of Object.keys(MISSING)) {
+    const html = mappedTile("Operating cash", { cents: null, reason }, "#0061FF");
+    assert.ok(!hasMoney(html), `${reason} rendered a dollar amount`);
+    assert.ok(html.includes("—"), `${reason} did not render a dash`);
+    assert.ok(html.includes(MISSING[reason].short), `${reason} did not say what is wrong`);
+  }
+});
+
+check("an unrecognised reason still refuses to print a figure", () => {
+  for (const figure of [null, undefined, {}, { cents: null, reason: "something_new" }]) {
+    const html = mappedTile("Operating cash", figure, "#0061FF");
+    assert.ok(!hasMoney(html), `${JSON.stringify(figure)} rendered a dollar amount`);
+  }
+});
+
+check("a missing mapping tells the reader where to fix it", () => {
+  assert.ok(MISSING.not_mapped.help.includes("/admin/accounting/quickbooks"));
+});
+
+check("the dashboard panel renders all three", () => {
+  const src = fs.readFileSync(path.join(ROOT, "qbo-panel.js"), "utf8");
+  for (const t of ["Operating cash", "IOLTA trust (bank)", "Accounts receivable"]) {
+    assert.ok(src.includes(t), `the dashboard panel has no ${t} tile`);
+  }
+  assert.ok(/reports\.keyFigures/.test(src));
+});
+
+// ── The local strip is labelled for what it is ─────────────
+// It is not wrong — it measures entries keyed into this app, and there are
+// none. It was labelled "Operating Cash" and "YTD Revenue" in the firm's
+// headline position, which is what made six zeros read as the firm's year.
+
+check("the local ledger tiles say they are not the firm's position", () => {
+  const ui = fs.readFileSync(path.join(ROOT, "accounting-ui.js"), "utf8");
+  assert.ok(/Recorded here in tezlaw-bot/.test(ui), "the strip needs a heading of its own");
+  assert.ok(/not the firm's position/.test(ui));
+  assert.ok(/nothing has been entered in this app, not that the account is empty/.test(ui),
+    "a zero here has to be explained, or it will be read as a balance again");
+});
+
+check("the local tiles no longer outrank the QuickBooks figures", () => {
+  const ui = fs.readFileSync(path.join(ROOT, "accounting-ui.js"), "utf8");
+  const strip = ui.slice(ui.indexOf("Recorded here in tezlaw-bot"), ui.indexOf("Quick Entry (Any Practice Area)"));
+  assert.ok(strip.length > 200, "the strip moved; this check needs updating");
+  assert.ok(!/font-size:22px; font-weight:700/.test(strip),
+    "these are secondary figures and should not be set in the headline size");
 });
 
 console.log(`\n${passed} checks passed\n`);

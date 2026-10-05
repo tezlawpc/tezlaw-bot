@@ -299,12 +299,66 @@ async function trialBalance({ start_date = thisYearStart(), end_date = today(), 
   return await getReport("TrialBalance", { start_date, end_date, ...rest }, opts);
 }
 
+// ─── The dashboard's own tiles ───────────────────────────
+//
+// The accounting dashboard has six tiles above everything else — Operating
+// Cash, IOLTA Trust, YTD Revenue, YTD Expenses, YTD Net Income, Open Invoices
+// — and every one of them read tezlaw-bot's journal tables, which fill only
+// when somebody hand-keys an entry. Nobody does. So the first thing anyone saw
+// on opening the firm's accounts was six zeros, while the real books sat in
+// QuickBooks showing a seven-figure year.
+//
+// Three of those figures are not on the profit-and-loss panel and have to be
+// looked up by account: the two bank balances and receivables. They are picked
+// out of the balance sheet BY QUICKBOOKS ACCOUNT ID, taken from the account
+// mapping staff already set up — never by matching the account's name, which
+// is the firm's own wording and changes without warning.
+
+/**
+ * Finds one of our chart-of-accounts numbers on the QuickBooks balance sheet.
+ *
+ * Returns a reason rather than a figure when it cannot be found, so the tile
+ * can say which of the two things went wrong — nobody has mapped the account,
+ * or QuickBooks did not report it — instead of printing $0.00 and letting the
+ * reader take it for the balance.
+ */
+function pickByMapping(lines, mappings, ourNumber) {
+  const qbId = mappings && mappings[String(ourNumber)];
+  if (!qbId) return { cents: null, reason: "not_mapped" };
+  const line = (lines || []).find(l => l.account_id != null && String(l.account_id) === String(qbId));
+  if (!line) return { cents: null, reason: "not_on_report" };
+  if (line.amount_cents == null) return { cents: null, reason: "no_amount", label: line.label };
+  return { cents: line.amount_cents, reason: null, label: line.label };
+}
+
+async function keyFigures({ company_id = null, force = false } = {}) {
+  const qbo = require("./qbo-sync");
+  const bs = await balanceSheet({}, { company_id, force });
+
+  let mappings = {};
+  try { mappings = await qbo.getAccountMappings(company_id); } catch (e) {
+    console.warn("[qbo-reports] account mappings unavailable:", e.message);
+  }
+
+  return {
+    as_of: (bs.header && bs.header.end_period) || null,
+    operating: pickByMapping(bs.lines, mappings, "1010"),
+    trust: pickByMapping(bs.lines, mappings, "1020"),
+    receivable: pickByMapping(bs.lines, mappings, "1100"),
+    from_cache: !!bs.from_cache,
+    fetched_at: bs.fetched_at || null,
+    error: bs.error || null,
+  };
+}
+
 module.exports = {
   initTables,
   getReport,
   profitAndLoss,
   balanceSheet,
   trialBalance,
+  keyFigures,
+  pickByMapping,
   // Pure, so the checks exercise the real parser against real report shapes
   // without a realm, a token or a network.
   flattenReport,

@@ -182,11 +182,27 @@ async function renderDashboard(query = {}) {
     ${qboCard}
     ${trustBanner}
 
-    <!-- Money stat tiles -->
+    <!-- Recorded in this app -->
+    <!--
+      These six figures read tezlaw-bot's own journal tables, which fill only
+      when somebody keys an entry in here. Nobody does, because the firm's
+      books are in QuickBooks — so for months this strip showed six zeros at
+      the top of the firm's accounts while the real books showed a seven-figure
+      year. They are correct for what they measure; they were labelled as
+      though they measured the firm's position.
+
+      The QuickBooks panel above carries the firm's actual figures. This strip
+      is the entry queue, and it says so.
+    -->
+    <h2 style="margin:22px 0 4px 0; font-size:16px; color:#2B2523;">Recorded here in tezlaw-bot</h2>
+    <div style="font-size:11px; color:#5E5854; margin-bottom:10px; line-height:1.6;">
+      Entries keyed into this app, which are what get pushed into QuickBooks. <strong>These are not the firm's position</strong> — the QuickBooks figures above are.
+      A zero here means nothing has been entered in this app, not that the account is empty.
+    </div>
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:20px;">
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
         <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">Operating Cash</div>
-        <div style="font-size:22px; font-weight:700; color:#2B2523; margin-top:4px;">${fmt$(stats.operating_balance)}</div>
+        <div style="font-size:17px; font-weight:600; color:#5E5854; margin-top:4px;">${fmt$(stats.operating_balance)}</div>
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
         <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">IOLTA Trust</div>
@@ -196,24 +212,24 @@ async function renderDashboard(query = {}) {
         ${stats.trust_balance === null
           ? `<div style="font-size:15px; font-weight:600; color:#5E5854; margin-top:8px;">Not applicable</div>
              <div style="font-size:11px; color:#5E5854;">Client trust is on the law firm's books only</div>`
-          : `<div style="font-size:22px; font-weight:700; color:${trustColor(trust)}; margin-top:4px;">${fmt$(stats.trust_balance)}</div>
+          : `<div style="font-size:17px; font-weight:600; color:${trustColor(trust)}; margin-top:4px;">${fmt$(stats.trust_balance)}</div>
              <div style="font-size:11px; color:${trustColor(trust)}; margin-top:2px;">${trustCaption(trust)}</div>`}
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
         <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">YTD Revenue</div>
-        <div style="font-size:22px; font-weight:700; color:#2F6B3F; margin-top:4px;">${fmt$(stats.ytd_revenue)}</div>
+        <div style="font-size:17px; font-weight:600; color:#5E5854; margin-top:4px;">${fmt$(stats.ytd_revenue)}</div>
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
         <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">YTD Expenses</div>
-        <div style="font-size:22px; font-weight:700; color:#2B2523; margin-top:4px;">${fmt$(stats.ytd_expense)}</div>
+        <div style="font-size:17px; font-weight:600; color:#5E5854; margin-top:4px;">${fmt$(stats.ytd_expense)}</div>
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
         <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">YTD Net Income</div>
-        <div style="font-size:22px; font-weight:700; color:${stats.ytd_net_income >= 0 ? "#2F6B3F" : "#9C2B1E"}; margin-top:4px;">${fmt$(stats.ytd_net_income)}</div>
+        <div style="font-size:17px; font-weight:600; color:${stats.ytd_net_income >= 0 ? "#2F6B3F" : "#9C2B1E"}; margin-top:4px;">${fmt$(stats.ytd_net_income)}</div>
       </div>
       <div style="background:white; padding:16px; border-radius:8px; border:1px solid #E8E3DC;">
         <div style="font-size:11px; color:#5E5854; text-transform:uppercase; letter-spacing:0.05em;">Open Invoices</div>
-        <div style="font-size:22px; font-weight:700; color:#2B2523; margin-top:4px;">${stats.open_invoices_count}</div>
+        <div style="font-size:17px; font-weight:600; color:#2B2523; margin-top:4px;">${stats.open_invoices_count}</div>
         <div style="font-size:11px; color:#5E5854; margin-top:2px;">${fmt$(stats.open_invoices_balance)} outstanding</div>
       </div>
     </div>
