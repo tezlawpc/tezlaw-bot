@@ -57,6 +57,7 @@ const CLIENT_BUNDLES = [
   "consultant-clients.js",
   "offline-notes.js",
   "calendar-feeds.js",
+  "accounting-client.js",
 ];
 
 const healed = new Set();

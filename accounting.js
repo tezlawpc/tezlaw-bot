@@ -724,7 +724,7 @@ async function syncFromPI() {
 
   // 1. PI Disbursements — full settlement waterfall
   const disbursements = await db.query(`
-    SELECT d.*, c.client_name, c.client_key, c.matter_type
+    SELECT d.*, c.client_name, c.client_key
     FROM pi_disbursements d
     JOIN pi_cases c ON c.id = d.case_id
     WHERE d.finalized = TRUE
@@ -1276,12 +1276,89 @@ async function getStats(company_id = null) {
   };
 }
 
+/**
+ * How much there is to export, and where the real numbers live.
+ *
+ * The three export buttons read this app's own journal, which fills only when
+ * somebody keys an entry in. Nobody does — the firm's books are in QuickBooks
+ * — so all three handed back a file with headers and no rows. An accountant
+ * opening a workbook of zeros reads it as the firm's year, not as an empty
+ * table, which is the same failure the dashboard had.
+ *
+ * So a route can now ask before it serves a download.
+ */
+async function exportCounts({ from_date = null, to_date = null, company_id = null } = {}) {
+  await initTables();
+  const cid = await companyIdOf(company_id);
+  let entries = 0;
+  try {
+    const r = await db.query(
+      `SELECT COUNT(*)::int AS n FROM accounting_journal_entries
+        WHERE company_id = $1 AND is_posted
+          AND ($2::date IS NULL OR entry_date >= $2::date)
+          AND ($3::date IS NULL OR entry_date <= $3::date)`,
+      [cid, from_date, to_date]);
+    entries = r.rows[0] ? Number(r.rows[0].n) || 0 : 0;
+  } catch (e) {
+    // Counting failed, so emptiness is not established. Serve the export.
+    console.warn("[accounting] export count failed:", e.message);
+    return { company_id: cid, entries: null, quickbooks: await quickbooksSource() };
+  }
+  return { company_id: cid, entries, quickbooks: await quickbooksSource() };
+}
+
+/** Whether QuickBooks can supply the real figures, and from which company. */
+async function quickbooksSource() {
+  try {
+    const qbo = require("./qbo-sync");
+    const st = await qbo.getSyncStatus();
+    if (!st || !st.connected) return { available: false, why: "QuickBooks is not connected" };
+    const env = st.environment || process.env.QBO_ENVIRONMENT || "sandbox";
+    if (env !== "production") {
+      return { available: false, why: "this connection points at the QuickBooks sandbox, not the firm's books" };
+    }
+    return {
+      available: true,
+      company: st.company_name || st.companyName || null,
+      realm: st.realm_id || st.realmId || null,
+    };
+  } catch (e) {
+    return { available: false, why: e.message };
+  }
+}
+
 // ─── Export: Excel ──────────────────────────────────────
 // Uses xlsx package (already in the project for hearing note exhibit parsing)
 
 async function exportToExcel({ from_date, to_date, filters = {} } = {}) {
   const XLSX = require("xlsx");
   const wb = XLSX.utils.book_new();
+
+  // Sheet 0: where each of the following sheets gets its numbers.
+  //
+  // Sheets 1-5 come from this app's own journal. Sheets 6-7 come from
+  // QuickBooks. Those are two different sets of books, and a workbook that
+  // did not say which was which would be read as one — so this sheet goes
+  // first and names the source of every other one.
+  const qbSrc = await quickbooksSource();
+  const counts = await exportCounts({ from_date, to_date });
+  const sourceRows = [
+    { Item: "Exported", Detail: new Date().toISOString() },
+    { Item: "Period", Detail: `${from_date || "all"} to ${to_date || "all"}` },
+    { Item: "", Detail: "" },
+    { Item: "Sheets 1-5 — from tezlaw-bot's own ledger", Detail: `${counts.entries == null ? "unknown" : counts.entries} posted journal entr${counts.entries === 1 ? "y" : "ies"} in this period` },
+    { Item: "", Detail: counts.entries === 0
+        ? "There are none. These sheets are empty because nothing has been keyed into this app, NOT because the firm had no activity."
+        : "Entries keyed into this app, which are what get pushed to QuickBooks." },
+    { Item: "", Detail: "" },
+    { Item: "Sheets 6-7 — from QuickBooks", Detail: qbSrc.available
+        ? `${qbSrc.company || "connected company"}${qbSrc.realm ? " (realm " + qbSrc.realm + ")" : ""}`
+        : "NOT INCLUDED — " + (qbSrc.why || "unavailable") },
+    { Item: "", Detail: qbSrc.available
+        ? "The firm's books as QuickBooks reports them. These are the figures to rely on."
+        : "" },
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sourceRows), "Source");
 
   // Sheet 1: General Ledger
   const ledger = await getLedger({ from_date, to_date, ...filters, limit: 10000 });
@@ -1363,6 +1440,38 @@ async function exportToExcel({ from_date, to_date, filters = {} } = {}) {
     Balance: await getAccountBalance(a.id, to_date),
   })));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(acctRows), "Chart of Accounts");
+
+  // Sheets 6-7: QuickBooks' own profit and loss and balance sheet.
+  //
+  // Without these the workbook is a report on an empty table. The firm's
+  // actual numbers are in QuickBooks, so an export that leaves them out is
+  // not an export of the firm's accounts.
+  //
+  // Caught on its own: a QuickBooks outage must still produce the workbook,
+  // with the Source sheet saying why those two are missing.
+  if (qbSrc.available) {
+    try {
+      const reports = require("./qbo-reports");
+      const [pl, bs] = await Promise.all([
+        reports.profitAndLoss({ start_date: from_date || undefined, end_date: to_date || undefined }, {}),
+        reports.balanceSheet({ as_of: to_date || undefined }, {}),
+      ]);
+      const sheetOf = (r) => (r.lines || []).map(l => ({
+        Account: "  ".repeat(Math.max(0, l.depth || 0)) + (l.label || ""),
+        Amount: l.amount_cents == null ? "" : l.amount_cents / 100,
+        Type: l.kind || "",
+        Group: l.group || "",
+        "QuickBooks account id": l.account_id || "",
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetOf(pl)), "QB Profit and Loss");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetOf(bs)), "QB Balance Sheet");
+    } catch (e) {
+      console.warn("[accounting] QuickBooks sheets omitted:", e.message);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
+        { Item: "QuickBooks reports could not be read", Detail: e.message },
+      ]), "QB (unavailable)");
+    }
+  }
 
   return XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 }
@@ -1486,4 +1595,5 @@ module.exports = {
   getLedger, getClientTrustLedger, getStats,
   // Exports
   exportToExcel, exportToIIF, exportToCSV,
+  exportCounts, quickbooksSource,
 };

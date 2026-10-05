@@ -222,6 +222,18 @@ jobs:
       - name: Trust: both figures
         run: node scripts/check-trust-both-figures.js
 
+      # Record Fee and Record Retainer slugified a typed name into the client
+      # key the entry — and a retainers trust ledger — was filed under. And
+      # Sync from PI selected a pi_cases column that does not exist.
+      - name: Accounting entries: client and columns
+        run: node scripts/check-accounting-entry.js
+
+      # All three export buttons read this apps own journal, which is empty,
+      # so each handed back a file with headers and no rows. A workbook of
+      # zeros is what goes to an accountant.
+      - name: Accounting exports
+        run: node scripts/check-accounting-export.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never

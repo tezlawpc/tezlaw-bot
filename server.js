@@ -4573,6 +4573,39 @@ app.get("/admin/accounting/new-entry", async (req, res) => {
 
 // ── Quick-entry forms for all practice areas ────────────
 
+/**
+ * Which client an accounting entry is filed under.
+ *
+ * The form used to send only a typed name, and the server slugified it into a
+ * client key. So "Chen Wei", "Wei Chen" and "chen wei" became three different
+ * clients, none of them necessarily the real one — and for a retainer, that
+ * key is the client's trust ledger. A trust ledger under a key matching no
+ * client is not a client ledger, which is the thing RRC 1.15 requires one of.
+ *
+ * The picker now sends the real key. It is still verified here: a client_key
+ * arriving over the wire is input, not fact, and this one decides whose trust
+ * ledger money lands in. An unrecognised key is discarded rather than
+ * honoured, and we fall back to the old slug — the same behaviour as before
+ * the picker, which is correct for a client who genuinely is not in the
+ * system yet.
+ */
+async function clientKeyFor(body) {
+  const typed = String((body && body.client_name) || "").trim();
+  const slug = typed.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const picked = String((body && body.client_key) || "").trim();
+  if (!picked) return { client_key: slug, matched: false };
+  try {
+    const cp = require("./client-profiles");
+    const all = await cp.aggregateClients();
+    const hit = all.find(c => c.key === picked);
+    if (hit) return { client_key: hit.key, client_name: hit.client_name || typed, matched: true };
+    console.warn("[accounting] client_key not recognised, falling back to the typed name:", picked);
+  } catch (e) {
+    console.warn("[accounting] could not verify client_key:", e.message);
+  }
+  return { client_key: slug, matched: false };
+}
+
 app.get("/admin/accounting/record-fee", async (req, res) => {
   try {
     const hearingNotes = require("./hearing-notes");
@@ -4586,7 +4619,7 @@ app.get("/admin/accounting/record-fee", async (req, res) => {
       </div>
       <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #E8E3DC; max-width:640px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Client Name (required)</label><input type="text" name="client_name" required placeholder="e.g. Chen Wei" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div style="grid-column:1/-1; position:relative;" data-client-pick><label style="font-size:11px; color:#5E5854;">Client (required)</label><input type="text" name="client_name" required placeholder="Start typing a client name or A-number" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"><input type="hidden" name="client_key" value=""><div data-client-menu hidden style="position:absolute; z-index:40; left:0; right:0; background:white; border:1px solid #CFC8BE; border-radius:4px; box-shadow:0 6px 18px rgba(0,0,0,.12); max-height:240px; overflow:auto;"></div><div data-client-note style="font-size:11px; margin-top:4px; min-height:15px;"></div></div>
           <div><label style="font-size:11px; color:#5E5854;">Matter Type</label>
             <select name="matter_type" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="immigration">Immigration</option>
@@ -4635,7 +4668,8 @@ app.get("/admin/accounting/record-fee", async (req, res) => {
             else alert("Error: " + d.error);
           } catch (e) { alert("Error: " + e.message); }
         }
-      </script>`;
+      </script>
+      ${require("./client-script").clientScriptTag("accounting-client.js")}`;
     res.send(hearingNotes.renderAdminChrome({ title: "Record Fee", body, activeItem: "accounting" }));
   } catch (err) { res.status(500).send("Error: " + err.message); }
 });
@@ -4643,12 +4677,13 @@ app.get("/admin/accounting/record-fee", async (req, res) => {
 app.post("/admin/accounting/record-fee", async (req, res) => {
   try {
     const accounting = require("./accounting");
+    const who = await clientKeyFor(req.body);
     const result = await accounting.recordFeeRevenue({
       date: req.body.date,
       amount: Number(req.body.amount),
       matter_type: req.body.matter_type,
-      client_name: req.body.client_name,
-      client_key: (req.body.client_name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+      client_name: who.client_name || req.body.client_name,
+      client_key: who.client_key,
       from_trust: !!req.body.from_trust,
       description: req.body.description || null,
       reference: req.body.reference || null,
@@ -4674,7 +4709,7 @@ app.get("/admin/accounting/record-retainer", async (req, res) => {
       </div>
       <form onsubmit="submitForm(event)" style="background:white; padding:24px; border-radius:8px; border:1px solid #E8E3DC; max-width:640px;">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-          <div style="grid-column:1/-1;"><label style="font-size:11px; color:#5E5854;">Client Name (required)</label><input type="text" name="client_name" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"></div>
+          <div style="grid-column:1/-1; position:relative;" data-client-pick><label style="font-size:11px; color:#5E5854;">Client (required)</label><input type="text" name="client_name" required placeholder="Start typing a client name or A-number" style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;"><input type="hidden" name="client_key" value=""><div data-client-menu hidden style="position:absolute; z-index:40; left:0; right:0; background:white; border:1px solid #CFC8BE; border-radius:4px; box-shadow:0 6px 18px rgba(0,0,0,.12); max-height:240px; overflow:auto;"></div><div data-client-note style="font-size:11px; margin-top:4px; min-height:15px;"></div></div>
           <div><label style="font-size:11px; color:#5E5854;">Matter Type</label>
             <select name="matter_type" required style="width:100%; padding:8px; border:1px solid #CFC8BE; border-radius:4px; box-sizing:border-box;">
               <option value="immigration">Immigration</option>
@@ -4708,7 +4743,8 @@ app.get("/admin/accounting/record-retainer", async (req, res) => {
             else alert("Error: " + d.error);
           } catch (e) { alert("Error: " + e.message); }
         }
-      </script>`;
+      </script>
+      ${require("./client-script").clientScriptTag("accounting-client.js")}`;
     res.send(hearingNotes.renderAdminChrome({ title: "Record Retainer", body, activeItem: "accounting" }));
   } catch (err) { res.status(500).send("Error: " + err.message); }
 });
@@ -4716,11 +4752,12 @@ app.get("/admin/accounting/record-retainer", async (req, res) => {
 app.post("/admin/accounting/record-retainer", async (req, res) => {
   try {
     const accounting = require("./accounting");
+    const who = await clientKeyFor(req.body);
     const result = await accounting.recordTrustDeposit({
       date: req.body.date,
       amount: Number(req.body.amount),
-      client_name: req.body.client_name,
-      client_key: (req.body.client_name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+      client_name: who.client_name || req.body.client_name,
+      client_key: who.client_key,
       matter_type: req.body.matter_type,
       description: req.body.description || null,
       reference: req.body.reference || null,
@@ -4889,6 +4926,34 @@ app.post("/admin/accounting/entry", async (req, res) => {
 });
 
 // Exports
+/**
+ * The .iif and .csv exports exist to carry entries keyed into this app INTO
+ * QuickBooks. When there are none, an empty file is not a useful answer: it
+ * imports nothing, and it reads as a report of zero. So the route says what
+ * happened and where the firm's numbers actually are.
+ *
+ * The Excel export is different and still served — it carries QuickBooks'
+ * own profit and loss and balance sheet, which is what an accountant asking
+ * for "the accounts" wants.
+ */
+function nothingToExportPage(what, counts) {
+  const qb = counts.quickbooks || {};
+  return `<!doctype html><meta charset="utf-8">
+    <div style="font-family:system-ui,-apple-system,sans-serif; max-width:620px; margin:60px auto; padding:0 20px; line-height:1.6; color:#2B2523;">
+      <h1 style="font-size:20px;">Nothing to export as ${what}</h1>
+      <p>This export carries journal entries keyed into tezlaw-bot into QuickBooks.
+      There are <strong>no posted entries</strong> in this app for that period, so the file
+      would import nothing.</p>
+      <p>${qb.available
+        ? `The firm's books are in QuickBooks${qb.company ? " (" + String(qb.company).replace(/[<>&]/g, "") + ")" : ""}, and that is already the system of record — there is nothing to push into it.`
+        : "QuickBooks is not currently readable from here either: " + String(qb.why || "").replace(/[<>&]/g, "") + "."}</p>
+      <p>For a workbook of the firm's actual figures, use
+      <a href="/admin/accounting/export/excel" style="color:#A34C00;">the Excel export</a> —
+      it includes QuickBooks' own profit and loss and balance sheet.</p>
+      <p><a href="/admin/accounting" style="color:#A34C00;">← Accounting</a></p>
+    </div>`;
+}
+
 app.get("/admin/accounting/export/excel", async (req, res) => {
   try {
     const accounting = require("./accounting");
@@ -4909,6 +4974,14 @@ app.get("/admin/accounting/export/excel", async (req, res) => {
 app.get("/admin/accounting/export/iif", async (req, res) => {
   try {
     const accounting = require("./accounting");
+    const counts = await accounting.exportCounts({
+      from_date: req.query.from || null,
+      to_date: req.query.to || null,
+    });
+    if (counts.entries === 0) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.send(nothingToExportPage("a QuickBooks Desktop .iif file", counts));
+    }
     const iif = await accounting.exportToIIF({
       from_date: req.query.from || null,
       to_date: req.query.to || null,
@@ -4926,6 +4999,14 @@ app.get("/admin/accounting/export/iif", async (req, res) => {
 app.get("/admin/accounting/export/csv", async (req, res) => {
   try {
     const accounting = require("./accounting");
+    const counts = await accounting.exportCounts({
+      from_date: req.query.from || null,
+      to_date: req.query.to || null,
+    });
+    if (counts.entries === 0) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.send(nothingToExportPage("a QuickBooks Online .csv file", counts));
+    }
     const csv = await accounting.exportToCSV({
       from_date: req.query.from || null,
       to_date: req.query.to || null,
