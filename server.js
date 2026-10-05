@@ -4068,10 +4068,80 @@ app.get("/admin/accounting/quickbooks", async (req, res) => {
         }
       </script>`;
 
-    res.send(hearingNotes.renderAdminChrome({ title: "QuickBooks Sync", body, activeItem: "accounting-qbo" }));
+    // "Connected" without saying connected to WHAT is how this hid. The
+    // environment is written onto the connection once, at connect time
+    // (qbo-sync exchangeCodeForTokens), and apiBase prefers that stored value
+    // over the variable. So a realm linked before QBO_ENVIRONMENT was set to
+    // production keeps calling Intuit's sandbox for ever, authenticates
+    // perfectly, and reports zeros that look like facts about the firm.
+    const envNow = process.env.QBO_ENVIRONMENT || "sandbox";
+    const envUsed = status.environment || envNow;
+    const qbName = companyInfo && (companyInfo.CompanyName || companyInfo.LegalName || companyInfo.Name);
+    let envBanner = "";
+    if (status.connected && envUsed !== "production") {
+      envBanner = `<div style="background:#ffebee; border-left:4px solid #c62828; padding:14px 18px; border-radius:4px; margin-bottom:16px; font-size:13px; line-height:1.6;">
+        <b style="color:#c62828;">Connected to the QuickBooks SANDBOX, not your books.</b><br>
+        This connection was made while the environment was <code>${esc(envUsed)}</code>, and that is stored on the
+        connection itself — changing QBO_ENVIRONMENT does not move an existing one. Every figure drawn from it is
+        meaningless. Disconnect and connect again to re-point it${envNow === "production" ? " (the variable is already correct)" : ", after setting QBO_ENVIRONMENT=production"}.
+      </div>`;
+    } else if (status.connected && envUsed !== envNow) {
+      envBanner = `<div style="background:#fff8e1; border-left:4px solid #f57f17; padding:14px 18px; border-radius:4px; margin-bottom:16px; font-size:13px;">
+        <b>This connection says <code>${esc(envUsed)}</code> but QBO_ENVIRONMENT now says <code>${esc(envNow)}</code>.</b>
+        The stored value is the one in use. Reconnect to adopt the new one.
+      </div>`;
+    } else if (status.connected) {
+      envBanner = `<div style="background:#e8f5e9; border-left:4px solid #2e7d32; padding:12px 18px; border-radius:4px; margin-bottom:16px; font-size:13px;">
+        Connected to <b>${esc(qbName || "QuickBooks")}</b> &middot; realm <code>${esc(status.realm_id || "?")}</code> &middot; <b>production</b>
+      </div>`;
+    }
+
+    res.send(hearingNotes.renderAdminChrome({ title: "QuickBooks Sync", body: envBanner + body, activeItem: "accounting-qbo" }));
   } catch (err) {
     console.error("[qbo status]:", err.message);
     res.status(500).send("Error: " + err.message);
+  }
+});
+
+// Read-only: ask QuickBooks for one of its own reports and show what came
+// back, parsed and raw. Written for the moment a report first has to be
+// rendered here: the parser has to match the shape of a real realm's reply
+// rather than an assumption about it, and this is how that gets checked
+// without a developer holding the firm's tokens.
+//
+// Admin only, and GET only — it issues no writes to QuickBooks.
+app.get("/admin/accounting/quickbooks/report", auth.requireRole("admin"), async (req, res) => {
+  try {
+    const reports = require("./qbo-reports");
+    const name = String(req.query.name || "ProfitAndLoss");
+    if (!/^[A-Za-z]+$/.test(name)) {
+      return res.status(400).json({ ok: false, error: "Report name must be letters only, e.g. ProfitAndLoss" });
+    }
+    const params = {};
+    for (const k of ["start_date", "end_date", "date_macro", "accounting_method", "summarize_column_by"]) {
+      if (req.query[k]) params[k] = String(req.query[k]);
+    }
+    const out = await reports.getReport(name, params, {
+      company_id: qboCompany(req),
+      force: req.query.force === "1",
+    });
+    res.json({
+      ok: true,
+      report: name,
+      params,
+      header: out.header,
+      groups: out.groups,
+      line_count: out.lines.length,
+      unparsed: out.unparsed,
+      parse_error: out.parse_error,
+      from_cache: out.from_cache,
+      fetched_at: out.fetched_at,
+      lines: out.lines,
+      raw: req.query.raw === "1" ? out.raw : undefined,
+    });
+  } catch (err) {
+    console.error("[qbo report]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

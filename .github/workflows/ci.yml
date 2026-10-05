@@ -143,6 +143,13 @@ jobs:
       - name: Trust ledger
         run: node scripts/check-trust-ledger.js
 
+      # The firm's books live in QuickBooks, and these pages show its own
+      # reports rather than a ledger rebuilt here. That makes the report
+      # parser load-bearing: a cent lost to floating point on every line, or
+      # a total read from the wrong column, both foot to something plausible.
+      - name: QuickBooks reports
+        run: node scripts/check-qbo-reports.js
+
       # ── The real server against a real database ──────────────────────
       # Every check above stubs Postgres. That is how "column t.completed
       # does not exist" reached a consultant's screen: the query had never
