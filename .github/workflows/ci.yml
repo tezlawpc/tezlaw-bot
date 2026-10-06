@@ -118,6 +118,19 @@ jobs:
       - name: Lead sources
         run: node scripts/check-lead-sources.js
 
+      - name: Ops group rules
+        run: node scripts/check-ops-chat.js
+
+      # A notice in the wrong topic is a notice somebody did not read. The
+      # court sorter, and its fallback while a topic does not exist yet.
+      - name: Court topics
+        run: node scripts/check-court-topics.js
+
+      # An answer in the ops group is read by everyone in it. Who is answered,
+      # what she may look up there, and what never leaves.
+      - name: Ask Zara in the ops group
+        run: node scripts/check-ask-zara.js
+
       # A document uploaded for signature: the fields a signer fills must land
       # where staff placed them, on rotated and cropped pages too, and nobody
       # outside the client's team may open the packet.
@@ -231,13 +244,13 @@ jobs:
       # Client trust is recorded in two tables that have never been joined.
       # Both figures are shown side by side; merging them means deciding which
       # rows are the same transaction twice, which is an attorney judgement.
-      - name: Trust: both figures
+      - name: "Trust: both figures"
         run: node scripts/check-trust-both-figures.js
 
       # Record Fee and Record Retainer slugified a typed name into the client
       # key the entry — and a retainers trust ledger — was filed under. And
       # Sync from PI selected a pi_cases column that does not exist.
-      - name: Accounting entries: client and columns
+      - name: "Accounting entries: client and columns"
         run: node scripts/check-accounting-entry.js
 
       # All three export buttons read this apps own journal, which is empty,

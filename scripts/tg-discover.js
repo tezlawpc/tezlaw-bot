@@ -87,11 +87,9 @@ if (!token) {
     for (const v of seen.values()) {
       if (v.chat_id === group.chat_id && v.thread_id) {
         const guess = (v.topic_name || "").toLowerCase();
-        const name = guess.includes("court")  ? "TG_TOPIC_COURT"
-                   : guess.includes("social") ? "TG_TOPIC_SOCIAL"
-                   : guess.includes("lead")   ? "TG_TOPIC_LEADS"
-                   : guess.includes("ops")    ? "TG_TOPIC_OPS"
-                   : "TG_TOPIC_?";
+        // tg-route.js knows which setting a topic's name belongs to,
+        // the four court divisions included.
+        const name = require("../tg-route").envForTopicName(guess) || "TG_TOPIC_?";
         console.log(`  ${name}=${v.thread_id}` +
                     (name.endsWith("?") ? `   # topic "${v.topic_name || "unnamed"}"` : ""));
       }

@@ -19,7 +19,8 @@ function withEnv(vars, fn) {
   const saved = {};
   const keys = ["TG_OPS_CHAT_ID", "TG_TOPIC_COURT", "TG_TOPIC_SOCIAL",
                 "TG_TOPIC_LEADS", "TG_TOPIC_OPS", "JJ_TELEGRAM_ID",
-                "RECIPIENT_JJ_TELEGRAM_ID"];
+                "RECIPIENT_JJ_TELEGRAM_ID", "TG_TOPIC_STATE", "TG_TOPIC_EOIR",
+                "TG_TOPIC_FEDERAL", "TG_TOPIC_USPTO"];
   for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; }
   Object.assign(process.env, vars);
   try { fn(); }
@@ -94,15 +95,15 @@ check("whitespace in a pasted env var does not break routing", () => {
   });
 });
 
-check("all four topics are declared", () => {
+check("the four topics and the four court divisions are declared", () => {
   assert.deepStrictEqual(Object.keys(route.TOPICS).sort(),
-                         ["court", "leads", "ops", "social"]);
+                         ["court", "eoir", "federal", "leads", "ops", "social", "state", "uspto"]);
 });
 
 check("describeRouting covers every topic", () => {
   withEnv({ JJ_TELEGRAM_ID: "555" }, () => {
     const rows = route.describeRouting();
-    assert.strictEqual(rows.length, 4);
+    assert.strictEqual(rows.length, 8);
     assert.ok(rows.every(r => r.via === "dm"));
   });
 });

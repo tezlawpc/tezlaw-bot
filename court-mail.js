@@ -1135,10 +1135,17 @@ async function forwardToDocket(row, reading) {
   }
 }
 
-async function tellJJ(text) {
-  // Court & deadlines topic, falling back to the direct message when no
-  // group is configured. See tg-route.js.
-  return require("./tg-route").send("court", text);
+async function tellJJ(text, hint) {
+  // The topic for the court this came from (State court, EOIR, Federal court,
+  // USPTO), or Court & deadlines when the email names none. Falls back to the
+  // direct message when no group is configured. See tg-route.js.
+  const tgr = require("./tg-route");
+  return tgr.send(hint ? tgr.courtTopic(hint) : "court", text);
+}
+// What a reading says about where the email came from.
+function courtHint(reading) {
+  const r = reading || {};
+  return { agency: r.agency, court: r.court, title: r.title };
 }
 
 function listUrl() {
@@ -1229,7 +1236,8 @@ async function processMail(id, { target = null, think = null, by = null, notify 
         );
         if (notify) {
           await tellJJ(`📨 Court email needs you: ${mail.subject || "(no subject)"}\n` +
-                       `Zara could not read it automatically.\n${why}\nOpen it: ${pageUrl(row.id)}`);
+                       `Zara could not read it automatically.\n${why}\nOpen it: ${pageUrl(row.id)}`,
+                       { text: `${mail.subject || ""} ${mail.from || ""}` });
         }
         return (await db.query(`SELECT * FROM court_mail WHERE id = $1`, [row.id])).rows[0];
       }
@@ -1254,7 +1262,7 @@ async function processMail(id, { target = null, think = null, by = null, notify 
         [row.id, why, digested ? "digest" : "ping"]);
       // An unplaceable receipt still needs assigning eventually, but it is
       // never urgent — it goes in the digest rather than interrupting.
-      if (notify && !digested) await tellJJ(`📨 Court email needs you: ${reading.title}\n${reading.summary}\n${why}\nAssign it: ${pageUrl(row.id)}`);
+      if (notify && !digested) await tellJJ(`📨 Court email needs you: ${reading.title}\n${reading.summary}\n${why}\nAssign it: ${pageUrl(row.id)}`, courtHint(reading));
       return (await db.query(`SELECT * FROM court_mail WHERE id = $1`, [row.id])).rows[0];
     };
     // A sender the mail server could not verify might be forged: read, but
@@ -1340,7 +1348,7 @@ async function processMail(id, { target = null, think = null, by = null, notify 
         skipped.length ? `Not filed (inline attachment): ${skipped.join(", ")} — check the email if that looks like a document.` : null,
         reading.action_items.length ? "To do:\n" + reading.action_items.map(a => "• " + a).join("\n") : null,
         `Review / undo: ${pageUrl(row.id)}`,
-      ].filter(Boolean).join("\n"));
+      ].filter(Boolean).join("\n"), courtHint(reading));
 
       // Tell the consultants assigned to this client that something arrived.
       // They get the headline and a login link and nothing else — see notify.js.

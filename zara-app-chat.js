@@ -79,11 +79,12 @@ const STAFF_TOOLS = [
   },
   {
     name: "list_upcoming_hearings",
-    description: "List upcoming immigration court hearings, USCIS interviews, or other scheduled court dates in the next N days. Includes client name, court type, date/time, and location.",
+    description: "Reads the firm's court calendar for the next N days: hearings from EOIR notices, hearing notes and the synced Outlook calendars, civil court hearings, open immigration deadlines (overdue ones included), and hearings or interviews that exist only as a task. The same calendar the app's Calendar screen shows. Use it for any question about hearings, court dates, interviews, or what is on the calendar. Staff who are not an admin or manager get their own clients only.",
     input_schema: {
       type: "object",
       properties: {
-        days: { type: "number", description: "How many days ahead to look (default 30, max 365)." },
+        days: { type: "number", description: "How many days ahead to look (default 30, max 365). 'This week' is 7." },
+        client: { type: "string", description: "Optional. Part of a client name, an A-number, or a civil case name or number, for one client." },
       },
     },
   },
@@ -213,7 +214,7 @@ function roleOf(user) {
   return (user && (user.role || user.r)) || null;
 }
 
-async function executeTool(db, user, name, args, sink = null) {
+async function executeTool(db, user, name, args, sink = null, ctx = {}) {
   const isAdmin = roleOf(user) === "admin";
   const userId = user.uid;
 
@@ -282,26 +283,20 @@ async function executeTool(db, user, name, args, sink = null) {
     }
 
     if (name === "list_upcoming_hearings") {
+      // This used to read the task list alone, so a hearing that was on the
+      // calendar and not on a task did not exist for her ("no hearings this
+      // week" on a week with hearings). It reads the calendar now, through the
+      // same reader the ops group uses.
+      //
+      // Who sees what follows the app's Calendar screen: an admin or manager
+      // the whole calendar, anyone else their own clients. Their list comes
+      // from the chat route (app-api.js getVisibleClientKeys). With no list
+      // handed in, they get nothing from the calendar rather than all of it.
+      const everything = ["admin", "manager"].includes(roleOf(user));
+      const given = ctx && ctx.visibleClientKeys;
+      const visibleKeys = everything ? null : (given instanceof Set ? given : new Set());
       const days = Math.min(365, Math.max(1, parseInt(args.days, 10) || 30));
-      const r = await db.query(
-        `SELECT t.client_name, t.matter_type, t.description, t.due_date, t.assigned_to
-         FROM tasks t
-         WHERE t.due_date IS NOT NULL
-           AND t.due_date >= CURRENT_DATE
-           AND t.due_date <= CURRENT_DATE + $1::int
-           AND t.status NOT IN ('completed', 'cancelled', 'rejected', 'pending_approval')
-           AND (
-             LOWER(t.description) LIKE '%hearing%'
-             OR LOWER(t.description) LIKE '%court%'
-             OR LOWER(t.description) LIKE '%interview%'
-             OR LOWER(t.description) LIKE '%deposition%'
-             OR LOWER(t.description) LIKE '%uscis%'
-           )
-         ORDER BY t.due_date ASC
-         LIMIT 30`,
-        [days]
-      );
-      return { hearings: r.rows, days_ahead: days };
+      return await require("./court-calendar").read({ days, client: args.client }, { visibleKeys });
     }
 
     if (name === "list_my_tasks") {
@@ -638,7 +633,7 @@ async function executeTool(db, user, name, args, sink = null) {
  */
 async function chat({
   systemPrompt, surface = "staff", extra = "", context = "",
-  message, history = [], db, user, proposals = null,
+  message, history = [], db, user, proposals = null, visibleClientKeys,
 }) {
   // Only enable tools when we have both db + a staff/admin user
   const role = roleOf(user);
@@ -662,7 +657,7 @@ async function chat({
     timeout: surface === "staff" ? 150000 : 60000,
     tools: useTools ? STAFF_TOOLS : null,
     onToolUse: useTools
-      ? (name, input) => executeTool(db, user, name, input, proposals)
+      ? (name, input) => executeTool(db, user, name, input, proposals, { visibleClientKeys })
       : null,
   });
 
@@ -687,7 +682,7 @@ The user is authenticated. Do NOT collect their name, phone number, or matter ty
 You have TOOLS to look up real firm data — USE THEM whenever the user asks about anything firm-specific:
 - Counts of open cases → count_active_cases
 - Recent clients or client lookup → list_recent_clients / search_client_by_name
-- Court dates, hearings, USCIS interviews → list_upcoming_hearings
+- Court dates, hearings, USCIS interviews, what is on the calendar → list_upcoming_hearings (the court calendar itself: notices, hearing notes, synced calendars, civil hearings, immigration deadlines, hearing tasks). If its result carries a warning that part of the calendar could not be read, say so; never answer "nothing scheduled" from an incomplete read.
 - Tasks and to-do items → list_my_tasks
 - Recently uploaded client documents → list_recent_client_documents
 - Outstanding / unpaid invoices → list_outstanding_invoices
@@ -886,6 +881,7 @@ Tez Law contact: 626-678-8677 · jj@tezlawfirm.com${record}${recordRules}`;
 // to carry lives in the charter and is prepended by zara-core.
 module.exports = {
   chat,
+  executeTool,
   STAFF_TOOLS,
   STAFF_OPS,
   CLIENT_OPS,

@@ -432,8 +432,10 @@ ${transcript.slice(-1500) || "(call just started)"}
 
 ⚡ JJ — please call this clerk back ASAP.`;
 
-  await require("./tg-route").send("court", text);
-  console.log("[voice] 🚨 COURT CLERK ALERT routed to Court & deadlines");
+  const tgr = require("./tg-route");
+  const clerkTopic = tgr.courtTopic({ court: intake.courtName });
+  await tgr.send(clerkTopic, text);
+  console.log(`[voice] 🚨 COURT CLERK ALERT routed to ${tgr.TOPICS[clerkTopic].label}`);
 }
 
 // ── 👔 IMMEDIATE opposing counsel alert (JJ + Team) ──────

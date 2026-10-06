@@ -429,7 +429,7 @@ async function runDailyReminders() {
 }
 
 async function sendTelegramAlert(message) {
-  await require("./tg-route").send("court", message);
+  await require("./tg-route").send("eoir", message);
 }
 
 // ── Cron scheduler ────────────────────────────────────────

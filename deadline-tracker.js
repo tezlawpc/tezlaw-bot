@@ -544,7 +544,10 @@ async function runDailyAlerts() {
     byAttorney.get(key).push(d);
   }
 
-  for (const [attorneyId, deadlines] of byAttorney) {
+  for (const [attorneyId, allForAttorney] of byAttorney) {
+   // One alert per court topic. Topics that share a destination are one
+   // message, so until the court topics exist this is the single alert it was.
+   for (const { topic, label, items: deadlines } of courtGroupsOf(allForAttorney)) {
     try {
       const buckets = bucketDeadlines(deadlines);
 
@@ -565,8 +568,8 @@ async function runDailyAlerts() {
       const alertCount = overdue.length + dueToday.length + dueTomorrow.length + t3.length + t7.length + t14.length + t30_merits.length + t15_merits.length;
       if (alertCount === 0) { results.skipped++; continue; }
 
-      const msg = buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14, t15_merits, t30_merits });
-      await sendTelegramAlert(msg);
+      const msg = buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14, t15_merits, t30_merits }, label);
+      await sendTelegramAlert(msg, topic);
 
       // Log alert to each deadline's history
       const allAlerted = [...overdue, ...dueToday, ...dueTomorrow, ...t3, ...t7, ...t14, ...t15_merits, ...t30_merits];
@@ -583,6 +586,7 @@ async function runDailyAlerts() {
       console.error(`[deadline-tracker] alert error for attorney ${attorneyId}:`, e.message);
       results.errors.push(`${attorneyId}: ${e.message}`);
     }
+   } // each court topic
   }
 
   console.log(`[deadline-tracker] Alerts done: ${results.alerted} deadlines alerted, ${results.skipped} skipped`);
@@ -597,9 +601,9 @@ function daysUntil(dateStr) {
   return Math.floor((target - today) / 86400000);
 }
 
-function buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14, t15_merits, t30_merits }) {
+function buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14, t15_merits, t30_merits }, label) {
   const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  let msg = `⏰ *Deadline alerts — ${dateStr}*\n\n`;
+  let msg = `⏰ *Deadline alerts — ${label ? label + ' — ' : ''}${dateStr}*\n\n`;
 
   const formatDeadline = (d) => {
     const client = d.client_name || 'Unknown';
@@ -663,8 +667,20 @@ function buildAlertMessage({ overdue, dueToday, dueTomorrow, t3, t7, t14, t15_me
   return msg;
 }
 
-async function sendTelegramAlert(text) {
-  await require("./tg-route").send("court", text, { parse_mode: "Markdown" });
+// Which court topic a deadline belongs in. Everything that comes out of a
+// hearing note or a hearing notice is an immigration court date. One typed in
+// by hand is read for the court it names, and stays in Court & deadlines when
+// it names none.
+function courtTopicOf(d) {
+  if (d.source_type && d.source_type !== "manual") return "eoir";
+  return require("./tg-route").courtTopic({ title: d.description, text: d.notes });
+}
+function courtGroupsOf(deadlines) {
+  return require("./tg-route").groupByDestination(deadlines, courtTopicOf);
+}
+
+async function sendTelegramAlert(text, topic) {
+  await require("./tg-route").send(topic || "court", text, { parse_mode: "Markdown" });
 }
 
 // ─── Cron scheduler ──────────────────────────────────

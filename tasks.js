@@ -561,6 +561,12 @@ async function getStats() {
   return r.rows[0] || {};
 }
 
+// Where task reminders go: the Ops & system topic of the ops group, or JJ's
+// direct message when no group is set (tg-route.js). null when neither is.
+function reminderDest() {
+  return require("./tg-route").target("ops");
+}
+
 // ─── Daily reminders (Telegram) ─────────────────────────
 // Called by cron at 8 AM Pacific. Sends a grouped list of tasks due today +
 // overdue tasks to the JJ_TELEGRAM_ID chat.
@@ -616,7 +622,7 @@ async function sendDailyReminders() {
   lines.push(`<a href="${tezBase}/admin/tasks">Open task list →</a>`);
   const message = lines.join("\n");
 
-  const chatId = process.env.JJ_TELEGRAM_ID;
+  const chatId = reminderDest();
   const result = await sendTelegramMessage(chatId, message);
   if (!result.ok) return result;
 
@@ -638,7 +644,7 @@ async function sendDailyReminders() {
 
 async function sendPerTaskReminders() {
   await initTable();
-  const chatId = process.env.JJ_TELEGRAM_ID;
+  const chatId = reminderDest();
   if (!chatId) return { sent: 0, reason: "no_chat_id" };
 
   // Find tasks that need a per-task ping right now:
@@ -732,7 +738,7 @@ async function sendSingleTaskReminder(task, chatId) {
 async function sendCreationReminder(task) {
   if (!task || !task.due_date) return;
   if (task.status === "pending_approval") return;   // not the firm's task yet
-  const chatId = process.env.JJ_TELEGRAM_ID;
+  const chatId = reminderDest();
   if (!chatId) return;
   const daysUntil = Math.floor((new Date(task.due_date) - new Date()) / 86400000);
   const window = task.reminder_days_before || 3;
@@ -764,25 +770,32 @@ async function snoozeTask(id, days) {
 
 // ─── Telegram helpers ───────────────────────────────────
 
+// chatId is a chat id, or { chat_id, message_thread_id } for a topic in the
+// ops group. A rejected topic thread is retried in the group itself: a
+// reminder in the wrong thread beats a reminder that never arrived.
 async function sendTelegramMessage(chatId, text, replyMarkup = null) {
   const token = process.env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_TOKEN;
   if (!token || !chatId) return { ok: false, reason: "no_telegram_config" };
+  const axios = require("axios");
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  const payload = {
+    ...(typeof chatId === "object" ? chatId : { chat_id: chatId }),
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+  };
+  if (replyMarkup) payload.reply_markup = replyMarkup;
   try {
-    const axios = require("axios");
-    const payload = {
-      chat_id: chatId,
-      text,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-    };
-    if (replyMarkup) payload.reply_markup = replyMarkup;
-    await axios.post(
-      `https://api.telegram.org/bot${token}/sendMessage`,
-      payload,
-      { timeout: 15000 }
-    );
+    await axios.post(url, payload, { timeout: 15000 });
     return { ok: true };
   } catch (e) {
+    if (payload.message_thread_id && e.response && e.response.status === 400) {
+      try {
+        delete payload.message_thread_id;
+        await axios.post(url, payload, { timeout: 15000 });
+        return { ok: true };
+      } catch (e2) { e = e2; }
+    }
     console.warn("[tasks] Telegram send failed:", e.message);
     return { ok: false, reason: e.message };
   }
