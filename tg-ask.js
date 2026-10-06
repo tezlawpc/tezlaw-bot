@@ -114,10 +114,214 @@ async function matterDeadlines(args) {
            party_key: "us = the firm must act, court = a hearing or a ruling" };
 }
 
+// The court calendar: what the Calendar screen in the Tara app and the admin
+// Calendar page show. The app's own "list_upcoming_hearings" reads the task
+// list, so a hearing that is on the calendar and not on a task was invisible
+// from the group ("no hearings this week" on a week with hearings). This
+// reads the calendar itself: EOIR notices, hearing notes, the synced Outlook
+// calendars (through eoir-calendar.js, which also merges duplicates), civil
+// hearings, and the open immigration deadlines. Read-only.
+const CALENDAR_TOOL = {
+  name: "court_calendar",
+  description:
+    "The firm's court calendar, the same one the Calendar screen in the Tara app and the admin Calendar page show: " +
+    "hearings from EOIR notices, hearing notes and the synced Outlook calendars, civil court hearings, and the open " +
+    "immigration deadlines. Use this FIRST for any question about hearings, court dates, interviews, or what is on " +
+    "the calendar. Leave `client` out for the whole firm over the next `days` days, or give part of a client's name, " +
+    "an A-number or a case name for one client.",
+  input_schema: {
+    type: "object",
+    properties: {
+      days: { type: "number", description: "Optional. How many days ahead to look, from today. Default 14, at most 365. 'This week' is 7." },
+      client: { type: "string", description: "Optional. Part of a client name, an A-number, or a civil case name or number." },
+    },
+  },
+};
+
+const PT = "America/Los_Angeles";
+// Today's date in the office's time zone, as YYYY-MM-DD.
+const todayPT = (now = new Date()) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: PT, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+const addDays = (ymd, n) => { const d = new Date(`${ymd}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const weekdayOf = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "long" });
+// Hearing dates are stored as the date and time printed on the notice, with
+// no zone, so they are read back the same way (in UTC), never converted:
+// converting moves a 9:00 hearing, or puts a midnight one on the day before.
+// The Calendar page reads them this way too, so the answers match it.
+const storedDay = (v) => { const d = new Date(v); return isNaN(d) ? null : d.toISOString().slice(0, 10); };
+function storedTime(v) {
+  const d = new Date(v);
+  if (isNaN(d) || (d.getUTCHours() === 0 && d.getUTCMinutes() === 0)) return null;   // midnight = no time was given
+  const h = d.getUTCHours(), m = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${h % 12 || 12}:${m} ${h < 12 ? "AM" : "PM"}`;
+}
+// A synced calendar is the exception. Outlook publishes local times, which are
+// stored like the notices. Google publishes true instants ("…Z"), and those
+// have to be converted to Pacific time or a 9:00 hearing reads as 4:00 PM.
+// Which kind an event is can only be told from its original DTSTART line.
+function instantPT(v) {
+  const d = new Date(v);
+  if (isNaN(d)) return null;
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: PT, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: PT, hour: "numeric", minute: "2-digit", hour12: true }).format(d);
+  return { day, time };
+}
+// Minutes after midnight for "9:00 AM" / "1:30 pm" / "13:30"; -1 when there is no usable time.
+function minutesOf(t) {
+  const m = String(t || "").match(/(\d{1,2})[:.](\d{2})\s*([AaPp])?/);
+  if (!m) return -1;
+  let h = parseInt(m[1], 10);
+  if (m[3]) { const pm = /p/i.test(m[3]); h = (h % 12) + (pm ? 12 : 0); }
+  return h * 60 + parseInt(m[2], 10);
+}
+const CALENDAR_SOURCE = {
+  hearing_notice: "EOIR notice", hearing_note_upcoming: "hearing note", hearing_note_past: "hearing note (hearing held)",
+  individual_hearing: "merits hearing note", individual_upcoming: "next action on a merits note", outlook_event: "synced calendar",
+};
+const CALENDAR_MAX = 60;
+
+async function courtCalendar(args, now = new Date()) {
+  const n = parseInt(args && args.days, 10);
+  const days = Number.isInteger(n) && n > 0 ? Math.min(365, n) : 14;
+  const client = String((args && (args.client || args.query)) || "").trim().slice(0, 80);
+  const like = client ? `%${client}%` : null;
+  const first = todayPT(now), last = addDays(first, days);
+  const from = `${first}T00:00:00Z`, to = `${last}T23:59:59Z`;
+  const unavailable = [];
+  const attempt = async (what, fn, fallback) => {
+    try { return await fn(); } catch (e) {
+      // A table that has never been created (42P01) holds nothing: that is an
+      // empty list, not a calendar that could not be read.
+      if (e && e.code === "42P01") return fallback;
+      console.warn(`[tg-ask] calendar ${what}:`, e.message); unavailable.push(what); return fallback;
+    }
+  };
+
+  // 1. The calendar the admin page shows (its own duplicates already merged).
+  const events = await attempt("court calendar", () =>
+    require("./eoir-calendar").getUnifiedEvents({ from_date: from, to_date: to, client_search: client || undefined }), []);
+
+  // 2. The notices themselves: the time as printed, and any notice the Tara
+  //    app's Calendar lists that the page above leaves out.
+  const notices = await attempt("hearing notices", async () => (await db().query(
+    `SELECT id::text AS id, client_name, a_number, hearing_date, hearing_time_text, hearing_type, court_name, judge_name
+       FROM client_hearing_notices
+      WHERE hearing_date >= $1 AND hearing_date <= $2 AND dismissed_at IS NULL
+        AND ($3::text IS NULL OR client_name ILIKE $3 OR a_number ILIKE $3)
+      ORDER BY hearing_date ASC LIMIT 200`, [from, to, like])).rows, []);
+  const noticeById = new Map(notices.map(x => [x.id, x]));
+  const seenNotices = new Set();
+
+  // How each synced event's time was published (see instantPT above).
+  const refsOf = (e) => e.source_refs || [{ source: e.source, id: e.source_id }];
+  const syncedIds = [...new Set(events.flatMap(e => refsOf(e).filter(r => r.source === "outlook_event").map(r => parseInt(r.id, 10))).filter(Number.isInteger))];
+  const synced = new Map(syncedIds.length ? (await attempt("synced calendar times", async () => (await db().query(
+    `SELECT id::text AS id, start_datetime, COALESCE(all_day, FALSE) AS all_day,
+            substring(raw_ical from 'DTSTART[^\r\n]*') AS dtstart
+       FROM outlook_synced_events WHERE id = ANY($1::int[])`, [syncedIds])).rows, [])).map(x => [x.id, x]) : []);
+
+  const hearings = [];
+  for (const e of events) {
+    if (e.source === "deadline") continue;                       // deadlines are listed below, with the overdue ones
+    let day = storedDay(e.event_date);
+    if (!day) continue;
+    const refs = refsOf(e);
+    let printed = null, typed = null;
+    for (const r of refs) {
+      if (r.source === "outlook_event") {
+        const sv = synced.get(String(r.id));
+        if (!sv || sv.all_day || typed) continue;
+        if (/Z\s*$/.test(sv.dtstart || "")) { const pt = instantPT(sv.start_datetime); if (pt) { typed = pt.time; if (e.source === "outlook_event") day = pt.day; } }
+        else if (sv.dtstart) typed = storedTime(sv.start_datetime);
+        continue;
+      }
+      if (r.source !== "hearing_notice") continue;
+      seenNotices.add(String(r.id));
+      const nt = noticeById.get(String(r.id));
+      if (nt && nt.hearing_time_text && !printed) printed = nt.hearing_time_text;
+    }
+    // A synced event with no readable DTSTART keeps its day and gives no time, rather than a time that may be hours out.
+    const hasSynced = refs.some(r => r.source === "outlook_event");
+    const time = typed || printed || (hasSynced ? null : storedTime(e.event_date));
+    if (day < first || day > last) continue;                     // a converted instant can fall just outside the window
+    const sources = [...new Set((e.sources || [e.source]).map(s => (s === "outlook_event" && e.feed_name) ? `calendar: ${e.feed_name}` : (CALENDAR_SOURCE[s] || s)))];
+    const fromCalendarOnly = e.source === "outlook_event";
+    hearings.push({
+      day, weekday: weekdayOf(day), time,
+      client: e.client_name || null, a_number: e.a_number || null,
+      type: e.event_subtype && e.event_subtype !== "outlook" ? e.event_subtype : null,
+      court: e.court_name || null, judge: e.judge_name || null,
+      entry: fromCalendarOnly && e.description && e.description !== e.client_name ? String(e.description).slice(0, 160) : undefined,
+      on_calendar_as: sources.join(", "),
+    });
+  }
+  for (const nt of notices) {
+    if (seenNotices.has(nt.id)) continue;
+    const day = storedDay(nt.hearing_date);
+    if (!day) continue;
+    // The page merges the same client on the same day; do the same here.
+    const same = hearings.find(h => h.day === day && (
+      (nt.a_number && h.a_number && String(nt.a_number).replace(/\D/g, "") === String(h.a_number).replace(/\D/g, "")) ||
+      (nt.client_name && h.client && String(nt.client_name).toLowerCase().trim() === String(h.client).toLowerCase().trim())));
+    if (same) { if (!same.time && nt.hearing_time_text) same.time = nt.hearing_time_text; continue; }
+    hearings.push({
+      day, weekday: weekdayOf(day), time: nt.hearing_time_text || storedTime(nt.hearing_date),
+      client: nt.client_name || null, a_number: nt.a_number || null, type: nt.hearing_type || null,
+      court: nt.court_name || null, judge: nt.judge_name || null, entry: undefined,
+      on_calendar_as: "notice on file",
+    });
+  }
+
+  // 3. Civil court hearings (the civil module keeps its own).
+  const civil = await attempt("civil hearings", async () => (await db().query(
+    `SELECT to_char(h.hearing_date, 'YYYY-MM-DD') AS day, h.hearing_time, h.hearing_type, h.department, h.judge, h.location,
+            h.appearance, c.case_name, c.case_number, c.court
+       FROM civil_hearings h JOIN civil_cases c ON c.id = h.case_id
+      WHERE h.status = 'scheduled' AND h.hearing_date >= $1::date AND h.hearing_date <= $2::date
+        AND ($3::text IS NULL OR c.case_name ILIKE $3 OR c.case_number ILIKE $3)
+      ORDER BY h.hearing_date ASC LIMIT 100`, [first, last, like])).rows, []);
+  for (const h of civil) {
+    hearings.push({
+      day: h.day, weekday: weekdayOf(h.day), time: h.hearing_time || null,
+      client: h.case_name || null, a_number: null,
+      type: h.hearing_type ? String(h.hearing_type).replace(/_/g, " ") : null,
+      court: [h.court, h.department ? `Dept. ${h.department}` : null, h.location].filter(Boolean).join(", ") || null,
+      judge: h.judge || null,
+      entry: [h.case_number ? `case no. ${h.case_number}` : null, h.appearance ? String(h.appearance).replace(/_/g, " ") : null].filter(Boolean).join("; ") || undefined,
+      on_calendar_as: "civil case hearing",
+    });
+  }
+  hearings.sort((a, b) => a.day.localeCompare(b.day) || minutesOf(a.time) - minutesOf(b.time));
+
+  // 4. Open immigration deadlines: everything overdue, and what falls due in the window.
+  const deadlines = await attempt("deadlines", async () => (await db().query(
+    `SELECT client_name, a_number, description, priority, to_char(due_date, 'YYYY-MM-DD') AS due
+       FROM deadlines
+      WHERE status = 'pending' AND due_date <= $1::date
+        AND ($2::text IS NULL OR client_name ILIKE $2 OR a_number ILIKE $2)
+      ORDER BY due_date ASC LIMIT 200`, [last, like])).rows.map(d => ({
+        due: d.due, overdue: d.due < first, client: d.client_name || null, a_number: d.a_number || null,
+        what: String(d.description || "").slice(0, 200), priority: d.priority && d.priority !== "normal" ? d.priority : undefined,
+      })), []);
+
+  const out = {
+    today: first, from: first, through: last, days,
+    ...(client ? { client_filter: client } : {}),
+    hearings: hearings.slice(0, CALENDAR_MAX),
+    deadlines: deadlines.slice(0, CALENDAR_MAX),
+    note: "Times are as printed on the notice or typed on the calendar. The Matter Manager keeps its own deadlines and hearings: matter_deadlines.",
+  };
+  if (hearings.length > CALENDAR_MAX) out.more_hearings_not_shown = hearings.length - CALENDAR_MAX;
+  if (deadlines.length > CALENDAR_MAX) out.more_deadlines_not_shown = deadlines.length - CALENDAR_MAX;
+  // An empty list is only "nothing scheduled" if every source answered.
+  if (unavailable.length) out.could_not_read = unavailable, out.warning = "Part of the calendar could not be read just now, so this may be incomplete. Say so; do not say nothing is scheduled.";
+  return out;
+}
+
 function groupTools() {
   const all = require("./zara-app-chat").STAFF_TOOLS || [];
   const allowed = new Set(GROUP_TOOL_NAMES);
-  return all.filter(t => allowed.has(t.name)).concat([MATTER_TOOL]);
+  return all.filter(t => allowed.has(t.name)).concat([CALENDAR_TOOL, MATTER_TOOL]);
 }
 
 // Run one look-up. Anything not on the list is refused here, whatever the
@@ -125,6 +329,9 @@ function groupTools() {
 async function runTool(user, name, input) {
   if (name === MATTER_TOOL.name) {
     try { return await matterDeadlines(input || {}); } catch (e) { return { error: e.message }; }
+  }
+  if (name === CALENDAR_TOOL.name) {
+    try { return await courtCalendar(input || {}); } catch (e) { return { error: e.message }; }
   }
   if (!GROUP_TOOL_NAMES.includes(name)) {
     return { error: "That look-up is not available in the group chat. It is in the Tara app." };
@@ -143,16 +350,18 @@ EVERYONE IN THE GROUP READS YOUR ANSWER, not only the person who asked. So:
 - A-numbers, receipt numbers, case numbers, hearing dates and deadlines are fine: staff need them.
 
 YOU CAN LOOK THINGS UP, AND ONLY LOOK. Use the tools for anything about the firm's own matters:
-- What is due, and when the next hearing is → matter_deadlines (the Matter Manager: immigration court, federal, state court and trademark matters)
+- Hearings, court dates, interviews, what is on the calendar → court_calendar (the calendar the Tara app and the admin Calendar page show: EOIR notices, hearing notes, the synced Outlook calendars, civil hearings, and open immigration deadlines)
+- What is due in the Matter Manager, and a matter's own deadlines and hearings → matter_deadlines (immigration court, federal, state court and trademark matters)
 - A civil litigation case: status, deadlines, hearings, notes → find_civil_matter, then get_civil_matter
 - A client's details, matter type and status → search_client_by_name, list_recent_clients
-- Hearings and interviews on the task list → list_upcoming_hearings
+- Hearing and interview TASKS on the task list → list_upcoming_hearings (the task list only; it is not the calendar)
 - Tasks → list_my_tasks
 - Documents clients uploaded → list_recent_client_documents
 - Staff notes on a client → get_client_notes
 - Unpaid invoices → list_outstanding_invoices
 - What is in a civil matter's case folder, and reading one document → list_case_documents, read_case_document
-If the first tool finds nothing, try the other place before saying there is no record: a client can be in the Matter Manager, the civil module, or the task list. Never say you lack access to the case management system; this is it.
+The calendar and the Matter Manager are two separate lists. For "any hearings this week", "what is coming up" or "what is due", run court_calendar AND matter_deadlines and answer from both. Never say nothing is scheduled after checking only one of them, and if a tool says part of the calendar could not be read, say that instead.
+If the first tool finds nothing, try the other place before saying there is no record: a client can be on the calendar, in the Matter Manager, the civil module, or the task list. Never say you lack access to the case management system; this is it.
 
 YOU CANNOT CHANGE ANYTHING FROM HERE. No updates, no new deadlines, no notes, no time entries. If someone asks for a change, say what you would change and that it is made in the Tara app or the admin panel. Never say a change was made.
 
@@ -584,6 +793,6 @@ async function handleStaffCommand(msg) {
 module.exports = {
   handle, handleStaffCommand,
   // exported for the check script
-  questionIn, withhold, plain, splitForTelegram, mayAnswer, groupTools, runTool, matterDeadlines,
+  questionIn, withhold, plain, splitForTelegram, mayAnswer, groupTools, runTool, matterDeadlines, courtCalendar, CALENDAR_TOOL,
   GROUP_TOOL_NAMES, MATTER_TOOL, GROUP_OPS, underLimit, historyFor, remember, staffFor, isJJ,
 };

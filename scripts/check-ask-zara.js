@@ -6,7 +6,9 @@
 //   2. she can run only the look-ups on the group's list, and none that
 //      change a record or show trust money, firm revenue or anyone's hours;
 //   3. Social Security, card and bank numbers are taken out of what she sends;
-//   4. only JJ can link a Telegram account, and never to a consultant login.
+//   4. only JJ can link a Telegram account, and never to a consultant login;
+//   5. a question about hearings is answered from the court calendar itself,
+//      not from the task list.
 //
 // Runs with no network, no database and no node_modules.
 
@@ -23,11 +25,19 @@ const fakeAxios = {
 };
 
 // A pretend database: the staff logins, who is linked, and the question log.
-const state = { users: [], links: new Map(), log: [], matterSql: [] };
+const state = { users: [], links: new Map(), log: [], matterSql: [], cal: null, calSql: [] };
 const fakeDb = {
   query: async (sql, params = []) => {
     const s = String(sql).replace(/\s+/g, " ").trim();
     if (/^CREATE TABLE/.test(s)) return { rows: [], rowCount: 0 };
+    // The calendar's own tables, for courtCalendar(): state.cal says what each holds, or how each fails.
+    for (const [key, re] of [["notices", /FROM client_hearing_notices/], ["synced", /FROM outlook_synced_events/], ["civil", /FROM civil_hearings h JOIN civil_cases/], ["deadlines", /FROM deadlines WHERE status = 'pending'/]]) {
+      if (!re.test(s)) continue;
+      state.calSql.push({ key, s, params });
+      const v = state.cal && state.cal[key];
+      if (v instanceof Error) throw v;
+      return { rows: v || [] };
+    }
     if (/FROM matters m WHERE m\.status = 'active'/.test(s)) { state.matterSql.push({ s, params }); return { rows: [{ id: 7, client_name: "Birch, Anna", matter_ref: "RM-1", court: "LA Immigration Court", case_type: "Removal", mark: null }] }; }
     if (/FROM matter_deadlines d/.test(s)) {
       state.matterSql.push({ s, params });
@@ -84,6 +94,7 @@ Module._load = function (request, ...rest) {
   if (request === "./db") return fakeDb;
   if (request === "./zara-app-chat") return fakeAppChat;
   if (request === "./zara-core") return fakeCore;
+  if (request === "./eoir-calendar") return { getUnifiedEvents: async (opts) => { state.calSql.push({ key: "page", params: opts }); const v = state.cal && state.cal.page; if (v instanceof Error) throw v; return v || []; } };
   return origLoad.call(this, request, ...rest);
 };
 const ask = require(path.join(ROOT, "tg-ask.js"));
@@ -192,6 +203,7 @@ check("the group's look-ups: nothing that writes, no trust money, no revenue, no
   for (const f of FORBIDDEN) assert.ok(!names.includes(f), `${f} is offered in the group`);
   assert.ok(!names.some(n => /^propose_|trust|insight|time/.test(n)), names.join());
   assert.ok(names.includes("matter_deadlines") && names.includes("search_client_by_name") && names.includes("get_civil_matter"));
+  assert.ok(names.includes("court_calendar"), "the court calendar is not offered in the group");
 });
 check("Matter Manager: a named client gets every open deadline; no name gets the next two weeks", async () => {
   state.matterSql.length = 0;
@@ -333,6 +345,124 @@ check("/staff unlink stops the answers; /staff lists who can ask, without consul
 check("something that is not /staff is left for the rest of the bot", () => withEnv({}, async () => {
   assert.strictEqual(await ask.handleStaffCommand(inGroup("/staffing levels look fine", 555)), false);
   assert.strictEqual(await ask.handleStaffCommand(inGroup("staff meeting at 3", 555)), false);
+}));
+
+// ── hearings come from the calendar, not the task list ──────────────────
+// 10:15 PM on October 5 in the office; already October 6 in UTC.
+const NOW = new Date("2026-10-06T05:15:00Z");
+const CAL = () => ({
+  page: [
+    // An EOIR notice that is also on the synced Outlook calendar: one hearing, already merged by the page.
+    { source: "outlook_event", source_id: "31", sources: ["hearing_notice", "outlook_event"], source_refs: [{ source: "hearing_notice", id: "7" }, { source: "outlook_event", id: "31" }],
+      client_name: "Lu, Guang", a_number: "A216-866-111", event_date: new Date("2026-10-06T09:00:00Z"), event_subtype: "master",
+      court_name: "Los Angeles Immigration Court", judge_name: "Hon. A. Reyes", description: "MCH Lu Guang", feed_name: "JJ Outlook" },
+    // A hearing today whose notice gave no time (stored at midnight).
+    { source: "hearing_notice", source_id: "8", client_name: "Ortiz, Maria", a_number: "A200-000-222", event_date: new Date("2026-10-05T00:00:00Z"), event_subtype: "individual", court_name: "Santa Ana Immigration Court" },
+    // A Google calendar entry, published as a UTC instant: 16:00Z is 9:00 AM in the office.
+    { source: "outlook_event", source_id: "32", client_name: "Tran, Bao", event_date: new Date("2026-10-08T16:00:00Z"), event_subtype: "individual", court_name: "Santa Ana", description: "Individual hearing - Tran", feed_name: "Court Google" },
+    // A synced entry whose original time line was not kept: its day, and no guessed time.
+    { source: "outlook_event", source_id: "33", client_name: "Zhou, Lin", event_date: new Date("2026-10-07T10:30:00Z"), event_subtype: "outlook", description: "MCH - Zhou", feed_name: "JJ Outlook" },
+    // The page also carries deadlines; they are listed separately, with the overdue ones.
+    { source: "deadline", source_id: "1", client_name: "Park, Min", event_date: new Date("2026-10-09T00:00:00Z"), description: "Submit I-589 supplement" },
+  ],
+  notices: [
+    { id: "7", client_name: "Lu, Guang", a_number: "A216-866-111", hearing_date: new Date("2026-10-06T09:00:00Z"), hearing_time_text: "9:00 AM", hearing_type: "master", court_name: "Los Angeles Immigration Court", judge_name: "Hon. A. Reyes" },
+    { id: "8", client_name: "Ortiz, Maria", a_number: "A200-000-222", hearing_date: new Date("2026-10-05T00:00:00Z"), hearing_time_text: null, hearing_type: "individual", court_name: "Santa Ana Immigration Court", judge_name: null },
+    // On file and listed by the Tara app, though the Calendar page leaves it out.
+    { id: "9", client_name: "Chen, Wei", a_number: "A200-000-333", hearing_date: new Date("2026-10-08T13:00:00Z"), hearing_time_text: "1:00 PM", hearing_type: "master", court_name: "Los Angeles Immigration Court", judge_name: null },
+  ],
+  synced: [
+    { id: "31", start_datetime: new Date("2026-10-06T09:00:00Z"), all_day: false, dtstart: "DTSTART;TZID=Pacific Standard Time:20261006T090000" },
+    { id: "32", start_datetime: new Date("2026-10-08T16:00:00Z"), all_day: false, dtstart: "DTSTART:20261008T160000Z" },
+    { id: "33", start_datetime: new Date("2026-10-07T10:30:00Z"), all_day: false, dtstart: null },
+  ],
+  civil: [{ day: "2026-10-06", hearing_time: "8:30 AM", hearing_type: "case_management_conference", department: "12", judge: "Hon. B. Okafor", location: null, appearance: "in_person", case_name: "Cedar v. Dunmore", case_number: "25STCV01234", court: "LASC Stanley Mosk" }],
+  deadlines: [{ client_name: "Lu, Guang", a_number: "A216-866-111", description: "File change of venue motion", priority: "high", due: "2026-09-25" },
+              { client_name: "Park, Min", a_number: "A200-000-666", description: "Submit I-589 supplement", priority: "normal", due: "2026-10-09" }],
+});
+const byClient = (r, name) => r.hearings.filter(h => h.client === name);
+check("court calendar: 'today' is the office's day, and the window is the days asked for", async () => {
+  state.cal = CAL(); state.calSql.length = 0;
+  let r = await ask.courtCalendar({ days: 7 }, NOW);
+  assert.strictEqual(r.today, "2026-10-05");                      // not the 6th, which it already is in UTC
+  assert.strictEqual(r.through, "2026-10-12");
+  const page = state.calSql.find(q => q.key === "page").params;
+  assert.strictEqual(page.from_date, "2026-10-05T00:00:00Z");
+  assert.strictEqual(page.to_date, "2026-10-12T23:59:59Z");
+  assert.strictEqual(page.client_search, undefined);
+  state.calSql.length = 0;
+  r = await ask.courtCalendar({}, NOW);
+  assert.strictEqual(r.days, 14);
+  r = await ask.courtCalendar({ days: 9999 }, NOW);
+  assert.strictEqual(r.days, 365);
+});
+check("court calendar: a notice's hearing is on its own day with the time printed on it, once", async () => {
+  state.cal = CAL();
+  const r = await ask.courtCalendar({ days: 7 }, NOW);
+  const lu = byClient(r, "Lu, Guang");
+  assert.strictEqual(lu.length, 1, "the same hearing is listed twice");
+  assert.deepStrictEqual([lu[0].day, lu[0].weekday, lu[0].time], ["2026-10-06", "Tuesday", "9:00 AM"]);
+  assert.ok(/EOIR notice/.test(lu[0].on_calendar_as) && /JJ Outlook/.test(lu[0].on_calendar_as));
+  const today = byClient(r, "Ortiz, Maria")[0];
+  assert.deepStrictEqual([today.day, today.time], ["2026-10-05", null], "a hearing today moved, or was given a time nobody printed");
+});
+check("court calendar: a notice the Tara app lists is reported even when the Calendar page leaves it out", async () => {
+  state.cal = CAL();
+  const r = await ask.courtCalendar({ days: 7 }, NOW);
+  const chen = byClient(r, "Chen, Wei");
+  assert.strictEqual(chen.length, 1);
+  assert.deepStrictEqual([chen[0].day, chen[0].time, chen[0].on_calendar_as], ["2026-10-08", "1:00 PM", "notice on file"]);
+});
+check("court calendar: a Google entry reads in Pacific time; an entry with no original time gives none", async () => {
+  state.cal = CAL();
+  const r = await ask.courtCalendar({ days: 7 }, NOW);
+  const tran = byClient(r, "Tran, Bao")[0];
+  assert.deepStrictEqual([tran.day, tran.time], ["2026-10-08", "9:00 AM"], "a 9:00 hearing would have been reported as 4:00 PM");
+  const zhou = byClient(r, "Zhou, Lin")[0];
+  assert.deepStrictEqual([zhou.day, zhou.time], ["2026-10-07", null]);
+});
+check("court calendar: civil hearings and open immigration deadlines are part of it, in date order", async () => {
+  state.cal = CAL();
+  const r = await ask.courtCalendar({ days: 7 }, NOW);
+  const cedar = byClient(r, "Cedar v. Dunmore")[0];
+  assert.ok(cedar && cedar.time === "8:30 AM" && /Dept\. 12/.test(cedar.court) && /25STCV01234/.test(cedar.entry) && cedar.type === "case management conference");
+  assert.deepStrictEqual(r.hearings.map(h => h.client), ["Ortiz, Maria", "Cedar v. Dunmore", "Lu, Guang", "Zhou, Lin", "Tran, Bao", "Chen, Wei"]);
+  assert.deepStrictEqual(r.deadlines.map(d => [d.due, d.overdue, d.priority]), [["2026-09-25", true, "high"], ["2026-10-09", false, undefined]]);
+  assert.ok(!r.hearings.some(h => /I-589/.test(JSON.stringify(h))), "a deadline was listed as a hearing");
+  assert.ok(!r.warning && !r.could_not_read);
+});
+check("court calendar: one client by name or A-number narrows every source", async () => {
+  state.cal = CAL(); state.calSql.length = 0;
+  const r = await ask.courtCalendar({ client: "Lu" }, NOW);
+  assert.strictEqual(r.client_filter, "Lu");
+  assert.strictEqual(state.calSql.find(q => q.key === "page").params.client_search, "Lu");
+  for (const key of ["notices", "civil", "deadlines"]) assert.ok(state.calSql.find(q => q.key === key).params.includes("%Lu%"), key);
+});
+check("court calendar: a table never created is an empty list; a source that fails is reported, never 'nothing scheduled'", async () => {
+  state.cal = CAL();
+  state.cal.civil = Object.assign(new Error('relation "civil_hearings" does not exist'), { code: "42P01" });
+  let r = await ask.courtCalendar({ days: 7 }, NOW);
+  assert.ok(!r.warning && !r.could_not_read && byClient(r, "Lu, Guang").length === 1);
+  state.cal = CAL();
+  state.cal.notices = new Error("connection terminated");
+  state.cal.page = new Error("connection terminated");
+  r = await ask.courtCalendar({ days: 7 }, NOW);
+  assert.deepStrictEqual(r.could_not_read, ["court calendar", "hearing notices"]);
+  assert.ok(/incomplete/.test(r.warning) && /do not say nothing is scheduled/.test(r.warning));
+  assert.strictEqual(byClient(r, "Cedar v. Dunmore").length, 1, "the sources that did answer were dropped");
+});
+check("court calendar: it only reads, and it is the look-up she is told to use for hearings", () => withEnv({}, async () => {
+  state.cal = CAL(); state.calSql.length = 0;
+  const id = fresh(); state.links.set(String(id), 2);
+  script.tools = ["court_calendar"];
+  await ask.handle(inGroup("@TEZJJBot any hearings this week?", id));
+  assert.ok(Array.isArray(script.results[0].hearings) && script.results[0].hearings.length === 6);
+  assert.strictEqual(ran.length, 0, "the calendar went through the app's runner");
+  for (const q of state.calSql) if (q.s) assert.ok(/^SELECT /.test(q.s) && !/\b(INSERT|UPDATE|DELETE|ALTER|DROP)\b/.test(q.s), q.s.slice(0, 80));
+  assert.ok(/court dates, interviews, what is on the calendar → court_calendar/.test(ask.GROUP_OPS));
+  assert.ok(/run court_calendar AND matter_deadlines/.test(ask.GROUP_OPS));
+  assert.ok(/the task list only; it is not the calendar/.test(ask.GROUP_OPS));
+  assert.strictEqual(state.log[0].tools, "court_calendar");
 }));
 
 // ── where it sits in the server ─────────────────────────────────────────
