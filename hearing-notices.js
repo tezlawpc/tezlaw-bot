@@ -469,51 +469,45 @@ async function dismissNotice(id) {
 // ── Client notification message builders ─────────────────
 
 const MESSAGES = {
-  en: (n) => `Hi, this is Tez Law Firm. This is a reminder about your upcoming ${prettyType(n.hearing_type)} hearing:
+  en: (n) => `Hi, this is Tez Law Firm. This is a reminder about your upcoming ${hearingKind(n.hearing_type, "en")} hearing:
 
-📅 Date: ${formatDate(n.hearing_date, "en")}
+📅 Date: ${hearingWhen(n, "en")}
 ${n.court_name ? `📍 Court: ${n.court_name}\n` : ""}${n.court_address ? `📌 Address: ${n.court_address}\n` : ""}${n.judge_name ? `⚖️ Judge: ${n.judge_name}\n` : ""}
 Please arrive 30 minutes early with your government-issued ID. If you cannot attend, call us IMMEDIATELY at 626-678-8677.
 
 — TEZ LAW FIRM`,
 
-  zh: (n) => `您好，这里是TEZ律师事务所。这是关于您即将到来的${prettyTypeZh(n.hearing_type)}庭审的提醒：
+  zh: (n) => `您好，这里是TEZ律师事务所。这是关于您即将到来的${hearingKind(n.hearing_type, "zh")}庭审的提醒：
 
-📅 日期：${formatDate(n.hearing_date, "zh")}
+📅 日期：${hearingWhen(n, "zh")}
 ${n.court_name ? `📍 法院：${n.court_name}\n` : ""}${n.court_address ? `📌 地址：${n.court_address}\n` : ""}${n.judge_name ? `⚖️ 法官：${n.judge_name}\n` : ""}
 请提前30分钟到达并携带政府颁发的身份证件。如无法出席，请立即致电626-678-8677。
 
 — TEZ律师事务所`,
 
-  es: (n) => `Hola, le habla el bufete Tez Law. Le recordamos su próxima audiencia de ${prettyTypeEs(n.hearing_type)}:
+  es: (n) => `Hola, le habla el bufete Tez Law. Le recordamos su próxima audiencia de ${hearingKind(n.hearing_type, "es")}:
 
-📅 Fecha: ${formatDate(n.hearing_date, "es")}
+📅 Fecha: ${hearingWhen(n, "es")}
 ${n.court_name ? `📍 Corte: ${n.court_name}\n` : ""}${n.court_address ? `📌 Dirección: ${n.court_address}\n` : ""}${n.judge_name ? `⚖️ Juez: ${n.judge_name}\n` : ""}
 Por favor llegue 30 minutos antes con su identificación oficial. Si no puede asistir, llámenos INMEDIATAMENTE al 626-678-8677.
 
 — TEZ LAW FIRM`,
 };
 
-function prettyType(t) {
-  const map = { master: "Master Calendar", individual: "Individual/Merits", bond: "Bond", status: "Status", biometrics: "Biometrics", interview: "Interview" };
-  return map[t] || "hearing";
-}
-function prettyTypeZh(t) {
-  const map = { master: "主听证", individual: "个人/庭审", bond: "保释", status: "状态", biometrics: "指纹采集", interview: "面谈" };
-  return map[t] || "";
-}
-function prettyTypeEs(t) {
-  const map = { master: "Calendario Maestro", individual: "Individual/Méritos", bond: "Fianza", status: "Estado", biometrics: "Biometría", interview: "Entrevista" };
-  return map[t] || "audiencia";
-}
-function formatDate(dt, lang) {
-  if (!dt) return "(fecha no confirmada)";
-  const d = new Date(dt);
-  if (isNaN(d)) return String(dt);
-  const opts = { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" };
-  const locale = { en: "en-US", zh: "zh-CN", es: "es-MX" }[lang] || "en-US";
-  return d.toLocaleString(locale, opts);
-}
+// How a hearing's date, time and kind are stated to a client now lives in
+// hearing-when.js, shared with hearing-reminders.js.
+//
+// What used to be here: a per-language prettyType() whose fallback turned a
+// court notice's own "Custody Redetermination Hearing" into "hearing" (so a
+// client read "your upcoming hearing hearing"), and a formatDate() that
+// called toLocaleString with hour/minute and no timeZone. That printed
+// hearing_date — a date-only value stored at noon UTC — in the server's zone,
+// so a 9:00 AM hearing was announced as 12:00 PM, and hearing_time_text,
+// which held the real "9:00 AM", was never read at all.
+//
+// Both builders had their own copy of that code and their own copy of that
+// bug. One module now, so they cannot drift apart again.
+const { hearingWhen, hearingKind } = require("./hearing-when");
 
 function buildNotificationMessage(notice, clientLang = "en") {
   const lang = ["en", "zh", "es"].includes(clientLang) ? clientLang : "en";

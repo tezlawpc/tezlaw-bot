@@ -190,6 +190,12 @@ jobs:
       - name: Admin 404 and path aliases
         run: node scripts/check-admin-404.js
 
+      # A reminder said 12:00 PM for a 9:00 AM custody hearing: both
+      # message builders formatted a noon-UTC placeholder and never read
+      # hearing_time_text. Times are quoted from the notice now.
+      - name: Hearing time quoted, never computed
+        run: node scripts/check-hearing-when.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

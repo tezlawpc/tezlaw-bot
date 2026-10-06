@@ -21,6 +21,8 @@
 const db = require("./db");
 const axios = require("axios");
 
+const { hearingWhen, hearingKind } = require("./hearing-when");
+
 const TIMEZONE_OFFSET_HOURS = -8;   // Pacific (adjust for DST manually if needed)
 
 // ── Schema ───────────────────────────────────────────────
@@ -100,6 +102,7 @@ async function getUpcomingHearings(daysOut) {
   try {
     const notices = await db.query(
       `SELECT n.id, n.client_name, n.a_number, n.hearing_date,
+              n.hearing_time_text,
               n.hearing_type, n.court_name, n.court_address, n.judge_name,
               n.client_key
        FROM client_hearing_notices n
@@ -154,8 +157,11 @@ async function getClientContactInfo(clientName, aNumber) {
 function buildReminderMessage(hearing, daysOut, lang = "en") {
   const langKey = ["en", "zh", "es"].includes(lang) ? lang : "en";
   const templates = TEMPLATES[langKey];
-  const dateStr = formatDateForLang(hearing.hearing_date, langKey);
-  const typeStr = prettyType(hearing.hearing_type, langKey);
+  // Quoted from the notice, never computed — see hearing-when.js. A source
+  // with no time text (a master hearing's next_hearing_date) correctly yields
+  // the "time not confirmed" form: it never had a time to state.
+  const dateStr = hearingWhen(hearing, langKey);
+  const typeStr = hearingKind(hearing.hearing_type, langKey);
   const courtLine = hearing.court_name || hearing.court_address || "";
   const judgeLine = hearing.judge_name || "";
 
@@ -260,22 +266,16 @@ Si NO puede asistir, llame al 626-678-8677 INMEDIATAMENTE. Faltar a su audiencia
 };
 
 function prettyType(t, lang) {
-  const map = {
-    en: { master: "Master Calendar", individual: "Individual/Merits", bond: "Bond", status: "Status", biometrics: "Biometrics", interview: "Interview" },
-    zh: { master: "主听证", individual: "个人/庭审", bond: "保释", status: "状态", biometrics: "指纹采集", interview: "面谈" },
-    es: { master: "Calendario Maestro", individual: "Individual/Méritos", bond: "Fianza", status: "Estado", biometrics: "Biometría", interview: "Entrevista" },
-  };
-  return (map[lang] || map.en)[t] || (lang === "en" ? "hearing" : lang === "zh" ? "庭审" : "audiencia");
+  // Delegated: the fallback used to discard a notice's own hearing type.
+  return hearingKind(t, lang);
 }
 
-function formatDateForLang(dt, lang) {
-  if (!dt) return "";
-  const d = new Date(dt);
-  if (isNaN(d)) return String(dt);
-  const opts = { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" };
-  const locale = { en: "en-US", zh: "zh-CN", es: "es-MX" }[lang] || "en-US";
-  return d.toLocaleString(locale, opts);
-}
+
+// formatDateForLang lived here and had the same defect as its twin in
+// hearing-notices.js: toLocaleString with hour/minute and no timeZone, over a
+// date-only value stored at noon UTC. On this path it mattered more, because
+// nobody reads these before they go: startCron() sends them at 7 AM Pacific.
+// See hearing-when.js.
 
 // ── Sending — WhatsApp via Meta Business API ─────────────
 
