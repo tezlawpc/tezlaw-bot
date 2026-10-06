@@ -7,8 +7,10 @@
 //      change a record or show trust money, firm revenue or anyone's hours;
 //   3. Social Security, card and bank numbers are taken out of what she sends;
 //   4. only JJ can link a Telegram account, and never to a consultant login;
-//   5. a question about hearings is answered from the court calendar itself,
-//      not from the task list.
+//   5. a question about hearings is answered from the court calendar itself
+//      (court-calendar.js), not from the task list alone;
+//   6. in the Tara app the same reader is used, and staff who are not an
+//      admin or manager see their own clients only.
 //
 // Runs with no network, no database and no node_modules.
 
@@ -31,7 +33,7 @@ const fakeDb = {
     const s = String(sql).replace(/\s+/g, " ").trim();
     if (/^CREATE TABLE/.test(s)) return { rows: [], rowCount: 0 };
     // The calendar's own tables, for courtCalendar(): state.cal says what each holds, or how each fails.
-    for (const [key, re] of [["notices", /FROM client_hearing_notices/], ["synced", /FROM outlook_synced_events/], ["civil", /FROM civil_hearings h JOIN civil_cases/], ["deadlines", /FROM deadlines WHERE status = 'pending'/]]) {
+    for (const [key, re] of [["notices", /FROM client_hearing_notices/], ["synced", /FROM outlook_synced_events/], ["civil", /FROM civil_hearings h JOIN civil_cases/], ["deadlines", /FROM deadlines WHERE status = 'pending'/], ["tasks", /FROM tasks t WHERE t\.due_date IS NOT NULL/]]) {
       if (!re.test(s)) continue;
       state.calSql.push({ key, s, params });
       const v = state.cal && state.cal[key];
@@ -366,19 +368,20 @@ const CAL = () => ({
     { source: "deadline", source_id: "1", client_name: "Park, Min", event_date: new Date("2026-10-09T00:00:00Z"), description: "Submit I-589 supplement" },
   ],
   notices: [
-    { id: "7", client_name: "Lu, Guang", a_number: "A216-866-111", hearing_date: new Date("2026-10-06T09:00:00Z"), hearing_time_text: "9:00 AM", hearing_type: "master", court_name: "Los Angeles Immigration Court", judge_name: "Hon. A. Reyes" },
-    { id: "8", client_name: "Ortiz, Maria", a_number: "A200-000-222", hearing_date: new Date("2026-10-05T00:00:00Z"), hearing_time_text: null, hearing_type: "individual", court_name: "Santa Ana Immigration Court", judge_name: null },
+    { id: "7", client_key: "lu-guang", client_name: "Lu, Guang", a_number: "A216-866-111", hearing_date: new Date("2026-10-06T09:00:00Z"), hearing_time_text: "9:00 AM", hearing_type: "master", court_name: "Los Angeles Immigration Court", judge_name: "Hon. A. Reyes" },
+    { id: "8", client_key: "ortiz-m", client_name: "Ortiz, Maria", a_number: "A200-000-222", hearing_date: new Date("2026-10-05T00:00:00Z"), hearing_time_text: null, hearing_type: "individual", court_name: "Santa Ana Immigration Court", judge_name: null },
     // On file and listed by the Tara app, though the Calendar page leaves it out.
-    { id: "9", client_name: "Chen, Wei", a_number: "A200-000-333", hearing_date: new Date("2026-10-08T13:00:00Z"), hearing_time_text: "1:00 PM", hearing_type: "master", court_name: "Los Angeles Immigration Court", judge_name: null },
+    { id: "9", client_key: "chen-wei", client_name: "Chen, Wei", a_number: "A200-000-333", hearing_date: new Date("2026-10-08T13:00:00Z"), hearing_time_text: "1:00 PM", hearing_type: "master", court_name: "Los Angeles Immigration Court", judge_name: null },
   ],
   synced: [
     { id: "31", start_datetime: new Date("2026-10-06T09:00:00Z"), all_day: false, dtstart: "DTSTART;TZID=Pacific Standard Time:20261006T090000" },
     { id: "32", start_datetime: new Date("2026-10-08T16:00:00Z"), all_day: false, dtstart: "DTSTART:20261008T160000Z" },
     { id: "33", start_datetime: new Date("2026-10-07T10:30:00Z"), all_day: false, dtstart: null },
   ],
-  civil: [{ day: "2026-10-06", hearing_time: "8:30 AM", hearing_type: "case_management_conference", department: "12", judge: "Hon. B. Okafor", location: null, appearance: "in_person", case_name: "Cedar v. Dunmore", case_number: "25STCV01234", court: "LASC Stanley Mosk" }],
-  deadlines: [{ client_name: "Lu, Guang", a_number: "A216-866-111", description: "File change of venue motion", priority: "high", due: "2026-09-25" },
-              { client_name: "Park, Min", a_number: "A200-000-666", description: "Submit I-589 supplement", priority: "normal", due: "2026-10-09" }],
+  civil: [{ day: "2026-10-06", hearing_time: "8:30 AM", hearing_type: "case_management_conference", department: "12", judge: "Hon. B. Okafor", location: null, appearance: "in_person", case_name: "Cedar v. Dunmore", case_number: "25STCV01234", court: "LASC Stanley Mosk", client_key: "cedar" }],
+  deadlines: [{ client_name: "Lu, Guang", a_number: "A216-866-111", description: "File change of venue motion", priority: "high", due: "2026-09-25", client_key: "a-a216866111" },
+              { client_name: "Park, Min", a_number: "A200-000-666", description: "Submit I-589 supplement", priority: "normal", due: "2026-10-09", client_key: "a-a200000666" }],
+  tasks: [{ client_key: "n-nguyen-thi", client_name: "Nguyen, Thi", matter_type: "Naturalization", title: "USCIS interview", description: "Prep and attend", due: "2026-10-07", assigned_to: "mliu" }],
 });
 const byClient = (r, name) => r.hearings.filter(h => h.client === name);
 check("court calendar: 'today' is the office's day, and the window is the days asked for", async () => {
@@ -436,7 +439,7 @@ check("court calendar: one client by name or A-number narrows every source", asy
   const r = await ask.courtCalendar({ client: "Lu" }, NOW);
   assert.strictEqual(r.client_filter, "Lu");
   assert.strictEqual(state.calSql.find(q => q.key === "page").params.client_search, "Lu");
-  for (const key of ["notices", "civil", "deadlines"]) assert.ok(state.calSql.find(q => q.key === key).params.includes("%Lu%"), key);
+  for (const key of ["notices", "civil", "deadlines", "tasks"]) assert.ok(state.calSql.find(q => q.key === key).params.includes("%Lu%"), key);
 });
 check("court calendar: a table never created is an empty list; a source that fails is reported, never 'nothing scheduled'", async () => {
   state.cal = CAL();
@@ -461,9 +464,76 @@ check("court calendar: it only reads, and it is the look-up she is told to use f
   for (const q of state.calSql) if (q.s) assert.ok(/^SELECT /.test(q.s) && !/\b(INSERT|UPDATE|DELETE|ALTER|DROP)\b/.test(q.s), q.s.slice(0, 80));
   assert.ok(/court dates, interviews, what is on the calendar → court_calendar/.test(ask.GROUP_OPS));
   assert.ok(/run court_calendar AND matter_deadlines/.test(ask.GROUP_OPS));
-  assert.ok(/the task list only; it is not the calendar/.test(ask.GROUP_OPS));
+  assert.ok(!/list_upcoming_hearings/.test(ask.GROUP_OPS) && !ask.groupTools().some(t => t.name === "list_upcoming_hearings"), "the group still has the old hearing look-up beside the calendar");
   assert.strictEqual(state.log[0].tools, "court_calendar");
 }));
+
+check("court calendar: a hearing that exists only as a task is reported, as a task", async () => {
+  state.cal = CAL(); state.calSql.length = 0;
+  const r = await ask.courtCalendar({ days: 7 }, NOW);
+  assert.deepStrictEqual(r.hearing_tasks, [{ due: "2026-10-07", client: "Nguyen, Thi", matter_type: "Naturalization", what: "USCIS interview: Prep and attend", assigned_to: "mliu" }]);
+  assert.ok(!r.hearings.some(h => h.client === "Nguyen, Thi"), "a task was listed as a calendar hearing");
+  const q = state.calSql.find(x => x.key === "tasks");
+  assert.deepStrictEqual(q.params.slice(0, 2), ["2026-10-05", "2026-10-12"], "the task window is not the office's days");
+  assert.ok(/NOT IN \('completed', 'cancelled', 'rejected', 'pending_approval'\)/.test(q.s));
+  assert.ok(/COALESCE\(t\.title, ''\)/.test(q.s), "the task's title is not searched, only its description");
+});
+
+// ── the same reader in the Tara app, limited to the person's own clients ─
+const calendar = require(path.join(ROOT, "court-calendar.js"));
+const realAppChat = require(path.join(ROOT, "zara-app-chat.js"));   // the real one; tg-ask above was given a stand-in
+check("in the app: staff who are not an admin or manager get their own clients only", async () => {
+  state.cal = CAL(); state.calSql.length = 0;
+  const mine = new Set(["lu-guang", "cedar", "a-a216866111"]);
+  const r = await calendar.read({ days: 7 }, { now: NOW, visibleKeys: mine });
+  assert.deepStrictEqual(r.hearings.map(h => h.client), ["Cedar v. Dunmore", "Lu, Guang"]);
+  assert.deepStrictEqual(r.deadlines.map(d => d.client), ["Lu, Guang"]);
+  assert.deepStrictEqual(r.hearing_tasks, [], "another client's hearing task was shown");
+  state.cal = CAL();
+  const r2 = await calendar.read({ days: 7 }, { now: NOW, visibleKeys: new Set(["n-nguyen-thi"]) });
+  assert.deepStrictEqual(r2.hearing_tasks.map(t => t.client), ["Nguyen, Thi"]);
+  assert.strictEqual(r.limited_to_own_clients, true);
+  assert.ok(/own clients/.test(r.note));
+  assert.ok(!state.calSql.some(q => q.key === "page"), "hearing notes and synced entries have no client key and must not be read for a scoped person");
+  assert.ok(/AS client_key/.test(state.calSql.find(q => q.key === "deadlines").s), "deadlines were not keyed the way the Calendar screen keys them");
+});
+check("in the app: an empty client list sees no hearing or deadline; it never becomes 'everything'", async () => {
+  state.cal = CAL();
+  const r = await calendar.read({ days: 7 }, { now: NOW, visibleKeys: new Set() });
+  assert.deepStrictEqual([r.hearings.length, r.deadlines.length, r.hearing_tasks.length], [0, 0, 0]);
+  assert.ok(!r.warning);
+});
+check("in the app: the hearing look-up is the calendar; an admin sees all of it, a paralegal needs a client list", async () => {
+  const run = (user, ctx) => realAppChat.executeTool(fakeDb, user, "list_upcoming_hearings", { days: 7 }, null, ctx);
+  state.cal = CAL();
+  let r = await run({ uid: 1, u: "jj", n: "JJ Zhang", r: "admin" }, {});
+  assert.ok(r.hearings.length >= 6 && r.hearings.some(h => h.client === "Zhou, Lin") && !r.limited_to_own_clients);
+  state.cal = CAL();
+  r = await run({ uid: 5, u: "ops", n: "Office Manager", r: "manager" }, { visibleClientKeys: new Set() });
+  assert.ok(r.hearings.length >= 6, "a manager was limited");
+  state.cal = CAL();
+  r = await run({ uid: 2, u: "mliu", n: "Michael Liu", r: "paralegal" }, { visibleClientKeys: new Set(["chen-wei"]) });
+  assert.deepStrictEqual(r.hearings.map(h => h.client), ["Chen, Wei"]);
+  for (const ctx of [{}, undefined, { visibleClientKeys: null }, { visibleClientKeys: ["lu-guang"] }]) {
+    state.cal = CAL();
+    r = await run({ uid: 2, u: "mliu", n: "Michael Liu", r: "paralegal" }, ctx);
+    assert.deepStrictEqual([r.hearings.length, r.deadlines.length, r.limited_to_own_clients], [0, 0, true], "a paralegal with no client list was shown the calendar: " + JSON.stringify(ctx));
+  }
+  r = await realAppChat.executeTool(fakeDb, { uid: 1, r: "admin" }, "list_upcoming_hearings", {}, null, {});
+  assert.strictEqual(r.days, 30);
+});
+check("in the app: the chat route hands over the person's client list, and it reaches the look-up", () => {
+  const api = fs.readFileSync(path.join(ROOT, "app-api.js"), "utf8");
+  const chat = api.slice(api.indexOf('civilApp.post("/api/staff/chat"'));
+  const call = chat.slice(chat.indexOf("zaraChat.chat({"), chat.indexOf("zaraChat.chat({") + 600);
+  assert.ok(/user: req\.user,[\s\S]*visibleClientKeys: await getVisibleClientKeys\(req\.user\),/.test(call), "the staff chat does not pass visibleClientKeys");
+  const app = fs.readFileSync(path.join(ROOT, "zara-app-chat.js"), "utf8");
+  assert.ok(/proposals = null, visibleClientKeys,\n\}\) \{/.test(app));
+  assert.ok(app.includes("executeTool(db, user, name, input, proposals, { visibleClientKeys })"));
+  assert.ok(!/FROM tasks t\s+WHERE t\.due_date IS NOT NULL\s+AND t\.due_date >= CURRENT_DATE/.test(app), "the task-list-only hearing query is still in the app chat");
+  // The consultant and client chats still get no look-ups at all.
+  assert.ok(/No db\/user — consultant chat doesn't get firm-data tools/.test(api));
+});
 
 // ── where it sits in the server ─────────────────────────────────────────
 check("server.js: she is asked before the group's silence rule, and the rule is still there", () => {

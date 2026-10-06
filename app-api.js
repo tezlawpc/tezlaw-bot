@@ -3227,6 +3227,9 @@ function registerAppApi(app) {
         history: history || [],
         db,
         user: req.user,
+        // What this person's Calendar screen may show (null = everything), so
+        // Zara's calendar look-up shows the same and no more.
+        visibleClientKeys: await getVisibleClientKeys(req.user),
         proposals,
       });
       res.json({ ok: true, reply: { answer, proposals } });
