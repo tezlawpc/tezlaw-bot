@@ -12,6 +12,15 @@ function getPool() {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+      // The firm is in West Covina and every date in this application is a
+      // Pacific date: "due today", "this week", a hearing on the 6th. The
+      // server runs UTC, so without this every CURRENT_DATE in the codebase
+      // — 91 of them — rolled over at 5pm Pacific, and from 5pm to midnight
+      // the app quietly believed it was already tomorrow. Setting it on the
+      // connection fixes all of them at once; it changes only how a date is
+      // read, never how an instant is stored, because TIMESTAMPTZ is
+      // absolute either way.
+      options: "-c timezone=America/Los_Angeles",
     });
   }
   return pool;
