@@ -108,7 +108,7 @@ async function checkSiteHealth() {
   else {
     if (/There has been a critical error|Fatal error:|Parse error:/i.test(home.body)) problems.push(["php", "Homepage shows a PHP / WordPress critical error."]);
     if (/<meta[^>]+name=["']robots["'][^>]+noindex/i.test(home.body)) problems.push(["noindex", "Homepage is set to NOINDEX — Google will drop the whole site. Check Settings → Reading → 'Discourage search engines' and Yoast."]);
-    if (!/"LegalService"/.test(home.body)) problems.push(["snippet", "The Tez SEO pack snippet looks switched off (no law-firm schema on the homepage). WPCode may have disabled it after an error: Code Snippets → Tez SEO pack → Active."]);
+    if (!/"LegalService"/.test(home.body)) problems.push(["snippet", "No law-firm schema on the homepage. It comes from the block “TEZ structured data (JSON-LD)”, which looks switched off: WordPress → Snippets → TEZ structured data (JSON-LD) → Active."]);
     if (home.ms > 8000) problems.push(["slow", `Homepage took ${(home.ms / 1000).toFixed(1)} s to load.`]);
   }
   try {
@@ -122,7 +122,9 @@ async function checkSiteHealth() {
     } catch (e) { problems.push(["sitemap", "Sitemap did not load."]); }
     try {
       const ll = await get("/llms.txt");
-      if (ll.status !== 200 || !/^# Tez Law/.test(ll.body)) problems.push(["llms", "llms.txt (the AI-assistant guide) is missing."]);
+      // The file opens with the firm's name: "# TEZ Law Firm" since October 2026,
+      // "# Tez Law P.C." before. Either is the real file.
+      if (ll.status !== 200 || !/^#\s*tez law/i.test(ll.body)) problems.push(["llms", "llms.txt (the AI-assistant guide) is missing."]);
     } catch (e) { /* minor */ }
   }
 
