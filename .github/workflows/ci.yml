@@ -284,3 +284,13 @@ jobs:
       - name: Database check
         timeout-minutes: 10
         run: node scripts/dbcheck.js
+
+      # Zara, end to end: the real server on the same scratch database, asked
+      # the questions staff ask in the ops group and in the app, with a
+      # calendar in the database. It reads what her look-ups were given.
+      # Telegram is recorded, the model is stood in for, and nothing can
+      # leave the build machine. Like the database check, if it cannot run
+      # at all it warns and does not block the deploy; a wrong answer does.
+      - name: Zara answers, end to end
+        timeout-minutes: 8
+        run: node scripts/e2e.js

@@ -496,6 +496,9 @@ app.get("/admin/backups/diagnose", auth.requireRole("admin"), async (req, res) =
 app.get("/version", (req, res) => {
   res.json({
     version: "v7-eoir-calendar-2026-08-28",
+    // The commit this server was built from (Render sets it). It is how
+    // anything outside can tell that a push is actually live.
+    commit: process.env.RENDER_GIT_COMMIT || null,
     features: {
       auto_match_tool_use: true,
       hearing_note_dedup: true,
