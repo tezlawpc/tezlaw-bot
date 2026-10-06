@@ -10319,6 +10319,52 @@ app.get("/admin/hearing/notes/duplicates", async (req, res) => {
   }
 });
 
+// The duplicates JJ saw on the calendar are these, not the hearing notes
+// above: a row in client_hearing_notices records both a file and a hearing,
+// and only the file was ever deduplicated. The scanner now refuses to create
+// the second hearing; this page is for the ones already in the table. It is
+// a preview -- nothing changes until the button is pressed -- and a merge is
+// reversible, because these are client records.
+app.get("/admin/hearing/notices/duplicates", gateByPerm("notes.master"), async (req, res) => {
+  try {
+    const hn = require("./hearing-notices");
+    const includePast = req.query.past === "1";
+    const groups = await hn.findDuplicateHearings({ includePast });
+    res.send(hn.renderDuplicateHearingsPage(groups, { includePast }));
+  } catch (err) {
+    console.error("[notice-duplicates]:", err.message);
+    res.status(500).send("<h1>Could not read the duplicates</h1><p>The reason is in the server log.</p>");
+  }
+});
+
+app.post("/admin/hearing/notices/merge-duplicates", async (req, res) => {
+  try {
+    const hn = require("./hearing-notices");
+    const keepId = parseInt(req.body.keep_id, 10);
+    const collapseIds = (Array.isArray(req.body.collapse_ids) ? req.body.collapse_ids : [])
+      .map((x) => parseInt(x, 10)).filter((n) => Number.isInteger(n));
+    if (!keepId || !collapseIds.length) {
+      return res.status(400).json({ ok: false, error: "Missing keep_id or collapse_ids" });
+    }
+    const result = await hn.mergeDuplicateHearings(keepId, collapseIds);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[merge-notice-duplicates]:", err.message);
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// Undo one. The merged row kept its date and its file, so this is just a flag.
+app.post("/admin/hearing/notices/:id/unmerge", async (req, res) => {
+  try {
+    const hn = require("./hearing-notices");
+    const row = await hn.unmergeDuplicateHearing(parseInt(req.params.id, 10));
+    res.json({ ok: true, ...row });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Voice dictation ─────────────────────────────────────
 // Attorney records audio in browser → Whisper transcribes →
 // Claude extracts fields → creates draft hearing note.

@@ -23,7 +23,10 @@ const axios = require("axios");
 
 const { hearingWhen, hearingKind } = require("./hearing-when");
 
-const TIMEZONE_OFFSET_HOURS = -8;   // Pacific (adjust for DST manually if needed)
+// The firm is in West Covina. This used to be a fixed -8, which is PST: for
+// the eight months California spends on PDT the "7 AM Pacific" run fired at
+// 8 AM. court-calendar.js asks the calendar instead of assuming.
+const { firmHour, todayPT } = require("./court-calendar");
 
 // ── Schema ───────────────────────────────────────────────
 
@@ -443,9 +446,10 @@ function startCron() {
   async function tick() {
     try {
       const now = new Date();
-      // Convert to Pacific approximately (server likely in UTC)
-      const pacificHour = (now.getUTCHours() + TIMEZONE_OFFSET_HOURS + 24) % 24;
-      const dateKey = now.toISOString().substring(0, 10);
+      const pacificHour = firmHour(now);
+      // The firm's day, not the UTC day: keyed on UTC this guard rolled over
+      // at 5pm Pacific, which allows a second run the same working afternoon.
+      const dateKey = todayPT(now);
       // Fire at 7 AM Pacific, once per day
       if (pacificHour === 7 && _lastRunDate !== dateKey) {
         _lastRunDate = dateKey;

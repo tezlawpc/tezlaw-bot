@@ -52,10 +52,23 @@ async function initTable() {
     CREATE INDEX IF NOT EXISTS idx_client_hearing_notices_client
       ON client_hearing_notices (client_key)
   `);
-  // Prevent double-inserting the exact same file (same hash) for the same client
+  // Prevent double-inserting the exact same file (same hash) for the same client.
+  // NOTE: this dedupes the FILE, not the HEARING. The same notice sitting in
+  // two Dropbox folders is two files, so until scanClientFolder started
+  // checking the hearing as well, it became two hearings on the calendar.
   await db.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_hearing_notices_dedup
       ON client_hearing_notices (client_key, dropbox_path, dropbox_hash)
+  `);
+
+  // Which row a duplicate was folded into. Set rather than deleting: the row
+  // is still the record that a document arrived, and a merge stays reversible.
+  try { await db.query(`ALTER TABLE client_hearing_notices ADD COLUMN IF NOT EXISTS duplicate_of INTEGER`); } catch {}
+
+  // Looked up for every scanned file, and by the duplicates page.
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_hearing_notices_hearing
+      ON client_hearing_notices (client_key, hearing_date)
   `);
   // Per-client scan-state tracking — lets daily scans skip clients whose folders
   // haven't changed since last scan (huge cost saving)
@@ -319,6 +332,7 @@ async function scanClientFolder({ clientKey, clientName, aNumber, dropboxFolderP
   const alreadyScanned = new Set(existing.rows.map(r => `${r.dropbox_path}|${r.dropbox_hash || ""}`));
 
   const notices = [];
+  const duplicates = [];      // hearings already on the calendar under another file
   let scanned = 0;
   let skipped = 0;
   const errors = [];
@@ -335,6 +349,90 @@ async function scanClientFolder({ clientKey, clientName, aNumber, dropboxFolderP
 
       if (extraction.is_hearing_notice && extraction.hearing_date) {
         const hearingDate = mergeDateTime(extraction.hearing_date, extraction.hearing_time);
+
+        // ── Is this hearing already on the client's calendar? ──
+        //
+        // The row written below is two things at once: a record that this
+        // FILE has been read, and a record that this HEARING exists. The
+        // ON CONFLICT target covers only the first. So the same notice in
+        // two Dropbox folders, or re-saved under a new name, produced a
+        // second hearing -- and a second reminder to the client.
+        //
+        // The email path (court-mail.js) has always checked the hearing
+        // before inserting. This is that check, and because it looks at the
+        // whole table it also catches the overlap between the two paths,
+        // which neither of them handled.
+        //
+        // By day, not by timestamp: two copies of one notice routinely
+        // disagree about the time -- one read as midnight because no time
+        // was printed on the page it was taken from -- and matching the
+        // timestamp would file them as two hearings, which is the bug.
+        const already = await db.query(
+          `SELECT id, hearing_time_text, hearing_type, court_name
+             FROM client_hearing_notices
+            WHERE client_key = $1
+              AND hearing_date::date = $2::date
+              AND is_hearing_notice = TRUE
+              AND dismissed_at IS NULL
+              AND duplicate_of IS NULL
+            ORDER BY id ASC LIMIT 1`,
+          [clientKey, hearingDate]
+        ).catch((e) => { console.warn("[hearing-notices] dedup lookup:", e.message); return { rows: [] }; });
+
+        if (already.rows.length) {
+          const keepId = already.rows[0].id;
+
+          // Record the file so it is not fetched and extracted again on every
+          // scan, but not as a hearing: is_hearing_notice FALSE and dismissed
+          // are what every reader in this application filters on, so the row
+          // never reaches a calendar. hearing_date is kept, so the merge can
+          // be read back and undone.
+          await db.query(
+            `INSERT INTO client_hearing_notices
+               (client_key, client_name, a_number, dropbox_path, dropbox_hash,
+                hearing_date, hearing_time_text, hearing_type, raw_extraction,
+                is_hearing_notice, duplicate_of, dismissed_at, dismiss_reason)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, FALSE, $10, NOW(), $11)
+             ON CONFLICT (client_key, dropbox_path, dropbox_hash) DO UPDATE
+               SET duplicate_of = EXCLUDED.duplicate_of,
+                   is_hearing_notice = FALSE,
+                   dismissed_at = COALESCE(client_hearing_notices.dismissed_at, NOW()),
+                   dismiss_reason = COALESCE(client_hearing_notices.dismiss_reason, EXCLUDED.dismiss_reason)`,
+            [
+              clientKey, clientName || null, aNumber || null,
+              file.path_display, file.content_hash || null,
+              hearingDate, extraction.hearing_time || null,
+              extraction.hearing_type || null,
+              JSON.stringify(extraction), keepId,
+              `duplicate of notice #${keepId} (same client, same hearing date)`,
+            ]
+          ).catch((e) => console.warn("[hearing-notices] duplicate row:", e.message));
+
+          // This copy may carry a detail the one on the calendar lacks -- a
+          // time, a courtroom, a judge. Fill gaps only; COALESCE(existing,
+          // new) can never overwrite a value that is already there.
+          await db.query(
+            `UPDATE client_hearing_notices SET
+               hearing_time_text = COALESCE(hearing_time_text, $2),
+               hearing_type      = COALESCE(hearing_type, $3),
+               court_name        = COALESCE(court_name, $4),
+               court_address     = COALESCE(court_address, $5),
+               judge_name        = COALESCE(judge_name, $6),
+               notice_type       = COALESCE(notice_type, $7)
+             WHERE id = $1`,
+            [
+              keepId, extraction.hearing_time || null, extraction.hearing_type || null,
+              extraction.court_name || null, extraction.court_address || null,
+              extraction.judge_name || null, extraction.notice_type || null,
+            ]
+          ).catch((e) => console.warn(`[hearing-notices] enrich #${keepId}:`, e.message));
+
+          duplicates.push({
+            file: file.name, dropbox_path: file.path_display, duplicate_of: keepId,
+          });
+          continue;   // not a new hearing: nothing to notify anybody about
+        }
+
         const inserted = await db.query(
           `INSERT INTO client_hearing_notices
              (client_key, client_name, a_number, dropbox_path, dropbox_hash,
@@ -427,7 +525,7 @@ async function scanClientFolder({ clientKey, clientName, aNumber, dropboxFolderP
     console.warn(`[scan-state] ${clientKey}: ${stateErr.message}`);
   }
 
-  return { scanned, skipped, notices, errors, total_candidates: files.length, estimated_cost_usd: estimatedCostUsd, delta_skipped: false };
+  return { scanned, skipped, notices, duplicates, errors, total_candidates: files.length, estimated_cost_usd: estimatedCostUsd, delta_skipped: false };
 }
 
 // ── Retrieval ────────────────────────────────────────────
@@ -553,8 +651,324 @@ async function dismissPastNotices({ gracePeriodDays = 1 } = {}) {
   return { dismissed_count: result.rowCount, dismissed: result.rows };
 }
 
+// ── Duplicate hearings: find, preview, merge ──────────────
+//
+//  "double check the function to add and delete hearings. right now there
+//   are alot of duplicate hearings in the calender."
+//
+//  WHY THEY HAPPEN. A row in client_hearing_notices is two things at once:
+//  a note that a FILE has been read, and a note that a HEARING exists. Only
+//  the first was ever deduplicated -- the unique index is on
+//  (client_key, dropbox_path, dropbox_hash). So the same hearing notice
+//  sitting in two Dropbox folders, or re-saved under a new name, was two
+//  files, and therefore two hearings, and therefore two reminders. The
+//  email path (court-mail.js) has always checked the hearing itself before
+//  inserting; the Dropbox path never did, and neither checked the other.
+//
+//  scanClientFolder now makes that check, so no new ones appear. What
+//  follows is for the ones already in the table.
+//
+//  IT DOES NOT CLEAN UP BY ITSELF. These are client records. Some have
+//  already been sent to the client; some were dismissed by hand with a
+//  reason somebody typed. The page shows exactly what it would merge and
+//  changes nothing until the button is pressed, and a merge is reversible:
+//  the losing rows keep their hearing_date and their file, and are marked
+//  duplicate_of the row that stayed.
+
+// How much of a hearing a given copy actually knows. The fullest copy is
+// the one worth keeping; a copy the client has already been told about wins
+// a tie, because that is the one the reminder log and the client's own
+// records point at.
+function noticeCompleteness(n) {
+  return (n.notified_at ? 8 : 0)
+    + (n.hearing_time_text ? 4 : 0)
+    + (n.court_name ? 2 : 0)
+    + (n.judge_name ? 1 : 0)
+    + (n.court_address ? 1 : 0)
+    + (n.hearing_type ? 1 : 0);
+}
+
+/**
+ * Every hearing that is on the calendar more than once: same client, same
+ * day. Read-only.
+ *
+ * Same day, not same timestamp, on purpose. Two copies of one notice often
+ * disagree about the time -- one was read as midnight because no time was
+ * printed on that page -- and grouping on the timestamp would file them as
+ * two different hearings, which is the bug, not the fix.
+ */
+async function findDuplicateHearings({ includePast = false } = {}) {
+  await initTable();
+
+  const r = await db.query(
+    `SELECT client_key, hearing_date::date AS day, COUNT(*)::int AS n
+       FROM client_hearing_notices
+      WHERE is_hearing_notice = TRUE
+        AND dismissed_at IS NULL
+        AND duplicate_of IS NULL
+        AND hearing_date IS NOT NULL
+        ${includePast ? "" : "AND hearing_date >= CURRENT_DATE"}
+      GROUP BY client_key, hearing_date::date
+     HAVING COUNT(*) > 1
+      ORDER BY hearing_date::date ASC
+      LIMIT 200`
+  );
+
+  const groups = [];
+  for (const g of r.rows) {
+    const rows = (await db.query(
+      `SELECT id, client_key, client_name, a_number, dropbox_path, dropbox_hash,
+              hearing_date, hearing_time_text, hearing_type, court_name,
+              court_address, judge_name, notice_type, confidence,
+              notified_at, notification_channel, created_at
+         FROM client_hearing_notices
+        WHERE client_key = $1 AND hearing_date::date = $2::date
+          AND is_hearing_notice = TRUE AND dismissed_at IS NULL AND duplicate_of IS NULL
+        ORDER BY id ASC`,
+      [g.client_key, g.day]
+    )).rows;
+    if (rows.length < 2) continue;
+
+    const sorted = [...rows].sort(
+      (a, b) => noticeCompleteness(b) - noticeCompleteness(a) || a.id - b.id);
+
+    // Reasons a human has to look at this one rather than trust the suggestion.
+    const warnings = [];
+    const distinct = (f) => [...new Set(rows.map(f).filter(Boolean))];
+    const times = distinct(n => n.hearing_time_text);
+    if (times.length > 1) warnings.push(`the copies disagree about the time: ${times.join(" vs ")}`);
+    const types = distinct(n => (n.hearing_type || "").trim());
+    if (types.length > 1) warnings.push(`and about the kind of hearing: ${types.join(" vs ")}`);
+    const courts = distinct(n => (n.court_name || "").trim());
+    if (courts.length > 1) warnings.push(`and about the court: ${courts.join(" vs ")}`);
+    const sent = rows.filter(n => n.notified_at);
+    if (sent.length > 1) warnings.push(`${sent.length} of these have already been sent to the client`);
+    const paths = distinct(n => n.dropbox_path);
+    if (paths.length > 1 && distinct(n => n.dropbox_hash).length === 1)
+      warnings.push("the same file is filed in more than one Dropbox folder — worth merging the folders too");
+
+    groups.push({
+      client_key: g.client_key,
+      client_name: rows[0].client_name,
+      a_number: rows[0].a_number,
+      day: g.day,
+      count: g.n,
+      notices: sorted,
+      keep_id: sorted[0].id,
+      collapse_ids: sorted.slice(1).map(n => n.id),
+      warnings,
+    });
+  }
+  return groups;
+}
+
+/**
+ * Collapse the extra copies into one.
+ *
+ * The losing rows are not deleted. They keep their hearing_date, their
+ * Dropbox path and their extraction, and gain duplicate_of pointing at the
+ * row that stayed -- so this can be read back, audited, or undone. They are
+ * marked is_hearing_notice = FALSE and dismissed, which is what every reader
+ * in the application filters on, so they leave the calendar and stop
+ * producing reminders without a single query needing to change.
+ */
+async function mergeDuplicateHearings(keepId, collapseIds) {
+  await initTable();
+
+  const ids = [...new Set(collapseIds.map(Number).filter(n => Number.isInteger(n) && n !== keepId))];
+  if (!Number.isInteger(keepId) || !ids.length) throw new Error("need a row to keep and at least one to collapse");
+
+  // The page may have been open a while. Re-check that these rows really are
+  // the same client and the same day before touching them: merging two
+  // unrelated hearings is far worse than showing a stale page.
+  const keep = (await db.query(
+    `SELECT id, client_key, hearing_date::date AS day FROM client_hearing_notices WHERE id = $1`,
+    [keepId])).rows[0];
+  if (!keep) throw new Error(`notice #${keepId} not found`);
+
+  const victims = (await db.query(
+    `SELECT id, client_key, hearing_date::date AS day FROM client_hearing_notices WHERE id = ANY($1::int[])`,
+    [ids])).rows;
+  const mismatched = victims.filter(
+    v => v.client_key !== keep.client_key || String(v.day) !== String(keep.day));
+  if (mismatched.length) {
+    throw new Error(
+      `refusing to merge: #${mismatched.map(v => v.id).join(", #")} `
+      + `${mismatched.length === 1 ? "is" : "are"} not the same client and date as #${keepId}. `
+      + "Reload the page and try again.");
+  }
+  if (!victims.length) throw new Error("none of those rows exist any more");
+
+  // Anything a losing copy knows that the keeper does not, the keeper gets.
+  // COALESCE, so a copy can only fill a gap, never overwrite what is there.
+  await db.query(
+    `UPDATE client_hearing_notices k SET
+       hearing_time_text = COALESCE(k.hearing_time_text, d.hearing_time_text),
+       hearing_type      = COALESCE(k.hearing_type,      d.hearing_type),
+       court_name        = COALESCE(k.court_name,        d.court_name),
+       court_address     = COALESCE(k.court_address,     d.court_address),
+       judge_name        = COALESCE(k.judge_name,        d.judge_name),
+       notice_type       = COALESCE(k.notice_type,       d.notice_type),
+       a_number          = COALESCE(k.a_number,          d.a_number),
+       client_name       = COALESCE(k.client_name,       d.client_name)
+     FROM (
+       SELECT MIN(hearing_time_text) AS hearing_time_text, MIN(hearing_type) AS hearing_type,
+              MIN(court_name) AS court_name, MIN(court_address) AS court_address,
+              MIN(judge_name) AS judge_name, MIN(notice_type) AS notice_type,
+              MIN(a_number) AS a_number, MIN(client_name) AS client_name
+         FROM client_hearing_notices WHERE id = ANY($2::int[])
+     ) d
+     WHERE k.id = $1`,
+    [keepId, ids]);
+
+  const collapsed = await db.query(
+    `UPDATE client_hearing_notices SET
+       duplicate_of      = $1,
+       is_hearing_notice = FALSE,
+       dismissed_at      = COALESCE(dismissed_at, NOW()),
+       dismiss_reason    = COALESCE(dismiss_reason, 'merged into notice #' || $1)
+     WHERE id = ANY($2::int[])
+     RETURNING id`,
+    [keepId, ids]);
+
+  console.log(`[hearing-notices] merged ${collapsed.rowCount} duplicate(s) into #${keepId}`);
+  return { keep_id: keepId, merged_count: collapsed.rowCount, merged_ids: collapsed.rows.map(r => r.id) };
+}
+
+/** Put a merged row back on the calendar. */
+async function unmergeDuplicateHearing(id) {
+  await initTable();
+  const r = await db.query(
+    `UPDATE client_hearing_notices SET
+       duplicate_of = NULL, is_hearing_notice = TRUE,
+       dismissed_at = NULL, dismiss_reason = NULL
+     WHERE id = $1 AND duplicate_of IS NOT NULL AND hearing_date IS NOT NULL
+     RETURNING id, client_name, hearing_date`,
+    [id]);
+  if (!r.rowCount) throw new Error(`#${id} is not a merged duplicate with a date on it`);
+  return r.rows[0];
+}
+
+function renderDuplicateHearingsPage(groups, { includePast = false } = {}) {
+  const { renderAdminChrome } = require("./hearing-notes");
+  const esc = (s) => String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+  const extra = groups.reduce((n, g) => n + (g.count - 1), 0);
+  const day = (d) => new Date(`${String(d).slice(0, 10)}T12:00:00Z`)
+    .toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", year: "numeric", month: "short", day: "numeric" });
+
+  const cards = groups.map(g => {
+    const rows = g.notices.map((n, i) => {
+      const keep = i === 0;
+      const folder = n.dropbox_path
+        ? esc(String(n.dropbox_path).split("/").slice(-2).join("/"))
+        : '<em style="color:#8A827C;">from email</em>';
+      return `<tr style="${keep ? "background:#FFF4E8;" : ""}">
+        <td style="padding:8px 10px; white-space:nowrap;">${keep
+          ? '<strong style="color:#A34C00;">KEEP</strong>'
+          : '<span style="color:#5E5854;">merge in</span>'}</td>
+        <td style="padding:8px 10px; font-family:ui-monospace,monospace; font-size:12px;">#${n.id}</td>
+        <td style="padding:8px 10px; font-size:13px;">${esc(n.hearing_time_text) || '<span style="color:#8A827C;">no time</span>'}</td>
+        <td style="padding:8px 10px; font-size:13px;">${esc(n.hearing_type) || "—"}</td>
+        <td style="padding:8px 10px; font-size:13px;">${esc(n.court_name) || "—"}</td>
+        <td style="padding:8px 10px; font-size:12px; color:#5E5854;">${folder}</td>
+        <td style="padding:8px 10px; text-align:center;">${n.notified_at
+          ? `<span title="sent to the client ${esc(n.notified_at)}">sent</span>` : ""}</td>
+      </tr>`;
+    }).join("");
+
+    const warn = g.warnings.length ? `
+      <div style="margin:0 0 14px; padding:10px 14px; background:#FFF4E8; border-left:3px solid #FF7B00; font-size:13px; color:#1E1B1A;">
+        <strong>Read this one before merging.</strong> ${g.warnings.map(esc).join(". ")}.
+      </div>` : "";
+
+    return `<section style="background:#FFFFFF; border:1px solid #E8E3DC; border-radius:8px; padding:20px; margin-bottom:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:4px;">
+        <h2 style="margin:0; font-size:18px; color:#2B2523;">${esc(g.client_name) || esc(g.client_key)}</h2>
+        <span style="font-size:13px; color:#5E5854;">${day(g.day)} · ${g.count} copies${g.a_number ? ` · ${esc(g.a_number)}` : ""}</span>
+      </div>
+      <p style="margin:0 0 14px; font-size:13px; color:#5E5854;">
+        One hearing, ${g.count} rows. Merging keeps #${g.keep_id} and fills any gaps in it from the others.
+      </p>
+      ${warn}
+      <table style="width:100%; border-collapse:collapse; font-size:13px; margin-bottom:16px;">
+        <thead><tr style="text-align:left; color:#8A827C; font-size:11px; letter-spacing:.06em; text-transform:uppercase;">
+          <th style="padding:6px 10px;"></th><th style="padding:6px 10px;">Row</th><th style="padding:6px 10px;">Time</th>
+          <th style="padding:6px 10px;">Type</th><th style="padding:6px 10px;">Court</th>
+          <th style="padding:6px 10px;">File</th><th style="padding:6px 10px;"></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <button type="button" class="merge-btn" data-keep="${g.keep_id}" data-collapse="${g.collapse_ids.join(",")}"
+        style="background:#A34C00; color:#FFFFFF; border:0; padding:10px 18px; border-radius:6px; font-size:14px; font-weight:600; cursor:pointer;">
+        Merge these ${g.count} into #${g.keep_id}
+      </button>
+      <span class="merge-msg" style="margin-left:12px; font-size:13px;"></span>
+    </section>`;
+  }).join("");
+
+  const body = `
+    <div class="page-header"><h1>Duplicate hearings</h1></div>
+
+    <p style="max-width:62ch; color:#1E1B1A; font-size:14px; line-height:1.6;">
+      ${groups.length
+        ? `${groups.length} hearing${groups.length === 1 ? " is" : "s are"} on the calendar more than once — ${extra} extra row${extra === 1 ? "" : "s"} in all.
+           Nothing here has been changed. Merging keeps the fullest copy, fills its gaps from the others, and takes the
+           rest off the calendar without deleting them, so a merge can be undone.`
+        : `No hearing is on the calendar twice${includePast ? "" : " from today onward"}. New ones are now prevented at the
+           point a notice is read, so this page should stay empty.`}
+    </p>
+
+    <p style="font-size:13px; color:#5E5854;">
+      <a href="/admin/hearing/notices/duplicates${includePast ? "" : "?past=1"}" style="color:#A34C00;">
+        ${includePast ? "Show only upcoming hearings" : "Include hearings that have already happened"}</a>
+      &nbsp;·&nbsp;
+      <a href="/admin/hearing/notes/duplicates" style="color:#A34C00;">Duplicate hearing notes (a different table)</a>
+    </p>
+
+    ${cards}
+
+    <script>
+      document.querySelectorAll(".merge-btn").forEach(function (btn) {
+        btn.addEventListener("click", async function () {
+          var msg = btn.parentElement.querySelector(".merge-msg");
+          var keep = parseInt(btn.dataset.keep, 10);
+          var collapse = btn.dataset.collapse.split(",").map(Number).filter(Boolean);
+          if (!window.confirm("Keep #" + keep + " and merge " + collapse.length + " other row(s) into it?\\n\\nThis can be undone.")) return;
+          btn.disabled = true; btn.style.opacity = ".5";
+          msg.style.color = "#5E5854"; msg.textContent = "merging\\u2026";
+          try {
+            var resp = await fetch("/admin/hearing/notices/merge-duplicates", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ keep_id: keep, collapse_ids: collapse }),
+            });
+            var data = await resp.json();
+            if (!data.ok) throw new Error(data.error || "merge failed");
+            msg.style.color = "#A34C00";
+            msg.textContent = "merged " + data.merged_count + " into #" + data.keep_id + ".";
+            btn.closest("section").style.opacity = ".45";
+          } catch (e) {
+            msg.style.color = "#A34C00";
+            msg.textContent = e.message;
+            btn.disabled = false; btn.style.opacity = "1";
+          }
+        });
+      });
+    </script>`;
+
+  return renderAdminChrome({ title: "Duplicate hearings", body, activeItem: "notice-duplicates" });
+}
+
 module.exports = {
   initTable,
+  findDuplicateHearings,
+  mergeDuplicateHearings,
+  unmergeDuplicateHearing,
+  renderDuplicateHearingsPage,
+  noticeCompleteness,
   extractFromFile,
   fetchDropboxFile,
   scanClientFolder,

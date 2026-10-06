@@ -45,6 +45,18 @@ const PT = "America/Los_Angeles";
 const todayPT = (now = new Date()) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: PT, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 const addDays = (ymd, n) => { const d = new Date(`${ymd}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+// The hour of the day in the office, 0-23.
+//
+// Three crons used to add a fixed -8 to the UTC hour. That is right from
+// November to March and wrong for the other eight months, so every job that
+// called itself "7 AM Pacific" actually ran at 8 AM through all of PDT.
+// hourCycle h23 rather than hour12:false on purpose: some ICU builds render
+// midnight as "24" with hour12:false, which would make an hour-0 job never
+// match and a 3 AM one fire on the wrong side of the night.
+const firmHour = (now = new Date()) =>
+  parseInt(new Intl.DateTimeFormat("en-GB", { timeZone: PT, hour: "2-digit", hourCycle: "h23" })
+    .format(now), 10) % 24;
 const weekdayOf = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "long" });
 // Hearing dates are stored as the date and time printed on the notice, with
 // no zone, so they are read back the same way (in UTC), never converted:
@@ -246,4 +258,4 @@ async function read(args, { now = new Date(), visibleKeys = null } = {}) {
   return out;
 }
 
-module.exports = { read, todayPT, addDays, storedDay, storedTime, instantPT, minutesOf, CALENDAR_MAX };
+module.exports = { read, todayPT, firmHour, addDays, storedDay, storedTime, instantPT, minutesOf, CALENDAR_MAX };

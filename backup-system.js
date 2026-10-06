@@ -38,7 +38,7 @@ const RETENTION_DAYS = 30;
 // this forces the API to operate against the user's home namespace instead
 // of the team space root, giving guaranteed write access.
 const USE_HOME_NAMESPACE = true;
-const TIMEZONE_OFFSET_HOURS = -8;   // Pacific (approx)
+const { firmHour, todayPT } = require("./court-calendar");
 const CRON_HOUR = 3;                 // Run at 3 AM Pacific
 
 // ── Snapshot all tables to a JSON object ─────────────────
@@ -560,8 +560,8 @@ function startCron() {
   async function tick() {
     try {
       const now = new Date();
-      const pacificHour = (now.getUTCHours() + TIMEZONE_OFFSET_HOURS + 24) % 24;
-      const dateKey = now.toISOString().substring(0, 10);
+      const pacificHour = firmHour(now);
+      const dateKey = todayPT(now);     // the firm's day, so the guard turns over at Pacific midnight
       if (pacificHour === CRON_HOUR && _lastRunDate !== dateKey) {
         _lastRunDate = dateKey;
         console.log("[backup] cron trigger at", now.toISOString());

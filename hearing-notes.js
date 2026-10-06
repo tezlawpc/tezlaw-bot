@@ -1574,6 +1574,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/hearing/history" class="nav-link ${isActive('history')}" data-perm="notes.history">
         <span class="nav-icon">⌘</span><span class="nav-label">Hearing History</span>
       </a>
+      <a href="/admin/hearing/notices/duplicates" class="nav-link ${isActive('notice-duplicates')}" data-perm="notes.master">
+        <span class="nav-icon">◫</span><span class="nav-label">Duplicate Hearings</span>
+      </a>
     </div>
 
     <!-- ── Civil Litigation section ── -->
@@ -3205,7 +3208,9 @@ function renderHistoryPage(notes) {
       <h1>Hearing Notes History</h1>
       <a href="/admin/hearing/notes" class="back-link">← Back to note-taking</a>
       &nbsp;·&nbsp;
-      <a href="/admin/hearing/notes/duplicates" class="back-link" style="color:#9C2B1E;">🧹 Find duplicates</a>
+      <a href="/admin/hearing/notes/duplicates" class="back-link" style="color:#A34C00;">🧹 Duplicate notes</a>
+      &nbsp;·&nbsp;
+      <a href="/admin/hearing/notices/duplicates" class="back-link" style="color:#A34C00;">◫ Duplicate hearings on the calendar</a>
     </div>
 
     <div style="background:white; padding:15px; border-radius:4px; margin-bottom:15px; border:1px solid #E8E3DC;">

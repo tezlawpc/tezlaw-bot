@@ -296,7 +296,9 @@ async function executeTool(db, user, name, args, sink = null, ctx = {}) {
       const given = ctx && ctx.visibleClientKeys;
       const visibleKeys = everything ? null : (given instanceof Set ? given : new Set());
       const days = Math.min(365, Math.max(1, parseInt(args.days, 10) || 30));
-      return await require("./court-calendar").read({ days, client: args.client }, { visibleKeys });
+      // ctx.now lets a caller pin the clock (the checks do); live callers omit it.
+      return await require("./court-calendar").read({ days, client: args.client },
+        { visibleKeys, now: (ctx && ctx.now) || new Date() });
     }
 
     if (name === "list_my_tasks") {

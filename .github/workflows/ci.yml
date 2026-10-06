@@ -209,6 +209,12 @@ jobs:
       - name: Hearing time quoted, never computed
         run: node scripts/check-hearing-when.js
 
+      # The same hearing in two Dropbox folders was two files, so it became
+      # two hearings on the calendar and two reminders to the client. The
+      # table dedupes files; it has to dedupe hearings too.
+      - name: One hearing, one row
+        run: node scripts/check-hearing-dedup.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

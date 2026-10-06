@@ -21,7 +21,7 @@
 const db = require("./db");
 const axios = require("axios");
 
-const TIMEZONE_OFFSET_HOURS = -8;    // PST default; adjust for DST manually
+const { firmHour, todayPT } = require("./court-calendar");
 const ALERT_DAYS = [14, 7, 3, 1, 0]; // alert schedule from due date
 
 // ─── Schema ───────────────────────────────────────────
@@ -686,29 +686,33 @@ async function sendTelegramAlert(text, topic) {
 // ─── Cron scheduler ──────────────────────────────────
 
 function scheduleDailyAlerts() {
-  // Run daily at 7 AM Pacific.  Pacific = UTC-8 (PST) or UTC-7 (PDT).
-  // Schedule based on TIMEZONE_OFFSET_HOURS.
-  const targetHourPacific = 7;
-  const targetHourUTC = (targetHourPacific - TIMEZONE_OFFSET_HOURS + 24) % 24;
+  // Check hourly and fire when it is actually 7 o'clock in West Covina.
+  //
+  // The previous version computed one target UTC hour at boot, from a fixed
+  // -8 offset. That was an hour late for the eight months of PDT, and being
+  // computed once it never noticed the clocks changing under a long-running
+  // process either. Same shape as the reminder and backup crons now.
+  const CHECK_INTERVAL_MS = 60 * 60 * 1000;
+  const TARGET_HOUR_PACIFIC = 7;
+  let lastRunDay = null;
 
-  function msUntilTarget() {
-    const now = new Date();
-    const next = new Date(now);
-    next.setUTCHours(targetHourUTC, 0, 0, 0);
-    if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-    return next - now;
+  async function tick() {
+    try {
+      const now = new Date();
+      const day = todayPT(now);
+      if (firmHour(now) === TARGET_HOUR_PACIFIC && lastRunDay !== day) {
+        lastRunDay = day;
+        console.log("[deadline-tracker] daily alert run at", now.toISOString());
+        await runDailyAlerts();
+      }
+    } catch (e) {
+      console.error("[deadline-tracker] alert tick error:", e.message);
+    }
   }
 
-  function scheduleNext() {
-    const ms = msUntilTarget();
-    console.log(`[deadline-tracker] Next alert run in ${Math.round(ms / 60000)} min`);
-    setTimeout(async () => {
-      try { await runDailyAlerts(); }
-      catch (e) { console.error("[deadline-tracker] Daily run failed:", e); }
-      scheduleNext();
-    }, ms);
-  }
-  scheduleNext();
+  setTimeout(tick, 90 * 1000);
+  setInterval(tick, CHECK_INTERVAL_MS);
+  console.log("✅ Deadline alert cron scheduled (7 AM Pacific daily)");
 }
 
 // ─── UI rendering ────────────────────────────────────

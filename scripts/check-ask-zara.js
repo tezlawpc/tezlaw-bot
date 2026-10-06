@@ -504,7 +504,10 @@ check("in the app: an empty client list sees no hearing or deadline; it never be
   assert.ok(!r.warning);
 });
 check("in the app: the hearing look-up is the calendar; an admin sees all of it, a paralegal needs a client list", async () => {
-  const run = (user, ctx) => realAppChat.executeTool(fakeDb, user, "list_upcoming_hearings", { days: 7 }, null, ctx);
+  // NOW, like every other calendar test here. Without it this ran against the
+  // real date and went red the morning the fixtures aged out from under it.
+  const run = (user, ctx) => realAppChat.executeTool(
+    fakeDb, user, "list_upcoming_hearings", { days: 7 }, null, { ...ctx, now: NOW });
   state.cal = CAL();
   let r = await run({ uid: 1, u: "jj", n: "JJ Zhang", r: "admin" }, {});
   assert.ok(r.hearings.length >= 6 && r.hearings.some(h => h.client === "Zhou, Lin") && !r.limited_to_own_clients);
