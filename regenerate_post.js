@@ -55,7 +55,7 @@ INCLUDE these internal links naturally:
 END with this author box exactly:
 <div class="author-box" style="background:#f5f5f5;padding:20px;margin-top:30px;border-left:4px solid #c8a96e;">
 <strong>About the Author: JJ Zhang, Esq.</strong><br>
-JJ Zhang is the managing attorney at Tez Law P.C. Licensed to practice in California (Bar #326666), JJ represents clients in immigration courts, federal courts, and California state courts.<br><br>
+JJ Zhang is the founding attorney at Tez Law P.C. Licensed to practice in California (Bar #326666), JJ represents clients in immigration courts, federal courts, and California state courts.<br><br>
 📞 <strong>626-678-8677</strong><br>
 💬 WhatsApp · WeChat · Telegram: <a href="https://tezlawfirm.com/jj">tezlawfirm.com/jj</a><br>
 🌐 <a href="https://tezlawfirm.com">www.tezlawfirm.com</a><br><br>
@@ -68,7 +68,7 @@ END with this disclaimer:
 
 END with this JSON-LD schema:
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"Article","headline":"Supreme Court Likely to Reject Trump Birthright Citizenship Ban 2026","author":{"@type":"Person","name":"JJ Zhang","jobTitle":"Managing Attorney","worksFor":{"@type":"LegalService","name":"Tez Law P.C.","url":"https://tezlawfirm.com"}},"publisher":{"@type":"Organization","name":"Tez Law P.C.","url":"https://tezlawfirm.com"},"datePublished":"2026-04-15","dateModified":"2026-04-15"}
+{"@context":"https://schema.org","@type":"Article","headline":"Supreme Court Likely to Reject Trump Birthright Citizenship Ban 2026","author":{"@type":"Person","name":"JJ Zhang","jobTitle":"Founding Attorney","worksFor":{"@type":"LegalService","name":"Tez Law P.C.","url":"https://tezlawfirm.com"}},"publisher":{"@type":"Organization","name":"Tez Law P.C.","url":"https://tezlawfirm.com"},"datePublished":"2026-04-15","dateModified":"2026-04-15"}
 </script>
 
 Return ONLY the HTML content, no JSON wrapper, no backticks.`;

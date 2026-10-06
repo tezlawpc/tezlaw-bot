@@ -58,7 +58,7 @@ const PRACTICE_LINKS = [
 const SOURCES_FILE = "/var/data/sources.json";
 
 const JJ_VOICE = `
-You are rewriting a legal blog post in the voice of JJ Zhang, managing attorney at Tez Law P.C.
+You are rewriting a legal blog post in the voice of JJ Zhang, founding attorney at Tez Law P.C.
 JJ's style: Conversational and direct. Signature phrase: "Protect your rights — we handle the rest."
 Uses "we"/"our team" not "I". Short punchy sentences mixed with longer explanations.
 Never uses: "In today's complex landscape", "navigating", "it's important to note", "comprehensive", "multifaceted".

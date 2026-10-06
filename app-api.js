@@ -905,7 +905,7 @@ Attorney makes no guarantee regarding the outcome. USCIS, the Immigration Court,
 6. TERMINATION
 Either party may terminate this agreement upon written notice. If Client terminates, earned fees are non-refundable.
 
-Managing Attorney: JJ Zhang, California Bar #326666
+Founding Attorney: JJ Zhang, California Bar #326666
 Tez Law P.C. · 626-678-8677 · jj@tezlawfirm.com
 
 Client signature: ______________________________  Date: _______________
@@ -949,7 +949,7 @@ Client agrees to attend all medical appointments, provide truthful and complete 
 6. NO GUARANTEE
 Attorney makes no guarantee regarding recovery amount or timing.
 
-Managing Attorney: JJ Zhang, California Bar #326666
+Founding Attorney: JJ Zhang, California Bar #326666
 Tez Law P.C. · 626-678-8677 · jj@tezlawfirm.com
 
 Client signature: ______________________________  Date: _______________
@@ -984,7 +984,7 @@ We appreciate the opportunity to serve you and look forward to a successful outc
 Sincerely,
 
 JJ Zhang
-Managing Attorney
+Founding Attorney
 Tez Law P.C.
 California Bar #326666`,
         variables: [

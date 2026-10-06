@@ -49,7 +49,7 @@ Structure the motion in these sections:
 4. LEGAL STANDARD - cite 8 C.F.R. § 1003.29, Matter of L-A-B-R- (good cause factors: likelihood of relief, statutory or regulatory bases, DHS position, procedural posture, diligence, prior continuances)
 5. STATEMENT OF GOOD CAUSE - apply the L-A-B-R- factors to these facts
 6. PRAYER FOR RELIEF - specific requested continuance date range if provided
-7. RESPECTFULLY SUBMITTED signature block for TEZ LAW FIRM (JJ Zhang, Managing Attorney, CA Bar #326666)
+7. RESPECTFULLY SUBMITTED signature block for TEZ LAW FIRM (JJ Zhang, Founding Attorney, CA Bar #326666)
 8. CERTIFICATE OF SERVICE
 
 Use formal legal writing. First-person plural ("Respondent respectfully requests..."). Do NOT include headers like "**Motion Draft**" — output the motion itself.`,
@@ -73,7 +73,7 @@ Structure:
 6. TIMELINESS ANALYSIS - address the 90-day bar directly (met, or excused, or exception applies)
 7. PRIMA FACIE ELIGIBILITY FOR RELIEF - if applicable, show respondent is eligible for the underlying relief sought (asylum, cancellation, adjustment, etc.)
 8. PRAYER FOR RELIEF
-9. Signature block: TEZ LAW FIRM, JJ Zhang, Managing Attorney, CA Bar #326666
+9. Signature block: TEZ LAW FIRM, JJ Zhang, Founding Attorney, CA Bar #326666
 10. CERTIFICATE OF SERVICE
 
 Reference attached exhibits by exhibit letter. Use formal legal writing. Output the motion itself, no meta-commentary.`,

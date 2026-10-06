@@ -16,7 +16,7 @@ const AGENTS = {
   // ── Immigration Agent ─────────────────────────────────────
   immigration: {
     name: "Immigration Specialist",
-    attorney: "JJ Zhang (Managing Attorney)",
+    attorney: "JJ Zhang (Founding Attorney)",
     email: "jj@tezlawfirm.com",
     prompt: `
 ============================
@@ -66,7 +66,7 @@ COMMON ISSUES:
 - AB 60: California driver's license for undocumented. Does NOT create immigration record.
 
 ROUTE TO:
-- All immigration matters are handled by JJ Zhang (Managing Attorney) with support from his paralegal team
+- All immigration matters are handled by JJ Zhang (Founding Attorney) with support from his paralegal team
 - USCIS filings assistance: Jue Wang (paralegal) — jue.wang@tezlawfirm.com
 - Immigration court assistance: Michael Liu (paralegal) — michael.liu@tezlawfirm.com
 - Schedule consultation or URGENT matters → JJ Zhang: 626-678-8677 / jj@tezlawfirm.com`,
@@ -75,7 +75,7 @@ ROUTE TO:
   // ── Car Accident / Personal Injury Agent ─────────────────
   personal_injury: {
     name: "Personal Injury Specialist",
-    attorney: "JJ Zhang (Managing Attorney)",
+    attorney: "JJ Zhang (Founding Attorney)",
     email: "jj@tezlawfirm.com",
     prompt: `
 ============================
@@ -137,7 +137,7 @@ SPECIAL SITUATIONS:
 - Commercial truck: FMCSA regulations, higher insurance minimums, more defendants
 - Pedestrian/bicycle: driver almost always liable in CA
 
-ROUTE TO: JJ Zhang (Managing Attorney) → jj@tezlawfirm.com or 626-678-8677
+ROUTE TO: JJ Zhang (Founding Attorney) → jj@tezlawfirm.com or 626-678-8677
 Case intake assistance: Lin Mei (paralegal) — lin.mei@tezlawfirm.com`,
   },
 

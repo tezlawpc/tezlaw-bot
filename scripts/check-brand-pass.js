@@ -53,6 +53,22 @@ function check(name, fn) {
   }
   check("no email is sent as “Tez Law P.C.” to a client: the public name is TEZ Law Firm", () =>
     !/from:\s*`"Tez Law P\.C\."/.test(read("esign.js") + read("notify.js") + read("signin-code.js")));
+  check("JJ’s title is Founding Attorney everywhere: no server file says “managing attorney”", () => {
+    const old = new RegExp("managing" + " attorney", "i");
+    const skip = new Set(["node_modules", ".git"]);
+    const hits = [];
+    const walk = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) { if (!skip.has(e.name)) walk(full); continue; }
+        if (!/\.(js|json|html|md|txt|ejs)$/i.test(e.name) || e.name === "package-lock.json" || full === __filename) continue;
+        if (old.test(fs.readFileSync(full, "utf8"))) hits.push(path.relative(REPO, full));
+      }
+    };
+    walk(REPO);
+    if (hits.length) throw new Error("still in: " + hits.join(", "));
+    return true;
+  });
   for (const f of ["intake.js", "web-intake.js", "analytics.js"]) {
     check(`${f}: its email is in the firm's colours`, () => !/#0C1C36|#B79C62|#3E2818|#B8891E/i.test(read(f)));
   }

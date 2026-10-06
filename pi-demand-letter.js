@@ -371,7 +371,7 @@ async function generateDemandLetter({
    (d) The insured should demand their carrier disclose limits and tender immediately
    (e) The insured should consider retaining personal counsel if they have concerns
 
-9. **CONCLUSION** — Reiterate deadline. Contact info for response. Signature block for JJ Zhang, Managing Attorney, Tez Law P.C.
+9. **CONCLUSION** — Reiterate deadline. Contact info for response. Signature block for JJ Zhang, Founding Attorney, Tez Law P.C.
 
 # VERIFIED CASE LAW (cite ONLY from this list)
 

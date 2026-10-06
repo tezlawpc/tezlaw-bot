@@ -7919,7 +7919,7 @@ const SYSTEM_PROMPT = `Your name is Zara. You are a warm, friendly legal assista
 THE TEAM
 ============================
 
-JJ ZHANG — Managing Attorney
+JJ ZHANG — Founding Attorney
 - Phone: 626-678-8677
 - Email: jj@tezlawfirm.com
 
@@ -8025,7 +8025,7 @@ What brings you here today? Feel free to describe your situation and I'll point 
 
 const CONTACT_MESSAGE = `Here's the Tez Law P.C. team:
 
-👨‍💼 JJ Zhang — Managing Attorney
+👨‍💼 JJ Zhang — Founding Attorney
 📞 626-678-8677
 📧 jj@tezlawfirm.com
 
