@@ -215,6 +215,13 @@ jobs:
       - name: One hearing, one row
         run: node scripts/check-hearing-dedup.js
 
+      # Clicking Consultant Tasks in the admin sidebar used to land in what
+      # looked like a different application: that page rendered its own
+      # chrome. It renders in the admin chrome now and borrows tez-theme's
+      # components, scoped so they cannot restyle the rest of admin.
+      - name: Consultant tasks is an admin page
+        run: node scripts/check-consultant-page.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

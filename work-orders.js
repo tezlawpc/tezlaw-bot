@@ -287,9 +287,41 @@ function renderPage({ user, pending = [], recent = [], staff = [], files = {}, f
     <datalist id="firm-staff">${staff.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
     ${decided ? `<h3 style="margin-top:34px;">Recently decided</h3><div class="card flush"><div class="rows">${decided}</div></div>` : ""}`;
 
-  return theme.page({
-    title: "Consultant tasks", area: "Consultant Tasks",
-    nav: navFor(user, pending.length), active: "pending", who: nameOf(user), body,
+  return inAdminChrome({
+    title: "Consultant tasks", body, active: "pending", user, waiting: pending.length,
+  });
+}
+
+// These render inside the admin chrome, the same one every other /admin
+// screen uses, so that clicking "Consultant Tasks" in the sidebar stays on
+// the same page instead of landing in what looks like another application.
+//
+// The bodies are written in tez-theme's components and the admin chrome
+// defines none of them, so the styles come with them, scoped to the
+// container (tez-theme.scopedCSS). The consultant PORTAL still renders
+// through theme.page(): different audience, different sign-in, bilingual.
+//
+// Required lazily: hearing-notes is a large module and this avoids caring
+// which of the two is loaded first.
+function inAdminChrome({ title, body, active, user, waiting }) {
+  const { renderAdminChrome } = require("./hearing-notes");
+
+  // What used to be the standalone nav. Task list and Dashboard are in the
+  // sidebar now, so only the two pages that belong to this screen are left.
+  const tabs = navFor(user, waiting)
+    .filter((n) => n.key === "pending" || n.key === "alert")
+    .map((n) => `<a href="${esc(n.href)}" style="padding:8px 15px; border-radius:6px; text-decoration:none; font-size:14px; ${
+      n.key === active
+        ? "background:#A34C00; color:#FFFFFF; font-weight:600;"
+        : "background:#F3EFE9; color:#2B2523;"
+    }">${esc(n.label)}${n.count ? ` · ${esc(n.count)}` : ""}</a>`).join("");
+
+  return renderAdminChrome({
+    title,
+    activeItem: "consultant-tasks",
+    body: `<style>${theme.scopedCSS(".tez-embed")}</style>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:22px;">${tabs}</div>
+      <div class="tez-embed">${body}</div>`,
   });
 }
 
@@ -336,7 +368,7 @@ function renderAlertPage({ user, clients = [], waiting = 0, flash = null, error 
         <button type="submit" class="btn-primary">Send alert</button>
       </form>` : `<div class="empty">No client has a consultant assigned yet.</div>`}
     </div>`;
-  return theme.page({ title: "Send an alert", area: "Consultant Tasks", nav: navFor(user, waiting), active: "alert", who: nameOf(user), body });
+  return inAdminChrome({ title: "Send an alert", body, active: "alert", user, waiting });
 }
 
 /**

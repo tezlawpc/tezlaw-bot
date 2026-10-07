@@ -281,7 +281,17 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   console.warn = silence;
   const pg = wo.renderPage({ user: asRole("attorney", "Chandler Jin"), staff: ["Jue Wang"],
     pending: [{ id: 3, title: "<script>x</script>", description: "it's \"quoted\"", priority: "urgent", submitter_name: "Luna Huang", created_at: new Date(), matter_type: "pi", client_name: "Chen, Mei", assigned_to: "Lin Mei" }] });
-  check("the firm's page is plain forms — no script to break", !/<script/i.test(pg) && /method="POST" action="\/admin\/consultant-tasks\/3\/approve"/.test(pg) && /action="\/admin\/consultant-tasks\/3\/reject"/.test(pg) && !/work.?orders?/i.test(pg.replace(/<svg[\s\S]*?<\/svg>/g, "")) && /name="reason"[^>]*required/.test(pg));
+  // The rule is notify-admin.js's: no inline script in a page built from a
+  // template literal, because an apostrophe in an onclick kills every script
+  // on the page (five hours of client search, 2026-09-28). This page renders
+  // in the admin chrome now, which carries that chrome's own two script
+  // blocks, so "no <script> in the document" is no longer the test. These
+  // three are what the rule is actually for.
+  const woSource = require("fs").readFileSync(require("path").join(__dirname, "..", "work-orders.js"), "utf8");
+  const scriptBodies = (pg.match(/<script[\s\S]*?<\/script>/gi) || []).join("\n");
+  check("the firm's page contributes no script of its own", !/<script/i.test(woSource));
+  check("and nothing the consultant typed is put inside one", !/script&gt;x/.test(scriptBodies) && !/it&#39;s/.test(scriptBodies));
+  check("the firm's page is plain forms — the decision needs no script", /method="POST" action="\/admin\/consultant-tasks\/3\/approve"/.test(pg) && /action="\/admin\/consultant-tasks\/3\/reject"/.test(pg) && !/work.?orders?/i.test(pg.replace(/<svg[\s\S]*?<\/svg>/g, "")) && /name="reason"[^>]*required/.test(pg));
   check("what the consultant typed cannot break out of it", /&lt;script&gt;x/.test(pg) && /it&#39;s &quot;quoted&quot;/.test(pg));
 
   console.log(failures ? `\n${failures} check(s) FAILED` : "\nall checks passed");

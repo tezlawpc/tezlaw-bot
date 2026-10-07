@@ -105,7 +105,7 @@ ok("the role colour no longer paints over the avatar", !/avatar\.style\.backgrou
 const navEmoji = (chrome.match(/<span class="nav-icon">([^<]*)<\/span>/g) || []).filter(s => /[\u{1F000}-\u{1FAFF}]/u.test(s));
 ok("no emoji used as a menu icon", navEmoji.length === 0, navEmoji);
 ok("the consultant-task approval page is on the menu, for those who can approve",
-  /href="\/admin\/consultant-tasks" class="nav-link" data-perm="tasks\.approve"/.test(chrome) &&
+  /href="\/admin\/consultant-tasks" class="nav-link[^"]*" data-perm="tasks\.approve"/.test(chrome) &&
   /"tasks\.approve":\s+\["admin", "manager", "attorney"\]/.test(read("auth.js")));
 const pagesWithOldLook = ["server.js", "admin.js", "accounting-ui.js", "personal-injury-ui.js", "client-profiles.js", "civil-litigation-ui.js", "auth.js", "dashboard.js", "hearing-notes.js", "individual-hearing-notes.js"]
   .filter(f => /#0C1C36|#B79C62|#3E2818|Cinzel/i.test(read(f)));

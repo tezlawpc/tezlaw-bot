@@ -237,4 +237,75 @@ function authPage({ title, heading, sub = "", body = "", foot = "TEZ Law Firm ·
 </html>`;
 }
 
-module.exports = { C, CSS, FONTS, SHIELD, LOCKUP, esc, page, authPage };
+// ── Lending these components to someone else's chrome ────────
+//
+// The firm-side consultant pages live inside the admin chrome
+// (hearing-notes.renderAdminChrome), not inside page() above, so that
+// clicking them in the admin sidebar does not land somewhere that looks
+// like a different application. Their bodies are written in the components
+// below -- .card, .btn-primary, .rows, .grid2, .timeline -- and the admin
+// chrome defines none of them.
+//
+// So scope the real CSS rather than keeping a second copy of it to drift:
+// every rule is prefixed so it can only match inside the container, and the
+// rules that draw this file's own standalone chrome are dropped, because
+// the admin chrome is drawing that part.
+//
+// Dropped: html, body, main and .foot set the standalone page's layout, and
+// .tez-* is its header and nav. Everything else is a component.
+const chromeOnly = (sel) =>
+  /\.tez-[a-z-]/.test(sel)                       // this file's header, nav and sign-out
+  || /(^|\s)(html|body|main)$/.test(sel)         // and the standalone page's own layout,
+  || sel === ".foot";                            // including :lang(zh) body and the footer
+
+function closingBrace(css, open) {
+  let depth = 0;
+  for (let i = open; i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    else if (css[i] === "}" && --depth === 0) return i;
+  }
+  return css.length;
+}
+
+function scopedCSS(scope = ".tez-embed") {
+  // Comments first. The text between one rule's } and the next rule's { is
+  // the selector, and that span also contains any comment written above the
+  // rule -- so splitting it on commas splits the comment's commas too, and
+  // its fragments come out looking like selectors.
+  const source = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+
+  const rewrite = (css) => {
+    const out = [];
+    let i = 0;
+    while (i < css.length) {
+      const open = css.indexOf("{", i);
+      if (open === -1) break;
+      const selector = css.slice(i, open).trim();
+
+      // @media and friends: keep the wrapper, rewrite what is inside it.
+      if (selector.startsWith("@")) {
+        const close = closingBrace(css, open);
+        out.push(`${selector}{${rewrite(css.slice(open + 1, close))}}`);
+        i = close + 1;
+        continue;
+      }
+
+      const close = css.indexOf("}", open);
+      const block = css.slice(open + 1, close).trim();
+
+      if (selector === ":root") {
+        // The brand's custom properties. These stay unscoped: scope them and
+        // every var() in the rules below resolves to nothing.
+        out.push(`:root{${block}}`);
+      } else {
+        const kept = selector.split(",").map((x) => x.trim()).filter((x) => x && !chromeOnly(x));
+        if (kept.length) out.push(`${kept.map((x) => `${scope} ${x}`).join(",")}{${block}}`);
+      }
+      i = close + 1;
+    }
+    return out.join("\n");
+  };
+  return rewrite(source);
+}
+
+module.exports = { C, CSS, FONTS, SHIELD, LOCKUP, esc, page, authPage, scopedCSS };
