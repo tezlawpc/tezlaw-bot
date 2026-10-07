@@ -369,6 +369,9 @@ async function renderCaseDetail(caseId) {
     </div>
 
     ${solWarning}
+    ${require("./case-autofill-page").buttonFor("pi", c.id, {
+      note: "Reads this case's police report, intake sheet and medical records -- from its Dropbox folder, or ones you upload -- and proposes the details the record does not have yet. The SOL date is never read off a document; it stays yours to compute.",
+    })}
 
     <!-- Money summary -->
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:16px;">

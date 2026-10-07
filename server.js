@@ -2194,6 +2194,15 @@ require("./work-orders").mount(app, auth);
 // result as the record rule 1.7 and 1.9 questions get answered from.
 require("./conflicts-page").mount(app, auth);
 
+// -- Read the case file --------------------------------------
+// Civil, PI and federal matters: read the documents the matter's Dropbox
+// folder already holds -- or ones uploaded here -- and propose the fields
+// the record does not have yet. Every proposed value carries the phrase it
+// came from and the file it came from, and nothing is written until
+// somebody ticks it. docUpload is the same memory-backed multer the civil
+// intake extractor uses: these uploads are read, not filed.
+require("./case-autofill-page").mount(app, auth, docUpload);
+
 // Fee agreements (/admin/retainer). Seventeen divergent templates became one
 // document whose fee terms, scope and language are chosen per engagement. The
 // statutory content is not optional: § 6148 makes an agreement voidable
@@ -3279,6 +3288,10 @@ app.get("/admin/federal/:id", async (req, res) => {
       </div>` : ""}
 
       ${m.notes ? `<div style="background:white; padding:20px; border-radius:8px; border:1px solid #E8E3DC; margin-bottom:16px; white-space:pre-wrap; font-size:13px; line-height:1.6;">${esc(m.notes)}</div>` : ""}
+
+      ${require("./case-autofill-page").buttonFor("federal", m.id, {
+        note: "Reads this matter's petition, application, office actions or agency notices -- from its Dropbox folder, or ones you upload -- and proposes the details the record does not have yet. Nothing is written until you tick it.",
+      })}
 
       <div style="display:flex; gap:8px;">
         <a href="/admin/tasks/new?client_name=${encodeURIComponent(m.client_name)}&matter_type=${encodeURIComponent(fm.TYPE_GROUPS[m.matter_type] === 'trademarks' ? 'tm' : 'immigration')}${m.a_number ? '&a_number=' + encodeURIComponent(m.a_number) : ''}${m.matter_number ? '&case_number=' + encodeURIComponent(m.matter_number) : ''}${m.agency ? '&court=' + encodeURIComponent(m.agency) : ''}" style="background:#A34C00; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:600;">+ Add Task</a>
@@ -6615,6 +6628,14 @@ try {
 try {
   require("./federal-matters").initTable().catch(e => console.warn("[federal-matters] init:", e.message));
 } catch (e) { console.warn("[federal-matters] module load:", e.message); }
+
+// Init the case-autofill run log on boot. It is the permanent record of what
+// was read and what was approved -- for PI and federal matters, which keep no
+// history table of their own, it is the ONLY record -- so it should exist
+// before the first read, not be created by it.
+try {
+  require("./case-autofill").initTables().catch(e => console.warn("[case-autofill] init:", e.message));
+} catch (e) { console.warn("[case-autofill] module load:", e.message); }
 
 // Init Milestones table on boot
 try {

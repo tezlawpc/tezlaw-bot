@@ -511,6 +511,9 @@ async function renderCaseDetail(id) {
       </table>
       ${opposingHtml}
         ${conflictHtml}
+        ${require("./case-autofill-page").buttonFor("civil", id, {
+          note: "Reads this matter's complaint, summons, proof of service and fee agreement -- from its Dropbox folder, or ones you upload -- and proposes the details the record does not have yet. Dates that move the deadline chain arrive unticked.",
+        })}
 
       <!-- Court docket checker (build 37) — rendered by civil-admin.js -->
       <div data-civil-panel="docket"></div>

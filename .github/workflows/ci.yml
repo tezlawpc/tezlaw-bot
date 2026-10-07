@@ -235,6 +235,15 @@ jobs:
       - name: Fee agreements carry what the statutes require
         run: node scripts/check-retainer.js
 
+      # This writes to a live litigation record from a machine's reading of a
+      # PDF, so what it refuses to do is the whole feature: a field that
+      # already has a value is never proposed, a value it cannot quote is
+      # dropped, a field filled in since the read is skipped rather than
+      # overwritten, and only a column on that matter kind's own list can be
+      # written at all. The statute of limitations is on no list.
+      - name: Reading a case file never overwrites one
+        run: node scripts/check-case-autofill.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar
