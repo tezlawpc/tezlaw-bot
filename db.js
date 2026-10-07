@@ -12,15 +12,19 @@ function getPool() {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
-      // The firm is in West Covina and every date in this application is a
-      // Pacific date: "due today", "this week", a hearing on the 6th. The
-      // server runs UTC, so without this every CURRENT_DATE in the codebase
-      // — 91 of them — rolled over at 5pm Pacific, and from 5pm to midnight
-      // the app quietly believed it was already tomorrow. Setting it on the
-      // connection fixes all of them at once; it changes only how a date is
-      // read, never how an instant is stored, because TIMESTAMPTZ is
-      // absolute either way.
-      options: "-c timezone=America/Los_Angeles",
+      // NO time zone is set on this connection, deliberately.
+      //
+      // It was set to America/Los_Angeles once, to stop CURRENT_DATE rolling
+      // over at 5pm Pacific. That is a real problem, but this is the wrong
+      // place to solve it: a hearing is stored here as the date and time
+      // printed on the notice, with no zone, and read back the same way (see
+      // the top of court-calendar.js). Reading those values in Pacific turns
+      // a notice with no time -- stored at midnight UTC -- into 5pm the
+      // previous day, and today's hearing vanishes from the Calendar and
+      // Home screens. scripts/e2e.js is what caught it.
+      //
+      // Where a query needs the office's day, compute it in JS at that call
+      // site, as app-api.js does with officeDay.todayPT().
     });
   }
   return pool;
