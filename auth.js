@@ -87,6 +87,13 @@ const PERMISSIONS = {
   "matters.access":       ["admin"],
   "admin_panel.access":   ["admin"],
 
+  // Fee agreements. The drafting page admits admin, manager and attorney --
+  // JJ signs every one, but Chandler and the office draft them -- so the
+  // sidebar link needs a key with that shape. It sat on matters.access,
+  // which is JJ alone and means "all Matters Manager links", so the link
+  // was invisible to two of the three roles that can use the page.
+  "retainer.draft":       ["admin", "manager", "attorney"],
+
   // Hearing notes — attorneys write, paralegals + viewers can read
   "hearings.write":       ["admin", "attorney"],
   "hearings.read":        ["admin", "manager", "attorney", "paralegal", "viewer"],

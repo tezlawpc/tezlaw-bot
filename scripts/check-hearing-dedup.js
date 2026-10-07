@@ -235,6 +235,56 @@ check("the once-a-day guard turns over on the firm's day", () => {
   }
 });
 
+// ── "need a button to click and merge all" ────────────────
+
+check("one button merges every group on the page", () => {
+  assert.ok(/async function mergeAllDuplicateHearings/.test(notices),
+    "there is no merge-all");
+  assert.ok(/mergeAllDuplicateHearings/.test(server), "it is not reachable");
+  assert.ok(/merge-all-duplicates/.test(server), "no route for it");
+});
+
+check("it goes through mergeDuplicateHearings, so every guard still applies", () => {
+  const i = notices.indexOf("async function mergeAllDuplicateHearings");
+  const body = notices.slice(i, notices.indexOf("/** Put a merged row back", i));
+  assert.ok(/await mergeDuplicateHearings\(g\.keep_id, g\.collapse_ids\)/.test(body),
+    "merge-all writes its own SQL instead of reusing the one that re-checks client and date");
+  assert.ok(!/DELETE/i.test(body), "merge-all deletes something");
+});
+
+check("a group that fails does not stop the rest, and is named", () => {
+  const i = notices.indexOf("async function mergeAllDuplicateHearings");
+  const body = notices.slice(i, notices.indexOf("/** Put a merged row back", i));
+  assert.ok(/try \{/.test(body) && /catch/.test(body), "one bad group would abort the loop");
+  assert.ok(/failed\.push/.test(body), "a failure is swallowed");
+  assert.ok(/error: e\.message/.test(body), "the reason is thrown away");
+});
+
+check("it asks before it writes, and the asking is a plain form", () => {
+  assert.ok(/function renderMergeAllConfirmPage/.test(notices),
+    "merge-all writes on one click with no confirmation");
+  const i = notices.indexOf("function renderMergeAllConfirmPage");
+  const page = notices.slice(i, notices.indexOf("/** What happened, once it has. */", i));
+  assert.ok(/<form method="POST" action="\/admin\/hearing\/notices\/merge-all-duplicates"/.test(page),
+    "the confirmation is not a real form");
+  assert.ok(!/<script/i.test(page), "a script tag here means an apostrophe in a client name can kill the page");
+  assert.ok(/Cancel/.test(page), "no way out of the confirmation screen");
+});
+
+check("the confirmation repeats the warnings rather than hiding them", () => {
+  const i = notices.indexOf("function renderMergeAllConfirmPage");
+  const page = notices.slice(i, notices.indexOf("/** What happened, once it has. */", i));
+  assert.ok(/g\.warnings/.test(page),
+    "copies that disagree about the time, or were already sent, would merge unseen");
+  assert.ok(/esc\(g\.client_name\)/.test(page), "a client name reaches the page unescaped");
+});
+
+check("merge-all is behind the same permission as the page", () => {
+  const route = server.slice(server.indexOf('app.post("/admin/hearing/notices/merge-all-duplicates"'));
+  assert.ok(/gateByPerm\("notes\.master"\)/.test(route.slice(0, 200)),
+    "anybody signed in could collapse every duplicate in the firm");
+});
+
 check("the reason is written down next to the code", () => {
   assert.ok(/two things at once/.test(notices),
     "the next person has to understand why this table needed two kinds of dedup");

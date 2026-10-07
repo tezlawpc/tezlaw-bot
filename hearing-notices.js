@@ -821,18 +821,59 @@ async function mergeDuplicateHearings(keepId, collapseIds) {
      WHERE k.id = $1`,
     [keepId, ids]);
 
+  // Both uses of $1 are cast. Without the casts Postgres deduces one type
+  // for the parameter from all of its uses -- integer from duplicate_of,
+  // text from the || below -- the two deductions conflict, and it refuses
+  // the statement with "inconsistent types deduced for parameter $1"
+  // before running any of it. The merge button raised exactly that.
   const collapsed = await db.query(
     `UPDATE client_hearing_notices SET
-       duplicate_of      = $1,
+       duplicate_of      = $1::int,
        is_hearing_notice = FALSE,
        dismissed_at      = COALESCE(dismissed_at, NOW()),
-       dismiss_reason    = COALESCE(dismiss_reason, 'merged into notice #' || $1)
+       dismiss_reason    = COALESCE(dismiss_reason, 'merged into notice #' || $1::text)
      WHERE id = ANY($2::int[])
      RETURNING id`,
     [keepId, ids]);
 
   console.log(`[hearing-notices] merged ${collapsed.rowCount} duplicate(s) into #${keepId}`);
   return { keep_id: keepId, merged_count: collapsed.rowCount, merged_ids: collapsed.rows.map(r => r.id) };
+}
+
+/**
+ * Merge every duplicate group at once.
+ *
+ * "need a button to click and merge all."
+ *
+ * Each group goes through mergeDuplicateHearings, which re-checks that the
+ * rows really are the same client and the same day before touching them. A
+ * group that fails is reported and the rest still run -- one bad group
+ * should not leave the other forty unmerged, and the caller needs to know
+ * which one it was.
+ */
+async function mergeAllDuplicateHearings({ includePast = false } = {}) {
+  const groups = await findDuplicateHearings({ includePast });
+  const merged = [];
+  const failed = [];
+
+  for (const g of groups) {
+    try {
+      const r = await mergeDuplicateHearings(g.keep_id, g.collapse_ids);
+      merged.push({
+        client: g.client_name || g.client_key, day: String(g.day).slice(0, 10),
+        keep_id: g.keep_id, merged_count: r.merged_count,
+      });
+    } catch (e) {
+      failed.push({
+        client: g.client_name || g.client_key, day: String(g.day).slice(0, 10),
+        keep_id: g.keep_id, error: e.message,
+      });
+    }
+  }
+
+  const rows = merged.reduce((n, m) => n + m.merged_count, 0);
+  console.log(`[hearing-notices] merge-all: ${merged.length} group(s), ${rows} row(s), ${failed.length} failed`);
+  return { groups: groups.length, merged, failed, rows_collapsed: rows };
 }
 
 /** Put a merged row back on the calendar. */
@@ -909,6 +950,21 @@ function renderDuplicateHearingsPage(groups, { includePast = false } = {}) {
     </section>`;
   }).join("");
 
+  // One button for the lot. It goes to a confirmation screen rather than
+  // merging on click: this writes to every group on the page at once, and a
+  // bulk write wants to say what it is about to do first. A plain link and
+  // a plain form, so it does not depend on the script below loading.
+  const mergeAll = groups.length > 1 ? `
+    <div style="margin:18px 0 24px; padding:14px 16px; background:#FAF8F5; border:1px solid #E8E3DC; border-radius:6px;">
+      <a href="/admin/hearing/notices/duplicates?merge_all=1${includePast ? "&past=1" : ""}"
+         style="display:inline-block; background:#A34C00; color:#FFFFFF; padding:10px 18px; border-radius:6px; text-decoration:none; font-size:14px; font-weight:600;">
+        Merge all ${groups.length} groups
+      </a>
+      <span style="margin-left:12px; font-size:13px; color:#5E5854;">
+        Shows you the list first. Each merge can be undone.
+      </span>
+    </div>` : "";
+
   const body = `
     <div class="page-header"><h1>Duplicate hearings</h1></div>
 
@@ -927,6 +983,8 @@ function renderDuplicateHearingsPage(groups, { includePast = false } = {}) {
       &nbsp;·&nbsp;
       <a href="/admin/hearing/notes/duplicates" style="color:#A34C00;">Duplicate hearing notes (a different table)</a>
     </p>
+
+    ${mergeAll}
 
     ${cards}
 
@@ -962,10 +1020,115 @@ function renderDuplicateHearingsPage(groups, { includePast = false } = {}) {
   return renderAdminChrome({ title: "Duplicate hearings", body, activeItem: "notice-duplicates" });
 }
 
+/**
+ * What "Merge all" is about to do, before it does it.
+ *
+ * Every group, with the warnings each one carries, and one form to go
+ * through with it. The warnings are the reason this screen exists: copies
+ * that disagree about the TIME of a hearing, or copies already sent to the
+ * client, are exactly the cases where somebody should look before a single
+ * click rewrites forty rows.
+ */
+function renderMergeAllConfirmPage(groups, { includePast = false } = {}) {
+  const { renderAdminChrome } = require("./hearing-notes");
+  const esc = (s) => String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const day = (d) => new Date(`${String(d).slice(0, 10)}T12:00:00Z`)
+    .toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", year: "numeric", month: "short", day: "numeric" });
+
+  const back = `/admin/hearing/notices/duplicates${includePast ? "?past=1" : ""}`;
+  const rows = groups.reduce((n, g) => n + (g.count - 1), 0);
+  const flagged = groups.filter((g) => g.warnings.length);
+
+  const list = groups.map((g) => `
+    <tr style="border-bottom:1px solid #E8E3DC; vertical-align:top;">
+      <td style="padding:9px 12px;">${esc(g.client_name) || esc(g.client_key)}</td>
+      <td style="padding:9px 12px; white-space:nowrap;">${day(g.day)}</td>
+      <td style="padding:9px 12px;">${g.count} &rarr; 1</td>
+      <td style="padding:9px 12px; font-family:ui-monospace,monospace; font-size:12px;">keeps #${g.keep_id}</td>
+      <td style="padding:9px 12px; font-size:13px; color:${g.warnings.length ? "#A34C00" : "#8A827C"};">
+        ${g.warnings.length ? esc(g.warnings.join(". ")) + "." : "—"}
+      </td>
+    </tr>`).join("");
+
+  const body = `
+    <div class="page-header"><h1>Merge all duplicate hearings</h1></div>
+
+    <p style="max-width:62ch; color:#1E1B1A; font-size:14px; line-height:1.6;">
+      ${groups.length} hearing${groups.length === 1 ? "" : "s"} on the calendar more than once, ${rows} extra
+      row${rows === 1 ? "" : "s"} in all. Merging keeps the fullest copy of each, fills its gaps from the others,
+      and takes the rest off the calendar without deleting them. Every one of these can be undone afterwards.
+    </p>
+
+    ${flagged.length ? `
+      <div style="margin:0 0 20px; padding:12px 16px; background:#FFF4E8; border-left:3px solid #FF7B00; max-width:70ch; font-size:14px; color:#1E1B1A;">
+        <strong>${flagged.length} of these ${flagged.length === 1 ? "carries a warning" : "carry warnings"}.</strong>
+        Read the right-hand column before going ahead. Where copies disagree about the time or the court,
+        merging keeps the one at the top and fills blanks only — it does not decide which of two times is right.
+      </div>` : ""}
+
+    <table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:22px;">
+      <thead><tr style="text-align:left; color:#8A827C; font-size:11px; letter-spacing:.06em; text-transform:uppercase;">
+        <th style="padding:6px 12px;">Client</th><th style="padding:6px 12px;">Hearing</th>
+        <th style="padding:6px 12px;">Rows</th><th style="padding:6px 12px;">Keeps</th>
+        <th style="padding:6px 12px;">Worth reading</th>
+      </tr></thead>
+      <tbody>${list}</tbody>
+    </table>
+
+    <form method="POST" action="/admin/hearing/notices/merge-all-duplicates" style="display:inline-block;">
+      <input type="hidden" name="past" value="${includePast ? "1" : ""}">
+      <button type="submit" style="background:#A34C00; color:#FFFFFF; border:0; padding:11px 20px; border-radius:6px; font-size:14px; font-weight:600; cursor:pointer;">
+        Merge all ${groups.length} groups
+      </button>
+    </form>
+    <a href="${back}" style="margin-left:14px; color:#5E5854; font-size:14px;">Cancel</a>`;
+
+  return renderAdminChrome({ title: "Merge all duplicates", body, activeItem: "notice-duplicates" });
+}
+
+/** What happened, once it has. */
+function renderMergeAllResultPage(result, { includePast = false } = {}) {
+  const { renderAdminChrome } = require("./hearing-notes");
+  const esc = (s) => String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const back = `/admin/hearing/notices/duplicates${includePast ? "?past=1" : ""}`;
+
+  const body = `
+    <div class="page-header"><h1>Merged</h1></div>
+
+    <p style="max-width:62ch; font-size:14px; line-height:1.6; color:#1E1B1A;">
+      ${result.merged.length} group${result.merged.length === 1 ? "" : "s"} merged,
+      ${result.rows_collapsed} row${result.rows_collapsed === 1 ? "" : "s"} taken off the calendar.
+      Nothing was deleted — each merged row kept its date and its file, and the duplicates page can put any of them back.
+    </p>
+
+    ${result.failed.length ? `
+      <div style="margin:18px 0; padding:12px 16px; background:#FFF4E8; border-left:3px solid #FF7B00; max-width:70ch; font-size:14px;">
+        <strong>${result.failed.length} could not be merged.</strong> The rest went through.
+        <ul style="margin:8px 0 0; padding-left:20px;">
+          ${result.failed.map((f) => `<li style="margin-bottom:4px;">${esc(f.client)} · ${esc(f.day)} — ${esc(f.error)}</li>`).join("")}
+        </ul>
+      </div>` : ""}
+
+    <p style="margin-top:22px;">
+      <a href="${back}" style="display:inline-block; background:#A34C00; color:#FFFFFF; padding:10px 18px; border-radius:6px; text-decoration:none; font-size:14px; font-weight:600;">
+        Back to duplicate hearings
+      </a>
+    </p>`;
+
+  return renderAdminChrome({ title: "Merged", body, activeItem: "notice-duplicates" });
+}
+
 module.exports = {
   initTable,
   findDuplicateHearings,
   mergeDuplicateHearings,
+  mergeAllDuplicateHearings,
+  renderMergeAllConfirmPage,
+  renderMergeAllResultPage,
   unmergeDuplicateHearing,
   renderDuplicateHearingsPage,
   noticeCompleteness,

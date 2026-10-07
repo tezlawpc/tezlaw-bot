@@ -10370,6 +10370,11 @@ app.get("/admin/hearing/notices/duplicates", gateByPerm("notes.master"), async (
     const hn = require("./hearing-notices");
     const includePast = req.query.past === "1";
     const groups = await hn.findDuplicateHearings({ includePast });
+    // "Merge all" lands here first: the same list, with what it is about to
+    // do spelled out and one form to go through with it.
+    if (req.query.merge_all === "1" && groups.length) {
+      return res.send(hn.renderMergeAllConfirmPage(groups, { includePast }));
+    }
     res.send(hn.renderDuplicateHearingsPage(groups, { includePast }));
   } catch (err) {
     console.error("[notice-duplicates]:", err.message);
@@ -10391,6 +10396,22 @@ app.post("/admin/hearing/notices/merge-duplicates", async (req, res) => {
   } catch (err) {
     console.error("[merge-notice-duplicates]:", err.message);
     res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// Every group at once. Behind the same permission as the page, and reached
+// only through the confirmation screen above, which lists what it will touch.
+app.post("/admin/hearing/notices/merge-all-duplicates", gateByPerm("notes.master"), async (req, res) => {
+  try {
+    const hn = require("./hearing-notices");
+    const includePast = String(req.body && req.body.past) === "1";
+    const result = await hn.mergeAllDuplicateHearings({ includePast });
+    res.send(hn.renderMergeAllResultPage(result, { includePast }));
+  } catch (err) {
+    console.error("[merge-all-notice-duplicates]:", err.message);
+    res.status(400).send(`<h1>Nothing was merged</h1><p>${String(err.message)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>` +
+      `<p><a href="/admin/hearing/notices/duplicates">Back</a></p>`);
   }
 });
 

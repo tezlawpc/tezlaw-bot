@@ -285,4 +285,43 @@ check("the reason is written next to the code", () => {
   assert.ok(/6148/.test(src) && /6147/.test(src) && /1632/.test(src));
 });
 
+// ── "i still do not see retainer agreement tab" ───────────
+//
+// It was there, sixth of nine links inside "Intake & Pipeline", between
+// Drip Campaigns and Conflict Check — and gated on matters.access, which
+// is JJ alone. It now sits in Overview next to E-Signature, which is what
+// happens to an agreement once it is drafted.
+
+check("the link is in Overview, next to E-Signature", () => {
+  const chrome = fs.readFileSync(path.join(ROOT, "hearing-notes.js"), "utf8");
+  const nav = chrome.slice(chrome.indexOf("<span>Overview</span>"),
+                           chrome.indexOf("<span>Immigration</span>"));
+  assert.ok(/href="\/admin\/retainer"/.test(nav),
+    "Fee Agreements is not in Overview, which is where JJ looked for it");
+  const retainerAt = nav.indexOf('href="/admin/retainer"');
+  const esignAt = nav.indexOf('href="/admin/esign"');
+  assert.ok(retainerAt > -1 && esignAt > retainerAt,
+    "draft it, then send it — the order should read that way");
+  // And nowhere else: two copies of a nav link is how one of them goes stale.
+  assert.strictEqual((chrome.match(/href="\/admin\/retainer"/g) || []).length, 1,
+    "the link is in the sidebar twice");
+});
+
+check("its permission admits everyone the page admits", () => {
+  const chrome = fs.readFileSync(path.join(ROOT, "hearing-notes.js"), "utf8");
+  const auth = fs.readFileSync(path.join(ROOT, "auth.js"), "utf8");
+  const link = chrome.slice(chrome.indexOf('href="/admin/retainer"'));
+  const perm = (link.match(/data-perm="([^"]+)"/) || [])[1];
+  assert.ok(perm, "the link has no permission key at all");
+  assert.notStrictEqual(perm, "matters.access",
+    "matters.access is admin-only and means the Matters Manager links");
+
+  const row = auth.match(new RegExp('"' + perm.replace(".", "\\.") + '":\\s*\\[([^\\]]*)\\]'));
+  assert.ok(row, `${perm} is not defined in auth.js — an undefined key hides the link from everybody`);
+  const roles = row[1].split(",").map((r) => r.trim().replace(/"/g, "")).filter(Boolean).sort();
+  const page = require(path.join(ROOT, "retainer-page.js"));
+  assert.deepStrictEqual(roles, [...page.ROLES].sort(),
+    "the sidebar shows the link to a different set of people than the page lets in");
+});
+
 console.log(`\n${passed} checks passed\n`);

@@ -249,6 +249,14 @@ jobs:
       - name: Reading a case file never overwrites one
         run: node scripts/check-case-autofill.js
 
+      # Every check here that touches the database stubs db.query, so none of
+      # them can catch a SQL typing error -- the stub accepts any statement.
+      # The merge button on the duplicate-hearings page was refused by
+      # Postgres on every click because one parameter was an integer in one
+      # clause and a string in another. This reads the SQL as text.
+      - name: Query parameters carry their type
+        run: node scripts/check-sql-params.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar
