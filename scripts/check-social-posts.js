@@ -75,8 +75,8 @@ const fakeDb = { query: async (sql, v = []) => {
     if (r) Object.assign(r, { status: "skipped", decided_by: v[1] });
     return { rows: r ? [{ id: r.id }] : [] };
   }
-  if (/^SELECT lang FROM social_posts WHERE channel = 'video'/.test(q)) {
-    return { rows: T.rows.filter(r => r.channel === "video").reverse().map(r => ({ lang: r.lang })) };
+  if (/^SELECT id, lang, media->>'group' AS grp FROM social_posts WHERE channel = 'video'/.test(q)) {
+    return { rows: T.rows.filter(r => r.channel === "video").reverse().map(r => ({ id: r.id, lang: r.lang, grp: (r.media && r.media.group) || null })) };
   }
   if (/^UPDATE social_posts SET delivered/.test(q)) {
     T.rows.find(r => r.id === v[0]).delivered = JSON.parse(v[1]); return { rows: [] };
@@ -366,22 +366,23 @@ console.log("\n── Videos: weekly cap and language ────────�
   const fs = require("fs"), os = require("os");
   const render = async () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tv-")); const file = path.join(dir, "v.mp4"); fs.writeFileSync(file, Buffer.alloc(1000, 1)); return { file, dir, seconds: 31 }; };
   const ZH_SCRIPT = { title: "绿卡审理期间可以出境吗？", caption: "什么是回美证，没有它就出境为什么可能导致申请被放弃。", tags: ["绿卡", "回美证"],
-    scenes: [{ text: "绿卡审理期间可以出境吗？" }, { text: "出境可能被视为放弃申请。" }, { text: "除非事先获得回美证。" }, { text: "完整文章请见 tezlawfirm.com" }] };
+    scenes: [{ text: "绿卡审理期间可以出境吗？" }, { text: "出境可能被视为放弃申请。" }, { text: "除非事先获得回美证。" }, { text: "完整文章请见 tezlawfirm.com", say: "完整文章请见我们的网站。" }] };
   const think = async p => ({ text: JSON.stringify(/简体中文/.test(p) ? ZH_SCRIPT : SCRIPT) });
   const ZH = { title: "绿卡", url: "https://tezlawfirm.com/zh-post", summary: "回美证" };
+  // Since October 2026 an article gets a video in every language it was published in
+  // (the full three-language behaviour is in check-video-voice.js); the weekly limit counts articles.
   const a = await S.queueVideo({ en: SOURCE, zh: ZH }, { think, render, notify: false });
-  const b = await S.queueVideo({ en: SOURCE, zh: ZH }, { think, render, notify: false });
-  check("two videos are queued", [a.queued, b.queued], [1, 1]);
-  check("…alternating languages", [a.lang, b.lang], ["en", "zh"]);
-  const c = await S.queueVideo({ en: SOURCE, zh: ZH }, { think, render, notify: false });
-  ok("a third in the same week is refused", c.queued === 0 && /weekly limit/.test(c.reason), c.reason);
+  check("one article gives a video per language, 普通话 first", [a.queued, a.langs], [2, ["zh", "en"]]);
+  const b = await S.queueVideo({ en: { ...SOURCE, url: URL + "?second" }, zh: ZH }, { think, render, notify: false });
+  check("a second article in the week is allowed", b.queued, 2);
+  const c = await S.queueVideo({ en: { ...SOURCE, url: URL + "?third" }, zh: ZH }, { think, render, notify: false });
+  ok("a third article in the same week is refused", c.queued === 0 && /weekly limit/.test(c.reason), c.reason);
   const row = T.rows.find(x => x.id === a.id);
   check("the video waits for approval", [row.channel, row.status, !!row.media_file], ["video", "pending", true]);
   process.env.SOCIAL_VIDEO_ENABLED = "false";
   ok("nothing is made when videos are off", (await S.queueVideo({ en: SOURCE }, { think, render })).queued === 0);
   process.env.SOCIAL_VIDEO_ENABLED = "true";
 }
-
 console.log("\n── Time slots (Pacific) ─────────────────────────");
 {
   const pt = d => new Date(d).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", hour: "numeric", minute: "2-digit" });

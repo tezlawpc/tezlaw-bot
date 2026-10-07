@@ -519,9 +519,11 @@ async function publishAllLanguages(post, notifyPrefix, state) {
     const vsrc = {};
     if (en) vsrc.en = { title: post.title, url: en, summary: post.metaDescription, content: post.content };
     if (zh && chPost) vsrc.zh = { title: chPost.title, url: zh, summary: chPost.metaDescription, content: chPost.content };
-    if (vsrc.en || vsrc.zh) {
+    const es = linkFor("Español");
+    if (es && esPost) vsrc.es = { title: esPost.title, url: es, summary: esPost.metaDescription, content: esPost.content };
+    if (vsrc.en || vsrc.zh || vsrc.es) {
       social.queueVideo(vsrc)
-        .then(v => console.log(v.queued ? `[autoposter] 🎬 ${v.lang} video #${v.id} awaiting approval` : `[autoposter] video skipped: ${v.reason}`))
+        .then(v => console.log(v.queued ? `[autoposter] 🎬 ${v.queued} video(s) awaiting approval: ${(v.langs || [v.lang]).join(", ")}` : `[autoposter] video skipped: ${v.reason}`))
         .catch(e => console.error("[autoposter] video error:", e.message));
     }
   } catch (soErr) {

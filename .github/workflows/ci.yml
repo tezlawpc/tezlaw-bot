@@ -131,6 +131,11 @@ jobs:
       - name: Ask Zara in the ops group
         run: node scripts/check-ask-zara.js
 
+      # Explainer videos: a video per language, what the voice is given to
+      # read, and what happens when a line does not come back as written.
+      - name: Video voice, three languages
+        run: node scripts/check-video-voice.js
+
       # A document uploaded for signature: the fields a signer fills must land
       # where staff placed them, on rotated and cropped pages too, and nobody
       # outside the client's team may open the packet.

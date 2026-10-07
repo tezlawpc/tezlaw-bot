@@ -173,8 +173,8 @@ function png(svg, w) {
   return r.render().asPng();
 }
 const styles = lang => lang === "zh" ? { head: T.zhHead, body: T.zhBody, label: T.zhHead } : { head: T.head, body: T.body, label: T.label };
-const TAGLINE = { en: "Protect your rights, we\u2019ll lead the fight.", zh: "守护您的权益，我们为您据理力争。" };
-const ADV = { en: "ATTORNEY ADVERTISING", zh: "律师广告" };
+const TAGLINE = { en: "Protect your rights, we\u2019ll lead the fight.", zh: "守护您的权益，我们为您据理力争。", es: "Proteja sus derechos, nosotros damos la pelea." };
+const ADV = { en: "ATTORNEY ADVERTISING", zh: "律师广告", es: "PUBLICIDAD DE ABOGADO" };
 
 // ── Image card ──────────────────────────────────────────────
 /**
@@ -228,7 +228,7 @@ ${textLine({ x: pad, y: H - (land ? 54 : 62), text: foot, style: S.body, size: l
 function slide({ text, eyebrow = "", lang = "en", index = 0, total = 1, kind = "scene" }) {
   const W = 1080, H = 1920, pad = 96, inner = W - pad * 2;
   const S = styles(lang), zh = lang === "zh";
-  const langs = zh ? "普通话 · 上海话 · English" : "English · 普通话 · Español";
+  const langs = zh ? "普通话 · 上海话 · English" : lang === "es" ? "Español · English · 普通话" : "English · 普通话 · Español";
   const footer = `<text x="${pad}" y="${H - 150}" font-family="${T.label.family}" font-weight="700" font-size="40" letter-spacing="1" fill="${C.marble}">tezlawfirm.com</text>
 ${textLine({ x: pad, y: H - 96, text: "626-678-8677 · " + langs, style: S.body, size: 31, fill: C.muted })}`;
 
@@ -276,37 +276,36 @@ async function duration(file) {
   return m ? (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]) : 0;
 }
 
+// One spoken line: made in the language's own voice, then transcribed and
+// compared with what it was meant to say (video-voice.js). Returns how that went.
 async function speak(text, lang, outFile) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENAI_API_KEY is not set (needed for the voiceover)");
-  const axios = require("axios");
-  const r = await axios.post("https://api.openai.com/v1/audio/speech",
-    { model: process.env.SOCIAL_TTS_MODEL || "tts-1-hd", voice: process.env.SOCIAL_TTS_VOICE || (lang === "zh" ? "nova" : "onyx"), input: text, response_format: "mp3", speed: 1.0 },
-    { headers: { Authorization: `Bearer ${key}` }, responseType: "arraybuffer", timeout: 60000 });
-  fs.writeFileSync(outFile, Buffer.from(r.data));
+  return require("./video-voice").speakChecked(text, lang, outFile);
 }
 
 const DISCLAIMER = {
   en: "General information, not legal advice. Every case is different, and prior results do not guarantee a similar outcome.\nThe narration is AI-generated; it is not the voice of an attorney.\nAttorney advertising. Tez Law P.C. · Responsible attorney: JJ Zhang, Esq. · 4141 S. Nogales St., Suite C102, West Covina, CA 91792",
   zh: "本视频仅供一般参考，不构成法律意见。每个案件情况不同，过往结果不保证类似结果。\n配音为AI合成，并非律师本人的声音。\n律师广告。Tez Law P.C. · 负责律师：章律师（JJ Zhang, Esq.）· 4141 S. Nogales St., Suite C102, West Covina, CA 91792",
+  es: "Información general, no asesoría legal. Cada caso es diferente, y los resultados anteriores no garantizan un resultado similar.\nLa narración es generada por IA; no es la voz de un abogado.\nPublicidad de abogado. Tez Law P.C. · Abogado responsable: JJ Zhang, Esq. · 4141 S. Nogales St., Suite C102, West Covina, CA 91792",
 };
 
 /**
- * video({ lang, eyebrow, scenes: [{ text, say }], speakFn? }) → { file, seconds, dir }
+ * video({ lang, eyebrow, scenes: [{ text, say }], speakFn? }) → { file, seconds, dir, voice }
+ * `voice` has one entry per scene: was the line heard back as written (see video-voice.js).
  * `text` is the on-screen line, `say` what the voice reads (defaults to text).
  */
 async function video({ lang = "en", eyebrow = "", scenes = [], speakFn = speak, workDir = null }) {
   if (!scenes.length) throw new Error("No scenes");
   const dir = workDir || fs.mkdtempSync(path.join(os.tmpdir(), "tezvid-"));
   const total = scenes.length;
-  const segs = [];
+  const segs = [], voice = [];
   const enc = ["-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-pix_fmt", "yuv420p", "-r", "30",
     "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-ac", "2"];
   for (let i = 0; i < total; i++) {
     const s = scenes[i];
     const img = path.join(dir, `s${i}.png`), aud = path.join(dir, `s${i}.mp3`), seg = path.join(dir, `s${i}.mp4`);
     fs.writeFileSync(img, slide({ text: s.text, eyebrow: i === 0 ? eyebrow : "", lang, index: i, total, kind: i === 0 ? "title" : "scene" }));
-    await speakFn(s.say || s.text, lang, aud);
+    const heard = await speakFn(s.say || s.text, lang, aud);
+    voice.push(Object.assign({ scene: i + 1 }, heard && typeof heard === "object" ? heard : { checked: false }));
     const d = Math.max(1.5, (await duration(aud)) + 0.45);
     await run(["-y", "-hide_banner", "-loglevel", "error", "-loop", "1", "-framerate", "30", "-i", img, "-i", aud,
       "-t", d.toFixed(2), "-af", "apad", ...enc, seg]);
@@ -322,7 +321,7 @@ async function video({ lang = "en", eyebrow = "", scenes = [], speakFn = speak, 
   fs.writeFileSync(list, segs.map(s => `file '${s}'`).join("\n"));
   const out = path.join(dir, "video.mp4");
   await run(["-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", out]);
-  return { file: out, seconds: await duration(out), dir };
+  return { file: out, seconds: await duration(out), dir, voice };
 }
 
 module.exports = { card, slide, video, wrap, measure, DISCLAIMER, TAGLINE };

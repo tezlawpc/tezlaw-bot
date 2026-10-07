@@ -598,31 +598,62 @@ async function askJJ(source, queued, rejected) {
 
 // ── Explainer videos ────────────────────────────────────────
 //
-// One short vertical video per article, at most SOCIAL_VIDEOS_PER_WEEK
-// (default 2), alternating English and 普通话. Branded slides, the spoken
-// line on screen, an AI voice, and a closing slide with the disclaimer that
-// also says the voice is AI-generated — an ad must not suggest a synthetic
-// voice is the lawyer's (Bus. & Prof. Code § 6157.2(c)).
+// For each article, one short vertical video per language: 普通话, English
+// and Español, each written from that language's own published post and
+// each approved on its own. At most SOCIAL_VIDEOS_PER_WEEK articles a week
+// (default 2) get videos. Branded slides, the spoken line on screen, an AI
+// voice, and a closing slide with the disclaimer that also says the voice is
+// AI-generated — an ad must not suggest a synthetic voice is the lawyer's
+// (Bus. & Prof. Code § 6157.2(c)).
+//
+// What the voice reads is written for the ear and then listened back to:
+// see video-voice.js for why and how.
 const VIDEO_ON = () => ENABLED && String(process.env.SOCIAL_VIDEO_ENABLED || "") === "true";
 const VIDEO_TARGETS = ["youtube", "tiktok"];
+const videoVoice = () => require("./video-voice");
+const VIDEO_LANGS = () => String(process.env.SOCIAL_VIDEO_LANGS || "zh,en,es").split(",").map(x => x.trim())
+  .filter((l, i, a) => videoVoice().LANGS.includes(l) && a.indexOf(l) === i);
 
 const AI_NOTE = { en: "Narration is AI-generated. General information, not legal advice.",
-                  zh: "配音为AI合成。本视频仅供一般参考，不构成法律意见。" };
+                  zh: "配音为AI合成。本视频仅供一般参考，不构成法律意见。",
+                  es: "La narración es generada por IA. Información general, no asesoría legal." };
+const VIDEO_EYEBROW = { en: "Know the law", zh: "法律常识", es: "Conozca la ley" };
 
-function buildVideoPrompt(source, lang) {
-  const zh = lang === "zh";
+const VIDEO_BRIEF = {
+  zh: {
+    ask: "为下面的文章写一段30–50秒的竖屏讲解短视频脚本，简体中文，普通话配音。",
+    shape: '{"title": "视频标题，最多30个字", "caption": "视频简介，1-2句，最多120个字，不要网址", "tags": ["3-6个关键词"], "scenes": [{"text": "屏幕上的字，最多30个字", "say": "配音读的话，最多60个字"}]}',
+    scenes: "4到6个场景。第一个场景用一个问题引出主题；最后一个场景的屏幕文字是：完整文章请见 tezlawfirm.com。",
+    narrator: "旁白是中性的讲解员，不是律师本人：不要用“我是律师”或以律师身份说话。",
+  },
+  en: {
+    ask: "Write the script for a 30-50 second vertical explainer video about the article below.",
+    shape: '{"title": "at most 70 characters", "caption": "1-2 sentences, at most 280 characters, no URL", "tags": ["3-6 plain keywords"], "scenes": [{"text": "on-screen line, at most 90 characters", "say": "what the narrator says, at most 30 words"}]}',
+    scenes: "4 to 6 scenes. Scene 1 opens with the question the article answers. The last scene says the full article is at tezlawfirm.com.",
+    narrator: "The narrator is a neutral explainer, not the attorney: never speak as a lawyer or say \"I\".",
+  },
+  es: {
+    ask: "Escriba en español el guion de un video explicativo vertical de 30 a 50 segundos sobre el artículo de abajo.",
+    shape: '{"title": "máximo 70 caracteres", "caption": "1 o 2 frases, máximo 280 caracteres, sin URL", "tags": ["3 a 6 palabras clave"], "scenes": [{"text": "línea en pantalla, máximo 90 caracteres", "say": "lo que dice el narrador, máximo 30 palabras"}]}',
+    scenes: "De 4 a 6 escenas. La primera abre con la pregunta que responde el artículo. La última dice en pantalla: Artículo completo en tezlawfirm.com.",
+    narrator: "El narrador es un presentador neutral, no el abogado: nunca hable como abogado ni diga «yo».",
+  },
+};
+
+// `fix` is the list of problems a previous attempt was refused for, so the
+// second attempt is a correction and not a second guess.
+function buildVideoPrompt(source, lang, fix = null) {
+  const b = VIDEO_BRIEF[lang] || VIDEO_BRIEF.en;
   return [
-    zh ? "为下面的文章写一段30–50秒的竖屏讲解短视频脚本，简体中文，普通话配音。"
-       : "Write the script for a 30-50 second vertical explainer video about the article below.",
+    b.ask,
     "Return JSON only, in this shape:",
-    zh ? '{"title": "视频标题，最多30个字", "caption": "视频简介，1-2句，最多120个字，不要网址", "tags": ["3-6个关键词"], "scenes": [{"text": "屏幕上的字，最多30个字", "say": "配音读的话，最多60个字"}]}'
-       : '{"title": "at most 70 characters", "caption": "1-2 sentences, at most 280 characters, no URL", "tags": ["3-6 plain keywords"], "scenes": [{"text": "on-screen line, at most 90 characters", "say": "what the narrator says, at most 30 words"}]}',
-    zh ? "4到6个场景。第一个场景用一个问题引出主题；最后一个场景说：完整文章请见 tezlawfirm.com。"
-       : "4 to 6 scenes. Scene 1 opens with the question the article answers. The last scene says the full article is at tezlawfirm.com.",
-    zh ? "旁白是中性的讲解员，不是律师本人：不要用“我是律师”或以律师身份说话。"
-       : "The narrator is a neutral explainer, not the attorney: never speak as a lawyer or say \"I\".",
+    b.shape,
+    b.scenes,
+    b.narrator,
+    ...videoVoice().speechRules(lang),
     "Only facts in the material. No advice to the viewer about their own case, no promises, no superlatives, no urgency, no call to hire the firm.",
     "If the material cannot support a video, reply exactly NOTHING TO SAY.",
+    ...(fix && fix.length ? ["", "Your previous script was refused. Write it again and fix exactly this: " + fix.join("; ") + "."] : []),
     "", "--- MATERIAL ---", `Title: ${source.title || ""}`, material(source, 7000), "--- END ---",
   ].join("\n");
 }
@@ -637,18 +668,21 @@ function checkScript(j, lang) {
   if (lang === "zh") { if (said.replace(/\s/g, "").length > 340) problems.push("narration too long for 50 seconds"); }
   else if (said.split(/\s+/).length > 150) problems.push("narration too long for 50 seconds");
   if (scenes.some(x => String(x.text).length > (lang === "zh" ? 40 : 120))) problems.push("an on-screen line is too long");
+  // Each spoken line must be something a synthetic voice can read in this language.
+  for (const x of scenes) for (const p of videoVoice().checkSay(x.say || x.text, lang)) if (!problems.includes(p)) problems.push(p);
   const all = [j.title, j.caption, ...scenes.map(x => `${x.text}\n${x.say || ""}`)].join("\n");
-  if (/\b(I am|I'm|as your) (an? )?(attorney|lawyer)\b/i.test(all) || /我是律师|作为您的律师/.test(all))
+  if (/\b(I am|I'm|as your) (an? )?(attorney|lawyer)\b/i.test(all) || /我是律师|作为您的律师/.test(all) || /\b(soy|como su) (un |una )?abogad[oa]\b/i.test(all))
     problems.push("the AI narrator speaks as the attorney");
+  if (lang === "es" && /\bnotari[oa]s?\b/i.test(all)) problems.push("uses \"notario\", which misleads in Spanish");
   const v = screen(all);
   return { ok: !problems.length && v.ok, problems: problems.concat(v.problems), scenes };
 }
 
-async function composeVideoScript(source, lang = "en", { think = null, tries = 2 } = {}) {
+async function composeVideoScript(source, lang = "en", { think = null, tries = 3 } = {}) {
   const ask = think || defaultAsk(1500);
   let last = { ok: false, problems: ["not attempted"] };
   for (let i = 0; i < tries; i++) {
-    const raw = String((await ask(buildVideoPrompt(source, lang))).text || "").trim();
+    const raw = String((await ask(buildVideoPrompt(source, lang, i ? last.problems : null))).text || "").trim();
     if (/^NOTHING TO SAY/i.test(raw)) return { ok: false, skip: true, problems: ["the material does not support a video"] };
     const j = parseJSON(raw);
     const c = checkScript(j, lang);
@@ -674,54 +708,81 @@ function videoCaption(script, target) {
   return [script.caption, link, note].filter(Boolean).join("\n\n");
 }
 
+// One row per video. Videos made together for one article share media.group.
 async function videosThisWeek() {
-  const r = await db.query(`SELECT lang FROM social_posts WHERE channel = 'video' AND created_at > NOW() - INTERVAL '7 days' ORDER BY created_at DESC`);
+  const r = await db.query(`SELECT id, lang, media->>'group' AS grp FROM social_posts WHERE channel = 'video' AND created_at > NOW() - INTERVAL '7 days' ORDER BY created_at DESC`);
   return r.rows || [];
 }
 
+// One language's video for one article: script, render, store, send for approval.
+async function makeVideo(source, lang, { think, notify, render, group, position }) {
+  const c = await composeVideoScript(source, lang, { think });
+  if (!c.ok) return { lang, skip: !!c.skip, reason: c.problems.join("; ") };
+  const s = c.script;
+  const out = await (render || require("./social-media").video)({ lang, eyebrow: VIDEO_EYEBROW[lang] || VIDEO_EYEBROW.en, scenes: s.scenes });
+  const fs = require("fs");
+  const file = fs.readFileSync(out.file);
+  try { fs.rmSync(out.dir, { recursive: true, force: true }); } catch {}
+
+  const voice = (out.voice || []).map(v => ({ scene: v.scene, checked: v.checked, clear: v.clear, score: v.score, takes: v.takes, heard: v.clear === false ? String(v.heard || "").slice(0, 200) : undefined }));
+  const text = videoCaption(s, "youtube");
+  const r = await db.query(
+    `INSERT INTO social_posts (channel, text, source_url, source_title, problems, media, lang, media_file)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8) RETURNING id`,
+    ["video", text, source.url, source.title || null, "[]",
+      JSON.stringify({ script: s, targets: VIDEO_TARGETS, seconds: Math.round(out.seconds || 0), group, voice }), lang, file]);
+  const id = r.rows[0].id;
+
+  if (notify) {
+    const V = videoVoice();
+    const cap1 = [`🎬 ${V.LANG_NAME[lang] || lang} explainer · ${Math.round(out.seconds || 0)}s · ${position}`,
+      `YouTube / TikTok title: ${s.title}`, "", s.caption, "", V.voiceReport(out.voice),
+      "Goes to YouTube Shorts and TikTok at their next open slots."].filter((x, i, a) => x !== "" || a[i - 1] !== "").join("\n");
+    const ok = await sendMediaToJJ("video", file, `tez-video-${id}.mp4`, cap1, buttonsFor(id, "Post video"));
+    if (!ok) await tellJJ(`${cap1}\n\n(The video was too large to preview here.)`, buttonsFor(id, "Post video"));
+  }
+  return { lang, id, seconds: out.seconds, voice };
+}
+
 /**
- * Make at most one video for an article. `sources` is { en: source, zh: source };
- * the language is whichever was used less recently.
+ * Make the videos for one article. `sources` is { zh, en, es }: that
+ * language's published post ({ title, url, summary, content }). A language
+ * with no post gets no video. Each video is its own row and its own approval.
+ * The weekly limit counts articles, not videos.
  */
 async function queueVideo(sources, { think = null, notify = true, render = null } = {}) {
   if (!VIDEO_ON()) return { queued: 0, reason: "SOCIAL_VIDEO_ENABLED is not true" };
   await initTable();
   const cap = Math.max(0, Number(process.env.SOCIAL_VIDEOS_PER_WEEK || 2));
   const recent = await videosThisWeek();
-  if (recent.length >= cap) return { queued: 0, reason: `weekly limit reached (${recent.length}/${cap})` };
+  const articles = new Set(recent.map(r => r.grp || "video-" + r.id));
+  if (articles.size >= cap) return { queued: 0, reason: `weekly limit reached (${articles.size}/${cap})` };
 
-  const langs = String(process.env.SOCIAL_VIDEO_LANGS || "en,zh").split(",").map(x => x.trim()).filter(l => sources[l] && sources[l].url);
+  const want = VIDEO_LANGS();
+  const langs = want.filter(l => sources[l] && sources[l].url);
   if (!langs.length) return { queued: 0, reason: "no source in a video language" };
-  const last = recent[0] && recent[0].lang;
-  const lang = langs.find(l => l !== last) || langs[0];
-  const source = sources[lang];
+  const group = (sources.en && sources.en.url) || sources[langs[0]].url;
+  const title = (sources.en || sources[langs[0]]).title || "";
+  const V = videoVoice();
 
-  const c = await composeVideoScript(source, lang, { think });
-  if (!c.ok) {
-    if (notify && !c.skip) await tellJJ(`🎬 No video for "${source.title}": ${c.problems.join("; ")}`);
-    return { queued: 0, reason: c.problems.join("; ") };
+  const made = [];
+  const skipped = want.filter(l => !langs.includes(l)).map(l => ({ lang: l, reason: "no published post in that language" }));
+  for (const lang of langs) {
+    // One language failing must not cost the other two.
+    try {
+      const one = await makeVideo(sources[lang], lang, { think, notify, render, group, position: `${langs.indexOf(lang) + 1} of ${langs.length}` });
+      if (one.id) made.push(one); else skipped.push(one);
+    } catch (e) { skipped.push({ lang, reason: e.message }); }
   }
-  const s = c.script;
-  const out = await (render || require("./social-media").video)({ lang, eyebrow: lang === "zh" ? "法律常识" : "Know the law", scenes: s.scenes });
-  const fs = require("fs");
-  const file = fs.readFileSync(out.file);
-  try { fs.rmSync(out.dir, { recursive: true, force: true }); } catch {}
+  const told = skipped.filter(x => !x.skip);
+  if (notify && told.length)
+    await tellJJ(`🎬 ${made.length ? `${made.length} of ${want.length} videos made` : "No video"} for "${title}". Not made: ` +
+      told.map(x => `${V.LANG_NAME[x.lang] || x.lang} (${x.reason})`).join("; "));
 
-  const text = videoCaption(s, "youtube");
-  const r = await db.query(
-    `INSERT INTO social_posts (channel, text, source_url, source_title, problems, media, lang, media_file)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8) RETURNING id`,
-    ["video", text, source.url, source.title || null, "[]",
-      JSON.stringify({ script: s, targets: VIDEO_TARGETS, seconds: Math.round(out.seconds || 0) }), lang, file]);
-  const id = r.rows[0].id;
-
-  if (notify) {
-    const cap1 = [`🎬 ${lang === "zh" ? "普通话" : "English"} explainer · ${Math.round(out.seconds || 0)}s`,
-      `YouTube / TikTok title: ${s.title}`, "", s.caption, "", "Goes to YouTube Shorts and TikTok at their next open slots."].join("\n");
-    const ok = await sendMediaToJJ("video", file, `tez-video-${id}.mp4`, cap1, buttonsFor(id, "Post video"));
-    if (!ok) await tellJJ(`${cap1}\n\n(The video was too large to preview here.)`, buttonsFor(id, "Post video"));
-  }
-  return { queued: 1, id, lang, seconds: out.seconds };
+  const first = made[0] || {};
+  return { queued: made.length, id: first.id, lang: first.lang, seconds: first.seconds,
+    ids: made.map(x => x.id), langs: made.map(x => x.lang), made, skipped,
+    reason: made.length ? undefined : (skipped.map(x => `${x.lang}: ${x.reason}`).join("; ") || "nothing was made") };
 }
 
 // ── When each channel posts ─────────────────────────────────
@@ -963,7 +1024,7 @@ async function status() {
 module.exports = {
   CHANNELS, BANNED, channelList, CARD_FORMAT, DEFAULT_SLOTS,
   screen, material, buildPrompt, composeOne, compose, composeCard, renderCard,
-  buildVideoPrompt, checkScript, composeVideoScript, videoCaption, queueVideo,
+  buildVideoPrompt, checkScript, composeVideoScript, videoCaption, queueVideo, VIDEO_LANGS,
   nextSlot, laToDate, deliverViaPostiz, postizCanDeliver, pasteToJJ,
   initTable, queueForSource, queueHolidays, queueFunFact, approve, skip, handleTelegramCallback, status,
 };
