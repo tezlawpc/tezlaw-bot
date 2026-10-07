@@ -458,7 +458,9 @@ check("court calendar: it only reads, and it is the look-up she is told to use f
   state.cal = CAL(); state.calSql.length = 0;
   const id = fresh(); state.links.set(String(id), 2);
   script.tools = ["court_calendar"];
-  await ask.handle(inGroup("@TEZJJBot any hearings this week?", id));
+  // NOW, like the direct calendar tests above. Read against the real date,
+  // this counted down as the fixtures aged and hit zero after 2026-10-09.
+  await ask.handle(inGroup("@TEZJJBot any hearings this week?", id), { now: NOW });
   assert.ok(Array.isArray(script.results[0].hearings) && script.results[0].hearings.length === 6);
   assert.strictEqual(ran.length, 0, "the calendar went through the app's runner");
   for (const q of state.calSql) if (q.s) assert.ok(/^SELECT /.test(q.s) && !/\b(INSERT|UPDATE|DELETE|ALTER|DROP)\b/.test(q.s), q.s.slice(0, 80));
