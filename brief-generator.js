@@ -653,7 +653,7 @@ KNOWN OPPOSING ARGUMENTS — REFUTE EACH IN A DEDICATED SECTION:
 ${opposingArguments.map((a, i) => `  ${i+1}. ${a}`).join("\n")}
 ` : "";
 
-  return `You are JJ Zhang, Managing Attorney at Tez Law P.C., drafting a motion brief.
+  return `You are JJ Zhang, Founding Attorney at Tez Law P.C., drafting a motion brief.
 
 ═══════════════════════════════════════════════════════════════
 DRAFTING ASSIGNMENT

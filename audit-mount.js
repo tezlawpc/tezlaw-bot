@@ -211,6 +211,93 @@ function startCron() {
     console.log(`[ngtf-audit] dropbox scan scheduled (${syncCron}, timezone ${tz})`);
   }
 
+  // Operating event obligations — weekdays at 07:45, just after the
+  // obligations sweep. Kept separate because these clocks are shorter
+  // and have no extension: four business days, and a Form 8-K has no
+  // Rule 12b-25 relief.
+  cron.schedule("45 7 * * 1-5", async () => {
+    try {
+      const r = await notify.notifyEventObligations();
+      await notify.flush(100);
+      if (r.sent) console.log("[ngtf-audit] event obligations:", JSON.stringify(r));
+    } catch (err) {
+      console.error("[ngtf-audit] event obligation sweep error:", err.message);
+    }
+  }, opts);
+
+  // The weekly roll-call — Fridays at 15:00, while people are still at
+  // their desks and can remember the week. This is the completeness half
+  // of the disclosure control: an affirmative "nothing to report" is the
+  // only thing that evidences the channel was open, as against a list of
+  // whatever happened to get typed in.
+  cron.schedule("0 15 * * 5", async () => {
+    try {
+      const r = await notify.notifyEventRollCall();
+      await notify.flush(100);
+      console.log("[ngtf-audit] weekly roll-call:", JSON.stringify(r));
+    } catch (err) {
+      console.error("[ngtf-audit] roll-call error:", err.message);
+    }
+  }, opts);
+
+  // ── Delivery ledger ──────────────────────────────────────
+  //
+  // Auto-transmit, hourly at :10. This is the sweep that closes the gap
+  // the whole ledger exists for: a document uploaded or swept in from a
+  // folder that no procedure ever carried to the other side. Hourly
+  // rather than daily because a four-business-day Form 8-K clock does
+  // not care that the upload happened after close of business, and the
+  // age threshold inside autoTransmit() is what keeps a twelve-file
+  // upload session to one package rather than twelve.
+  cron.schedule("10 * * * *", async () => {
+    try {
+      const delivery = require("./audit-delivery");
+      const r = await delivery.autoTransmit({});
+      await notify.flush(100);
+      if (r.created && r.created.length) {
+        console.log(
+          `[ngtf-audit] auto-transmit: issued ${r.created.map((c) => c.number).join(", ")} (${r.documents} documents)`
+        );
+      }
+      if (r.skipped && r.skipped.length) {
+        // Almost always "no auditor accounts yet", which is a true
+        // statement about the portal rather than a fault to retry out of.
+        console.warn("[ngtf-audit] auto-transmit skipped:", JSON.stringify(r.skipped));
+      }
+    } catch (err) {
+      console.error("[ngtf-audit] auto-transmit error:", err.message);
+    }
+  }, opts);
+
+  // The chaser — weekdays at 08:45, after the obligations sweeps so a
+  // single morning does not open with four separate emails. Business-day
+  // aware throughout: a reminder fired on the Sunday of a long weekend
+  // has spent its one chance to be noticed.
+  cron.schedule("45 8 * * 1-5", async () => {
+    try {
+      const delivery = require("./audit-delivery");
+      const r = await delivery.runChaser({});
+      await notify.flush(200);
+      if (r.reminded || r.stalled || r.bounced) console.log("[ngtf-audit] delivery chaser:", JSON.stringify(r));
+    } catch (err) {
+      console.error("[ngtf-audit] delivery chaser error:", err.message);
+    }
+  }, opts);
+
+  // Undelivered alarm — weekdays at 09:15. Separate from the chaser
+  // because it is a different failure: not "they have not replied" but
+  // "nobody has been told this exists", which is the one that silently
+  // costs weeks.
+  cron.schedule("15 9 * * 1-5", async () => {
+    try {
+      const r = await notify.notifyUndelivered();
+      await notify.flush(100);
+      if (r.sent) console.log("[ngtf-audit] undelivered alert:", JSON.stringify(r));
+    } catch (err) {
+      console.error("[ngtf-audit] undelivered alert error:", err.message);
+    }
+  }, opts);
+
   // Audit committee weekly roll-up — Mondays at 08:30.
   cron.schedule("30 8 * * 1", async () => {
     try {
@@ -268,4 +355,6 @@ module.exports = {
   sync: require("./audit-sync"),
   dropbox: require("./audit-dropbox"),
   zip: require("./audit-zip"),
+  events: require("./audit-events"),
+  delivery: require("./audit-delivery"),
 };

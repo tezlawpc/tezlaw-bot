@@ -510,7 +510,7 @@ async function checkReviews() {
         const fresh = reviews.filter(x => !prev.seen.includes(x.name) && Date.now() - new Date(x.publishTime).getTime() < 14 * 86400000);
         for (const rv of fresh) {
           const stars = "★".repeat(rv.rating || 0) + "☆".repeat(5 - (rv.rating || 0));
-          const reply = await suggestReply(rv, "Tez Law P.C.");
+          const reply = await suggestReply(rv, "TEZ Law Firm");
           await tell(`${rv.rating <= 3 ? "⚠️ " : "⭐ "}New Google review — ${name}\n${stars}  by ${(rv.authorAttribution && rv.authorAttribution.displayName) || "a reviewer"}\n\n"${((rv.text && rv.text.text) || "(no text)").substring(0, 900)}"\n${reply ? `\nSuggested reply (review before posting):\n${reply}\n` : ""}\nReply on Google: ${rv.googleMapsUri || p.googleMapsUri || "business.google.com/reviews"}`);
         }
         const added = now.count - prev.count;

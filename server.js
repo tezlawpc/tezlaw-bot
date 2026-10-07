@@ -496,6 +496,9 @@ app.get("/admin/backups/diagnose", auth.requireRole("admin"), async (req, res) =
 app.get("/version", (req, res) => {
   res.json({
     version: "v7-eoir-calendar-2026-08-28",
+    // The commit this server was built from (Render sets it). It is how
+    // anything outside can tell that a push is actually live.
+    commit: process.env.RENDER_GIT_COMMIT || null,
     features: {
       auto_match_tool_use: true,
       hearing_note_dedup: true,
@@ -7919,7 +7922,7 @@ const SYSTEM_PROMPT = `Your name is Zara. You are a warm, friendly legal assista
 THE TEAM
 ============================
 
-JJ ZHANG — Managing Attorney
+JJ ZHANG — Founding Attorney
 - Phone: 626-678-8677
 - Email: jj@tezlawfirm.com
 
@@ -8025,7 +8028,7 @@ What brings you here today? Feel free to describe your situation and I'll point 
 
 const CONTACT_MESSAGE = `Here's the Tez Law P.C. team:
 
-👨‍💼 JJ Zhang — Managing Attorney
+👨‍💼 JJ Zhang — Founding Attorney
 📞 626-678-8677
 📧 jj@tezlawfirm.com
 

@@ -730,7 +730,7 @@ CIVIL MATTERS: for anything about a civil litigation case — status, deadlines,
 Format: use short paragraphs, bullet points for lists, and bold for key terms. No excessive markdown.
 
 Tez Law's own context:
-- Managing attorney: JJ Zhang, California Bar #326666
+- Founding attorney: JJ Zhang, California Bar #326666
 - Firm phone: 626-678-8677
 - Serves California + nationwide (immigration/trademark)
 - Multilingual: English, Mandarin, Shanghainese, Spanish`;

@@ -111,6 +111,13 @@ const PERMISSIONS = {
   // Answering sweeps is company-side ONLY.
   "checklist.answer": ["portal_admin", "company_admin", "company_contributor"],
   "checklist.waive": ["portal_admin", "company_admin"],
+  // Reporting an operating event needs only dashboard.view, deliberately:
+  // the person who DID the thing has to be able to report it, and that
+  // person is usually not an officer. DETERMINING whether it is
+  // reportable is a different act. It is management's judgment under
+  // Item 307 and it is recorded against a name, so it stops at the
+  // company leads.
+  "event.determine": ["portal_admin", "company_admin"],
   "checklist.accept": ["auditor_lead"],
   "checklist.reject": ["auditor_lead", "auditor_staff"],
   "checklist.generate": ["portal_admin", "company_admin"],
@@ -135,6 +142,34 @@ const PERMISSIONS = {
     "audit_committee",
   ],
   "events.view": ["portal_admin", "company_admin", "auditor_lead", "auditor_staff", "audit_committee"],
+
+  // ── Delivery ledger ──────────────────────────────────────
+  // Both sides may ISSUE a package: the company sends documents, the
+  // engagement team requests items. An auditor requesting items is not
+  // preparing or certifying the company's records, so this does not
+  // touch the Rule 2-01(c)(4) boundary that keeps upload company-side.
+  //
+  // ACKNOWLEDGING is deliberately absent from this matrix. It is checked
+  // per ROW, against the named recipients of that specific package,
+  // because an acknowledgment from somebody the package was not
+  // addressed to is worth nothing — and a role-based check would have
+  // let any auditor sign for any colleague's package.
+  "delivery.view": [
+    "portal_admin",
+    "company_admin",
+    "company_contributor",
+    "auditor_lead",
+    "auditor_staff",
+    "audit_committee",
+  ],
+  "delivery.create": [
+    "portal_admin",
+    "company_admin",
+    "company_contributor",
+    "auditor_lead",
+    "auditor_staff",
+  ],
+  "delivery.admin": ["portal_admin"],
 };
 
 function can(user, permission) {
@@ -476,7 +511,20 @@ async function login(res, user, remember) {
 // "/login/../api/whoami" satisfy startsWith("/login/") and skip the
 // whole auth check. Express happens to 404 that today, but it is a
 // bypass waiting for the first route added under /login/*.
-const PUBLIC_PATHS = ["/login", "/logout", "/setup", "/healthz"];
+const PUBLIC_PATHS = ["/login", "/logout", "/setup", "/healthz", "/hook/mail"];
+
+// Two routes carry their own credential in the path or the query and so
+// cannot be behind the session cookie. Both are matched by an ANCHORED
+// pattern over the normalized path rather than a prefix test, for exactly
+// the reason the comment above gives: a prefix test on a non-normalized
+// path is a bypass waiting for the first route added underneath it.
+//
+//   /r/<token>   the per-recipient receipt link. The token identifies a
+//                recipient and grants NOTHING — the handler records the
+//                click and then sends them to sign in. It has to be
+//                public because its whole job is to work from an email
+//                client before anybody has a session.
+const PUBLIC_PATTERNS = [/^\/r\/[0-9a-f]{20,80}$/];
 
 function isPublic(rawPath) {
   let p = String(rawPath || "/");
@@ -486,7 +534,8 @@ function isPublic(rawPath) {
     /* fall through with the raw value */
   }
   if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
-  return PUBLIC_PATHS.includes(p);
+  if (PUBLIC_PATHS.includes(p)) return true;
+  return PUBLIC_PATTERNS.some((re) => re.test(p));
 }
 
 /**
@@ -603,4 +652,10 @@ module.exports = {
   requirePermission,
   requireCompanySide,
   wantsJSON,
+  // Exported so the public-path matcher can be tested directly. It is
+  // the one function here whose failure mode is an authentication
+  // bypass, so it should not only be reachable through a live request.
+  isPublic,
+  PUBLIC_PATHS,
+  PUBLIC_PATTERNS,
 };

@@ -76,6 +76,31 @@ function iso(dt) {
 }
 
 /**
+ * TODAY, as a calendar date in the server's own timezone.
+ *
+ * This exists because iso() and dstr() do not agree, and must not: iso()
+ * reads UTC parts, while dstr() deliberately reads LOCAL parts so that a
+ * DATE column comes back as the day that was stored (see the comment in
+ * dstr — reading UTC there shifted filing deadlines by a day).
+ *
+ * The consequence is that `cal.iso(new Date())` is NOT today's date. It
+ * is today's date in UTC, which after about 17:00 Pacific or 20:00
+ * Eastern is TOMORROW. Comparing that against a dstr() value — which
+ * every stored date goes through — is an off-by-one that only appears
+ * late in the day and only on a server west of Greenwich. On a UTC
+ * container it is invisible; set TZ=America/New_York and every evening
+ * after eight o'clock, an item due tomorrow reads as overdue, a package
+ * sent a minute ago reads as a day old, and a once-a-day guard that
+ * compares "have I already done this today" never matches.
+ *
+ * So: anything that needs today's date for comparison against a stored
+ * date uses this, never iso(new Date()).
+ */
+function today() {
+  return dstr(new Date());
+}
+
+/**
  * Normalize ANY date-ish value to a 'YYYY-MM-DD' string.
  *
  * node-postgres returns SQL DATE columns as JavaScript Date objects,
@@ -552,6 +577,7 @@ module.exports = {
   DEADLINE_DAYS,
   // date utils
   iso,
+  today,
   dstr,
   parse,
   addDays,

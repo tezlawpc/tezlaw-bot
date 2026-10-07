@@ -905,7 +905,7 @@ Attorney makes no guarantee regarding the outcome. USCIS, the Immigration Court,
 6. TERMINATION
 Either party may terminate this agreement upon written notice. If Client terminates, earned fees are non-refundable.
 
-Managing Attorney: JJ Zhang, California Bar #326666
+Founding Attorney: JJ Zhang, California Bar #326666
 Tez Law P.C. · 626-678-8677 · jj@tezlawfirm.com
 
 Client signature: ______________________________  Date: _______________
@@ -949,7 +949,7 @@ Client agrees to attend all medical appointments, provide truthful and complete 
 6. NO GUARANTEE
 Attorney makes no guarantee regarding recovery amount or timing.
 
-Managing Attorney: JJ Zhang, California Bar #326666
+Founding Attorney: JJ Zhang, California Bar #326666
 Tez Law P.C. · 626-678-8677 · jj@tezlawfirm.com
 
 Client signature: ______________________________  Date: _______________
@@ -984,7 +984,7 @@ We appreciate the opportunity to serve you and look forward to a successful outc
 Sincerely,
 
 JJ Zhang
-Managing Attorney
+Founding Attorney
 Tez Law P.C.
 California Bar #326666`,
         variables: [
@@ -1839,8 +1839,11 @@ function registerAppApi(app) {
   app.get("/api/staff/dashboard", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const tasks = require("./tasks");
-      const today = new Date().toISOString().split("T")[0];
-      const nextWeek = new Date(Date.now() + 7 * 86400e3).toISOString().split("T")[0];
+      // The office's day, not UTC's. After 5 PM Pacific the UTC date is already
+      // tomorrow, which showed tasks due today as overdue and dropped today's hearings.
+      const officeDay = require("./court-calendar");
+      const today = officeDay.todayPT();
+      const nextWeek = officeDay.addDays(today, 7);
 
       const visibleKeys = await getVisibleClientKeys(req.user);
       const admin = isAdmin(req.user);
@@ -2097,8 +2100,11 @@ function registerAppApi(app) {
   app.get("/api/staff/calendar", requireBearer, requireFirmUser, async (req, res) => {
     try {
       const days = Math.min(parseInt(req.query.days || "30", 10), 90);
-      const today = new Date().toISOString().split("T")[0];
-      const end = new Date(Date.now() + days * 86400e3).toISOString().split("T")[0];
+      // The office's day, not UTC's. After 5 PM Pacific the UTC date is already
+      // tomorrow, which dropped today's hearings from the Calendar screen.
+      const officeDay = require("./court-calendar");
+      const today = officeDay.todayPT();
+      const end = officeDay.addDays(today, days);
       const visibleKeys = await getVisibleClientKeys(req.user);
       const [allH, allD] = await Promise.all([
         db.query(

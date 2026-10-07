@@ -61,7 +61,7 @@ function fmtBytes(n) {
 function daysUntil(d) {
   const s = cal.dstr(d);
   if (!s) return null;
-  return Math.round((cal.parse(s) - cal.parse(cal.iso(new Date()))) / 86400000);
+  return Math.round((cal.parse(s) - cal.parse(cal.today())) / 86400000);
 }
 
 function pill(text, color, bg) {
@@ -128,7 +128,10 @@ function statusPill(status) {
 // ── Chrome ──────────────────────────────────────────────────
 const NAV = [
   { key: "dashboard", href: `${BASE}`, label: "Dashboard", perm: "dashboard.view" },
+  { key: "report-event", href: `${BASE}/report-event`, label: "Report something", perm: "dashboard.view" },
+  { key: "events", href: `${BASE}/events`, label: "Event register", perm: "dashboard.view" },
   { key: "upload", href: `${BASE}/upload`, label: "Upload", perm: "document.upload" },
+  { key: "transmittals", href: `${BASE}/transmittals`, label: "Deliveries", perm: "delivery.view" },
   { key: "documents", href: `${BASE}/documents`, label: "Documents", perm: "document.view_all" },
   { key: "triage", href: `${BASE}/triage`, label: "Triage", perm: "document.view_all" },
   { key: "calendar", href: `${BASE}/calendar`, label: "Calendar", perm: "dashboard.view" },
@@ -241,6 +244,21 @@ function chrome({ title, body, user, active, wide = false }) {
     font-weight:700;text-align:center;line-height:20px;margin-right:7px;flex:0 0 auto}
   footer{max-width:1180px;margin:0 auto;padding:26px 22px 38px;color:var(--mute);font-size:11.5px;line-height:1.6}
   @media(max-width:640px){main{padding:14px}.card{padding:13px}td,th{padding:7px 9px}}
+  /* A delivery receipt gets printed and attached to a letter, so the
+     printed page has to be the evidence and nothing else: no navigation,
+     no buttons, no forms, and hashes that do not run off the paper. */
+  @media print{
+    header.top nav.tabs,.noprint,.btn,form.noprint{display:none!important}
+    header.top{background:#fff!important;color:#000!important;padding:0 0 10px;border-bottom:2px solid #000}
+    header.top .who{color:#000!important}
+    body{background:#fff}
+    main{max-width:none;padding:0}
+    .card{border:1px solid #999;break-inside:avoid;page-break-inside:avoid;margin-bottom:10px}
+    .mono,code{word-break:break-all;white-space:pre-wrap}
+    a{color:#000;text-decoration:none}
+    .printonly{display:block!important}
+  }
+  .printonly{display:none}
 </style>
 </head><body>
 <header class="top">
@@ -464,6 +482,7 @@ function dashboardPage(d, user) {
       : ""
   }
   ${stats}
+  ${deliveryStrip(d.delivery, user)}
   ${openGates ? `<div class="note red"><b>${openGates} gating item${openGates === 1 ? " is" : "s are"} still open.</b>
     A gating item is one where a standard or rule prevents the report or filing from issuing until it is
     delivered — the quarterly representation letter, for instance, makes an AS 4105 interim review incomplete
@@ -1374,13 +1393,25 @@ function uploadPage({ engagements }, user) {
 
 // ── Taxonomy reference ──────────────────────────────────────
 function taxonomyPage(user) {
+  // The index deliberately shows EVERY category, including ones whose
+  // industry module is switched off, because it is a reference work: a
+  // filtered index would understate the taxonomy and give no way to see
+  // what turning a module on would add. Inactive ones are labelled.
+  const active = tax.activeModules();
   const sections = tax.BRACKETS.map((b) => {
     const cats = tax.categoriesForBracket(b.code);
     const rows = cats
       .map(
-        (c) => `<tr>
+        (c) => `<tr${active.includes(tax.moduleOf(c)) ? "" : ' style="opacity:.6;"'}>
       <td style="white-space:nowrap;"><code>${esc(c.code)}</code>${c.gate ? " " + pill("GATE", "#991B1B") : ""}${c.conf ? " " + pill("RESTRICTED", "#6B21A8") : ""}</td>
       <td><b>${esc(c.label)}</b>
+        ${
+          tax.moduleOf(c) === "core"
+            ? ""
+            : active.includes(tax.moduleOf(c))
+            ? " " + pill(tax.INDUSTRY_MODULES[tax.moduleOf(c)].label, "#1C7C54")
+            : " " + pill("module off — not requested", "#667")
+        }
         ${c.note ? `<details><summary>What the auditor does with it</summary><div class="sm" style="color:var(--ink2);">${esc(c.note)}</div></details>` : ""}</td>
       <td class="xs">${c.tiers.map((t) => pill(t, "#2C5F8A")).join(" ")}</td>
       <td class="xs muted">${esc((c.authority || []).join(", "))}</td></tr>`
@@ -1395,16 +1426,28 @@ function taxonomyPage(user) {
   }).join("");
 
   const s = tax.STATS;
+  const live = tax.liveStats();
   const body = `
   <h1>Document index</h1>
   <div class="sub">${s.categories} document categories in ${s.brackets} sections · ${s.gates} are gating items ·
+    ${live.categories} active for this issuer's industry ·
     this index is what the classifier routes against and what the checklists are generated from</div>
 
+  <div class="note amber"><b>${live.categories} of ${s.categories} categories are active.</b>
+    The rest belong to industry modules this issuer has not selected, and are shown greyed out. They are
+    still routed by the classifier, so a document that genuinely belongs to one is filed correctly rather
+    than forced into the wrong category; they simply are not requested on a checklist. Change the selection
+    on the <a href="${BASE}/profile">issuer profile</a>.</div>
+
   <div class="grid g4" style="margin-bottom:16px;">
-    <div class="stat"><div class="n">${s.monthly}</div><div class="l">Monthly close</div></div>
-    <div class="stat"><div class="n">${s.quarterly}</div><div class="l">Quarterly review</div></div>
-    <div class="stat"><div class="n">${s.annual}</div><div class="l">Annual audit</div></div>
-    <div class="stat"><div class="n">${s.event}</div><div class="l">Event-driven</div></div>
+    <div class="stat"><div class="n">${live.monthly}</div><div class="l">Monthly close</div>
+      <div class="x">of ${s.monthly} in the full index</div></div>
+    <div class="stat"><div class="n">${live.quarterly}</div><div class="l">Quarterly review</div>
+      <div class="x">of ${s.quarterly}</div></div>
+    <div class="stat"><div class="n">${live.annual}</div><div class="l">Annual audit</div>
+      <div class="x">of ${s.annual}</div></div>
+    <div class="stat"><div class="n">${live.event}</div><div class="l">Event-driven</div>
+      <div class="x">of ${s.event}</div></div>
   </div>
 
   <div class="note blue"><b>How to read this.</b> Every category carries the PCAOB or SEC provision that makes
@@ -1566,9 +1609,10 @@ function calendarPage({ fiscalYear, engagements }, user) {
 // below is computed from these fields rather than written into code, so
 // this form is the difference between a portal built for one registrant
 // and a portal that can be pointed at another one.
-function profilePage({ profile: p, derived, warnings = [] }, user) {
+function profilePage({ profile: p, derived, warnings = [], stats = null }, user) {
   const canEdit = auth.can(user, "portal.settings");
   const d = derived || issuer.derive(p);
+  const issuer_modules = tax.INDUSTRY_MODULES;
 
   const opt = (v, cur, label) =>
     `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(label)}</option>`;
@@ -1702,10 +1746,47 @@ function profilePage({ profile: p, derived, warnings = [] }, user) {
     ${check("f-egc", p.emergingGrowthCompany, "Emerging growth company", "An EGC's auditor's report omits critical audit matters, and the status expires — normally five years from the first registered sale.")}
     ${check("f-icfr", p.icfrAuditorAttestation, "Auditor attestation on ICFR is obtained", "Section 404(b). Not required of a non-accelerated filer, and not of an EGC at all. Management's own 404(a) report is required either way.")}
     ${check("f-gc", p.goingConcernDoubt, "Substantial doubt about going concern", "Drives the ASC 205-40 evaluation, the disclosure and the emphasis paragraph in the auditor's report.")}
+    ${check("f-reporting", p.reportingCompany !== false, "Files reports under the Exchange Act", "10-K, 10-Q and 8-K. Turn this off only for a company that does not report at all.")}
+    ${check("f-s12", p.section12Registered, "Registered under Section 12 of the Exchange Act", "A separate fact from being listed and from filing reports, and it is the gate on Section 16 and Schedule 13D. A company that registered an offering on Form S-1 and never filed a Form 8-A reports under Section 15(d) only: it files 10-Ks, 10-Qs and 8-Ks, but its insiders file NO Forms 3, 4 or 5 and its 5% holders file no Schedule 13D. If this is wrong, the event register will either invent obligations that do not exist or miss ones that do.")}
     <div class="grid g2" style="margin-top:14px;">
       <div><label>EGC first registered sale date</label><input type="date" id="f-egcdate" value="${esc(p.egcFirstSaleDate || "")}" ${canEdit ? "" : "disabled"}>
         <div class="xs muted" style="margin-top:4px;">Leave blank if not an EGC. Used to warn before the status lapses.</div></div>
     </div>
+  </div>
+
+  <div class="card"><h2>Industry</h2>
+    <div class="sm muted" style="margin-bottom:4px;">The core categories bind every reporting company.
+      Industry modules add the categories that only matter for a particular business, and they are the
+      reason this portal can be pointed at a second issuer without editing code.</div>
+    <div class="grid g2">
+      <div><label>SIC code</label><input type="text" id="f-sic" value="${esc(p.sic || "")}" placeholder="2000" ${canEdit ? "" : "disabled"}>
+        <div class="xs muted" style="margin-top:4px;">As filed on the cover page. Used only to suggest
+          modules below, never to switch them on by itself.</div></div>
+    </div>
+    <div style="margin-top:14px;">
+      ${Object.values(issuer_modules)
+        .filter((m) => !m.always)
+        .map((m) => {
+          const on = (p.industryModules || []).includes(m.key);
+          const suggested = (derived.suggestedModules || []).includes(m.key);
+          return `<label style="display:flex;gap:9px;align-items:flex-start;margin:13px 0 0;font-weight:400;">
+            <input type="checkbox" class="mod" value="${esc(m.key)}" ${on ? "checked" : ""} ${canEdit ? "" : "disabled"}
+              style="width:auto;margin-top:2px;flex:0 0 auto;">
+            <span><b style="font-size:12px;">${esc(m.label)}</b>
+              ${suggested ? " " + pill("SUGGESTED BY SIC", "#B45309") : ""}
+              <div class="xs muted" style="margin-top:2px;">${esc(m.blurb)}</div></span></label>`;
+        })
+        .join("")}
+    </div>
+    ${
+      stats
+        ? `<div class="note blue" style="margin-top:14px;"><b>With these modules, a checklist draws on
+           ${stats.categories} of ${tax.STATS.categories} categories.</b> ${stats.annual} on an annual
+           engagement, ${stats.quarterly} on a quarterly one, ${stats.monthly} on a monthly close.
+           Categories belonging to a module that is off stay in the document index and still resolve for
+           documents already filed under them; they simply stop being requested.</div>`
+        : ""
+    }
   </div>
 
   <div class="card"><h2>Audit</h2>
@@ -1741,6 +1822,10 @@ function profilePage({ profile: p, derived, warnings = [] }, user) {
       timezone:v('f-tz')||'America/New_York',
       fiscalYearEndMonth:parseInt(v('f-fyem'),10), fiscalYearEndDay:parseInt(v('f-fyed'),10),
       filerStatus:v('f-filer'), exchange:v('f-exchange'),
+      sic:v('f-sic'),
+      reportingCompany:c('f-reporting'), section12Registered:c('f-s12'),
+      industryModules:Array.prototype.slice.call(document.querySelectorAll('input.mod'))
+        .filter(function(x){return x.checked}).map(function(x){return x.value}),
       smallerReportingCompany:c('f-src'), emergingGrowthCompany:c('f-egc'),
       icfrAuditorAttestation:c('f-icfr'), goingConcernDoubt:c('f-gc'),
       egcFirstSaleDate:v('f-egcdate')||null,
@@ -1925,6 +2010,1244 @@ function playbooksPage({ playbooks, declared, engagements }, user) {
   return chrome({ title: "Corporate actions", body, user, active: "playbooks", wide: true });
 }
 
+// ── Operating events ────────────────────────────────────────
+//
+// The intake is the only page in this portal written for somebody with
+// no accounting background, and it is written in their words. A person
+// who knew to search for "material definitive agreement" would never
+// have needed it. Everything here is phrased as the thing they did.
+
+function obligationCard(o) {
+  const color = o.preAct ? "#991B1B" : o.severity === "critical" ? "#991B1B" : o.severity === "high" ? "#B45309" : "#2C5F8A";
+  const due = o.dueDate || o.due_date;
+  const item = o.item8k || o.item_8k;
+  const s3 = o.s3Risk || o.s3_risk;
+  const pre = o.preAct || o.pre_act;
+  const ver = o.verified;
+  return `<div class="card" style="border-left:3px solid ${color};margin-bottom:11px;">
+    <div class="between">
+      <div style="flex:1;min-width:250px;">
+        ${pre ? pill("WAS DUE BEFORE YOU DID IT", "#991B1B") + " " : ""}
+        ${item ? pill("Form 8-K Item " + esc(item), "#991B1B") + " " : ""}
+        ${o.kind === "decision" ? pill("A DECISION, NOT A FILING", "#6B21A8") + " " : ""}
+        ${ver === false ? confidencePill("unconfirmed") + " " : ""}
+        <div style="font-weight:650;font-size:13.5px;margin-top:5px;">${esc(o.label)}</div>
+        <div class="xs muted" style="margin-top:4px;">${esc((o.authority || []).join(" · "))}</div>
+      </div>
+      <div class="right" style="white-space:nowrap;">
+        <div style="font-weight:700;font-size:15px;color:${color};">${due ? fmtDate(due) : "No fixed date"}</div>
+        ${due ? `<div class="xs muted">${(() => { const n = daysUntil(due); return n === null ? "" : n < 0 ? Math.abs(n) + " days past" : n === 0 ? "today" : "in " + n + " days"; })()}</div>` : ""}
+        ${o.anchorLabel ? `<div class="xs muted">from ${esc(String(o.anchorLabel).toLowerCase())}</div>` : ""}
+      </div>
+    </div>
+    ${o.consequence ? `<div class="sm" style="color:var(--ink2);margin-top:9px;">${esc(o.consequence)}</div>` : ""}
+    ${s3 ? `<div class="note red" style="margin:9px 0 0;"><b>Filing this late also costs Form S-3 eligibility for twelve months.</b>
+      Curing it late does not restore it. If the company raises money off a shelf or an at-the-market facility,
+      a four-day miss here shuts that down for a year.</div>` : ""}
+    ${o.note ? `<details style="margin-top:7px;"><summary>More detail</summary><div class="sm" style="color:var(--ink2);white-space:pre-line;">${esc(o.note)}</div></details>` : ""}
+  </div>`;
+}
+
+function reportEventPage({ catalog, engagements, profile }, user) {
+  const regime = catalog.regime;
+  const groups = Object.keys(catalog.groups).sort();
+
+  const cards = groups
+    .map((g) => {
+      const items = catalog.groups[g]
+        .map(
+          (e) => `<button type="button" class="evbtn" data-key="${esc(e.key)}"
+            style="display:block;width:100%;text-align:left;background:#fff;border:1px solid var(--line);
+                   border-radius:7px;padding:12px 14px;margin-bottom:8px;cursor:pointer;font:inherit;">
+            <div style="font-weight:600;font-size:13.5px;color:var(--ink);">${esc(e.label)}</div>
+            <div class="xs muted" style="margin-top:3px;">
+              ${e.maxObligations} thing${e.maxObligations === 1 ? "" : "s"} this can trigger${e.hasPreAct ? " · one of them is due BEFORE you act" : ""}</div>
+          </button>`
+        )
+        .join("");
+      return `<div style="margin-bottom:18px;"><h3 style="margin-bottom:9px;">${esc(g)}</h3>${items}</div>`;
+    })
+    .join("");
+
+  const engOpts = engagements
+    .map((e) => `<option value="${e.id}">${esc(e.period_name || e.period_label)}</option>`)
+    .join("");
+
+  const body = `
+  <h1>Report something that happened</h1>
+  <div class="sub">Tell it in your own words. The portal works out what it triggered and when it is due.</div>
+
+  <div class="note blue"><b>You do not need to know whether something is reportable.</b> That is the whole point.
+    Pick the closest description, answer two or three questions, and the portal will tell you what it found,
+    including when it finds nothing. An event reported and found not reportable costs you a minute. The
+    reverse costs a filing deadline, and for some items twelve months of Form S-3 eligibility.</div>
+
+  <div class="note amber"><b>This portal never decides whether something is material.</b> It computes dates,
+    names the rule and asks for a decision. Materiality is management's judgment, and under SAB 99 a conclusion
+    resting only on a percentage has, in the staff's words, no basis in the accounting literature or the law.</div>
+
+  <div class="card" style="background:#F8FAFB;">
+    <div class="sm"><b>What applies to this company:</b>
+      ${regime.reporting ? pill("Files SEC reports", "#2C5F8A") : pill("Not a reporting company", "#667")}
+      ${regime.listed ? pill("Listed — " + esc(regime.exchangeFamily) + " rules apply", "#991B1B") : pill("Not exchange listed", "#667")}
+      ${regime.section12 ? pill("Section 12 — Forms 3/4/5 apply", "#B45309") : pill("No Section 16 duties", "#667")}
+    </div>
+    <div class="xs muted" style="margin-top:7px;">These three facts decide which obligations exist, and they are
+      set on the <a href="${BASE}/profile">issuer profile</a>. If any of them is wrong, everything below is wrong.</div>
+  </div>
+
+  <div id="picker">${cards}</div>
+
+  <div id="form" style="display:none;"></div>
+  <div id="result"></div>
+
+  <script>
+  var CATALOG = ${JSON.stringify(catalog.groups)};
+  var ENG_OPTS = ${JSON.stringify(engOpts)};
+  var CURRENT = null;
+
+  function byKey(k){
+    for (var g in CATALOG) { for (var i=0;i<CATALOG[g].length;i++){ if (CATALOG[g][i].key===k) return CATALOG[g][i]; } }
+    return null;
+  }
+  function esc(t){ return String(t==null?'':t).replace(/[&<>"]/g,function(m){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]; }); }
+
+  document.querySelectorAll('.evbtn').forEach(function(b){
+    b.addEventListener('click', function(){ pick(b.getAttribute('data-key')); });
+  });
+
+  function pick(key){
+    var e = byKey(key); if(!e) return;
+    CURRENT = e;
+    document.getElementById('picker').style.display='none';
+    document.getElementById('result').innerHTML='';
+    var qs = e.questions.map(function(q){
+      if (q.type==='yesno') {
+        return '<div style="margin:14px 0;"><div style="font-weight:600;font-size:13px;">'+esc(q.prompt)+'</div>'+
+          (q.help?'<div class="xs muted" style="margin:3px 0 6px;">'+esc(q.help)+'</div>':'')+
+          '<div class="row"><label style="font-weight:400;margin:0;"><input type="radio" name="q-'+q.id+'" value="yes" style="width:auto;"> Yes</label>'+
+          '<label style="font-weight:400;margin:0;"><input type="radio" name="q-'+q.id+'" value="no" style="width:auto;" checked> No</label>'+
+          '<label style="font-weight:400;margin:0;"><input type="radio" name="q-'+q.id+'" value="unsure" style="width:auto;"> Not sure</label></div></div>';
+      }
+      var t = q.type==='date' ? 'date' : 'text';
+      return '<div style="margin:14px 0;"><label>'+esc(q.prompt)+'</label>'+
+        '<input type="'+t+'" id="q-'+q.id+'">'+
+        (q.help?'<div class="xs muted" style="margin-top:4px;">'+esc(q.help)+'</div>':'')+'</div>';
+    }).join('');
+
+    var anchors = e.anchors.map(function(a){
+      return '<div><label>'+esc(a.label)+'</label><input type="date" id="d-'+a.key+'">'+
+        (a.help?'<div class="xs muted" style="margin-top:4px;">'+esc(a.help)+'</div>':'')+'</div>';
+    }).join('');
+
+    document.getElementById('form').innerHTML =
+      '<div class="between"><div><h2 style="font-size:17px;">'+esc(e.label)+'</h2></div>'+
+      '<button class="btn ghost sm" onclick="back()">Pick something else</button></div>'+
+      '<div class="note blue">'+esc(e.headline)+'</div>'+
+      '<div class="card"><h2>Dates</h2><div class="grid g2">'+anchors+
+      '<div><label>When did you or anyone here first know?</label><input type="date" id="d-learned2">'+
+      '<div class="xs muted" style="margin-top:4px;">Kept separately from when it happened. A few obligations run from knowledge, and the sequence is what matters if anyone ever asks.</div></div>'+
+      '</div></div>'+
+      '<div class="card"><h2>A few questions</h2>'+qs+'</div>'+
+      '<div class="card"><h2>Anything else worth knowing</h2>'+
+      '<textarea id="summary" placeholder="In your own words. If you are unsure of a date, say so here."></textarea>'+
+      '<label style="margin-top:12px;">Attach to a period (optional)</label>'+
+      '<select id="engagement"><option value="">Not tied to a particular period</option>'+ENG_OPTS+'</select>'+
+      '<div class="xs muted" style="margin-top:4px;">Pick one and the documents it asks for also appear on that period\'s checklist.</div>'+
+      '</div>'+
+      '<div class="row"><button class="btn ghost" onclick="preview()">Show me what this triggers</button>'+
+      '<button class="btn" onclick="submit()">Report it</button><span class="sm muted" id="msg"></span></div>';
+    document.getElementById('form').style.display='block';
+    window.scrollTo(0,0);
+  }
+
+  function back(){
+    document.getElementById('form').style.display='none';
+    document.getElementById('result').innerHTML='';
+    document.getElementById('picker').style.display='block';
+  }
+
+  function gather(){
+    var answers={}, dates={};
+    CURRENT.questions.forEach(function(q){
+      if (q.type==='yesno') {
+        var sel=document.querySelector('input[name="q-'+q.id+'"]:checked');
+        answers[q.id] = sel ? sel.value : 'no';
+      } else {
+        var el=document.getElementById('q-'+q.id);
+        if (el && el.value) answers[q.id]=el.value;
+      }
+    });
+    CURRENT.anchors.forEach(function(a){
+      var el=document.getElementById('d-'+a.key);
+      if (el && el.value) dates[a.key]=el.value;
+    });
+    var l=document.getElementById('d-learned2');
+    if (l && l.value) dates.learned=l.value;
+    return {answers:answers, dates:dates};
+  }
+
+  async function preview(){
+    var g=gather();
+    if (!Object.keys(g.dates).length) return alert('Please give at least one date. Every deadline is measured from one.');
+    var msg=document.getElementById('msg'); msg.textContent='Working it out...';
+    try {
+      var r=await fetch('${BASE}/api/events/preview',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({key:CURRENT.key,answers:g.answers,dates:g.dates})});
+      var j=await r.json(); if(!j.ok) throw new Error(j.error||'Failed');
+      render(j.built); msg.textContent='';
+    } catch(e){ msg.textContent=''; alert(e.message); }
+  }
+
+  function render(b){
+    var html='<h2 style="margin-top:20px;">What this triggers</h2>';
+    if (!b.obligations.length) {
+      html+='<div class="note green"><b>Nothing appears to be triggered by this.</b> That is a real answer and '+
+        'worth recording: a decision that something was not reportable leaves no other trace, and it is the '+
+        'one most likely to be looked at later.</div>';
+    } else {
+      if (b.counts.preAct) html+='<div class="note red"><b>Something here was due BEFORE you acted.</b> '+
+        'It cannot be fixed by doing it late. Read it first and speak to counsel today.</div>';
+      html+='<div class="sm muted" style="margin-bottom:11px;">'+b.counts.total+' in total · '+
+        b.counts.filings+' filing'+(b.counts.filings===1?'':'s')+' · '+b.counts.critical+' critical'+
+        (b.counts.s3Risk?' · '+b.counts.s3Risk+' affecting Form S-3 eligibility':'')+
+        (b.counts.unverified?' · '+b.counts.unverified+' with an unconfirmed date':'')+'</div>';
+      html+=b.obligations.map(card).join('');
+    }
+    if (b.suppressed && b.suppressed.length) {
+      html+='<details style="margin-top:14px;"><summary>'+b.suppressed.length+
+        ' obligation(s) do not apply to this company</summary><div class="sm muted" style="margin-top:7px;">'+
+        b.suppressed.map(function(x){return '<div style="margin-bottom:5px;"><b>'+esc(x.label)+'</b><br>'+esc(x.reason)+'</div>';}).join('')+
+        '</div></details>';
+    }
+    document.getElementById('result').innerHTML=html;
+  }
+
+  function card(o){
+    var color = o.preAct ? '#991B1B' : o.severity==='critical' ? '#991B1B' : o.severity==='high' ? '#B45309' : '#2C5F8A';
+    var h='<div class="card" style="border-left:3px solid '+color+';margin-bottom:11px;"><div class="between">'+
+      '<div style="flex:1;min-width:250px;">';
+    if (o.preAct) h+='<span class="pill" style="color:#991B1B;background:#991B1B18;border-color:#991B1B44;">WAS DUE BEFORE YOU DID IT</span> ';
+    if (o.item8k) h+='<span class="pill" style="color:#991B1B;background:#991B1B18;border-color:#991B1B44;">Form 8-K Item '+esc(o.item8k)+'</span> ';
+    if (o.kind==='decision') h+='<span class="pill" style="color:#6B21A8;background:#6B21A818;border-color:#6B21A844;">A DECISION, NOT A FILING</span> ';
+    if (o.verified===false) h+='<span class="pill" style="color:#9C4221;background:#9C422118;border-color:#9C422144;">UNVERIFIED DATE</span> ';
+    h+='<div style="font-weight:650;font-size:13.5px;margin-top:5px;">'+esc(o.label)+'</div>'+
+       '<div class="xs muted" style="margin-top:4px;">'+esc((o.authority||[]).join(' · '))+'</div></div>'+
+       '<div class="right" style="white-space:nowrap;"><div style="font-weight:700;font-size:15px;color:'+color+';">'+
+       (o.dueDate||'No fixed date')+'</div>'+
+       (o.anchorLabel?'<div class="xs muted">from '+esc(String(o.anchorLabel).toLowerCase())+'</div>':'')+'</div></div>';
+    if (o.consequence) h+='<div class="sm" style="color:var(--ink2);margin-top:9px;">'+esc(o.consequence)+'</div>';
+    if (o.s3Risk) h+='<div class="note red" style="margin:9px 0 0;"><b>Filing this late also costs Form S-3 '+
+      'eligibility for twelve months.</b> Curing it late does not restore it.</div>';
+    if (o.note) h+='<details style="margin-top:7px;"><summary>More detail</summary><div class="sm" '+
+      'style="color:var(--ink2);white-space:pre-line;">'+esc(o.note)+'</div></details>';
+    return h+'</div>';
+  }
+
+  async function submit(){
+    var g=gather();
+    if (!Object.keys(g.dates).length) return alert('Please give at least one date. Every deadline is measured from one.');
+    var msg=document.getElementById('msg'); msg.textContent='Recording...';
+    try {
+      var r=await fetch('${BASE}/api/events/report',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({key:CURRENT.key,answers:g.answers,dates:g.dates,
+          summary:(document.getElementById('summary')||{}).value||'',
+          engagementId:(document.getElementById('engagement')||{}).value||null})});
+      var j=await r.json(); if(!j.ok) throw new Error(j.error||'Failed');
+      location.href='${BASE}/event/'+j.reportId;
+    } catch(e){ msg.textContent=''; alert(e.message); }
+  }
+  </script>`;
+
+  return chrome({ title: "Report something", body, user, active: "report-event" });
+}
+
+function eventRegisterPage({ reports, obligations, undetermined, attestations, stats, preAct, confirm }, user) {
+  const canDetermine = auth.can(user, "event.determine");
+
+  const obRows = obligations.length
+    ? obligations
+        .map((o) => {
+          const late = o.due_date && daysUntil(o.due_date) < 0;
+          return `<tr>
+        <td style="white-space:nowrap;">${o.pre_act ? pill("PRE-ACT", "#991B1B") + " " : ""}${o.item_8k ? `<code>8-K ${esc(o.item_8k)}</code>` : esc(o.kind)}</td>
+        <td>${esc(o.label)}
+          <div class="xs muted">from “${esc(o.event_label)}” · <a href="${BASE}/event/${o.report_id}">open</a></div>
+          ${o.s3_risk ? `<div class="xs" style="color:var(--red);font-weight:600;">Late here costs Form S-3 eligibility for twelve months.</div>` : ""}
+          ${o.verified === false ? `<div class="xs" style="color:var(--rust);font-weight:600;">Unverified date — check the rule.</div>` : ""}</td>
+        <td class="sm" style="white-space:nowrap;color:${late ? "var(--red)" : "var(--mute)"};font-weight:${late ? 600 : 400};">${fmtDate(o.due_date)}</td>
+        <td>${pill(o.severity || "normal", o.severity === "critical" ? "#991B1B" : o.severity === "high" ? "#B45309" : "#667")}</td>
+        <td class="right">${canDetermine ? `<button class="btn sm ghost" onclick="doneOb(${o.id})">Done</button>` : ""}</td></tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="5" class="empty">Nothing outstanding.</td></tr>`;
+
+  const repRows = reports.length
+    ? reports
+        .map(
+          (r) => `<tr>
+      <td><a href="${BASE}/event/${r.id}">${esc(r.event_label)}</a>
+        <div class="xs muted">${esc(r.reported_by_name || "")} · ${fmtDateTime(r.reported_at)}</div></td>
+      <td class="sm">${fmtDate(r.occurred_on)}</td>
+      <td class="sm">${r.obligations} total${r.open_obligations ? `, ${r.open_obligations} open` : ""}
+        ${r.overdue ? `<div class="xs" style="color:var(--red);font-weight:600;">${r.overdue} overdue</div>` : ""}</td>
+      <td class="sm">${fmtDate(r.next_due)}</td>
+      <td>${
+        r.determined_at
+          ? pill(String(r.determination).replace(/_/g, " "), r.determination === "reportable" ? "#991B1B" : "#1C7C54")
+          : pill("NEEDS A DECISION", "#B45309")
+      }</td></tr>`
+        )
+        .join("")
+    : `<tr><td colspan="5" class="empty">Nothing reported yet.</td></tr>`;
+
+  const today = cal.today();
+  const weekStart = confirm || cal.iso(cal.addDays(cal.parse(today), -7));
+
+  const body = `
+  <div class="between"><div>
+    <h1>Event register</h1>
+    <div class="sub">Everything reported, what it triggered, and who decided</div></div>
+    <a class="btn" href="${BASE}/report-event">Report something</a></div>
+
+  <div class="grid g4" style="margin-bottom:16px;">
+    <div class="stat"><div class="n" style="color:${stats.undetermined ? "var(--amber)" : "var(--green)"}">${stats.undetermined}</div>
+      <div class="l">Need a decision</div><div class="x">Including the ones that turn out to be nothing</div></div>
+    <div class="stat"><div class="n" style="color:${stats.overdue ? "var(--red)" : "var(--ink)"}">${stats.overdue}</div>
+      <div class="l">Overdue</div><div class="x">No Form 8-K extension exists</div></div>
+    <div class="stat"><div class="n">${stats.openObligations}</div><div class="l">Open obligations</div></div>
+    <div class="stat"><div class="n" style="color:${stats.s3Risk ? "var(--red)" : "var(--ink)"}">${stats.s3Risk}</div>
+      <div class="l">Affect Form S-3</div><div class="x">Twelve months if filed late</div></div>
+  </div>
+
+  ${
+    stats.preAct
+      ? `<div class="note red"><b>${stats.preAct} obligation${stats.preAct === 1 ? " was" : "s were"} due before the act that triggered ${stats.preAct === 1 ? "it" : "them"}.</b>
+         Filing or notifying late does not cure these. They are listed first below.</div>`
+      : ""
+  }
+
+  <div class="card" style="border-left:3px solid var(--green);">
+    <h2>Weekly confirmation</h2>
+    <div class="sm" style="color:var(--ink2);">Completeness is the hard half of this. A register that only knows
+      what somebody chose to type in can show that what was reported was reported, and nothing more. An
+      affirmative “nothing to report”, signed and dated, is what makes it evidence.</div>
+    <div class="row" style="margin-top:12px;">
+      <span class="sm muted">For ${fmtDate(weekStart)} to ${fmtDate(today)}:</span>
+      <button class="btn ok sm" onclick="confirmPeriod('nothing_to_report')">Nothing to report</button>
+      <button class="btn ghost sm" onclick="confirmPeriod('reported')">I reported everything I know of</button>
+      <span class="sm muted" id="cmsg"></span>
+    </div>
+  </div>
+
+  <h2 style="margin-top:22px;">Outstanding obligations</h2>
+  <div class="card tight"><table>
+    <tr><th>What</th><th>Obligation</th><th>Due</th><th></th><th></th></tr>${obRows}</table></div>
+
+  <h2 style="margin-top:22px;">Reported events</h2>
+  <div class="card tight"><table>
+    <tr><th>Event</th><th>Happened</th><th>Obligations</th><th>Next due</th><th>Decision</th></tr>${repRows}</table></div>
+
+  ${
+    attestations.length
+      ? `<h2 style="margin-top:22px;">Confirmation history</h2>
+         <div class="card tight"><table><tr><th>Person</th><th>Period</th><th>Answer</th><th>Signed</th></tr>
+         ${attestations
+           .map(
+             (a) => `<tr><td class="sm">${esc(a.user_name)}</td>
+             <td class="sm">${fmtDate(a.period_start)} to ${fmtDate(a.period_end)}</td>
+             <td>${a.answer === "nothing_to_report" ? pill("Nothing to report", "#1C7C54") : pill("Reported everything", "#2C5F8A")}</td>
+             <td class="sm muted">${fmtDateTime(a.created_at)}</td></tr>`
+           )
+           .join("")}</table></div>`
+      : ""
+  }
+
+  ${
+    preAct && preAct.length
+      ? `<h2 style="margin-top:22px;">Things that need doing BEFORE you act</h2>
+         <div class="note amber">These are the obligations that cannot be cured. Worth knowing before the
+         decision rather than after it, because by the time the act has happened the notice is already late.</div>
+         <div class="card tight"><table><tr><th>If you are about to</th><th>You must first</th><th>Authority</th></tr>
+         ${preAct
+           .map(
+             (x) => `<tr><td class="sm">${esc(x.eventLabel)}</td>
+             <td class="sm"><b>${esc(x.label)}</b><div class="xs muted">${esc(x.consequence || "")}</div></td>
+             <td class="xs muted">${esc((x.authority || []).join(" · "))}</td></tr>`
+           )
+           .join("")}</table></div>`
+      : ""
+  }
+
+  <script>
+  async function post(url, body){
+    var r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+    var j=await r.json(); if(!j.ok) throw new Error(j.error||'Request failed'); return j;
+  }
+  async function doneOb(id){
+    var n=prompt('What was done? This goes on the record.');
+    if(!n) return;
+    try{ await post('${BASE}/api/events/obligation/'+id+'/done',{note:n}); location.reload(); }catch(e){ alert(e.message); }
+  }
+  async function confirmPeriod(answer){
+    var msg=document.getElementById('cmsg');
+    var note = answer==='nothing_to_report' ? '' : (prompt('Anything to add? (optional)')||'');
+    msg.textContent='Recording...';
+    try{
+      await post('${BASE}/api/events/confirm-period',
+        {periodStart:'${weekStart}',periodEnd:'${today}',answer:answer,note:note});
+      location.reload();
+    }catch(e){ msg.textContent=''; alert(e.message); }
+  }
+  </script>`;
+
+  return chrome({ title: "Event register", body, user, active: "events", wide: true });
+}
+
+function eventDetailPage({ report: r }, user) {
+  const canDetermine = auth.can(user, "event.determine");
+  const obs = r.obligations.map((o) => obligationCard({ ...o, item8k: o.item_8k, preAct: o.pre_act, s3Risk: o.s3_risk, note: o.guidance, authority: o.authority, dueDate: o.due_date, anchorLabel: null })).join("");
+
+  const body = `
+  <div class="between"><div>
+    <h1>${esc(r.event_label)}</h1>
+    <div class="sub">Reported by ${esc(r.reported_by_name || "—")} on ${fmtDateTime(r.reported_at)}</div></div>
+    <a class="btn ghost" href="${BASE}/events">Back to the register</a></div>
+
+  ${r.summary ? `<div class="note blue">${esc(r.summary)}</div>` : ""}
+
+  <div class="card"><h2>The timeline</h2>
+    <div class="sm muted" style="margin-bottom:10px;">Kept as four separate dates on purpose. If anyone ever asks
+      when this company first knew something, this is the answer, and a single date column could not give it.</div>
+    <table>
+      <tr><th>It happened</th><td class="sm">${fmtDate(r.occurred_on)}</td></tr>
+      <tr><th>Someone here knew</th><td class="sm">${fmtDate(r.learned_on)}</td></tr>
+      <tr><th>It was reported</th><td class="sm">${fmtDateTime(r.reported_at)}</td></tr>
+      <tr><th>Management was told</th><td class="sm">${r.notified_at ? fmtDateTime(r.notified_at) : "—"}</td></tr>
+      <tr><th>Control version in force</th><td class="sm"><code>${esc(r.catalog_version)}</code></td></tr>
+    </table>
+  </div>
+
+  <h2 style="margin-top:20px;">What it triggered</h2>
+  ${obs || `<div class="empty">Nothing was triggered by this event.</div>`}
+
+  <div class="card" style="border-left:3px solid ${r.determined_at ? "var(--green)" : "var(--amber)"};">
+    <h2>The determination</h2>
+    ${
+      r.determined_at
+        ? `<div>${pill(String(r.determination).replace(/_/g, " "), r.determination === "reportable" ? "#991B1B" : "#1C7C54")}
+           by <b>${esc(r.determined_by_name || "")}</b> on ${fmtDateTime(r.determined_at)}</div>
+           <div class="sm" style="margin-top:9px;color:var(--ink2);white-space:pre-line;">${esc(r.determination_note || "")}</div>
+           <div class="xs muted" style="margin-top:9px;">A recorded determination is final. If it was wrong, report a
+             correcting event rather than rewriting this one.</div>`
+        : canDetermine
+        ? `<div class="note amber">Somebody has to decide, and the decision is recorded against their name.
+             This includes deciding that nothing is reportable, which is the determination with no other trace
+             and the one most likely to be examined later. The portal will not make it for you.</div>
+           <label>What did you conclude?</label>
+           <select id="det">
+             <option value="reportable">Reportable — the obligations above apply</option>
+             <option value="not_reportable">Not reportable — nothing is required</option>
+             <option value="deferred">Deferred — waiting on facts or on counsel</option>
+           </select>
+           <label>Why? Briefly.</label>
+           <textarea id="note" placeholder="The reasoning. For a materiality call, address the qualitative factors and not just the numbers."></textarea>
+           <button class="btn" style="margin-top:12px;" onclick="determine()">Record the determination</button>
+           <span class="sm muted" id="dmsg"></span>`
+        : `<div class="note amber">This still needs a decision from someone with authority to make it.</div>`
+    }
+  </div>
+
+  <script>
+  async function determine(){
+    var d=document.getElementById('det').value, n=document.getElementById('note').value;
+    if(!n||n.trim().length<10) return alert('Please give the reasoning. This is the record showing a person decided, on a date.');
+    var msg=document.getElementById('dmsg'); msg.textContent='Recording...';
+    try{
+      var r=await fetch('${BASE}/api/events/'+${r.id}+'/determine',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({determination:d,note:n})});
+      var j=await r.json(); if(!j.ok) throw new Error(j.error||'Failed');
+      location.reload();
+    }catch(e){ msg.textContent=''; alert(e.message); }
+  }
+  </script>`;
+
+  return chrome({ title: esc(r.event_label), body, user, active: "events" });
+}
+
+// ════════════════════════════════════════════════════════════
+//  DELIVERY LEDGER
+// ════════════════════════════════════════════════════════════
+//
+// The screens here exist to answer one question honestly: was the other
+// side actually told, and did they agree the package was complete. Every
+// receipt fact is shown with what it can support, because the failure
+// mode of a delivery dashboard is a green tick that means less than the
+// reader assumes.
+
+const RECEIPT_FACTS = [
+  ["notified_at", "Queued for sending", "The portal created the message.", "#889"],
+  ["email_sent_at", "Our mail server accepted it", "Says nothing about whether it arrived.", "#B45309"],
+  ["email_delivered_at", "Their mail server accepted it", "This is the fact that answers “it never arrived”.", "#2C5F8A"],
+  ["email_bounced_at", "Rejected on delivery", "It demonstrably did not arrive. No reminder will fix this.", "#991B1B"],
+  ["email_opened_at", "Tracking image loaded", "Unreliable in both directions — gateways prefetch it, most clients block it. Not evidence on its own.", "#B45309"],
+  ["link_clicked_at", "Link in the email clicked", "The link was addressed to this person, so it identifies them.", "#2C5F8A"],
+  ["first_viewed_at", "Opened the package in the portal", "Signed in as themselves.", "#17706E"],
+  ["last_download_at", "Downloaded the files", "The strongest observation short of a statement.", "#17706E"],
+  ["disputed_at", "Reported incomplete", "They say something is missing.", "#9C4221"],
+  ["dispute_resolved_at", "Dispute resolved", "", "#667"],
+  ["acknowledged_at", "Acknowledged as complete", "A statement by them. The only receipt that closes an item.", "#1C7C54"],
+];
+
+function stagePill(stage) {
+  if (!stage) return "";
+  return pill(stage.label, stage.color);
+}
+
+function receiptTimeline(r) {
+  const rows = RECEIPT_FACTS.filter(([k]) => r[k]).map(
+    ([k, label, caption, color]) => `<tr>
+      <td style="white-space:nowrap;color:${color};font-weight:600;width:1%;">${esc(label)}</td>
+      <td class="sm" style="white-space:nowrap;">${fmtDateTime(r[k])}</td>
+      <td class="xs muted">${esc(caption)}${
+      k === "email_bounced_at" && r.bounce_reason
+        ? `<br><span class="mono" style="color:var(--red);">${esc(String(r.bounce_reason).slice(0, 220))}</span>`
+        : ""
+    }${
+      k === "acknowledged_at" && r.acknowledged_note
+        ? `<br><b>Note:</b> ${esc(r.acknowledged_note)}`
+        : ""
+    }${k === "disputed_at" && r.dispute_note ? `<br><b>Said:</b> ${esc(r.dispute_note)}` : ""}${
+      k === "dispute_resolved_at" && r.dispute_resolution ? `<br><b>Resolution:</b> ${esc(r.dispute_resolution)}` : ""
+    }${
+      k === "last_download_at" && Number(r.download_count) > 1
+        ? ` (${r.download_count} downloads)`
+        : ""
+    }${
+      k === "link_clicked_at" && r.link_clicked_ip ? ` From ${esc(r.link_clicked_ip)}.` : ""
+    }</td></tr>`
+  );
+  if (!rows.length) {
+    return `<div class="empty" style="padding:14px;">Nothing has happened yet — the message has not even been sent.
+      If this persists, SMTP is not configured and <b>no notification has left the building</b>.</div>`;
+  }
+  return `<table style="font-size:12.5px;">${rows.join("")}</table>`;
+}
+
+/** The dashboard band. Silent unless something needs a human. */
+function deliveryStrip(s, user) {
+  if (!s) return "";
+  const out = [];
+
+  if (s.undelivered) {
+    out.push(`<div class="note ${s.undeliveredStale ? "red" : "amber"}">
+      <b>${s.undelivered} document${s.undelivered === 1 ? "" : "s"} ${
+      s.undelivered === 1 ? "has" : "have"
+    } never been transmitted to anyone.</b>
+      ${
+        s.auditor_accounts === 0
+          ? `There are no active auditor accounts, so nothing <em>can</em> be transmitted. The portal will not
+             record a delivery that cannot have happened. <a href="${BASE}/users">Create the engagement
+             team's accounts</a> and these go out on the next sweep.`
+          : `A file sitting in the portal is stored, not delivered — that distinction is the whole reason
+             this ledger exists. ${
+               s.undeliveredOldestHours >= 24
+                 ? `The oldest has been waiting ${Math.floor(s.undeliveredOldestHours / 24)} day${
+                     Math.floor(s.undeliveredOldestHours / 24) === 1 ? "" : "s"
+                   }. `
+                 : ""
+             }<a href="${BASE}/transmittals?tab=undelivered">Review and transmit</a>.`
+      }
+    </div>`);
+  }
+
+  if (s.bounced) {
+    out.push(`<div class="note red"><b>${s.bounced} notification${s.bounced === 1 ? "" : "s"} did not arrive.</b>
+      The receiving mail server rejected ${s.bounced === 1 ? "it" : "them"}, so the recipient was never told the
+      package existed. Reminders will not help — the address has to be fixed and the package reissued.
+      <a href="${BASE}/transmittals?filter=stalled">See which</a>.</div>`);
+  }
+
+  if (s.disputed) {
+    out.push(`<div class="note red"><b>${s.disputed} package${s.disputed === 1 ? " has" : "s have"} been reported
+      incomplete.</b> <a href="${BASE}/transmittals?filter=disputed">Open the dispute${
+      s.disputed === 1 ? "" : "s"
+    }</a> and send what was missing as a further transmittal.</div>`);
+  } else if (s.stalled) {
+    out.push(`<div class="note amber"><b>${s.stalled} package${s.stalled === 1 ? " is" : "s are"} stalled</b> past
+      ${s.config ? s.config.stalled_business_days : 5} business days without acknowledgment. These are now recorded
+      as delays for the AS 1301.25 schedule rather than chased as reminders.
+      <a href="${BASE}/delays">See the schedule</a>.</div>`);
+  }
+
+  if (s.awaitingMe && s.awaitingMe.length) {
+    out.push(`<div class="note blue"><b>${s.awaitingMe.length} package${
+      s.awaitingMe.length === 1 ? "" : "s"
+    } ${s.awaitingMe.length === 1 ? "is" : "are"} waiting for your acknowledgment.</b>
+      ${s.awaitingMe
+        .slice(0, 4)
+        .map((t) => `<a href="${BASE}/transmittal/${t.id}">${esc(t.number)}</a>`)
+        .join(" · ")}${s.awaitingMe.length > 4 ? ` and ${s.awaitingMe.length - 4} more` : ""}.
+      Only you can say a package is complete — the portal can see it was delivered, not that it was enough.</div>`);
+  }
+
+  return out.join("");
+}
+
+// ── The ledger ──────────────────────────────────────────────
+function transmittalsPage(
+  { transmittals, undelivered, stats, filter, tab, engagements, auditorAccounts },
+  user
+) {
+  const canCreate = auth.can(user, "delivery.create");
+  const FILTERS = [
+    ["open", "Open"],
+    ["stalled", "Stalled"],
+    ["disputed", "Disputed"],
+    ["closed", "Acknowledged"],
+    ["all", "All"],
+    ["void", "Void"],
+  ];
+
+  const chips = FILTERS.map(
+    ([k, label]) =>
+      `<a class="btn sm ${k === filter ? "" : "ghost"}" href="${BASE}/transmittals?filter=${k}">${esc(label)}</a>`
+  ).join(" ");
+
+  const statRow = `
+  <div class="grid g4" style="margin-bottom:16px;">
+    <div class="stat"><div class="n" style="color:${stats.undelivered ? "var(--red)" : "var(--green)"}">${
+    stats.undelivered
+  }</div>
+      <div class="l">Undelivered</div><div class="x">Uploaded, nobody told</div></div>
+    <div class="stat"><div class="n">${stats.open}</div><div class="l">Awaiting receipt</div>
+      <div class="x">Of ${stats.total} issued</div></div>
+    <div class="stat"><div class="n" style="color:${stats.stalled || stats.bounced ? "var(--red)" : "var(--ink)"}">${
+    stats.stalled + stats.bounced
+  }</div>
+      <div class="l">Not moving</div><div class="x">${stats.bounced} did not arrive</div></div>
+    <div class="stat"><div class="n">${
+      stats.medianAckBusinessDays == null ? "—" : stats.medianAckBusinessDays
+    }</div>
+      <div class="l">Median ack</div><div class="x">${
+        stats.ackSampleSize ? `Business days, last ${stats.ackSampleSize}` : "No acknowledgments yet"
+      }</div></div>
+  </div>`;
+
+  const ledger = transmittals.length
+    ? `<table>
+      <tr><th>No.</th><th>Subject</th><th>Period</th><th class="right">Items</th><th>State</th>
+        <th>Addressed to</th><th class="right">Age</th><th>Sent</th></tr>
+      ${transmittals
+        .map((t) => {
+          const roll = t.dispute_count
+            ? ["Disputed", "#9C4221"]
+            : t.voided_at
+            ? ["Void", "#889"]
+            : t.to_count && t.ack_count === t.to_count
+            ? ["Acknowledged", "#1C7C54"]
+            : t.bounce_count && !t.viewed_count
+            ? ["Did not arrive", "#991B1B"]
+            : t.stalled_count
+            ? ["Stalled", "#991B1B"]
+            : t.viewed_count
+            ? ["Seen", "#B45309"]
+            : ["Awaiting", "#B45309"];
+          return `<tr>
+          <td><a href="${BASE}/transmittal/${t.id}"><b>${esc(t.number)}</b></a>
+            ${t.auto_generated ? `<div class="xs muted">auto</div>` : ""}</td>
+          <td>${esc(String(t.subject).slice(0, 70))}
+            <div class="xs muted">${t.direction === "to_auditor" ? "company → auditor" : "auditor → company"}${
+            t.delivery_method !== "portal" ? ` · also by ${esc(t.delivery_method.replace(/_/g, " "))}` : ""
+          }</div></td>
+          <td class="sm muted">${esc(t.period_label || "—")}</td>
+          <td class="right">${t.doc_count}${t.item_count ? ` <span class="xs muted">+${t.item_count}r</span>` : ""}</td>
+          <td>${pill(roll[0], roll[1])}</td>
+          <td class="sm">${t.ack_count}/${t.to_count} signed
+            ${t.bounce_count ? ` ${pill(t.bounce_count + " bounced", "#991B1B")}` : ""}</td>
+          <td class="right sm" style="color:${
+            t.ageBusinessDays >= 5 && t.ack_count < t.to_count ? "var(--red);font-weight:600" : "inherit"
+          };">${t.ageBusinessDays}bd</td>
+          <td class="sm muted" style="white-space:nowrap;">${fmtDate(t.created_at)}</td></tr>`;
+        })
+        .join("")}</table>`
+    : `<div class="empty">No transmittals match this filter.${
+        canCreate ? ` <a href="${BASE}/transmittal/new">Issue one</a>.` : ""
+      }</div>`;
+
+  const undeliveredTable = undelivered.length
+    ? `<form method="POST" action="${BASE}/api/transmittal/create" id="txform">
+      <input type="hidden" name="direction" value="to_auditor">
+      <table>
+        <tr><th style="width:1%;"><input type="checkbox" id="all" style="width:auto;"></th>
+          <th>Document</th><th>Ref</th><th>Period</th><th class="right">Size</th><th>Waiting</th><th>Arrived by</th></tr>
+        ${undelivered
+          .map(
+            (d) => `<tr>
+          <td><input type="checkbox" name="documentIds" value="${d.id}" checked style="width:auto;"></td>
+          <td><a href="${BASE}/document/${d.id}">${esc(d.filename)}</a>
+            ${d.is_gate ? ` ${pill("GATE", "#991B1B")}` : ""}
+            ${d.needs_confirmation ? ` ${pill("UNCLASSIFIED", "#B45309")}` : ""}</td>
+          <td><code>${esc(d.category_code || "—")}</code></td>
+          <td class="sm muted">${esc(d.engagement_period || "no period")}</td>
+          <td class="right sm">${fmtBytes(d.size_bytes)}</td>
+          <td class="sm" style="color:${d.ageHours >= 24 ? "var(--red);font-weight:600" : "inherit"};">${
+              d.ageHours >= 24 ? `${Math.floor(d.ageHours / 24)}d ${d.ageHours % 24}h` : `${d.ageHours}h`
+            }</td>
+          <td class="sm muted">${esc(d.uploaded_by_name || d.source || "—")}</td></tr>`
+          )
+          .join("")}
+      </table>
+      <div style="padding:14px 18px;border-top:1px solid var(--line);">
+        <label>Message to the engagement team (optional)</label>
+        <textarea name="message" placeholder="Anything they should know before opening these."></textarea>
+        <div class="row" style="margin-top:12px;">
+          <button class="btn ok" type="submit" ${auditorAccounts ? "" : "disabled"}>Issue transmittal and notify</button>
+          ${
+            auditorAccounts
+              ? `<span class="xs muted">One numbered package, one email each, and the receipt clock starts.</span>`
+              : `<span class="xs" style="color:var(--red);">No active auditor accounts — there is nobody to send to.</span>`
+          }
+        </div>
+      </div>
+    </form>
+    <script>
+      document.getElementById("all").addEventListener("change", function(e){
+        document.querySelectorAll('#txform input[name=documentIds]').forEach(function(c){ c.checked = e.target.checked; });
+      });
+      document.getElementById("txform").addEventListener("submit", function(e){
+        e.preventDefault();
+        var ids = Array.from(document.querySelectorAll('#txform input[name=documentIds]:checked')).map(function(c){return Number(c.value);});
+        if (!ids.length) { alert("Select at least one document."); return; }
+        var btn = e.target.querySelector('button[type=submit]');
+        btn.disabled = true; btn.textContent = "Issuing\\u2026";
+        fetch("${BASE}/api/transmittal/create", {
+          method: "POST", headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({ direction:"to_auditor", documentIds: ids,
+            message: document.querySelector('#txform textarea[name=message]').value })
+        }).then(function(r){return r.json();}).then(function(j){
+          if (j.ok) location.href = "${BASE}/transmittal/" + j.transmittal.id;
+          else { alert(j.error || "Could not issue the transmittal."); btn.disabled = false; btn.textContent = "Issue transmittal and notify"; }
+        }).catch(function(err){ alert(String(err)); btn.disabled = false; btn.textContent = "Issue transmittal and notify"; });
+      });
+    </script>`
+    : `<div class="empty">Nothing is waiting. Every document on file has been transmitted to somebody — which
+        is the state this page exists to keep you in.</div>`;
+
+  const body = `
+  <div class="between"><div>
+    <h1>Deliveries</h1>
+    <div class="sub">Who was told what, when they saw it, and whether they said it was complete</div>
+  </div>${canCreate ? `<a class="btn" href="${BASE}/transmittal/new">Issue a transmittal</a>` : ""}</div>
+
+  ${statRow}
+
+  <div class="note blue">
+    <b>A shared folder cannot settle &ldquo;we never got it&rdquo;.</b> It knows a file exists; it does not know
+    that a named person was told, that the message reached their mail server, that they opened it, or that they
+    agreed the package was complete. Those are four separate facts and only the last one closes an item, so each
+    is recorded separately here and labelled with what it can actually support.
+  </div>
+
+  <div class="row" style="margin-bottom:14px;">
+    <a class="btn sm ${tab === "undelivered" ? "" : "ghost"}" href="${BASE}/transmittals?tab=undelivered">
+      Undelivered${stats.undelivered ? ` (${stats.undelivered})` : ""}</a>
+    <a class="btn sm ${tab === "undelivered" ? "ghost" : ""}" href="${BASE}/transmittals">Ledger</a>
+    <span style="flex:1;"></span>
+    <a class="btn sm ghost" href="${BASE}/delays">AS 1301.25 delays</a>
+  </div>
+
+  ${
+    tab === "undelivered"
+      ? `<div class="card tight">
+           <div style="padding:14px 18px 0;">
+             <h2>Uploaded, but nobody has been told</h2>
+             <div class="sub">An active document that has never appeared on a live transmittal. This is a tracked
+               state, not an absence — it is the exact gap that produces &ldquo;we never got it&rdquo;, so the
+               portal names it rather than showing a reassuring tick.</div>
+           </div>${undeliveredTable}</div>`
+      : `<div class="card tight">
+           <div style="padding:14px 18px 0;"><div class="between"><h2>Transmittal ledger</h2>
+             <div class="row">${chips}</div></div></div>${ledger}</div>`
+  }`;
+
+  return chrome({ title: "Deliveries", body, user, active: "transmittals", wide: true });
+}
+
+// ── One package ─────────────────────────────────────────────
+function transmittalDetailPage({ data, myReceipt }, user) {
+  const { transmittal: t, documents, recipients, events, manifest, rollup } = data;
+  const canAck = !!myReceipt && !myReceipt.acknowledged_at && !t.voided_at;
+  const canResolve = auth.can(user, "delivery.create");
+  const canVoid = auth.can(user, "delivery.admin") && !t.voided_at;
+  let canonical = [];
+  try {
+    const delivery = require("./audit-delivery");
+    canonical = [delivery.MANIFEST_FORMAT].concat(delivery.manifestLines(documents));
+  } catch {
+    /* the fingerprint panel degrades to the stored hash alone */
+  }
+
+  const manifestRows = documents
+    .map(
+      (d) => `<tr>
+      <td class="right muted" style="width:1%;">${d.ordinal}</td>
+      <td>${
+        d.document_id
+          ? `<a href="${BASE}/document/${d.document_id}">${esc(d.filename)}</a>`
+          : `${esc(d.filename)} ${pill("REQUESTED", "#B45309")}`
+      }
+        ${d.version && d.version > 1 ? ` <span class="xs muted">v${d.version}</span>` : ""}
+        ${
+          Number(d.superseded_by_count) > 0
+            ? `<div class="xs" style="color:var(--amber);">A newer version of this file exists now. The manifest
+                 deliberately still names the version that was handed over.</div>`
+            : ""
+        }</td>
+      <td class="sm muted">${esc(d.category_label || d.category_code || "—")}</td>
+      <td class="right sm">${d.size_bytes ? fmtBytes(d.size_bytes) : "—"}</td>
+      <td><code class="xs">${esc(d.sha256 ? d.sha256.slice(0, 16) : "—")}</code></td></tr>`
+    )
+    .join("");
+
+  const people = recipients
+    .map(
+      (r) => `<div class="card" style="margin-bottom:12px;">
+      <div class="between">
+        <div><b>${esc(r.name || r.email)}</b>
+          <span class="xs muted">${esc(r.email)}${r.org ? ` · ${esc(r.org)}` : ""}</span>
+          <div class="xs muted">${
+            r.kind === "to" ? "Addressed to — owes an acknowledgment" : "Copied — not chased"
+          }${
+        Number(r.reminder_count) ? ` · ${r.reminder_count} reminder${Number(r.reminder_count) === 1 ? "" : "s"} sent` : ""
+      }${r.stalled_at ? ` · recorded as stalled ${fmtDate(r.stalled_at)}` : ""}</div></div>
+        <div>${stagePill(r.stage)}</div>
+      </div>
+      <div class="xs muted" style="margin:7px 0 9px;">${esc(r.stage ? r.stage.weight : "")}</div>
+      ${receiptTimeline(r)}
+      ${
+        r.disputed_at && !r.dispute_resolved_at && canResolve
+          ? `<form class="noprint" style="margin-top:10px;" onsubmit="return resolveDispute(event, ${r.id})">
+               <label>Record how this dispute was resolved</label>
+               <input type="text" name="resolution" required minlength="10"
+                 placeholder="e.g. the September statement was sent as T-0019 on the 9th">
+               <button class="btn sm" type="submit" style="margin-top:8px;">Record resolution</button>
+             </form>`
+          : ""
+      }
+    </div>`
+    )
+    .join("");
+
+  const eventRows = events.length
+    ? `<table><tr><th>When</th><th>Event</th><th>Who</th><th>Detail</th></tr>
+      ${events
+        .map(
+          (e) => `<tr>
+        <td class="sm muted" style="white-space:nowrap;">${fmtDateTime(e.created_at)}</td>
+        <td class="sm"><b>${esc(String(e.event).replace(/^transmittal_/, "").replace(/_/g, " "))}</b></td>
+        <td class="sm muted">${esc(e.actor_email || "system")}${e.ip ? `<div class="xs">${esc(e.ip)}</div>` : ""}</td>
+        <td class="xs muted mono">${esc(JSON.stringify(e.detail || {}).slice(0, 180))}</td></tr>`
+        )
+        .join("")}</table>`
+    : `<div class="empty">No events recorded.</div>`;
+
+  const body = `
+  <div class="between"><div>
+    <h1>${esc(t.number)} — ${esc(t.subject)}</h1>
+    <div class="sub">${
+      t.direction === "to_auditor" ? "Issued by the company to the engagement team" : "Issued by the engagement team to the company"
+    }${t.period_label ? ` · ${esc(t.period_name || t.period_label)}` : ""} · ${fmtDateTime(t.created_at)}${
+    t.created_by_name ? ` by ${esc(t.created_by_name)}` : ""
+  }</div>
+  </div><div class="row noprint">
+    ${pill(rollup.label, rollup.color)}
+    <a class="btn sm ghost" href="javascript:window.print()">Print receipt</a>
+    <a class="btn sm ghost" href="${BASE}/transmittals">All deliveries</a>
+  </div></div>
+
+  ${
+    t.voided_at
+      ? `<div class="note red"><b>This transmittal was voided ${fmtDate(t.voided_at)}${
+          t.voided_by_name ? ` by ${esc(t.voided_by_name)}` : ""
+        }.</b> ${esc(t.void_reason || "")}<br>
+        It is kept rather than deleted because the recipients saw it, and a gap in the numbering would be the
+        suspicious part.</div>`
+      : ""
+  }
+  ${t.message ? `<div class="card"><h3>Covering message</h3><div style="white-space:pre-wrap;">${esc(t.message)}</div></div>` : ""}
+  ${
+    t.delivery_method !== "portal"
+      ? `<div class="note amber"><b>This package also went out by ${esc(
+          t.delivery_method.replace(/_/g, " ")
+        )}.</b> ${esc(t.method_note || "")}<br>
+        Recorded here so the ledger covers every route, not only the tidy one. A record that knows about just
+        the portal has the same blind spot in a new costume.</div>`
+      : ""
+  }
+
+  ${
+    canAck
+      ? `<div class="card noprint" style="border-color:#1C7C54;border-width:2px;">
+          <h2>Acknowledge receipt</h2>
+          <p class="sm" style="margin-top:0;">The portal can see that this reached you and whether you took the
+            files. It cannot say on your behalf that the package is complete — only you can, and that
+            statement is what closes these items. An acknowledgment is final once recorded.</p>
+          <form onsubmit="return ack(event)">
+            <label>Note (optional)</label>
+            <input type="text" name="note" placeholder="e.g. received, reconciled to the trial balance">
+            <div class="row" style="margin-top:12px;">
+              <button class="btn ok" type="submit">Acknowledge — this package is complete</button>
+              <button class="btn ghost" type="button" onclick="document.getElementById('disp').style.display='block'">
+                Something is missing</button>
+            </div>
+          </form>
+          <form id="disp" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line);"
+            onsubmit="return disp(event)">
+            <label>What is missing or wrong? (at least ten characters)</label>
+            <textarea name="note" required minlength="10"
+              placeholder="e.g. the September bank statement for the operating account is not in here"></textarea>
+            <div class="xs muted" style="margin-top:6px;">A fast objection is worth far more to the close than
+              slow silence, and the sender is told immediately.</div>
+            <button class="btn danger" type="submit" style="margin-top:10px;">Report the package incomplete</button>
+          </form>
+        </div>`
+      : myReceipt && myReceipt.acknowledged_at
+      ? `<div class="note green"><b>You acknowledged this package on ${fmtDateTime(myReceipt.acknowledged_at)}.</b>
+          ${myReceipt.acknowledged_note ? esc(myReceipt.acknowledged_note) : ""}</div>`
+      : !myReceipt
+      ? `<div class="note blue">You are not a recipient of this transmittal, so there is nothing for you to
+          acknowledge. An acknowledgment only means something if it comes from the person the package was
+          addressed to.</div>`
+      : ""
+  }
+
+  <div class="card tight">
+    <div style="padding:14px 18px 0;"><div class="between"><h2>Manifest</h2>
+      <div class="sm muted">${t.doc_count} document${t.doc_count === 1 ? "" : "s"}${
+    t.item_count ? ` · ${t.item_count} requested` : ""
+  } · ${fmtBytes(t.total_bytes)}</div></div></div>
+    <table><tr><th class="right">#</th><th>File</th><th>Category</th><th class="right">Size</th><th>SHA-256</th></tr>
+      ${manifestRows}</table>
+    <div style="padding:14px 18px;border-top:1px solid var(--line);">
+      <div class="between">
+        <div>
+          <h3 style="margin-bottom:4px;">Manifest fingerprint</h3>
+          <div class="mono">${esc(manifest.stored)}</div>
+        </div>
+        <div>${
+          manifest.matches
+            ? pill("VERIFIED", "#1C7C54")
+            : pill("DOES NOT MATCH — INVESTIGATE", "#991B1B")
+        }</div>
+      </div>
+      <div class="xs muted" style="margin-top:8px;">
+        A SHA-256 over this package's own ordered list of file names, file hashes and sizes. Either a file is
+        under that fingerprint or it is not, so if anything is later said to be missing the question is settled
+        by arithmetic rather than recollection. ${
+          manifest.matches
+            ? "Recomputed from the sealed manifest just now and it matches."
+            : "<b style='color:var(--red)'>The recomputed value does not match the sealed one. That should be impossible — the manifest is sealed by database trigger — so treat it as a serious integrity question and do not rely on this package.</b>"
+        }
+      </div>
+      ${
+        canonical.length
+          ? `<details class="noprint" style="margin-top:9px;"><summary>Show the canonical form, so the other side can recompute it</summary>
+             <div class="mono xs" style="white-space:pre;background:#F8FAFB;padding:10px;border-radius:5px;border:1px solid var(--line);overflow:auto;">${esc(
+               canonical.join("\n")
+             )}</div>
+             <div class="xs muted" style="margin-top:6px;">Lines joined with a single newline, no trailing
+               newline, UTF-8, then SHA-256. The first line is the format identifier, so a future change to the
+               format cannot be mistaken for a tampered manifest.</div></details>`
+          : ""
+      }
+    </div>
+  </div>
+
+  <h2 style="margin-top:22px;">Receipts — ${rollup.acked} of ${rollup.owed} addressed recipients have signed</h2>
+  ${people}
+
+  <div class="card tight"><div style="padding:14px 18px 0;"><h2>Chain of custody</h2>
+    <div class="sub">Append-only. Nothing here can be edited or removed, including by direct database access.</div>
+  </div>${eventRows}</div>
+
+  ${
+    canVoid
+      ? `<div class="card noprint"><h2>Void this transmittal</h2>
+          <p class="sm" style="margin-top:0;">Voiding withdraws the package. It is never deleted: the recipients
+            saw it, and a hole in the numbering is harder to explain than a withdrawal. The reason is kept.</p>
+          <form onsubmit="return voidTx(event)">
+            <label>Reason (at least ten characters)</label>
+            <input type="text" name="reason" required minlength="10"
+              placeholder="e.g. issued against the wrong period; reissued as T-0021">
+            <button class="btn danger" type="submit" style="margin-top:10px;">Void ${esc(t.number)}</button>
+          </form></div>`
+      : ""
+  }
+
+  <script>
+    function post(url, payload, btn) {
+      if (btn) { btn.disabled = true; }
+      return fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload||{}) })
+        .then(function(r){ return r.json(); })
+        .then(function(j){ if (j.ok) location.reload(); else { alert(j.error || "That did not work."); if (btn) btn.disabled = false; } })
+        .catch(function(e){ alert(String(e)); if (btn) btn.disabled = false; });
+    }
+    function ack(e){ e.preventDefault();
+      post("${BASE}/api/transmittal/${t.id}/acknowledge", { note: e.target.note.value }, e.target.querySelector("button")); return false; }
+    function disp(e){ e.preventDefault();
+      post("${BASE}/api/transmittal/${t.id}/dispute", { note: e.target.note.value }, e.target.querySelector("button")); return false; }
+    function voidTx(e){ e.preventDefault();
+      if (!confirm("Void ${esc(t.number)}? This cannot be undone.")) return false;
+      post("${BASE}/api/transmittal/${t.id}/void", { reason: e.target.reason.value }, e.target.querySelector("button")); return false; }
+    function resolveDispute(e, id){ e.preventDefault();
+      post("${BASE}/api/transmittal/receipt/" + id + "/resolve", { resolution: e.target.resolution.value }, e.target.querySelector("button")); return false; }
+  </script>`;
+
+  return chrome({ title: `${t.number} · Transmittal`, body, user, active: "transmittals", wide: true });
+}
+
+// ── Compose ─────────────────────────────────────────────────
+function newTransmittalPage({ engagements, candidates, people, direction, openItems }, user) {
+  const isToAuditor = direction !== "to_company";
+
+  const docRows = candidates.length
+    ? candidates
+        .map(
+          (d) => `<tr>
+      <td style="width:1%;"><input type="checkbox" name="doc" value="${d.id}" style="width:auto;"></td>
+      <td>${esc(d.filename)}${d.is_gate ? ` ${pill("GATE", "#991B1B")}` : ""}
+        ${d.transmitted ? ` ${pill("already sent", "#889")}` : ""}</td>
+      <td><code class="xs">${esc(d.category_code || "—")}</code></td>
+      <td class="sm muted">${esc(d.engagement_period || "—")}</td>
+      <td class="right sm">${fmtBytes(d.size_bytes)}</td></tr>`
+        )
+        .join("")
+    : "";
+
+  const itemRows = (openItems || [])
+    .map(
+      (i) => `<tr>
+      <td style="width:1%;"><input type="checkbox" name="item" value="${i.id}" style="width:auto;"></td>
+      <td>${esc(String(i.label).slice(0, 110))}${i.is_gate ? ` ${pill("GATE", "#991B1B")}` : ""}</td>
+      <td><code class="xs">${esc(i.category_code || "—")}</code></td>
+      <td class="sm muted">${esc(i.period_label || "—")}</td>
+      <td class="sm">${fmtDate(i.due_date)}</td></tr>`
+    )
+    .join("");
+
+  const body = `
+  <h1>Issue a transmittal</h1>
+  <div class="sub">A numbered package, addressed to named people, with a receipt clock</div>
+
+  <div class="note blue">
+    Numbering is the cheap trick that makes this work. It gives both sides a noun: &ldquo;transmittal 14, sent
+    the 6th, acknowledged the 8th&rdquo; ends an argument that &ldquo;the files are in the folder&rdquo; cannot
+    even begin. Batching matters too — twelve files are one package and one email, because a system that
+    pages a recipient twelve times is muted by week two, and a muted system is worse than none: it still
+    produces a record saying the auditor was notified.
+  </div>
+
+  <form id="f">
+    <div class="card">
+      <h2>Direction</h2>
+      <select name="direction" onchange="location.href='${BASE}/transmittal/new?direction=' + this.value">
+        <option value="to_auditor" ${isToAuditor ? "selected" : ""}>Company → engagement team (sending documents)</option>
+        <option value="to_company" ${!isToAuditor ? "selected" : ""}>Engagement team → company (requesting items)</option>
+      </select>
+      <div class="xs muted" style="margin-top:6px;">The direction decides who owes the acknowledgment, and which
+        side gets chased. An auditor requesting items is not preparing the company's records, so this does not
+        touch the Rule 2-01 independence boundary.</div>
+
+      <label>Subject</label>
+      <input type="text" name="subject" placeholder="${
+        isToAuditor ? "e.g. Q1 bank reconciliations and statements" : "e.g. Outstanding PBC items for Q1 fieldwork"
+      }">
+
+      <label>Covering message</label>
+      <textarea name="message" placeholder="What the other side should know before opening this."></textarea>
+
+      <label>Also sent by another route?</label>
+      <select name="deliveryMethod">
+        <option value="portal">No — the portal only</option>
+        <option value="email_attachment">Also emailed as attachments</option>
+        <option value="courier">Also sent by courier or hand delivery</option>
+        <option value="other">Also sent some other way</option>
+      </select>
+      <input type="text" name="methodNote" placeholder="Detail, if it went out another way" style="margin-top:8px;">
+      <div class="xs muted" style="margin-top:6px;">Record it either way. A ledger that only knows about the tidy
+        path has the same blind spot that produced the problem.</div>
+    </div>
+
+    <div class="card">
+      <h2>Recipients</h2>
+      ${
+        people.length
+          ? people
+              .map(
+                (p) => `<label style="font-weight:400;display:flex;gap:8px;align-items:flex-start;margin:7px 0;">
+          <input type="checkbox" name="rcpt" value="${p.user_id}" checked style="width:auto;margin-top:3px;">
+          <span><b>${esc(p.name)}</b> <span class="xs muted">${esc(p.email)}</span>
+            <div class="xs muted">${
+              p.kind === "to" ? "Will be asked to acknowledge, and chased until they do" : "Copied only"
+            }</div></span></label>`
+              )
+              .join("")
+          : `<div class="note red"><b>There is nobody to send to.</b> ${
+              isToAuditor
+                ? "No active auditor accounts exist yet. Create the engagement team's accounts first — until then documents will keep showing as undelivered, which is accurate."
+                : "No active company accounts exist."
+            } <a href="${BASE}/users">Manage users</a>.</div>`
+      }
+    </div>
+
+    ${
+      docRows
+        ? `<div class="card tight"><div style="padding:14px 18px 0;"><h2>Documents to enclose</h2>
+            <div class="sub">Most recent first. Files already transmitted are marked — re-sending is fine,
+              it just creates a second package.</div></div>
+          <table><tr><th></th><th>Document</th><th>Ref</th><th>Period</th><th class="right">Size</th></tr>${docRows}</table></div>`
+        : `<div class="card"><h2>Documents to enclose</h2><div class="empty">No documents on file yet.</div></div>`
+    }
+
+    ${
+      itemRows
+        ? `<div class="card tight"><div style="padding:14px 18px 0;"><h2>Items to request</h2>
+            <div class="sub">Open checklist items. These carry no bytes, so they contribute no hash to the
+              manifest — the fingerprint attests to files, and a request is not a file.</div></div>
+          <table><tr><th></th><th>Item</th><th>Ref</th><th>Period</th><th>Due</th></tr>${itemRows}</table></div>`
+        : ""
+    }
+
+    <div class="card">
+      <button class="btn ok" type="submit" ${people.length ? "" : "disabled"}>Issue and notify</button>
+      <a class="btn ghost" href="${BASE}/transmittals">Cancel</a>
+    </div>
+  </form>
+
+  <script>
+    document.getElementById("f").addEventListener("submit", function(e){
+      e.preventDefault();
+      var f = e.target;
+      var docs = Array.from(f.querySelectorAll('input[name=doc]:checked')).map(function(c){return Number(c.value);});
+      var items = Array.from(f.querySelectorAll('input[name=item]:checked')).map(function(c){return Number(c.value);});
+      var rcpt = Array.from(f.querySelectorAll('input[name=rcpt]:checked')).map(function(c){return Number(c.value);});
+      if (!docs.length && !items.length) { alert("Select at least one document or one item to request."); return; }
+      if (!rcpt.length) { alert("Select at least one recipient \\u2014 a package addressed to nobody would record a delivery that did not happen."); return; }
+      var btn = f.querySelector('button[type=submit]');
+      btn.disabled = true; btn.textContent = "Issuing\\u2026";
+      fetch("${BASE}/api/transmittal/create", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          direction: f.direction.value, subject: f.subject.value, message: f.message.value,
+          deliveryMethod: f.deliveryMethod.value, methodNote: f.methodNote.value,
+          documentIds: docs, itemIds: items, recipientIds: rcpt })
+      }).then(function(r){return r.json();}).then(function(j){
+        if (j.ok) location.href = "${BASE}/transmittal/" + j.transmittal.id;
+        else { alert(j.error || "Could not issue the transmittal."); btn.disabled = false; btn.textContent = "Issue and notify"; }
+      }).catch(function(err){ alert(String(err)); btn.disabled = false; btn.textContent = "Issue and notify"; });
+    });
+  </script>`;
+
+  return chrome({ title: "Issue a transmittal", body, user, active: "transmittals" });
+}
+
+// ── AS 1301.25 schedule of delays ───────────────────────────
+function delaysPage({ report, engagementId, engagements }, user) {
+  const section = (rows, title, blurb) => `
+    <div class="card tight">
+      <div style="padding:14px 18px 0;"><h2>${esc(title)}</h2><div class="sub">${blurb}</div></div>
+      ${
+        rows.length
+          ? `<table><tr><th>No.</th><th>Package</th><th>Recipient</th><th>Period</th>
+              <th class="right">Business days</th><th>What happened</th><th>Reminders</th></tr>
+            ${rows
+              .map(
+                (x) => `<tr>
+              <td><b>${esc(x.number)}</b></td>
+              <td class="sm">${esc(String(x.subject).slice(0, 60))}
+                <div class="xs muted">sent ${fmtDate(x.created_at)}${
+                  x.ack_due_on ? ` · asked for by ${fmtDate(x.ack_due_on)}` : ""
+                }</div></td>
+              <td class="sm">${esc(x.name || x.email)}</td>
+              <td class="sm muted">${esc(x.period_label || "—")}</td>
+              <td class="right" style="font-weight:600;color:${
+                x.businessDays > report.stalledBusinessDays ? "var(--red)" : "var(--ink)"
+              };">${x.businessDays}</td>
+              <td class="sm">${esc(x.reason)}${x.stillOutstanding ? ` ${pill("STILL OPEN", "#991B1B")}` : ""}
+                ${x.bounce_reason ? `<div class="xs mono" style="color:var(--red);">${esc(String(x.bounce_reason).slice(0, 120))}</div>` : ""}
+                ${x.dispute_note ? `<div class="xs muted">&ldquo;${esc(String(x.dispute_note).slice(0, 120))}&rdquo;</div>` : ""}</td>
+              <td class="right sm">${x.reminder_count}</td></tr>`
+              )
+              .join("")}</table>`
+          : `<div class="empty">Nothing to report here.</div>`
+      }
+    </div>`;
+
+  const gates = report.openGates.length
+    ? `<div class="card tight">
+        <div style="padding:14px 18px 0;"><h2>Gating items still outstanding</h2>
+          <div class="sub">A gate is by definition information the auditor is waiting for, so these are the
+            clearest case of the delay AS 1301.25 asks about.</div></div>
+        <table><tr><th>Ref</th><th>Item</th><th>Period</th><th>Was due</th><th class="right">Business days late</th></tr>
+        ${report.openGates
+          .map(
+            (g) => `<tr>
+            <td><code>${esc(g.category_code || "—")}</code></td>
+            <td class="sm">${esc(String(g.label).slice(0, 100))}</td>
+            <td class="sm muted">${esc(g.period_label || "—")}</td>
+            <td class="sm">${fmtDate(g.due_date)}</td>
+            <td class="right" style="color:var(--red);font-weight:600;">${g.businessDaysLate}</td></tr>`
+          )
+          .join("")}</table></div>`
+    : "";
+
+  const nothing =
+    !report.toAuditor.length && !report.toCompany.length && !report.openGates.length;
+
+  const body = `
+  <div class="between"><div>
+    <h1>Delays in receiving information</h1>
+    <div class="sub">AS 1301.25 · schedule of difficulties encountered · generated ${fmtDateTime(
+      report.generatedAt
+    )}</div>
+  </div><div class="row noprint">
+    <a class="btn sm ghost" href="javascript:window.print()">Print</a>
+    <a class="btn sm ghost" href="${BASE}/transmittals">Deliveries</a>
+  </div></div>
+
+  <div class="note purple">
+    AS 1301.25 requires the auditor to communicate to the audit committee any difficulties encountered during
+    the audit, and names <b>delays in receiving information</b> as an example. That schedule is normally
+    assembled from memory at the end of fieldwork, which is why it is always vague and always contested. This
+    one is built from the delivery ledger with dates — which also means it will sometimes show that the
+    delay was not the company's.
+    <br><br>
+    A package counts as a delay here once it has been outstanding more than
+    <b>${report.stalledBusinessDays} business days</b>, or if it bounced, or if the recipient reported it
+    incomplete. This is a factual schedule, not a conclusion: whether any of it was significant to the audit
+    is the engagement partner's judgment.
+  </div>
+
+  ${nothing ? `<div class="card"><div class="empty">No delays recorded. Nothing has bounced, stalled or been
+    reported incomplete, and no gating item is overdue.</div></div>` : ""}
+
+  ${section(
+    report.toAuditor,
+    "Company → engagement team",
+    "Packages the company sent that the engagement team was slow to acknowledge, or never did."
+  )}
+  ${section(
+    report.toCompany,
+    "Engagement team → company",
+    "Items the engagement team requested that the company was slow to return. The direction cuts both ways, deliberately."
+  )}
+  ${gates}`;
+
+  return chrome({ title: "AS 1301.25 delays", body, user, active: "transmittals", wide: true });
+}
+
 function usersPage({ users }, user) {
   const roleOptions = Object.entries(auth.ROLES)
     .map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`)
@@ -2021,5 +3344,15 @@ module.exports = {
   calendarPage,
   profilePage,
   playbooksPage,
+  reportEventPage,
+  eventRegisterPage,
+  eventDetailPage,
+  // delivery ledger
+  deliveryStrip,
+  transmittalsPage,
+  transmittalDetailPage,
+  newTransmittalPage,
+  delaysPage,
+  receiptTimeline,
   usersPage,
 };

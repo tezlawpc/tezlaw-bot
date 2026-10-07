@@ -58,7 +58,7 @@ const PRACTICE_LINKS = [
 const SOURCES_FILE = "/var/data/sources.json";
 
 const JJ_VOICE = `
-You are rewriting a legal blog post in the voice of JJ Zhang, managing attorney at Tez Law P.C.
+You are rewriting a legal blog post in the voice of JJ Zhang, founding attorney at TEZ Law Firm.
 JJ's style: Conversational and direct. Signature phrase: "Protect your rights — we handle the rest."
 Uses "we"/"our team" not "I". Short punchy sentences mixed with longer explanations.
 Never uses: "In today's complex landscape", "navigating", "it's important to note", "comprehensive", "multifaceted".
@@ -67,9 +67,9 @@ Occasionally uses rhetorical questions. Never guarantees outcomes.
 JJ is an immigrant himself. Has business/real estate background. Speaks English, Mandarin, Shanghainese.`;
 
 const FOOTER_TEXT = {
-  en: { label: "About the Author", title: "Founding Attorney · Tez Law P.C.", bio: "<strong>JJ Zhang came to the United States as an immigrant</strong> and built businesses in hospitality, manufacturing, real estate and lending before practicing law. Today he and the Tez Law P.C. team represent individuals, families, investors and companies.", tagline: "Protect your rights, we’ll lead the fight.", cta1: "Schedule a consultation · 626-678-8677", cta2: "Save our contact details →", chat: "WhatsApp, WeChat, Telegram, phone and email — all on our contact page:", areas: "<strong>Immigration:</strong> nationwide · <strong>Injury, disputes and real estate:</strong> Los Angeles, Orange, San Bernardino and Riverside counties", disc: "This article is general information, not legal advice, and reading it does not create an attorney-client relationship. Laws and agency practices change; contact Tez Law P.C. at 626-678-8677 or jj@tezlawfirm.com about your situation. Prior results do not guarantee a similar outcome." },
-  zh: { label: "关于作者", title: "创始律师 · Tez Law P.C.", bio: "<strong>章律师本人也是移民</strong>，从事法律工作之前曾经营酒店、制造、房地产开发和贷款业务。如今，他与 Tez Law P.C. 团队一起为个人、家庭、投资人和企业提供法律服务。", tagline: "守护您的权益，我们为您据理力争。", cta1: "预约咨询 · 626-678-8677", cta2: "保存我们的联系方式 →", chat: "WhatsApp、微信、Telegram、电话和电子邮件，尽在我们的联系页面：", areas: "<strong>移民案件：</strong>全美 · <strong>人身伤害、商业纠纷与房地产：</strong>洛杉矶、橙县、圣贝纳迪诺和河滨县", disc: "本文仅为一般信息，不构成法律意见，阅读本文不建立律师与客户关系。法律和政府做法经常变化，具体情况请致电 626-678-8677 或发邮件至 jj@tezlawfirm.com 咨询 Tez Law P.C.。过往结果不保证类似结果。" },
-  es: { label: "Sobre el autor", title: "Abogado fundador · Tez Law P.C.", bio: "<strong>JJ Zhang llegó a Estados Unidos como inmigrante</strong> y dirigió negocios de hotelería, manufactura, bienes raíces y préstamos antes de ejercer la abogacía. Hoy él y el equipo de Tez Law P.C. representan a personas, familias, inversionistas y empresas.", tagline: "Proteja sus derechos, nosotros damos la pelea.", cta1: "Programe una consulta · 626-678-8677", cta2: "Guarde nuestros datos de contacto →", chat: "WhatsApp, WeChat, Telegram, teléfono y correo, todo en nuestra página de contacto:", areas: "<strong>Inmigración:</strong> en todo el país · <strong>Lesiones, disputas y bienes raíces:</strong> condados de Los Ángeles, Orange, San Bernardino y Riverside", disc: "Este artículo es información general, no asesoría legal, y leerlo no crea una relación abogado-cliente. Las leyes cambian; comuníquese con Tez Law P.C. al 626-678-8677 o jj@tezlawfirm.com sobre su caso. Los resultados anteriores no garantizan un resultado similar." },
+  en: { label: "About the Author", title: "Founding Attorney · TEZ Law Firm", bio: "<strong>JJ Zhang came to the United States as an immigrant</strong> and built businesses in hospitality, manufacturing, real estate and lending before practicing law. Today he and the TEZ Law Firm team represent individuals, families, investors and companies.", tagline: "Protect your rights, we’ll lead the fight.", cta1: "Schedule a consultation · 626-678-8677", cta2: "Save our contact details →", chat: "WhatsApp, WeChat, Telegram, phone and email — all on our contact page:", areas: "<strong>Immigration:</strong> nationwide · <strong>Injury, disputes and real estate:</strong> Los Angeles, Orange, San Bernardino and Riverside counties", disc: "This article is general information, not legal advice, and reading it does not create an attorney-client relationship. Laws and agency practices change; contact TEZ Law Firm at 626-678-8677 or jj@tezlawfirm.com about your situation. Prior results do not guarantee a similar outcome." },
+  zh: { label: "关于作者", title: "创始律师 · TEZ律师事务所", bio: "<strong>章律师本人也是移民</strong>，从事法律工作之前曾经营酒店、制造、房地产开发和贷款业务。如今，他与 TEZ律师事务所团队一起为个人、家庭、投资人和企业提供法律服务。", tagline: "守护您的权益，我们为您据理力争。", cta1: "预约咨询 · 626-678-8677", cta2: "保存我们的联系方式 →", chat: "WhatsApp、微信、Telegram、电话和电子邮件，尽在我们的联系页面：", areas: "<strong>移民案件：</strong>全美 · <strong>人身伤害、商业纠纷与房地产：</strong>洛杉矶、橙县、圣贝纳迪诺和河滨县", disc: "本文仅为一般信息，不构成法律意见，阅读本文不建立律师与客户关系。法律和政府做法经常变化，具体情况请致电 626-678-8677 或发邮件至 jj@tezlawfirm.com 咨询 TEZ律师事务所。过往结果不保证类似结果。" },
+  es: { label: "Sobre el autor", title: "Abogado fundador · TEZ Law Firm", bio: "<strong>JJ Zhang llegó a Estados Unidos como inmigrante</strong> y dirigió negocios de hotelería, manufactura, bienes raíces y préstamos antes de ejercer la abogacía. Hoy él y el equipo de TEZ Law Firm representan a personas, familias, inversionistas y empresas.", tagline: "Proteja sus derechos, nosotros damos la pelea.", cta1: "Programe una consulta · 626-678-8677", cta2: "Guarde nuestros datos de contacto →", chat: "WhatsApp, WeChat, Telegram, teléfono y correo, todo en nuestra página de contacto:", areas: "<strong>Inmigración:</strong> en todo el país · <strong>Lesiones, disputas y bienes raíces:</strong> condados de Los Ángeles, Orange, San Bernardino y Riverside", disc: "Este artículo es información general, no asesoría legal, y leerlo no crea una relación abogado-cliente. Las leyes cambian; comuníquese con TEZ Law Firm al 626-678-8677 o jj@tezlawfirm.com sobre su caso. Los resultados anteriores no garantizan un resultado similar." },
 };
 const FOOTER_MARK = "<style>.tez-ab{";
 // Every way to reach the firm lives on one page, tezlawfirm.com/jj, so that a
@@ -580,7 +580,7 @@ async function publishToWordPress({ title, content, category, tags, metaDescript
   postData.meta = { tez_lang: lang || "en" };
   if (metaDescription) postData.meta._yoast_wpseo_metadesc = metaDescription.substring(0, 158);
   if (focusKeyword) postData.meta._yoast_wpseo_focuskw = focusKeyword;
-  if (title) postData.meta._yoast_wpseo_title = (title.length > 45 ? title : title + " | Tez Law P.C.");
+  if (title) postData.meta._yoast_wpseo_title = (title.length > 45 ? title : title + " | TEZ Law Firm");
 
   let postRes;
   try {
@@ -608,13 +608,13 @@ async function generatePost({ topic, practiceArea, context, useSearch, sources }
   const currentYear = new Date().getFullYear();
   const todayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const locationContext = ["Immigration Law", "Immigration"].includes(practiceArea)
-    ? "nationwide United States (Tez Law handles immigration cases across the entire US)"
+    ? "nationwide United States (TEZ Law Firm handles immigration cases across the entire US)"
     : "Southern California — Los Angeles County, Orange County, San Bernardino County, and Riverside Counties. Key cities: West Covina, LA, Anaheim, San Bernardino, Riverside, Ontario, Pomona.";
   const sourceInstruction = sources && sources.length > 0
     ? `\nPRIORITY SOURCES: When researching this topic, prioritize information from these high-authority sources: ${sources.join(", ")}. Search these first, then supplement with other credible sources if needed.\n`
     : "";
   const linkList = PRACTICE_LINKS.map(([label, url]) => `- ${label}: ${url}`).join("\n");
-  const prompt = `You write clear, accurate legal articles for Tez Law P.C., a law firm in West Covina and Newport Beach, California. JJ Zhang is the founding attorney (California Bar #326666).
+  const prompt = `You write clear, accurate legal articles for TEZ Law Firm (legal name Tez Law P.C.), a California law firm with offices in West Covina, City of Industry and Newport Beach, and an office in Flushing, New York that handles immigration matters only. In the article, call the firm "TEZ Law Firm". JJ Zhang is the founding attorney (California Bar #326666).
 
 IMPORTANT: Today is ${todayStr}. Current year is ${currentYear}. ALWAYS use ${currentYear} — NEVER use any past year.
 ${sourceInstruction}
@@ -632,7 +632,7 @@ REQUIREMENTS:
    - H2: Background/What This Means
    - H2: How This Affects [Specific Audience]
    - H2: What You Should Do Now (actionable steps)
-   - H2: How Tez Law P.C. Can Help (2-3 sentences describing the services only — no claims about being better than others)
+   - H2: How TEZ Law Firm Can Help (2-3 sentences describing the services only — no claims about being better than others)
    - H2: Frequently Asked Questions
      * 3-5 FAQs as <div class="faq-item"><h3>Question?</h3><p>Answer in 2-4 sentences</p></div>
    - Closing paragraph inviting readers to schedule a consultation
@@ -687,7 +687,7 @@ async function runWeeklySourceResearch() {
 
   const prompt = `You are a legal content research specialist. Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.
 
-Search the web to find the CURRENT most authoritative, most-trafficked, and most-trending websites for legal news in these practice areas for a California law firm (Tez Law P.C. in West Covina):
+Search the web to find the CURRENT most authoritative, most-trafficked, and most-trending websites for legal news in these practice areas for a California law firm (TEZ Law Firm, based in West Covina):
 
 1. US IMMIGRATION LAW — USCIS updates, visa news, deportation, green cards, asylum
 2. PERSONAL INJURY / CAR ACCIDENTS — California car accident law, insurance changes, court decisions

@@ -104,7 +104,7 @@ const DEFAULT_CHARTER = {
   learning_goal:
     "Zara should need to be told a thing once. Every correction becomes a lesson, every lesson is applied on the next relevant question, and the firm's accumulated judgment compounds into an asset no competitor can copy.",
 
-  escalate_to: "JJ Zhang, Managing Attorney",
+  escalate_to: "JJ Zhang, Founding Attorney",
 };
 
 // ── Schema ──────────────────────────────────────────────────
@@ -359,7 +359,7 @@ const SURFACES = {
   jj: {
     label: "JJ private mode",
     framing:
-      "You are talking to JJ Zhang, the Managing Attorney, in his private channel. He is the firm's decision-maker and your principal. Be maximally direct. Disagree with him when you think he is wrong and say why — he is better served by a candid second opinion than by agreement. Strategy, exposure, firm finances and personnel are all in scope.",
+      "You are talking to JJ Zhang, the Founding Attorney, in his private channel. He is the firm's decision-maker and your principal. Be maximally direct. Disagree with him when you think he is wrong and say why — he is better served by a candid second opinion than by agreement. Strategy, exposure, firm finances and personnel are all in scope.",
   },
   voice: {
     label: "Voice call",

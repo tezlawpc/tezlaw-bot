@@ -42,7 +42,7 @@ const JJ_TELEGRAM_ID = process.env.JJ_TELEGRAM_ID;
 const ENABLED = String(process.env.WECHAT_PUBLISH_ENABLED || "") === "true";
 // The approval gate. Leaving this false is the recommendation.
 const AUTO = String(process.env.WECHAT_PUBLISH_AUTO || "") === "true";
-const AUTHOR = process.env.WECHAT_AUTHOR || "Tez Law P.C.";
+const AUTHOR = process.env.WECHAT_AUTHOR || "TEZ Law Firm";
 // A cover uploaded once and reused. Read at call time, not at boot, so
 // setting it is a Render env edit rather than a deploy.
 function defaultCover() { return process.env.WECHAT_COVER_MEDIA_ID || ""; }
@@ -138,10 +138,10 @@ function toWeChatHtml(html, { sourceUrl } = {}) {
 
   const sig = [
     '<p style="margin-top:28px;color:#888;font-size:13px;line-height:1.7;">',
-    "Tez Law P.C. · 626-678-8677<br>",
-    "移民 · 房地產 · 商業訴訟 · 遺產規劃<br>",
+    "TEZ律师事务所 · 626-678-8677<br>",
+    "移民 · 房地产 · 商业诉讼 · 遗产规划<br>",
     sourceUrl ? `原文：${escapeHtml(sourceUrl)}<br>` : "",
-    "本文僅供參考，不構成法律意見。具體問題請聯繫我們。",
+    "本文仅供参考，不构成法律意见。具体问题请联系我们。",
     "</p>",
   ].join("");
 

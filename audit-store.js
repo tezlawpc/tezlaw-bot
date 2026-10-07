@@ -640,6 +640,301 @@ async function listDeclaredActions(limit = 40) {
   return r.rows;
 }
 
+// ══════════════════ OPERATING EVENT REGISTER ══════════════════
+//
+// The upward channel. An operator reports what they did in their own
+// words; the catalog decides what it triggered; the obligations become
+// dated rows that the existing sweeps and notifications already chase.
+//
+// Three rules hold throughout, and each is why this is a control rather
+// than a to-do list: the knowledge timeline is immutable, every event
+// needs a recorded disposition including the negative ones, and the
+// catalog version in force is stamped on the record so an issuer can
+// show which control was operating in a given period.
+
+/**
+ * Record a reported operating event and everything it triggered.
+ */
+async function reportEvent({ eventKey, answers = {}, dates = {}, summary, learnedOn, actor, engagementId = null }) {
+  const events = require("./audit-events");
+  const issuer = require("./audit-issuer");
+  const profile = issuer.current();
+  const built = events.evaluate(eventKey, answers, dates, profile);
+
+  const occurred =
+    cal.dstr(dates.occurred) ||
+    cal.dstr(dates.signed) ||
+    cal.dstr(dates.notice) ||
+    cal.dstr(dates.closed) ||
+    cal.dstr(dates.determined) ||
+    cal.dstr(dates.declared) ||
+    null;
+
+  const r = await db.query(
+    `INSERT INTO ngtf_audit_event_reports
+       (event_key, event_label, summary, answers, dates, occurred_on, learned_on,
+        reported_by, catalog_version, issuer_regime, engagement_id, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open')
+     RETURNING *`,
+    [
+      built.key,
+      built.label,
+      summary || null,
+      JSON.stringify(answers),
+      JSON.stringify(dates),
+      occurred,
+      cal.dstr(learnedOn) || cal.dstr(dates.learned) || occurred,
+      actor && actor.id ? actor.id : null,
+      built.catalogVersion,
+      JSON.stringify(built.regime),
+      engagementId,
+    ]
+  );
+  const report = r.rows[0];
+
+  for (const ob of built.obligations) {
+    await db.query(
+      `INSERT INTO ngtf_audit_event_obligations
+         (report_id, obligation_id, kind, label, authority, item_8k, anchor_key, anchor_date,
+          due_date, date_confidence, verified, pre_act, s3_risk, severity, consequence,
+          guidance, owner_role, doc_category, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'open')
+       ON CONFLICT (report_id, obligation_id) DO NOTHING`,
+      [
+        report.id,
+        ob.id,
+        ob.kind,
+        ob.label,
+        ob.authority || null,
+        ob.item8k || null,
+        ob.anchorKey || null,
+        ob.anchorDate || null,
+        ob.dueDate || null,
+        ob.dateConfidence || null,
+        !!ob.verified,
+        !!ob.preAct,
+        !!ob.s3Risk,
+        ob.severity || "normal",
+        ob.consequence || null,
+        ob.note || null,
+        ob.owner || null,
+        ob.docCategory || null,
+      ]
+    );
+  }
+
+  // Where the operator named a period, the document obligations also
+  // become ordinary checklist items, so the morning sweep and the
+  // overdue notices pick them up with no new machinery.
+  let spawned = 0;
+  if (engagementId) {
+    const cl = (
+      await db.query(`SELECT * FROM ngtf_audit_checklists WHERE engagement_id=$1 LIMIT 1`, [engagementId])
+    ).rows[0];
+    if (cl) {
+      for (const ob of built.obligations) {
+        if (!ob.docCategory) continue;
+        const cat = tax.CATEGORY_BY_CODE[ob.docCategory];
+        const row = await insertChecklistItem(cl.id, engagementId, {
+          kind: "document",
+          categoryCode: ob.docCategory,
+          bracketCode: cat ? cat.bracket : null,
+          label: `${ob.label} \u2014 from "${built.label}"`,
+          authority: ob.authority || null,
+          note: [ob.consequence, ob.note].filter(Boolean).join("\n\n") || null,
+          owner: ob.owner || "cfo",
+          dueDate: ob.dueDate || null,
+          isGate: false,
+          dateConfidence: ob.dateConfidence,
+          verified: !!ob.verified,
+        });
+        if (row) spawned++;
+      }
+    }
+  }
+
+  await schema.logEvent({
+    engagementId: engagementId || null,
+    event: "operating_event_reported",
+    actor,
+    detail: {
+      reportId: report.id,
+      eventKey: built.key,
+      obligations: built.obligations.length,
+      filings: built.counts.filings,
+      preAct: built.counts.preAct,
+      s3Risk: built.counts.s3Risk,
+      catalogVersion: built.catalogVersion,
+    },
+  });
+
+  // The officers have to be told, and the time it took has to be
+  // visible: "accumulated and communicated to management" is the control.
+  try {
+    await notify.notifyOperatingEvent({ report, built, actor });
+    await db.query(`UPDATE ngtf_audit_event_reports SET notified_at = NOW() WHERE id = $1`, [report.id]);
+  } catch (err) {
+    console.error("[ngtf-audit] operating event notification failed:", err.message);
+  }
+
+  return { report, built, spawnedChecklistItems: spawned };
+}
+
+/**
+ * Record the disposition. Mandatory, including when the answer is that
+ * nothing is reportable: a decision not to file leaves no other trace,
+ * and it is the determination most likely to be examined later.
+ */
+async function determineEvent({ reportId, determination, note, actor }) {
+  const allowed = ["reportable", "not_reportable", "deferred", "superseded"];
+  if (!allowed.includes(determination)) {
+    throw new Error(`Determination must be one of: ${allowed.join(", ")}.`);
+  }
+  if (!note || String(note).trim().length < 10) {
+    throw new Error(
+      "A determination needs its reasoning. Say why, briefly \u2014 this is the record that shows the " +
+        "decision was made by a person on a date, which is the whole point of keeping it."
+    );
+  }
+  const r = await db.query(
+    `UPDATE ngtf_audit_event_reports
+        SET determination=$2, determination_note=$3, determined_by=$4, determined_at=NOW(),
+            status = CASE WHEN $2 IN ('not_reportable','superseded') THEN 'closed' ELSE 'open' END
+      WHERE id=$1 AND determined_at IS NULL
+      RETURNING *`,
+    [reportId, determination, String(note).trim(), actor && actor.id ? actor.id : null]
+  );
+  if (!r.rows.length) {
+    throw new Error("That event has already been determined. A recorded determination is final; report a correcting event instead.");
+  }
+  await schema.logEvent({
+    event: "operating_event_determined",
+    actor,
+    detail: { reportId, determination },
+  });
+  return r.rows[0];
+}
+
+/** Close out one obligation. */
+async function satisfyObligation({ obligationRowId, note, actor }) {
+  const r = await db.query(
+    `UPDATE ngtf_audit_event_obligations
+        SET status='done', satisfied_note=$2, satisfied_by=$3, satisfied_at=NOW()
+      WHERE id=$1 AND status <> 'done'
+      RETURNING *`,
+    [obligationRowId, note || null, actor && actor.id ? actor.id : null]
+  );
+  if (!r.rows.length) throw new Error("That obligation is already closed.");
+  await schema.logEvent({ event: "operating_obligation_satisfied", actor, detail: { obligationRowId, note: note || null } });
+  return r.rows[0];
+}
+
+/**
+ * The affirmative nil response. Without this the register can only
+ * support "what we reported, we reported" and never completeness.
+ */
+async function confirmNothingToReport({ periodStart, periodEnd, answer, note, actor }) {
+  const events = require("./audit-events");
+  if (!actor || !actor.id) throw new Error("A confirmation has to be signed by a named person.");
+  const start = cal.dstr(periodStart);
+  const end = cal.dstr(periodEnd);
+  if (!start || !end) throw new Error("A confirmation needs the period it covers.");
+  const reported = await db.query(
+    `SELECT id FROM ngtf_audit_event_reports
+      WHERE reported_by=$1 AND reported_at::date BETWEEN $2 AND $3`,
+    [actor.id, start, end]
+  );
+  const r = await db.query(
+    `INSERT INTO ngtf_audit_event_attestations
+       (user_id, period_start, period_end, answer, note, reported_ids, catalog_version)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (user_id, period_start, period_end) DO NOTHING
+     RETURNING *`,
+    [
+      actor.id,
+      start,
+      end,
+      answer === "reported" ? "reported" : "nothing_to_report",
+      note || null,
+      reported.rows.map((x) => x.id),
+      events.CATALOG_VERSION,
+    ]
+  );
+  if (!r.rows.length) {
+    throw new Error("You have already confirmed this period. A confirmation is evidence and cannot be replaced.");
+  }
+  await schema.logEvent({
+    event: "operating_event_period_confirmed",
+    actor,
+    detail: { periodStart: start, periodEnd: end, answer: r.rows[0].answer, eventsReported: reported.rows.length },
+  });
+  return r.rows[0];
+}
+
+/** The register, as the page shows it. */
+async function eventRegister({ limit = 60 } = {}) {
+  const reports = await db.query(
+    `SELECT r.*, u.name AS reported_by_name, d.name AS determined_by_name,
+            (SELECT COUNT(*)::int FROM ngtf_audit_event_obligations o WHERE o.report_id=r.id) AS obligations,
+            (SELECT COUNT(*)::int FROM ngtf_audit_event_obligations o WHERE o.report_id=r.id AND o.status='open') AS open_obligations,
+            (SELECT MIN(o.due_date) FROM ngtf_audit_event_obligations o WHERE o.report_id=r.id AND o.status='open') AS next_due,
+            (SELECT COUNT(*)::int FROM ngtf_audit_event_obligations o WHERE o.report_id=r.id AND o.status='open' AND o.due_date < CURRENT_DATE) AS overdue,
+            (SELECT COUNT(*)::int FROM ngtf_audit_event_obligations o WHERE o.report_id=r.id AND o.s3_risk AND o.status='open') AS s3_risk
+       FROM ngtf_audit_event_reports r
+       LEFT JOIN ngtf_audit_users u ON u.id=r.reported_by
+       LEFT JOIN ngtf_audit_users d ON d.id=r.determined_by
+      ORDER BY r.reported_at DESC
+      LIMIT $1`,
+    [limit]
+  );
+  const obligations = await db.query(
+    `SELECT o.*, r.event_label, r.event_key
+       FROM ngtf_audit_event_obligations o
+       JOIN ngtf_audit_event_reports r ON r.id=o.report_id
+      WHERE o.status='open'
+      ORDER BY o.pre_act DESC, o.due_date NULLS LAST, o.severity`
+  );
+  const undetermined = reports.rows.filter((r) => !r.determined_at);
+  const attestations = await db.query(
+    `SELECT a.*, u.name AS user_name FROM ngtf_audit_event_attestations a
+       JOIN ngtf_audit_users u ON u.id=a.user_id
+      ORDER BY a.period_end DESC, u.name LIMIT 40`
+  );
+  return {
+    reports: reports.rows,
+    obligations: obligations.rows,
+    undetermined,
+    attestations: attestations.rows,
+    stats: {
+      open: reports.rows.filter((r) => r.status === "open").length,
+      undetermined: undetermined.length,
+      openObligations: obligations.rows.length,
+      overdue: obligations.rows.filter((o) => o.due_date && cal.parse(cal.dstr(o.due_date)) < cal.parse(cal.today())).length,
+      preAct: obligations.rows.filter((o) => o.pre_act).length,
+      s3Risk: obligations.rows.filter((o) => o.s3_risk).length,
+    },
+  };
+}
+
+async function getEventReport(id) {
+  const r = await db.query(
+    `SELECT r.*, u.name AS reported_by_name, d.name AS determined_by_name
+       FROM ngtf_audit_event_reports r
+       LEFT JOIN ngtf_audit_users u ON u.id=r.reported_by
+       LEFT JOIN ngtf_audit_users d ON d.id=r.determined_by
+      WHERE r.id=$1`,
+    [id]
+  );
+  if (!r.rows.length) return null;
+  const obs = await db.query(
+    `SELECT o.*, s.name AS satisfied_by_name FROM ngtf_audit_event_obligations o
+       LEFT JOIN ngtf_audit_users s ON s.id=o.satisfied_by
+      WHERE o.report_id=$1 ORDER BY o.pre_act DESC, o.due_date NULLS LAST, o.severity`,
+    [id]
+  );
+  return { ...r.rows[0], obligations: obs.rows };
+}
+
 async function setReportReleaseDate(engagementId, dateStr, actor) {
   const info = cal.documentationCompletionDate(dateStr);
   if (!info) throw new Error("Invalid report release date — use YYYY-MM-DD.");
@@ -1772,6 +2067,13 @@ module.exports = {
   // corporate actions
   openPlaybookEngagement,
   listDeclaredActions,
+  // operating event register
+  reportEvent,
+  determineEvent,
+  satisfyObligation,
+  confirmNothingToReport,
+  eventRegister,
+  getEventReport,
   setReportReleaseDate,
   archiveEngagement,
   setLegalHold,

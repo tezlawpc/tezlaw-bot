@@ -53,6 +53,32 @@ function check(name, fn) {
   }
   check("no email is sent as “Tez Law P.C.” to a client: the public name is TEZ Law Firm", () =>
     !/from:\s*`"Tez Law P\.C\."/.test(read("esign.js") + read("notify.js") + read("signin-code.js")));
+  check("new blog posts carry the public name: the legal name appears once, where the writer is told both", () => {
+    const a = read("autoposter.js");
+    return (a.match(/Tez Law P\.C\./g) || []).length === 1 && /TEZ Law Firm \(legal name Tez Law P\.C\.\)/.test(a) && /\| TEZ Law Firm"/.test(a);
+  });
+  check("the writer is told all four offices, and that Flushing is immigration only", () =>
+    /offices in West Covina, City of Industry and Newport Beach, and an office in Flushing, New York that handles immigration matters only/.test(read("autoposter.js")));
+  check("the WeChat signature is Simplified Chinese under the public name", () => {
+    const w = read("wechat-publish.js");
+    return /TEZ律师事务所 · 626-678-8677/.test(w) && /房地产 · 商业诉讼 · 遗产规划/.test(w) && !/[產業訴遺僅參聯繫體]/.test(w);
+  });
+  check("JJ’s title is Founding Attorney everywhere: no server file says “managing attorney”", () => {
+    const old = new RegExp("managing" + " attorney", "i");
+    const skip = new Set(["node_modules", ".git"]);
+    const hits = [];
+    const walk = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) { if (!skip.has(e.name)) walk(full); continue; }
+        if (!/\.(js|json|html|md|txt|ejs)$/i.test(e.name) || e.name === "package-lock.json" || full === __filename) continue;
+        if (old.test(fs.readFileSync(full, "utf8"))) hits.push(path.relative(REPO, full));
+      }
+    };
+    walk(REPO);
+    if (hits.length) throw new Error("still in: " + hits.join(", "));
+    return true;
+  });
   for (const f of ["intake.js", "web-intake.js", "analytics.js"]) {
     check(`${f}: its email is in the firm's colours`, () => !/#0C1C36|#B79C62|#3E2818|#B8891E/i.test(read(f)));
   }

@@ -483,6 +483,11 @@ check("court calendar: a hearing that exists only as a task is reported, as a ta
 
 // ── the same reader in the Tara app, limited to the person's own clients ─
 const calendar = require(path.join(ROOT, "court-calendar.js"));
+// Every look-up in this file reads the calendar as of NOW, whatever today is. The
+// calendar above is dated; two checks used to reach it through the real clock,
+// so they passed on October 5, 2026 and failed from the next morning on.
+const readAsOfToday = calendar.read;
+calendar.read = (args, opts) => readAsOfToday(args, Object.assign({}, opts, { now: NOW }));
 const realAppChat = require(path.join(ROOT, "zara-app-chat.js"));   // the real one; tg-ask above was given a stand-in
 check("in the app: staff who are not an admin or manager get their own clients only", async () => {
   state.cal = CAL(); state.calSql.length = 0;
