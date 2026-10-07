@@ -111,7 +111,8 @@ INSERT INTO tasks (title, client_key, client_name, a_number, matter_type, descri
   ('Prepare Lu master hearing', 'a-a216866111', 'Lu, Guang',   'A216-866-111', 'Removal',        'pleadings',          '${D(1)}', 'open',      'Michael Liu'),
   ('USCIS interview',           'n-nguyen-thi', 'Nguyen, Thi', NULL,           'Naturalization', 'LA field office',    '${D(3)}', 'open',      'JJ Zhang'),
   ('Court hearing prep',        'n-done-dee',   'Done, Dee',   NULL,           'Removal',        NULL,                 '${D(3)}', 'completed', 'JJ Zhang'),
-  ('Order business cards',      NULL,           NULL,          NULL,           NULL,             'for the front desk', '${D(3)}', 'open',      'JJ Zhang');`;
+  ('Order business cards',      NULL,           NULL,          NULL,           NULL,             'for the front desk', '${D(3)}', 'open',      'JJ Zhang'),
+  ('Renew the notary bond',     NULL,           NULL,          NULL,           NULL,             'due today',          '${D(0)}', 'open',      'JJ Zhang');`;
 const SEED_CIVIL = `
 WITH c AS (INSERT INTO civil_cases (client_key, case_name, court, case_number, status) VALUES ('n-cedar-llc', 'Cedar v. Dunmore', 'LASC Stanley Mosk', '25STCV01234', 'active') RETURNING id)
 INSERT INTO civil_hearings (case_id, hearing_date, hearing_time, hearing_type, department, judge, status)
@@ -273,6 +274,11 @@ const J = JSON.stringify;
   check("the app chat answers and ran the hearing look-up", r.status === 200 && r.body.ok === true && Array.isArray(r.tool.hearings), r.body);
   check("JJ (admin) gets the whole calendar, the same seven hearings as the group", J(names(r.tool)) === J(["Cedar v. Dunmore", "Chen, Wei", "Lu, Guang", "Ortiz, Maria", "Park, Min", "Tran, Bao", "Zhou, Lin"]) && !r.tool.limited_to_own_clients, names(r.tool));
   check("the app still has its own tools (nothing else about the chat changed)", r.tools.includes("list_upcoming_hearings") && r.tools.includes("propose_matter_update"), r.tools);
+  // The screens themselves. These two fail from 5 PM Pacific to midnight if "today" is taken from UTC.
+  const jjScreen = await screen("jj");
+  check("the Calendar screen lists today's hearing at any hour of the office's day", jjScreen.hearings.includes("Ortiz, Maria"), jjScreen.hearings);
+  const home = await (await fetch(BASE + "/api/staff/dashboard", { headers: { authorization: "Bearer " + await token("jj") } })).json();
+  check("the Home screen counts a task due today as due today, not overdue, and shows today's hearing", home.ok === true && home.stats.due_today === 1 && home.stats.overdue === 0 && (home.upcoming_hearings || []).some(h => h.client_name === "Ortiz, Maria"), home.stats);
   r = await askApp("ops", "any hearings this week?");
   check("a manager gets the whole calendar too", names(r.tool).length === 7 && !r.tool.limited_to_own_clients, names(r.tool));
   r = await askApp("mliu", "any hearings this week?");

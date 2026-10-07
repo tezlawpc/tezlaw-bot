@@ -150,7 +150,7 @@ const WC = require("../wechat-publish");
   check("an image already on WeChat's CDN is kept",
     WC.toWeChatHtml('<img src="https://mmbiz.qpic.cn/a.jpg">').includes("mmbiz.qpic.cn"));
   check("the firm's number is on every article", html.includes("626-678-8677"));
-  check("and the disclaimer", html.includes("不構成法律意見"));
+  check("and the disclaimer, in Simplified Chinese", html.includes("不构成法律意见") && !html.includes("不構成"));
   check("the original is linked back", html.includes("tezlawfirm.com/p/1"));
 
   check("a digest is made when none is given",

@@ -53,6 +53,16 @@ function check(name, fn) {
   }
   check("no email is sent as “Tez Law P.C.” to a client: the public name is TEZ Law Firm", () =>
     !/from:\s*`"Tez Law P\.C\."/.test(read("esign.js") + read("notify.js") + read("signin-code.js")));
+  check("new blog posts carry the public name: the legal name appears once, where the writer is told both", () => {
+    const a = read("autoposter.js");
+    return (a.match(/Tez Law P\.C\./g) || []).length === 1 && /TEZ Law Firm \(legal name Tez Law P\.C\.\)/.test(a) && /\| TEZ Law Firm"/.test(a);
+  });
+  check("the writer is told all four offices, and that Flushing is immigration only", () =>
+    /offices in West Covina, City of Industry and Newport Beach, and an office in Flushing, New York that handles immigration matters only/.test(read("autoposter.js")));
+  check("the WeChat signature is Simplified Chinese under the public name", () => {
+    const w = read("wechat-publish.js");
+    return /TEZ律师事务所 · 626-678-8677/.test(w) && /房地产 · 商业诉讼 · 遗产规划/.test(w) && !/[產業訴遺僅參聯繫體]/.test(w);
+  });
   check("JJ’s title is Founding Attorney everywhere: no server file says “managing attorney”", () => {
     const old = new RegExp("managing" + " attorney", "i");
     const skip = new Set(["node_modules", ".git"]);
