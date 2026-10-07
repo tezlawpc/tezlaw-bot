@@ -587,6 +587,7 @@ async function createAll() {
   `);
 
   await createDeliveryTables();
+  await createSubledgerTables();
 
   await installImmutabilityTriggers();
   await seedSettings();
@@ -803,6 +804,238 @@ async function createDeliveryTables() {
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_mailev_rcpt ON ngtf_audit_mail_events (receipt_id, received_at DESC)`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_mailev_type ON ngtf_audit_mail_events (event_type, received_at DESC)`);
+}
+
+// ── AR / AP subledgers and audit sampling ───────────────────
+//
+// THE DEFICIENCY THIS ADDRESSES is not a missing report. It is that a
+// receivable or a payable exists in the accounting system as a NUMBER,
+// and the evidence that the number is real — the invoice, the delivery
+// receipt, the cash that arrived — lives in somebody's email. When the
+// auditor sends a sample selection list, that gap becomes a week of
+// hunting, and the week lands in the middle of the close.
+//
+// WHAT THIS IS NOT. It is deliberately not an AR/AP system. The
+// accounting system stays the system of record, because replacing it
+// would be a year of work and the auditor would still ask for exactly
+// the same things. What is missing is narrower and cheaper:
+//
+//   1. a FROZEN snapshot of each subledger that ties to the general
+//      ledger — the first thing an auditor checks and the first thing
+//      that fails;
+//   2. a document index keyed to the INVOICE NUMBER, so support can be
+//      found by the identifier the auditor will actually quote;
+//   3. a matching engine for the selection list, so "here are our 40
+//      selections" becomes a worklist instead of an archaeology project.
+//
+// WHY SNAPSHOTS ARE APPEND-ONLY. An aging is evidence as of a date. If
+// the row that was handed over can be edited later, the tie-out it
+// supported means nothing, and a reconciliation that was agreed in
+// October cannot be shown to be the same one in February. A corrected
+// aging is a NEW snapshot with its own version — never an edit of the
+// old one. That is also how an auditor thinks about it: they tested a
+// population, and the population has to still exist.
+//
+// WHY THE SELECTION LIST IS MODELLED SEPARATELY FROM WHO TYPED IT IN.
+// In practice the auditor emails an Excel file and the controller enters
+// it here. The record therefore has to distinguish the party who CHOSE
+// the sample from the user who TRANSCRIBED it, and keep the auditor's
+// own file as the authority. Collapsing the two would produce a record
+// saying the company selected its own audit sample, which is both false
+// and the sort of thing that reads very badly later.
+async function createSubledgerTables() {
+  // One row per (engagement, kind, as-of date) snapshot.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ngtf_audit_subledgers (
+      id               SERIAL PRIMARY KEY,
+      kind             TEXT NOT NULL,                 -- 'ar' | 'ap'
+      engagement_id    INTEGER REFERENCES ngtf_audit_engagements(id),
+      as_of_date       DATE NOT NULL,
+      period_label     TEXT,
+      version          INTEGER NOT NULL DEFAULT 1,
+      supersedes_id    INTEGER REFERENCES ngtf_audit_subledgers(id),
+      status           TEXT NOT NULL DEFAULT 'active', -- active | superseded
+      -- where it came from. The source file also goes into the document
+      -- store so it satisfies its checklist item and can be transmitted.
+      document_id      INTEGER REFERENCES ngtf_audit_documents(id),
+      source_filename  TEXT,
+      source_sha256    TEXT,
+      column_map       JSONB,
+      -- the population
+      row_count        INTEGER NOT NULL DEFAULT 0,
+      total_amount     NUMERIC(18,2) NOT NULL DEFAULT 0,
+      debit_count      INTEGER NOT NULL DEFAULT 0,     -- credit balances in AR / debit balances in AP
+      debit_amount     NUMERIC(18,2) NOT NULL DEFAULT 0,
+      counterparty_count INTEGER NOT NULL DEFAULT 0,
+      bucket_current   NUMERIC(18,2) NOT NULL DEFAULT 0,
+      bucket_1_30      NUMERIC(18,2) NOT NULL DEFAULT 0,
+      bucket_31_60     NUMERIC(18,2) NOT NULL DEFAULT 0,
+      bucket_61_90     NUMERIC(18,2) NOT NULL DEFAULT 0,
+      bucket_over_90   NUMERIC(18,2) NOT NULL DEFAULT 0,
+      -- THE TIE-OUT. Entered by the company, not computed, because only
+      -- the company knows what the GL says. An unexplained variance is
+      -- the finding; the portal's job is to refuse to hide it.
+      gl_balance       NUMERIC(18,2),
+      gl_source        TEXT,
+      variance         NUMERIC(18,2),
+      tie_out_note     TEXT,
+      tied_out         BOOLEAN NOT NULL DEFAULT FALSE,
+      tied_out_by      INTEGER REFERENCES ngtf_audit_users(id),
+      tied_out_at      TIMESTAMPTZ,
+      -- the threshold above which a line is near-certain to be selected
+      -- individually. Supplied by the auditor when they share it.
+      key_item_threshold NUMERIC(18,2),
+      threshold_source TEXT,
+      imported_by      INTEGER REFERENCES ngtf_audit_users(id),
+      imported_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      note             TEXT
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_sub_kind ON ngtf_audit_subledgers (kind, as_of_date DESC)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_sub_eng ON ngtf_audit_subledgers (engagement_id, kind, status)`);
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_ngtf_sub_active
+      ON ngtf_audit_subledgers (kind, as_of_date)
+      WHERE status = 'active'
+  `).catch((err) => {
+    console.warn("[ngtf-audit] active-subledger uniqueness index not created:", err.message);
+  });
+
+  // The transactions. norm_doc_number is the join key that makes the
+  // whole feature work: an auditor writes "Inv 1234", the accounting
+  // system says "INV-0001234", and a human spends ten minutes per line
+  // reconciling the two. Normalising on import does it once.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ngtf_audit_subledger_lines (
+      id                 BIGSERIAL PRIMARY KEY,
+      subledger_id       INTEGER NOT NULL REFERENCES ngtf_audit_subledgers(id) ON DELETE CASCADE,
+      line_no            INTEGER NOT NULL,
+      counterparty_name  TEXT NOT NULL,
+      counterparty_code  TEXT,
+      norm_counterparty  TEXT,
+      doc_number         TEXT,
+      norm_doc_number    TEXT,
+      norm_doc_digits    TEXT,
+      doc_date           DATE,
+      due_date           DATE,
+      amount             NUMERIC(18,2) NOT NULL DEFAULT 0,
+      open_amount        NUMERIC(18,2),
+      currency           TEXT,
+      days_outstanding   INTEGER,
+      aging_bucket       TEXT,
+      po_number          TEXT,
+      reference          TEXT,
+      memo               TEXT,
+      is_related_party   BOOLEAN NOT NULL DEFAULT FALSE,
+      is_contra_balance  BOOLEAN NOT NULL DEFAULT FALSE,
+      -- why this line is likely to be picked, if it is. Stored rather
+      -- than recomputed so the worklist a person worked from yesterday
+      -- is the one they see today.
+      risk_flags         TEXT[],
+      likely_selected    BOOLEAN NOT NULL DEFAULT FALSE,
+      raw                JSONB,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_subline_sub ON ngtf_audit_subledger_lines (subledger_id, line_no)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_subline_doc ON ngtf_audit_subledger_lines (subledger_id, norm_doc_number)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_subline_digits ON ngtf_audit_subledger_lines (subledger_id, norm_doc_digits)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_subline_cp ON ngtf_audit_subledger_lines (subledger_id, norm_counterparty)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_subline_amt ON ngtf_audit_subledger_lines (subledger_id, amount DESC)`);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_ngtf_subline_likely
+      ON ngtf_audit_subledger_lines (subledger_id) WHERE likely_selected = TRUE
+  `);
+
+  // The document index: which uploaded file supports which line, and in
+  // what capacity. support_type matters because the procedures need
+  // different things — an invoice alone does not evidence that goods were
+  // delivered, which is the whole point of AS 2310 Appendix C.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ngtf_audit_subledger_support (
+      id            SERIAL PRIMARY KEY,
+      line_id       BIGINT NOT NULL REFERENCES ngtf_audit_subledger_lines(id) ON DELETE CASCADE,
+      document_id   INTEGER NOT NULL REFERENCES ngtf_audit_documents(id),
+      support_type  TEXT NOT NULL,
+      note          TEXT,
+      added_by      INTEGER REFERENCES ngtf_audit_users(id),
+      added_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (line_id, document_id, support_type)
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_subsup_line ON ngtf_audit_subledger_support (line_id, support_type)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_subsup_doc ON ngtf_audit_subledger_support (document_id)`);
+
+  // A selection list from the auditor.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ngtf_audit_sample_requests (
+      id                SERIAL PRIMARY KEY,
+      ref               TEXT NOT NULL UNIQUE,          -- 'S-0007'
+      seq               INTEGER NOT NULL,
+      kind              TEXT NOT NULL,                 -- 'ar' | 'ap'
+      procedure         TEXT NOT NULL,
+      subledger_id      INTEGER REFERENCES ngtf_audit_subledgers(id),
+      engagement_id     INTEGER REFERENCES ngtf_audit_engagements(id),
+      label             TEXT NOT NULL,
+      instructions      TEXT,
+      required_support  TEXT[] NOT NULL DEFAULT '{}',
+      -- WHO CHOSE the sample, as against who typed it in. Never the same
+      -- field: the auditor selects the items under AS 2310.15 and
+      -- AS 2315, and a record implying otherwise is worse than no record.
+      requested_by_firm TEXT,
+      requested_by_name TEXT,
+      selections_source TEXT NOT NULL DEFAULT 'transcribed_from_auditor',
+      source_document_id INTEGER REFERENCES ngtf_audit_documents(id),
+      entered_by        INTEGER REFERENCES ngtf_audit_users(id),
+      entered_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      received_on       DATE,
+      due_on            DATE,
+      status            TEXT NOT NULL DEFAULT 'open',  -- open | complete | delivered | closed
+      transmittal_id    INTEGER,
+      completed_at      TIMESTAMPTZ,
+      closed_at         TIMESTAMPTZ
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_samreq_open ON ngtf_audit_sample_requests (status, due_on)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_samreq_eng ON ngtf_audit_sample_requests (engagement_id, kind)`);
+
+  // One row per selection. An UNMATCHED selection is a finding, not a
+  // user-interface inconvenience: either the auditor sampled from a
+  // different population than the one they were given, or the invoice is
+  // not in the aging that was handed over. Both are worth knowing in
+  // week one rather than week six.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ngtf_audit_sample_selections (
+      id              SERIAL PRIMARY KEY,
+      request_id      INTEGER NOT NULL REFERENCES ngtf_audit_sample_requests(id) ON DELETE CASCADE,
+      selection_no    TEXT NOT NULL,
+      -- exactly as the auditor wrote it, never cleaned up. If their list
+      -- and the aging disagree, the disagreement is the evidence.
+      given_counterparty TEXT,
+      given_doc_number   TEXT,
+      given_doc_date     DATE,
+      given_amount       NUMERIC(18,2),
+      given_note         TEXT,
+      line_id         BIGINT REFERENCES ngtf_audit_subledger_lines(id),
+      match_method    TEXT,
+      match_note      TEXT,
+      status          TEXT NOT NULL DEFAULT 'open',  -- open|partial|complete|unmatched|waived
+      assigned_to     INTEGER REFERENCES ngtf_audit_users(id),
+      note            TEXT,
+      waiver_reason   TEXT,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (request_id, selection_no)
+    )
+  `);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_samsel_req ON ngtf_audit_sample_selections (request_id, status)`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_ngtf_samsel_line ON ngtf_audit_sample_selections (line_id)`);
+
+  await db.query(`ALTER TABLE ngtf_audit_events ADD COLUMN IF NOT EXISTS subledger_id INTEGER`);
+  await db.query(`ALTER TABLE ngtf_audit_events ADD COLUMN IF NOT EXISTS sample_request_id INTEGER`);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_ngtf_audit_events_sample
+      ON ngtf_audit_events (sample_request_id, created_at DESC) WHERE sample_request_id IS NOT NULL
+  `);
 }
 
 // ── AS 1215 enforcement at the database level ───────────────
@@ -1026,6 +1259,175 @@ async function installImmutabilityTriggers() {
     await installDeliveryTriggers();
   } catch (err) {
     console.warn("[ngtf-audit] delivery ledger triggers not installed:", err.message);
+  }
+  try {
+    await installSubledgerTriggers();
+  } catch (err) {
+    console.warn("[ngtf-audit] subledger triggers not installed:", err.message);
+  }
+}
+
+async function installSubledgerTriggers() {
+  // ── A tested population cannot be edited ──────────────────
+  //
+  // An aging is evidence as of a date. Once it has been tied to the
+  // general ledger and handed over, the rows in it ARE the population
+  // the auditor sampled from, and a population that can be edited
+  // afterwards supports nothing: the reconciliation agreed in October
+  // cannot be shown to be the same one in February.
+  //
+  // So a corrected aging is a NEW snapshot with its own version, never
+  // an edit of the old one. Two columns stay writable — risk_flags and
+  // likely_selected — because they are the portal's own analysis of the
+  // population rather than part of it, and they legitimately change when
+  // the auditor shares a different threshold.
+  await db.query(`
+    CREATE OR REPLACE FUNCTION ngtf_audit_subline_frozen()
+    RETURNS TRIGGER AS $$
+    DECLARE tied BOOLEAN;
+    BEGIN
+      SELECT tied_out INTO tied FROM ngtf_audit_subledgers
+        WHERE id = COALESCE(OLD.subledger_id, NEW.subledger_id);
+
+      IF TG_OP = 'DELETE' THEN
+        IF COALESCE(tied, FALSE) THEN
+          RAISE EXCEPTION
+            'This aging has been tied to the general ledger, so its rows are the population the auditor samples from and cannot be removed. Import a corrected aging as a new snapshot instead.';
+        END IF;
+        RETURN OLD;
+      END IF;
+
+      IF COALESCE(tied, FALSE) THEN
+        IF NEW.counterparty_name IS DISTINCT FROM OLD.counterparty_name
+           OR NEW.doc_number     IS DISTINCT FROM OLD.doc_number
+           OR NEW.doc_date       IS DISTINCT FROM OLD.doc_date
+           OR NEW.amount         IS DISTINCT FROM OLD.amount
+           OR NEW.open_amount    IS DISTINCT FROM OLD.open_amount
+           OR NEW.subledger_id   IS DISTINCT FROM OLD.subledger_id
+           OR NEW.line_no        IS DISTINCT FROM OLD.line_no THEN
+          RAISE EXCEPTION
+            'This aging is tied out and frozen. A transaction''s counterparty, number, date or amount cannot be changed after the tie-out that relied on them. Import a corrected aging as a new snapshot.';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+  await db.query(`DROP TRIGGER IF EXISTS trg_ngtf_subline_frozen ON ngtf_audit_subledger_lines`);
+  await db.query(`
+    CREATE TRIGGER trg_ngtf_subline_frozen
+      BEFORE UPDATE OR DELETE ON ngtf_audit_subledger_lines
+      FOR EACH ROW EXECUTE FUNCTION ngtf_audit_subline_frozen();
+  `);
+
+  // The snapshot header: its identity and its agreed totals are what the
+  // tie-out was. Superseding it is allowed and is the intended route.
+  await db.query(`
+    CREATE OR REPLACE FUNCTION ngtf_audit_subledger_frozen()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION
+          'A subledger snapshot cannot be deleted. Supersede it with a corrected import — the ledger has to show which population was tested, not only the latest one.';
+      END IF;
+      IF NEW.kind IS DISTINCT FROM OLD.kind
+         OR NEW.as_of_date IS DISTINCT FROM OLD.as_of_date
+         OR NEW.imported_at IS DISTINCT FROM OLD.imported_at
+         OR NEW.version IS DISTINCT FROM OLD.version THEN
+        RAISE EXCEPTION 'A snapshot''s kind, as-of date, version and import time are fixed once taken.';
+      END IF;
+      IF COALESCE(OLD.tied_out, FALSE) THEN
+        IF NEW.row_count    IS DISTINCT FROM OLD.row_count
+           OR NEW.total_amount IS DISTINCT FROM OLD.total_amount
+           OR NEW.gl_balance   IS DISTINCT FROM OLD.gl_balance
+           OR NEW.variance     IS DISTINCT FROM OLD.variance
+           OR NEW.tied_out_by  IS DISTINCT FROM OLD.tied_out_by
+           OR NEW.tied_out_at  IS DISTINCT FROM OLD.tied_out_at THEN
+          RAISE EXCEPTION
+            'This snapshot is tied out. The row count, the subledger total, the general-ledger balance and the variance are the reconciliation itself and are final. Supersede the snapshot instead.';
+        END IF;
+        IF NEW.tied_out = FALSE THEN
+          RAISE EXCEPTION 'A tie-out cannot be un-done. Supersede the snapshot with a corrected import.';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+  await db.query(`DROP TRIGGER IF EXISTS trg_ngtf_subledger_frozen ON ngtf_audit_subledgers`);
+  await db.query(`
+    CREATE TRIGGER trg_ngtf_subledger_frozen
+      BEFORE UPDATE OR DELETE ON ngtf_audit_subledgers
+      FOR EACH ROW EXECUTE FUNCTION ngtf_audit_subledger_frozen();
+  `);
+
+  // The auditor's own words. given_* is what THEY wrote on their
+  // selection list, and if their list and the aging disagree, the
+  // disagreement is the evidence — so it must not be tidied up to make
+  // the match work. Re-matching a line is allowed and is logged.
+  await db.query(`
+    CREATE OR REPLACE FUNCTION ngtf_audit_selection_verbatim()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      IF NEW.given_counterparty IS DISTINCT FROM OLD.given_counterparty
+         OR NEW.given_doc_number IS DISTINCT FROM OLD.given_doc_number
+         OR NEW.given_doc_date   IS DISTINCT FROM OLD.given_doc_date
+         OR NEW.given_amount     IS DISTINCT FROM OLD.given_amount
+         OR NEW.selection_no     IS DISTINCT FROM OLD.selection_no
+         OR NEW.request_id       IS DISTINCT FROM OLD.request_id THEN
+        RAISE EXCEPTION
+          'A selection is recorded as the auditor wrote it and cannot be edited. Where their list and the aging disagree, that disagreement is the finding — record it in the note rather than correcting their list.';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+  await db.query(`DROP TRIGGER IF EXISTS trg_ngtf_selection_verbatim ON ngtf_audit_sample_selections`);
+  await db.query(`
+    CREATE TRIGGER trg_ngtf_selection_verbatim
+      BEFORE UPDATE ON ngtf_audit_sample_selections
+      FOR EACH ROW EXECUTE FUNCTION ngtf_audit_selection_verbatim();
+  `);
+
+  await db.query(`
+    CREATE OR REPLACE FUNCTION ngtf_audit_samreq_fixed()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'A sample request cannot be deleted. Close it with a reason — the ledger has to show what was asked for.';
+      END IF;
+      IF NEW.ref IS DISTINCT FROM OLD.ref
+         OR NEW.seq IS DISTINCT FROM OLD.seq
+         OR NEW.kind IS DISTINCT FROM OLD.kind
+         OR NEW.selections_source IS DISTINCT FROM OLD.selections_source
+         OR NEW.entered_by IS DISTINCT FROM OLD.entered_by
+         OR NEW.entered_at IS DISTINCT FROM OLD.entered_at THEN
+        RAISE EXCEPTION
+          'A sample request''s reference, population, and the record of who supplied and who entered the selections are fixed once issued.';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+  await db.query(`DROP TRIGGER IF EXISTS trg_ngtf_samreq_fixed ON ngtf_audit_sample_requests`);
+  await db.query(`
+    CREATE TRIGGER trg_ngtf_samreq_fixed
+      BEFORE UPDATE OR DELETE ON ngtf_audit_sample_requests
+      FOR EACH ROW EXECUTE FUNCTION ngtf_audit_samreq_fixed();
+  `);
+
+  for (const t of [
+    "ngtf_audit_subledgers",
+    "ngtf_audit_subledger_lines",
+    "ngtf_audit_sample_requests",
+    "ngtf_audit_sample_selections",
+  ]) {
+    await db.query(`DROP TRIGGER IF EXISTS trg_${t}_no_truncate ON ${t}`);
+    await db.query(`
+      CREATE TRIGGER trg_${t}_no_truncate
+        BEFORE TRUNCATE ON ${t}
+        FOR EACH STATEMENT EXECUTE FUNCTION ngtf_audit_no_truncate();
+    `);
   }
 }
 
@@ -1292,17 +1694,20 @@ async function setSetting(key, value) {
 }
 
 // Append-only chain-of-custody write. Never throws into the caller.
-async function logEvent({ documentId, engagementId, itemId, transmittalId, event, actor, ip, userAgent, detail }) {
+async function logEvent({ documentId, engagementId, itemId, transmittalId, subledgerId, sampleRequestId, event, actor, ip, userAgent, detail }) {
   try {
     await db.query(
       `INSERT INTO ngtf_audit_events
-         (document_id, engagement_id, item_id, transmittal_id, event, actor_id, actor_email, actor_org, ip, user_agent, detail)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+         (document_id, engagement_id, item_id, transmittal_id, subledger_id, sample_request_id,
+          event, actor_id, actor_email, actor_org, ip, user_agent, detail)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         documentId || null,
         engagementId || null,
         itemId || null,
         transmittalId || null,
+        subledgerId || null,
+        sampleRequestId || null,
         event,
         actor ? actor.id : null,
         actor ? actor.email : null,
@@ -1323,6 +1728,8 @@ module.exports = {
   installImmutabilityTriggers,
   installDeliveryTriggers,
   createDeliveryTables,
+  installSubledgerTriggers,
+  createSubledgerTables,
   getSetting,
   setSetting,
   logEvent,

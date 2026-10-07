@@ -36,6 +36,107 @@
 // annual    = FY audit PBC package
 // event     = triggered by a transaction, not a calendar date
 // s1        = registration-statement / bring-down package (AS 4101)
+// ── Industry modules ───────────────────────────────────────
+//
+//  WHY THIS EXISTS
+//  The taxonomy was written for one registrant and hard-coded its
+//  industry: hotel property files, franchise and PIP agreements,
+//  STR/PMS revenue reports, a robot fleet register. Those are
+//  properties of Nightfood, not properties of audits. A second
+//  issuer inherits them as dead weight, and a third one — an oil
+//  and gas filer, say — finds its entire disclosure regime absent.
+//
+//  So a category now belongs to a MODULE. "core" is everything
+//  that binds any reporting company; the rest are selected on the
+//  issuer profile. A module that is off removes the category from
+//  CHECKLISTS ONLY. The lookups stay complete, deliberately:
+//  CATEGORY_BY_CODE, CATEGORIES and CLASSIFIER_INDEX always hold
+//  every category, so a document already filed under a category
+//  still resolves its label and bracket, and a stray hotel deed
+//  arriving at a company with hospitality switched off is still
+//  classified correctly rather than forced into the wrong bin.
+//  Turning a module off must never orphan history.
+//
+//  sicPrefixes only SUGGEST a module when a SIC code is entered.
+//  The profile stores the chosen module keys explicitly, because
+//  inferring an issuer's industry on every request is the kind of
+//  cleverness that silently re-dates a checklist.
+const INDUSTRY_MODULES = {
+  core: {
+    key: "core",
+    label: "Core (every reporting company)",
+    always: true,
+    blurb:
+      "Governance, close and general ledger, revenue, inventory, fixed assets, debt, equity, payroll, " +
+      "estimates, litigation, reporting and transactions. Binds every registrant regardless of industry.",
+    sicPrefixes: [],
+  },
+  consumer_products: {
+    key: "consumer_products",
+    label: "Consumer products, food and beverage",
+    blurb:
+      "Trade spend is the signature estimate of this industry and the one most often wrong: slotting fees, " +
+      "promotional allowances, retailer deductions, chargebacks, spoils and coupon redemption. A company " +
+      "selling through retailers and distributors accrues against claims that arrive months late.",
+    sicPrefixes: ["20", "21", "22", "23", "28", "30", "31", "39", "51", "54", "58"],
+  },
+  hospitality: {
+    key: "hospitality",
+    label: "Hospitality and hotel asset ownership",
+    blurb:
+      "Owned or managed lodging: night-audit and PMS revenue records, STR benchmarking that feeds the " +
+      "impairment and going-concern assumptions, deeds and title, and franchise, management and PIP agreements.",
+    sicPrefixes: ["70"],
+  },
+  robotics: {
+    key: "robotics",
+    label: "Robotics and equipment-as-a-service",
+    blurb:
+      "Fleets of revenue-generating units deployed on third-party premises: the asset register, deployment " +
+      "schedule and utilisation data behind both revenue and impairment.",
+    sicPrefixes: ["35", "36", "73"],
+  },
+};
+
+/** Module keys that are always on, whatever the profile says. */
+const ALWAYS_ON = Object.values(INDUSTRY_MODULES)
+  .filter((m) => m.always)
+  .map((m) => m.key);
+
+/**
+ * The modules in force right now, from the issuer profile.
+ *
+ * Required lazily: audit-issuer reads the database and this file is
+ * loaded by the classifier, the checklist builder and the UI, so a
+ * top-level require would put a database module in the load path of
+ * every one of them.
+ */
+function activeModules() {
+  let chosen = [];
+  try {
+    const issuer = require("./audit-issuer");
+    const p = issuer.current();
+    if (Array.isArray(p.industryModules)) chosen = p.industryModules;
+  } catch {
+    /* no profile yet — core only, which is the honest default */
+  }
+  return Array.from(new Set([...ALWAYS_ON, ...chosen.filter((k) => INDUSTRY_MODULES[k])]));
+}
+
+/** Modules a SIC code suggests, for the profile form to offer. */
+function modulesForSic(sic) {
+  const s = String(sic || "").replace(/\D/g, "");
+  if (!s) return [];
+  return Object.values(INDUSTRY_MODULES)
+    .filter((m) => !m.always && m.sicPrefixes.some((pre) => s.startsWith(pre)))
+    .map((m) => m.key);
+}
+
+/** A category's module, defaulting to core. */
+function moduleOf(cat) {
+  return (cat && cat.module) || "core";
+}
+
 const TIERS = ["monthly", "quarterly", "annual", "event", "s1"];
 
 // ── Brackets ────────────────────────────────────────────────
@@ -694,6 +795,34 @@ const CATEGORIES = [
       "With substantial doubt already concluded, the auditor will want the short-horizon " +
       "forecast refreshed every close, reconciled to the prior version with variances explained.",
   },
+  {
+    code: "C-090",
+    bracket: "C",
+    label: "Subsequent-Period Disbursement Register (Search for Unrecorded Liabilities)",
+    tiers: ["quarterly", "annual"],
+    authority: ["AS 2301", "AS 2810.12", "AS 1105.08"],
+    strong: [
+      "subsequent disbursements", "subsequent payments", "post year end payments",
+      "search for unrecorded liabilities", "unrecorded liabilities", "subsequent check register",
+    ],
+    kw: ["after year end", "subsequent period", "payments after", "post close payments", "cutoff payments"],
+    neg: [],
+    owner: "controller",
+    gate: false,
+    assertions: ["completeness", "cutoff"],
+    note:
+      "THE PROCEDURE THAT FINDS THE UNDERSTATEMENT IN A COMPANY SHORT OF ACCOUNTING STAFF, and the one " +
+      "most often missing from a first PBC package. C-070 is the register for the period under audit; " +
+      "this is the register for the period AFTER it, which is a different population and the one the " +
+      "search for unrecorded liabilities is run against. The auditor takes every payment above a " +
+      "threshold and asks, for each, whether the liability belonged in the period just closed. The test " +
+      "turns on when the service was performed or the goods were received \u2014 not the invoice date and " +
+      "not the payment date \u2014 so the invoices behind those payments have to show the service period " +
+      "on their face. Deliver the cheque, ACH and wire register from the day after period end through " +
+      "the end of fieldwork, with payee, date, amount and the general-ledger account hit. Not a gate: an " +
+      "AS 4105 interim review is analytical and inquiry-based and does not require it, so making it one " +
+      "would block a Form 10-Q over a procedure that was never performed at interim.",
+  },
 
   // ══════════════════ D — REVENUE & AR ══════════════════
   {
@@ -809,6 +938,7 @@ const CATEGORIES = [
   },
   {
     code: "D-090",
+    module: "hospitality",
     bracket: "D",
     label: "Hospitality Revenue — STR / PMS Reports & Daily Revenue Reports",
     tiers: ["monthly", "quarterly", "annual"],
@@ -825,6 +955,102 @@ const CATEGORIES = [
   },
 
   // ══════════════════ E — INVENTORY ══════════════════
+  {
+    code: "D-100",
+    bracket: "D",
+    label: "Price Concession vs Credit Loss Determination",
+    tiers: ["quarterly", "annual"],
+    authority: ["ASC 606-10-32-5 to -14", "ASC 326-20", "AS 2501"],
+    strong: ["price concession", "variable consideration", "collection rate", "concession analysis", "revenue reduction"],
+    kw: ["concession", "collectability", "collection history", "bad debt reclass", "constraint"],
+    neg: [],
+    owner: "cfo",
+    gate: false,
+    assertions: ["accuracy", "valuation", "cutoff"],
+    note:
+      "WHERE A RECEIVABLE SHORTFALL BELONGS, AND IT IS ONE OR THE OTHER. A shortfall the company " +
+      "expected when it made the sale is an implicit price concession and reduces revenue; a shortfall " +
+      "from a customer who could not pay is a credit loss and is bad debt expense. The two land in " +
+      "different places on the income statement, and the SEC staff asks about it: a cohort issuer had " +
+      "roughly $1.2 million originally booked as bad debt expense reassessed as variable consideration " +
+      "reducing revenue. D-050 proves the revenue accounting and D-020 proves the CECL estimate; this " +
+      "item is the determination of which of the two a given amount belongs in, with the collection-rate " +
+      "history that supports the estimate and the ASC 606-10-32-11 constraint analysis.",
+  },
+  {
+    code: "D-110",
+    bracket: "D",
+    module: "consumer_products",
+    label: "Trade Promotion, Slotting & Customer Deduction Accrual",
+    tiers: ["monthly", "quarterly", "annual"],
+    authority: ["ASC 606-10-32-25", "ASC 606-10-32-5 to -14", "AS 2501"],
+    strong: ["trade promotion", "slotting", "deduction", "chargeback", "coupon redemption", "promotional allowance", "spoils", "swell allowance"],
+    kw: ["trade spend", "broker claim", "off-invoice", "billback", "scan down", "retailer deduction", "mcb", "shelf fee"],
+    neg: [],
+    owner: "cfo",
+    gate: false,
+    assertions: ["completeness", "accuracy", "cutoff"],
+    note:
+      "THE SIGNATURE ESTIMATE OF THIS INDUSTRY, AND THE ONE MOST OFTEN WRONG. Consideration payable to " +
+      "a customer reduces the transaction price, so slotting fees, promotional allowances, retailer " +
+      "deductions, chargebacks, spoils and coupon redemptions are revenue reductions rather than expenses. " +
+      "The difficulty is timing: claims arrive months after the shipment they relate to, so the accrual at " +
+      "period end is an estimate of claims not yet received. Deliver the promotion authorisations, the " +
+      "retailer and distributor deduction and chargeback logs, broker claim backup, coupon clearinghouse " +
+      "redemption reports, slotting and listing agreements, the accrual build-up, and a look-back comparing " +
+      "prior accruals to the deductions that actually arrived. The look-back is the part auditors ask for " +
+      "and companies rarely keep.",
+  },
+  {
+    code: "D-120",
+    bracket: "D",
+    label: "Customer Confirmation Contact Detail (Verified Names, Addresses & Contacts)",
+    tiers: ["annual"],
+    authority: ["AS 2310.15", "AS 2310.24", "AS 2310.A9"],
+    strong: ["confirmation contact", "customer addresses", "confirmation list", "customer contact detail"],
+    kw: ["confirmation", "contact list", "customer address", "ar confirmation"],
+    neg: ["confirmation response", "confirmation reply", "returned confirmation"],
+    owner: "controller",
+    gate: false,
+    assertions: ["existence", "rights"],
+    note:
+      "ALL THE COMPANY SUPPLIES FOR A CONFIRMATION, AND THE BOUNDARY MATTERS. AS 2310 applies to fiscal " +
+      "years ending on or after June 15, 2025, so it is already in force for a June year end. " +
+      "AS 2310.24 requires the auditor to confirm receivables arising from the transfer of goods or " +
+      "services, or otherwise obtain evidence by directly accessing information held by a knowledgeable " +
+      "external source; AS 2310.25 permits alternative procedures instead only where the auditor " +
+      "determines confirmation is not feasible, and that determination has to be documented. " +
+      "AS 2310.15 then requires the AUDITOR to select the items, send the requests and receive the " +
+      "responses. So what the company provides is verified contact detail \u2014 legal entity name, " +
+      "billing address, the accounts-payable contact and their email and telephone \u2014 and the basis " +
+      "on which it was verified, since an address taken from the customer master without checking is the " +
+      "weak point the standard is aimed at. Do NOT collect confirmation responses and do not contact the " +
+      "customer about the confirmation: a reply that passed through the company is not confirmation " +
+      "evidence and the procedure has to be done again.",
+  },
+  {
+    code: "D-130",
+    bracket: "D",
+    label: "Subsequent Cash Receipts Applied to Period-End Receivables",
+    tiers: ["quarterly", "annual"],
+    authority: ["AS 2310.23", "AS 2310 Appendix C", "AS 1105.08"],
+    strong: ["subsequent cash receipts", "cash receipts after", "subsequent collections", "cash applied"],
+    kw: ["remittance", "deposits after", "collections after period end", "payment application"],
+    neg: [],
+    owner: "controller",
+    gate: false,
+    assertions: ["existence", "valuation"],
+    note:
+      "WHAT SAVES THE AUDIT WHEN THE CONFIRMATIONS DO NOT COME BACK, WHICH IS USUALLY. Under AS 2310.23 " +
+      "a non-response sends the auditor to the alternative procedures in Appendix C, and the first of " +
+      "those is examining subsequent cash receipts: money that actually arrived is stronger evidence " +
+      "that a receivable existed than a customer's signature on a form. Deliver the cash applied to " +
+      "period-end invoices after the balance sheet date, showing the invoice each receipt was applied " +
+      "to, the deposit or remittance it came in on, and the bank statement line it can be traced to \u2014 " +
+      "an unapplied lump sum proves nothing about any particular invoice. Having this ready in advance " +
+      "turns a three-week non-response problem into an afternoon, which is the single highest-return " +
+      "item on the receivables side of a PBC list.",
+  },
   {
     code: "E-010",
     bracket: "E",
@@ -933,6 +1159,7 @@ const CATEGORIES = [
   },
   {
     code: "F-040",
+    module: "hospitality",
     bracket: "F",
     label: "Hotel Property Files — Deeds, Title, Appraisals & Closing Statements",
     tiers: ["annual", "event"],
@@ -949,6 +1176,7 @@ const CATEGORIES = [
   },
   {
     code: "F-050",
+    module: "hospitality",
     bracket: "F",
     label: "Franchise, Management & PIP Agreements (Hospitality)",
     tiers: ["annual", "event"],
@@ -977,6 +1205,7 @@ const CATEGORIES = [
   },
   {
     code: "F-070",
+    module: "robotics",
     bracket: "F",
     label: "Robot Fleet Register & RaaS Asset Deployment Schedule",
     tiers: ["quarterly", "annual"],
@@ -2099,6 +2328,99 @@ const CATEGORIES = [
 
   // ══════════════════ M — BUSINESS COMBINATIONS ══════════════════
   {
+    code: "L-240",
+    bracket: "L",
+    label: "Interim Review Completion Record (AS 4105)",
+    tiers: ["quarterly", "s1"],
+    authority: ["Reg S-X 10-01(d)", "AS 4105", "AS 4105.34", "AS 1220"],
+    strong: ["interim review", "review completion", "review report", "as 4105", "10-01(d)"],
+    kw: ["interim", "review sign-off", "reviewed by", "quarterly review"],
+    neg: [],
+    owner: "auditor",
+    gate: true,
+    assertions: ["completeness"],
+    note:
+      "THE GATE THAT MAKES A FORM 10-Q FILABLE. Reg S-X 10-01(d) requires the interim financial statements " +
+      "in a Form 10-Q to have been reviewed by an independent public accountant before filing, and AS 4105 " +
+      "governs that review. If the review is not complete, the fact has to be disclosed. In the comparable " +
+      "filings read for this taxonomy, not one 10-Q stated either that a review had been performed or that " +
+      "one had not. L-130 holds the quarterly representation letter, which AS 4105.34 makes a precondition " +
+      "of the review; this item holds the other end — the completion record, dated before the filing date, " +
+      "plus the AS 1220 engagement quality review where one applies. Compare its date to the filing date: " +
+      "a completion record dated after the 10-Q went out is the defect this category exists to catch.",
+  },
+  {
+    code: "L-250",
+    bracket: "L",
+    label: "Pre-Filing Tie-Out & Exhibit Completeness Check",
+    tiers: ["quarterly", "annual", "s1"],
+    authority: ["Reg S-K Item 601", "Reg S-X Rule 2-02(a)", "Exchange Act Rule 12b-15", "Reg S-K Item 10(e)"],
+    strong: ["tie-out", "tie out", "exhibit index", "completeness check", "filing checklist", "proof of filing"],
+    kw: ["tieout", "cross-reference", "exhibit list", "edgarization", "blackline", "bring-down check"],
+    neg: [],
+    owner: "cfo",
+    gate: false,
+    assertions: ["accuracy", "completeness", "presentation"],
+    note:
+      "THE HIGHEST-FREQUENCY DEFECT IN REAL FILINGS, AND IT IS NOT AN ACCOUNTING PROBLEM. Six of ten SEC " +
+      "staff comment letters reviewed for this taxonomy opened with a mechanical defect rather than an " +
+      "accounting one: an amended Form 10-K filed without currently dated Exhibit 31 and 32 certifications, " +
+      "an audit report naming the wrong fiscal years, MD&A figures that did not agree to the financial " +
+      "statements, interim statements not labelled unaudited, a legal opinion referencing the previous " +
+      "registration statement, a missing predecessor auditor's report, a duplicated table. Every one is " +
+      "cheap to prevent and expensive to receive. Deliver the completed tie-out: every MD&A and cover-page " +
+      "figure traced to the statements, the exhibit index checked against what was actually filed including " +
+      "incorporated-by-reference entries, and on any amendment, Rule 12b-15 confirmation that currently " +
+      "dated certifications are attached.",
+  },
+  {
+    code: "L-260",
+    bracket: "L",
+    label: "Draft Auditor's Report & Report-Form Review",
+    tiers: ["annual", "s1"],
+    authority: ["AS 3101", "AS 3101.18a", "AS 3101.19", "AS 2415.12", "AS 2415.13", "Reg S-X Rule 2-02"],
+    strong: ["draft auditor's report", "draft audit report", "report of independent registered public accounting firm", "opinion draft"],
+    kw: ["audit report", "going concern paragraph", "emphasis of matter", "explanatory paragraph", "critical audit matter"],
+    neg: [],
+    owner: "auditor",
+    gate: true,
+    assertions: ["presentation"],
+    note:
+      "THE ONE DOCUMENT THE AUDITOR HANDS BACK, AND IT HAD NO HOME. The taxonomy held every document the " +
+      "company gives the auditor and no category for the report that actually gets filed. Review the draft " +
+      "for form, not just substance: AS 2415 prohibits conditional going-concern language, so \"may cast " +
+      "substantial doubt\" or \"may struggle to meet its obligations\" is a defect even where the conclusion " +
+      "is right, and one cohort issuer drew a comment for exactly that mixture. Confirm whether a paragraph " +
+      "is an AS 3101.18a explanatory paragraph or an AS 3101.19 emphasis of matter, that management's " +
+      "ASC 205-40 conclusion and the report say the same thing, that critical audit matters appear or are " +
+      "properly omitted for an emerging growth company, that the signature is conformed under Rule 2-02(a), " +
+      "that the fiscal years named are the ones being reported, and that every predecessor auditor's report " +
+      "covering a period presented is included.",
+  },
+  {
+    code: "L-270",
+    bracket: "L",
+    label: "Item 307 / 308 Disclosure-Controls Conclusion Cross-Walk",
+    tiers: ["quarterly", "annual"],
+    authority: ["Reg S-K Item 307", "Reg S-K Item 308", "Reg S-K Item 308(c)", "Exchange Act Rule 13a-15", "Release 33-8238"],
+    strong: ["disclosure controls conclusion", "cross-walk", "crosswalk", "307 conclusion", "effectiveness conclusion"],
+    kw: ["disclosure controls", "not effective", "changes in internal control", "icfr change", "dcp conclusion"],
+    neg: [],
+    owner: "cfo",
+    gate: false,
+    assertions: ["presentation", "completeness"],
+    note:
+      "FORCES THE STATED CONCLUSION TO FOLLOW THE EVIDENCE. Disclosure controls and internal control over " +
+      "financial reporting overlap, so an unremediated material weakness or an out-of-period adjustment is " +
+      "very hard to reconcile with a conclusion that disclosure controls were effective. Three of the " +
+      "comment letters reviewed made precisely this point, one of them citing Release 33-8238 Section II.D. " +
+      "L-080 tracks the deficiencies and L-040 holds the certifications and the evaluation memo; nothing " +
+      "reconciled the two. Deliver the cross-walk: every open deficiency, every restatement and every " +
+      "out-of-period adjustment in the period, mapped to the disclosure-controls and ICFR conclusions " +
+      "actually stated in the filing, plus the Item 308(c) determination of whether ICFR changed during " +
+      "the quarter — a quarterly assertion with no annual equivalent.",
+  },
+  {
     code: "M-010",
     bracket: "M",
     label: "Purchase / Merger / Share Exchange Agreements & LOIs",
@@ -2229,12 +2551,33 @@ function folderPath(categoryCode, { fiscalYear, periodLabel } = {}) {
   return `/${fy}/${per}/${br.folder}/${leaf}`;
 }
 
-function categoriesForTier(tier) {
-  return CATEGORIES.filter((c) => c.tiers.includes(tier));
+/**
+ * Categories on a checklist for this tier.
+ *
+ * Module-filtered, and this is the ONE place industry selection takes
+ * effect: every checklist in the system is built from this function,
+ * so nothing else had to learn about modules. Pass `modules` to
+ * override the profile; pass `allModules` to ignore the filter.
+ */
+function categoriesForTier(tier, opts = {}) {
+  const inTier = CATEGORIES.filter((c) => c.tiers.includes(tier));
+  if (opts.allModules) return inTier;
+  const active = opts.modules ? Array.from(new Set([...ALWAYS_ON, ...opts.modules])) : activeModules();
+  return inTier.filter((c) => active.includes(moduleOf(c)));
 }
 
-function categoriesForBracket(bracketCode) {
-  return CATEGORIES.filter((c) => c.bracket === bracketCode);
+/**
+ * Every category in a bracket, INCLUDING ones whose module is off.
+ * The document index is a reference work; hiding categories there
+ * would make the taxonomy look smaller than it is and leave no way
+ * to see what switching a module on would add. Pass activeOnly for
+ * the filtered set.
+ */
+function categoriesForBracket(bracketCode, opts = {}) {
+  const all = CATEGORIES.filter((c) => c.bracket === bracketCode);
+  if (!opts.activeOnly) return all;
+  const active = opts.modules ? Array.from(new Set([...ALWAYS_ON, ...opts.modules])) : activeModules();
+  return all.filter((c) => active.includes(moduleOf(c)));
 }
 
 function gateItems(tier) {
@@ -2262,19 +2605,49 @@ const CLASSIFIER_INDEX = CATEGORIES.map((c) => ({
 }));
 
 // Counts used by the README and the UI header.
+// Totals across the WHOLE taxonomy, not the active profile. STATS is
+// computed once at load, so making it profile-dependent would freeze
+// whatever the profile happened to be during the first require — a bug
+// that surfaces as stale counts on one page and not another. Counts for
+// the profile in force come from liveStats().
 const STATS = {
   brackets: BRACKETS.length,
   categories: CATEGORIES.length,
-  monthly: categoriesForTier("monthly").length,
-  quarterly: categoriesForTier("quarterly").length,
-  annual: categoriesForTier("annual").length,
-  event: categoriesForTier("event").length,
-  s1: categoriesForTier("s1").length,
+  monthly: categoriesForTier("monthly", { allModules: true }).length,
+  quarterly: categoriesForTier("quarterly", { allModules: true }).length,
+  annual: categoriesForTier("annual", { allModules: true }).length,
+  event: categoriesForTier("event", { allModules: true }).length,
+  s1: categoriesForTier("s1", { allModules: true }).length,
   gates: CATEGORIES.filter((c) => c.gate).length,
+  modules: Object.keys(INDUSTRY_MODULES).length,
 };
+
+/** Counts for the modules actually in force, computed per call. */
+function liveStats(modules) {
+  const o = modules ? { modules } : {};
+  const active = modules ? Array.from(new Set([...ALWAYS_ON, ...modules])) : activeModules();
+  return {
+    activeModules: active,
+    categories: CATEGORIES.filter((c) => active.includes(moduleOf(c))).length,
+    monthly: categoriesForTier("monthly", o).length,
+    quarterly: categoriesForTier("quarterly", o).length,
+    annual: categoriesForTier("annual", o).length,
+    event: categoriesForTier("event", o).length,
+    s1: categoriesForTier("s1", o).length,
+    byModule: Object.fromEntries(
+      Object.keys(INDUSTRY_MODULES).map((k) => [k, CATEGORIES.filter((c) => moduleOf(c) === k).length])
+    ),
+  };
+}
 
 module.exports = {
   TIERS,
+  INDUSTRY_MODULES,
+  ALWAYS_ON,
+  activeModules,
+  modulesForSic,
+  moduleOf,
+  liveStats,
   BRACKETS,
   BRACKET_BY_CODE,
   CATEGORIES,

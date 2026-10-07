@@ -24,6 +24,7 @@ audit-schema.js        Tables, indexes, AS 1215 immutability triggers
 audit-auth.js          Self-contained authentication and roles
 audit-notify.js        Notification routing and outbox
 audit-delivery.js      Transmittals, delivery receipts and chasing
+audit-subledger.js     AR/AP subledgers, audit sampling and support indexing
 audit-store.js         Engagements, documents, checklist logic
 audit-api.js           HTTP routes
 audit-ui.js            Server-rendered pages
@@ -179,6 +180,8 @@ Only `DATABASE_URL` is required — it is already set on the Render service.
 | `AUDIT_WEBHOOK_URL` | — | Optional. POSTs every notification as JSON — useful for piping into Zara or Telegram. |
 | `AUDIT_MAIL_WEBHOOK_SECRET` | — | Enables `POST /audit/hook/mail`, where the mail provider reports whether a message was **delivered** or **bounced**. Without it the portal knows only that its own relay accepted the message. See §7a. |
 | `AUDIT_DELIVERY_SUPPRESS_UPLOAD_EMAIL` | unset | Set to `1` to stop the per-file "something arrived" email and let the transmittal carry it instead. Quieter, at the cost of up to the auto-transmit window before anyone hears. |
+
+No new variables are needed for the AR/AP subledger — see §7b.
 | `AUDIT_INSECURE_COOKIES` | unset | Leave unset. Set to `1` **only** for local HTTP development. |
 | `AUDIT_LOGIN_MAX_FAILS` / `AUDIT_LOGIN_WINDOW_MIN` | `8` / `15` | Login throttle. |
 | `AUDIT_LEAD_Q_GATE` / `_Q_STD` / `_A_GATE` / `_A_STD` | `25` / `18` / `60` / `45` | Days before the statutory filing deadline that PBC items fall due. Tune with TAAD. |
@@ -486,6 +489,144 @@ Configure it in Resend as
 
 ---
 
+## 7b. AR / AP subledgers and the sample list
+
+"Here are our forty selections. Please provide support." That email is where a small-cap close goes to die —
+not because the documents don't exist, they almost always do, but because **a receivable lives in the
+accounting system as a number while the evidence that the number is real lives in somebody's inbox.** Forty
+selections then become forty separate archaeology projects.
+
+### This is not an AR/AP system
+
+The accounting system stays the system of record. Replacing it would be a year of work and the auditor would
+still ask for exactly the same things. Three narrower things were missing:
+
+1. **A frozen snapshot that ties to the general ledger.** Export an aging **detail** report as of the period
+   end — CSV or Excel, as it comes out of the books — and the importer reads it, including the title rows
+   above the header, the per-bucket group headers and the subtotal rows that QuickBooks and Sage put inside
+   the body. Column headings are matched by synonym, so `Open Balance` / `Amount Due` / `Balance Due` all land
+   in the right place.
+2. **A document index keyed to the invoice number**, because that is the identifier the auditor will quote.
+3. **A matching engine for the selection list.**
+
+### The tie-out is also the proof the import read your file correctly
+
+Enter the general-ledger balance for the control account. If the amount column had been picked up wrongly the
+total would not agree — so one action is both the reconciliation the auditor wants and the check that the
+import worked. **A variance is allowed; an unexplained one is not** — under half a dollar it passes silently,
+and above that the explanation is required and kept.
+
+A tie-out is final once recorded, and the population freezes with it: after tie-out a line's counterparty,
+number, date and amount cannot be changed and no line can be deleted, by trigger. A corrected aging is
+imported as a **new version** that supersedes the old one without destroying it, because the old one is the
+population that was tested.
+
+### You do not have to wait for the sample
+
+You cannot know which items they will pick. You *can* know which ones are near-certain, because the method is
+not a secret: everything above a threshold is tested individually and the remainder is sampled. So the portal
+marks a **likely-picks** worklist — the large items plus the markers an auditor is trained to look at:
+
+| Marker | Why |
+|---|---|
+| `key_item` | Above the auditor's individual-testing threshold. |
+| `top_by_amount`, `largest_for_counterparty` | Large items are tested individually, not sampled. |
+| `related_party` | Attention out of all proportion to size — ASC 850, AS 2410. |
+| `contra_balance` | A credit in AR or a debit in AP usually belongs on the other side of the balance sheet. |
+| `cutoff_window` | Dated in the last five days before the cutoff; the period turns on the delivery date, not the invoice date. |
+| `dated_after_period_end` | Should not be in that aging at all. Find it before they do. |
+| `over_90`, `round_amount` | Feeds the allowance question; round numbers draw a second look. |
+
+On the test population of 827 open invoices this is **under 45% of lines and in practice a few dozen worth
+chasing** — which is the difference between answering a selection list in a morning and answering it in a
+fortnight. **When the auditor has not shared a threshold the portal refuses to invent one**, says so on
+screen, and falls back to the largest items plus the markers. It is labelled a heuristic everywhere it
+appears, because it is one.
+
+### Readiness is measured in dollars
+
+95% of lines covered while the three largest invoices are missing is not 95% ready, it is zero — they sample
+by dollars and test the large items individually. Both figures are shown and **the dollar figure leads**.
+
+### The selection list
+
+Paste what the auditor sent — a block copied out of Excel, a CSV, or a few typed lines. A header row of
+Selection, Customer, Invoice, Date, Amount is surest; without one, the column shapes are inferred. Matching
+is tried in descending order of certainty and **stops at the first method that identifies exactly one line**:
+
+| Outcome | Example from the test suite |
+|---|---|
+| `doc_number_and_amount` | `INV-0010104` + the amount agreeing. |
+| `doc_digits_and_amount` | The auditor wrote `Inv 10533`; the ledger holds `INV-0010533`. |
+| matched, amount disagrees | Matched on the number, and the difference is **surfaced rather than smoothed over** — it is exactly what they are testing for. |
+| `counterparty_and_amount` | No invoice number given at all. |
+| **ambiguous → refused** | One invoice number used by two different customers. A person chooses; **a confidently wrong match is worse than an honest gap**, because the gap gets filled and the wrong match gets delivered. |
+| **unmatched** | And the reason distinguishes "your customer, not that invoice" from "neither is in this aging — they are probably working from a different population", which is a five-minute email rather than a week of searching. |
+
+The auditor's own words are stored **verbatim and immutable**. Where their list and the aging disagree, that
+disagreement is the finding, so it cannot be tidied up to make a match work.
+
+**Who chose the sample is kept separate from who typed it in.** Under AS 2315 and AS 2310.15 the auditor
+selects the items; a transcribed list has to name the firm it came from, and the portal refuses one that
+doesn't. A record implying the company selected its own audit sample is both wrong and hard to explain later.
+
+### The AS 2310 confirmation boundary is structural
+
+**AS 2310 is already in force for NGTF** — fiscal years ending on or after **15 June 2025**, so the June 30
+year end was subject to it on the FY2025 audit. AS 2310.24 requires the auditor to confirm receivables or
+obtain the equivalent directly from an external source; .25 allows alternative procedures instead only where
+confirmation is **not feasible**, documented. And **.15 makes selecting, sending and receiving the auditor's
+job.**
+
+So on a confirmation request the portal accepts **verified contact detail and nothing else**, and
+`confirmation_response` is refused outright with the reason. Companies do sometimes try to help by collecting
+those; it voids the procedure rather than speeding it up.
+
+### Finishing the job
+
+When every selection is complete or waived with a written reason, one click issues it as a **numbered
+transmittal** through §7a, so the handover is signed for. `package.zip` is foldered one directory per
+selection, named with the selection number and counterparty, each file prefixed with its support type
+(`INV`, `POD`, `CASH`…), plus `index.json` and `index.csv` tying every selection back to the auditor's own
+row. That naming is most of the perceived quality of a sample response and it costs nothing.
+
+**Waiving needs a reason.** "We cannot produce this" is a real answer the auditor is entitled to in writing,
+and it is one they will follow up — which beats a silent omission. A request will not go out while any
+selection is unmatched.
+
+### Three categories were added to the index
+
+| Code | Why it was missing |
+|---|---|
+| **C-090** Subsequent-Period Disbursement Register | C-070 is the register for the period under audit; this is the register for the period **after** it, which is the population the **search for unrecorded liabilities** is run against. The procedure that finds the understatement in a company short of accounting staff, and the item most often absent from a first PBC package. Not a gate — an AS 4105 interim review doesn't require it, so making it one would block a 10-Q over a procedure never performed at interim. |
+| **D-120** Customer Confirmation Contact Detail | All the company supplies under AS 2310.15, with the basis on which each address was verified. |
+| **D-130** Subsequent Cash Receipts Applied to Period-End Receivables | What saves the audit when confirmations don't come back, which is usually. AS 2310.23 sends a non-response to Appendix C, and the first alternative there is subsequent cash receipts. The highest-return item on the receivables side of a PBC list. |
+
+### Readiness checks
+
+Run per snapshot, and **they go quiet once satisfied** rather than nagging: not tied out, unexplained
+variance, wrong-signed balances (Reg S-X 5-02, ASC 210-20-45-1), lines dated after the period end,
+counterparty concentration ≥10% (ASC 275-10-50-20, and ASC 280-10-50-42 if also ≥10% of revenue), over-90
+balances with no CECL support on file (ASC 326-20-30-1), the missing subsequent-disbursement register, no
+vendor statements (AS 1105.08 — third-party evidence outweighs the company's own ledger), and likely-picked
+lines with nothing attached.
+
+### Routes, including the ones for the bot
+
+| Route | What |
+|---|---|
+| `/audit/subledgers` | Snapshots, tie-out state, import |
+| `/audit/subledger/:id` | Aging, concentration, coverage, checks, the line browser with per-line upload |
+| `/audit/samples`, `/audit/sample/:id` | Requests and the worklist |
+| `POST /audit/api/sample/match` | **Dry run.** Give it a list; get back what matches and what is missing, recording nothing. This is the one Zara should call. |
+| `GET /audit/api/subledger/lookup?doc=Inv+10104` | One invoice and everything filed behind it. Loose numbers work. |
+| `GET /audit/api/sample/:id/package.zip` | The foldered package |
+| `POST /audit/api/subledger/support` | Upload and file against a line in **one action** — "upload, then go and find the line, then attach it" is three steps and the third is the one that gets skipped |
+
+Added sweep: outstanding sample requests, weekdays 09:30.
+
+---
+
 ## 8. Why it is safe to hand an auditor a login
 
 **Independence is structural, not a setting.** Auditor accounts can download everything and raise
@@ -535,6 +676,15 @@ Exercised against a real PostgreSQL 16 instance over HTTP, not just reviewed:
   callbacks applied and the sender paged; open tracking stored raw but **not** believed; the reminder
   ladder, the rung-by-age jump, the one-per-day guard, the bounced-address skip; dispute and
   resolution; the AS 1301.25 schedule; and the no-auditor-accounts case
+- **AR/AP subledger and sampling**: 130 assertions over HTTP as four users, against a real PostgreSQL 16 and
+  1,240 lines of QuickBooks-shaped aging (title rows, per-bucket group headers, subtotals, a grand total,
+  credit balances, lines dated after the period end, and duplicate invoice numbers across two customers).
+  Covers the import and column detection; the tie-out refusing an unexplained variance and accepting an
+  explained one; re-import superseding without destroying the tested population; every frozen-population
+  trigger; the likely-picks worklist with and without a supplied threshold; each matching outcome including
+  the ambiguous one it refuses and both kinds of unmatched; the independence boundary (auditor cannot import,
+  attach or reconcile, but can record their own selections); the AS 2310 confirmation boundary; waivers;
+  delivery as a transmittal; the package's folders and index; and both bot endpoints
 - **Upgrade in place**: the three tables, four triggers and five added columns were stripped from a
   populated database and the service rebooted. Everything returned, and 115 checklist items, 7
   documents, 45 chain-of-custody rows and the Q1 filing date (16 Nov 2026) were byte-identical before
@@ -550,6 +700,11 @@ once-a-day guard that asks "have I already done this today" never matched — wh
 chasing email within seconds of the package arriving, and again on every run. `cal.today()` now exists,
 is documented with the trap, and all thirteen call sites use it. The rule: `dstr()` for values from the
 database, `iso()` for the result of internal arithmetic, `today()` for now.
+
+**A second real bug, found the same way.** The sample-package route built a byte-complete zip and never
+called `res.end()`. `ZipWriter.finish()` writes the central directory but does not close the socket, so the
+download hung forever on an archive that was already finished — the most confusing possible way for it to
+fail, and invisible to any test that did not actually wait for the transfer.
 
 A security review found and closed: a path by which the portal re-opened to anonymous administrator
 creation, three trigger bypasses, an API-level archive bypass, a login timing oracle, missing login
@@ -584,6 +739,17 @@ that forked the document chain.
 - Open tracking remains **off**. Turning it on adds a tracking pixel to correspondence with the
   company's auditor, and the evidence it yields is unreliable in both directions. The receipt link is
   better evidence and needs no pixel.
+- The subledger importer reads an aging **detail** report. A summary by customer has no invoice rows, so
+  there is nothing for a selection to match against, and it is refused with that explanation.
+- Aging buckets are computed in **calendar** days from the due date (falling back to the document date),
+  which is what every accounting system does — so the buckets reconcile to the report the company already
+  produces. Where the export carries its own `Aging` column, that is used instead.
+- The likely-picks worklist is a **heuristic, not a prediction** of the auditor's sample, and is labelled as
+  one. Without a threshold from the auditor it is the largest items plus the risk markers; the portal will
+  not invent a materiality figure.
+- Where a counterparty name differs between the auditor's list and the ledger beyond punctuation and the
+  usual entity suffixes, the name match will miss. The invoice-number match carries those cases, and a
+  genuinely ambiguous match is referred to a person rather than guessed.
 
 ---
 
