@@ -2187,6 +2187,13 @@ app.use("/admin/alerts", auth.requireRole("admin", "manager"));
 // (/admin/consultant-tasks).
 require("./work-orders").mount(app, auth);
 
+// Conflict checks (/admin/conflicts). The automatic check on a new intake
+// searched `clients` and `intakes` only, so it never saw an opposing party
+// and reported "cleared" on names it had not looked for. conflicts.js sweeps
+// every place a party is recorded, the other side included, and files the
+// result as the record rule 1.7 and 1.9 questions get answered from.
+require("./conflicts-page").mount(app, auth);
+
 app.get("/admin/alerts", async (req, res) => {
   try {
     const na = require("./notify-admin");

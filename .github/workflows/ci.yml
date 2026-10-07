@@ -222,6 +222,12 @@ jobs:
       - name: Consultant tasks is an admin page
         run: node scripts/check-consultant-page.js
 
+      # The conflict check searched `clients` and `intakes` only, so it never
+      # read an opposing party and could report "cleared" on a name the firm
+      # had been directly opposite. Rule 1.7 and 1.9 turn on those names.
+      - name: Conflict checks read the other side
+        run: node scripts/check-conflicts.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

@@ -393,6 +393,27 @@ async function renderCaseDetail(id) {
     <tr><td style="padding:8px 12px;color:#5E5854;font-family:Montserrat,sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:1px;vertical-align:top;width:180px;">${k}</td><td style="padding:8px 12px;color:#2B2523;">${v}</td></tr>
   `).join("");
 
+  // Conflict check. Both sides go in the link: our client AND the opposing
+  // party and their counsel, because the opposing party is what decides a
+  // rule 1.9 question and the old automatic check never searched for it.
+  const conflictNames = [
+    summary.case_name, summary.client_key, summary.opposing_party,
+    summary.opposing_counsel && summary.opposing_counsel.name,
+    summary.opposing_counsel && summary.opposing_counsel.firm,
+  ].filter(Boolean);
+  const conflictHref = require("./conflicts-page").linkFor({
+    kind: "civil", ref: `Civil #${id}`, names: conflictNames,
+  });
+  const conflictHtml = `
+    <div style="margin-top:16px; padding:14px 16px; background:#FAF8F5; border:1px solid #E8E3DC; border-radius:6px;">
+      <a href="${conflictHref}" style="display:inline-block; background:#A34C00; color:#FFFFFF; padding:9px 18px; border-radius:6px; text-decoration:none; font-size:14px; font-weight:600;">
+        ◆ Run a conflict check
+      </a>
+      <div style="margin-top:8px; font-size:13px; color:#5E5854;">
+        Checks ${conflictNames.length} name${conflictNames.length === 1 ? "" : "s"} from this case — our client and the other side — against every matter the firm has. The result is filed against this case.
+      </div>
+    </div>`;
+
   const opposingHtml = summary.opposing_counsel && Object.keys(summary.opposing_counsel).length ? `
     <div style="background:#FAF8F5;border:1px solid #E8E3DC;border-radius:6px;padding:16px;margin-top:16px;">
       <div style="font-family:Cormorant Garamond,Georgia,serif;font-weight:600;color:#2B2523;margin-bottom:8px;">Opposing Counsel</div>
@@ -489,6 +510,7 @@ async function renderCaseDetail(id) {
         ${overviewTable}
       </table>
       ${opposingHtml}
+        ${conflictHtml}
 
       <!-- Court docket checker (build 37) — rendered by civil-admin.js -->
       <div data-civil-panel="docket"></div>

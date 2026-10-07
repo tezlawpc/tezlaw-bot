@@ -1715,8 +1715,11 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/panel/drip" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◍</span><span class="nav-label">Drip Campaigns</span>
       </a>
+      <a href="/admin/conflicts" class="nav-link ${isActive('conflict-check')}" data-perm="matters.access">
+        <span class="nav-icon">◆</span><span class="nav-label">Conflict Check</span>
+      </a>
       <a href="/admin/panel/conflicts" class="nav-link" data-perm="matters.access">
-        <span class="nav-icon">◆</span><span class="nav-label">Conflicts</span>
+        <span class="nav-icon">◇</span><span class="nav-label">Intake Conflicts</span>
       </a>
       <a href="/admin/panel/sol" class="nav-link" data-perm="matters.access">
         <span class="nav-icon">◒</span><span class="nav-label">SoL Deadlines</span>
