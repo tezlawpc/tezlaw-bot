@@ -28,6 +28,7 @@ const cal = require("./audit-calendar");
 const checklists = require("./audit-checklists");
 const schema = require("./audit-schema");
 const notify = require("./audit-notify");
+const delivery = require("./audit-delivery");
 const db = require("./db");
 
 const upload = multer({
@@ -139,6 +140,15 @@ router.get("/logout", (req, res) => {
 
 router.get("/", auth.requirePermission("dashboard.view"), htmlWrap(async (req, res) => {
   const data = await store.dashboard();
+  // Best-effort: the delivery band is additive, and a portal whose
+  // dashboard dies because one new query failed is a worse outcome than
+  // a dashboard without the band.
+  try {
+    data.delivery = await delivery.deliveryStats();
+    data.delivery.awaitingMe = await delivery.awaitingMe(req.auditUser);
+  } catch (err) {
+    console.error("[ngtf-audit] delivery stats failed:", err.message);
+  }
   res.send(ui.dashboardPage(data, req.auditUser));
 }));
 
@@ -225,10 +235,19 @@ router.get("/upload", auth.requirePermission("document.upload"), htmlWrap(async 
 
 router.get("/profile", auth.requirePermission("dashboard.view"), htmlWrap(async (req, res) => {
   const issuer = require("./audit-issuer");
+  const taxo = require("./audit-taxonomy");
   const profile = await issuer.load({ fresh: true });
   const v = issuer.validate(profile);
   res.send(
-    ui.profilePage({ profile, derived: issuer.derive(profile), warnings: v.warnings }, req.auditUser)
+    ui.profilePage(
+      {
+        profile,
+        derived: issuer.derive(profile),
+        warnings: v.warnings,
+        stats: taxo.liveStats(profile.industryModules),
+      },
+      req.auditUser
+    )
   );
 }));
 
@@ -241,9 +260,286 @@ router.get("/playbooks", auth.requirePermission("dashboard.view"), htmlWrap(asyn
   res.send(ui.playbooksPage({ playbooks: playbooks.list(), declared, engagements }, req.auditUser));
 }));
 
+router.get("/report-event", auth.requirePermission("dashboard.view"), htmlWrap(async (req, res) => {
+  const events = require("./audit-events");
+  const issuer = require("./audit-issuer");
+  const profile = await issuer.load({ fresh: true });
+  const engagements = await store.listEngagements({ includeArchived: false, limit: 40 });
+  res.send(ui.reportEventPage({ catalog: events.list(profile), engagements, profile }, req.auditUser));
+}));
+
+router.get("/events", auth.requirePermission("dashboard.view"), htmlWrap(async (req, res) => {
+  const events = require("./audit-events");
+  const issuer = require("./audit-issuer");
+  const profile = await issuer.load({ fresh: true });
+  const register = await store.eventRegister({ limit: 60 });
+  res.send(
+    ui.eventRegisterPage(
+      { ...register, preAct: events.preActObligations(profile), confirm: req.query.confirm || null, profile },
+      req.auditUser
+    )
+  );
+}));
+
+router.get("/event/:id", auth.requirePermission("dashboard.view"), htmlWrap(async (req, res) => {
+  const report = await store.getEventReport(parseInt(req.params.id, 10));
+  if (!report) return res.status(404).send(ui.errorPage("That reported event does not exist.", req.auditUser));
+  res.send(ui.eventDetailPage({ report }, req.auditUser));
+}));
+
 router.get("/users", auth.requirePermission("portal.users"), htmlWrap(async (req, res) => {
   const users = await auth.listUsers();
   res.send(ui.usersPage({ users }, req.auditUser));
+}));
+
+// ════════════════ DELIVERY LEDGER ════════════════
+
+router.get("/transmittals", auth.requirePermission("delivery.view"), htmlWrap(async (req, res) => {
+  const filter = ["open", "closed", "void", "stalled", "disputed", "all"].includes(req.query.filter)
+    ? req.query.filter
+    : "open";
+  const tab = req.query.tab === "undelivered" ? "undelivered" : "ledger";
+  const [transmittals, undelivered, stats, engagements] = await Promise.all([
+    delivery.listTransmittals({ filter }),
+    delivery.undeliveredDocuments({ limit: 400 }),
+    delivery.deliveryStats(),
+    store.listEngagements({ limit: 40 }),
+  ]);
+  res.send(
+    ui.transmittalsPage(
+      { transmittals, undelivered, stats, filter, tab, engagements, auditorAccounts: stats.auditor_accounts },
+      req.auditUser
+    )
+  );
+}));
+
+router.get("/transmittal/new", auth.requirePermission("delivery.create"), htmlWrap(async (req, res) => {
+  const direction = req.query.direction === "to_company" ? "to_company" : "to_auditor";
+  const [people, engagements, docs, items] = await Promise.all([
+    delivery.defaultRecipients(direction),
+    store.listEngagements({ limit: 40 }),
+    db.query(
+      `SELECT d.id, d.filename, d.category_code, d.size_bytes, d.is_gate, e.period_label AS engagement_period,
+              EXISTS (SELECT 1 FROM ngtf_audit_transmittal_documents td
+                        JOIN ngtf_audit_transmittals t ON t.id = td.transmittal_id
+                       WHERE td.document_id = d.id AND t.voided_at IS NULL) AS transmitted
+         FROM ngtf_audit_documents d
+         LEFT JOIN ngtf_audit_engagements e ON e.id = d.engagement_id
+        WHERE d.status = 'active'
+        ORDER BY d.uploaded_at DESC LIMIT 120`
+    ),
+    db.query(
+      `SELECT i.id, i.label, i.category_code, i.due_date, i.is_gate, c.period_label
+         FROM ngtf_audit_checklist_items i
+         JOIN ngtf_audit_checklists c ON c.id = i.checklist_id
+        WHERE i.status IN ('open','pending_confirmation') AND i.kind = 'document'
+        ORDER BY i.is_gate DESC, i.due_date NULLS LAST LIMIT 120`
+    ),
+  ]);
+  res.send(
+    ui.newTransmittalPage(
+      { engagements, candidates: docs.rows, openItems: items.rows, people, direction },
+      req.auditUser
+    )
+  );
+}));
+
+router.get("/transmittal/:id", auth.requirePermission("delivery.view"), htmlWrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const data = await delivery.getTransmittal(id);
+  if (!data) return res.status(404).send(ui.errorPage("That transmittal does not exist.", req.auditUser));
+  // Opening the page IS the strongest observation short of a statement,
+  // so it is recorded before the page renders — and only for a named
+  // recipient. A colleague browsing the ledger must not create a receipt
+  // in somebody else's name.
+  const myReceipt = await delivery.isRecipient(id, req.auditUser);
+  if (myReceipt) {
+    try {
+      await delivery.recordView({ transmittalId: id, user: req.auditUser, req });
+    } catch (err) {
+      console.error("[ngtf-audit] view receipt failed:", err.message);
+    }
+  }
+  const fresh = await delivery.getTransmittal(id);
+  res.send(
+    ui.transmittalDetailPage(
+      { data: fresh, myReceipt: myReceipt ? await delivery.isRecipient(id, req.auditUser) : null },
+      req.auditUser
+    )
+  );
+}));
+
+router.get("/delays", auth.requirePermission("delivery.view"), htmlWrap(async (req, res) => {
+  const engagementId = req.query.engagement ? parseInt(req.query.engagement, 10) : null;
+  const [report, engagements] = await Promise.all([
+    delivery.delayReport({ engagementId }),
+    store.listEngagements({ limit: 40 }),
+  ]);
+  res.send(ui.delaysPage({ report, engagementId, engagements }, req.auditUser));
+}));
+
+/**
+ * The receipt link. PUBLIC by necessity — its whole job is to work from
+ * an email client before anybody has a session.
+ *
+ * It records that the link addressed to this person was clicked, from an
+ * IP, at a time, and then sends them onward to sign in. The token
+ * identifies; it does not authorise. Nothing about the package is
+ * disclosed here, so a leaked link reveals nothing and grants nothing.
+ */
+router.get("/r/:token", htmlWrap(async (req, res) => {
+  const base = auth.mountBase();
+  let hit = null;
+  try {
+    hit = await delivery.recordLinkClick(req.params.token, req);
+  } catch (err) {
+    console.error("[ngtf-audit] receipt link failed:", err.message);
+  }
+  if (!hit) {
+    // Deliberately vague and deliberately not a 404 page with detail: an
+    // unknown token should not reveal whether it ever existed.
+    return res.redirect(base + "/login");
+  }
+  const next = encodeURIComponent(`${base}/transmittal/${hit.transmittal.id}`);
+  return res.redirect(`${base}/login?next=${next}`);
+}));
+
+/**
+ * Mail provider callbacks — whether the message actually ARRIVED.
+ *
+ * PUBLIC, and authenticated by a shared secret instead of a session,
+ * because the caller is the mail provider. The secret may arrive as
+ * ?s= or as X-Audit-Webhook-Secret, because providers differ in what
+ * they will let you configure; compared in constant time either way.
+ *
+ * On HMAC: Resend and others sign with Svix, which needs the RAW request
+ * body. The host application's global JSON parser has already consumed
+ * it by the time this router is reached, so verifying a signature here
+ * would mean reaching back into the host app's middleware stack — which
+ * this module promises not to do. A high-entropy shared secret over
+ * HTTPS is the honest trade, and the endpoint is write-only into a log:
+ * the worst a forged call can do is assert a delivery or a bounce, which
+ * is why the raw payload is kept and the provider's own console remains
+ * the authority if anything is ever contested.
+ */
+router.post("/hook/mail", express.json({ limit: "512kb" }), wrap(async (req, res) => {
+  const expected = process.env.AUDIT_MAIL_WEBHOOK_SECRET || "";
+  if (!expected) return res.status(503).json({ ok: false, error: "mail callbacks are not configured" });
+  const supplied = String(req.query.s || req.headers["x-audit-webhook-secret"] || "");
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !require("crypto").timingSafeEqual(a, b)) {
+    return res.status(403).json({ ok: false, error: "forbidden" });
+  }
+  const provider = String(req.query.provider || "resend").slice(0, 40);
+  const payloads = Array.isArray(req.body) ? req.body : [req.body];
+  const results = [];
+  for (const p of payloads.slice(0, 50)) {
+    try {
+      results.push(await notify.handleMailProviderEvent(p, { provider }));
+    } catch (err) {
+      console.error("[ngtf-audit] mail callback failed:", err.message);
+      results.push({ applied: false, error: err.message });
+    }
+  }
+  // Always 200 on a authenticated call. A provider that receives an
+  // error retries, and retrying a callback we have already stored just
+  // duplicates rows in the log.
+  return res.json({ ok: true, handled: results.length, results });
+}));
+
+router.post("/api/transmittal/create", auth.requirePermission("delivery.create"), wrap(async (req, res) => {
+  const b = req.body || {};
+  const out = await delivery.createTransmittal({
+    direction: b.direction === "to_company" ? "to_company" : "to_auditor",
+    engagementId: b.engagementId ? Number(b.engagementId) : null,
+    documentIds: Array.isArray(b.documentIds) ? b.documentIds : [],
+    itemIds: Array.isArray(b.itemIds) ? b.itemIds : [],
+    subject: b.subject || null,
+    message: b.message || null,
+    recipientIds: Array.isArray(b.recipientIds) && b.recipientIds.length ? b.recipientIds : null,
+    deliveryMethod: b.deliveryMethod || "portal",
+    methodNote: b.methodNote || null,
+    actor: req.auditUser,
+    req,
+  });
+  return ok(res, { transmittal: out.transmittal, recipients: out.recipients.length, manifest: out.manifest });
+}));
+
+router.post("/api/transmittal/:id/acknowledge", auth.requirePermission("delivery.view"), wrap(async (req, res) => {
+  const r = await delivery.acknowledge({
+    transmittalId: parseInt(req.params.id, 10),
+    user: req.auditUser,
+    note: (req.body || {}).note || null,
+    req,
+  });
+  return ok(res, { acknowledged: r.acknowledged_at, recipient: r.email });
+}));
+
+router.post("/api/transmittal/:id/dispute", auth.requirePermission("delivery.view"), wrap(async (req, res) => {
+  const r = await delivery.dispute({
+    transmittalId: parseInt(req.params.id, 10),
+    user: req.auditUser,
+    note: (req.body || {}).note,
+    req,
+  });
+  return ok(res, { disputed: r.disputed_at, recipient: r.email });
+}));
+
+router.post("/api/transmittal/receipt/:id/resolve", auth.requirePermission("delivery.create"), wrap(async (req, res) => {
+  const r = await delivery.resolveDispute({
+    recipientId: parseInt(req.params.id, 10),
+    user: req.auditUser,
+    resolution: (req.body || {}).resolution,
+    req,
+  });
+  return ok(res, { resolved: r.dispute_resolved_at });
+}));
+
+router.post("/api/transmittal/:id/void", auth.requirePermission("delivery.admin"), wrap(async (req, res) => {
+  const r = await delivery.voidTransmittal({
+    id: parseInt(req.params.id, 10),
+    user: req.auditUser,
+    reason: (req.body || {}).reason,
+    req,
+  });
+  return ok(res, { voided: r.voided_at, number: r.number });
+}));
+
+router.get("/api/delivery/stats", auth.requirePermission("delivery.view"), wrap(async (req, res) => {
+  return ok(res, { stats: await delivery.deliveryStats() });
+}));
+
+router.get("/api/delivery/undelivered", auth.requirePermission("delivery.view"), wrap(async (req, res) => {
+  return ok(res, { documents: await delivery.undeliveredDocuments({ limit: 1000 }) });
+}));
+
+router.get("/api/delivery/delays", auth.requirePermission("delivery.view"), wrap(async (req, res) => {
+  const engagementId = req.query.engagement ? parseInt(req.query.engagement, 10) : null;
+  return ok(res, { report: await delivery.delayReport({ engagementId }) });
+}));
+
+/** Dry run of the chaser, so it can be inspected before it is trusted. */
+router.get("/api/delivery/due", auth.requirePermission("portal.settings"), wrap(async (req, res) => {
+  const due = await delivery.dueReminders();
+  return ok(res, {
+    config: due.config,
+    today: due.today,
+    remind: due.remind.map((r) => ({ number: r.number, to: r.email, nth: r.nth, businessDays: r.age, seen: r.seen, ccLead: r.ccLead })),
+    stall: due.stall.map((r) => ({ number: r.number, to: r.email, businessDays: r.age })),
+    bounced: due.bounced.map((r) => ({ number: r.number, to: r.email, reason: r.bounce_reason })),
+    skipped: due.skipped,
+  });
+}));
+
+router.post("/api/delivery/chase", auth.requirePermission("portal.settings"), wrap(async (req, res) => {
+  return ok(res, { result: await delivery.runChaser({ dryRun: (req.body || {}).dryRun === true }) });
+}));
+
+router.post("/api/delivery/auto-transmit", auth.requirePermission("delivery.create"), wrap(async (req, res) => {
+  return ok(res, {
+    result: await delivery.autoTransmit({ actor: req.auditUser, force: (req.body || {}).force === true }),
+  });
 }));
 
 // ════════════════ JSON API ════════════════
@@ -335,6 +631,14 @@ router.get("/api/document/:id/download", auth.requirePermission("document.downlo
     return fail(res, "This document is restricted. Your role does not permit downloading confidential items.", 403);
   }
   await store.recordDownload({ documentId: id, user: req.auditUser, req, bytes: doc.size_bytes });
+  // Taking the file IS receipt of any package that contained it, whether
+  // or not they ever opened the package's own page. Best-effort: a
+  // failure here must never withhold a document somebody is entitled to.
+  try {
+    await delivery.recordDownloadReceipt({ documentId: id, user: req.auditUser, req });
+  } catch (err) {
+    console.error("[ngtf-audit] delivery receipt on download failed:", err.message);
+  }
   res.setHeader("Content-Type", doc.mime_type || "application/octet-stream");
   res.setHeader("Content-Disposition", `attachment; filename="${String(doc.filename).replace(/"/g, "")}"`);
   res.setHeader("Content-Length", doc.size_bytes);
@@ -484,7 +788,7 @@ router.post("/api/engagement/:id/legal-hold", auth.requirePermission("engagement
 
 router.post("/api/engagement/:id/filed", auth.requirePermission("engagement.create"), wrap(async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const when = req.body.date || cal.iso(new Date());
+  const when = req.body.date || cal.today();
   // Validate before writing: the chain-of-custody log is append-only, so
   // a "filing recorded" entry for an engagement that does not exist can
   // never be corrected or removed.
@@ -808,6 +1112,14 @@ router.post("/api/issuer/profile", auth.requirePermission("portal.settings"), wr
     fiscalYearEndDay: parseInt(b.fiscalYearEndDay, 10),
     filerStatus: String(b.filerStatus || prev.filerStatus),
     exchange: String(b.exchange || prev.exchange),
+    sic: String(b.sic || "").trim(),
+    section12Registered: !!b.section12Registered,
+    reportingCompany: b.reportingCompany !== false,
+    industryModules: Array.isArray(b.industryModules)
+      ? b.industryModules.filter((k) => typeof k === "string")
+      : Array.isArray(prev.industryModules)
+      ? prev.industryModules
+      : [],
     smallerReportingCompany: !!b.smallerReportingCompany,
     emergingGrowthCompany: !!b.emergingGrowthCompany,
     icfrAuditorAttestation: !!b.icfrAuditorAttestation,
@@ -833,8 +1145,38 @@ router.post("/api/issuer/profile", auth.requirePermission("portal.settings"), wr
     openPeriods = r.rows[0] ? r.rows[0].n : 0;
   }
 
+  // Turning a module OFF is the mirror of the upgrade problem: the
+  // categories stop appearing on new checklists while documents already
+  // filed under them stay where they are. That is allowed — a company
+  // genuinely exits a line of business — but it is never silent.
+  const tax = require("./audit-taxonomy");
+  const before = Array.isArray(prev.industryModules) ? prev.industryModules : [];
+  const removed = before.filter((k) => !next.industryModules.includes(k));
+  const moduleWarnings = [];
+  for (const key of removed) {
+    const codes = tax.CATEGORIES.filter((c) => tax.moduleOf(c) === key).map((c) => c.code);
+    if (!codes.length) continue;
+    const r = await db.query(
+      `SELECT COUNT(*)::int AS docs,
+              (SELECT COUNT(*)::int FROM ngtf_audit_checklist_items
+                WHERE category_code = ANY($1) AND status IN ('open','pending_confirmation')) AS open_items
+         FROM ngtf_audit_documents WHERE category_code = ANY($1) AND status='active'`,
+      [codes]
+    );
+    const row = r.rows[0] || { docs: 0, open_items: 0 };
+    if (row.docs || row.open_items) {
+      const label = tax.INDUSTRY_MODULES[key] ? tax.INDUSTRY_MODULES[key].label : key;
+      moduleWarnings.push(
+        `Turning off "${label}" stops its categories appearing on periods opened from now on, but ` +
+          `${row.docs} document${row.docs === 1 ? "" : "s"} and ${row.open_items} open checklist ` +
+          `item${row.open_items === 1 ? "" : "s"} already reference them. Those stay exactly where they are ` +
+          `and remain downloadable; nothing is deleted. Open periods keep the items they were built with.`
+      );
+    }
+  }
+
   const saved = await issuer.save(next, req.auditUser);
-  const warnings = [...saved.warnings];
+  const warnings = [...saved.warnings, ...moduleWarnings];
   if (calendarMoved && openPeriods) {
     warnings.push(
       `The fiscal year end moved, and ${openPeriods} engagement${openPeriods === 1 ? "" : "s"} already ` +
@@ -843,7 +1185,12 @@ router.post("/api/issuer/profile", auth.requirePermission("portal.settings"), wr
         `reopened deliberately rather than re-dated underneath the audit trail.`
     );
   }
-  ok(res, { profile: saved.profile, derived: issuer.derive(saved.profile), warnings });
+  ok(res, {
+    profile: saved.profile,
+    derived: issuer.derive(saved.profile),
+    stats: tax.liveStats(saved.profile.industryModules),
+    warnings,
+  });
 }));
 
 // ════════════════ CORPORATE ACTIONS ════════════════
@@ -886,6 +1233,95 @@ router.post("/api/playbooks/declare", auth.requirePermission("engagement.create"
     alreadyPresent: r.alreadyPresent,
     needsVerification: r.built.counts.needsVerification,
   });
+}));
+
+// ════════════════ OPERATING EVENT REGISTER ════════════════
+//
+// Reporting an event needs only dashboard.view: the whole point is that
+// the person who DID the thing can report it, and that person is usually
+// not an officer. Recording the determination is a different act and
+// needs real authority, because it is management's judgment.
+
+router.get("/api/events/catalog", auth.requirePermission("dashboard.view"), wrap(async (req, res) => {
+  const events = require("./audit-events");
+  const issuer = require("./audit-issuer");
+  ok(res, { catalog: events.list(await issuer.load()) });
+}));
+
+/** Work out what an event would trigger, without recording anything. */
+router.post("/api/events/preview", auth.requirePermission("dashboard.view"), wrap(async (req, res) => {
+  const events = require("./audit-events");
+  const issuer = require("./audit-issuer");
+  const key = String(req.body.key || "");
+  const answers = req.body.answers && typeof req.body.answers === "object" ? req.body.answers : {};
+  const dates = {};
+  for (const k of Object.keys(events.ANCHORS)) {
+    if (req.body.dates && req.body.dates[k]) dates[k] = String(req.body.dates[k]).slice(0, 10);
+  }
+  ok(res, { built: events.evaluate(key, answers, dates, await issuer.load()) });
+}));
+
+router.post("/api/events/report", auth.requirePermission("dashboard.view"), wrap(async (req, res) => {
+  const events = require("./audit-events");
+  const key = String(req.body.key || "");
+  if (!events.EVENTS[key]) return fail(res, `Unknown event "${key}".`);
+  const answers = req.body.answers && typeof req.body.answers === "object" ? req.body.answers : {};
+  const dates = {};
+  for (const k of Object.keys(events.ANCHORS)) {
+    if (req.body.dates && req.body.dates[k]) dates[k] = String(req.body.dates[k]).slice(0, 10);
+  }
+  if (!Object.keys(dates).length) {
+    return fail(
+      res,
+      "Every deadline is measured from a date, so at least one is needed. If you are unsure of the exact " +
+        "day, give your best estimate and say so in the summary rather than leaving it out."
+    );
+  }
+  const r = await store.reportEvent({
+    eventKey: key,
+    answers,
+    dates,
+    summary: req.body.summary ? String(req.body.summary).slice(0, 2000) : null,
+    learnedOn: req.body.learnedOn || null,
+    engagementId: req.body.engagementId ? parseInt(req.body.engagementId, 10) : null,
+    actor: req.auditUser,
+  });
+  ok(res, {
+    reportId: r.report.id,
+    obligations: r.built.obligations.length,
+    counts: r.built.counts,
+    spawnedChecklistItems: r.spawnedChecklistItems,
+  });
+}));
+
+router.post("/api/events/:id/determine", auth.requirePermission("event.determine"), wrap(async (req, res) => {
+  const r = await store.determineEvent({
+    reportId: parseInt(req.params.id, 10),
+    determination: String(req.body.determination || ""),
+    note: req.body.note,
+    actor: req.auditUser,
+  });
+  ok(res, { report: r });
+}));
+
+router.post("/api/events/obligation/:id/done", auth.requirePermission("event.determine"), wrap(async (req, res) => {
+  const r = await store.satisfyObligation({
+    obligationRowId: parseInt(req.params.id, 10),
+    note: req.body.note,
+    actor: req.auditUser,
+  });
+  ok(res, { obligation: r });
+}));
+
+router.post("/api/events/confirm-period", auth.requirePermission("dashboard.view"), wrap(async (req, res) => {
+  const r = await store.confirmNothingToReport({
+    periodStart: req.body.periodStart,
+    periodEnd: req.body.periodEnd,
+    answer: req.body.answer,
+    note: req.body.note,
+    actor: req.auditUser,
+  });
+  ok(res, { attestation: r });
 }));
 
 router.post("/api/users", auth.requirePermission("portal.users"), wrap(async (req, res) => {

@@ -23,6 +23,7 @@ audit-checklists.js    Monthly / quarterly / annual checklist generation
 audit-schema.js        Tables, indexes, AS 1215 immutability triggers
 audit-auth.js          Self-contained authentication and roles
 audit-notify.js        Notification routing and outbox
+audit-delivery.js      Transmittals, delivery receipts and chasing
 audit-store.js         Engagements, documents, checklist logic
 audit-api.js           HTTP routes
 audit-ui.js            Server-rendered pages
@@ -176,6 +177,8 @@ Only `DATABASE_URL` is required — it is already set on the Render service.
 | `AUDIT_BASE_PATH` | `/audit` | Mount path. Every link in the portal is built from this, so it can be changed safely. |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `AUDIT_SMS_FROM` | — | Optional SMS for escalations only (overdue gating items, filing deadlines). |
 | `AUDIT_WEBHOOK_URL` | — | Optional. POSTs every notification as JSON — useful for piping into Zara or Telegram. |
+| `AUDIT_MAIL_WEBHOOK_SECRET` | — | Enables `POST /audit/hook/mail`, where the mail provider reports whether a message was **delivered** or **bounced**. Without it the portal knows only that its own relay accepted the message. See §7a. |
+| `AUDIT_DELIVERY_SUPPRESS_UPLOAD_EMAIL` | unset | Set to `1` to stop the per-file "something arrived" email and let the transmittal carry it instead. Quieter, at the cost of up to the auto-transmit window before anyone hears. |
 | `AUDIT_INSECURE_COOKIES` | unset | Leave unset. Set to `1` **only** for local HTTP development. |
 | `AUDIT_LOGIN_MAX_FAILS` / `AUDIT_LOGIN_WINDOW_MIN` | `8` / `15` | Login throttle. |
 | `AUDIT_LEAD_Q_GATE` / `_Q_STD` / `_A_GATE` / `_A_STD` | `25` / `18` / `60` / `45` | Days before the statutory filing deadline that PBC items fall due. Tune with TAAD. |
@@ -354,6 +357,135 @@ reminders weekdays 08:00; archive countdown daily 08:15; committee digest Monday
 
 ---
 
+## 7a. The delivery ledger — "we sent it" / "we never got it"
+
+That exchange costs more days in a small-cap close than any accounting question, and **nothing in a
+shared folder can settle it**. A folder knows a file exists. It does not know that a named person was
+told, that the message reached their mail server, that they opened it, or that they agreed the package
+was complete. Those are four separate facts, they fail separately, and only the last one closes an item.
+
+### The unit of delivery is a transmittal
+
+A numbered package handed from one side to the other, the way a law firm numbers a production:
+`T-0001`, `T-0002`. Numbering is the cheap trick that makes the whole thing work, because it gives both
+sides a noun. "Transmittal 14, sent the 6th, acknowledged the 8th" ends an argument that "the files are
+in the folder" cannot even begin.
+
+Batching matters too. Twelve files uploaded in one sitting are **one package and one email**, not twelve.
+
+Each package carries a **manifest fingerprint** — a SHA-256 over its own ordered list of file names,
+file hashes and sizes. Both sides can recompute it, and the canonical form is shown on screen so they
+can. That turns "you never sent the September bank statement" from an argument into arithmetic: either
+that file's hash is under the fingerprint or it is not.
+
+### Nothing may sit un-notified
+
+An active document that has never appeared on a live transmittal is **undelivered** — a tracked state
+with its own alarm, not an absence. That silent state is what produced the problem in the first place:
+files landed, and no procedure carried the fact to the other side. `auto_transmit` closes the window on
+its own, hourly.
+
+If there are **no active auditor accounts**, the portal refuses to create a package and says so plainly
+rather than recording a delivery that cannot have happened. On a fresh install that is the honest answer.
+
+### The receipt facts, graded by what they can support
+
+The portal never calls a package "read" on the strength of a tracking pixel.
+
+| Fact | What it actually supports |
+|---|---|
+| `email_sent_at` | Our relay accepted it. Says **nothing** about arrival. |
+| `email_delivered_at` | Their mail server accepted it. **This is the fact that answers "it never arrived."** Requires the provider callback — see `AUDIT_MAIL_WEBHOOK_SECRET`. |
+| `email_bounced_at` | It demonstrably did **not** arrive. The most valuable column here: knowable on day zero instead of in week three, and the sender is paged immediately. |
+| `email_opened_at` | Unreliable in both directions — gateways prefetch the image, most clients block it. **Off by default**, recorded raw but never believed, labelled unreliable wherever shown. |
+| `link_clicked_at` | The link addressed to this person was clicked. The token identifies a recipient and **grants nothing** — the handler records the click and sends them to sign in. Better evidence than a pixel, and no pixel. |
+| `first_viewed_at` | Opened the package in the portal, signed in as themselves. |
+| `download_count` | Took the files. Strongest observation. |
+| `acknowledged_at` | **Stated on the record that the package is complete.** The only receipt that closes an item, because it is the only one that is a statement by them rather than an observation about them. |
+| `disputed_at` | Said something is missing. A fast objection beats slow silence, and the sender hears at once. |
+
+**Acknowledging is checked per row, not per role** — against the named recipients of that specific
+package. An acknowledgment from somebody it was not addressed to is worth nothing, and a role check
+would have let any auditor sign for a colleague's package.
+
+### Chasing is business-day arithmetic
+
+Defaults, all in the `delivery` settings key and all editable via `POST /audit/api/settings/delivery`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `auto_transmit_after_minutes` | `30` | How long an upload session batches before a package is issued. |
+| `undelivered_alert_after_hours` | `24` | When an un-transmitted document raises the alarm. |
+| `ack_due_business_days` | `3` | The date the email asks them to acknowledge by. |
+| `view_reminder_business_days` | `[1, 3]` | Rungs when the package has not been opened at all. |
+| `ack_reminder_business_days` | `[3, 6]` | Rungs when it has been seen but not acknowledged. A different problem, so a different ladder. |
+| `stalled_business_days` | `5` | Past this it stops being a reminder and becomes a recorded delay. |
+| `max_reminders` | `4` | Then it stops nagging the recipient. |
+| `escalate_to_lead_from_reminder` | `2` | From this rung the **sender's** lead is copied — chasing it is their move, not the recipient's. |
+
+Three behaviours worth knowing:
+
+- **The rung is chosen by age, not by how many were sent.** A package already eight business days old
+  with no reminder goes straight to the rung its age has earned, so the sender's lead is copied on the
+  first message rather than a day later. Still exactly one email; skipped rungs are marked spent.
+- **One reminder per person per day**, whatever the ladder says.
+- **A bounced address is never nudged again.** Shouting into a void produces a record claiming the
+  recipient was reminded. The sender is told instead.
+
+### AS 1301.25, built from the ledger
+
+`/audit/delays` assembles the schedule of **difficulties encountered, including delays in receiving
+information**, in both directions and with dates. That communication is normally reconstructed from
+memory at the end of fieldwork, which is why it is always vague and always contested. Built from the
+ledger it is a factual schedule — which also means it will sometimes show the delay was not the
+company's. Whether any of it was significant to the audit stays the engagement partner's judgment.
+
+This is the page that makes the feature worth something to **TAAD** rather than only to Nightfood.
+
+### Everything here is append-only, by trigger
+
+A sent-items folder proves nothing in a dispute, because the person holding it could have edited it.
+The question is never "do you have a record" but "can the record have been changed." So, enforced in
+the database rather than in application code:
+
+- A receipt timestamp, once written, **cannot be cleared, moved or overwritten**; no counter can decrease.
+- An **acknowledgment is final**. So is a recorded dispute — resolution is a separate field.
+- A **manifest is sealed** when the package is issued. Anything left out goes in a further transmittal;
+  that is what the numbering is for.
+- A transmittal cannot be **deleted**, only **voided with a reason**. The recipients saw it, and a hole
+  in the numbering is harder to explain than a withdrawal.
+- `TRUNCATE` is blocked on all three tables (row triggers do not fire on `TRUNCATE`).
+
+### New routes
+
+| Route | Who |
+|---|---|
+| `/audit/transmittals` | Ledger, plus the **Undelivered** tab |
+| `/audit/transmittal/new` | Compose — either direction |
+| `/audit/transmittal/:id` | Manifest, per-recipient receipt timeline, chain of custody, **Print receipt** |
+| `/audit/delays` | The AS 1301.25 schedule |
+| `/audit/r/:token` | **Public.** Records a click, then sends them to sign in. Grants nothing. |
+| `/audit/hook/mail` | **Public**, shared-secret. Mail provider delivery and bounce callbacks. |
+| `GET /audit/api/delivery/due` | Dry run of the chaser — inspect it before trusting it |
+| `POST /audit/api/delivery/chase` | Run the chaser now |
+| `POST /audit/api/delivery/auto-transmit` | Sweep the undelivered queue now |
+
+Added sweeps (all `AUDIT_TZ`): auto-transmit hourly at `:10`; chaser weekdays 08:45; undelivered alarm
+weekdays 09:15.
+
+**On the mail webhook and HMAC.** Resend and others sign callbacks with Svix, which needs the *raw*
+request body. The host application's global JSON parser has already consumed it by the time this
+router is reached, and verifying a signature here would mean reaching into the host app's middleware
+stack — which this module promises not to do. A high-entropy shared secret over HTTPS is the honest
+trade: the endpoint is write-only into a log, the worst a forged call can do is assert a delivery or a
+bounce, the raw payload is kept as received, and the provider's own console remains the authority if
+anything is ever contested.
+
+Configure it in Resend as
+`https://tezlaw-bot-nightfood.onrender.com/audit/hook/mail?s=<AUDIT_MAIL_WEBHOOK_SECRET>`.
+
+---
+
 ## 8. Why it is safe to hand an auditor a login
 
 **Independence is structural, not a setting.** Auditor accounts can download everything and raise
@@ -395,6 +527,29 @@ Exercised against a real PostgreSQL 16 instance over HTTP, not just reviewed:
 - **Timezone**: dates stable across UTC, New York, Tokyo, Sydney and Los Angeles
 - **Full walkthrough**: setup → users → seed year → upload → sweep → download → review note →
   PBC export → report release → archive → post-archive addition
+- **Delivery ledger**: 119 assertions, driven over HTTP as five different users against a real
+  PostgreSQL 16 and a real (fake) SMTP server — auto-transmit; one email per recipient rather than per
+  file; the receipt link, view, download and acknowledgment path; a non-recipient refused; every
+  append-only trigger (back-dating, deletion, cleared timestamps, wound-back counters, re-pointed
+  receipts, sealed manifests, `TRUNCATE`) refused at the database; provider delivery and bounce
+  callbacks applied and the sender paged; open tracking stored raw but **not** believed; the reminder
+  ladder, the rung-by-age jump, the one-per-day guard, the bounced-address skip; dispute and
+  resolution; the AS 1301.25 schedule; and the no-auditor-accounts case
+- **Upgrade in place**: the three tables, four triggers and five added columns were stripped from a
+  populated database and the service rebooted. Everything returned, and 115 checklist items, 7
+  documents, 45 chain-of-custody rows and the Q1 filing date (16 Nov 2026) were byte-identical before
+  and after — verified by md5 over the item/status/due-date set
+
+**A real bug found while building this, and fixed across the whole module.** `cal.iso()` reads UTC
+parts while `cal.dstr()` deliberately reads *local* parts (so a `DATE` column comes back as the day
+that was stored). `cal.iso(new Date())` is therefore **not today's date** — it is today's date in UTC,
+which after about 17:00 Pacific or 20:00 Eastern is *tomorrow*. Thirteen places compared one against
+the other. On a UTC container it is invisible; with `TZ` set to a US zone, every evening after eight
+o'clock an item due tomorrow read as overdue, a package sent a minute ago read as a day old, and a
+once-a-day guard that asks "have I already done this today" never matched — which in testing sent a
+chasing email within seconds of the package arriving, and again on every run. `cal.today()` now exists,
+is documented with the trap, and all thirteen call sites use it. The rule: `dstr()` for values from the
+database, `iso()` for the result of internal arithmetic, `today()` for now.
 
 A security review found and closed: a path by which the portal re-opened to anonymous administrator
 creation, three trigger bypasses, an API-level archive bypass, a login timing oracle, missing login
@@ -415,6 +570,20 @@ that forked the document chain.
   securities counsel.
 - Six of the quarterly sweeps spawn nothing, because everything they imply is already a standing item
   on that checklist — a YES on those produces the notification but no new rows.
+- **The delivery ledger cannot know a message arrived until the mail provider is wired up.** Without
+  `AUDIT_MAIL_WEBHOOK_SECRET` and the callback configured, the strongest thing the portal can say about
+  an email is that its own relay accepted it — and `email_delivered_at` and `email_bounced_at` stay
+  empty. The in-portal receipts (link clicked, viewed, downloaded, acknowledged) work regardless.
+- The mail callback is authenticated by shared secret, not by HMAC signature verification, for the
+  reason given at the end of §7a.
+- Where a callback carries no identifying header and no matchable message id, a bounce or delivery is
+  matched to the recipient's **most recent outstanding receipt within 21 days**. That is a heuristic and
+  is recorded as one (`matched_by = recipient_address_heuristic`). In practice one person has one
+  package in flight; where it is wrong, a bounce is attributed to the wrong package, which is still a
+  loud and correct signal about that address.
+- Open tracking remains **off**. Turning it on adds a tracking pixel to correspondence with the
+  company's auditor, and the evidence it yields is unreliable in both directions. The receipt link is
+  better evidence and needs no pixel.
 
 ---
 
