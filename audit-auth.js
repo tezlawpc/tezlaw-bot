@@ -170,6 +170,42 @@ const PERMISSIONS = {
     "auditor_staff",
   ],
   "delivery.admin": ["portal_admin"],
+
+  // ── AR / AP subledgers and sampling ──────────────────────
+  // Importing an aging and filing the evidence behind it is PREPARING
+  // THE COMPANY'S RECORDS, so it is company-side only for the same
+  // Rule 2-01(c)(4)(i) reason that upload is. An auditor who assembled
+  // the client's receivables support would not be independent of it.
+  "subledger.view": [
+    "portal_admin",
+    "company_admin",
+    "company_contributor",
+    "auditor_lead",
+    "auditor_staff",
+    "audit_committee",
+  ],
+  "subledger.import": ["portal_admin", "company_admin", "company_contributor"],
+  // Agreeing the subledger to the control account is a reconciliation,
+  // and a reconciliation is a controller's job — so the contributor role
+  // holds it. It is recorded against a name and is final once written,
+  // which is the control, rather than restricting who may perform it.
+  "subledger.tie_out": ["portal_admin", "company_admin", "company_contributor"],
+  "subledger.support": ["portal_admin", "company_admin", "company_contributor"],
+  // Recording a selection list is bookkeeping about the audit, not about
+  // the company, so either side may do it — and the record keeps WHO
+  // CHOSE the sample separate from who typed it in, which is the part
+  // that actually matters under AS 2315 and AS 2310.15.
+  "sample.record": [
+    "portal_admin",
+    "company_admin",
+    "company_contributor",
+    "auditor_lead",
+    "auditor_staff",
+  ],
+  // Working the list — attaching support, assigning, waiving — is the
+  // company producing its own records.
+  "sample.work": ["portal_admin", "company_admin", "company_contributor"],
+  "sample.waive": ["portal_admin", "company_admin", "company_contributor"],
 };
 
 function can(user, permission) {

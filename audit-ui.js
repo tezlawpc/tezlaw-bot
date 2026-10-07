@@ -132,6 +132,7 @@ const NAV = [
   { key: "events", href: `${BASE}/events`, label: "Event register", perm: "dashboard.view" },
   { key: "upload", href: `${BASE}/upload`, label: "Upload", perm: "document.upload" },
   { key: "transmittals", href: `${BASE}/transmittals`, label: "Deliveries", perm: "delivery.view" },
+  { key: "subledgers", href: `${BASE}/subledgers`, label: "AR / AP", perm: "subledger.view" },
   { key: "documents", href: `${BASE}/documents`, label: "Documents", perm: "document.view_all" },
   { key: "triage", href: `${BASE}/triage`, label: "Triage", perm: "document.view_all" },
   { key: "calendar", href: `${BASE}/calendar`, label: "Calendar", perm: "dashboard.view" },
@@ -483,6 +484,7 @@ function dashboardPage(d, user) {
   }
   ${stats}
   ${deliveryStrip(d.delivery, user)}
+  ${subledgerStrip(d.subledger, user)}
   ${openGates ? `<div class="note red"><b>${openGates} gating item${openGates === 1 ? " is" : "s are"} still open.</b>
     A gating item is one where a standard or rule prevents the report or filing from issuing until it is
     delivered — the quarterly representation letter, for instance, makes an AS 4105 interim review incomplete
@@ -3248,6 +3250,918 @@ function delaysPage({ report, engagementId, engagements }, user) {
   return chrome({ title: "AS 1301.25 delays", body, user, active: "transmittals", wide: true });
 }
 
+// ════════════════════════════════════════════════════════════
+//  AR / AP SUBLEDGERS AND SAMPLING
+// ════════════════════════════════════════════════════════════
+
+function money(n) {
+  const v = Number(n) || 0;
+  return (v < 0 ? "−$" : "$") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function money0(n) {
+  const v = Number(n) || 0;
+  return (v < 0 ? "−$" : "$") + Math.abs(Math.round(v)).toLocaleString("en-US");
+}
+
+function kindLabel(k) {
+  return k === "ar" ? "Receivables" : k === "ap" ? "Payables" : String(k || "").toUpperCase();
+}
+
+function riskChips(flags) {
+  const sub = require("./audit-subledger");
+  return (flags || [])
+    .map((f) => {
+      const l = sub.RISK_FLAG_LABELS[f];
+      const color = f === "dated_after_period_end" || f === "contra_balance" ? "#991B1B"
+        : f === "key_item" || f === "related_party" ? "#9C4221"
+        : f === "cutoff_window" || f === "over_90" ? "#B45309" : "#2C5F8A";
+      return `<span class="flag" style="border-color:${color}66;color:${color};background:${color}11;" title="${esc(
+        l ? l[1] : ""
+      )}">${esc(l ? l[0] : f.replace(/_/g, " "))}</span>`;
+    })
+    .join("");
+}
+
+function supportChips(have, required) {
+  const sub = require("./audit-subledger");
+  const req = required || [];
+  const out = [];
+  for (const t of req) {
+    const st = sub.SUPPORT_TYPES[t];
+    const got = (have || []).includes(t);
+    out.push(
+      `<span class="flag" title="${esc(st ? st.proves : "")}" style="border-color:${
+        got ? "#1C7C54" : "#991B1B"
+      }66;color:${got ? "#1C7C54" : "#991B1B"};background:${got ? "#1C7C5411" : "#991B1B11"};">${
+        got ? "✓ " : "✕ "
+      }${esc(st ? st.short : t)}</span>`
+    );
+  }
+  for (const t of have || []) {
+    if (req.includes(t)) continue;
+    const st = sub.SUPPORT_TYPES[t];
+    out.push(`<span class="flag" style="border-color:#88999966;color:#667;background:#88999911;">${esc(st ? st.short : t)}</span>`);
+  }
+  return out.join("") || `<span class="xs muted">nothing attached</span>`;
+}
+
+function severityPill(sev) {
+  return pill(sev === "high" ? "Fix this" : sev === "medium" ? "Worth doing" : "Note", sev === "high" ? "#991B1B" : sev === "medium" ? "#B45309" : "#667");
+}
+
+function checksCard(checks) {
+  if (!checks.length) {
+    return `<div class="card"><h2>Readiness checks</h2>
+      <div class="empty">Nothing outstanding. The aging ties, the dates are inside the period, and the supporting
+        populations are on file.</div></div>`;
+  }
+  return `<div class="card"><h2>Readiness checks</h2>
+    <div class="sub">Each of these is something the auditor will raise. Every one is cheaper to find now than
+      in a review note.</div>
+    ${checks
+      .map(
+        (c) => `<div style="padding:11px 0;border-bottom:1px solid #EFF2F5;">
+      <div class="between"><div><b>${esc(c.title)}</b></div><div>${severityPill(c.severity)}</div></div>
+      <div class="sm" style="margin-top:4px;">${esc(c.detail)}</div>
+      <div class="xs muted" style="margin-top:5px;"><b>Do:</b> ${esc(c.fix)}${
+          (c.authority || []).length ? ` &nbsp;·&nbsp; ${esc(c.authority.join(", "))}` : ""
+        }</div></div>`
+      )
+      .join("")}</div>`;
+}
+
+/** The dashboard band. Silent unless something needs a person. */
+function subledgerStrip(s, user) {
+  if (!s) return "";
+  const out = [];
+  if (s.untied) {
+    out.push(`<div class="note red"><b>${s.untied} aging${s.untied === 1 ? " has" : "s have"} not been agreed to the
+      general ledger.</b> That is the first thing the auditor checks and the first thing that fails — and until it
+      is done, any sample drawn from that population is built on sand.
+      <a href="${BASE}/subledgers">Tie it out</a>.</div>`);
+  }
+  if (s.unmatched_selections) {
+    out.push(`<div class="note red"><b>${s.unmatched_selections} selection${
+      s.unmatched_selections === 1 ? "" : "s"
+    } could not be matched to the aging you provided.</b>
+      Either the sample was drawn from a different population, or the invoice is not in the aging that was handed
+      over. Both are worth settling now rather than in week six.
+      <a href="${BASE}/samples">Open the requests</a>.</div>`);
+  }
+  if (s.outstanding_selections) {
+    out.push(`<div class="note amber"><b>${s.outstanding_selections} selection${
+      s.outstanding_selections === 1 ? "" : "s"
+    } still need support.</b>
+      ${s.dueSoon && s.dueSoon.length ? `${esc(s.dueSoon[0].ref)} is due ${fmtDate(s.dueSoon[0].due_on)}. ` : ""}
+      <a href="${BASE}/samples">Work the list</a>.</div>`);
+  }
+  if (s.ready_to_deliver) {
+    out.push(`<div class="note green"><b>${s.ready_to_deliver} sample request${
+      s.ready_to_deliver === 1 ? " is" : "s are"
+    } complete and ready to go out.</b> Issuing it as a transmittal starts the receipt record, so there is no
+      question later about whether it arrived. <a href="${BASE}/samples">Send it</a>.</div>`);
+  }
+  for (const k of ["ar", "ap"]) {
+    const l = s.latest && s.latest[k];
+    if (l && l.likelyUnsupported > 0) {
+      out.push(`<div class="note blue"><b>${l.likelyUnsupported} likely-selected ${kindLabel(k).toLowerCase()} line${
+        l.likelyUnsupported === 1 ? "" : "s"
+      } have no support attached</b> — ${money0(l.likelyUnsupportedAmount)} of the ${kindLabel(k).toLowerCase()}
+        balance. These are the large items and the ones carrying risk markers, so they are the ones most likely to be
+        picked. <a href="${BASE}/subledger/${l.id}?filter=likely">Work them before the list arrives</a>.</div>`);
+    }
+  }
+  return out.join("");
+}
+
+// ── Snapshots ───────────────────────────────────────────────
+function subledgersPage({ subledgers, stats, engagements, canImport }, user) {
+  const rows = subledgers.length
+    ? `<table>
+      <tr><th>As of</th><th>Ledger</th><th class="right">Lines</th><th class="right">Total</th>
+        <th>Tie-out</th><th class="right">Likely picks</th><th>Imported</th><th></th></tr>
+      ${subledgers
+        .map((s) => {
+          const varAbs = Math.abs(Number(s.variance) || 0);
+          const tie = !s.tied_out
+            ? pill("Not tied out", "#991B1B")
+            : varAbs <= 0.5
+            ? pill("Agreed", "#1C7C54")
+            : pill(`Variance ${money0(s.variance)}`, "#B45309");
+          return `<tr>
+          <td><a href="${BASE}/subledger/${s.id}"><b>${fmtDate(s.as_of_date)}</b></a>
+            ${s.version > 1 ? `<div class="xs muted">v${s.version}</div>` : ""}</td>
+          <td>${esc(kindLabel(s.kind))}
+            <div class="xs muted">${esc(s.engagement_period || "no period")}</div></td>
+          <td class="right">${s.row_count}</td>
+          <td class="right"><b>${money0(s.total_amount)}</b>
+            ${Number(s.debit_count) ? `<div class="xs" style="color:var(--amber);">${s.debit_count} wrong-signed</div>` : ""}</td>
+          <td>${tie}</td>
+          <td class="right">${s.likely_count}
+            <div class="xs muted">${s.lines_with_support} w/ support</div></td>
+          <td class="sm muted" style="white-space:nowrap;">${fmtDate(s.imported_at)}</td>
+          <td><a class="btn sm ghost" href="${BASE}/subledger/${s.id}">Open</a></td></tr>`;
+        })
+        .join("")}</table>`
+    : `<div class="empty">No aging has been imported yet. Export an AR or AP aging <b>detail</b> report as of the
+        period end — CSV or Excel, straight out of whatever you keep the books in — and drop it in below.</div>`;
+
+  const importForm = canImport
+    ? `<div class="card">
+      <h2>Import an aging</h2>
+      <div class="sub">An aging <b>detail</b> report, not a summary by customer: the portal needs the individual
+        invoices, because those are what the auditor will select. CSV or Excel, as exported.</div>
+      <form id="imp" enctype="multipart/form-data">
+        <div class="grid g2">
+          <div>
+            <label>Which ledger</label>
+            <select name="kind" required>
+              <option value="ar">Accounts receivable aging</option>
+              <option value="ap">Accounts payable aging</option>
+            </select>
+            <label>As of (the period end the aging was run at)</label>
+            <input type="date" name="asOfDate" required>
+            <label>Engagement (optional)</label>
+            <select name="engagementId">
+              <option value="">— work it out from the date —</option>
+              ${engagements
+                .map((e) => `<option value="${e.id}">${esc(e.period_label)}${e.period_name ? ` — ${esc(e.period_name)}` : ""}</option>`)
+                .join("")}
+            </select>
+          </div>
+          <div>
+            <label>General-ledger balance for this account as of that date (optional, but do it now)</label>
+            <input type="text" name="glBalance" placeholder="e.g. 1842355.17">
+            <label>Source of that balance</label>
+            <input type="text" name="glSource" placeholder="e.g. trial balance 1200 Accounts Receivable">
+            <label>Auditor's individual-testing threshold, if they have shared it (optional)</label>
+            <input type="text" name="keyItemThreshold" placeholder="leave blank if they have not">
+            <div class="xs muted" style="margin-top:5px;">Blank is the honest answer when you do not have it. The
+              portal will not invent a materiality figure and then present the worklist as if it knew their sample.</div>
+          </div>
+        </div>
+        <label>File</label>
+        <input type="file" name="file" accept=".csv,.xlsx,.xls,.txt" required>
+        <div class="row" style="margin-top:13px;">
+          <button class="btn" type="submit">Import</button>
+          <span class="xs muted">Column headings are detected automatically, including the title rows above them.</span>
+        </div>
+      </form>
+      <div class="note blue" style="margin-top:14px;">
+        <b>The tie-out is what proves the import read your file correctly.</b> If the amount column were picked up
+        wrongly the total would not agree to the general ledger, so entering the GL balance is both the
+        reconciliation the auditor wants and the check that this worked. Re-importing supersedes cleanly, and the
+        old population is kept, because it is what was tested.
+      </div>
+      <div id="impout"></div>
+    </div>
+    <script>
+      document.getElementById("imp").addEventListener("submit", function(e){
+        e.preventDefault();
+        var btn = e.target.querySelector('button[type=submit]');
+        btn.disabled = true; btn.textContent = "Importing\\u2026";
+        var fd = new FormData(e.target);
+        fetch("${BASE}/api/subledger/import", { method:"POST", body: fd })
+          .then(function(r){ return r.json(); })
+          .then(function(j){
+            if (j.ok) { location.href = "${BASE}/subledger/" + j.subledger.subledger.id; return; }
+            document.getElementById("impout").innerHTML =
+              '<div class="note red">' + (j.error || "Could not read that file.") + '</div>';
+            btn.disabled = false; btn.textContent = "Import";
+          })
+          .catch(function(err){
+            document.getElementById("impout").innerHTML = '<div class="note red">' + String(err) + '</div>';
+            btn.disabled = false; btn.textContent = "Import";
+          });
+      });
+    </script>`
+    : "";
+
+  const body = `
+  <div class="between"><div>
+    <h1>Receivables &amp; payables</h1>
+    <div class="sub">A frozen population that ties to the ledger, with the evidence filed against it</div>
+  </div><a class="btn ghost" href="${BASE}/samples">Sample requests${
+    stats.open_requests ? ` (${stats.open_requests})` : ""
+  }</a></div>
+
+  <div class="grid g4" style="margin-bottom:16px;">
+    <div class="stat"><div class="n" style="color:${stats.untied ? "var(--red)" : "var(--green)"}">${stats.untied}</div>
+      <div class="l">Not tied out</div><div class="x">Of ${stats.snapshots} active</div></div>
+    <div class="stat"><div class="n">${stats.open_requests}</div><div class="l">Open requests</div>
+      <div class="x">${stats.outstanding_selections} selections outstanding</div></div>
+    <div class="stat"><div class="n" style="color:${stats.unmatched_selections ? "var(--red)" : "var(--ink)"}">${
+    stats.unmatched_selections
+  }</div>
+      <div class="l">Unmatched</div><div class="x">Not in the aging given</div></div>
+    <div class="stat"><div class="n" style="color:${stats.ready_to_deliver ? "var(--green)" : "var(--ink)"}">${
+    stats.ready_to_deliver
+  }</div><div class="l">Ready to send</div><div class="x">Complete, not yet delivered</div></div>
+  </div>
+
+  <div class="note blue">
+    <b>The thing that costs weeks is not the missing document, it is the missing index.</b> A receivable exists in
+    the accounting system as a number; the evidence that the number is real — the invoice, the delivery receipt,
+    the cash that arrived — lives in somebody's inbox. Keying that evidence to the invoice number, once, is what
+    turns "here are our forty selections" from an archaeology project into a worklist.
+  </div>
+
+  <div class="card tight"><div style="padding:14px 18px 0;"><h2>Imported agings</h2></div>${rows}</div>
+  ${importForm}`;
+
+  return chrome({ title: "Receivables & payables", body, user, active: "subledgers", wide: true });
+}
+
+// ── One snapshot ────────────────────────────────────────────
+function subledgerDetailPage(
+  { data, checks, readiness: rd, lines, lineTotal, lineTotalAmount, filter, q, risk, people, canImport },
+  user
+) {
+  const s = data.subledger;
+  const sub = require("./audit-subledger");
+  const varAbs = Math.abs(Number(s.variance) || 0);
+
+  const buckets = [
+    ["Current", s.bucket_current],
+    ["1–30", s.bucket_1_30],
+    ["31–60", s.bucket_31_60],
+    ["61–90", s.bucket_61_90],
+    ["Over 90", s.bucket_over_90],
+  ];
+  const bucketTotal = buckets.reduce((a, b) => a + Math.abs(Number(b[1]) || 0), 0) || 1;
+
+  const tieOutPanel = s.tied_out
+    ? `<div class="note ${varAbs <= 0.5 ? "green" : "amber"}">
+        <b>${
+          varAbs <= 0.5
+            ? "Agreed to the general ledger."
+            : `Tied out with a variance of ${money(s.variance)}.`
+        }</b>
+        Subledger ${money(s.total_amount)} against general ledger ${money(s.gl_balance)}${
+        s.gl_source ? `, per ${esc(s.gl_source)}` : ""
+      }. Recorded ${fmtDateTime(s.tied_out_at)}${s.tied_out_by_name ? ` by ${esc(s.tied_out_by_name)}` : ""}.
+        ${s.tie_out_note ? `<br><b>Explanation:</b> ${esc(s.tie_out_note)}` : ""}
+        <br><span class="xs">A reconciliation is final once recorded. A corrected aging is imported as a new
+        snapshot, which supersedes this one without destroying it — this population is what was tested.</span>
+      </div>`
+    : `<div class="card" style="border-color:var(--red);border-width:2px;">
+        <h2>Agree it to the general ledger</h2>
+        <p class="sm" style="margin-top:0;">This is the first thing the auditor does with an aging and the first
+          thing that fails. It is also the check that the import read your file correctly: if the amount column had
+          been picked up wrongly, the total below would not agree.</p>
+        <div class="row" style="margin-bottom:10px;">
+          <div class="stat" style="flex:1;"><div class="n">${money0(s.total_amount)}</div>
+            <div class="l">This aging totals</div><div class="x">${s.row_count} open items</div></div>
+        </div>
+        <form onsubmit="return tieOut(event)">
+          <label>General-ledger balance for this account as of ${fmtDate(s.as_of_date)}</label>
+          <input type="text" name="glBalance" required placeholder="e.g. 1842355.17">
+          <label>Where that came from</label>
+          <input type="text" name="glSource" placeholder="e.g. trial balance account 1200">
+          <label>Explanation, if there is a difference</label>
+          <textarea name="note" placeholder="Required when the two do not agree. An unexplained variance is the finding, and it is far cheaper to write down now than to reconstruct in February."></textarea>
+          <button class="btn" type="submit" style="margin-top:11px;">Record the tie-out</button>
+        </form>
+      </div>`;
+
+  const readinessCard = `
+  <div class="card">
+    <div class="between"><h2>Support coverage</h2>
+      <div class="xs muted">${esc(rd.required.map((t) => sub.SUPPORT_TYPES[t].label).join(" + "))}</div></div>
+    <div class="grid g2">
+      <div>
+        <div class="between"><div class="sm"><b>By dollars</b></div><div class="sm"><b>${rd.dollarsPct}%</b></div></div>
+        <div class="bar"><i style="width:${rd.dollarsPct}%;background:${
+    rd.dollarsPct >= 90 ? "var(--green)" : rd.dollarsPct >= 50 ? "var(--amber)" : "var(--red)"
+  };"></i></div>
+        <div class="xs muted" style="margin-top:4px;">${money0(rd.dollarsComplete)} of ${money0(rd.dollars)}</div>
+      </div>
+      <div>
+        <div class="between"><div class="sm">By line count</div><div class="sm">${rd.linesPct}%</div></div>
+        <div class="bar"><i style="width:${rd.linesPct}%;background:#99A;"></i></div>
+        <div class="xs muted" style="margin-top:4px;">${rd.linesComplete} of ${rd.lines} lines${
+    rd.onlyLikely ? " (likely picks only)" : ""
+  }</div>
+      </div>
+    </div>
+    <div class="note blue" style="margin-bottom:0;">
+      <b>The dollar figure is the one that matters.</b> 95% of lines covered while the three largest invoices are
+      missing is not 95% ready, it is zero — they sample by dollars, and the largest items are tested
+      individually rather than sampled at all.
+    </div>
+    ${
+      Object.keys(rd.missingByType).length
+        ? `<table style="margin-top:6px;"><tr><th>Missing</th><th class="right">Lines</th><th class="right">Dollars</th></tr>
+            ${Object.entries(rd.missingByType)
+              .filter(([, v]) => v.lines)
+              .map(
+                ([k, v]) =>
+                  `<tr><td>${esc(v.label)}<div class="xs muted">${esc(sub.SUPPORT_TYPES[k].proves)}</div></td>
+                   <td class="right">${v.lines}</td><td class="right">${money0(v.dollars)}</td></tr>`
+              )
+              .join("") || `<tr><td colspan="3" class="muted sm">Nothing missing.</td></tr>`}</table>`
+        : ""
+    }
+  </div>`;
+
+  const FILTERS = [
+    ["", `All ${lineTotal ? "" : ""}`],
+    ["likely", "Likely picks"],
+    ["unsupported", "No support"],
+    ["contra", "Wrong-signed"],
+    ["over_90", "Over 90 days"],
+    ["related", "Related party"],
+    ["after_period", "Dated after period end"],
+  ];
+  const chips = FILTERS.map(
+    ([k, label]) =>
+      `<a class="btn sm ${k === (filter || "") ? "" : "ghost"}" href="${BASE}/subledger/${s.id}${
+        k ? `?filter=${k}` : ""
+      }">${esc(label.trim())}</a>`
+  ).join(" ");
+
+  const supportOptions = Object.entries(sub.SUPPORT_TYPES)
+    .filter(([, v]) => v.kinds.includes(s.kind))
+    .map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`)
+    .join("");
+
+  const lineRows = lines.length
+    ? lines
+        .map(
+          (l) => `<tr>
+      <td class="right muted xs">${l.line_no}</td>
+      <td><b>${esc(l.counterparty_name)}</b>
+        <div class="xs muted">${esc(l.doc_number || "no number")}${l.po_number ? ` · PO ${esc(l.po_number)}` : ""}</div></td>
+      <td class="sm">${fmtDate(l.doc_date)}<div class="xs muted">${
+            l.due_date ? "due " + fmtDate(l.due_date) : ""
+          }</div></td>
+      <td class="right"><b>${money(l.open_amount)}</b>
+        <div class="xs muted">${l.days_outstanding == null ? "" : l.days_outstanding + "d"}</div></td>
+      <td>${riskChips(l.risk_flags)}</td>
+      <td>${supportChips(l.support_types, rd.required)}</td>
+      <td style="width:1%;"><details><summary>Attach</summary>
+        <form class="noprint" enctype="multipart/form-data" onsubmit="return addSupport(event, ${l.id})"
+          style="min-width:230px;padding:6px 0;">
+          <select name="supportType" required>${supportOptions}</select>
+          <input type="file" name="file" required style="margin-top:6px;">
+          <input type="text" name="note" placeholder="note (optional)" style="margin-top:6px;">
+          <button class="btn sm" type="submit" style="margin-top:7px;">Upload &amp; file</button>
+        </form></details></td></tr>`
+        )
+        .join("")
+    : "";
+
+  const body = `
+  <div class="between"><div>
+    <h1>${esc(kindLabel(s.kind))} as of ${fmtDate(s.as_of_date)}</h1>
+    <div class="sub">${s.row_count} open items · ${money(s.total_amount)} · ${s.counterparty_count}
+      ${s.kind === "ar" ? "customers" : "vendors"} · imported ${fmtDateTime(s.imported_at)}${
+    s.imported_by_name ? ` by ${esc(s.imported_by_name)}` : ""
+  }${s.version > 1 ? ` · version ${s.version}` : ""}</div>
+  </div><div class="row">
+    ${s.status === "superseded" ? pill("SUPERSEDED", "#889") : ""}
+    ${s.document_id ? `<a class="btn sm ghost" href="${BASE}/document/${s.document_id}">Source file</a>` : ""}
+    <a class="btn sm ghost" href="${BASE}/subledgers">All agings</a>
+  </div></div>
+
+  ${
+    s.status === "superseded"
+      ? `<div class="note amber"><b>A later version of this aging has been imported.</b> This one is kept because it
+          is the population that was tested — a sample drawn from it still points here.</div>`
+      : ""
+  }
+
+  ${tieOutPanel}
+
+  <div class="grid g2">
+    <div class="card">
+      <h2>Aging</h2>
+      <table>${buckets
+        .map(
+          ([label, v]) => `<tr>
+        <td style="width:80px;">${esc(label)}</td>
+        <td style="min-width:120px;"><div class="bar"><i style="width:${
+          Math.round((Math.abs(Number(v) || 0) / bucketTotal) * 100)
+        }%;background:${label === "Over 90" ? "var(--red)" : label === "61–90" ? "var(--amber)" : "var(--navy2)"};"></i></div></td>
+        <td class="right">${money0(v)}</td></tr>`
+        )
+        .join("")}</table>
+      ${
+        s.key_item_threshold
+          ? `<div class="xs muted" style="margin-top:9px;">Individual-testing threshold
+              <b>${money0(s.key_item_threshold)}</b>${s.threshold_source ? ` (${esc(s.threshold_source)})` : ""}.</div>`
+          : `<div class="xs muted" style="margin-top:9px;">No individual-testing threshold has been shared, so the
+              likely-picks list is the largest items plus risk markers rather than a prediction of their sample.
+              ${canImport ? `<a href="#" onclick="setThreshold();return false;">Enter one if the auditor gives you theirs</a>.` : ""}</div>`
+      }
+    </div>
+    <div class="card">
+      <h2>Concentration</h2>
+      <table>${data.concentration
+        .map(
+          (c) => `<tr><td>${esc(c.counterparty_name)}<div class="xs muted">${c.lines} item${
+            c.lines === 1 ? "" : "s"
+          }</div></td>
+          <td class="right">${money0(c.amount)}</td>
+          <td class="right" style="width:60px;color:${c.pct >= 10 ? "var(--amber)" : "inherit"};font-weight:${
+            c.pct >= 10 ? 600 : 400
+          };">${c.pct}%</td></tr>`
+        )
+        .join("")}</table>
+      ${
+        data.concentration[0] && data.concentration[0].pct >= 10
+          ? `<div class="xs muted" style="margin-top:8px;">A concentration at this level is a disclosure question
+              under ASC 275-10-50-20, separately from collectability.</div>`
+          : ""
+      }
+    </div>
+  </div>
+
+  ${readinessCard}
+  ${checksCard(checks)}
+
+  <div class="card tight">
+    <div style="padding:14px 18px 0;">
+      <div class="between"><h2>Transactions</h2>
+        <form method="GET" action="${BASE}/subledger/${s.id}" class="row">
+          ${filter ? `<input type="hidden" name="filter" value="${esc(filter)}">` : ""}
+          <input type="text" name="q" value="${esc(q || "")}" placeholder="invoice number or name"
+            style="width:220px;">
+          <button class="btn sm ghost" type="submit">Find</button>
+        </form></div>
+      <div class="row" style="margin:4px 0 10px;">${chips}</div>
+      <div class="sub">${lineTotal} line${lineTotal === 1 ? "" : "s"} · ${money0(lineTotalAmount)}${
+    lines.length < lineTotal ? ` · showing the largest ${lines.length}` : ""
+  }</div>
+    </div>
+    ${
+      lineRows
+        ? `<table><tr><th class="right">#</th><th>${s.kind === "ar" ? "Customer" : "Vendor"} / invoice</th>
+            <th>Date</th><th class="right">Open</th><th>Why it may be picked</th><th>Support</th><th></th></tr>
+          ${lineRows}</table>`
+        : `<div class="empty">Nothing matches that.</div>`
+    }
+  </div>
+
+  <script>
+    function tieOut(e){ e.preventDefault();
+      var f=e.target, btn=f.querySelector('button');
+      btn.disabled=true;
+      fetch("${BASE}/api/subledger/${s.id}/tie-out", { method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ glBalance:f.glBalance.value, glSource:f.glSource.value, note:f.note.value }) })
+        .then(function(r){return r.json();}).then(function(j){
+          if (j.ok) location.reload(); else { alert(j.error); btn.disabled=false; } })
+        .catch(function(x){ alert(String(x)); btn.disabled=false; });
+      return false; }
+    function addSupport(e, lineId){ e.preventDefault();
+      var f=e.target, btn=f.querySelector('button');
+      btn.disabled=true; btn.textContent="Uploading\\u2026";
+      var fd=new FormData(f); fd.append("lineId", lineId);
+      fetch("${BASE}/api/subledger/support", { method:"POST", body: fd })
+        .then(function(r){return r.json();}).then(function(j){
+          if (j.ok) location.reload();
+          else { alert(j.error); btn.disabled=false; btn.textContent="Upload & file"; } })
+        .catch(function(x){ alert(String(x)); btn.disabled=false; btn.textContent="Upload & file"; });
+      return false; }
+    function setThreshold(){
+      var v = prompt("Individual-testing threshold the auditor gave you (dollars). Blank to clear.");
+      if (v === null) return;
+      fetch("${BASE}/api/subledger/${s.id}/threshold", { method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ threshold: v === "" ? null : v, source: "supplied by the auditor" }) })
+        .then(function(r){return r.json();}).then(function(j){ if (j.ok) location.reload(); else alert(j.error); }); }
+  </script>`;
+
+  return chrome({ title: `${kindLabel(s.kind)} ${fmtDate(s.as_of_date)}`, body, user, active: "subledgers", wide: true });
+}
+
+// ── Sample requests ─────────────────────────────────────────
+function samplesPage({ requests, subledgers, status, canCreate }, user) {
+  const sub = require("./audit-subledger");
+  const rows = requests.length
+    ? `<table><tr><th>Ref</th><th>Procedure</th><th>Population</th><th class="right">Selections</th>
+        <th>Progress</th><th>Due</th><th>From</th></tr>
+      ${requests
+        .map((r) => {
+          const pct = r.total ? Math.round((r.complete / r.total) * 100) : 0;
+          return `<tr>
+          <td><a href="${BASE}/sample/${r.id}"><b>${esc(r.ref)}</b></a>
+            <div class="xs muted">${esc(r.kind.toUpperCase())}</div></td>
+          <td>${esc((sub.PROCEDURES[r.procedure] || { label: r.procedure }).label)}
+            <div class="xs muted">${esc(String(r.label).slice(0, 60))}</div></td>
+          <td class="sm muted">${fmtDate(r.as_of_date)}<div class="xs">${esc(r.period_label || "")}</div></td>
+          <td class="right">${r.total}
+            ${r.unmatched ? `<div class="xs" style="color:var(--red);">${r.unmatched} unmatched</div>` : ""}</td>
+          <td style="min-width:110px;"><div class="bar"><i style="width:${pct}%;background:${
+            pct === 100 ? "var(--green)" : "var(--navy2)"
+          };"></i></div><div class="xs muted" style="margin-top:2px;">${r.complete}/${r.total}</div></td>
+          <td class="sm ${r.due_on && daysUntil(r.due_on) < 0 ? "" : "muted"}" style="${
+            r.due_on && daysUntil(r.due_on) < 0 ? "color:var(--red);font-weight:600;" : ""
+          }">${fmtDate(r.due_on)}</td>
+          <td class="sm muted">${esc(r.requested_by_firm || "—")}
+            ${r.status !== "open" ? `<div>${statusPill(r.status === "delivered" ? "report_released" : "satisfied")}</div>` : ""}</td></tr>`;
+        })
+        .join("")}</table>`
+    : `<div class="empty">No sample requests recorded.</div>`;
+
+  const active = subledgers.filter((s) => s.status === "active");
+  const form = canCreate
+    ? `<div class="card">
+      <h2>Record a selection list</h2>
+      <div class="sub">Paste what the auditor sent. A header row of Selection, Customer, Invoice, Date, Amount is
+        surest, but a block copied straight out of Excel works too.</div>
+      <form id="sam">
+        <div class="grid g2">
+          <div>
+            <label>Population it was drawn from</label>
+            <select name="subledgerId" required id="subsel">
+              ${active
+                .map(
+                  (s) =>
+                    `<option value="${s.id}" data-kind="${s.kind}">${esc(kindLabel(s.kind))} — ${fmtDate(
+                      s.as_of_date
+                    )} (${s.row_count} items${s.tied_out ? ", tied out" : ", NOT tied out"})</option>`
+                )
+                .join("")}
+            </select>
+            <label>Procedure</label>
+            <select name="procedure" required id="procsel">
+              ${Object.entries(sub.PROCEDURES)
+                .map(([k, v]) => `<option value="${k}" data-kind="${v.kind || ""}">${esc(v.label)}</option>`)
+                .join("")}
+            </select>
+            <div class="xs muted" id="procnote" style="margin-top:6px;"></div>
+          </div>
+          <div>
+            <label>Which firm sent it</label>
+            <input type="text" name="requestedByFirm" placeholder="e.g. TAAD, LLP" required>
+            <label>Who at the firm (optional)</label>
+            <input type="text" name="requestedByName">
+            <div class="grid g2" style="gap:9px;">
+              <div><label>Received on</label><input type="date" name="receivedOn"></div>
+              <div><label>Due back</label><input type="date" name="dueOn"></div>
+            </div>
+          </div>
+        </div>
+        <label>The selections</label>
+        <textarea name="list" required style="min-height:150px;font-family:ui-monospace,Menlo,monospace;font-size:12px;"
+          placeholder="Selection&#9;Customer&#9;Invoice&#9;Date&#9;Amount&#10;1&#9;Acme Foods Inc&#9;INV-10433&#9;9/12/2026&#9;48,210.00&#10;2&#9;Harbor Distributing&#9;INV-10512&#9;9/24/2026&#9;31,005.50"></textarea>
+        <div class="row" style="margin-top:12px;">
+          <button class="btn" type="submit">Match against the aging</button>
+          <span class="xs muted">Nothing is sent to anyone — this builds the worklist.</span>
+        </div>
+      </form>
+      <div class="note amber" style="margin-top:14px;">
+        <b>The record will say the auditor chose this sample and that you transcribed it.</b> Those are different
+        facts and the portal keeps them apart, because a record implying the company selected its own audit sample
+        is both wrong and reads very badly later. Attach their file to the request once it exists.
+      </div>
+      <div id="samout"></div>
+    </div>
+    <script>
+      var PROCS = ${JSON.stringify(
+        Object.fromEntries(Object.entries(sub.PROCEDURES).map(([k, v]) => [k, { note: v.note, kind: v.kind, requires: v.requires }]))
+      )};
+      function syncProc(){
+        var p = document.getElementById("procsel").value;
+        var d = PROCS[p] || {};
+        document.getElementById("procnote").textContent = d.note || "";
+      }
+      document.getElementById("procsel").addEventListener("change", syncProc); syncProc();
+      document.getElementById("sam").addEventListener("submit", function(e){
+        e.preventDefault();
+        var f = e.target, btn = f.querySelector('button[type=submit]');
+        var opt = document.getElementById("subsel").selectedOptions[0];
+        btn.disabled = true; btn.textContent = "Matching\\u2026";
+        fetch("${BASE}/api/sample/create", { method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ subledgerId: Number(f.subledgerId.value), kind: opt.dataset.kind,
+            procedure: f.procedure.value, requestedByFirm: f.requestedByFirm.value,
+            requestedByName: f.requestedByName.value, receivedOn: f.receivedOn.value || null,
+            dueOn: f.dueOn.value || null, list: f.list.value }) })
+          .then(function(r){return r.json();}).then(function(j){
+            if (j.ok) { location.href = "${BASE}/sample/" + j.request.request.id; return; }
+            document.getElementById("samout").innerHTML = '<div class="note red">' + (j.error||"Could not read that list.") + '</div>';
+            btn.disabled = false; btn.textContent = "Match against the aging";
+          }).catch(function(x){
+            document.getElementById("samout").innerHTML = '<div class="note red">' + String(x) + '</div>';
+            btn.disabled = false; btn.textContent = "Match against the aging"; });
+      });
+    </script>`
+    : "";
+
+  const body = `
+  <div class="between"><div>
+    <h1>Sample requests</h1>
+    <div class="sub">A selection list, matched to the population, with the gaps and their owners</div>
+  </div><div class="row">
+    ${["open", "complete", "delivered", "all"]
+      .map(
+        (k) =>
+          `<a class="btn sm ${k === status ? "" : "ghost"}" href="${BASE}/samples?status=${k}">${
+            k[0].toUpperCase() + k.slice(1)
+          }</a>`
+      )
+      .join(" ")}
+    <a class="btn sm ghost" href="${BASE}/subledgers">Agings</a>
+  </div></div>
+  <div class="card tight"><div style="padding:14px 18px 0;"><h2>Requests</h2></div>${rows}</div>
+  ${form}`;
+
+  return chrome({ title: "Sample requests", body, user, active: "subledgers", wide: true });
+}
+
+// ── One request: the worklist ───────────────────────────────
+function sampleDetailPage({ data, people, canWork }, user) {
+  const sub = require("./audit-subledger");
+  const r = data.request;
+  const proc = data.procedure;
+  const required = r.required_support || [];
+  const confirmationOnly = !!proc.companySuppliesOnly;
+
+  const supportOptions = Object.entries(sub.SUPPORT_TYPES)
+    .filter(([k, v]) => v.kinds.includes(r.kind) && (!confirmationOnly || k === "counterparty_contact" || k === "other"))
+    .map(([k, v]) => `<option value="${k}"${required.includes(k) ? " selected" : ""}>${esc(v.label)}</option>`)
+    .join("");
+
+  const rows = data.selections
+    .map((s) => {
+      const badge =
+        s.status === "complete"
+          ? pill("Complete", "#1C7C54")
+          : s.status === "waived"
+          ? pill("Waived", "#889")
+          : s.status === "unmatched"
+          ? pill("NOT IN THE AGING", "#991B1B")
+          : s.status === "partial"
+          ? pill("Partial", "#B45309")
+          : pill("Open", "#B45309");
+      return `<tr>
+      <td class="right"><b>${esc(s.selection_no)}</b></td>
+      <td>
+        <div><b>${esc(s.given_counterparty || "—")}</b> <span class="xs muted">as the auditor wrote it</span></div>
+        <div class="xs muted">${esc(s.given_doc_number || "no number")} · ${fmtDate(s.given_doc_date)} · ${
+        s.given_amount == null ? "no amount" : money(s.given_amount)
+      }</div>
+        ${
+          s.line_id
+            ? `<div class="xs" style="margin-top:3px;color:var(--green);">→ line ${s.line_no}: ${esc(
+                s.counterparty_name
+              )} ${esc(s.doc_number || "")} ${money(s.open_amount)}
+                <span class="muted">(${esc(String(s.match_method || "").replace(/_/g, " "))})</span></div>`
+            : `<div class="xs" style="margin-top:3px;color:var(--red);">${esc(s.match_note || "No match found.")}</div>`
+        }
+        ${s.given_note ? `<div class="xs" style="color:var(--amber);margin-top:3px;">${esc(s.given_note)}</div>` : ""}
+        ${s.waiver_reason ? `<div class="xs muted" style="margin-top:3px;"><b>Waived:</b> ${esc(s.waiver_reason)}</div>` : ""}
+      </td>
+      <td>${badge}${s.risk_flags && s.risk_flags.length ? `<div style="margin-top:4px;">${riskChips(s.risk_flags)}</div>` : ""}</td>
+      <td>${supportChips(s.have, required)}
+        ${
+          s.support.length
+            ? `<details style="margin-top:5px;"><summary class="xs">${s.support.length} file${
+                s.support.length === 1 ? "" : "s"
+              }</summary>${s.support
+                .map(
+                  (x) =>
+                    `<div class="xs" style="padding:2px 0;"><a href="${BASE}/document/${x.document_id}">${esc(
+                      x.filename
+                    )}</a> <span class="muted">${esc(
+                      sub.SUPPORT_TYPES[x.support_type] ? sub.SUPPORT_TYPES[x.support_type].short : x.support_type
+                    )}</span>${
+                      canWork
+                        ? ` <a href="#" onclick="dropSupport(${x.id});return false;" style="color:var(--red);">remove</a>`
+                        : ""
+                    }</div>`
+                )
+                .join("")}</details>`
+            : ""
+        }</td>
+      <td class="sm">${esc(s.assigned_to_name || "—")}</td>
+      <td style="width:1%;">${
+        canWork && s.status !== "waived"
+          ? `<details><summary>Work</summary><div style="min-width:250px;padding:6px 0;">
+              ${
+                s.line_id
+                  ? `<form enctype="multipart/form-data" onsubmit="return addSupport(event, ${s.line_id})">
+                      <select name="supportType" required>${supportOptions}</select>
+                      <input type="file" name="file" required style="margin-top:6px;">
+                      <button class="btn sm" type="submit" style="margin-top:7px;">Upload &amp; file</button>
+                    </form>`
+                  : `<div class="xs" style="color:var(--red);margin-bottom:7px;">Match it to a line before attaching
+                      anything — otherwise the document is filed against nothing.</div>
+                     <form onsubmit="return manualMatch(event, ${s.id})">
+                       <input type="text" name="q" placeholder="search the aging" required>
+                       <button class="btn sm ghost" type="submit" style="margin-top:6px;">Search</button>
+                     </form>`
+              }
+              <form onsubmit="return assign(event, ${s.id})" style="margin-top:9px;">
+                <select name="userId"><option value="">— unassigned —</option>
+                  ${people.map((p) => `<option value="${p.id}"${p.id === s.assigned_to ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
+                </select>
+                <button class="btn sm ghost" type="submit" style="margin-top:6px;">Assign</button>
+              </form>
+              <form onsubmit="return waive(event, ${s.id})" style="margin-top:9px;">
+                <input type="text" name="reason" placeholder="why it cannot be produced" required minlength="10">
+                <button class="btn sm danger" type="submit" style="margin-top:6px;">Waive</button>
+              </form>
+            </div></details>`
+          : ""
+      }</td></tr>`;
+    })
+    .join("");
+
+  const body = `
+  <div class="between"><div>
+    <h1>${esc(r.ref)} — ${esc(proc.label)}</h1>
+    <div class="sub">${esc(kindLabel(r.kind))} as of ${fmtDate(r.as_of_date)}${
+    r.period_label ? ` · ${esc(r.period_label)}` : ""
+  } · ${data.counts.total} selection${data.counts.total === 1 ? "" : "s"}${
+    r.due_on ? ` · due ${fmtDate(r.due_on)}` : ""
+  }</div>
+  </div><div class="row">
+    ${
+      r.status === "delivered"
+        ? `<a class="btn sm ghost" href="${BASE}/transmittal/${r.transmittal_id}">Delivered — see the receipt</a>`
+        : data.counts.complete + data.counts.waived === data.counts.total && canWork
+        ? `<button class="btn ok" onclick="deliver()">Issue as a transmittal</button>`
+        : ""
+    }
+    <a class="btn sm ghost" href="${BASE}/api/sample/${r.id}/package.zip">Download the package</a>
+    <a class="btn sm ghost" href="${BASE}/samples">All requests</a>
+  </div></div>
+
+  <div class="note blue">
+    <b>${esc(proc.label)}.</b> ${esc(proc.note)}
+    ${(proc.authority || []).length ? `<br><span class="xs">${esc(proc.authority.join(" · "))}</span>` : ""}
+  </div>
+
+  ${
+    confirmationOnly
+      ? `<div class="note red">
+          <b>Do not collect confirmation responses, and do not contact the customer about the confirmation.</b>
+          AS 2310.15 requires the auditor to select the items, send the requests and receive the responses. A reply
+          that passed through the company is not confirmation evidence — submitting one does not speed the audit
+          up, it voids the procedure and forces it to be done again. What you provide here is verified contact
+          detail, and nothing else is accepted on this request.
+        </div>`
+      : ""
+  }
+
+  ${
+    !r.tied_out
+      ? `<div class="note red"><b>The aging this sample was drawn from has not been agreed to the general ledger.</b>
+          Do that first — if the population does not tie, the sample does not mean anything regardless of how
+          well it is supported. <a href="${BASE}/subledger/${r.subledger_id}">Tie it out</a>.</div>`
+      : ""
+  }
+
+  ${
+    data.counts.unmatched
+      ? `<div class="note red"><b>${data.counts.unmatched} selection${
+          data.counts.unmatched === 1 ? "" : "s"
+        } could not be found in this aging.</b>
+        Before chasing documents, settle which population they are working from. The usual cause is that the
+        selections were drawn from a different aging than the one that was handed over, and that is a five-minute
+        email rather than a week of searching.</div>`
+      : ""
+  }
+
+  <div class="grid g4" style="margin-bottom:16px;">
+    <div class="stat"><div class="n" style="color:${data.dollarsPct >= 100 ? "var(--green)" : "var(--ink)"}">${
+    data.dollarsPct
+  }%</div><div class="l">Covered by dollars</div>
+      <div class="x">${money0(data.dollarsComplete)} of ${money0(data.dollars)}</div></div>
+    <div class="stat"><div class="n">${data.counts.complete}</div><div class="l">Complete</div>
+      <div class="x">Of ${data.counts.total}</div></div>
+    <div class="stat"><div class="n" style="color:${
+      data.counts.open + data.counts.partial ? "var(--amber)" : "var(--ink)"
+    }">${data.counts.open + data.counts.partial}</div><div class="l">Still needed</div>
+      <div class="x">${data.counts.partial} part-done</div></div>
+    <div class="stat"><div class="n" style="color:${data.counts.unmatched ? "var(--red)" : "var(--ink)"}">${
+    data.counts.unmatched
+  }</div><div class="l">Unmatched</div><div class="x">${data.counts.waived} waived</div></div>
+  </div>
+
+  <div class="card">
+    <h3>Provenance</h3>
+    <table style="font-size:12.5px;">
+      <tr><td style="width:34%;color:var(--mute);">Selections chosen by</td><td><b>${esc(
+        r.requested_by_firm || "not recorded"
+      )}</b>${r.requested_by_name ? ` — ${esc(r.requested_by_name)}` : ""}</td></tr>
+      <tr><td style="color:var(--mute);">Entered in the portal by</td><td>${esc(r.entered_by_name || "—")} on ${fmtDateTime(
+    r.entered_at
+  )}</td></tr>
+      <tr><td style="color:var(--mute);">How</td><td>${esc(
+        String(r.selections_source).replace(/_/g, " ")
+      )}${
+    r.source_filename
+      ? ` · <a href="${BASE}/document/${r.source_document_id}">${esc(r.source_filename)}</a>`
+      : ` · <span style="color:var(--amber);">their own file is not attached</span>`
+  }</td></tr>
+      <tr><td style="color:var(--mute);">Support required per selection</td><td>${esc(
+        required.map((t) => sub.SUPPORT_TYPES[t].label).join(" + ") || "—"
+      )}</td></tr>
+    </table>
+    <div class="xs muted">Who chose the sample and who typed it in are kept apart deliberately. Under AS 2315 and
+      AS 2310.15 the auditor selects the items, and a record implying the company selected its own audit sample
+      would be both wrong and hard to explain.</div>
+  </div>
+
+  <div class="card tight">
+    <div style="padding:14px 18px 0;"><h2>Selections</h2>
+      <div class="sub">The left column is what the auditor wrote, verbatim. Where their list and the aging
+        disagree, that disagreement is the finding — it is not tidied up to make the match work.</div></div>
+    <table><tr><th class="right">#</th><th>Selection</th><th>State</th><th>Support</th><th>Owner</th><th></th></tr>
+      ${rows}</table>
+  </div>
+
+  <div id="matchbox"></div>
+
+  <script>
+    function post(url, payload){
+      return fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload||{}) })
+        .then(function(r){return r.json();}).then(function(j){
+          if (j.ok) location.reload(); else alert(j.error || "That did not work."); });
+    }
+    function addSupport(e, lineId){ e.preventDefault();
+      var f=e.target, btn=f.querySelector('button');
+      btn.disabled=true; btn.textContent="Uploading\\u2026";
+      var fd=new FormData(f); fd.append("lineId", lineId);
+      fetch("${BASE}/api/subledger/support", { method:"POST", body: fd })
+        .then(function(r){return r.json();}).then(function(j){
+          if (j.ok) location.reload(); else { alert(j.error); btn.disabled=false; btn.textContent="Upload & file"; } })
+        .catch(function(x){ alert(String(x)); btn.disabled=false; btn.textContent="Upload & file"; });
+      return false; }
+    function assign(e, id){ e.preventDefault();
+      post("${BASE}/api/selection/" + id + "/assign", { userId: e.target.userId.value || null }); return false; }
+    function waive(e, id){ e.preventDefault();
+      post("${BASE}/api/selection/" + id + "/waive", { reason: e.target.reason.value }); return false; }
+    function dropSupport(id){ if(!confirm("Remove this support link? The document itself is kept.")) return;
+      post("${BASE}/api/subledger/support/" + id + "/remove", {}); }
+    function manualMatch(e, selId){ e.preventDefault();
+      var q = e.target.q.value;
+      fetch("${BASE}/api/subledger/${r.subledger_id}/lines?q=" + encodeURIComponent(q) + "&limit=12")
+        .then(function(r){return r.json();}).then(function(j){
+          if (!j.ok || !j.lines.length) { alert("Nothing in the aging matches that."); return; }
+          var html = '<div class="card"><h2>Pick the line for selection ' + selId + '</h2><table>' +
+            j.lines.map(function(l){
+              return '<tr><td>' + l.line_no + '</td><td>' + l.counterparty_name + '</td><td>' +
+                (l.doc_number||'') + '</td><td class="right">' + l.open_amount + '</td>' +
+                '<td><button class="btn sm" onclick="pick(' + selId + ',' + l.id + ')">This one</button></td></tr>';
+            }).join('') + '</table></div>';
+          document.getElementById("matchbox").innerHTML = html;
+          document.getElementById("matchbox").scrollIntoView();
+        });
+      return false; }
+    function pick(selId, lineId){
+      post("${BASE}/api/selection/" + selId + "/match", { lineId: lineId, note: "Matched by hand after an ambiguous or failed automatic match." }); }
+    function deliver(){
+      if (!confirm("Issue this as a numbered transmittal to the engagement team?")) return;
+      post("${BASE}/api/sample/${r.id}/deliver", {}); }
+  </script>`;
+
+  return chrome({ title: `${r.ref} · Sample`, body, user, active: "subledgers", wide: true });
+}
+
 function usersPage({ users }, user) {
   const roleOptions = Object.entries(auth.ROLES)
     .map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`)
@@ -3349,6 +4263,15 @@ module.exports = {
   eventDetailPage,
   // delivery ledger
   deliveryStrip,
+  subledgerStrip,
+  subledgersPage,
+  subledgerDetailPage,
+  samplesPage,
+  sampleDetailPage,
+  riskChips,
+  supportChips,
+  money,
+  money0,
   transmittalsPage,
   transmittalDetailPage,
   newTransmittalPage,

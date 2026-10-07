@@ -1543,6 +1543,138 @@ async function notifyUndelivered() {
   return { sent: out.length, undelivered: stale.length, noAuditorAccounts: noAuditors };
 }
 
+// ── AR / AP sample requests ─────────────────────────────────
+
+/**
+ * A selection list has landed. This goes to the company, because the
+ * work is theirs — and it leads with what is ALREADY covered, because
+ * the useful number on day one is how much of the list is a non-problem.
+ */
+async function notifySampleRequest(data) {
+  if (!data) return { sent: 0 };
+  const sub = require("./audit-subledger");
+  const r = data.request;
+  const c = data.counts;
+  const outstanding = c.open + c.partial;
+
+  const subject = c.unmatched
+    ? `${tag()} ${r.ref} — ${c.unmatched} of ${c.total} selections are NOT in the aging we gave them`
+    : `${tag()} ${r.ref} — ${outstanding} of ${c.total} selections need support`;
+
+  const inner = `
+    <p style="margin:0 0 12px;"><strong>${esc(r.requested_by_firm || "The engagement team")}</strong> has selected
+      <strong>${c.total}</strong> item${c.total === 1 ? "" : "s"} for
+      ${esc(data.procedure.label.toLowerCase())}, from the ${esc(r.kind === "ar" ? "receivables" : "payables")} aging
+      as of ${esc(cal.dstr(r.as_of_date))}.</p>
+    ${kvTable([
+      ["Request", `<strong>${esc(r.ref)}</strong> — ${esc(r.label)}`],
+      ["Already complete", `${c.complete} of ${c.total}${
+        data.dollarsPct != null ? ` &nbsp;·&nbsp; <strong>${data.dollarsPct}% by dollars</strong>` : ""
+      }`],
+      ["Still to find", `${outstanding}`],
+      ...(c.unmatched ? [["Not in the aging", `<strong style="color:#991B1B;">${c.unmatched}</strong>`]] : []),
+      ["Support required per item", esc((r.required_support || []).map((t) => (sub.SUPPORT_TYPES[t] ? sub.SUPPORT_TYPES[t].label : t)).join(" + "))],
+      ...(r.due_on ? [["Due back", `<strong>${esc(cal.dstr(r.due_on))}</strong>`]] : []),
+    ])}
+    ${
+      c.unmatched
+        ? `<div style="margin:0 0 14px;padding:12px;background:#FDF0F0;border-left:3px solid #991B1B;">
+             <strong style="color:#991B1B;">Settle this before chasing any documents.</strong>
+             ${c.unmatched} selection${c.unmatched === 1 ? "" : "s"} cannot be found in the aging that was handed
+             over. Either the sample was drawn from a different population, or those invoices are not in that
+             aging. It is a five-minute email to ask which aging they are working from, against a week of
+             searching for documents that may not need to exist.
+           </div>`
+        : ""
+    }
+    ${
+      data.procedure.companySuppliesOnly
+        ? `<div style="margin:0 0 14px;padding:12px;background:#FDF0F0;border-left:3px solid #991B1B;">
+             <strong style="color:#991B1B;">Do not collect the confirmation responses.</strong>
+             AS 2310.15 requires the auditor to send the requests and receive the replies. A response that came
+             through the company is not confirmation evidence — it voids the procedure rather than speeding it up.
+             Supply the verified contact detail and nothing else.
+           </div>`
+        : ""
+    }
+    ${
+      !r.tied_out
+        ? `<div style="margin:0 0 14px;padding:12px;background:#FDF6EA;border-left:3px solid #B45309;">
+             <strong>The aging this was drawn from has not been agreed to the general ledger.</strong> Do that
+             first — if the population does not tie, the sample means nothing however well it is supported.
+           </div>`
+        : ""
+    }
+    ${button("Open the worklist", portalLink(`${BASE}/sample/${r.id}`), "#1F3A5F")}
+  `;
+
+  const recipients = await audience("company");
+  const rows = await enqueue({
+    kind: "sample_request",
+    recipients,
+    subject,
+    body: shell(`${r.ref} · selection list`, inner, c.unmatched ? "#991B1B" : "#1F3A5F"),
+    engagementId: r.engagement_id,
+    instant: true,
+  });
+  await flush(rows.length || 10);
+  return { sent: rows.length };
+}
+
+/** Chase the selections that are still missing support. */
+async function notifySampleDue() {
+  const r = await db.query(
+    `SELECT q.id, q.ref, q.label, q.due_on, q.kind, q.engagement_id, q.requested_by_firm,
+            COUNT(*) FILTER (WHERE x.status NOT IN ('complete','waived'))::int AS outstanding,
+            COUNT(*) FILTER (WHERE x.status = 'unmatched')::int AS unmatched,
+            COUNT(*)::int AS total
+       FROM ngtf_audit_sample_requests q
+       JOIN ngtf_audit_sample_selections x ON x.request_id = q.id
+      WHERE q.status = 'open'
+      GROUP BY q.id
+     HAVING COUNT(*) FILTER (WHERE x.status NOT IN ('complete','waived')) > 0
+      ORDER BY q.due_on NULLS LAST`
+  );
+  if (!r.rows.length) return { sent: 0, reason: "nothing outstanding" };
+
+  const today = cal.today();
+  const due = r.rows.filter((x) => x.due_on && cal.dstr(x.due_on) <= cal.iso(cal.addDays(cal.parse(today), 3)));
+  if (!due.length) return { sent: 0, reason: "nothing due within three days" };
+  const overdue = due.filter((x) => cal.dstr(x.due_on) < today);
+
+  const li = (x) =>
+    `<li style="margin-bottom:6px;"><strong>${esc(x.ref)}</strong> — ${esc(String(x.label).slice(0, 70))}<br>
+      <span style="color:#667;">${x.outstanding} of ${x.total} still needed · due ${esc(cal.dstr(x.due_on))}${
+      x.unmatched ? ` · <span style="color:#991B1B;font-weight:600;">${x.unmatched} not in the aging</span>` : ""
+    }</span></li>`;
+
+  const subject = overdue.length
+    ? `${tag()} ${overdue.length} sample request${overdue.length === 1 ? "" : "s"} OVERDUE`
+    : `${tag()} ${due.length} sample request${due.length === 1 ? "" : "s"} due within 3 days`;
+  const inner = `
+    ${overdue.length ? `<p style="margin:0 0 4px;font-weight:600;color:#991B1B;">Overdue (${overdue.length})</p>
+      <ul style="margin:6px 0 14px;padding-left:20px;">${overdue.map(li).join("")}</ul>` : ""}
+    ${due.length - overdue.length ? `<p style="margin:0 0 4px;font-weight:600;color:#B45309;">Due soon</p>
+      <ul style="margin:6px 0 14px;padding-left:20px;">${due.filter((x) => !overdue.includes(x)).map(li).join("")}</ul>` : ""}
+    <div style="margin:12px 0;padding:10px 12px;background:#F2F6FA;border-left:3px solid #2C5F8A;font-size:12.5px;">
+      A sample response that arrives late is the delay the auditor reports to the audit committee under
+      AS 1301.25, and it is the one most clearly attributable to the company. Waiving an item with a written
+      reason counts as an answer; silence does not.
+    </div>
+    ${button("Open the requests", portalLink(`${BASE}/samples`), "#B45309")}
+  `;
+  const recipients = await audience("company");
+  const rows = await enqueue({
+    kind: "sample_due",
+    recipients,
+    subject,
+    body: shell("Sample requests outstanding", inner, overdue.length ? "#991B1B" : "#B45309"),
+    instant: true,
+  });
+  await flush(rows.length || 20);
+  return { sent: rows.length, due: due.length, overdue: overdue.length };
+}
+
 // ── Provider callbacks: did it actually arrive ──────────────
 //
 // "Our mail server accepted it" and "their mail server accepted it" are
@@ -1791,6 +1923,8 @@ module.exports = {
   notifyBounce,
   notifyDeliveryStalled,
   notifyUndelivered,
+  notifySampleRequest,
+  notifySampleDue,
   handleMailProviderEvent,
   normaliseEventType,
   matchReceipt,

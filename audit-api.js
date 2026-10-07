@@ -29,6 +29,7 @@ const checklists = require("./audit-checklists");
 const schema = require("./audit-schema");
 const notify = require("./audit-notify");
 const delivery = require("./audit-delivery");
+const subledger = require("./audit-subledger");
 const db = require("./db");
 
 const upload = multer({
@@ -148,6 +149,11 @@ router.get("/", auth.requirePermission("dashboard.view"), htmlWrap(async (req, r
     data.delivery.awaitingMe = await delivery.awaitingMe(req.auditUser);
   } catch (err) {
     console.error("[ngtf-audit] delivery stats failed:", err.message);
+  }
+  try {
+    data.subledger = await subledger.subledgerStats();
+  } catch (err) {
+    console.error("[ngtf-audit] subledger stats failed:", err.message);
   }
   res.send(ui.dashboardPage(data, req.auditUser));
 }));
@@ -540,6 +546,417 @@ router.post("/api/delivery/auto-transmit", auth.requirePermission("delivery.crea
   return ok(res, {
     result: await delivery.autoTransmit({ actor: req.auditUser, force: (req.body || {}).force === true }),
   });
+}));
+
+// ════════════════ AR / AP SUBLEDGERS AND SAMPLING ════════════════
+
+router.get("/subledgers", auth.requirePermission("subledger.view"), htmlWrap(async (req, res) => {
+  const [subledgers, stats, engagements] = await Promise.all([
+    subledger.listSubledgers({ includeSuperseded: true }),
+    subledger.subledgerStats(),
+    store.listEngagements({ limit: 40 }),
+  ]);
+  res.send(
+    ui.subledgersPage(
+      { subledgers, stats, engagements, canImport: auth.can(req.auditUser, "subledger.import") },
+      req.auditUser
+    )
+  );
+}));
+
+router.get("/subledger/:id", auth.requirePermission("subledger.view"), htmlWrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const data = await subledger.getSubledger(id);
+  if (!data) return res.status(404).send(ui.errorPage("No such aging.", req.auditUser));
+  const filter = ["likely", "unsupported", "contra", "over_90", "related", "after_period"].includes(req.query.filter)
+    ? req.query.filter
+    : null;
+  const [checks, rd, found, people] = await Promise.all([
+    subledger.completenessChecks({ subledgerId: id }).then((x) => x.checks),
+    subledger.readiness({ subledgerId: id, onlyLikely: filter === "likely" }),
+    subledger.searchLines({ subledgerId: id, q: req.query.q || null, filter, limit: 150 }),
+    db.query(`SELECT id, name FROM ngtf_audit_users WHERE active=TRUE AND org='company' ORDER BY name`),
+  ]);
+  res.send(
+    ui.subledgerDetailPage(
+      {
+        data,
+        checks,
+        readiness: rd,
+        lines: found.lines,
+        lineTotal: found.total,
+        lineTotalAmount: found.totalAmount,
+        filter,
+        q: req.query.q || null,
+        people: people.rows,
+        canImport: auth.can(req.auditUser, "subledger.import"),
+      },
+      req.auditUser
+    )
+  );
+}));
+
+router.get("/samples", auth.requirePermission("subledger.view"), htmlWrap(async (req, res) => {
+  const status = ["open", "complete", "delivered", "closed", "all"].includes(req.query.status) ? req.query.status : "open";
+  const [requests, subledgers] = await Promise.all([
+    subledger.listSampleRequests({ status }),
+    subledger.listSubledgers({ includeSuperseded: false }),
+  ]);
+  res.send(
+    ui.samplesPage(
+      { requests, subledgers, status, canCreate: auth.can(req.auditUser, "sample.record") },
+      req.auditUser
+    )
+  );
+}));
+
+router.get("/sample/:id", auth.requirePermission("subledger.view"), htmlWrap(async (req, res) => {
+  const data = await subledger.getSampleRequest(parseInt(req.params.id, 10));
+  if (!data) return res.status(404).send(ui.errorPage("No such sample request.", req.auditUser));
+  const people = await db.query(`SELECT id, name FROM ngtf_audit_users WHERE active=TRUE AND org='company' ORDER BY name`);
+  res.send(
+    ui.sampleDetailPage(
+      { data, people: people.rows, canWork: auth.can(req.auditUser, "sample.work") },
+      req.auditUser
+    )
+  );
+}));
+
+// ── Import and tie-out ──────────────────────────────────────
+
+router.post(
+  "/api/subledger/import",
+  auth.requirePermission("subledger.import"),
+  auth.requireCompanySide,
+  upload.single("file"),
+  wrap(async (req, res) => {
+    if (!req.file) return fail(res, "Attach the aging file.", 400);
+    const b = req.body || {};
+    const out = await subledger.importSubledger({
+      kind: b.kind,
+      asOfDate: b.asOfDate,
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      engagementId: b.engagementId ? Number(b.engagementId) : null,
+      keyItemThreshold: b.keyItemThreshold || null,
+      thresholdSource: b.keyItemThreshold ? "supplied by the auditor" : null,
+      note: b.note || null,
+      actor: req.auditUser,
+      req,
+    });
+    // Tie it out in the same action when the GL balance was supplied —
+    // the reconciliation is most likely to actually happen while the
+    // person is still looking at the number.
+    let tie = null;
+    if (b.glBalance) {
+      try {
+        tie = await subledger.tieOut({
+          subledgerId: out.subledger.subledger.id,
+          glBalance: b.glBalance,
+          glSource: b.glSource || null,
+          note: b.tieOutNote || null,
+          actor: req.auditUser,
+          req,
+        });
+      } catch (err) {
+        // A variance needing an explanation is not an import failure.
+        out.tieOutDeferred = err.message;
+      }
+    }
+    return ok(res, { subledger: await subledger.getSubledger(out.subledger.subledger.id), imported: out, tie });
+  })
+);
+
+router.post("/api/subledger/:id/tie-out", auth.requirePermission("subledger.tie_out"), auth.requireCompanySide, wrap(async (req, res) => {
+  const b = req.body || {};
+  const r = await subledger.tieOut({
+    subledgerId: parseInt(req.params.id, 10),
+    glBalance: b.glBalance,
+    glSource: b.glSource || null,
+    note: b.note || null,
+    actor: req.auditUser,
+    req,
+  });
+  return ok(res, { variance: Number(r.variance), tiedOut: r.tied_out_at });
+}));
+
+router.post("/api/subledger/:id/threshold", auth.requirePermission("subledger.import"), wrap(async (req, res) => {
+  const b = req.body || {};
+  const r = await subledger.computeRisk({
+    subledgerId: parseInt(req.params.id, 10),
+    threshold: b.threshold === "" ? null : b.threshold,
+    thresholdSource: b.source || null,
+    actor: req.auditUser,
+  });
+  return ok(res, { risk: r });
+}));
+
+router.get("/api/subledger/:id/lines", auth.requirePermission("subledger.view"), wrap(async (req, res) => {
+  const r = await subledger.searchLines({
+    subledgerId: parseInt(req.params.id, 10),
+    q: req.query.q || null,
+    filter: req.query.filter || null,
+    limit: Math.min(Number(req.query.limit) || 100, 500),
+  });
+  return ok(res, r);
+}));
+
+router.get("/api/subledger/:id/checks", auth.requirePermission("subledger.view"), wrap(async (req, res) => {
+  return ok(res, await subledger.completenessChecks({ subledgerId: parseInt(req.params.id, 10) }));
+}));
+
+// ── Support: upload and file in one action ──────────────────
+//
+// One action deliberately. "Upload the file, then go and find the line,
+// then attach it" is three steps, and the third one is the one that gets
+// skipped — which is how the index ends up incomplete and the whole
+// feature stops being worth anything.
+router.post(
+  "/api/subledger/support",
+  auth.requirePermission("subledger.support"),
+  auth.requireCompanySide,
+  upload.single("file"),
+  wrap(async (req, res) => {
+    const b = req.body || {};
+    const lineId = Number(b.lineId);
+    if (!lineId) return fail(res, "Which line is this support for?", 400);
+    if (!b.supportType) return fail(res, "Say what kind of support this is.", 400);
+    if (subledger.COMPANY_FORBIDDEN_SUPPORT[b.supportType]) {
+      return fail(res, subledger.COMPANY_FORBIDDEN_SUPPORT[b.supportType], 403);
+    }
+
+    let documentId = b.documentId ? Number(b.documentId) : null;
+    if (!documentId) {
+      if (!req.file) return fail(res, "Attach a file, or give the id of a document already on file.", 400);
+      const line = await db.query(
+        `SELECT l.doc_number, l.counterparty_name, s.engagement_id, s.as_of_date
+           FROM ngtf_audit_subledger_lines l JOIN ngtf_audit_subledgers s ON s.id=l.subledger_id
+          WHERE l.id=$1`,
+        [lineId]
+      );
+      if (!line.rows.length) return fail(res, "No such subledger line.", 404);
+      const ing = await store.ingestDocument({
+        buffer: req.file.buffer,
+        filename: req.file.originalname,
+        mimeType: req.file.mimetype,
+        user: req.auditUser,
+        periodHint: cal.dstr(line.rows[0].as_of_date),
+        engagementOverride: line.rows[0].engagement_id,
+        req,
+        source: "subledger_support",
+      });
+      documentId = ing.document.id;
+    }
+    const r = await subledger.attachSupport({
+      lineId,
+      documentId,
+      supportType: b.supportType,
+      note: b.note || null,
+      actor: req.auditUser,
+      req,
+    });
+    return ok(res, { support: r, documentId });
+  })
+);
+
+router.post("/api/subledger/support/:id/remove", auth.requirePermission("subledger.support"), auth.requireCompanySide, wrap(async (req, res) => {
+  return ok(res, { removed: await subledger.detachSupport({ supportId: parseInt(req.params.id, 10), actor: req.auditUser, req }) });
+}));
+
+// ── Sample requests ─────────────────────────────────────────
+
+router.post("/api/sample/create", auth.requirePermission("sample.record"), wrap(async (req, res) => {
+  const b = req.body || {};
+  let selections = Array.isArray(b.selections) ? b.selections : null;
+  if (!selections) {
+    if (!b.list) return fail(res, "Paste the selection list, or send a selections array.", 400);
+    selections = subledger.parseSelectionList(b.list).selections;
+  }
+  const request = await subledger.createSampleRequest({
+    kind: b.kind,
+    procedure: b.procedure,
+    subledgerId: Number(b.subledgerId),
+    label: b.label || null,
+    instructions: b.instructions || null,
+    requiredSupport: Array.isArray(b.requiredSupport) ? b.requiredSupport : null,
+    requestedByFirm: b.requestedByFirm || null,
+    requestedByName: b.requestedByName || null,
+    selectionsSource: b.selectionsSource || (req.auditUser.org === "auditor" ? "auditor_entered" : "transcribed_from_auditor"),
+    sourceDocumentId: b.sourceDocumentId ? Number(b.sourceDocumentId) : null,
+    receivedOn: b.receivedOn || null,
+    dueOn: b.dueOn || null,
+    selections,
+    actor: req.auditUser,
+    req,
+  });
+  try {
+    await notify.notifySampleRequest(request);
+  } catch (err) {
+    console.error("[ngtf-audit] sample request notice failed:", err.message);
+  }
+  return ok(res, { request });
+}));
+
+/**
+ * Dry-run matching. The endpoint the bot uses to answer "what would we
+ * be missing if they asked for these" without recording anything.
+ */
+router.post("/api/sample/match", auth.requirePermission("subledger.view"), wrap(async (req, res) => {
+  const b = req.body || {};
+  const selections = Array.isArray(b.selections) ? b.selections : subledger.parseSelectionList(b.list || "").selections;
+  const subledgerId = Number(b.subledgerId);
+  if (!subledgerId) return fail(res, "Say which aging to match against.", 400);
+  const result = await subledger.matchSelections({ subledgerId, selections });
+  // Say what support each matched line already has, which is the half
+  // the caller actually wants.
+  const required = Array.isArray(b.requiredSupport) && b.requiredSupport.length
+    ? b.requiredSupport
+    : (subledger.PROCEDURES[b.procedure] || subledger.PROCEDURES.other).requires;
+  for (const s of result.selections) {
+    if (!s.line_id) continue;
+    const sup = await subledger.supportFor(s.line_id);
+    s.have = Array.from(new Set(sup.map((x) => x.support_type)));
+    s.missing = required.filter((t) => !s.have.includes(t));
+    s.ready = s.missing.length === 0;
+  }
+  return ok(res, { required, result });
+}));
+
+router.post("/api/selection/:id/assign", auth.requirePermission("sample.work"), wrap(async (req, res) => {
+  const b = req.body || {};
+  return ok(res, {
+    selection: await subledger.assignSelection({
+      selectionId: parseInt(req.params.id, 10),
+      userId: b.userId ? Number(b.userId) : null,
+      note: b.note || null,
+      actor: req.auditUser,
+    }),
+  });
+}));
+
+router.post("/api/selection/:id/waive", auth.requirePermission("sample.waive"), wrap(async (req, res) => {
+  return ok(res, {
+    selection: await subledger.waiveSelection({
+      selectionId: parseInt(req.params.id, 10),
+      reason: (req.body || {}).reason,
+      actor: req.auditUser,
+      req,
+    }),
+  });
+}));
+
+router.post("/api/selection/:id/match", auth.requirePermission("sample.work"), wrap(async (req, res) => {
+  const b = req.body || {};
+  return ok(res, {
+    selection: await subledger.matchSelectionManually({
+      selectionId: parseInt(req.params.id, 10),
+      lineId: Number(b.lineId),
+      note: b.note || null,
+      actor: req.auditUser,
+      req,
+    }),
+  });
+}));
+
+router.post("/api/sample/:id/deliver", auth.requirePermission("sample.work"), auth.requireCompanySide, wrap(async (req, res) => {
+  const r = await subledger.deliverSampleRequest({
+    requestId: parseInt(req.params.id, 10),
+    message: (req.body || {}).message || null,
+    actor: req.auditUser,
+    req,
+  });
+  return ok(res, { transmittal: r.transmittal, documents: r.documents });
+}));
+
+router.get("/api/sample/:id", auth.requirePermission("subledger.view"), wrap(async (req, res) => {
+  const data = await subledger.getSampleRequest(parseInt(req.params.id, 10));
+  if (!data) return fail(res, "No such sample request.", 404);
+  return ok(res, { request: data });
+}));
+
+/**
+ * The package, one folder per selection.
+ *
+ * Folder naming is most of the perceived quality of a sample response
+ * and it costs nothing: an auditor should not have to work out which of
+ * forty PDFs belongs to selection 23. index.json and index.csv go in
+ * alongside, so their side can tie the package back to their own list
+ * without opening anything.
+ */
+router.get("/api/sample/:id/package.zip", auth.requirePermission("document.download"), wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const man = await subledger.samplePackageManifest(id);
+  const { ZipWriter } = require("./audit-zip");
+
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="${man.request.ref}-support.zip"`);
+  const zip = new ZipWriter(res);
+  const now = new Date();
+
+  await zip.add(
+    `${man.request.ref}/index.json`,
+    Buffer.from(JSON.stringify({ request: man.request.ref, procedure: man.procedure.label, selections: man.index }, null, 2)),
+    now
+  );
+  const csv = [
+    "selection,status,auditor_counterparty,auditor_doc_number,auditor_amount,matched_counterparty,matched_doc_number,matched_amount,match_method,documents,waiver_reason",
+  ]
+    .concat(
+      man.index.map((x) =>
+        [
+          x.selection, x.status, x.auditor_counterparty, x.auditor_doc_number, x.auditor_amount,
+          x.matched_counterparty, x.matched_doc_number, x.matched_amount, x.match_method,
+          x.documents.map((d) => d.support_type).join(" "), x.waiver_reason,
+        ]
+          .map((v) => (v == null ? "" : `"${String(v).replace(/"/g, '""')}"`))
+          .join(",")
+      )
+    )
+    .join("\n");
+  await zip.add(`${man.request.ref}/index.csv`, Buffer.from(csv, "utf8"), now);
+
+  for (const e of man.entries) {
+    const doc = await store.getDocument(e.documentId, { withBytes: true });
+    if (!doc) continue;
+    if (doc.is_confidential && !auth.can(req.auditUser, "document.download_confidential")) continue;
+    await store.recordDownload({ documentId: doc.id, user: req.auditUser, req, bytes: doc.size_bytes });
+    try {
+      await delivery.recordDownloadReceipt({ documentId: doc.id, user: req.auditUser, req });
+    } catch {
+      /* best effort */
+    }
+    await zip.add(e.path, doc.file_data, doc.uploaded_at ? new Date(doc.uploaded_at) : now);
+  }
+  // finish() writes the central directory; it does NOT close the socket.
+  // Without res.end() the client waits for a response that never
+  // completes — the archive is byte-complete and the download still
+  // hangs, which is the most confusing possible way for this to fail.
+  await zip.finish();
+  res.end();
+
+  await schema.logEvent({
+    sampleRequestId: id,
+    engagementId: man.request.engagement_id,
+    event: "sample_package_downloaded",
+    actor: req.auditUser,
+    detail: { ref: man.request.ref, files: man.entries.length, selections: man.counts.total },
+  });
+}));
+
+/** The bot's lookup: one invoice, and everything behind it. */
+router.get("/api/subledger/lookup", auth.requirePermission("subledger.view"), wrap(async (req, res) => {
+  const rows = await subledger.lookup({
+    kind: req.query.kind || null,
+    docNumber: req.query.doc || req.query.invoice || null,
+    counterparty: req.query.name || null,
+    asOfDate: req.query.asOf || null,
+    limit: Math.min(Number(req.query.limit) || 25, 100),
+  });
+  return ok(res, { matches: rows });
+}));
+
+router.get("/api/subledger/stats", auth.requirePermission("subledger.view"), wrap(async (req, res) => {
+  return ok(res, { stats: await subledger.subledgerStats() });
 }));
 
 // ════════════════ JSON API ════════════════

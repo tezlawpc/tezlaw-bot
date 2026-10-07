@@ -298,6 +298,21 @@ function startCron() {
     }
   }, opts);
 
+  // Sample requests outstanding — weekdays at 09:30, after the
+  // undelivered alarm. Separate because the failure is different again:
+  // not "nobody was told" and not "they have not replied", but "we were
+  // asked for something specific and have not produced it", which is the
+  // delay most clearly attributable to the company under AS 1301.25.
+  cron.schedule("30 9 * * 1-5", async () => {
+    try {
+      const r = await notify.notifySampleDue();
+      await notify.flush(100);
+      if (r.sent) console.log("[ngtf-audit] sample requests due:", JSON.stringify(r));
+    } catch (err) {
+      console.error("[ngtf-audit] sample due sweep error:", err.message);
+    }
+  }, opts);
+
   // Audit committee weekly roll-up — Mondays at 08:30.
   cron.schedule("30 8 * * 1", async () => {
     try {
@@ -357,4 +372,5 @@ module.exports = {
   zip: require("./audit-zip"),
   events: require("./audit-events"),
   delivery: require("./audit-delivery"),
+  subledger: require("./audit-subledger"),
 };
