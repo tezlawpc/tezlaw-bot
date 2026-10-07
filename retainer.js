@@ -209,14 +209,29 @@ const CLAUSES = {
   },
 };
 
-// Which clauses a given engagement needs.
-function clausesFor({ structure }) {
+// The numbered clauses that follow the fee section.
+//
+// The flat-fee clauses are deliberately NOT here: retainer-doc's fee section
+// renders them in place, where the money is, and listing them again produced
+// a document that stated its own fee terms twice. A fee agreement that says
+// the same thing twice invites an argument about which one governs.
+function clausesFor({ structure } = {}) {
   const keys = ["cooperation", "translation", "insurance", "fee_dispute", "termination"];
-  if (structure === "flat" || structure === "hybrid") {
-    keys.unshift("flat_fee_earning", "flat_fee_deposit");
-  }
   keys.push("acknowledgment");
   return keys;
+}
+
+// The flat-fee clauses the fee section renders itself.
+function feeClausesFor({ structure } = {}) {
+  return (structure === "flat" || structure === "hybrid")
+    ? ["flat_fee_earning", "flat_fee_deposit"] : [];
+}
+
+// Every clause in the finished document, wherever it is rendered. This is
+// what the § 1632 check has to look at: a clause missing its Chinese is a
+// problem whether it sits in the fee section or in the numbered list.
+function allClausesFor(a = {}) {
+  return [...feeClausesFor(a), ...clausesFor(a), ...(a.bilingual ? ["language"] : [])];
 }
 
 /**
@@ -262,7 +277,7 @@ function problemsWith(a = {}) {
   // nobody has written. The English alone is not what the client is
   // held to have understood.
   if (a.bilingual) {
-    const missing = clausesFor(a).filter((k) => CLAUSES[k] && !CLAUSES[k].zh);
+    const missing = allClausesFor(a).filter((k) => CLAUSES[k] && !CLAUSES[k].zh);
     if (missing.length) {
       out.push(
         `Chinese is missing for ${missing.length} clause${missing.length === 1 ? "" : "s"}: `
@@ -279,5 +294,5 @@ const money = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFract
 
 module.exports = {
   RATES, FEE_STRUCTURES, FLAT_MILESTONES, SCOPE_PRESETS, MATTER_LABELS,
-  CLAUSES, clausesFor, problemsWith, money,
+  CLAUSES, clausesFor, feeClausesFor, allClausesFor, problemsWith, money,
 };

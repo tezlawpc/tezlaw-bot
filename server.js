@@ -2194,6 +2194,15 @@ require("./work-orders").mount(app, auth);
 // result as the record rule 1.7 and 1.9 questions get answered from.
 require("./conflicts-page").mount(app, auth);
 
+// Fee agreements (/admin/retainer). Seventeen divergent templates became one
+// document whose fee terms, scope and language are chosen per engagement. The
+// statutory content is not optional: § 6148 makes an agreement voidable
+// without the rates, the nature of the services and each side's
+// responsibilities, § 6147 does the same for a contingency, and rule 1.5(d)
+// forbids calling a fee earned-on-receipt. retainer.js holds those rules and
+// the page refuses to send a draft that breaks them.
+require("./retainer-page").mount(app, auth);
+
 app.get("/admin/alerts", async (req, res) => {
   try {
     const na = require("./notify-admin");

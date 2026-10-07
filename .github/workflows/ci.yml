@@ -228,6 +228,13 @@ jobs:
       - name: Conflict checks read the other side
         run: node scripts/check-conflicts.js
 
+      # One generator now writes every fee agreement the firm signs, so a
+      # clause that is wrong is wrong on all of them. § 6148 and § 6147 make
+      # an agreement voidable without their required terms, and rule 1.5(d)
+      # forbids calling a fee earned-on-receipt.
+      - name: Fee agreements carry what the statutes require
+        run: node scripts/check-retainer.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar
