@@ -156,18 +156,12 @@ function coverPage(a) {
  * and the fixed-position version of this was painting it once, mid-document.
  */
 function letterhead(a) {
+  void a;
   return `
     <div class="sheet-head">
     <div class="lh">
       <img class="lh-mark" src="/brand/logo-light.svg" alt="TEZ Law Firm">
       <div class="lh-tag">${esc(FIRM.tagline.en)}</div>
-    </div>
-    <div class="letter">
-      <p class="date">${esc(longDate(a.agreement_date || a.date))}</p>
-      ${a.client_name ? `<p class="attn">${esc(a.client_name)}</p>` : ""}
-      <p class="re"><strong>Re:&nbsp;&nbsp;Agreement for Legal Services${
-        matterOf(a) ? " (" + esc(matterOf(a)) + ")" : ""}</strong></p>
-      <p class="dear">Dear ${esc(a.client_name || "Client")}:</p>
     </div>
     </div>`;
 }
@@ -471,8 +465,6 @@ function body(a, { forClient = true, withLetterhead = true } = {}) {
   return `
     ${withLetterhead ? coverPage(a) : ""}
 
-    ${withLetterhead ? firmProfilePage(a) : ""}
-
     ${withLetterhead ? letterhead(a) : ""}
 
     <h1>Agreement for Legal Services${bilingual ? " · 律师与客户委托收费协议" : ""}</h1>
@@ -522,7 +514,10 @@ function body(a, { forClient = true, withLetterhead = true } = {}) {
       <div class="sigs">
         <div class="sig">
           <div class="rule"></div>
-          <div class="who">${esc(FIRM.entity)}, doing business as ${esc(FIRM.name)}</div>
+          <!-- The P.C. alone: the dba is stated in the opening paragraph, and
+               the full line wrapped to two, knocking the firm's date rule out
+               of line with the client's. -->
+          <div class="who">${esc(FIRM.entity)}</div>
           <div class="when">Date: <span class="rule short"></span></div>
         </div>
         <div class="sig">
@@ -535,11 +530,13 @@ function body(a, { forClient = true, withLetterhead = true } = {}) {
 
     ${paymentPage(a)}
 
+    ${withLetterhead ? firmProfilePage(a) : ""}
+
     <footer class="offices">
       <div class="t">${esc(FIRM.name)}</div>
-      ${FIRM.offices.map((o) => `<div class="o"><strong>${esc(o.city)}</strong>${
-        o.lines.map((l) => `<div>${esc(l)}</div>`).join("")}${
-        o.note ? `<div class="n">${esc(o.note)}</div>` : ""}</div>`).join("")}
+      <div>${FIRM.offices.map((o) => `<span class="o"><b>${esc(o.city)}</b> ${
+        esc(o.lines.join(", "))}${o.note ? ` <span class="n">(${esc(o.note)})</span>` : ""}</span>`).join("")}</div>
+      <div>${esc(FIRM.phone)} &nbsp;·&nbsp; ${esc(FIRM.fax)} &nbsp;·&nbsp; ${esc(FIRM.email)} &nbsp;·&nbsp; ${esc(FIRM.web)}</div>
     </footer>`;
 }
 
@@ -585,6 +582,10 @@ const CSS = `
      pairing the firm's bilingual filings already use. */
   body { margin:0; background:var(--marble); color:var(--ink);
     font-family:"Times New Roman",Times,serif; font-size:11pt; line-height:1.45; }
+  /* Justified, the way a contract is set. Hyphenation on, or justifying
+     an 11pt serif in a 7in column opens rivers between the words. */
+  p, li { text-align:justify; hyphens:auto; -webkit-hyphens:auto; }
+  .fp-point p, .pay-warn p, .offices, .cv-value, .siglet { text-align:left; hyphens:manual; }
 
   .sheet { width:8.5in; margin:0 auto; background:#FFFFFF; position:relative;
     padding:var(--pad-t) var(--pad-x) var(--pad-b); }
@@ -631,7 +632,7 @@ const CSS = `
   .cv-foot-right { text-align:right; }
 
   /* ── The firm profile, from the firm's own deck ─────────────  */
-  .firm-profile { page-break-after:always; break-after:page; padding-bottom:0.2in; }
+  .firm-profile { page-break-before:always; break-before:page; }
   .fp-h { font-size:11pt; font-weight:bold; letter-spacing:.06em; text-transform:uppercase;
     text-align:center; margin:0 0 16px; }
   .fp-lead { font-weight:bold; margin:0 0 10px; }
@@ -686,21 +687,27 @@ const CSS = `
   table.fees td { padding:5px 8px; border-bottom:1px solid var(--travertine); vertical-align:top; }
   .consent { border:1px solid var(--charcoal); padding:9px 12px; margin:10px 0; }
   .siglet { font-size:10.5pt; }
-  .rule { border-bottom:1px solid var(--charcoal); height:1.6em; }
+  /* A signature's width, not half the page. */
+  .rule { border-bottom:1px solid var(--charcoal); height:1.6em; width:2.6in; }
   .rule.short { display:inline-block; width:1.6in; border-bottom:1px solid var(--charcoal); height:1em; }
   .signatures { margin-top:28px; page-break-inside:avoid; break-inside:avoid; }
-  .sigs { display:flex; gap:40px; margin-top:20px; }
-  .sig { flex:1; }
-  .sig .who { font-size:10pt; margin-top:5px; }
+  .sigs { display:flex; gap:0.7in; margin-top:20px; }
+  .sig { width:2.6in; }
+  .sig .who { font-size:10pt; margin-top:5px; white-space:nowrap; }
   .sig .when { font-size:10pt; margin-top:12px; }
   /* Ran off the bottom of the last page and lost the New York office.
      Kept together, and allowed its own page if that is what it takes. */
-  .offices { margin-top:30px; padding-top:12px; border-top:1px solid var(--travertine);
-    font-size:9pt; color:var(--stone); display:flex; gap:22px; flex-wrap:wrap;
+  /* A footer, not a section. Four stacked columns of addresses were as
+     loud as the agreement; this is one quiet line under a hairline. */
+  .offices { margin-top:26px; padding-top:9px; border-top:0.5pt solid var(--travertine);
+    font-size:8pt; line-height:1.5; color:var(--stone);
     page-break-inside:avoid; break-inside:avoid; }
-  .offices .t { width:100%; font-size:10pt; font-weight:bold;
-    letter-spacing:.1em; text-transform:uppercase; color:var(--charcoal); margin-bottom:6px; }
-  .offices .o { min-width:1.6in; }
+  .offices .t { font-weight:bold; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--stone); margin-bottom:3px; }
+  .offices .o { display:inline; }
+  .offices .o::after { content:"  ·  "; }
+  .offices .o:last-child::after { content:""; }
+  .offices .o b { font-weight:bold; }
   .offices .n { font-style:italic; }
 
   /* ── Screen only ────────────────────────────────────────────  */

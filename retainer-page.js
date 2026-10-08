@@ -185,13 +185,24 @@ function renderForm({ user, clients = [], prefill = {}, problems = [] } = {}) {
         One item per line. § 6148(a)(2) requires the general nature of the services to be stated, so this is what
         the agreement covers and nothing else. Pick a starting line below and edit it.
       </p>
-      <select onchange="" name="preset_ignored" style="width:100%; padding:9px; border:1px solid #E8E3DC; border-radius:6px; font-size:13px; margin-bottom:8px;">
+      <select name="preset_ignored" style="width:100%; padding:9px; border:1px solid #E8E3DC; border-radius:6px; font-size:13px; margin-bottom:8px;">
         <option value="">— common scope lines, for copying —</option>
         ${presets}
       </select>
-      <textarea id="r-scope" name="scope" rows="5" required maxlength="4000"
-        style="width:100%; padding:11px; border:1px solid #E8E3DC; border-radius:6px; font-size:14px; font-family:inherit; margin-bottom:22px;"
+      <textarea id="r-scope" name="scope" rows="7" required maxlength="4000"
+        style="width:100%; padding:11px; border:1px solid #E8E3DC; border-radius:6px; font-size:14px; font-family:inherit; margin-bottom:10px;"
         placeholder="File and attend a bond redetermination hearing&#10;File a petition for writ of habeas corpus in the District Court">${esc(p.scope || "")}</textarea>
+
+      <div style="margin-bottom:22px;">
+        <button type="submit" formaction="${PAGE}/scope/elaborate" formnovalidate
+          style="background:#F3EFE9; color:#2B2523; border:1px solid #E8E3DC;
+          padding:7px 13px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">
+          Ask Zara to expand these lines</button>
+        <span style="font-size:12px; color:#5E5854; margin-left:8px;">She rewrites what you wrote in plainer
+          English, and will not add work. Read them before saving: this is what the firm is promising to do.</span>
+        ${p.scope_notes ? `<ul style="margin:8px 0 0 18px; padding:0; font-size:12px; color:#A34C00;">${
+          [].concat(p.scope_notes).map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
+      </div>
 
       <h2 style="font-size:15px; margin:0 0 14px; color:#2B2523;">Fee</h2>
       <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:16px;">
@@ -423,6 +434,36 @@ function mount(app, auth) {
     }
   });
 
+  // Zara expands the scope lines, back into the same form.
+  //
+  // Nothing is saved here. The scope is the firm's contractual promise --
+  // § 6148(a)(2), and the clause right after it says anything not listed
+  // is outside the Agreement -- so an expansion is a proposal the drafter
+  // reads and edits in the box, never text that reaches a signed
+  // agreement because a job ran.
+  app.post(PAGE + "/scope/elaborate", async (req, res) => {
+    const b = req.body || {};
+    const terms = termsFromForm(b, req.user);
+    let lines = terms.scope || [];
+    let notes = [];
+    try {
+      const out = await require("./scope-writer").elaborate(lines, {
+        matterLabel: terms.matter_label || "",
+        matterType: terms.matter_type || "",
+      });
+      lines = out.lines;
+      notes = out.notes;
+    } catch (err) {
+      console.error("[scope elaborate]:", err.message);
+      notes = [`Zara could not be reached (${err.message}). Your lines are unchanged.`];
+    }
+    res.send(renderForm({
+      user: req.user,
+      clients: await knownClients().catch(() => []),
+      prefill: { ...terms, scope: lines.join("\n"), scope_notes: notes },
+    }));
+  });
+
   app.post(PAGE + "/new", async (req, res) => {
     const terms = termsFromForm(req.body || {}, req.user);
     try {
@@ -498,6 +539,24 @@ function mount(app, auth) {
       }
       await db().query(
         `UPDATE retainer_drafts SET status = 'ready_to_send', updated_at = NOW() WHERE id = $1`, [d.id]);
+
+      // The agreement is on its way, so the file catches up: the document
+      // on the client's profile, a case in whichever table this practice
+      // area uses, and an invoice for whatever is owed on signing. All of
+      // it idempotent, because somebody will press this twice, and none of
+      // it able to stop the send: an accounting hiccup must not keep a
+      // client from signing.
+      let handoff = null;
+      try {
+        handoff = await require("./retainer-handoff").handoff(d, { by: uidOf(req.user) });
+        await db().query(
+          `UPDATE retainer_drafts SET terms = jsonb_set(terms, '{handoff}', $2::jsonb, true) WHERE id = $1`,
+          [d.id, JSON.stringify(handoff.steps)]).catch(() => {});
+      } catch (err) {
+        console.error("[retainer handoff]:", err.message);
+        handoff = { ok: false, steps: [{ step: "handoff", ok: false, note: err.message }] };
+      }
+      req.retainerHandoff = handoff;
       res.redirect(`/admin/esign?retainer=${d.id}`);
     } catch (err) {
       console.error("[retainer send]:", err.message);
