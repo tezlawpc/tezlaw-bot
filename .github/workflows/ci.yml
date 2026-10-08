@@ -257,6 +257,14 @@ jobs:
       - name: Query parameters carry their type
         run: node scripts/check-sql-params.js
 
+      # Clicking an EOIR notice on the calendar opened the JSON API the app
+      # reads, so the browser printed the raw response. Three other links on
+      # that calendar went nowhere before this one. Also guards the hearing
+      # time: a notice parsed to "13:00" was refused for having no am/pm and
+      # the client was told the time was not confirmed.
+      - name: A calendar click opens a page, and quotes the time on the notice
+        run: node scripts/check-notice-page.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

@@ -172,6 +172,14 @@ function renderForm({ user, clients = [], prefill = {}, problems = [] } = {}) {
         </div>
       </div>
 
+      <div style="margin-bottom:22px;">
+        <label for="r-matter-label" style="display:block; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:#8A827C; margin-bottom:5px;">Matter, as it should read on the cover</label>
+        <input id="r-matter-label" name="matter_label" maxlength="200" value="${esc(p.matter_label || "")}"
+          placeholder="EB-5 I-526E petition, Smith Regional Center"
+          style="width:100%; padding:10px; border:1px solid #E8E3DC; border-radius:6px; font-size:14px;">
+        <div style="font-size:12px; color:#5E5854; margin-top:4px;">Optional. Left blank, the cover and the Re line use the matter type above.</div>
+      </div>
+
       <h2 style="font-size:15px; margin:0 0 6px; color:#2B2523;">Scope of work</h2>
       <p style="font-size:13px; color:#5E5854; margin:0 0 10px;">
         One item per line. § 6148(a)(2) requires the general nature of the services to be stated, so this is what
@@ -374,13 +382,20 @@ function termsFromForm(b, user) {
     deposit: structure === "hourly" ? (fee || null) : null,
     contingency_pct: Number(b.contingency_pct || 0) || null,
     costs_borne_by: String(b.costs_borne_by || "") || null,
+    matter_label: String(b.matter_label || "").trim() || null,
     micra: !!b.micra,
     timekeepers: [].concat(b.timekeepers || []).filter(Boolean),
     milestones,
     operating_account_consent: !!b.operating_account_consent,
     bilingual: !!b.bilingual,
     work_already_begun: !!b.work_already_begun,
-    agreement_date: new Date().toISOString().slice(0, 10),
+    // The date on the paper, in the firm's own zone. toISOString() is the
+    // UTC date: from 5pm Pacific onward it is tomorrow, so an agreement
+    // drafted in the evening was dated the next day. Same bug as the
+    // printed date and the Word filename; this is where it started.
+    agreement_date: new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date()),
     drafted_by: nameOf(user),
   };
 }

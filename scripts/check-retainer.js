@@ -410,7 +410,7 @@ check("its permission admits everyone the page admits", () => {
 //     and letter head" ───────────────────────────────────────
 
 const sample = {
-  client_name: "O'Brien & Sons, LLC", matter_type: "estate",
+  client_name: "O'Brien & Sons, LLC", matter_type: "estate_planning",
   matter_label: "Revocable living trust", structure: "flat", total_fee: 5000,
   agreement_date: "2026-10-07", scope: ["Prepare a revocable living trust."],
   milestones: [{ pct: 40, work: "Assessment" }, { pct: 60, work: "Drafting and execution" }],
@@ -461,13 +461,238 @@ check("a bilingual agreement is bilingual on the page, not just on the sheet", (
 check("the cover is the brand's fee-agreement cover", () => {
   const html = DOC.render(sample, { forClient: true, id: 7 });
   // Wording from 03-Print-Pack/04-Client-Folder/TEZ-Fee-Agreement-Cover.
-  assert.ok(/Attorney–Client<br>Fee Agreement/.test(html), "wrong title");
+  // The firm's own executed agreement is called "Agreement for Legal
+  // Services", and it carries no dash -- "try to avoid having '-' in the
+  // agreement" (JJ, 2026-10-07).
+  assert.ok(/Agreement for<br>Legal Services/.test(html), "wrong title");
   assert.ok(html.includes("律师与客户委托收费协议"), "the Chinese title is missing");
-  assert.ok(/Confidential[\s\S]{0,30}Attorney–Client Communication/.test(html), "no eyebrow");
+  assert.ok(/Confidential[\s\S]{0,30}Privileged Attorney Communication/.test(html), "no eyebrow");
   assert.ok(html.includes("JJ Zhang, Esq."), "the responsible attorney is not named");
   assert.ok(html.includes("Tez Law P.C., doing business as TEZ Law Firm"),
     "the entity line at the foot of the cover is wrong");
   assert.ok(html.includes("/brand/logo-light.svg"), "the cover has no logo");
+});
+
+check("every matter type the code branches on is one the form can produce", () => {
+  // The waiver was keyed to "eb5", "business" and "corporate". The form
+  // emits MATTER_LABELS keys and nothing else, so the waiver never appeared
+  // on an EB-5 agreement -- and the check that was meant to catch that
+  // called clausesFor({matter_type:"eb5"}) directly, inventing the input it
+  // was testing. This compares the two lists instead.
+  const real = Object.keys(R.MATTER_LABELS);
+  const unreachable = R.CONFLICT_WAIVER_MATTERS.filter((k) => !real.includes(k));
+  assert.deepStrictEqual(unreachable, [],
+    "clausesFor branches on matter types the form cannot emit: " + unreachable.join(", "));
+
+  // And no fixture in this file may use one either, or the checks drift
+  // away from the system again.
+  const src = fs.readFileSync(__filename, "utf8");
+  const used = [...src.matchAll(/matter_type:\s*"([a-z_]+)"/g)].map((m) => m[1]);
+  const bogus = [...new Set(used)].filter((k) => !real.includes(k));
+  assert.deepStrictEqual(bogus, [],
+    "a check uses a matter type the form cannot emit: " + bogus.join(", "));
+});
+
+check("the Matter line is never blank on the cover", () => {
+  // It was blank on every agreement: the cover reads matter_label, the form
+  // only ever collected matter_type, and nothing joined the two.
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  const PizZip = require(path.join(ROOT, "node_modules", "pizzip"));
+
+  const written = DOC.render({ ...sample, matter_label: "I-526E petition, Smith RC" });
+  assert.ok(plain(written).includes("I-526E petition, Smith RC"),
+    "a matter the drafter wrote does not reach the cover");
+
+  const bare = { ...sample };
+  delete bare.matter_label;
+  assert.ok(bare.matter_type, "the fixture has no matter type to fall back to");
+  const fallback = R.MATTER_LABELS[bare.matter_type];
+  assert.ok(fallback, "the matter type has no label of its own");
+  assert.ok(plain(DOC.render(bare)).includes(fallback),
+    "with no matter written, the cover prints nothing instead of the matter type");
+
+  // And the same in Word, which builds its cover separately.
+  const docXml = new PizZip(DOCX.build(bare, DOC)).file("word/document.xml").asText();
+  assert.ok(docXml.includes(fallback), "the Word cover's Matter line is blank");
+});
+
+check("the agreement uses no dash as punctuation", () => {
+  // "try to avoid having '-' in the agreement." Hyphens inside a word are
+  // spelling and stay -- non-refundable, source-of-funds, I-526E. An em or
+  // en dash is punctuation, and there should be none.
+  for (const a of [sample, { ...sample, bilingual: true }, { ...sample, structure: "contingency", contingency_pct: 33 }]) {
+    const t = plain(DOC.body(a, { forClient: true, withLetterhead: false }));
+    const found = (t.match(/[^\s]*[—–][^\s]*/g) || []);
+    assert.deepStrictEqual(found, [], "a dash is being used as punctuation: " + found.join(" | "));
+  }
+  // The cover and the letter's head too.
+  assert.deepStrictEqual(
+    (plain(DOC.render(sample)).match(/[^\s]*[—–][^\s]*/g) || []), [],
+    "a dash survives on the cover or the letterhead");
+});
+
+check("the date stored for a new draft is the firm's calendar date", () => {
+  const src = fs.readFileSync(path.join(ROOT, "retainer-page.js"), "utf8");
+  // new Date().toISOString().slice(0,10) is the UTC date: from 5pm Pacific
+  // onward it is tomorrow, and the draft was dated the next day.
+  assert.ok(!/agreement_date:\s*new Date\(\)\.toISOString\(\)/.test(src),
+    "a new draft is dated by the UTC clock again");
+  assert.ok(/agreement_date:[\s\S]{0,200}America\/Los_Angeles/.test(src),
+    "the draft date is not taken in the firm's own zone");
+});
+
+check("the firm profile is the firm's own copy, not mine", () => {
+  // Advertising copy: Rules 7.1 to 7.3 and B&P 6157.2, with an open State
+  // Bar matter. Every sentence here is lifted from the approved deck, so
+  // the guard is that the page says what the deck says and claims nothing.
+  // Scoped to the profile page, not the whole document: "guarantee"
+  // appears in the NO-guarantee clause, which is the opposite of a claim.
+  // Same error as the earned-on-receipt scan -- matching the word rather
+  // than the meaning.
+  assert.ok(plain(DOC.render(sample)).includes("About the firm"), "the profile page is missing");
+  const t = plain(DOC.firmProfilePage(sample));
+  assert.ok(t.includes("Tez Law P.C. protects people's rights and businesses"),
+    "the firm paragraph is not the deck's");
+  assert.ok(t.includes("Fifth and Ninth Circuits"), "the courts line is missing");
+  // Nothing that reads as a claim about results.
+  for (const banned of [/\bbest\b/i, /\bleading\b/i, /\btop[- ]rated\b/i, /success rate/i,
+                        /\bguarantee/i, /\bwon\b/i, /\bno\.? ?1\b/i, /\bexpert\b/i]) {
+    assert.ok(!banned.test(t), "the profile page makes a claim the rules do not allow: " + banned);
+  }
+  // And it is bilingual when the agreement is.
+  const zh = plain(DOC.firmProfilePage({ ...sample, bilingual: true }));
+  assert.ok(zh.includes("关于本所"), "the Chinese profile is missing from a bilingual packet");
+});
+
+check("the payment page warns before it tells", () => {
+  const html = DOC.render(sample);
+  const t = plain(html);
+  assert.ok(t.includes("Paying the firm"), "the payment page is missing");
+  // The warning is the page's reason for existing, so it comes first.
+  const warn = t.indexOf("telephone us on 626-678-8677");
+  // "We also take a check" became "We also take Zelle to ..., a check ..."
+  // once the real instruction sheet was wired in.
+  const methods = t.indexOf("We also take");
+  assert.ok(warn > -1, "the fraud warning is not on the page");
+  assert.ok(warn < methods, "the warning comes after the payment methods");
+  assert.ok(t.includes("never email you changed payment instructions"),
+    "the one sentence that defeats the attack is missing");
+  // A border, not a background: a warning that vanishes when Background
+  // graphics is unticked is not a warning.
+  const css = DOC.CSS.replace(/\s+/g, "");
+  assert.ok(/\.pay-warn\{[^}]*border:2ptsolidvar\(--orange\)/.test(css),
+    "the warning box is drawn with a background, so it may not print");
+});
+
+check("no account number is in the repository", () => {
+  // The repo is on GitHub. An account number committed here is in the
+  // history for good. firm-payment.js reads them from the environment and
+  // knows only their names.
+  const pay = fs.readFileSync(path.join(ROOT, "firm-payment.js"), "utf8");
+  const code = pay.replace(/^\s*(\/\/|\*|\/\*).*$/gm, "");
+  assert.ok(!/\b\d{9}\b/.test(code), "something that looks like a routing number is in the file");
+  assert.ok(!/\b\d{8,17}\b/.test(code), "something that looks like an account number is in the file");
+  assert.ok(/process\.env\[env\]/.test(code), "the details are not read from the environment");
+});
+
+check("with nothing configured the page gives no numbers and no placeholders", () => {
+  const PAY = require(path.join(ROOT, "firm-payment.js"));
+  const keep = {};
+  for (const env of Object.values(PAY.FIELDS)) { keep[env] = process.env[env]; delete process.env[env]; }
+  const seen = PAY.paymentDetails();
+  const stash = { ...seen };
+  for (const k of Object.keys(seen)) seen[k] = "";
+  try {
+    const t = plain(DOC.render(sample));
+    assert.ok(/telephone the office on 626-678-8677 for the account details/.test(t),
+      "an unconfigured page does not tell the client what to do");
+    assert.ok(!/Routing number/.test(t), "an empty details table is being printed");
+    assert.ok(!/X{4,}|0{6,}|_{4,}/.test(t),
+      "a placeholder that could be mistaken for an account number is on the page");
+    assert.ok(/never email you changed payment instructions/.test(t), "the warning vanished");
+  } finally {
+    Object.assign(seen, stash);
+    for (const [env, v] of Object.entries(keep)) if (v !== undefined) process.env[env] = v;
+  }
+});
+
+check("a retainer goes to the trust account unless the client agreed otherwise", () => {
+  // Rule 1.15(a): client funds go to trust. Rule 1.15(b): a flat fee may
+  // go to operating, but only with the client's written agreement, signed
+  // above $1,000 -- which is the box this agreement already collects. The
+  // page follows that box, so the two cannot drift apart.
+  const PAY = require(path.join(ROOT, "firm-payment.js"));
+  const flatNoConsent = { ...sample, structure: "flat", operating_account_consent: false };
+  const flatConsent = { ...sample, structure: "flat", operating_account_consent: true };
+  const hourlyConsent = { ...sample, structure: "hourly", operating_account_consent: true };
+
+  assert.strictEqual(PAY.accountFor(flatNoConsent).kind, "trust",
+    "a flat fee with no consent is being sent to the operating account");
+  assert.strictEqual(PAY.accountFor(flatConsent).kind, "operating",
+    "the consent the client signed is being ignored");
+  assert.strictEqual(PAY.accountFor({}).kind, "trust", "the default is not trust");
+  // A consent box ticked on an hourly matter is not a 1.15(b) flat-fee
+  // agreement, so it does not move the money.
+  assert.strictEqual(PAY.accountFor(hourlyConsent).kind, "trust",
+    "an hourly deposit is being sent to the operating account");
+});
+
+check("only one of the two accounts is on any one agreement", () => {
+  const PAY = require(path.join(ROOT, "firm-payment.js"));
+  const d = PAY.paymentDetails();
+  if (!PAY.isConfigured(d)) return;   // nothing set on this machine
+  const t = plain(DOC.render({ ...sample, structure: "flat", operating_account_consent: false }));
+  assert.ok(t.includes(d.trust_account), "the trust account is not on a trust agreement");
+  assert.ok(!t.includes(d.operating_account),
+    "both accounts are printed, so a client can pay into the wrong one");
+});
+
+check("both routing numbers are given, and labelled apart", () => {
+  const PAY = require(path.join(ROOT, "firm-payment.js"));
+  const d = PAY.paymentDetails();
+  if (!PAY.isConfigured(d)) return;
+  // Bank of America uses a different routing number for ACH than for
+  // wires. One printed where the other belongs is a returned payment.
+  assert.notStrictEqual(d.routing_wire, d.routing_ach,
+    "the two routing numbers are the same, which is almost certainly a mis-read sheet");
+  const t = plain(DOC.render(sample));
+  assert.ok(/Routing number, wire/.test(t), "the wire routing number is not labelled as one");
+  assert.ok(/Routing number, ACH/.test(t), "the ACH routing number is not labelled as one");
+  assert.ok(/The two routing numbers are different/.test(t),
+    "nothing tells the client the numbers are not interchangeable");
+});
+
+check("the drafting screen can say which payment settings are unset", () => {
+  const PAY = require(path.join(ROOT, "firm-payment.js"));
+  const seen = PAY.paymentDetails();
+  const stash = { ...seen };
+  for (const k of Object.keys(seen)) seen[k] = "";
+  try {
+    assert.ok(!PAY.isConfigured(), "an empty configuration reads as configured");
+    const missing = PAY.missingFields();
+    for (const env of ["TEZ_PAY_BANK", "TEZ_PAY_TRUST_NAME", "TEZ_PAY_TRUST_ACCOUNT",
+                       "TEZ_PAY_ROUTING_WIRE", "TEZ_PAY_ROUTING_ACH"]) {
+      assert.ok(missing.includes(env), `${env} is not reported as missing`);
+    }
+    // Optional ones are not nagged about.
+    assert.ok(!missing.includes("TEZ_PAY_ZELLE"), "an optional setting is reported as missing");
+  } finally {
+    Object.assign(seen, stash);
+  }
+});
+
+check("no account number is in the repository", () => {
+  // The repo is on GitHub. Anything committed here is in the history for
+  // good. firm-payment.js knows only the names of the settings.
+  const pay = fs.readFileSync(path.join(ROOT, "firm-payment.js"), "utf8");
+  const code = pay.replace(/^\s*(\/\/|\*|\/\*).*$/gm, "");
+  assert.ok(!/\b\d{9}\b/.test(code), "something that looks like a routing number is in the file");
+  assert.ok(!/\b\d{8,17}\b/.test(code), "something that looks like an account number is in the file");
+  assert.ok(/process\.env\[env\]/.test(code), "the details are not read from the environment");
+  // And the file that does hold them is ignored by git.
+  const ignore = fs.readFileSync(path.join(ROOT, ".gitignore"), "utf8");
+  assert.ok(/^firm-payment\.local\.json$/m.test(ignore),
+    "firm-payment.local.json is not in .gitignore, so the numbers can be committed");
 });
 
 check("the contracting party is the P.C., not the trade name", () => {
@@ -648,10 +873,8 @@ check("the cover and the letterhead are in the Word file once each", () => {
   // build() prepends its own cover and letterhead, so the body it converts
   // must not carry a second copy: the date, the Re line and the salutation
   // were each printing twice, and the cover's title leaked into the letter.
-  const re = sample.matter_label
-    ? new RegExp("Attorney–Client Fee Agreement — " + sample.matter_label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")
-    : /Re:/g;
-  assert.strictEqual((doc.match(re) || []).length, 1, "the Re line is in the document twice");
+  assert.strictEqual((doc.match(/Agreement for Legal Services \(/g) || []).length, 1,
+    "the Re line is in the document twice");
   assert.strictEqual((doc.match(/Dear /g) || []).length, 1, "the salutation is in the document twice");
   assert.ok(!/Attorney–ClientFee Agreement/.test(doc), "the cover's title leaked into the letter");
 });
@@ -692,7 +915,7 @@ check("the filename names the client and the date", () => {
 // ── The clause set, grown from the firm's own agreements ──
 
 check("the agreement now says what the firm's robust ones say", () => {
-  const keys = R.clausesFor({ structure: "flat", matter_type: "estate" });
+  const keys = R.clausesFor({ structure: "flat", matter_type: "immigration_removal" });
   for (const k of ["scope_limits", "hourly_outside_scope", "client_duties", "no_guarantee",
                    "delegation", "trust_account", "records", "confidentiality",
                    "governing_law", "effective_date"]) {
@@ -703,8 +926,9 @@ check("the agreement now says what the firm's robust ones say", () => {
 });
 
 check("the conflict waiver appears where the firm acts for more than one party", () => {
-  assert.ok(R.clausesFor({ matter_type: "eb5" }).includes("conflict_disclosure"));
-  assert.ok(!R.clausesFor({ matter_type: "estate" }).includes("conflict_disclosure"),
+  assert.ok(R.clausesFor({ matter_type: "immigration_business" }).includes("conflict_disclosure"),
+    "EB-5 and investor work is exactly what the waiver is for");
+  assert.ok(!R.clausesFor({ matter_type: "immigration_removal" }).includes("conflict_disclosure"),
     "a single-client matter should not carry a waiver describing a conflict that cannot arise");
 });
 

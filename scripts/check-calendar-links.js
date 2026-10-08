@@ -101,7 +101,11 @@ check("every link the calendar can emit resolves to a real route", () => {
 check("the specific routes that were wrong are right", () => {
   // Named individually so a regression names itself rather than failing in bulk.
   assert.strictEqual(cal.eventHref(SAMPLES.individual_hearing), "/admin/hearing/individual/7");
-  assert.strictEqual(cal.eventHref(SAMPLES.hearing_notice), "/admin/clients/chen%2C%20mei/hearing-notices");
+  // /hearing-notices is the JSON API the app reads. Sending a browser there
+  // printed the raw response, which is what JJ saw when he clicked a notice
+  // on the calendar. /hearings is the page, anchored on the notice clicked.
+  assert.strictEqual(cal.eventHref(SAMPLES.hearing_notice),
+    "/admin/clients/chen%2C%20mei/hearings#notice-3");
   assert.strictEqual(cal.eventHref(SAMPLES.outlook_event), null);
 });
 

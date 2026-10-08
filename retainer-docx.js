@@ -190,7 +190,9 @@ function fromHtml(html) {
     return `<p class="sigmark"> </p></section>`;
   });
   // Block elements, in document order.
-  const re = /<(h1|h2|h3|p|li|table)\b([^>]*)>([\s\S]*?)<\/\1>/gi;
+  // div is here only for the firm profile's point titles and its lead and
+  // section lines, which are not paragraphs but do have to print.
+  const re = /<(h1|h2|h3|p|li|table|div)\b([^>]*)>([\s\S]*?)<\/\1>/gi;
   let m;
   while ((m = re.exec(html)) !== null) {
     const tag = m[1].toLowerCase();
@@ -203,7 +205,9 @@ function fromHtml(html) {
     // The drafter's "why this clause is here" notes never leave the firm.
     if (/\bwhy\b/.test(cls)) continue;
 
-    if (/\bsigmark\b/.test(cls)) {
+    if (/\bfp-(point-t|lead|apart)\b/.test(cls)) {
+      out.push(para(runsFrom(inner, { bold: true }), { before: 120, after: 40, keepNext: true }));
+    } else if (/\bsigmark\b/.test(cls)) {
       out.push(sigXml);
     } else if (tag === "h1") {
       // 22 half-points is 11pt. The title is centred and tracked rather
@@ -298,7 +302,12 @@ function headerRels(target) {
  * Its wording is the brand's, not mine: the title, its Chinese, the
  * eyebrow, the four fields and the entity line at the foot.
  */
-function coverPage(FIRM, a) {
+/** A hard page break of its own, for a section the converter cannot see. */
+function pageBreak() {
+  return `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:br w:type="page"/></w:r></w:p>`;
+}
+
+function coverPage(FIRM, a, doc) {
   const when = dateFor(a);
   const rule = (label, value) =>
     para(run(label.toUpperCase(), { size: 16, bold: true, color: CHARCOAL, spacing: 30 }),
@@ -322,15 +331,15 @@ function coverPage(FIRM, a) {
     ], { before: 520, after: 60 }),
     para(run(FIRM.tagline.en, { size: 20, italic: true, color: EMBER, font: COVER_HEAD_FONT }),
       { after: 900 }),
-    para(run("Confidential  ·  Attorney–Client Communication",
+    para(run("Confidential  ·  Privileged Attorney Communication",
       { size: 17, bold: true, color: EMBER, spacing: 36 }), { before: 0, after: 120 }),
-    para(run("Attorney–Client", { size: 64, bold: true, color: CHARCOAL, font: COVER_HEAD_FONT }),
+    para(run("Agreement for", { size: 64, bold: true, color: CHARCOAL, font: COVER_HEAD_FONT }),
       { after: 0 }),
-    para(run("Fee Agreement", { size: 64, bold: true, color: CHARCOAL, font: COVER_HEAD_FONT }),
+    para(run("Legal Services", { size: 64, bold: true, color: CHARCOAL, font: COVER_HEAD_FONT }),
       { after: 80 }),
     para(run("律师与客户委托收费协议", { size: 36, color: EMBER, font: ZH_FONT }), { after: 560 }),
     rule("Client", a.client_name),
-    rule("Matter", a.matter_label),
+    rule("Matter", doc.matterOf ? doc.matterOf(a) : a.matter_label),
     rule("Responsible attorney", FIRM.attorney),
     rule("Date", when.long),
     para(run(FIRM.dba, { size: 17, color: STONE }), { before: 760, after: 20 }),
@@ -359,7 +368,8 @@ function dateFor(a) {
 
 // ── The letterhead, which the HTML draws with CSS ───────────
 
-function letterhead(FIRM, a) {
+function letterhead(FIRM, a, doc) {
+  const matter = doc && doc.matterOf ? doc.matterOf(a) : (a.matter_label || "");
   const wc = FIRM.offices[0];
   // No drawn header any more: the sheet underneath IS the letterhead. This
   // is only what a letter opens with on top of it.
@@ -367,7 +377,7 @@ function letterhead(FIRM, a) {
   return [
     text(dateFor(a).long, { size: 20, after: 180 }),
     a.client_name ? text(a.client_name, { size: 22, after: 40 }) : "",
-    text(`Re:  Attorney–Client Fee Agreement${a.matter_label ? " — " + a.matter_label : ""}`,
+    text(`Re:  Agreement for Legal Services${matter ? ` (${matter})` : ""}`,
       { bold: true, size: 22, after: 160 }),
     text(`Dear ${a.client_name || "Client"}:`, { size: 22, after: 180 }),
   ].filter(Boolean).join("");
@@ -377,7 +387,7 @@ function offices(FIRM) {
   const line = FIRM.offices.map((o) => o.city).join("   ·   ");
   const note = FIRM.offices.find((o) => o.note);
   return para(run(line, { size: 16, color: STONE }), { before: 560, align: "center", after: 20 }) +
-    (note ? para(run(`${note.city} — ${note.note}`, { size: 15, color: STONE, italic: true }),
+    (note ? para(run(`${note.city} (${note.note})`, { size: 15, color: STONE, italic: true }),
       { align: "center" }) : "");
 }
 
@@ -463,7 +473,8 @@ function build(a = {}, doc) {
   // The offices are on the letterhead sheet itself now, so they are not
   // printed a second time at the end.
   return wrap(
-    coverPage(doc.FIRM, a) + letterhead(doc.FIRM, a) + fromHtml(html),
+    coverPage(doc.FIRM, a, doc) + fromHtml(doc.firmProfilePage(a)) + pageBreak() +
+    letterhead(doc.FIRM, a, doc) + fromHtml(html),
     { bilingual: !!a.bilingual });
 }
 

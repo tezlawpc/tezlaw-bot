@@ -135,10 +135,10 @@ const SCOPE_PRESETS = {
 };
 
 const MATTER_LABELS = {
-  immigration_removal: "Immigration — removal defense",
-  immigration_family: "Immigration — family",
-  immigration_business: "Immigration — business and investor",
-  immigration_naturalization: "Immigration — naturalization",
+  immigration_removal: "Immigration: removal defense",
+  immigration_family: "Immigration: family",
+  immigration_business: "Immigration: business and investor",
+  immigration_naturalization: "Immigration: naturalization",
   federal_litigation: "Federal litigation",
   civil_litigation: "Business and civil litigation",
   landlord_tenant: "Landlord / tenant",
@@ -212,14 +212,14 @@ const CLAUSES = {
 
   scope_limits: {
     title: { en: "Limits of Our Representation", zh: "代理範圍的限制" },
-    en: "Our representation is limited to the matter described in the scope above. We give no opinion on the commercial merits or likely success of any transaction, investment or venture, and nothing we say should be read as one. Work outside immigration and the practice areas named in this Agreement — including tax, corporate, securities and accounting advice — is for counsel of your own choosing, at that counsel's own charges. Where we coordinate with a business plan writer, economist, accountant or other outside professional, we do so as an accommodation to you; their fees are not covered by ours and we do not supervise their work.",
+    en: "Our representation is limited to the matter described in the scope above. We give no opinion on the commercial merits or likely success of any transaction, investment or venture, and nothing we say should be read as one. Work outside immigration and the practice areas named in this Agreement, including tax, corporate, securities and accounting advice, is for counsel of your own choosing, at that counsel's own charges. Where we coordinate with a business plan writer, economist, accountant or other outside professional, we do so as an accommodation to you; their fees are not covered by ours and we do not supervise their work.",
     zh: "本事務所之代理範圍僅限於上述服務範圍所載之事項。本事務所不就任何交易、投資或商業計畫之商業價值或成功可能性提供任何意見，本事務所之任何陳述亦不得被解釋為此種意見。凡不屬於本協議所列執業領域之事務，包括稅務、公司、證券及會計等方面之諮詢，應由您自行選任之專業人士處理，其費用由您另行支付。本事務所如與商業計畫撰寫人、經濟學家、會計師或其他外部專業人士協調配合，係為便利您而提供之協助；該等人員之費用不包含在本事務所之費用內，本事務所亦不對其工作負監督之責。",
     because: "Rule 1.2(b) permits limiting the scope with the client's informed consent; saying what is NOT covered is what makes the limit informed. From the Wecare engagement letter.",
   },
 
   hourly_outside_scope: {
     title: { en: "Work Outside This Agreement", zh: "本協議範圍外之工作" },
-    en: "Anything not described in the scope above — including ancillary applications, appeals, motions to reopen, and any other matter you later ask us to take on — is not covered by the fee stated here. We will agree any such work with you in writing first. Where it is charged by the hour, our rates are $650 for the managing partner, $350 for an associate attorney and $200 for a paralegal. We will give you an estimate before starting and will not proceed without your approval.",
+    en: "Anything not described in the scope above, including ancillary applications, appeals, motions to reopen, and any other matter you later ask us to take on, is not covered by the fee stated here. We will agree any such work with you in writing first. Where it is charged by the hour, our rates are $650 for the managing partner, $350 for an associate attorney and $200 for a paralegal. We will give you an estimate before starting and will not proceed without your approval.",
     zh: "凡未列於上述服務範圍之事項，包括附帶申請、上訴、重啟程序之動議，以及您日後要求本事務所承辦之其他事務，均不包含在本協議所訂費用之內。該等工作須經雙方另行書面約定後方得進行。如按小時計費，本事務所之費率為：管理合夥人每小時 650 美元，助理律師每小時 350 美元，律師助理每小時 200 美元。本事務所將於開始工作前向您提供費用估算，未經您同意不會進行。",
     because: "§ 6148(a)(1) requires the hourly rate and the basis of charges to be stated where fees are not fixed. From the Wecare engagement letter, at the firm's current figures.",
   },
@@ -345,6 +345,9 @@ const CLAUSES = {
 // renders them in place, where the money is, and listing them again produced
 // a document that stated its own fee terms twice. A fee agreement that says
 // the same thing twice invites an argument about which one governs.
+/** Matter types that get the conflict waiver. Keys of MATTER_LABELS. */
+const CONFLICT_WAIVER_MATTERS = ["immigration_business", "real_estate", "estate_planning"];
+
 function clausesFor({ structure, matter_type } = {}) {
   // Ordered the way the firm's own agreements run: what we will do, what
   // you must do, what is not covered, the money, how it ends, the legal
@@ -371,11 +374,21 @@ function clausesFor({ structure, matter_type } = {}) {
   ];
 
   // The conflict disclosure is for matters where the firm may act for more
-  // than one party to the same project — EB-5 and business work. On a
-  // single-client matter it describes a situation that does not exist, and
-  // a clause that does not apply is noise in a document the client has to
-  // read. The drafter can still add it.
-  if (["eb5", "business", "corporate", "real_estate"].includes(String(matter_type || ""))) {
+  // than one party to the same project. On a single-client matter it
+  // describes a situation that does not exist, and a clause that does not
+  // apply is noise in a document the client has to read.
+  //
+  // These are keys from MATTER_LABELS, which is what the form produces.
+  // They used to be "eb5", "business" and "corporate", none of which the
+  // form can emit, so the waiver never appeared on the matters it was
+  // written for. check-retainer.js now refuses any key that is not a real
+  // matter type.
+  //
+  //   immigration_business  EB-5 and investor work: the investor and the
+  //                         entity can be two clients on one project
+  //   real_estate           buyer and seller, or several owners
+  //   estate_planning       both spouses on one plan
+  if (CONFLICT_WAIVER_MATTERS.includes(String(matter_type || ""))) {
     keys.splice(keys.indexOf("trust_account"), 0, "conflict_disclosure");
   }
 
@@ -461,7 +474,7 @@ function problemsWith(a = {}) {
 
 const money = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 0 });
 
-module.exports = {
+module.exports = { CONFLICT_WAIVER_MATTERS,
   RATES, FEE_STRUCTURES, FLAT_MILESTONES, SCOPE_PRESETS, MATTER_LABELS,
   CLAUSES, clausesFor, feeClausesFor, allClausesFor, problemsWith, money,
   OUTSIDE_SCOPE_RATES,

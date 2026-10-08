@@ -22,3 +22,8 @@ tmp/
 # Expo bumps the build number in place on every build, which made every
 # `git pull` on the build machine fail with a local-changes conflict.
 app.json
+
+# Account numbers. This repository is on GitHub; anything committed
+# here is in the history for good. firm-payment.js reads this file,
+# or the same values as TEZ_PAY_* environment variables.
+firm-payment.local.json

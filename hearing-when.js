@@ -44,6 +44,19 @@
 // to prevent, reintroduced one layer down.
 const TIME_SHAPE = /^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?$/i;
 
+// Some notices are parsed into 24-hour text -- "13:00" off an EOIR PDF --
+// and TIME_SHAPE rejects them because they carry no am/pm. The client was
+// then told "time not confirmed, please call us" for a hearing whose time
+// we had, which sends them to the office for an answer already on file.
+// Range-checked the same way, and converted to the 12-hour wording the
+// notices use, so the client reads one format.
+// Two-digit hour only. "13:00" and "08:30" are unambiguously 24-hour, so
+// they can be converted. "9:00" is NOT: it is 9 AM or 9 PM depending on
+// the notice, and picking one is precisely the guess that told a client
+// noon for a 9:00 AM custody hearing. check-hearing-when.js has refused
+// "9:00" since that bug, and it still does.
+const TIME_24 = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
 const PHRASES = {
   en: {
     join: (d, t) => `${d} at ${t}`,
@@ -81,6 +94,14 @@ function quotedTime(timeText) {
   if (!t) return null;
   // Tolerate "9:00 AM", "9 AM", "9:00am", "1:30 p.m."; refuse anything else
   // rather than repeat a parser artefact to a client.
+  // A 24-hour time is a real time, not a parser artefact. Converted to the
+  // 12-hour wording the notices themselves use, so a client reads one format.
+  const h24 = TIME_24.exec(t);
+  if (h24) {
+    const H = Number(h24[1]);
+    const hour12 = H % 12 === 0 ? 12 : H % 12;
+    return `${hour12}:${h24[2]} ${H < 12 ? "AM" : "PM"}`;
+  }
   const m = TIME_SHAPE.exec(t);
   if (!m) return null;
   const hour = Number(m[1]);

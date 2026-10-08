@@ -11396,6 +11396,24 @@ app.get("/admin/clients/:key/court-mail", async (req, res) => {
   }
 });
 
+// The PAGE behind a notice on the calendar. The JSON route below is what
+// the app reads; sending a browser there printed the raw response.
+app.get("/admin/clients/:key/hearings", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const hn = require("./hearing-notices");
+    const hearingNotes = require("./hearing-notes");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).send("<h1>Client not found</h1>");
+    const notices = await hn.listClientNotices(client.key);
+    const body = hn.renderNoticesPage(client, notices, { focusId: req.query.notice || null });
+    res.send(hearingNotes.renderAdminChrome({ title: "Hearing notices", body, activeItem: "calendar" }));
+  } catch (err) {
+    console.error("[hearing notices page]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
 app.get("/admin/clients/:key/hearing-notices", async (req, res) => {
   try {
     const cp = require("./client-profiles");

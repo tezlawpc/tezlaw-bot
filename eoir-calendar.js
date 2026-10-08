@@ -870,9 +870,12 @@ function eventHref(event) {
     case "individual_upcoming":
       return ref.id ? `/admin/hearing/individual/${encodeURIComponent(ref.id)}` : null;
     case "hearing_notice":
-      // The notices page is per client, and only the notices query carries the key.
+      // /hearing-notices is the JSON API the app reads -- a browser sent
+      // there printed the raw response, which is what JJ was looking at.
+      // /hearings is the page. The anchor opens on the notice clicked.
       return event.client_key
-        ? `/admin/clients/${encodeURIComponent(event.client_key)}/hearing-notices`
+        ? `/admin/clients/${encodeURIComponent(event.client_key)}/hearings${
+            ref.id ? `#notice-${encodeURIComponent(ref.id)}` : ""}`
         : null;
     case "deadline":
       return "/admin/deadlines";

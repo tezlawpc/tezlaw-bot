@@ -61,6 +61,21 @@ const FIRM = {
 const MONTHS = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
+/**
+ * What goes on the "Matter" line.
+ *
+ * It was blank on every agreement: the cover reads `matter_label` and the
+ * form only ever collected `matter_type`, a code. A drafter can now write a
+ * matter of their own, and when they do not, the matter type's own label
+ * stands in -- a cover that says "Immigration: removal defense" is right,
+ * and one that says nothing is not.
+ */
+function matterOf(a) {
+  const written = String(a.matter_label || "").trim();
+  if (written) return written;
+  return (R.MATTER_LABELS && R.MATTER_LABELS[a.matter_type]) || "";
+}
+
 const longDate = (d) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ""));
   if (m) return `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}`;
@@ -96,12 +111,12 @@ function coverPage(a) {
     <section class="cover">
       <div class="cv-bars"><span class="cv-bar-orange"></span><span class="cv-bar-dark"></span></div>
       <img class="cv-logo" src="/brand/logo-light.svg" alt="TEZ Law">
-      <div class="cv-eyebrow">Confidential &nbsp;·&nbsp; Attorney–Client Communication</div>
-      <h1 class="cv-title">Attorney–Client<br>Fee Agreement</h1>
+      <div class="cv-eyebrow">Confidential &nbsp;·&nbsp; Privileged Attorney Communication</div>
+      <h1 class="cv-title">Agreement for<br>Legal Services</h1>
       <div class="cv-title-zh">律师与客户委托收费协议</div>
       <div class="cv-fields">
         ${field("Client", a.client_name)}
-        ${field("Matter", a.matter_label || "")}
+        ${field("Matter", matterOf(a))}
         ${field("Responsible attorney", FIRM.attorney)}
         ${field("Date", longDate(a.agreement_date || a.date))}
       </div>
@@ -150,11 +165,92 @@ function letterhead(a) {
     <div class="letter">
       <p class="date">${esc(longDate(a.agreement_date || a.date))}</p>
       ${a.client_name ? `<p class="attn">${esc(a.client_name)}</p>` : ""}
-      <p class="re"><strong>Re:&nbsp;&nbsp;Attorney–Client Fee Agreement${
-        a.matter_label ? " — " + esc(a.matter_label) : ""}</strong></p>
+      <p class="re"><strong>Re:&nbsp;&nbsp;Agreement for Legal Services${
+        matterOf(a) ? " (" + esc(matterOf(a)) + ")" : ""}</strong></p>
       <p class="dear">Dear ${esc(a.client_name || "Client")}:</p>
     </div>
     </div>`;
+}
+
+/**
+ * The firm profile page, from the firm's own deck.
+ *
+ * Verbatim from Tez-Law-Firm-Profile-EN_6 / -ZH_6. Advertising copy is
+ * governed by Rules 7.1 to 7.3 and B&P 6157.2, and the firm has an open
+ * State Bar matter, so nothing on this page is written here: it is the
+ * approved deck's own wording, cut to one page.
+ */
+const PROFILE = {
+  heading: { en: "About the firm", zh: "关于本所" },
+  lead: {
+    en: "Protecting your rights and your business, and helping it grow",
+    zh: "守护您的权益与企业，助力企业成长",
+  },
+  body: {
+    en: [
+      "Tez Law P.C. protects people's rights and businesses and helps businesses grow. Our attorneys, case managers and paralegals work as one team for individuals, families, investors and companies. When a matter needs a fight, we will lead it.",
+      "Our work covers immigration, disputes and litigation, real estate and construction, private client matters, intellectual property, and compliance for public companies.",
+      "We litigate in the Los Angeles Superior Court and in the U.S. District Courts for the Central, Southern and Northern Districts of California and the District of Arizona, and take appeals to the U.S. Courts of Appeals for the Fifth and Ninth Circuits.",
+      "We serve clients in English, Mandarin and Shanghainese, with Spanish support, from offices in West Covina, City of Industry and Newport Beach, and an immigration office in Flushing, New York.",
+    ],
+    zh: [
+      "Tez Law P.C. 致力于守护个人权益与企业利益，并助力企业发展壮大。本所律师、案件经理及律师助理团队协同工作，为个人、家庭、投资人及企业提供服务。需要据理力争时，我们为您挺身而出。",
+      "本所业务涵盖移民、诉讼与争议解决、房地产及工程、私人客户、知识产权，以及上市公司合规事务。",
+      "本所律师在洛杉矶县高等法院，以及加州中区、南区、北区和亚利桑那州联邦地区法院出庭，并办理向联邦第五及第九巡回上诉法院提出的上诉。",
+      "本所在西科维纳、工业市及纽波特比奇设有办公室，并在纽约法拉盛设有移民业务办公室，以英语、普通话和上海话提供服务，并可提供西班牙语协助。",
+    ],
+  },
+  apart: {
+    en: "What clients get from Tez Law",
+    zh: "客户在 Tez Law 可以得到的服务",
+  },
+  points: [
+    { en: ["Experienced litigators",
+           "In state and federal courts: business, real estate and landlord tenant cases in Superior Court, and mandamus, APA and habeas actions in the U.S. District Courts."],
+      zh: ["经验丰富的诉讼律师",
+           "州法院与联邦法院均可出庭：在加州高等法院办理商业、房地产及房东租客案件，在联邦地区法院提起强制令、APA 及人身保护令诉讼。"] },
+    { en: ["Business and property fluency",
+           "Before law, the founding attorney ran hotels, ran a galvanized wire mill in China with U.S. distribution, built real estate projects and founded a mortgage lender."],
+      zh: ["熟悉商业与房地产",
+           "执业前，创始律师曾经营酒店、在中国经营镀锌线材厂并在美国分销、开发房地产项目，并创办房贷公司。"] },
+    { en: ["Immigration at every stage",
+           "USCIS filings, Immigration Court hearings, BIA appeals and petitions for review in the Fifth and Ninth Circuits, handled by one team."],
+      zh: ["移民案件全程代理",
+           "从移民局申请、移民法庭出庭、向移民上诉委员会（BIA）上诉，到向联邦第五及第九巡回上诉法院申请复审，均由同一团队负责。"] },
+    { en: ["Technology enabled service",
+           "Zara, the firm's digital assistant, takes messages and intake on WhatsApp, WeChat, Telegram and web chat."],
+      zh: ["科技辅助的服务",
+           "本所数字助理 Zara 可通过 WhatsApp、微信、Telegram 及网站在线接收留言和登记咨询。"] },
+    { en: ["Bilingual, bicultural counsel",
+           "Advice in English, Mandarin or Shanghainese, and written explanations of filings in Simplified Chinese."],
+      zh: ["双语及跨文化的法律服务",
+           "以英语、普通话或上海话提供咨询，并以简体中文书面解释各项申请文件。"] },
+  ],
+};
+
+function firmProfilePage(a) {
+  const zh = !!a.bilingual;
+  const P = PROFILE;
+  const paras = P.body.en.map((t, i) => `
+    <p>${esc(t)}</p>
+    ${zh ? `<p class="zh">${esc(P.body.zh[i])}</p>` : ""}`).join("");
+
+  const points = P.points.map((p) => `
+    <div class="fp-point">
+      <div class="fp-point-t">${esc(p.en[0])}${zh ? ` · ${esc(p.zh[0])}` : ""}</div>
+      <p>${esc(p.en[1])}</p>
+      ${zh ? `<p class="zh">${esc(p.zh[1])}</p>` : ""}
+    </div>`).join("");
+
+  return `
+    <section class="firm-profile">
+      <h2 class="fp-h">${esc(P.heading.en)}${zh ? ` · ${esc(P.heading.zh)}` : ""}</h2>
+      <p class="fp-lead">${esc(P.lead.en)}</p>
+      ${zh ? `<p class="fp-lead zh">${esc(P.lead.zh)}</p>` : ""}
+      ${paras}
+      <div class="fp-apart">${esc(P.apart.en)}${zh ? ` · ${esc(P.apart.zh)}` : ""}</div>
+      <div class="fp-points">${points}</div>
+    </section>`;
 }
 
 // ── The fee section, which is where the statutes bite ────────
@@ -167,7 +263,7 @@ function inlineClause(k, bilingual) {
   if (!c) return "";
   const zh = !bilingual ? ""
     : c.zh ? `<p class="zh">${esc(c.zh)}</p>`
-    : `<p class="zh missing">[中文待律師撰寫 — Chinese for this clause has not been written. Civ. Code § 1632: the client is held to the version in their own language.]</p>`;
+    : `<p class="zh missing">[中文待律師撰寫: Chinese for this clause has not been written. Civ. Code § 1632: the client is held to the version in their own language.]</p>`;
   return `<p>${esc(c.en)}</p>${zh}`;
 }
 
@@ -239,7 +335,7 @@ function feeSection(a) {
         "The firm will advance them and be reimbursed out of any recovery."}
         You remain responsible for costs and expenses whether or not there is a recovery, except as any other
         provision of this Agreement states otherwise.</p>
-      <p>You may be required to pay, out of your share of any recovery, amounts claimed by others — including
+      <p>You may be required to pay, out of your share of any recovery, amounts claimed by others, including
         medical providers, health plans and insurers asserting a lien or a right of subrogation.</p>
       <p><strong>The fee stated above is not set by law. It is negotiable between you and the firm.</strong></p>
       ${a.micra ? `<p>Because this is a claim against a health care provider, Business and Professions Code
@@ -248,12 +344,99 @@ function feeSection(a) {
 
   // § 6148(a)(1) also wants the other charges, whatever the structure.
   parts.push(`
-    <p>Costs and expenses — filing and government fees, service of process, translation, interpreters, couriers,
-      records, experts, depositions, travel — are in addition to the fee${
+    <p>Costs and expenses (filing and government fees, service of process, translation, interpreters,
+      couriers, records, experts, depositions and travel) are in addition to the fee${
       a.structure === "contingency" ? "" : " and are billed to you as they are incurred"}.
       We will tell you before incurring any single cost over ${R.money(a.cost_approval_threshold || 500)}.</p>`);
 
   return parts.join("\n");
+}
+
+/**
+ * How to pay, and how not to be defrauded doing it.
+ *
+ * The account details come from the environment through firm-payment.js;
+ * nothing here is in the repository. When they are not set the page prints
+ * the warning and the methods and tells the client to call -- never a
+ * placeholder that could be mistaken for an account number.
+ */
+function paymentPage(a) {
+  const PAY = require("./firm-payment");
+  const d = PAY.paymentDetails();
+  const ready = PAY.isConfigured(d);
+  const acct = PAY.accountFor(a, d);
+  const zh = !!a.bilingual;
+
+  const row = (label, value, labelZh) => value ? `
+    <tr><th>${esc(label)}${zh && labelZh ? `<br><span class="zh">${esc(labelZh)}</span>` : ""}</th>
+        <td>${esc(value)}</td></tr>` : "";
+
+  return `
+    <section class="payment">
+      <h2 class="pay-h">Paying the firm${zh ? " · 付款方式" : ""}</h2>
+
+      <div class="pay-warn">
+        <div class="pay-warn-t">Before you send money, telephone us on 626-678-8677 and confirm
+          these details with someone you have already spoken to.</div>
+        <p>Wire fraud is common in legal matters. Someone who is reading email may send you a
+          revised set of instructions from an address that is one character different from ours.
+          <strong>We will never email you changed payment instructions.</strong> If you receive any,
+          do not act on them, and telephone us at the number above, which is on our letterhead and
+          on our website.</p>
+        ${zh ? `<p class="zh">在匯款之前，請先致電 626-678-8677，向您已經聯繫過的本所人員核對以下資料。
+          法律事務中的電匯詐騙十分常見：他人可能以與本所僅差一字的電郵地址，向您發送所謂「更新後」的付款指示。
+          <strong>本事務所絕不會以電郵方式通知您變更付款資料。</strong>如收到此類訊息，請勿依其辦理，
+          並請撥打上述號碼與本所聯繫；該號碼印於本所信箋並載於本所網站。</p>` : ""}
+      </div>
+
+      ${ready ? `
+      <p>${acct.kind === "trust"
+        ? "Money you send before it is earned is held in the firm's client trust account."
+        : "You have agreed in this Agreement that the flat fee may be deposited into the firm's operating account. Your right to a refund of any unearned part of it is not affected."}</p>
+      ${zh ? `<p class="zh">${acct.kind === "trust"
+        ? "您於費用賺取前所支付之款項，存放於本事務所之客戶信託帳戶。"
+        : "您已於本協議中同意本事務所得將固定費用存入其營運帳戶；此不影響您就尚未賺取部分請求退還之權利。"}</p>` : ""}
+
+      <table class="pay">
+        ${row("Bank", d.bank, "銀行")}
+        ${row("Account name", acct.name, "帳戶名稱")}
+        ${row("Account number", acct.number, "帳號")}
+        ${row("Routing number, wire", d.routing_wire, "電匯路由號碼")}
+        ${row("Routing number, ACH and direct deposit", d.routing_ach, "ACH 及直接存款路由號碼")}
+        ${row("Reference", PAY.referenceFor(a, d), "匯款備註")}
+      </table>
+      <p>The two routing numbers are different. Use the wire number for a wire and the ACH number
+        for a direct deposit or an automatic payment; the wrong one will be returned.</p>
+      ${zh ? `<p class="zh">上列兩組路由號碼並不相同：電匯請使用電匯號碼，直接存款或自動扣款請使用 ACH 號碼；
+        使用錯誤者，款項將被退回。</p>` : ""}
+
+      ${(d.swift_usd || d.swift_fx) ? `
+      <p>From outside the United States:</p>
+      <table class="pay">
+        ${row("SWIFT, sending US dollars", d.swift_usd, "SWIFT 代碼（美元）")}
+        ${row("Bank address", d.bank_address_usd, "銀行地址")}
+        ${row("SWIFT, sending another currency", d.swift_fx, "SWIFT 代碼（外幣）")}
+        ${row("Bank address", d.bank_address_fx, "銀行地址")}
+      </table>
+      <p>Your own bank may charge a fee for sending, and a bank in between may deduct one. Those
+        charges are yours; the firm credits you with the amount it actually receives.</p>
+      ${zh ? `<p class="zh">您的銀行可能收取匯費，中間行亦可能扣收費用；該等費用由您負擔，
+        本事務所以實際收到之金額入帳。</p>` : ""}
+      ` : ""}
+      ` : `
+      <p>Please telephone the office on 626-678-8677 for the account details. They are given by
+        telephone rather than printed here.</p>
+      ${zh ? `<p class="zh">請致電本所 626-678-8677 索取帳戶資料。該資料以電話提供，不印於本文件。</p>` : ""}
+      `}
+
+      <p>We also take ${d.zelle ? `Zelle to ${esc(d.zelle)}, ` : ""}a check payable to Tez Law P.C.
+        at any of the offices listed at the end of this Agreement, and a card in the office or by a
+        payment link we send you. We do not take payment in cryptocurrency, by gift card, or in cash
+        above $5,000.</p>
+      ${zh ? `<p class="zh">本事務所亦接受${d.zelle ? `Zelle（${esc(d.zelle)}）、` : ""}支票（抬頭請寫 Tez Law P.C.，
+        可送交本協議末頁所列任一辦公室），以及於辦公室刷卡或使用本所提供之付款連結。
+        本事務所不接受加密貨幣、禮品卡，亦不接受超過 5,000 美元之現金。</p>` : ""}
+    </section>`;
 }
 
 // ── The document ─────────────────────────────────────────────
@@ -274,7 +457,7 @@ function body(a, { forClient = true, withLetterhead = true } = {}) {
     const zh = bilingual && c.zh
       ? `<p class="zh">${esc(c.zh)}</p>`
       : bilingual
-        ? `<p class="zh missing">[中文待律師撰寫 — Chinese for this clause has not been written. Civ. Code § 1632: the client is held to the version in their own language, so this may not go out until a lawyer writes it.]</p>`
+        ? `<p class="zh missing">[中文待律師撰寫: Chinese for this clause has not been written. Civ. Code § 1632: the client is held to the version in their own language, so this may not go out until a lawyer writes it.]</p>`
         : "";
     return `
       <section class="clause">
@@ -288,9 +471,11 @@ function body(a, { forClient = true, withLetterhead = true } = {}) {
   return `
     ${withLetterhead ? coverPage(a) : ""}
 
+    ${withLetterhead ? firmProfilePage(a) : ""}
+
     ${withLetterhead ? letterhead(a) : ""}
 
-    <h1>Attorney–Client Fee Agreement${bilingual ? " · 律师与客户委托收费协议" : ""}</h1>
+    <h1>Agreement for Legal Services${bilingual ? " · 律师与客户委托收费协议" : ""}</h1>
 
     <p>This Agreement is between <strong>${esc(a.client_name)}</strong> ("you") and
       <strong>${esc(FIRM.entity)}</strong>, doing business as ${esc(FIRM.name)} ("we", "us" or "the firm").
@@ -347,6 +532,8 @@ function body(a, { forClient = true, withLetterhead = true } = {}) {
         </div>
       </div>
     </section>
+
+    ${paymentPage(a)}
 
     <footer class="offices">
       <div class="t">${esc(FIRM.name)}</div>
@@ -442,6 +629,34 @@ const CSS = `
     color:var(--stone); border-top:1px solid var(--travertine); padding-top:12px;
     margin-top:auto; }
   .cv-foot-right { text-align:right; }
+
+  /* ── The firm profile, from the firm's own deck ─────────────  */
+  .firm-profile { page-break-after:always; break-after:page; padding-bottom:0.2in; }
+  .fp-h { font-size:11pt; font-weight:bold; letter-spacing:.06em; text-transform:uppercase;
+    text-align:center; margin:0 0 16px; }
+  .fp-lead { font-weight:bold; margin:0 0 10px; }
+  .fp-apart { font-weight:bold; margin:18px 0 8px; }
+  .fp-points { display:grid; grid-template-columns:1fr 1fr; gap:10px 26px; }
+  .fp-point p { margin:0 0 4px; }
+  .fp-point-t { font-weight:bold; }
+  .firm-profile .zh { margin-bottom:8px; }
+
+  /* ── Paying the firm ────────────────────────────────────────
+     The warning is bordered rather than shaded: a background does not
+     print unless the person ticks "Background graphics", and a warning
+     that disappears when the document is printed is not a warning. */
+  .payment { page-break-before:always; break-before:page; page-break-inside:auto; }
+  .pay-h { font-size:11pt; font-weight:bold; letter-spacing:.06em; text-transform:uppercase;
+    text-align:center; margin:0 0 16px; }
+  .pay-warn { border:2pt solid var(--orange); padding:12px 14px; margin:0 0 16px;
+    page-break-inside:avoid; break-inside:avoid; }
+  .pay-warn-t { font-weight:bold; margin-bottom:7px; }
+  .pay-warn p { margin:0 0 6px; }
+  table.pay { width:100%; border-collapse:collapse; margin:0 0 12px;
+    page-break-inside:avoid; break-inside:avoid; }
+  table.pay th { text-align:left; width:2.2in; font-weight:bold; vertical-align:top;
+    padding:5px 10px 5px 0; border-bottom:1px solid var(--travertine); }
+  table.pay td { padding:5px 0; border-bottom:1px solid var(--travertine); }
 
   /* ── The letter ─────────────────────────────────────────────
      No top padding any more: the page box already clears the artwork,
@@ -551,7 +766,7 @@ function render(a, { forClient = true, id = null } = {}) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Agreement for Legal Services — ${esc(a.client_name || "draft")}</title>
+<title>Agreement for Legal Services: ${esc(a.client_name || "draft")}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Montserrat:wght@400;600&family=Noto+Serif+SC:wght@400;600&display=swap" rel="stylesheet">
 <style>${CSS}</style>
@@ -560,4 +775,4 @@ function render(a, { forClient = true, id = null } = {}) {
 </html>`;
 }
 
-module.exports = { render, body, feeSection, letterhead, coverPage, actionBar, FIRM, CSS };
+module.exports = { render, body, feeSection, letterhead, coverPage, actionBar, firmProfilePage, paymentPage, matterOf, FIRM, PROFILE, CSS };

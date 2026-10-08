@@ -605,7 +605,7 @@ Por favor llegue 30 minutos antes con su identificación oficial. Si no puede as
 //
 // Both builders had their own copy of that code and their own copy of that
 // bug. One module now, so they cannot drift apart again.
-const { hearingWhen, hearingKind } = require("./hearing-when");
+const { hearingWhen, hearingKind, quotedTime } = require("./hearing-when");
 
 function buildNotificationMessage(notice, clientLang = "en") {
   const lang = ["en", "zh", "es"].includes(clientLang) ? clientLang : "en";
@@ -1122,7 +1122,100 @@ function renderMergeAllResultPage(result, { includePast = false } = {}) {
   return renderAdminChrome({ title: "Merged", body, activeItem: "notice-duplicates" });
 }
 
+// ── The page behind a notice on the calendar ────────────────
+//
+// No inline script anywhere in here: notify-admin.js's rule. A client name
+// with an apostrophe in an onclick took client search down for five hours
+// on 2026-09-28, and this page renders court names and client names.
+
+const esc = (v) => String(v == null ? "" : v)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+/**
+ * A notice's date.
+ *
+ * The value is a wall-clock date read off the paper and stored without a
+ * zone, so UTC is the calendar date it was stored as. Rendering it in a
+ * zone behind UTC prints the day before -- which is the bug this codebase
+ * has now had four times.
+ */
+function noticeDay(v) {
+  if (!v) return "date not on the notice";
+  const d = new Date(v);
+  if (isNaN(d)) return "date not on the notice";
+  return d.toLocaleDateString("en-US", {
+    timeZone: "UTC", weekday: "long", year: "numeric", month: "long", day: "numeric",
+  });
+}
+
+const TITLES = {
+  master: "Master calendar hearing",
+  individual: "Individual / merits hearing",
+  bond: "Bond hearing",
+};
+
+function renderNoticesPage(client, notices, { focusId = null } = {}) {
+  const name = client.client_name || client.key;
+  const rows = notices.map((n) => {
+    const focused = focusId && String(n.id) === String(focusId);
+    const when = noticeDay(n.hearing_date);
+    const time = quotedTime(n.hearing_time_text);
+    return `
+      <div id="notice-${esc(n.id)}" style="border:1px solid ${focused ? "#FF7B00" : "#E8E3DC"};
+        ${focused ? "box-shadow:0 0 0 3px rgba(255,123,0,.15);" : ""}
+        border-radius:8px; padding:16px 18px; margin-bottom:12px; background:#FFFFFF;">
+        <div style="display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+          <div>
+            <div style="font-size:15px; font-weight:600; color:#2B2523;">
+              ${esc(TITLES[n.hearing_type] || n.notice_type || "Hearing")}
+            </div>
+            <div style="font-size:13px; color:#2B2523; margin-top:4px;">${esc(when)}</div>
+            <div style="font-size:13px; color:${time ? "#2B2523" : "#A34C00"}; margin-top:2px;">
+              ${time ? esc(time) : "Time not stated on the notice. Call the court before telling the client a time."}
+            </div>
+          </div>
+          <div style="text-align:right; font-size:12px; color:#5E5854;">
+            <div>Notice #${esc(n.id)}</div>
+            <div style="margin-top:3px;">Read with ${esc(n.confidence || "unknown")} confidence</div>
+            ${n.notified_at
+              ? `<div style="margin-top:3px; color:#1E7F4F;">Client told via ${esc(n.notification_channel || "unknown")}</div>`
+              : `<div style="margin-top:3px; color:#A34C00;">Client not yet told</div>`}
+          </div>
+        </div>
+        <div style="margin-top:12px; font-size:13px; color:#2B2523; line-height:1.6;">
+          ${n.court_name ? `<div><b>Court:</b> ${esc(n.court_name)}</div>` : ""}
+          ${n.court_address ? `<div><b>Address:</b> ${esc(n.court_address)}</div>` : ""}
+          ${n.judge_name ? `<div><b>Judge:</b> ${esc(n.judge_name)}</div>` : ""}
+        </div>
+        ${n.dropbox_path ? `<div style="margin-top:10px; font-size:12px; color:#5E5854;
+          word-break:break-all;"><b>From:</b> ${esc(n.dropbox_path)}</div>` : ""}
+      </div>`;
+  }).join("");
+
+  return `
+  <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+    <div>
+      <h1 style="margin:0;">Hearing notices</h1>
+      <div style="font-size:13px; color:#5E5854; margin-top:4px;">${esc(name)}</div>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <a href="/admin/calendar" style="background:#F3EFE9; color:#2B2523; border:1px solid #E8E3DC;
+        padding:8px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:600;">Back to the calendar</a>
+      <a href="/admin/clients/${encodeURIComponent(client.key)}" style="background:#2B2523; color:#FFFFFF;
+        padding:8px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:600;">Client record</a>
+    </div>
+  </div>
+  <div style="font-size:12px; color:#5E5854; margin:0 0 16px;">
+    Read out of the notices in this client's Dropbox folder. The date and time are quoted from the
+    paper, never calculated, so a blank time means the notice did not state one.
+  </div>
+  ${rows || `<div style="padding:28px; text-align:center; color:#5E5854; border:1px dashed #E8E3DC; border-radius:8px;">
+    No hearing notices have been read for this client yet. Run <b>Update from Dropbox</b> on the calendar.</div>`}`;
+}
+
 module.exports = {
+  renderNoticesPage,
   initTable,
   findDuplicateHearings,
   mergeDuplicateHearings,
