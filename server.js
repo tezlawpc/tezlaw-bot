@@ -87,6 +87,13 @@ app.use("/brand-fonts", express.static(require("path").join(__dirname, "assets",
   maxAge: "365d", immutable: true,
 }));
 
+// The firm's own artwork: the letterhead sheets at 300dpi, the logo, the
+// shield. Documents use these rather than an approximation drawn in CSS,
+// so what the app prints and what the office prints cannot drift apart.
+app.use("/brand", express.static(require("path").join(__dirname, "assets", "brand"), {
+  maxAge: "365d", immutable: true,
+}));
+
 app.use("/static", express.static(require("path").join(__dirname, "public"), {
   maxAge: "7d",
   immutable: false,

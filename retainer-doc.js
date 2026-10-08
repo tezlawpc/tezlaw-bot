@@ -25,9 +25,13 @@ const esc = (s) => String(s == null ? "" : s)
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 const FIRM = {
-  name: "TEZ Law Firm",
-  entity: "Tez Law P.C.",
+  name: "TEZ Law Firm",          // public copy
+  entity: "Tez Law P.C.",        // legal lines, signatures of record, fee agreements
+  dba: "Tez Law P.C., doing business as TEZ Law Firm",
   subtitle: "A Professional Corporation",
+  tagline: { en: "Protect your rights, we'll lead the fight.",
+             zh: "守护您的权益，我们为您据理力争。" },
+  attorney: "JJ Zhang, Esq.",
   phone: "626-678-8677",
   fax: "626-808-4994",
   email: "jj@tezlawfirm.com",
@@ -45,29 +49,69 @@ const longDate = (d) => new Date(d || Date.now()).toLocaleDateString("en-US", {
 });
 
 /**
- * The letterhead, as the firm's own engagement letters carry it.
+ * The cover, from 03-Print-Pack/04-Client-Folder/TEZ-Fee-Agreement-Cover.
  *
- * The Wecare agreement opens with the entity, the West Covina address,
- * telephone and fax, email and web, then the date, who it is addressed to,
- * an RE: line and a salutation. That is what a client recognises as a
- * letter from the firm; a wordmark and a phone number is a web page.
+ * The brand set includes a first page built for this exact document, so
+ * this is that page with the blanks filled rather than a design decision
+ * of mine. Its wording is the source of the document's title in both
+ * languages and of the entity line at the foot.
+ */
+function coverPage(a) {
+  const field = (label, value) => `
+    <div class="cv-field">
+      <div class="cv-rule"></div>
+      <div class="cv-label">${esc(label)}</div>
+      <div class="cv-value">${esc(value || "")}</div>
+    </div>`;
+
+  return `
+    <section class="cover">
+      <div class="cv-bars"><span class="cv-bar-orange"></span><span class="cv-bar-dark"></span></div>
+      <img class="cv-logo" src="/brand/logo-light.svg" alt="TEZ Law">
+      <div class="cv-eyebrow">Confidential &nbsp;·&nbsp; Attorney–Client Communication</div>
+      <h1 class="cv-title">Attorney–Client<br>Fee Agreement</h1>
+      <div class="cv-title-zh">律师与客户委托收费协议</div>
+      <div class="cv-fields">
+        ${field("Client", a.client_name)}
+        ${field("Matter", a.matter_label || "")}
+        ${field("Responsible attorney", FIRM.attorney)}
+        ${field("Date", longDate(a.agreement_date || a.date))}
+      </div>
+      <div class="cv-foot">
+        <div>
+          ${esc(FIRM.dba)}<br>
+          ${esc(FIRM.offices[0].lines.join(", "))}<br>
+          ${esc(FIRM.phone)} &nbsp;·&nbsp; ${esc(FIRM.email)}
+        </div>
+        <div class="cv-foot-right">
+          Please read the full agreement<br>before signing. Keep a copy<br>for your records.
+        </div>
+      </div>
+    </section>`;
+}
+
+/**
+ * The letterhead sheet itself -- the firm's own 300dpi artwork, not a
+ * redrawing of it. The English and Chinese sheets are different files;
+ * a bilingual agreement gets the Chinese one, which is what the office
+ * would reach for.
+ *
+ * In the browser this sits behind page one. CSS cannot reliably put a
+ * different image behind every printed page across browsers, so the Word
+ * export is what carries the letterhead on every sheet -- first-page
+ * header and continuation header, the way the firm's own letterhead .docx
+ * is built. The print view says so on screen.
  */
 function letterhead(a) {
-  const wc = FIRM.offices[0];
+  const sheet = a.bilingual ? "/brand/letterhead-first-zh.png" : "/brand/letterhead-first-en.png";
   return `
-    <header class="doc-head">
-      <div class="mark">TEZ&nbsp;LAW&nbsp;FIRM</div>
-      <div class="sub">${esc(FIRM.entity)} &nbsp;·&nbsp; ${esc(FIRM.subtitle)}</div>
-      <div class="sub">${esc(wc.lines.join(", "))}</div>
-      <div class="sub">Tel ${esc(FIRM.phone)} &nbsp;·&nbsp; Fax ${esc(FIRM.fax)}
-        &nbsp;·&nbsp; ${esc(FIRM.email)} &nbsp;·&nbsp; ${esc(FIRM.web)}</div>
-    </header>
+    <img class="sheet-art" src="${sheet}" alt="">
     <div class="letter">
       <p class="date">${esc(longDate(a.agreement_date || a.date))}</p>
-      ${a.client_name ? `<p class="attn">Attn: ${esc(a.client_name)}</p>` : ""}
-      <p class="re"><strong>RE: Agreement for Legal Services${
+      ${a.client_name ? `<p class="attn">${esc(a.client_name)}</p>` : ""}
+      <p class="re"><strong>Re:&nbsp;&nbsp;Attorney–Client Fee Agreement${
         a.matter_label ? " — " + esc(a.matter_label) : ""}</strong></p>
-      <p class="dear">Dear ${esc(a.client_name || "Client")},</p>
+      <p class="dear">Dear ${esc(a.client_name || "Client")}:</p>
     </div>`;
 }
 
@@ -198,12 +242,15 @@ function body(a, { forClient = true } = {}) {
 
   let n = 0;
   return `
+    ${coverPage(a)}
+
     ${letterhead(a)}
 
-    <h1>Agreement for Legal Services${bilingual ? " · 法律服務協議" : ""}</h1>
+    <h1>Attorney–Client Fee Agreement${bilingual ? " · 律师与客户委托收费协议" : ""}</h1>
 
     <p>This Agreement is between <strong>${esc(a.client_name)}</strong> ("you") and
-      ${esc(FIRM.name)} ("we", "us" or "the firm"). It sets out what we will do for you, what it will cost,
+      <strong>${esc(FIRM.entity)}</strong>, doing business as ${esc(FIRM.name)} ("we", "us" or "the firm").
+      It sets out what we will do for you, what it will cost,
       and what each of us is responsible for. It takes effect when it is signed${
       a.work_already_begun ? ", and it covers work the firm has already begun or completed on this matter at your request" : ""}.</p>
 
@@ -285,12 +332,48 @@ const CSS = `
   @font-face { font-family:"Noto Serif SC"; font-weight:600;
     src:url("/brand-fonts/TezSerif-Bold.ttf") format("truetype"); font-display:swap; }
 
-  @page { size: letter; margin: 1in 1in 0.9in; }
-  :root { --ink:#1E1B1A; --charcoal:#2B2523; --ember:#A34C00; --stone:#5E5854; --travertine:#E8E3DC; }
+  /* The firm's letterhead margins, from its Word template: 1.3in top so the
+     text clears the header artwork, 0.75in sides, 1.0in bottom so it clears
+     the office addresses. */
+  @page { size: letter; margin: 1.3in 0.75in 1in; }
+  /* Straight from the brand board. --orange is the Seal Orange of the logo
+     and the rules; --ember is orange TEXT on light, which is a different
+     colour and was being used for both. */
+  :root { --ink:#1E1B1A; --charcoal:#2B2523; --orange:#FF7B00; --ember:#A34C00;
+          --stone:#5E5854; --travertine:#E8E3DC; --marble:#FAF8F5; }
   * { box-sizing: border-box; }
   body { margin:0; background:#FAF8F5; color:var(--ink);
     font-family:"Brand Sans",Montserrat,"Helvetica Neue",Arial,sans-serif; font-size:11pt; line-height:1.55; }
-  .sheet { max-width:7.5in; margin:0 auto; padding:0.5in 0; background:#FFFFFF; }
+  .sheet { max-width:7.5in; margin:0 auto; padding:0.5in 0; background:#FFFFFF;
+    position:relative; }
+  /* Everything that is not the letterhead artwork sits above it. */
+  .sheet > *:not(.sheet-art) { position:relative; z-index:1; }
+  .letter { padding-top:2.1in; }   /* clears the header artwork on the sheet */
+  /* ── The cover, from TEZ-Fee-Agreement-Cover ── */
+  .cover { position:relative; min-height:9.4in; padding:0 0 0 0; page-break-after:always;
+    break-after:page; }
+  .cv-bars { display:flex; flex-direction:column; margin:-0.3in -0.35in 0.75in; }
+  .cv-bar-orange { height:7px; background:var(--orange); }
+  .cv-bar-dark { height:16px; background:var(--charcoal); }
+  .cv-logo { width:1.35in; height:auto; display:block; margin-bottom:1.2in; }
+  .cv-eyebrow { font-size:8.5pt; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--ember); font-weight:600; margin-bottom:10px; }
+  .cv-title { font-family:"Cormorant Garamond",Georgia,serif; font-weight:600; font-size:34pt;
+    line-height:1.08; color:var(--charcoal); margin:0 0 6px; }
+  .cv-title-zh { font-family:"Noto Serif SC",serif; font-size:19pt; color:var(--ember);
+    margin-bottom:0.9in; }
+  .cv-fields { display:grid; grid-template-columns:1fr 1fr; gap:26px 40px; margin-bottom:1.1in; }
+  .cv-rule { border-top:1px solid var(--charcoal); margin-bottom:7px; }
+  .cv-label { font-size:8pt; letter-spacing:.14em; text-transform:uppercase; color:var(--charcoal);
+    font-weight:600; }
+  .cv-value { font-size:11pt; color:var(--ink); margin-top:4px; min-height:1.2em; }
+  .cv-foot { display:flex; justify-content:space-between; gap:30px; font-size:9pt;
+    color:var(--stone); border-top:1px solid var(--travertine); padding-top:12px; }
+  .cv-foot-right { text-align:right; }
+
+  /* ── The letterhead sheet, the firm's own artwork ── */
+  .sheet-art { position:absolute; inset:0; width:100%; height:auto; z-index:0;
+    pointer-events:none; }
   .doc-head { border-bottom:2px solid var(--ember); padding-bottom:11px; margin-bottom:26px;
     text-align:center; }
   /* nowrap, because tracking this wide used to let "LAW" break across the
@@ -298,7 +381,6 @@ const CSS = `
   .mark { font-family:"Cormorant Garamond",Georgia,serif; font-size:23pt; letter-spacing:.2em;
     text-transform:uppercase; color:var(--charcoal); white-space:nowrap; font-weight:600; }
   .doc-head .sub { font-size:8.5pt; letter-spacing:.04em; color:var(--stone); margin-top:3px; }
-  .letter { margin-bottom:22px; }
   .letter p { margin:0 0 6px; }
   .letter .date { color:var(--stone); }
   .letter .re { margin-top:12px; }
@@ -381,7 +463,8 @@ function actionBar(id) {
         <button type="submit" class="btn dark">Send for signature</button>
       </form>
       <a class="btn plain" href="/admin/retainer/${encodeURIComponent(id)}">Back to the draft</a>
-      <span class="hint">In the print dialog, untick <em>Headers and footers</em> to drop the URL and date.</span>
+      <span class="hint">In the print dialog, untick <em>Headers and footers</em> to drop the URL and date.
+        The Word file carries the letterhead on every page; this view carries it on the first.</span>
     </div>`;
 }
 
@@ -401,4 +484,4 @@ function render(a, { forClient = true, id = null } = {}) {
 </html>`;
 }
 
-module.exports = { render, body, feeSection, letterhead, actionBar, FIRM, CSS };
+module.exports = { render, body, feeSection, letterhead, coverPage, actionBar, FIRM, CSS };

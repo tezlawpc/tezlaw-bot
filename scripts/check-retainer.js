@@ -335,28 +335,86 @@ const sample = {
   operating_account_consent: true,
 };
 
-check("the letterhead carries what the firm's own letters carry", () => {
+check("the letterhead is the firm's own artwork, not a redrawing of it", () => {
   const html = DOC.render(sample, { forClient: true, id: 7 });
-  for (const bit of ["4141 S. Nogales", "626-678-8677", "626-808-4994",
-                     "www.tezlawfirm.com", "A Professional Corporation"]) {
-    assert.ok(html.includes(bit), `the letterhead is missing ${bit}`);
+  // The brand set ships the letterhead as a full-page 300dpi sheet. Drawing
+  // an approximation of it in CSS is what JJ caught on 2026-10-07.
+  assert.ok(/<img class="sheet-art" src="\/brand\/letterhead-first-en\.png"/.test(html),
+    "the English letterhead sheet is not used");
+  assert.ok(!/Tez Law P\.C\. &nbsp;·&nbsp; A Professional Corporation/.test(html),
+    "the hand-drawn header is still being printed over the artwork");
+  for (const f of ["letterhead-first-en.png", "letterhead-first-zh.png",
+                   "letterhead-continuation.png", "logo-light.svg"]) {
+    assert.ok(fs.existsSync(path.join(ROOT, "assets", "brand", f)), `assets/brand/${f} is missing`);
   }
-  assert.ok(/RE: Agreement for Legal Services — Revocable living trust/.test(html),
-    "no RE line");
-  assert.ok(html.includes("Dear O&#39;Brien"), "no salutation, or it is unescaped");
-  assert.strictEqual((html.match(/<header class="doc-head">/g) || []).length, 1,
-    "two headers — the old one was left behind");
+  const server = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
+  assert.ok(/express\.static\(require\("path"\)\.join\(__dirname, "assets", "brand"\)/.test(server),
+    "nothing serves assets/brand");
 });
 
-check("all four offices are on it, and they stay on one page", () => {
+check("a bilingual agreement gets the Chinese sheet", () => {
+  const zh = DOC.render({ ...sample, bilingual: true }, { forClient: true, id: 7 });
+  assert.ok(zh.includes("/brand/letterhead-first-zh.png"),
+    "a Chinese agreement would go out on the English letterhead");
+});
+
+check("the cover is the brand's fee-agreement cover", () => {
   const html = DOC.render(sample, { forClient: true, id: 7 });
-  for (const city of ["West Covina", "City of Industry", "Newport Beach", "Flushing"]) {
-    assert.ok(html.includes(city), `${city} is missing from the footer`);
-  }
-  // The print JJ sent back ran New York off the bottom of the last page.
-  const offices = DOC.CSS.slice(DOC.CSS.indexOf(".offices {"));
-  assert.ok(/page-break-inside:\s*avoid/.test(offices.slice(0, 400)),
-    "the office block can still be split across a page break");
+  // Wording from 03-Print-Pack/04-Client-Folder/TEZ-Fee-Agreement-Cover.
+  assert.ok(/Attorney–Client<br>Fee Agreement/.test(html), "wrong title");
+  assert.ok(html.includes("律师与客户委托收费协议"), "the Chinese title is missing");
+  assert.ok(/Confidential[\s\S]{0,30}Attorney–Client Communication/.test(html), "no eyebrow");
+  assert.ok(html.includes("JJ Zhang, Esq."), "the responsible attorney is not named");
+  assert.ok(html.includes("Tez Law P.C., doing business as TEZ Law Firm"),
+    "the entity line at the foot of the cover is wrong");
+  assert.ok(html.includes("/brand/logo-light.svg"), "the cover has no logo");
+});
+
+check("the contracting party is the P.C., not the trade name", () => {
+  // Brand board: "TEZ Law Firm" in public copy; "Tez Law P.C." in legal
+  // lines, signatures of record and fee agreements. The letterhead footer
+  // says the same -- TEZ Law Firm is a trade name.
+  const html = DOC.render(sample, { forClient: true, id: 7 });
+  assert.ok(/\("you"\) and\s*<strong>Tez Law P\.C\.<\/strong>, doing business as/.test(html),
+    "the agreement still names the trade name as the contracting party");
+});
+
+check("the page geometry is the firm's letterhead template's", () => {
+  assert.ok(/@page \{ size: letter; margin: 1\.3in 0\.75in 1in; \}/.test(DOC.CSS),
+    "the margins do not match the letterhead, so text will sit on the artwork");
+});
+
+check("Seal Orange and Ember are two different colours again", () => {
+  // The board: #FF7B00 is the logo and the rules; #A34C00 is orange TEXT on
+  // light. Both were coming out of one variable.
+  assert.ok(/--orange:#FF7B00/.test(DOC.CSS.replace(/\s+/g, "")), "Seal Orange is not defined");
+  assert.ok(/--ember:#A34C00/.test(DOC.CSS.replace(/\s+/g, "")), "Ember is not defined");
+});
+
+check("the Word file carries the letterhead on every page", () => {
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  const PizZip = require(path.join(ROOT, "node_modules", "pizzip"));
+  const z = new PizZip(DOCX.build(sample, DOC));
+  const doc = z.file("word/document.xml").asText();
+  // The same split the firm's own letterhead .docx uses.
+  assert.ok(doc.includes("<w:titlePg/>"), "Word would use one header for every page");
+  assert.ok(/w:type="first" r:id="rIdH2"/.test(doc), "no first-page header");
+  assert.ok(/w:type="default" r:id="rIdH1"/.test(doc), "no continuation header");
+  assert.ok(z.file("word/media/letterhead-first.png"), "the letterhead sheet is not embedded");
+  assert.ok(z.file("word/media/letterhead-continuation.png"), "the continuation sheet is not embedded");
+  assert.ok(/behindDoc="1"/.test(z.file("word/header2.xml").asText()),
+    "the artwork would print on top of the text");
+  // 1.3in top = 1872 twips; 0.75in sides = 1080.
+  assert.ok(/w:top="1872"/.test(doc) && /w:left="1080"/.test(doc), "margins do not match the letterhead");
+});
+
+check("the Chinese Word file gets the Chinese sheet", () => {
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  const PizZip = require(path.join(ROOT, "node_modules", "pizzip"));
+  const en = new PizZip(DOCX.build(sample, DOC));
+  const zh = new PizZip(DOCX.build({ ...sample, bilingual: true }, DOC));
+  const size = (z) => z.file("word/media/letterhead-first.png").asBinary().length;
+  assert.notStrictEqual(size(en), size(zh), "both languages embed the same letterhead sheet");
 });
 
 check("the brand faces are served by this app, not only by Google", () => {
@@ -427,6 +485,7 @@ check("the fee table becomes a Word table, not a run-on paragraph", () => {
 check("the filename names the client and the date", () => {
   const DOCX = require(path.join(ROOT, "retainer-docx.js"));
   const n = DOCX.fileName(sample);
+  assert.ok(n.startsWith("Attorney-Client Fee Agreement"), "the file is not named for the document: " + n);
   assert.ok(n.endsWith(".docx") && n.includes("2026-10-07"), n);
   assert.ok(!/[\\/:*?"<>|]/.test(n), "the filename carries a character a filesystem will refuse: " + n);
 });

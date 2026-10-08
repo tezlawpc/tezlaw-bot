@@ -167,23 +167,120 @@ function fromHtml(html) {
   return out.join("");
 }
 
+// ── The letterhead sheets ───────────────────────────────────
+//
+// Full-page artwork, anchored behind the text at the page origin. Letter is
+// 8.5 x 11in, and Word measures in EMU at 914400 to the inch, so the extent
+// is fixed rather than computed: these images are always a whole page.
+
+const PAGE_W_EMU = 7772400;   // 8.5in
+const PAGE_H_EMU = 10058400;  // 11in
+
+const NS = {
+  w: 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"',
+  r: 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"',
+  wp: 'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"',
+  a: 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"',
+  pic: 'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"',
+};
+
+/** A header whose only content is one full-page image behind the text. */
+function sheetHeader(name) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr ${NS.w} ${NS.r} ${NS.wp} ${NS.a} ${NS.pic}>
+  <w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:drawing>
+    <wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="1"
+               behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1">
+      <wp:simplePos x="0" y="0"/>
+      <wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH>
+      <wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV>
+      <wp:extent cx="${PAGE_W_EMU}" cy="${PAGE_H_EMU}"/>
+      <wp:effectExtent l="0" t="0" r="0" b="0"/>
+      <wp:wrapNone/>
+      <wp:docPr id="1" name="${name}"/>
+      <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+        <pic:pic>
+          <pic:nvPicPr><pic:cNvPr id="1" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr>
+          <pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+          <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${PAGE_W_EMU}" cy="${PAGE_H_EMU}"/></a:xfrm>
+            <a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>
+        </pic:pic>
+      </a:graphicData></a:graphic>
+    </wp:anchor>
+  </w:drawing></w:r></w:p>
+</w:hdr>`;
+}
+
+function headerRels(target) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${target}"/>
+</Relationships>`;
+}
+
+/**
+ * The cover, from the brand set's TEZ-Fee-Agreement-Cover.
+ *
+ * Its wording is the brand's, not mine: the title, its Chinese, the
+ * eyebrow, the four fields and the entity line at the foot.
+ */
+function coverPage(FIRM, a) {
+  const when = dateFor(a);
+  const rule = (label, value) =>
+    para(run(label.toUpperCase(), { size: 16, bold: true, color: CHARCOAL, spacing: 30 }),
+      { before: 260, after: 40, border: CHARCOAL }) +
+    para(run(value || " ", { size: 22 }), { after: 180 });
+
+  return [
+    para(run("Confidential  ·  Attorney–Client Communication",
+      { size: 17, bold: true, color: EMBER, spacing: 36 }), { before: 1400, after: 120 }),
+    para(run("Attorney–Client", { size: 64, bold: true, color: CHARCOAL, font: HEAD_FONT }),
+      { after: 0 }),
+    para(run("Fee Agreement", { size: 64, bold: true, color: CHARCOAL, font: HEAD_FONT }),
+      { after: 80 }),
+    para(run("律师与客户委托收费协议", { size: 36, color: EMBER, font: ZH_FONT }), { after: 700 }),
+    rule("Client", a.client_name),
+    rule("Matter", a.matter_label),
+    rule("Responsible attorney", FIRM.attorney),
+    rule("Date", when.long),
+    para(run(FIRM.dba, { size: 17, color: STONE }), { before: 900, after: 20 }),
+    para(run(FIRM.offices[0].lines.join(", "), { size: 17, color: STONE }), { after: 20 }),
+    para(run(`${FIRM.phone} · ${FIRM.email}`, { size: 17, color: STONE }), { after: 20 }),
+    para(run("Please read the full agreement before signing. Keep a copy for your records.",
+      { size: 17, color: STONE, italic: true }), { before: 160 }),
+    // Everything after this starts on the letterhead.
+    `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:br w:type="page"/></w:r></w:p>`,
+  ].join("");
+}
+
+/** The date the document is dated by, in both the shapes this file needs. */
+function dateFor(a) {
+  const stored = String(a.agreement_date || a.date || "");
+  const iso = /^\d{4}-\d{2}-\d{2}/.test(stored)
+    ? stored.slice(0, 10)
+    : new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit",
+      }).format(new Date());
+  // Parsed as a local noon so the long form cannot slip a day either way.
+  const long = new Date(`${iso}T12:00:00`).toLocaleDateString("en-US",
+    { year: "numeric", month: "long", day: "numeric" });
+  return { iso, long };
+}
+
 // ── The letterhead, which the HTML draws with CSS ───────────
 
 function letterhead(FIRM, a) {
   const wc = FIRM.offices[0];
-  const when = new Date(a.agreement_date || a.date || Date.now()).toLocaleDateString("en-US", {
-    timeZone: "America/Los_Angeles", year: "numeric", month: "long", day: "numeric",
-  });
+  // No drawn header any more: the sheet underneath IS the letterhead. This
+  // is only what a letter opens with on top of it.
+  void wc;
   return [
-    para(run("TEZ LAW FIRM", { bold: true, size: 40, color: CHARCOAL, font: HEAD_FONT, spacing: 70 }),
-      { align: "center", after: 40 }),
-    para(run(`${FIRM.entity} · A Professional Corporation`, { size: 17, color: STONE }),
-      { align: "center", after: 20 }),
-    para(run(wc.lines.join(", "), { size: 17, color: STONE }), { align: "center", after: 20 }),
-    para(run(`Tel ${FIRM.phone} · ${FIRM.email} · www.tezlawfirm.com`, { size: 17, color: STONE }),
-      { align: "center", after: 180, border: EMBER }),
-    text(when, { size: 20, after: 180 }),
-  ].join("");
+    text(dateFor(a).long, { size: 20, after: 180 }),
+    a.client_name ? text(a.client_name, { size: 22, after: 40 }) : "",
+    text(`Re:  Attorney–Client Fee Agreement${a.matter_label ? " — " + a.matter_label : ""}`,
+      { bold: true, size: 22, after: 160 }),
+    text(`Dear ${a.client_name || "Client"}:`, { size: 22, after: 180 }),
+  ].filter(Boolean).join("");
 }
 
 function offices(FIRM) {
@@ -196,16 +293,24 @@ function offices(FIRM) {
 
 // ── The container ───────────────────────────────────────────
 
-function wrap(bodyXml) {
+function wrap(bodyXml, { bilingual = false } = {}) {
   const PizZip = require("pizzip");
+  const fs = require("fs");
+  const path = require("path");
   const zip = new PizZip();
+
+  const art = (f) => fs.readFileSync(path.join(__dirname, "assets", "brand", f));
+  const firstSheet = bilingual ? "letterhead-first-zh.png" : "letterhead-first-en.png";
 
   zip.file("[Content_Types].xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
     `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
     `<Default Extension="xml" ContentType="application/xml"/>` +
+    `<Default Extension="png" ContentType="image/png"/>` +
     `<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>` +
+    `<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>` +
+    `<Override PartName="/word/header2.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>` +
     `</Types>`);
 
   zip.file("_rels/.rels",
@@ -214,13 +319,37 @@ function wrap(bodyXml) {
     `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>` +
     `</Relationships>`);
 
+  // The firm's own sheets. header1 is every page after the first, header2
+  // is the first -- the same split, and the same two files, as the firm's
+  // letterhead template.
+  zip.file("word/media/letterhead-continuation.png", art("letterhead-continuation.png"));
+  zip.file("word/media/letterhead-first.png", art(firstSheet));
+  zip.file("word/header1.xml", sheetHeader("Continuation sheet"));
+  zip.file("word/header2.xml", sheetHeader("Letterhead"));
+  zip.file("word/_rels/header1.xml.rels", headerRels("media/letterhead-continuation.png"));
+  zip.file("word/_rels/header2.xml.rels", headerRels("media/letterhead-first.png"));
+
+  zip.file("word/_rels/document.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+    `<Relationship Id="rIdH1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>` +
+    `<Relationship Id="rIdH2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header2.xml"/>` +
+    `</Relationships>`);
+
   zip.file("word/document.xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+    `<w:document ${NS.w} ${NS.r} ${NS.wp} ${NS.a} ${NS.pic}>` +
     `<w:body>${bodyXml}` +
-    // Letter, one-inch margins, matching the print stylesheet.
-    `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>` +
-    `<w:pgMar w:top="1440" w:right="1440" w:bottom="1296" w:left="1440" w:header="720" w:footer="720"/>` +
+    `<w:sectPr>` +
+    `<w:headerReference w:type="default" r:id="rIdH1"/>` +
+    `<w:headerReference w:type="first" r:id="rIdH2"/>` +
+    // titlePg: the first page takes the letterhead, the rest the
+    // continuation sheet. Without it Word uses one header for all.
+    `<w:titlePg/>` +
+    `<w:pgSz w:w="12240" w:h="15840"/>` +
+    // The firm's letterhead margins: 1.3in top so text clears the header
+    // artwork, 0.75in sides, 1.0in bottom so it clears the addresses.
+    `<w:pgMar w:top="1872" w:right="1080" w:bottom="1440" w:left="1080" w:header="0" w:footer="0"/>` +
     `</w:sectPr></w:body></w:document>`);
 
   return zip.generate({ type: "nodebuffer", compression: "DEFLATE" });
@@ -234,27 +363,18 @@ function wrap(bodyXml) {
  */
 function build(a = {}, doc) {
   const html = doc.body(a, { forClient: true });
-  return wrap(letterhead(doc.FIRM, a) + fromHtml(html) + offices(doc.FIRM));
+  // The offices are on the letterhead sheet itself now, so they are not
+  // printed a second time at the end.
+  return wrap(
+    coverPage(doc.FIRM, a) + letterhead(doc.FIRM, a) + fromHtml(html),
+    { bilingual: !!a.bilingual });
 }
 
 /** A filename a person can find again. */
 function fileName(a = {}) {
   const who = String(a.client_name || "Client").replace(/[^\w一-鿿 -]+/g, "").trim() || "Client";
-  // The date the document is dated by. A stored YYYY-MM-DD is used AS IT IS:
-  // court-calendar.js sets the convention at the top of the file -- a date
-  // with no zone is the date printed on the paper and is never converted --
-  // and running it through a timezone moves it. new Date("2026-10-07") is
-  // midnight UTC, which is 5pm on the 6th in West Covina.
-  //
-  // Only when nothing is stored is "today" computed, and then it is the
-  // office's today, not UTC's.
-  const stored = String(a.agreement_date || a.date || "");
-  const when = /^\d{4}-\d{2}-\d{2}/.test(stored)
-    ? stored.slice(0, 10)
-    : new Intl.DateTimeFormat("en-CA", {
-        timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit",
-      }).format(new Date());
-  return `Agreement for Legal Services - ${who} - ${when}.docx`;
+  const when = dateFor(a).iso;
+  return `Attorney-Client Fee Agreement - ${who} - ${when}.docx`;
 }
 
-module.exports = { build, fileName, fromHtml, runsFrom, tableXml, wrap };
+module.exports = { build, fileName, fromHtml, runsFrom, tableXml, wrap, coverPage, dateFor };
