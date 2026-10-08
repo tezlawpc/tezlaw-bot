@@ -173,26 +173,98 @@ check("a contingency with no costs treatment is refused", () => {
 
 // ── Civ. Code § 1632 ────────────────────────────────────────
 
-check("a bilingual draft is blocked while any clause has no Chinese", () => {
-  const bad = R.problemsWith({ ...flat, bilingual: true });
-  assert.ok(bad.some((p) => /1632/.test(p) && /lawyer has to write it/.test(p)));
-  assert.ok(bad.some((p) => /not something to machine-translate/.test(p)),
-    "the point is that nobody should be tempted to generate it");
+check("the § 1632 guard still bites when a clause has no Chinese", () => {
+  // Every clause has Chinese now (JJ, 2026-10-07), so this can no longer be
+  // shown with the real data -- and a check that passes only because the
+  // data happens to be incomplete stops being a check the moment it is
+  // completed. The guard is exercised directly instead: take one clause's
+  // Chinese away and confirm the draft is refused.
+  const key = "trust_account";
+  const keep = R.CLAUSES[key].zh;
+  try {
+    R.CLAUSES[key].zh = null;
+    const bad = R.problemsWith({ ...flat, bilingual: true });
+    assert.ok(bad.some((p) => /1632/.test(p)), "a clause with no Chinese no longer blocks a bilingual draft");
+    assert.ok(bad.some((p) => /not something to machine-translate/.test(p)),
+      "the point is that nobody should be tempted to generate it");
+  } finally {
+    R.CLAUSES[key].zh = keep;
+  }
 });
 
-check("the check covers clauses in the fee section too, not just the numbered ones", () => {
+check("the guard reaches the fee section, not just the numbered clauses", () => {
   // The flat-fee clauses render inside the fee section. An earlier version
   // looked only at the numbered list and so missed exactly the clauses that
   // say what the client is paying.
-  const missing = R.allClausesFor({ ...flat, bilingual: true })
-    .filter((k) => R.CLAUSES[k] && !R.CLAUSES[k].zh);
-  assert.ok(missing.includes("flat_fee_earning") && missing.includes("flat_fee_deposit"));
+  const all = R.allClausesFor({ ...flat, bilingual: true });
+  assert.ok(all.includes("flat_fee_earning") && all.includes("flat_fee_deposit"),
+    "the fee clauses are outside what the § 1632 check looks at");
+  const key = "flat_fee_earning";
+  const keep = R.CLAUSES[key].zh;
+  try {
+    R.CLAUSES[key].zh = null;
+    assert.ok(R.problemsWith({ ...flat, bilingual: true }).some((p) => /1632/.test(p)),
+      "a fee clause with no Chinese would go out unnoticed");
+  } finally {
+    R.CLAUSES[key].zh = keep;
+  }
 });
 
-check("where the Chinese exists it is the firm's own, and it is used", () => {
+check("every clause now carries Chinese, title and body", () => {
+  const gaps = Object.entries(R.CLAUSES)
+    .filter(([, c]) => !c.zh || !c.title.zh)
+    .map(([k]) => k);
+  assert.deepStrictEqual(gaps, [], "these clauses have no Chinese: " + gaps.join(", "));
+});
+
+const SIMPLIFIED_ONLY = /[协议务师应费后圆单据办问题这现实证对马]/;
+
+const simplifiedClauses = () => {
+  const out = [];
+  for (const [k, c] of Object.entries(R.CLAUSES)) {
+    const m = `${c.title.zh || ""}${c.zh || ""}`.match(SIMPLIFIED_ONLY);
+    if (m) out.push(k);
+  }
+  return out.sort();
+};
+
+check("the Chinese written for this generator is Traditional", () => {
+  // Scoped to `zh_from` unset -- the clauses whose Chinese was written
+  // here. The firm's own executed Chinese is the next check's business.
+  const bad = simplifiedClauses().filter((k) => !R.CLAUSES[k].zh_from);
+  assert.deepStrictEqual(bad, [],
+    "simplified characters in Chinese written for this generator: " + bad.join(", "));
+});
+
+check("the firm's executed Chinese is in two scripts, and these are the five", () => {
+  // NOT a failure to fix here. The I-526E template is Simplified and the
+  // original agreement is Traditional, so a bilingual agreement prints
+  // both. This pins which five are Simplified: edit one of them, or add
+  // a sixth, and this check says so rather than letting the mix drift.
+  //
+  // To settle it: convert these five to Traditional (then delete this
+  // check -- the one above will cover them), or convert the other five
+  // to Simplified and flip the rule above. Either is a lawyer's call on
+  // executed wording.
+  assert.deepStrictEqual(simplifiedClauses(), [
+    "client_duties",
+    "delegation",
+    "electronic_communications",
+    "governing_law",
+    "no_guarantee",
+  ], "the set of Simplified clauses changed");
+
+  for (const k of simplifiedClauses()) {
+    assert.strictEqual(R.CLAUSES[k].zh_from, "firm",
+      `${k} is Simplified but is not marked as the firm's own text — if its Chinese was written here, write it in Traditional`);
+  }
+});
+
+check("a bilingual agreement actually prints the Chinese", () => {
   const t = DOC.render({ ...flat, bilingual: true });
   assert.ok(/客戶配合/.test(t) && /終止服務/.test(t), "the executed templates' Chinese should appear");
-  assert.ok(/中文待律師撰寫/.test(t), "and the gaps should be marked in the document itself");
+  assert.ok(/客戶信託帳戶/.test(t), "the new Chinese should appear");
+  assert.ok(!/中文待律師撰寫/.test(t), "a gap marker is still being printed");
 });
 
 check("English-only drafts are not held up by the Chinese gap", () => {
@@ -549,9 +621,22 @@ check("five clauses took their Chinese from the firm's own template", () => {
 });
 
 check("a clause with no Chinese still cannot go out bilingual", () => {
-  const problems = R.problemsWith({ ...sample, bilingual: true });
-  assert.ok(problems.some((p) => /中文|Chinese/i.test(p)),
-    "the § 1632 guard stopped noticing the untranslated clauses");
+  // Every clause has Chinese now, so this has to make a gap to test the
+  // guard rather than assert that one exists.
+  const key = "records";
+  const keep = R.CLAUSES[key].zh;
+  try {
+    R.CLAUSES[key].zh = null;
+    const problems = R.problemsWith({ ...sample, bilingual: true });
+    assert.ok(problems.some((p) => /中文|Chinese/i.test(p)),
+      "the § 1632 guard stopped noticing an untranslated clause");
+  } finally {
+    R.CLAUSES[key].zh = keep;
+  }
+  assert.strictEqual(
+    R.problemsWith({ ...sample, bilingual: true })
+      .filter((p) => /中文|Chinese/i.test(p)).length, 0,
+    "the gap was not put back");
 });
 
 console.log(`\n${passed} checks passed\n`);
