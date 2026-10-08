@@ -1173,14 +1173,35 @@ async function runDailyDigest(forceRun = false) {
 // ============================================================
 function scheduleDigest() {
   // 6:00 AM Pacific = 14:00 UTC
+  // NOTE: the comment above says 6:00 AM Pacific = 14:00 UTC, but the
+  // timezone option below is Pacific, so "0 14" is 2 PM PACIFIC. The
+  // conversion to UTC and the timezone option were both applied. Left as
+  // it runs rather than silently moved: changing when JJ's digest arrives
+  // is his call, not a drive-by fix.
   cron.schedule("0 14 * * *", async () => {
     console.log("[digest] ⏰ Scheduled digest triggered");
     await runDailyDigest();
+
+    // USCIS forms and fees, on the same daily pass. Quiet unless the
+    // Federal Register shows a form revision or a fee change, in which
+    // case it checks the forms themselves at once rather than waiting for
+    // the weekly tracker.
+    try {
+      const watch = require("./uscis-watch");
+      const out = await watch.runDaily({
+        send: (msg) => require("./tg-route").send("eoir", msg),
+      });
+      if (out.hits && out.hits.length) {
+        console.log(`[uscis-watch] ${out.hits.length} Federal Register item(s); forms re-checked`);
+      }
+    } catch (err) {
+      console.warn("[uscis-watch] failed:", err.message);
+    }
   }, {
     timezone: "America/Los_Angeles",
   });
 
-  console.log("[digest] 📅 Daily digest scheduled for 6:00 AM Pacific");
+  console.log("[digest] 📅 Daily digest scheduled (2 PM Pacific), with the USCIS forms and fees watch");
 
   // Initialize tables on startup
   initCitationTable();

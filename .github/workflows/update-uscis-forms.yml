@@ -1,0 +1,41 @@
+name: USCIS form editions
+
+# Weekly, and on demand. The daily watch in legal-digest.js reacts to the
+# Federal Register the moment a form or fee notice appears; this is the
+# backstop that confirms the silence was real, because a form can change
+# without a notice landing the same day.
+on:
+  schedule:
+    - cron: "41 14 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  editions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install what reads a PDF
+        run: npm install pdf-parse --no-save
+
+      - name: Read the edition off every form we file
+        run: node scripts/uscis-form-editions.js
+
+      - name: Commit what changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet uscis-forms.json; then
+            echo "No edition moved."
+          else
+            git add uscis-forms.json
+            git commit -m "USCIS form editions, $(date -u +%Y-%m-%d)"
+            git push
+          fi

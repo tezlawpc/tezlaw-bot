@@ -1,0 +1,207 @@
+{
+  "checked_on": "2026-10-08",
+  "forms": {
+    "i-130": {
+      "name": "Petition for Alien Relative",
+      "area": "family",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-130.pdf",
+      "edition": "04/01/24",
+      "expires": "02/28/2027",
+      "omb": "1615-0012",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-130a": {
+      "name": "Supplemental Information for Spouse Beneficiary",
+      "area": "family",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-130a.pdf",
+      "edition": "04/01/24",
+      "expires": "02/28/2027",
+      "omb": "1615-0012",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-485": {
+      "name": "Application to Register Permanent Residence",
+      "area": "family",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-485.pdf",
+      "edition": "09/18/26",
+      "expires": "02/28/2027",
+      "omb": "1615-0023",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-864": {
+      "name": "Affidavit of Support",
+      "area": "family",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-864.pdf",
+      "edition": "08/24/26",
+      "expires": "10/31/2027",
+      "omb": "1615-0075",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-864a": {
+      "name": "Contract Between Sponsor and Household Member",
+      "area": "family",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-864a.pdf",
+      "edition": "08/24/26",
+      "expires": "10/31/2027",
+      "omb": "1615-0075",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-129f": {
+      "name": "Petition for Alien Fiance(e)",
+      "area": "family",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-129f.pdf",
+      "edition": "01/20/25",
+      "expires": "03/31/2027",
+      "omb": "1615-0001",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-751": {
+      "name": "Petition to Remove Conditions on Residence",
+      "area": "family",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-751.pdf",
+      "edition": "04/01/24",
+      "expires": "03/31/2027",
+      "omb": "1615-0038",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-765": {
+      "name": "Application for Employment Authorization",
+      "area": "work",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-765.pdf",
+      "edition": "08/21/25",
+      "expires": "08/31/2027",
+      "omb": "1615-0040",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-131": {
+      "name": "Application for Travel Document",
+      "area": "work",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-131.pdf",
+      "edition": "01/20/25",
+      "expires": "06/30/2027",
+      "omb": "1615-0013",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-140": {
+      "name": "Immigrant Petition for Alien Worker",
+      "area": "business",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-140.pdf",
+      "edition": "06/07/24",
+      "expires": "02/28/2027",
+      "omb": "1615-0015",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-129": {
+      "name": "Petition for a Nonimmigrant Worker",
+      "area": "business",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-129.pdf",
+      "edition": "09/09/26",
+      "expires": "12/31/2027",
+      "omb": "1615-0009",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-526e": {
+      "name": "Immigrant Petition by Regional Center Investor",
+      "area": "business",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-526e.pdf",
+      "edition": "01/20/25",
+      "expires": "03/31/2027",
+      "omb": "1615-0026",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-589": {
+      "name": "Application for Asylum and for Withholding of Removal",
+      "area": "removal",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-589.pdf",
+      "edition": "07/28/26",
+      "expires": "09/30/2027",
+      "omb": "1615-0067",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-912": {
+      "name": "Request for Fee Waiver",
+      "area": "removal",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-912.pdf",
+      "edition": "07/22/25",
+      "expires": null,
+      "omb": "1615-0116",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-601": {
+      "name": "Application for Waiver of Grounds of Inadmissibility",
+      "area": "removal",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-601.pdf",
+      "edition": "01/20/25",
+      "expires": "03/31/2027",
+      "omb": "1615-0029",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "i-601a": {
+      "name": "Application for Provisional Unlawful Presence Waiver",
+      "area": "removal",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-601a.pdf",
+      "edition": "01/20/25",
+      "expires": "03/31/2027",
+      "omb": "1615-0123",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "n-400": {
+      "name": "Application for Naturalization",
+      "area": "naturalization",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/n-400.pdf",
+      "edition": "01/20/25",
+      "expires": "02/28/2027",
+      "omb": "1615-0052",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "n-600": {
+      "name": "Application for Certificate of Citizenship",
+      "area": "naturalization",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/n-600.pdf",
+      "edition": "01/20/25",
+      "expires": "02/28/2027",
+      "omb": "1615-0057",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    },
+    "g-28": {
+      "name": "Notice of Entry of Appearance as Attorney",
+      "area": "all",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/g-28.pdf",
+      "edition": "09/17/18",
+      "expires": "05/31/2021",
+      "omb": "1615-0105",
+      "omb_expired": true,
+      "first_seen": "2026-10-08"
+    },
+    "i-90": {
+      "name": "Application to Replace Permanent Resident Card",
+      "area": "family",
+      "url": "https://www.uscis.gov/sites/default/files/document/forms/i-90.pdf",
+      "edition": "01/20/25",
+      "expires": "02/28/2027",
+      "omb": "1615-0082",
+      "omb_expired": false,
+      "first_seen": "2026-10-08"
+    }
+  },
+  "changed": [],
+  "failed": []
+}

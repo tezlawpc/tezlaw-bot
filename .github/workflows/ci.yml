@@ -280,6 +280,13 @@ jobs:
       - name: The EOIR reminder schedule says only what the notice says
         run: node scripts/check-reminder-schedule.js
 
+      # USCIS publishes no forms API, so the edition date is read off each
+      # form PDF and the Federal Register is the daily signal. Most of this
+      # guards the matcher: the Register titles its notices with the form's
+      # NAME, and two forms can be one word apart.
+      - name: USCIS form editions, and the matcher that spots a change
+        run: node scripts/check-uscis-forms.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar
