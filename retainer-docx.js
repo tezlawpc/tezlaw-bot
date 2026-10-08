@@ -26,11 +26,17 @@
 //  degrades to a plain paragraph rather than vanishing.
 // ============================================================
 
-const HEAD_FONT = "Cormorant Garamond";
-const BODY_FONT = "Montserrat";
-const ZH_FONT = "Noto Serif SC";
+// The agreement is set in Times New Roman 11pt, headings included; the
+// brand faces are the COVER's, which is the brand's own artwork. SimSun is
+// the Chinese face that pairs with Times in the firm's bilingual filings.
+const HEAD_FONT = "Times New Roman";
+const BODY_FONT = "Times New Roman";
+const COVER_HEAD_FONT = "Cormorant Garamond";
+const COVER_BODY_FONT = "Montserrat";
+const ZH_FONT = "SimSun";
 
 const CHARCOAL = "2B2523";
+const ORANGE = "FF7B00";
 const EMBER = "A34C00";
 const STONE = "5E5854";
 
@@ -40,7 +46,7 @@ const xmlEsc = (s) => String(s == null ? "" : s)
 
 // HTML entities retainer-doc emits, plus the few a clause may carry.
 const unescape = (s) => String(s == null ? "" : s)
-  .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+  .replace(/&nbsp;/g, "\u00a0").replace(/&amp;/g, "&").replace(/&lt;/g, "<")
   .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
   .replace(/&middot;/g, "·").replace(/&rarr;/g, "→");
 
@@ -84,7 +90,11 @@ function runsFrom(html, base = {}) {
   const re = /<(\/?)(strong|b|em|i)\b[^>]*>/gi;
   let at = 0, bold = !!base.bold, italic = !!base.italic, m;
   const push = (raw) => {
-    const t = unescape(raw.replace(/<[^>]+>/g, ""));
+    // The source wraps and indents its paragraphs. HTML collapses that
+    // run of newline-and-spaces; Word, with xml:space="preserve", prints
+    // it. Collapse ASCII whitespace only, so the non-breaking spaces
+    // after "Re:" survive as themselves.
+    const t = unescape(raw.replace(/<[^>]+>/g, "")).replace(/[ \t\r\n]+/g, " ");
     if (t) out.push(run(t, { ...base, bold, italic }));
   };
   while ((m = re.exec(html)) !== null) {
@@ -128,8 +138,57 @@ function tableXml(html) {
 }
 
 /** The agreement's rendered HTML body, as WordprocessingML. */
+/**
+ * The signature block, as a borderless two-column table.
+ *
+ * It has to be built rather than converted: the rules and the names are
+ * divs, and fromHtml reads block tags. That is why every Word copy of this
+ * agreement until now came out with nowhere to sign.
+ */
+function signatureBlock(names) {
+  const cell = (xml, { line = false } = {}) =>
+    `<w:tc><w:tcPr><w:tcW w:w="4680" w:type="dxa"/>` +
+    `<w:tcBorders>${line
+      ? `<w:bottom w:val="single" w:sz="6" w:color="${CHARCOAL}"/>`
+      : `<w:bottom w:val="nil"/>`}` +
+    `<w:top w:val="nil"/><w:left w:val="nil"/><w:right w:val="nil"/></w:tcBorders>` +
+    `</w:tcPr>${xml}</w:tc>`;
+  const gap = `<w:tc><w:tcPr><w:tcW w:w="480" w:type="dxa"/>` +
+    `<w:tcBorders><w:top w:val="nil"/><w:bottom w:val="nil"/>` +
+    `<w:left w:val="nil"/><w:right w:val="nil"/></w:tcBorders></w:tcPr>` +
+    `${para([run(" ")], { after: 0 })}</w:tc>`;
+  const row = (cells) => `<w:tr>${cells[0]}${gap}${cells[1]}</w:tr>`;
+
+  const blank = para([run(" ")], { before: 300, after: 40 });
+  const who = (n) => para(runsFrom(n, { size: 20 }), { after: 220 });
+  const when = para([run("Date: ____________________", { size: 20 })], { after: 0 });
+
+  return `<w:tbl>` +
+    `<w:tblPr><w:tblW w:w="9840" w:type="dxa"/>` +
+    `<w:tblBorders><w:top w:val="nil"/><w:bottom w:val="nil"/><w:left w:val="nil"/>` +
+    `<w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>` +
+    `<w:tblLayout w:type="fixed"/></w:tblPr>` +
+    row([cell(blank, { line: true }), cell(blank, { line: true })]) +
+    row([cell(who(names[0] || "")), cell(who(names[1] || ""))]) +
+    row([cell(when), cell(when)]) +
+    `</w:tbl>` + para([run(" ")], { after: 0 });
+}
+
 function fromHtml(html) {
   const out = [];
+
+  // The signature block comes out first: it is divs, which the loop below
+  // does not see, and a fee agreement with no signature lines is not one.
+  // A marker paragraph keeps its place in document order.
+  let sigXml = "";
+  html = html.replace(/<div class="sigs">([\s\S]*?)<\/div>\s*<\/section>/i, (_all, inner) => {
+    const names = [];
+    const who = /<div class="who">([\s\S]*?)<\/div>/gi;
+    let w;
+    while ((w = who.exec(inner)) !== null) names.push(w[1].replace(/<[^>]*>/g, "").trim());
+    sigXml = signatureBlock(names);
+    return `<p class="sigmark"> </p></section>`;
+  });
   // Block elements, in document order.
   const re = /<(h1|h2|h3|p|li|table)\b([^>]*)>([\s\S]*?)<\/\1>/gi;
   let m;
@@ -144,12 +203,16 @@ function fromHtml(html) {
     // The drafter's "why this clause is here" notes never leave the firm.
     if (/\bwhy\b/.test(cls)) continue;
 
-    if (tag === "h1") {
-      out.push(para(runsFrom(inner, { size: 34, bold: true, color: CHARCOAL, font: HEAD_FONT }),
-        { before: 120, after: 60, keepNext: true }));
+    if (/\bsigmark\b/.test(cls)) {
+      out.push(sigXml);
+    } else if (tag === "h1") {
+      // 22 half-points is 11pt. The title is centred and tracked rather
+      // than enlarged, which is how the page sets it.
+      out.push(para(runsFrom(inner, { size: 22, bold: true, font: HEAD_FONT, spacing: 12 }),
+        { align: "center", before: 240, after: 200, keepNext: true }));
     } else if (tag === "h2" || tag === "h3") {
-      out.push(para(runsFrom(inner, { size: 26, bold: true, color: CHARCOAL, font: HEAD_FONT }),
-        { before: 260, after: 80, keepNext: true }));
+      out.push(para(runsFrom(inner, { size: 22, bold: true, font: HEAD_FONT }),
+        { before: 240, after: 60, keepNext: true }));
     } else if (tag === "li") {
       out.push(para([run("•  ", { size: 22 }), ...runsFrom(inner)], { indent: 360, after: 90 }));
     } else if (/\bzh\b/.test(cls) && /\bmissing\b/.test(cls)) {
@@ -211,7 +274,18 @@ function sheetHeader(name) {
 </w:hdr>`;
 }
 
+/** The first page's header: present, and empty. */
+function emptyHeader() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr ${NS.w} ${NS.r} ${NS.wp} ${NS.a} ${NS.pic}>
+  <w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:p>
+</w:hdr>`;
+}
+
 function headerRels(target) {
+  // No image on the cover's header, so no relationship either.
+  if (!target) return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${target}"/>
@@ -231,19 +305,35 @@ function coverPage(FIRM, a) {
       { before: 260, after: 40, border: CHARCOAL }) +
     para(run(value || " ", { size: 22 }), { after: 180 });
 
+  // The brand cover's two bars, as borders on an empty paragraph: Seal
+  // Orange over Charcoal. A shaded paragraph would not print unless the
+  // person had background graphics on.
+  const bar = (color, weight) =>
+    `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>` +
+    `<w:pBdr><w:bottom w:val="single" w:sz="${weight}" w:color="${color}"/></w:pBdr>` +
+    `</w:pPr></w:p>`;
+
   return [
+    bar(ORANGE, 10),
+    bar(CHARCOAL, 22),
+    para([
+      run("TEZ", { size: 30, bold: true, color: ORANGE, font: COVER_BODY_FONT, spacing: 60 }),
+      run(" LAW FIRM", { size: 30, bold: true, color: CHARCOAL, font: COVER_BODY_FONT, spacing: 60 }),
+    ], { before: 520, after: 60 }),
+    para(run(FIRM.tagline.en, { size: 20, italic: true, color: EMBER, font: COVER_HEAD_FONT }),
+      { after: 900 }),
     para(run("Confidential  ·  Attorney–Client Communication",
-      { size: 17, bold: true, color: EMBER, spacing: 36 }), { before: 1400, after: 120 }),
-    para(run("Attorney–Client", { size: 64, bold: true, color: CHARCOAL, font: HEAD_FONT }),
+      { size: 17, bold: true, color: EMBER, spacing: 36 }), { before: 0, after: 120 }),
+    para(run("Attorney–Client", { size: 64, bold: true, color: CHARCOAL, font: COVER_HEAD_FONT }),
       { after: 0 }),
-    para(run("Fee Agreement", { size: 64, bold: true, color: CHARCOAL, font: HEAD_FONT }),
+    para(run("Fee Agreement", { size: 64, bold: true, color: CHARCOAL, font: COVER_HEAD_FONT }),
       { after: 80 }),
-    para(run("律师与客户委托收费协议", { size: 36, color: EMBER, font: ZH_FONT }), { after: 700 }),
+    para(run("律师与客户委托收费协议", { size: 36, color: EMBER, font: ZH_FONT }), { after: 560 }),
     rule("Client", a.client_name),
     rule("Matter", a.matter_label),
     rule("Responsible attorney", FIRM.attorney),
     rule("Date", when.long),
-    para(run(FIRM.dba, { size: 17, color: STONE }), { before: 900, after: 20 }),
+    para(run(FIRM.dba, { size: 17, color: STONE }), { before: 760, after: 20 }),
     para(run(FIRM.offices[0].lines.join(", "), { size: 17, color: STONE }), { after: 20 }),
     para(run(`${FIRM.phone} · ${FIRM.email}`, { size: 17, color: STONE }), { after: 20 }),
     para(run("Please read the full agreement before signing. Keep a copy for your records.",
@@ -293,14 +383,16 @@ function offices(FIRM) {
 
 // ── The container ───────────────────────────────────────────
 
-function wrap(bodyXml, { bilingual = false } = {}) {
+// `bilingual` is accepted and currently unused: it used to choose between
+// the English and Chinese first-page sheets, and there is no first-page
+// sheet any more -- the cover owns page one. Kept because callers pass it.
+function wrap(bodyXml, { bilingual = false } = {}) {  // eslint-disable-line no-unused-vars
   const PizZip = require("pizzip");
   const fs = require("fs");
   const path = require("path");
   const zip = new PizZip();
 
   const art = (f) => fs.readFileSync(path.join(__dirname, "assets", "brand", f));
-  const firstSheet = bilingual ? "letterhead-first-zh.png" : "letterhead-first-en.png";
 
   zip.file("[Content_Types].xml",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
@@ -319,15 +411,16 @@ function wrap(bodyXml, { bilingual = false } = {}) {
     `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>` +
     `</Relationships>`);
 
-  // The firm's own sheets. header1 is every page after the first, header2
-  // is the first -- the same split, and the same two files, as the firm's
-  // letterhead template.
+  // header1 runs on every page after the first. header2 is the FIRST page,
+  // which is the cover -- and the cover carries the firm's mark itself, so
+  // that header is deliberately empty. It used to hold the full first-page
+  // sheet, which put a second shield and a second footer on top of the
+  // cover's own.
   zip.file("word/media/letterhead-continuation.png", art("letterhead-continuation.png"));
-  zip.file("word/media/letterhead-first.png", art(firstSheet));
   zip.file("word/header1.xml", sheetHeader("Continuation sheet"));
-  zip.file("word/header2.xml", sheetHeader("Letterhead"));
+  zip.file("word/header2.xml", emptyHeader());
   zip.file("word/_rels/header1.xml.rels", headerRels("media/letterhead-continuation.png"));
-  zip.file("word/_rels/header2.xml.rels", headerRels("media/letterhead-first.png"));
+  zip.file("word/_rels/header2.xml.rels", headerRels(null));
 
   zip.file("word/_rels/document.xml.rels",
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
@@ -343,13 +436,16 @@ function wrap(bodyXml, { bilingual = false } = {}) {
     `<w:sectPr>` +
     `<w:headerReference w:type="default" r:id="rIdH1"/>` +
     `<w:headerReference w:type="first" r:id="rIdH2"/>` +
-    // titlePg: the first page takes the letterhead, the rest the
-    // continuation sheet. Without it Word uses one header for all.
+    // titlePg: the first page (the cover) takes the empty header, every
+    // page after it the continuation sheet. Without it Word uses one
+    // header for all and the cover gets a letterhead on top of it.
     `<w:titlePg/>` +
     `<w:pgSz w:w="12240" w:h="15840"/>` +
-    // The firm's letterhead margins: 1.3in top so text clears the header
-    // artwork, 0.75in sides, 1.0in bottom so it clears the addresses.
-    `<w:pgMar w:top="1872" w:right="1080" w:bottom="1440" w:left="1080" w:header="0" w:footer="0"/>` +
+    // Measured off the continuation sheet, not guessed: its ink stops at
+    // 0.85in and its rule sits at 10.47in, so 1.15in top (1656 twips) and
+    // 0.80in bottom (1152). The old 1.3in/1.0in was the FIRST-page sheet's,
+    // whose office block starts at 9.35in -- text ran through it.
+    `<w:pgMar w:top="1656" w:right="1080" w:bottom="1152" w:left="1080" w:header="0" w:footer="0"/>` +
     `</w:sectPr></w:body></w:document>`);
 
   return zip.generate({ type: "nodebuffer", compression: "DEFLATE" });
@@ -362,7 +458,8 @@ function wrap(bodyXml, { bilingual = false } = {}) {
  * doc — retainer-doc, which renders the body and holds FIRM
  */
 function build(a = {}, doc) {
-  const html = doc.body(a, { forClient: true });
+  // Without the cover and the letter's head: this builder makes its own.
+  const html = doc.body(a, { forClient: true, withLetterhead: false });
   // The offices are on the letterhead sheet itself now, so they are not
   // printed a second time at the end.
   return wrap(

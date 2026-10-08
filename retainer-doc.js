@@ -13,9 +13,14 @@
 //  packet is built from. No new dependency, and the review step
 //  is the page itself rather than a preview of a preview.
 //
-//  Two audiences, one document. `forClient` strips the margin
-//  notes that tell the drafter which rule a clause is there to
-//  satisfy; the client's copy carries none of them.
+//  One document, one audience. The margin notes that used to tell
+//  the drafter which rule each clause satisfies are gone from the
+//  rendered agreement -- "do not include the explanations in the
+//  fee agreement" (JJ, 2026-10-07). The reasons themselves are not
+//  lost: they stay on the clause as `because` in retainer.js, where
+//  the drafting screen and check-retainer.js read them. `forClient`
+//  is still accepted so existing callers keep working, and both
+//  values now render the identical document.
 // ============================================================
 
 const R = require("./retainer");
@@ -44,9 +49,26 @@ const FIRM = {
   ],
 };
 
-const longDate = (d) => new Date(d || Date.now()).toLocaleDateString("en-US", {
-  timeZone: "America/Los_Angeles", year: "numeric", month: "long", day: "numeric",
-});
+/**
+ * The date printed on the paper.
+ *
+ * A stored "YYYY-MM-DD" is a calendar date, not an instant -- the same
+ * contract court-calendar.js states at the top. `new Date("2026-10-07")`
+ * is midnight UTC, which is 5pm on the 6th in Los Angeles, so formatting
+ * it in Pacific printed the day before and the agreement was dated a day
+ * early. Parse the three numbers and name the month; never convert.
+ */
+const MONTHS = ["January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"];
+
+const longDate = (d) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ""));
+  if (m) return `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}`;
+  const now = d ? new Date(d) : new Date();
+  return now.toLocaleDateString("en-US", {
+    timeZone: "America/Los_Angeles", year: "numeric", month: "long", day: "numeric",
+  });
+};
 
 /**
  * The cover, from 03-Print-Pack/04-Client-Folder/TEZ-Fee-Agreement-Cover.
@@ -64,7 +86,13 @@ function coverPage(a) {
       <div class="cv-value">${esc(value || "")}</div>
     </div>`;
 
+  // The cover owns page one outright: it is positioned over the whole
+  // sheet, letterhead artwork and all, so the firm's mark appears once
+  // rather than twice. `.cover-slot` is the in-flow block that reserves
+  // the page for it -- exactly one text box tall, so the letter starts
+  // on page two whatever the cover contains.
   return `
+    <div class="cover-slot">
     <section class="cover">
       <div class="cv-bars"><span class="cv-bar-orange"></span><span class="cv-bar-dark"></span></div>
       <img class="cv-logo" src="/brand/logo-light.svg" alt="TEZ Law">
@@ -87,31 +115,45 @@ function coverPage(a) {
           Please read the full agreement<br>before signing. Keep a copy<br>for your records.
         </div>
       </div>
-    </section>`;
+    </section>
+    </div>`;
 }
 
 /**
- * The letterhead sheet itself -- the firm's own 300dpi artwork, not a
- * redrawing of it. The English and Chinese sheets are different files;
- * a bilingual agreement gets the Chinese one, which is what the office
- * would reach for.
+ * The letterhead at the head of the letter.
  *
- * In the browser this sits behind page one. CSS cannot reliably put a
- * different image behind every printed page across browsers, so the Word
- * export is what carries the letterhead on every sheet -- first-page
- * header and continuation header, the way the firm's own letterhead .docx
- * is built. The print view says so on screen.
+ * This used to be the firm's full-page 2550x3300 artwork dropped in as an
+ * image, and that is what JJ was looking at when he said the alignment was
+ * off. Three things were wrong with it at once. The image was scaled to the
+ * 7.5in text column, so an 8.5in sheet lost 12% and the logo no longer sat
+ * on the text's left margin. It was absolutely positioned against the whole
+ * document, so it landed on the COVER and collided with the cover's own
+ * mark -- two shields, two footers, overlapping. And nothing put it on page
+ * two onwards, while the body still reserved 2.1in at the top of every page
+ * for a header that was not there.
+ *
+ * So: the mark is set in HTML, in the text column, which makes it aligned
+ * by construction rather than by a number that has to be kept in step with
+ * the artwork. The rule is a border, not a background, so it prints whether
+ * or not "Background graphics" is ticked. The firm's real sheet still goes
+ * on every page of the Word export, which is where a per-page letterhead
+ * actually works -- CSS cannot put one behind every printed page in Chrome,
+ * and the fixed-position version of this was painting it once, mid-document.
  */
 function letterhead(a) {
-  const sheet = a.bilingual ? "/brand/letterhead-first-zh.png" : "/brand/letterhead-first-en.png";
   return `
-    <img class="sheet-art" src="${sheet}" alt="">
+    <div class="sheet-head">
+    <div class="lh">
+      <img class="lh-mark" src="/brand/logo-light.svg" alt="TEZ Law Firm">
+      <div class="lh-tag">${esc(FIRM.tagline.en)}</div>
+    </div>
     <div class="letter">
       <p class="date">${esc(longDate(a.agreement_date || a.date))}</p>
       ${a.client_name ? `<p class="attn">${esc(a.client_name)}</p>` : ""}
       <p class="re"><strong>Re:&nbsp;&nbsp;Attorney–Client Fee Agreement${
         a.matter_label ? " — " + esc(a.matter_label) : ""}</strong></p>
       <p class="dear">Dear ${esc(a.client_name || "Client")}:</p>
+    </div>
     </div>`;
 }
 
@@ -216,7 +258,12 @@ function feeSection(a) {
 
 // ── The document ─────────────────────────────────────────────
 
-function body(a, { forClient = true } = {}) {
+// withLetterhead:false returns the agreement without the cover and
+// without the letter's head. The Word exporter builds both natively -- a
+// real cover page and a real first-page header -- so it asks for the body
+// alone; passing it the whole thing printed the date, the Re line and the
+// salutation twice.
+function body(a, { forClient = true, withLetterhead = true } = {}) {
   const keys = R.clausesFor(a);
   const scope = (a.scope || []).filter(Boolean);
   const bilingual = !!a.bilingual;
@@ -224,8 +271,6 @@ function body(a, { forClient = true } = {}) {
   const clause = (k, n) => {
     const c = R.CLAUSES[k];
     if (!c) return "";
-    const note = !forClient && c.because
-      ? `<p class="why">Why this is here: ${esc(c.because)}</p>` : "";
     const zh = bilingual && c.zh
       ? `<p class="zh">${esc(c.zh)}</p>`
       : bilingual
@@ -236,15 +281,14 @@ function body(a, { forClient = true } = {}) {
         <h2>${n}. ${esc(c.title.en)}${bilingual && c.title.zh ? ` · ${esc(c.title.zh)}` : ""}</h2>
         <p>${esc(c.en)}</p>
         ${zh}
-        ${note}
       </section>`;
   };
 
   let n = 0;
   return `
-    ${coverPage(a)}
+    ${withLetterhead ? coverPage(a) : ""}
 
-    ${letterhead(a)}
+    ${withLetterhead ? letterhead(a) : ""}
 
     <h1>Attorney–Client Fee Agreement${bilingual ? " · 律师与客户委托收费协议" : ""}</h1>
 
@@ -262,13 +306,11 @@ function body(a, { forClient = true } = {}) {
         a.structure === "hybrid"
           ? "If you ask us to do work outside it and we agree, that work is billed by the hour at the rates below."
           : "If you want us to take on additional work, we will agree that separately, in writing."}</p>
-      ${!forClient ? `<p class="why">Why this is here: § 6148(a)(2) — the general nature of the services must be stated, or the agreement is voidable by the client.</p>` : ""}
     </section>
 
     <section class="clause">
       <h2>${++n}. Fees and Costs${bilingual ? " · 費用" : ""}</h2>
       ${feeSection(a)}
-      ${!forClient ? `<p class="why">Why this is here: § 6148(a)(1) — the rates and other charges. For a contingency, § 6147(a).</p>` : ""}
     </section>
 
     <section class="clause">
@@ -278,7 +320,6 @@ function body(a, { forClient = true } = {}) {
         offer of settlement or any decision from a court or agency.</p>
       <p>We cannot and do not guarantee any particular result. No one can. Nothing said by anyone at the firm
         is a promise about the outcome of your matter.</p>
-      ${!forClient ? `<p class="why">Why this is here: § 6148(a)(3) — each party's responsibilities.</p>` : ""}
     </section>
 
     ${keys.map((k) => clause(k, ++n)).join("")}
@@ -287,7 +328,6 @@ function body(a, { forClient = true } = {}) {
       <h2>${++n}. ${esc(R.CLAUSES.language.title.en)} · ${esc(R.CLAUSES.language.title.zh)}</h2>
       <p>${esc(R.CLAUSES.language.en)}</p>
       <p class="zh">${esc(R.CLAUSES.language.zh)}</p>
-      ${!forClient ? `<p class="why">Why this is here: Civ. Code § 1632(b)(6) and (j) — legal services negotiated mainly in Chinese require a translation delivered before execution, and the English controls on conflict.</p>` : ""}
     </section>` : ""}
 
     <section class="signatures">
@@ -297,7 +337,7 @@ function body(a, { forClient = true } = {}) {
       <div class="sigs">
         <div class="sig">
           <div class="rule"></div>
-          <div class="who">${esc(FIRM.name)}</div>
+          <div class="who">${esc(FIRM.entity)}, doing business as ${esc(FIRM.name)}</div>
           <div class="when">Date: <span class="rule short"></span></div>
         </div>
         <div class="sig">
@@ -332,95 +372,124 @@ const CSS = `
   @font-face { font-family:"Noto Serif SC"; font-weight:600;
     src:url("/brand-fonts/TezSerif-Bold.ttf") format("truetype"); font-display:swap; }
 
-  /* The firm's letterhead margins, from its Word template: 1.3in top so the
-     text clears the header artwork, 0.75in sides, 1.0in bottom so it clears
-     the office addresses. */
-  @page { size: letter; margin: 1.3in 0.75in 1in; }
+  /* ── Page geometry ──────────────────────────────────────────
+     Measured off the artwork rather than guessed. The continuation
+     sheet carries ink from 0.50in to 0.85in at the head and a rule at
+     10.47in; the text box is set clear of both. The old 1.3in/1.0in
+     came from the Word template's FIRST-page sheet, whose office block
+     starts at 9.35in -- which is why body text was printing straight
+     through the addresses. */
+  @page { size: letter; margin: 1.15in 0.75in 0.8in; }
+
   /* Straight from the brand board. --orange is the Seal Orange of the logo
      and the rules; --ember is orange TEXT on light, which is a different
      colour and was being used for both. */
   :root { --ink:#1E1B1A; --charcoal:#2B2523; --orange:#FF7B00; --ember:#A34C00;
-          --stone:#5E5854; --travertine:#E8E3DC; --marble:#FAF8F5; }
+          --stone:#5E5854; --travertine:#E8E3DC; --marble:#FAF8F5;
+          --pad-t:1.15in; --pad-x:0.75in; --pad-b:0.8in; }
   * { box-sizing: border-box; }
-  body { margin:0; background:#FAF8F5; color:var(--ink);
-    font-family:"Brand Sans",Montserrat,"Helvetica Neue",Arial,sans-serif; font-size:11pt; line-height:1.55; }
-  .sheet { max-width:7.5in; margin:0 auto; padding:0.5in 0; background:#FFFFFF;
-    position:relative; }
-  /* Everything that is not the letterhead artwork sits above it. */
-  .sheet > *:not(.sheet-art) { position:relative; z-index:1; }
-  .letter { padding-top:2.1in; }   /* clears the header artwork on the sheet */
-  /* ── The cover, from TEZ-Fee-Agreement-Cover ── */
-  .cover { position:relative; min-height:9.4in; padding:0 0 0 0; page-break-after:always;
-    break-after:page; }
-  .cv-bars { display:flex; flex-direction:column; margin:-0.3in -0.35in 0.75in; }
-  .cv-bar-orange { height:7px; background:var(--orange); }
-  .cv-bar-dark { height:16px; background:var(--charcoal); }
-  .cv-logo { width:1.35in; height:auto; display:block; margin-bottom:1.2in; }
+
+  /* ── The document's type ────────────────────────────────────
+     "the font should be times new roman and 11 font." Times New Roman
+     11pt throughout the agreement, headings included -- bold and, for
+     the title, a little tracking, which is how a fee agreement is set.
+     The cover keeps the brand faces: it is the brand's own artwork, not
+     body text. Chinese pairs SimSun/Songti with Times, which is the
+     pairing the firm's bilingual filings already use. */
+  body { margin:0; background:var(--marble); color:var(--ink);
+    font-family:"Times New Roman",Times,serif; font-size:11pt; line-height:1.45; }
+
+  .sheet { width:8.5in; margin:0 auto; background:#FFFFFF; position:relative;
+    padding:var(--pad-t) var(--pad-x) var(--pad-b); }
+
+  /* The letterhead, set in the text column so it lines up with the body by
+     construction. The rule is a border rather than a background so it
+     survives a print with "Background graphics" unticked. */
+  .lh { display:flex; align-items:flex-end; justify-content:space-between; gap:0.4in;
+    border-bottom:1.5pt solid var(--orange); padding-bottom:9px; margin-bottom:0.42in; }
+  .lh-mark { height:0.78in; width:auto; display:block; }
+  .lh-tag { font-family:"Cormorant Garamond",Georgia,serif; font-size:11pt; font-style:italic;
+    color:var(--ember); text-align:right; line-height:1.25; padding-bottom:2px; }
+
+  /* ── The cover ──────────────────────────────────────────────
+     Page one outright: .cover-slot is one text box tall, so the letter
+     always begins on page two, and the cover itself is laid over the
+     whole sheet so the firm's mark appears once instead of twice. */
+  .cover-slot { page-break-after:always; break-after:page; }
+  .cover { height:9.05in; overflow:hidden; display:flex; flex-direction:column;
+    font-family:"Brand Sans",Montserrat,"Helvetica Neue",Arial,sans-serif; }
+  /* Borders, not filled divs: a background does not print unless the person
+     ticks "Background graphics", and these two bars are the brand's. */
+  .cv-bars { border-top:7px solid var(--orange); border-bottom:16px solid var(--charcoal);
+    height:0; margin-bottom:0.75in; }
+  .cv-bar-orange, .cv-bar-dark { display:none; }
+  .cv-logo { width:1.35in; height:auto; display:block; margin-bottom:0.9in; }
   .cv-eyebrow { font-size:8.5pt; letter-spacing:.18em; text-transform:uppercase;
     color:var(--ember); font-weight:600; margin-bottom:10px; }
+  /* .cv-title is an h1, so it has to put back everything the body h1 rule
+     sets -- the cover is the brand's artwork, not a section heading. */
   .cv-title { font-family:"Cormorant Garamond",Georgia,serif; font-weight:600; font-size:34pt;
-    line-height:1.08; color:var(--charcoal); margin:0 0 6px; }
+    line-height:1.08; color:var(--charcoal); margin:0 0 6px;
+    text-align:left; text-transform:none; letter-spacing:0; }
   .cv-title-zh { font-family:"Noto Serif SC",serif; font-size:19pt; color:var(--ember);
-    margin-bottom:0.9in; }
-  .cv-fields { display:grid; grid-template-columns:1fr 1fr; gap:26px 40px; margin-bottom:1.1in; }
+    margin-bottom:0.55in; }
+  .cv-fields { display:grid; grid-template-columns:1fr 1fr; gap:24px 40px; }
   .cv-rule { border-top:1px solid var(--charcoal); margin-bottom:7px; }
   .cv-label { font-size:8pt; letter-spacing:.14em; text-transform:uppercase; color:var(--charcoal);
     font-weight:600; }
   .cv-value { font-size:11pt; color:var(--ink); margin-top:4px; min-height:1.2em; }
   .cv-foot { display:flex; justify-content:space-between; gap:30px; font-size:9pt;
-    color:var(--stone); border-top:1px solid var(--travertine); padding-top:12px; }
+    color:var(--stone); border-top:1px solid var(--travertine); padding-top:12px;
+    margin-top:auto; }
   .cv-foot-right { text-align:right; }
 
-  /* ── The letterhead sheet, the firm's own artwork ── */
-  .sheet-art { position:absolute; inset:0; width:100%; height:auto; z-index:0;
-    pointer-events:none; }
-  .doc-head { border-bottom:2px solid var(--ember); padding-bottom:11px; margin-bottom:26px;
-    text-align:center; }
-  /* nowrap, because tracking this wide used to let "LAW" break across the
-     line and the wordmark came out as "L AW". */
-  .mark { font-family:"Cormorant Garamond",Georgia,serif; font-size:23pt; letter-spacing:.2em;
-    text-transform:uppercase; color:var(--charcoal); white-space:nowrap; font-weight:600; }
-  .doc-head .sub { font-size:8.5pt; letter-spacing:.04em; color:var(--stone); margin-top:3px; }
+  /* ── The letter ─────────────────────────────────────────────
+     No top padding any more: the page box already clears the artwork,
+     and the 2.1in that used to sit here was reserving room for a header
+     that had been pushed onto the cover. */
+  .letter { padding-top:0; }
   .letter p { margin:0 0 6px; }
-  .letter .date { color:var(--stone); }
+  .letter .date { margin-bottom:14px; }
   .letter .re { margin-top:12px; }
   .letter .dear { margin-top:12px; }
-  h1 { font-family:"Cormorant Garamond",Georgia,serif; font-size:19pt; font-weight:600;
-    color:var(--charcoal); margin:0 0 2px; }
-  .meta { color:var(--stone); font-size:9.5pt; margin:0 0 22px; }
-  h2 { font-family:"Cormorant Garamond",Georgia,serif; font-size:13pt; font-weight:600;
-    color:var(--charcoal); margin:22px 0 7px; page-break-after:avoid; }
-  p, li { margin:0 0 9px; }
-  ul { margin:0 0 10px; padding-left:22px; }
+
+  h1 { font-family:"Times New Roman",Times,serif; font-size:11pt; font-weight:bold;
+    letter-spacing:.06em; text-transform:uppercase; text-align:center;
+    color:var(--ink); margin:26px 0 18px; }
+  h2 { font-family:"Times New Roman",Times,serif; font-size:11pt; font-weight:bold;
+    color:var(--ink); margin:16px 0 5px; page-break-after:avoid; break-after:avoid; }
+  p, li { margin:0 0 8px; }
+  ul { margin:0 0 9px; padding-left:24px; }
   .clause { page-break-inside:auto; }
-  .zh { font-family:"Noto Serif SC","Songti SC","STSong",SimSun,serif; font-size:10.5pt; color:var(--charcoal); }
-  .zh.missing { color:var(--ember); background:#FFF4E8; border-left:3px solid #FF7B00;
-    padding:8px 11px; font-family:Montserrat,sans-serif; font-size:9.5pt; }
-  .why { font-size:9pt; color:var(--ember); background:#FAF8F5; border-left:3px solid var(--travertine);
-    padding:6px 10px; margin:4px 0 12px; }
-  table.fees { width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:10.5pt; }
-  table.fees th { text-align:left; font-size:8.5pt; letter-spacing:.06em; text-transform:uppercase;
-    color:var(--stone); border-bottom:1px solid var(--travertine); padding:5px 8px; }
-  table.fees td { padding:6px 8px; border-bottom:1px solid #F3EFE9; vertical-align:top; }
-  .consent { background:#FFF4E8; border-left:3px solid #FF7B00; padding:10px 13px; }
-  .siglet { font-size:10pt; color:var(--stone); }
+  .zh { font-family:"Noto Serif SC","Songti SC","STSong",SimSun,serif;
+    font-size:10.5pt; line-height:1.6; color:var(--ink); }
+  .zh.missing { color:var(--ember); font-style:italic; }
+  table.fees { width:100%; border-collapse:collapse; margin:8px 0 12px; font-size:10.5pt;
+    page-break-inside:avoid; break-inside:avoid; }
+  table.fees th { text-align:left; font-size:10pt; font-weight:bold;
+    border-bottom:1px solid var(--charcoal); padding:5px 8px 4px; }
+  table.fees td { padding:5px 8px; border-bottom:1px solid var(--travertine); vertical-align:top; }
+  .consent { border:1px solid var(--charcoal); padding:9px 12px; margin:10px 0; }
+  .siglet { font-size:10.5pt; }
   .rule { border-bottom:1px solid var(--charcoal); height:1.6em; }
   .rule.short { display:inline-block; width:1.6in; border-bottom:1px solid var(--charcoal); height:1em; }
-  .signatures { margin-top:30px; page-break-inside:avoid; }
-  .sigs { display:flex; gap:40px; margin-top:22px; }
+  .signatures { margin-top:28px; page-break-inside:avoid; break-inside:avoid; }
+  .sigs { display:flex; gap:40px; margin-top:20px; }
   .sig { flex:1; }
-  .sig .who { font-size:9.5pt; color:var(--stone); margin-top:5px; }
-  .sig .when { font-size:9.5pt; color:var(--stone); margin-top:12px; }
+  .sig .who { font-size:10pt; margin-top:5px; }
+  .sig .when { font-size:10pt; margin-top:12px; }
   /* Ran off the bottom of the last page and lost the New York office.
      Kept together, and allowed its own page if that is what it takes. */
-  .offices { margin-top:36px; padding-top:14px; border-top:1px solid var(--travertine);
-    font-size:8.5pt; color:var(--stone); display:flex; gap:22px; flex-wrap:wrap;
+  .offices { margin-top:30px; padding-top:12px; border-top:1px solid var(--travertine);
+    font-size:9pt; color:var(--stone); display:flex; gap:22px; flex-wrap:wrap;
     page-break-inside:avoid; break-inside:avoid; }
-  .offices .t { width:100%; font-family:"Cormorant Garamond",Georgia,serif; font-size:11pt;
-    letter-spacing:.12em; text-transform:uppercase; color:var(--charcoal); margin-bottom:6px; }
+  .offices .t { width:100%; font-size:10pt; font-weight:bold;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--charcoal); margin-bottom:6px; }
   .offices .o { min-width:1.6in; }
   .offices .n { font-style:italic; }
-  .actions { max-width:7.5in; margin:0 auto; padding:14px 0 0; display:flex; gap:10px;
+
+  /* ── Screen only ────────────────────────────────────────────  */
+  .actions { width:8.5in; margin:0 auto; padding:14px 0 10px; display:flex; gap:10px;
     align-items:center; flex-wrap:wrap; }
   .actions form { margin:0; }
   .btn { display:inline-block; background:#F3EFE9; color:var(--charcoal); border:1px solid var(--travertine);
@@ -429,11 +498,17 @@ const CSS = `
   .btn.primary { background:var(--ember); color:#FFFFFF; border-color:var(--ember); }
   .btn.dark { background:var(--charcoal); color:#FFFFFF; border-color:var(--charcoal); }
   .btn.plain { background:transparent; border-color:transparent; color:var(--stone); font-weight:400; }
-  .actions .hint { font-size:9pt; color:var(--stone); font-style:italic; }
+  .actions .hint { font-size:9pt; color:var(--stone); font-style:italic;
+    font-family:"Brand Sans",Montserrat,sans-serif; }
+  @media screen {
+    .sheet { box-shadow:0 1px 3px rgba(43,37,35,.14), 0 10px 30px rgba(43,37,35,.07);
+      margin-bottom:0.4in; }
+  }
+
   @media print {
     body { background:#FFFFFF; }
-    .sheet { padding:0; max-width:none; }
-    .why { display:none; }
+    /* @page supplies the margins now, so the sheet is the bare paper. */
+    .sheet { width:auto; padding:0; box-shadow:none; margin:0; }
     .no-print { display:none !important; }
   }
 `;
@@ -464,7 +539,8 @@ function actionBar(id) {
       </form>
       <a class="btn plain" href="/admin/retainer/${encodeURIComponent(id)}">Back to the draft</a>
       <span class="hint">In the print dialog, untick <em>Headers and footers</em> to drop the URL and date.
-        The Word file carries the letterhead on every page; this view carries it on the first.</span>
+        This view puts the firm's mark at the head of the letter; the Word file puts the full
+        letterhead sheet on every page, which is what to send when that matters.</span>
     </div>`;
 }
 

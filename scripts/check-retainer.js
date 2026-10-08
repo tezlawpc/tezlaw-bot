@@ -330,9 +330,19 @@ check("the page contributes no script of its own", () => {
     "notify-admin.js's rule; a page that sets fee terms is the last one to let break");
 });
 
-check("the client's copy carries no internal notes", () => {
-  assert.ok(!/Why this is here/.test(DOC.render(flat, { forClient: true })));
-  assert.ok(/Why this is here/.test(DOC.render(flat, { forClient: false })));
+check("the agreement carries no internal notes, in either view", () => {
+  // "do not include the explanations in the fee agreement" (JJ, 2026-10-07).
+  // They used to be on the attorney's view, one print setting away from a
+  // client's copy. Both views now render the identical document.
+  const asClient = DOC.render(flat, { forClient: true });
+  const asDrafter = DOC.render(flat, { forClient: false });
+  assert.ok(!/Why this is here/.test(asClient), "a note reached the client's copy");
+  assert.ok(!/Why this is here/.test(asDrafter), "a note is still rendered for the drafter");
+  assert.ok(!/class="why"/.test(asDrafter), "the note element is still in the document");
+  assert.strictEqual(asClient, asDrafter, "the two views have drifted apart again");
+  // The reasons are not lost -- they stay on the clause, where the drafting
+  // screen and this file read them.
+  assert.ok(R.CLAUSES.scope_limits.because, "the clause lost the reason it is there");
 });
 
 check("the firm signs first, and the offices are on it", () => {
@@ -407,14 +417,25 @@ const sample = {
   operating_account_consent: true,
 };
 
-check("the letterhead is the firm's own artwork, not a redrawing of it", () => {
+check("the letterhead sits in the text column, and the mark appears once", () => {
   const html = DOC.render(sample, { forClient: true, id: 7 });
-  // The brand set ships the letterhead as a full-page 300dpi sheet. Drawing
-  // an approximation of it in CSS is what JJ caught on 2026-10-07.
-  assert.ok(/<img class="sheet-art" src="\/brand\/letterhead-first-en\.png"/.test(html),
-    "the English letterhead sheet is not used");
-  assert.ok(!/Tez Law P\.C\. &nbsp;·&nbsp; A Professional Corporation/.test(html),
-    "the hand-drawn header is still being printed over the artwork");
+  // "alignment is off." Three faults at once, and this is the guard on all
+  // three. (a) The full-page 8.5in sheet was scaled into the 7.5in text
+  // column, so the logo no longer sat on the text's left margin. (b) It was
+  // positioned against the whole document, so it landed on the COVER and
+  // collided with the cover's own mark. (c) Nothing put it on page two
+  // onward, while the body still reserved 2.1in at the top of every page
+  // for it.
+  assert.ok(/<img class="lh-mark" src="\/brand\/logo-light\.svg"/.test(html),
+    "the letter has no letterhead mark");
+  assert.ok(!/class="sheet-art"/.test(html) && !/class="page-art"/.test(html),
+    "the full-page sheet is back in the HTML, where it cannot be made to align");
+  assert.ok(!/letterhead-first-(en|zh)\.png/.test(html),
+    "a first-page sheet would print on top of the cover's own mark");
+  assert.ok(!/padding-top:2\.1in/.test(DOC.CSS.replace(/\s+/g, "")),
+    "the letter still reserves room for a header that is not there");
+  assert.ok(/\.lh\{[^}]*border-bottom:1\.5ptsolidvar\(--orange\)/.test(DOC.CSS.replace(/\s+/g, "")),
+    "the rule under the mark is not a border, so it vanishes when Background graphics is off");
   for (const f of ["letterhead-first-en.png", "letterhead-first-zh.png",
                    "letterhead-continuation.png", "logo-light.svg"]) {
     assert.ok(fs.existsSync(path.join(ROOT, "assets", "brand", f)), `assets/brand/${f} is missing`);
@@ -424,10 +445,17 @@ check("the letterhead is the firm's own artwork, not a redrawing of it", () => {
     "nothing serves assets/brand");
 });
 
-check("a bilingual agreement gets the Chinese sheet", () => {
+check("a bilingual agreement is bilingual on the page, not just on the sheet", () => {
+  // The HTML no longer picks a letterhead by language, because it no longer
+  // uses a full-page sheet at all -- what makes a draft Chinese is the
+  // Chinese in it. The per-page letterhead lives in the Word file.
   const zh = DOC.render({ ...sample, bilingual: true }, { forClient: true, id: 7 });
-  assert.ok(zh.includes("/brand/letterhead-first-zh.png"),
-    "a Chinese agreement would go out on the English letterhead");
+  const en = DOC.render(sample, { forClient: true, id: 7 });
+  assert.ok(zh.includes("客戶信託帳戶") || zh.includes("服務範圍"),
+    "a bilingual draft has no Chinese in it");
+  assert.ok(!/[一-龥]/.test(plain(en).replace(/律师与客户委托收费协议/g, "")),
+    "an English-only draft is carrying Chinese");
+  assert.ok(/SimSun|Songti/.test(DOC.CSS), "no Chinese face is specified, so Word substitutes one");
 });
 
 check("the cover is the brand's fee-agreement cover", () => {
@@ -451,9 +479,49 @@ check("the contracting party is the P.C., not the trade name", () => {
     "the agreement still names the trade name as the contracting party");
 });
 
-check("the page geometry is the firm's letterhead template's", () => {
-  assert.ok(/@page \{ size: letter; margin: 1\.3in 0\.75in 1in; \}/.test(DOC.CSS),
-    "the margins do not match the letterhead, so text will sit on the artwork");
+check("the page geometry is measured off the artwork, not off the old template", () => {
+  // letterhead-continuation.png is 2550x3300 at 300dpi. Its ink runs
+  // 0.50-0.85in at the head and its rule sits at 10.47in, so the text box
+  // is 1.15in down and 0.80in up. The old 1.3in/1.0in came from the
+  // FIRST-page sheet, whose office block starts at 9.35in -- which is why
+  // body text was printing through the addresses.
+  assert.ok(/@page \{ size: letter; margin: 1\.15in 0\.75in 0\.8in; \}/.test(DOC.CSS),
+    "the margins no longer match the sheet the document actually prints on");
+  const px = (inches) => Math.round(inches * 300);
+  const png = fs.readFileSync(path.join(ROOT, "assets", "brand", "letterhead-continuation.png"));
+  assert.strictEqual(png.readUInt32BE(16), px(8.5), "the sheet is not 8.5in wide at 300dpi");
+  assert.strictEqual(png.readUInt32BE(20), px(11), "the sheet is not 11in tall at 300dpi");
+});
+
+check("the agreement is set in Times New Roman 11pt", () => {
+  // "the font should be times new roman and 11 font."
+  const css = DOC.CSS.replace(/\s+/g, "");
+  assert.ok(/body\{[^}]*font-family:"TimesNewRoman",Times,serif;font-size:11pt/.test(css),
+    "the body is not Times New Roman 11pt");
+  for (const sel of ["h1", "h2"]) {
+    const m = new RegExp(sel + "\\{[^}]*font-family:\"TimesNewRoman\"[^}]*font-size:11pt").test(css);
+    assert.ok(m, `${sel} is not Times New Roman 11pt`);
+  }
+  // The cover is the brand's own artwork and keeps the brand faces.
+  assert.ok(/\.cv-title\{[^}]*font-family:"CormorantGaramond"/.test(css),
+    "the cover lost the brand face");
+  // And the Word file is set the same way: 22 half-points is 11pt.
+  const src = fs.readFileSync(path.join(ROOT, "retainer-docx.js"), "utf8");
+  assert.ok(/const BODY_FONT = "Times New Roman"/.test(src), "the Word body is not Times New Roman");
+  assert.ok(/const HEAD_FONT = "Times New Roman"/.test(src), "the Word headings are not Times New Roman");
+  assert.ok(/size = 22/.test(src), "the Word default is no longer 11pt");
+});
+
+check("the date printed is the date stored, not the day before", () => {
+  // court-calendar.js's contract: a date with no zone is the date on the
+  // paper and is never converted. new Date("2026-10-07") is midnight UTC,
+  // which is 5pm on the 6th in Los Angeles -- the agreement was coming out
+  // dated a day early. Same bug as the Word filename, twice before.
+  const t = plain(DOC.render({ ...sample, agreement_date: "2026-10-07" }));
+  assert.ok(t.includes("October 7, 2026"), "the printed date is not the stored date");
+  assert.ok(!t.includes("October 6, 2026"), "the date slipped a day on the way to the page");
+  const jan = plain(DOC.render({ ...sample, agreement_date: "2026-01-01" }));
+  assert.ok(jan.includes("January 1, 2026"), "a new-year date slipped into the previous year");
 });
 
 check("Seal Orange and Ember are two different colours again", () => {
@@ -472,21 +540,33 @@ check("the Word file carries the letterhead on every page", () => {
   assert.ok(doc.includes("<w:titlePg/>"), "Word would use one header for every page");
   assert.ok(/w:type="first" r:id="rIdH2"/.test(doc), "no first-page header");
   assert.ok(/w:type="default" r:id="rIdH1"/.test(doc), "no continuation header");
-  assert.ok(z.file("word/media/letterhead-first.png"), "the letterhead sheet is not embedded");
   assert.ok(z.file("word/media/letterhead-continuation.png"), "the continuation sheet is not embedded");
-  assert.ok(/behindDoc="1"/.test(z.file("word/header2.xml").asText()),
+  // header2 is the first page, which is the cover; it is empty on purpose.
+  // See "the Word file's cover page has no letterhead behind it".
+  assert.ok(/behindDoc="1"/.test(z.file("word/header1.xml").asText()),
     "the artwork would print on top of the text");
-  // 1.3in top = 1872 twips; 0.75in sides = 1080.
-  assert.ok(/w:top="1872"/.test(doc) && /w:left="1080"/.test(doc), "margins do not match the letterhead");
+  // 1.15in top = 1656 twips; 0.80in bottom = 1152; 0.75in sides = 1080.
+  assert.ok(/w:top="1656"/.test(doc) && /w:bottom="1152"/.test(doc) && /w:left="1080"/.test(doc),
+    "the Word margins do not match the sheet: 1.15in top, 0.80in bottom, 0.75in sides");
 });
 
-check("the Chinese Word file gets the Chinese sheet", () => {
+check("the Word file's cover page has no letterhead behind it", () => {
   const DOCX = require(path.join(ROOT, "retainer-docx.js"));
   const PizZip = require(path.join(ROOT, "node_modules", "pizzip"));
-  const en = new PizZip(DOCX.build(sample, DOC));
-  const zh = new PizZip(DOCX.build({ ...sample, bilingual: true }, DOC));
-  const size = (z) => z.file("word/media/letterhead-first.png").asBinary().length;
-  assert.notStrictEqual(size(en), size(zh), "both languages embed the same letterhead sheet");
+  const z = new PizZip(DOCX.build(sample, DOC));
+  // header2 is the first page, and the first page is the cover, which
+  // carries the firm's mark itself. It used to hold the full first-page
+  // sheet: a second shield and a second footer on top of the cover's own.
+  const first = z.file("word/header2.xml").asText();
+  assert.ok(!/<w:drawing>/.test(first), "the cover page still has artwork behind it");
+  assert.strictEqual(z.file("word/media/letterhead-first.png"), null,
+    "the first-page sheet is still being embedded");
+  // And the continuation sheet is still on every page after it.
+  const rest = z.file("word/header1.xml").asText();
+  assert.ok(/<w:drawing>/.test(rest), "no letterhead on the pages after the cover");
+  assert.ok(z.file("word/media/letterhead-continuation.png"), "the continuation sheet is not embedded");
+  const doc = z.file("word/document.xml").asText();
+  assert.ok(/<w:titlePg\/>/.test(doc), "without titlePg Word puts one header on every page");
 });
 
 check("the brand faces are served by this app, not only by Google", () => {
@@ -525,7 +605,7 @@ check("the Word file is a real .docx, and it is built FROM the page", () => {
   assert.strictEqual(buf.slice(0, 2).toString("latin1"), "PK", "not a zip, so not a .docx");
   // Converted, not restated: the builder reads retainer-doc's own markup.
   const src = fs.readFileSync(path.join(ROOT, "retainer-docx.js"), "utf8");
-  assert.ok(/doc\.body\(a, \{ forClient: true \}\)/.test(src),
+  assert.ok(/doc\.body\(a, \{ forClient: true, withLetterhead: false \}\)/.test(src),
     "the Word exporter reasons about the agreement a second time instead of converting it");
   assert.ok(!/§ 614[78]|contingen/i.test(src.replace(/^\s*(\/\/|\*).*$/gm, "")),
     "fee logic has been duplicated into the Word exporter");
@@ -533,10 +613,57 @@ check("the Word file is a real .docx, and it is built FROM the page", () => {
 
 check("the drafter's notes never reach the Word file", () => {
   const DOCX = require(path.join(ROOT, "retainer-docx.js"));
-  const withNotes = DOC.body(sample, { forClient: false });
-  assert.ok(/class="why"/.test(withNotes), "the fixture no longer has notes to strip");
-  assert.ok(!/Why this is here/.test(DOCX.fromHtml(withNotes)),
+  // Nothing renders them any more, so the real assertion is that the
+  // document has none. The stripper stays and is tested on an injected
+  // note, so re-adding one anywhere cannot carry it into a client's copy.
+  assert.ok(!/class="why"/.test(DOC.body(sample, { forClient: false })),
+    "a note is being rendered again");
+  const injected = `<p>Real text.</p><p class="why">Why this is here: § 6148(a)(1).</p>`;
+  assert.ok(!/Why this is here/.test(DOCX.fromHtml(injected)),
     "a 'why this clause is here' note would go out to the client");
+  assert.ok(/Real text\./.test(DOCX.fromHtml(injected)), "the stripper ate the agreement too");
+});
+
+check("the Word file has somewhere to sign", () => {
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  const PizZip = require(path.join(ROOT, "node_modules", "pizzip"));
+  const doc = new PizZip(DOCX.build(sample, DOC)).file("word/document.xml").asText();
+  // fromHtml reads block tags, and the signature lines are divs, so they
+  // were being dropped in silence: every Word copy of this agreement went
+  // out with no rule, no names and no date lines.
+  assert.ok(doc.includes("Tez Law P.C., doing business as TEZ Law Firm"),
+    "the firm does not sign the Word copy");
+  const asXml = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/'/g, "&apos;");
+  assert.ok(doc.includes(asXml(sample.client_name)), "the client does not sign the Word copy");
+  assert.ok(!doc.includes("&amp;amp;"), "the client's name was escaped twice on its way to Word");
+  assert.ok((doc.match(/Date: _+/g) || []).length === 2, "both date lines are not there");
+  assert.ok(/<w:bottom w:val="single" w:sz="6" w:color="2B2523"\/>/.test(doc),
+    "there is no rule to sign on");
+});
+
+check("the cover and the letterhead are in the Word file once each", () => {
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  const PizZip = require(path.join(ROOT, "node_modules", "pizzip"));
+  const doc = new PizZip(DOCX.build(sample, DOC)).file("word/document.xml").asText();
+  // build() prepends its own cover and letterhead, so the body it converts
+  // must not carry a second copy: the date, the Re line and the salutation
+  // were each printing twice, and the cover's title leaked into the letter.
+  const re = sample.matter_label
+    ? new RegExp("Attorney–Client Fee Agreement — " + sample.matter_label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")
+    : /Re:/g;
+  assert.strictEqual((doc.match(re) || []).length, 1, "the Re line is in the document twice");
+  assert.strictEqual((doc.match(/Dear /g) || []).length, 1, "the salutation is in the document twice");
+  assert.ok(!/Attorney–ClientFee Agreement/.test(doc), "the cover's title leaked into the letter");
+});
+
+check("Word does not print the source file's line wrapping as gaps", () => {
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  // Runs carry xml:space="preserve", so a newline and six spaces of
+  // indentation in retainer-doc.js came out as six spaces mid-sentence.
+  const xml = DOCX.fromHtml("<p>One sentence,\n      and its second half.</p>");
+  assert.ok(!/ {2}/.test(xml.replace(/<[^>]*>/g, "")), "a run still carries collapsed whitespace");
+  assert.ok(/One sentence, and its second half\./.test(xml.replace(/<[^>]*>/g, "")),
+    "the sentence did not survive the collapse");
 });
 
 check("an apostrophe in a client name survives into Word as itself", () => {
