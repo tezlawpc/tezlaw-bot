@@ -52,6 +52,18 @@ async function initTable() {
       ON hearing_reminder_log (hearing_source, hearing_source_id, days_out)
   `);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_reminder_date ON hearing_reminder_log (sent_at DESC)`);
+  // stage_key: which message this was, not just how many days out. Two
+  // different messages can sit at the same distance from a hearing.
+  await db.query(
+    `ALTER TABLE hearing_reminder_log ADD COLUMN IF NOT EXISTS stage_key TEXT`).catch(() => {});
+  // Rows written before the schedule existed carry the bare day count, so
+  // they keep suppressing the message they already sent.
+  await db.query(
+    `UPDATE hearing_reminder_log SET stage_key = days_out::text WHERE stage_key IS NULL`).catch(() => {});
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_hearing_reminder_stage
+       ON hearing_reminder_log (hearing_source, hearing_source_id, stage_key)`).catch(() => {});
+
 }
 
 // ── Query upcoming hearings from all sources ─────────────
@@ -59,9 +71,16 @@ async function initTable() {
 async function getUpcomingHearings(daysOut) {
   // Compute the target date window: exactly `daysOut` days from now.
   // We match anything from midnight to midnight in Pacific timezone.
+  // The firm's calendar day, not UTC's. toISOString() names tomorrow from
+  // 5pm Pacific onward, so for seven hours of every day the 30-day window
+  // was the 31-day window and the 1-day window was the day of the hearing.
+  // A negative daysOut looks BACK, for the message that goes out after a
+  // master hearing.
   const now = new Date();
   const target = new Date(now.getTime() + daysOut * 24 * 60 * 60 * 1000);
-  const dateStr = target.toISOString().substring(0, 10);   // YYYY-MM-DD
+  const dateStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(target);
   const startOfDay = new Date(dateStr + "T00:00:00Z");
   const endOfDay = new Date(dateStr + "T23:59:59Z");
 
@@ -157,7 +176,7 @@ async function getClientContactInfo(clientName, aNumber) {
 
 // ── Reminder message templates ────────────────────────────
 
-function buildReminderMessage(hearing, daysOut, lang = "en") {
+function buildReminderMessage(hearing, daysOut, lang = "en", stage = null) {
   const langKey = ["en", "zh", "es"].includes(lang) ? lang : "en";
   const templates = TEMPLATES[langKey];
   // Quoted from the notice, never computed — see hearing-when.js. A source
@@ -168,11 +187,29 @@ function buildReminderMessage(hearing, daysOut, lang = "en") {
   const courtLine = hearing.court_name || hearing.court_address || "";
   const judgeLine = hearing.judge_name || "";
 
-  if (daysOut === 7) {
-    return templates.sevenDay({ date: dateStr, type: typeStr, court: courtLine, judge: judgeLine });
-  } else {
-    return templates.oneDay({ date: dateStr, type: typeStr, court: courtLine, judge: judgeLine });
+  // A stage with a message of its own -- the post-master collection, the
+  // 60-day review, the filing cutoff, the five-day where-to-go -- uses it.
+  // Everything else is a hearing reminder, which is what these templates
+  // have always been.
+  if (stage && stage.kind !== "hearing") {
+    const SCHED = require("./reminder-schedule");
+    const body = SCHED.messageFor(stage, {
+      lang: langKey,
+      name: hearing.client_name || "",
+      when: dateStr,
+      court: courtLine,
+      address: hearing.court_address || "",
+      judge: judgeLine,
+    });
+    if (body) return body;
   }
+
+  // The urgent wording is for the last couple of days, whichever stage
+  // asked for it, rather than for the number 1 specifically.
+  if (stage ? !stage.urgent : daysOut >= 7) {
+    return templates.sevenDay({ date: dateStr, type: typeStr, court: courtLine, judge: judgeLine });
+  }
+  return templates.oneDay({ date: dateStr, type: typeStr, court: courtLine, judge: judgeLine });
 }
 
 const TEMPLATES = {
@@ -332,33 +369,41 @@ async function sendViaSms(phone, message) {
 // ── Main scheduling logic ────────────────────────────────
 
 // Process reminders for a specific days-out window (7 or 1).
-async function processRemindersForWindow(daysOut) {
+async function processRemindersForWindow(daysOut, stage = null) {
   await initTable();
-  const hearings = await getUpcomingHearings(daysOut);
+  const all = await getUpcomingHearings(daysOut);
+  // A stage applies to one kind of hearing. Without this, the 60-day
+  // merits review would go to master-calendar clients too.
+  const hearings = stage ? all.filter((h) => stage.applies.includes(h.source)) : all;
   const results = { hearings_found: hearings.length, sent: 0, skipped_no_phone: 0, skipped_already_sent: 0, errors: 0 };
 
   for (const h of hearings) {
     try {
       // Check if we already sent a reminder for this hearing at this window
+      // Keyed by the STAGE, not the day count: two different messages can
+      // sit at the same distance, and a stage that is later renamed must
+      // not re-send to everyone who already had it.
+      const logKey = stage ? stage.key : String(daysOut);
       const existing = await db.query(
-        `SELECT id FROM hearing_reminder_log WHERE hearing_source = $1 AND hearing_source_id = $2 AND days_out = $3`,
-        [h.source, h.source_id, daysOut]
+        `SELECT id FROM hearing_reminder_log
+          WHERE hearing_source = $1 AND hearing_source_id = $2 AND stage_key = $3`,
+        [h.source, h.source_id, logKey]
       );
       if (existing.rows.length) { results.skipped_already_sent++; continue; }
 
       if (!h.client_phone) {
         await db.query(
           `INSERT INTO hearing_reminder_log
-             (hearing_source, hearing_source_id, client_key, client_name, hearing_date, days_out, channel, success, error_message)
-           VALUES ($1, $2, $3, $4, $5, $6, 'skipped', FALSE, 'no phone number')
+             (hearing_source, hearing_source_id, client_key, client_name, hearing_date, days_out, stage_key, channel, success, error_message)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'skipped', FALSE, 'no phone number')
            ON CONFLICT DO NOTHING`,
-          [h.source, h.source_id, h.client_key || null, h.client_name, h.hearing_date, daysOut]
+          [h.source, h.source_id, h.client_key || null, h.client_name, h.hearing_date, daysOut, logKey]
         );
         results.skipped_no_phone++;
         continue;
       }
 
-      const message = buildReminderMessage(h, daysOut, h.client_language || "en");
+      const message = buildReminderMessage(h, daysOut, h.client_language || "en", stage);
       let channelUsed = null, error = null, success = false;
 
       // Try WhatsApp first, fall back to SMS
@@ -380,10 +425,10 @@ async function processRemindersForWindow(daysOut) {
 
       await db.query(
         `INSERT INTO hearing_reminder_log
-           (hearing_source, hearing_source_id, client_key, client_name, hearing_date, days_out, channel, recipient, success, error_message)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           (hearing_source, hearing_source_id, client_key, client_name, hearing_date, days_out, stage_key, channel, recipient, success, error_message)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT DO NOTHING`,
-        [h.source, h.source_id, h.client_key || null, h.client_name, h.hearing_date, daysOut, channelUsed, h.client_phone, success, error]
+        [h.source, h.source_id, h.client_key || null, h.client_name, h.hearing_date, daysOut, logKey, channelUsed, h.client_phone, success, error]
       );
 
       if (success) results.sent++;
@@ -400,35 +445,37 @@ async function processRemindersForWindow(daysOut) {
 // Run reminders for both windows (7 days and 1 day out)
 async function runDailyReminders() {
   console.log("[reminders] Starting daily run at", new Date().toISOString());
-  const sevenDay = await processRemindersForWindow(7);
-  const oneDay = await processRemindersForWindow(1);
+  const SCHED = require("./reminder-schedule");
 
-  const summary = `📅 Daily hearing reminder summary:
+  // Every stage the schedule names, in the order a client meets them.
+  // Previously this was two hard-coded windows, 7 and 1.
+  const runs = [];
+  for (const stage of SCHED.STAGES.filter((st) => st.on)) {
+    try {
+      const r = await processRemindersForWindow(stage.when, stage);
+      runs.push({ stage, ...r });
+    } catch (err) {
+      console.error(`[reminders] stage ${stage.key} failed:`, err.message);
+      runs.push({ stage, hearings_found: 0, sent: 0, errors: 1, failed: err.message });
+    }
+  }
 
-7-day window:
-  Hearings: ${sevenDay.hearings_found}
-  ✓ Sent: ${sevenDay.sent}
-  ⚠️ No phone: ${sevenDay.skipped_no_phone}
-  ✓ Already sent: ${sevenDay.skipped_already_sent}
-  ❌ Errors: ${sevenDay.errors}
+  const line = (r) =>
+    `  ${r.stage.key.padEnd(14)} ${String(r.hearings_found).padStart(3)} found  ` +
+    `${String(r.sent).padStart(3)} sent  ${String(r.skipped_already_sent || 0).padStart(3)} already  ` +
+    `${String(r.skipped_no_phone || 0).padStart(3)} no phone  ${String(r.errors || 0).padStart(3)} errors` +
+    (r.failed ? `  (${r.failed})` : "");
 
-1-day window (URGENT):
-  Hearings: ${oneDay.hearings_found}
-  ✓ Sent: ${oneDay.sent}
-  ⚠️ No phone: ${oneDay.skipped_no_phone}
-  ✓ Already sent: ${oneDay.skipped_already_sent}
-  ❌ Errors: ${oneDay.errors}`;
-
+  const summary = `📅 Daily hearing reminder summary\n\n` + runs.map(line).join("\n");
   console.log(summary);
 
-  // Alert JJ via Telegram
   try {
     await sendTelegramAlert(summary);
   } catch (e) {
     console.warn("[reminders] Telegram alert failed:", e.message);
   }
 
-  return { sevenDay, oneDay };
+  return { runs };
 }
 
 async function sendTelegramAlert(message) {

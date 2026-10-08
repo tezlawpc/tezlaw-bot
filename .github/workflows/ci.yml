@@ -272,6 +272,14 @@ jobs:
       - name: An agreement that goes out files itself, and Zara never adds work
         run: node scripts/check-retainer-handoff.js
 
+      # Every message an Immigration Court client gets, and when. These go
+      # to people in removal proceedings about dates that decide whether
+      # they stay, so the guards are mostly about what the messages must
+      # not say: a time that was not on the notice, a filing deadline the
+      # judge did not set, or an explanation of voluntary departure.
+      - name: The EOIR reminder schedule says only what the notice says
+        run: node scripts/check-reminder-schedule.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar
