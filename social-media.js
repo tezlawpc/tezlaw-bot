@@ -209,7 +209,7 @@ function card({ eyebrow = "", title = "", points = [], lang = "en", format = "po
     y += pl.length * pSize * pLH + 24;
   }
   const ebSize = land ? 21 : 24, ebSp = zh ? 3 : +(ebSize * 0.22).toFixed(1);
-  const foot = zh ? "tezlawfirm.com · 626-678-8677 · 普通话 · English" : "tezlawfirm.com · 626-678-8677";
+  const foot = "tezlawfirm.com · 626-678-8677 · " + require("./ad-rules").OFFICE_CITY;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
 <rect width="${W}" height="${H}" fill="${C.char}"/>
 ${brandRow(pad, land ? 62 : 76, land ? 72 : 84, land ? 21 : 24)}
@@ -228,7 +228,7 @@ ${textLine({ x: pad, y: H - (land ? 54 : 62), text: foot, style: S.body, size: l
 function slide({ text, eyebrow = "", lang = "en", index = 0, total = 1, kind = "scene" }) {
   const W = 1080, H = 1920, pad = 96, inner = W - pad * 2;
   const S = styles(lang), zh = lang === "zh";
-  const langs = zh ? "普通话 · 上海话 · English" : lang === "es" ? "Español · English · 普通话" : "English · 普通话 · Español";
+  const langs = zh ? "普通话 · 上海话 · English" : lang === "es" ? "English · 普通话 · 上海话" : "English · 普通话 · 上海话";
   const footer = `<text x="${pad}" y="${H - 150}" font-family="${T.label.family}" font-weight="700" font-size="40" letter-spacing="1" fill="${C.marble}">tezlawfirm.com</text>
 ${textLine({ x: pad, y: H - 96, text: "626-678-8677 · " + langs, style: S.body, size: 31, fill: C.muted })}`;
 
@@ -313,7 +313,7 @@ async function video({ lang = "en", eyebrow = "", scenes = [], speakFn = speak, 
   }
   // Closing card: logo + disclaimer + AI-voice notice, 5 seconds, silent
   const endImg = path.join(dir, "end.png"), endSeg = path.join(dir, "end.mp4");
-  fs.writeFileSync(endImg, slide({ text: DISCLAIMER[lang] || DISCLAIMER.en, lang, kind: "end" }));
+  fs.writeFileSync(endImg, slide({ text: require("./ad-rules").videoDisclaimer(lang, DISCLAIMER), lang, kind: "end" }));
   await run(["-y", "-hide_banner", "-loglevel", "error", "-loop", "1", "-framerate", "30", "-i", endImg, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
     "-t", "5", ...enc, endSeg]);
   segs.push(endSeg);

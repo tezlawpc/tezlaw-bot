@@ -67,9 +67,9 @@ Occasionally uses rhetorical questions. Never guarantees outcomes.
 JJ is an immigrant himself. Has business/real estate background. Speaks English, Mandarin, Shanghainese.`;
 
 const FOOTER_TEXT = {
-  en: { label: "About the Author", title: "Founding Attorney · TEZ Law Firm", bio: "<strong>JJ Zhang came to the United States as an immigrant</strong> and built businesses in hospitality, manufacturing, real estate and lending before practicing law. Today he and the TEZ Law Firm team represent individuals, families, investors and companies.", tagline: "Protect your rights, we’ll lead the fight.", cta1: "Schedule a consultation · 626-678-8677", cta2: "Save our contact details →", chat: "WhatsApp, WeChat, Telegram, phone and email — all on our contact page:", areas: "<strong>Immigration:</strong> nationwide · <strong>Injury, disputes and real estate:</strong> Los Angeles, Orange, San Bernardino and Riverside counties", disc: "This article is general information, not legal advice, and reading it does not create an attorney-client relationship. Laws and agency practices change; contact TEZ Law Firm at 626-678-8677 or jj@tezlawfirm.com about your situation. Prior results do not guarantee a similar outcome." },
-  zh: { label: "关于作者", title: "创始律师 · TEZ律师事务所", bio: "<strong>章律师本人也是移民</strong>，从事法律工作之前曾经营酒店、制造、房地产开发和贷款业务。如今，他与 TEZ律师事务所团队一起为个人、家庭、投资人和企业提供法律服务。", tagline: "守护您的权益，我们为您据理力争。", cta1: "预约咨询 · 626-678-8677", cta2: "保存我们的联系方式 →", chat: "WhatsApp、微信、Telegram、电话和电子邮件，尽在我们的联系页面：", areas: "<strong>移民案件：</strong>全美 · <strong>人身伤害、商业纠纷与房地产：</strong>洛杉矶、橙县、圣贝纳迪诺和河滨县", disc: "本文仅为一般信息，不构成法律意见，阅读本文不建立律师与客户关系。法律和政府做法经常变化，具体情况请致电 626-678-8677 或发邮件至 jj@tezlawfirm.com 咨询 TEZ律师事务所。过往结果不保证类似结果。" },
-  es: { label: "Sobre el autor", title: "Abogado fundador · TEZ Law Firm", bio: "<strong>JJ Zhang llegó a Estados Unidos como inmigrante</strong> y dirigió negocios de hotelería, manufactura, bienes raíces y préstamos antes de ejercer la abogacía. Hoy él y el equipo de TEZ Law Firm representan a personas, familias, inversionistas y empresas.", tagline: "Proteja sus derechos, nosotros damos la pelea.", cta1: "Programe una consulta · 626-678-8677", cta2: "Guarde nuestros datos de contacto →", chat: "WhatsApp, WeChat, Telegram, teléfono y correo, todo en nuestra página de contacto:", areas: "<strong>Inmigración:</strong> en todo el país · <strong>Lesiones, disputas y bienes raíces:</strong> condados de Los Ángeles, Orange, San Bernardino y Riverside", disc: "Este artículo es información general, no asesoría legal, y leerlo no crea una relación abogado-cliente. Las leyes cambian; comuníquese con TEZ Law Firm al 626-678-8677 o jj@tezlawfirm.com sobre su caso. Los resultados anteriores no garantizan un resultado similar." },
+  en: { label: "About the Author", title: "Founding Attorney · TEZ Law Firm", bio: "<strong>JJ Zhang came to the United States as an immigrant</strong> and built businesses in hospitality, manufacturing, real estate and lending before practicing law. Today he and the TEZ Law Firm team represent individuals, families, investors and companies.", tagline: "Protect your rights, we’ll lead the fight.", cta1: "Schedule a consultation · 626-678-8677", cta2: "Save our contact details →", chat: "WhatsApp, WeChat, Telegram, phone and email — all on our contact page:", areas: "<strong>Immigration:</strong> nationwide · <strong>Injury, disputes and real estate:</strong> Los Angeles, Orange, San Bernardino and Riverside counties", disc: "This article is general information, not legal advice, and reading it does not create an attorney-client relationship. Laws and agency practices change; contact TEZ Law Firm (West Covina, California) at 626-678-8677 or jj@tezlawfirm.com about your situation. Prior results do not guarantee a similar outcome." },
+  zh: { label: "关于作者", title: "创始律师 · TEZ律师事务所", bio: "<strong>章律师本人也是移民</strong>，从事法律工作之前曾经营酒店、制造、房地产开发和贷款业务。如今，他与 TEZ律师事务所团队一起为个人、家庭、投资人和企业提供法律服务。", tagline: "守护您的权益，我们为您据理力争。", cta1: "预约咨询 · 626-678-8677", cta2: "保存我们的联系方式 →", chat: "WhatsApp、微信、Telegram、电话和电子邮件，尽在我们的联系页面：", areas: "<strong>移民案件：</strong>全美 · <strong>人身伤害、商业纠纷与房地产：</strong>洛杉矶、橙县、圣贝纳迪诺和河滨县", disc: "本文仅为一般信息，不构成法律意见，阅读本文不建立律师与客户关系。法律和政府做法经常变化，具体情况请致电 626-678-8677 或发邮件至 jj@tezlawfirm.com 咨询 TEZ律师事务所（West Covina, California）。过往结果不保证类似结果。" },
+  es: { label: "Sobre el autor", title: "Abogado fundador · TEZ Law Firm", bio: "<strong>JJ Zhang llegó a Estados Unidos como inmigrante</strong> y dirigió negocios de hotelería, manufactura, bienes raíces y préstamos antes de ejercer la abogacía. Hoy él y el equipo de TEZ Law Firm representan a personas, familias, inversionistas y empresas.", tagline: "Proteja sus derechos, nosotros damos la pelea.", cta1: "Programe una consulta · 626-678-8677", cta2: "Guarde nuestros datos de contacto →", chat: "WhatsApp, WeChat, Telegram, teléfono y correo, todo en nuestra página de contacto:", areas: "<strong>Inmigración:</strong> en todo el país · <strong>Lesiones, disputas y bienes raíces:</strong> condados de Los Ángeles, Orange, San Bernardino y Riverside", disc: "Este artículo es información general, no asesoría legal, y leerlo no crea una relación abogado-cliente. Las leyes cambian; comuníquese con TEZ Law Firm (West Covina, California) al 626-678-8677 o jj@tezlawfirm.com sobre su caso. Los resultados anteriores no garantizan un resultado similar." },
 };
 const FOOTER_MARK = "<style>.tez-ab{";
 // Every way to reach the firm lives on one page, tezlawfirm.com/jj, so that a
@@ -87,7 +87,7 @@ function getStaticFooter(title, lang = "en") {
 <div class="tez-ab-title">${t.title}</div>
 <div class="tez-ab-creds"><span>California State Bar #326666</span><span>U.S. Court of Appeals, Ninth Circuit</span><span>CA Real Estate Broker #01921248</span></div>
 <p class="tez-ab-bio">${t.bio}</p>
-<div class="tez-ab-langs"><span class="tez-lang">English</span><span class="tez-lang">普通话 Mandarin</span><span class="tez-lang">上海话 Shanghainese</span><span class="tez-lang">Español (support)</span></div>
+<div class="tez-ab-langs"><span class="tez-lang">English</span><span class="tez-lang">普通话 Mandarin</span><span class="tez-lang">上海话 Shanghainese</span>${require("./ad-rules").spanishChip(lang)}</div>
 <div class="tez-ab-tagline">${t.tagline}</div>
 <div class="tez-ab-ctas"><a href="https://tezlawfirm.com/contact/" class="tez-cta1">${t.cta1}</a><a href="https://tezlawfirm.com/jj" class="tez-cta2">${t.cta2}</a></div>
 <div class="tez-ab-chat">${t.chat} <a href="https://tezlawfirm.com/jj">tezlawfirm.com/jj</a></div>
@@ -128,6 +128,14 @@ function complianceIssues(html) {
       if (why.startsWith("specialist") && /specialized knowledge|specialty occupation/i.test(text.substring(m.index, m.index + 30))) continue;
       issues.push(`${why}: "${text.substring(Math.max(0, m.index - 20), m.index + m[0].length + 20).trim()}"`);
     }
+  }
+  // October 2026 advertising review (ad-rules.js): free consultations, track
+  // records, years of experience, expert, specialist and success-rate claims,
+  // in English, Spanish and Chinese. A post that trips one is held as a
+  // draft, and the daily site scan (site-watch.js) reports it on any page.
+  for (const r of require("./ad-rules").CLAIM_RULES) {
+    const m = text.match(r.re);
+    if (m && !issues.some(x => x.startsWith(r.why))) issues.push(`${r.why}: "${text.substring(Math.max(0, m.index - 20), m.index + m[0].length + 20).trim()}"`);
   }
   return issues;
 }
@@ -645,7 +653,9 @@ ${linkList}
    - Never call the firm or its lawyers best, top, leading, premier, #1, expert or specialists; never say the firm "specializes".
    - Never promise or imply an outcome ("we will win", "guaranteed", "get your green card approved"). Use "may", "can", "generally".
    - No success rates, case counts or client testimonials.
-   - Do not say "free consultation".
+   - Do not say "free consultation" (some consultations carry a fee).
+   - No claims about the firm's experience, record or skill: no "experienced team", "track record", "proven", "aggressive", "years of experience", "best outcome".
+   - Do not offer help in any language other than English, Mandarin or Shanghainese.
 6. Write for readers who may speak English as a second language: short sentences, plain words, define legal terms once.
 
 Return ONLY this JSON (no markdown, no backticks):

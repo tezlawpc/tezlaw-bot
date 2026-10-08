@@ -107,10 +107,14 @@ const fakePostiz = {
   },
 };
 
+// B&P § 6159.1: every posted ad is copied to the archive (ad-archive.js).
+const fakeArchive = { kept: [], keep: async (o) => { fakeArchive.kept.push(o); return { ok: true, where: "test" }; } };
+
 const realLoad = Module._load;
 Module._load = function (request) {
   if (request === "./db" || request === path.join(__dirname, "..", "db")) return fakeDb;
   if (request === "./postiz") return fakePostiz;
+  if (request === "./ad-archive") return fakeArchive;
   return realLoad.apply(this, arguments);
 };
 
@@ -458,6 +462,7 @@ console.log("\n── Approval schedules through Postiz ────────
   check("retrying finishes TikTok only", [r2.ok, P.calls.map(c => c.channel)], [true, ["youtube", "tiktok"]]);
   check("…uploading the video just once per attempt", P.uploads.filter(u => u.type === "video/mp4").length, 2);
   check("…and the stored video is released afterwards", T.rows[0].media_file, null);
+  check("…once the archive has its copy", fakeArchive.kept.some(k => k.kind === "video" && k.row.id === 930 && k.ext === "mp4"), true);
   ok("TikTok's text says tezlawfirm.com, not a long link", /tezlawfirm\.com/.test(P.calls[1].content) && !P.calls[1].content.includes(URL));
 }
 {

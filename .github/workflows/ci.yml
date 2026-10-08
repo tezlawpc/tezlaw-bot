@@ -136,6 +136,11 @@ jobs:
       - name: Video voice, three languages
         run: node scripts/check-video-voice.js
 
+      # The advertising rules: what posts, cards, videos, follow-up texts and
+      # the site cleanup may and may not say.
+      - name: Advertising rules
+        run: node scripts/check-ad-rules.js
+
       # A document uploaded for signature: the fields a signer fills must land
       # where staff placed them, on rotated and cropped pages too, and nobody
       # outside the client's team may open the packet.

@@ -50,7 +50,7 @@ STRUCTURE (1,000-1,200 words):
 INCLUDE these internal links naturally:
 - <a href="https://tezlawfirm.com/immigration/">immigration services</a>
 - <a href="https://tezlawfirm.com/immigration/removal-proceedings-immigration-court/">removal proceedings</a>
-- <a href="https://tezlawfirm.com/contact/">free consultation</a>
+- <a href="https://tezlawfirm.com/contact/">schedule a consultation</a>
 
 END with this author box exactly:
 <div class="author-box" style="background:#f5f5f5;padding:20px;margin-top:30px;border-left:4px solid #c8a96e;">
@@ -59,7 +59,7 @@ JJ Zhang is the founding attorney at Tez Law P.C. Licensed to practice in Califo
 📞 <strong>626-678-8677</strong><br>
 💬 WhatsApp · WeChat · Telegram: <a href="https://tezlawfirm.com/jj">tezlawfirm.com/jj</a><br>
 🌐 <a href="https://tezlawfirm.com">www.tezlawfirm.com</a><br><br>
-<em>我们也说中文 · Puede hablar español</em><br><br>
+<em>我们也说中文</em><br><br>
 <strong>Protect your rights — we handle the rest.</strong>
 </div>
 

@@ -131,6 +131,9 @@ const BANNED = [
   { re: /\byour\s+case\s+(will|is)\b/i, why: "speaks to the reader's own case" },
   // Fee claims that invite trouble if not carefully qualified.
   { re: /\bfree\s+(green\s?card|visa|citizenship)\b/i, why: "implies a free immigration benefit" },
+  // October 2026 advertising review: free consultations, specialist and
+  // expert claims, success rates, track records, experience (ad-rules.js).
+  ...require("./ad-rules").CLAIM_RULES,
 ];
 
 // A post that never names the firm is not marketing, and one with no link
@@ -612,7 +615,9 @@ const VIDEO_ON = () => ENABLED && String(process.env.SOCIAL_VIDEO_ENABLED || "")
 const VIDEO_TARGETS = ["youtube", "tiktok"];
 const videoVoice = () => require("./video-voice");
 const VIDEO_LANGS = () => String(process.env.SOCIAL_VIDEO_LANGS || "zh,en,es").split(",").map(x => x.trim())
-  .filter((l, i, a) => videoVoice().LANGS.includes(l) && a.indexOf(l) === i);
+  .filter((l, i, a) => videoVoice().LANGS.includes(l) && a.indexOf(l) === i)
+  // Rule 7.1, Comment [5]: Spanish videos say Spanish help is from office staff (ad-rules.js).
+  .filter(l => l !== "es" || require("./ad-rules").spanishReady());
 
 const AI_NOTE = { en: "Narration is AI-generated. General information, not legal advice.",
                   zh: "配音为AI合成。本视频仅供一般参考，不构成法律意见。",
@@ -880,14 +885,18 @@ async function deliverViaPostiz({ row }) {
       done[target] = { date: r.date, postId: r.postId, account: r.account };
       await save();
     }
-    await db.query(`UPDATE social_posts SET media_file = NULL WHERE id = $1`, [row.id]);
+    // B&P § 6159.1: keep a true copy for a year. The stored video is let go
+    // only once the archive has it.
+    const kept = file ? await require("./ad-archive").keep({ row, kind: "video", buffer: Buffer.from(file), ext: "mp4", text: videoCaption(s, "youtube"), done })
+      .catch(e => ({ ok: false, where: e.message })) : { ok: true };
+    if (kept.ok) await db.query(`UPDATE social_posts SET media_file = NULL WHERE id = $1`, [row.id]);
     return done;
   }
 
   if (done[row.channel]) return done;
-  let media = [];
+  let media = [], png = null;
   if (row.media && row.media.card && CARD_FORMAT[row.channel]) {
-    const png = renderCard(row.media.card, row.channel);
+    png = renderCard(row.media.card, row.channel);
     media = [await postiz.upload(png, `tez-card-${row.id}.png`, "image/png")];
   }
   const date = nextSlot(row.channel, await takenSlots(row.channel));
@@ -895,6 +904,7 @@ async function deliverViaPostiz({ row }) {
     meta: { title: row.source_title, url: row.source_url } });
   done[row.channel] = { date: r.date, postId: r.postId, account: r.account };
   await save();
+  await require("./ad-archive").keep({ row, buffer: png, ext: "png", text: row.text, done }).catch(e => console.warn("[social] archive:", e.message));
   return done;
 }
 

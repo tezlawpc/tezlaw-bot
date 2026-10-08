@@ -11,42 +11,50 @@ function getPool() {
   return pool;
 }
 
-// Default drip messages by case type
+// Default drip messages by case type.
+//
+// October 2026 advertising review: the earlier wording offered a "free
+// consultation" (some consultations carry a fee), said "Attorney JJ Zhang is
+// reviewing your case" an hour after intake whether or not he was, leaned on
+// deadline fear ("we'd hate for you to miss yours"), called him a specialist,
+// and never said Zara is automated. These say only what is true at the
+// moment they go out, name the firm and its city (B&P § 6157.2(b)), say Zara
+// is an automated assistant, and offer a way out in the first message.
 const DRIP_TEMPLATES = {
   default: [
     {
       delay_hours: 1,
-      message: "Hi {name}! 👋 This is Zara from Tez Law. Just checking in — do you have any questions about your {case_type} case? Attorney JJ Zhang is reviewing your information and will be in touch soon.",
+      message: "Hi {name}, this is Zara, TEZ Law Firm's automated assistant (West Covina, CA). Thank you for reaching out about your {case_type} matter. Someone from our office will follow up with you. Reply here with any questions, or reply STOP and we won't message you again.",
     },
     {
       delay_hours: 24,
-      message: "Hi {name}, Zara here from Tez Law again. We want to make sure you get the help you need for your {case_type} matter. Would you like to schedule a free consultation with Attorney JJ Zhang? Just reply YES and we'll get you set up! 📅",
+      message: "Hi {name}, Zara here, TEZ Law Firm's automated assistant. Would you like to schedule a consultation with attorney JJ Zhang about your {case_type} matter? Reply YES and our office will contact you to find a time and tell you about any consultation fee.",
     },
     {
       delay_hours: 72,
-      message: "Hi {name}! Tez Law here. Many clients with {case_type} cases have important deadlines — we'd hate for you to miss yours. Attorney JJ Zhang offers free consultations. Reply anytime to get started. 🏛️",
+      message: "Hi {name}, a note from TEZ Law Firm: if you'd like to talk with an attorney about your {case_type} matter, reply here or call 626-678-8677.",
     },
     {
       delay_hours: 168,
-      message: "Hi {name}, final follow-up from Tez Law. If you're still looking for legal help with your {case_type} matter, Attorney JJ Zhang is ready to assist. Reply STOP to opt out, or reply anytime to connect. ⚖️",
+      message: "Hi {name}, this is our last follow-up from TEZ Law Firm. Reply anytime to connect with our office, or reply STOP and we won't message you again.",
     },
   ],
   immigration: [
     {
       delay_hours: 1,
-      message: "Hi {name}! 👋 This is Zara from Tez Law. Your immigration matter is important — Attorney JJ Zhang specializes in immigration law and is reviewing your case. Any questions? Just reply!",
+      message: "Hi {name}, this is Zara, TEZ Law Firm's automated assistant (West Covina, CA). Thank you for reaching out about your immigration matter. Someone from our office will follow up with you. Reply here with any questions, or reply STOP and we won't message you again.",
     },
     {
       delay_hours: 24,
-      message: "Hi {name}, Zara from Tez Law. Immigration cases often have urgent filing deadlines. Would you like a free consultation with Attorney JJ Zhang to discuss your options? Reply YES to schedule! 📅",
+      message: "Hi {name}, Zara here, TEZ Law Firm's automated assistant. Would you like to schedule a consultation with attorney JJ Zhang about your immigration matter? Reply YES and our office will contact you to find a time and tell you about any consultation fee.",
     },
     {
       delay_hours: 72,
-      message: "Hi {name}! Immigration law changes frequently. Tez Law stays current on all USCIS updates to protect your case. Reply anytime — Attorney JJ Zhang is here to help. 🏛️",
+      message: "Hi {name}, a note from TEZ Law Firm: if you'd like to talk with an attorney about your immigration matter, reply here or call 626-678-8677.",
     },
     {
       delay_hours: 168,
-      message: "Hi {name}, last check-in from Tez Law about your immigration matter. We're here whenever you're ready. Reply STOP to opt out or reply to connect with Attorney JJ Zhang. ⚖️",
+      message: "Hi {name}, this is our last follow-up from TEZ Law Firm about your immigration matter. Reply anytime to connect with our office, or reply STOP and we won't message you again.",
     },
   ],
 };

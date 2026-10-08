@@ -9552,6 +9552,11 @@ require("./web-intake").mount(app);
 // the page that counts them (/admin/lead-sources).
 require("./lead-sources").mount(app);
 
+// The October 2026 advertising review, applied to the published site:
+// /admin/ad-cleanup checks every post and page, shows what would change,
+// and changes it only when JJ says so (ad-cleanup.js).
+require("./ad-cleanup").mount(app);
+
 app.post("/chat", async (req, res) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Content-Type");
