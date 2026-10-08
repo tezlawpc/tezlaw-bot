@@ -182,6 +182,102 @@ const CLAUSES = {
     zh: "您在此確認此協定內容已用中文翻譯解釋給您知道。而您也已閱讀、瞭解和同意此協定的條約和條款及服務範圍。如果此協定的英文和中文翻譯意思上有任何衝突，此協定內容以英文版為主。",
   },
 
+  // ══════════════════════════════════════════════════════════
+  //  From the firm's own robust agreements
+  //  ────────────────────────────────────────────────────────
+  //  Everything below was in the Wecare engagement letter or the
+  //  I-526E template and not in what this generator produced. Where
+  //  `zh` is filled in, it is the firm's own Chinese, copied from the
+  //  I-526E template rather than translated.
+  // ══════════════════════════════════════════════════════════
+
+  scope_limits: {
+    title: { en: "Limits of Our Representation", zh: null },
+    en: "Our representation is limited to the matter described in the scope above. We give no opinion on the commercial merits or likely success of any transaction, investment or venture, and nothing we say should be read as one. Work outside immigration and the practice areas named in this Agreement — including tax, corporate, securities and accounting advice — is for counsel of your own choosing, at that counsel's own charges. Where we coordinate with a business plan writer, economist, accountant or other outside professional, we do so as an accommodation to you; their fees are not covered by ours and we do not supervise their work.",
+    zh: null,
+    because: "Rule 1.2(b) permits limiting the scope with the client's informed consent; saying what is NOT covered is what makes the limit informed. From the Wecare engagement letter.",
+  },
+
+  hourly_outside_scope: {
+    title: { en: "Work Outside This Agreement", zh: null },
+    en: "Anything not described in the scope above — including ancillary applications, appeals, motions to reopen, and any other matter you later ask us to take on — is not covered by the fee stated here. We will agree any such work with you in writing first. Where it is charged by the hour, our rates are $650 for the managing partner, $350 for an associate attorney and $200 for a paralegal. We will give you an estimate before starting and will not proceed without your approval.",
+    zh: null,
+    because: "§ 6148(a)(1) requires the hourly rate and the basis of charges to be stated where fees are not fixed. From the Wecare engagement letter, at the firm's current figures.",
+  },
+
+  client_duties: {
+    title: { en: "What You Are Responsible For", zh: "客户的其他义务" },
+    en: "We can only act on what you give us. You agree that the information and documents you provide will be accurate, complete, timely and truthful in every respect; to tell us of anything that comes to your attention bearing on the matter; to review any document we prepare for filing and confirm it is correct before it is filed; to attend proceedings, meetings and interviews where your presence is required; and to keep us informed of your address, telephone number and whereabouts.",
+    zh: "客户同意在律师履行本协议项下的职责所需的范围内与律师合作。合作包括但不限于出席所有需要客户出席的诉讼程序、会议、大会和其他活动；并根据要求及时向律师提供任何必要的文件和其他信息。客户同意对律师说实话并且不隐瞒信息。此外，客户同意进行合作，向律师通报客户可能注意到的任何信息或进展，遵守本协议，按时支付律师的账单，并向律师通报客户的地址、电话号码和行踪。",
+  },
+
+  no_guarantee: {
+    title: { en: "No Guarantee of Outcome", zh: "免责声明" },
+    en: "Nothing in this Agreement, and nothing said to you by anyone at the firm, is a promise or guarantee about the outcome of your matter. Any comment we make about the likely result is an expression of opinion only. An estimate of costs is not a limit on them, and actual costs may differ significantly from an estimate.",
+    zh: "本协议中的任何内容以及律师向客户提供的声明中的任何内容均不得被解释为对此事结果的承诺或保证。律师不做出此类承诺或保证。律师对此事结果的评论仅是意见表达，并非承诺或保证，也不应被视为承诺或保证。客户支付的任何押金或律师提供的成本和费用估算均不构成对成本和费用的限制，也不构成成本和费用不会超过押金或估算金额的保证。实际成本和费用可能与给出的估计有很大差异。",
+  },
+
+  delegation: {
+    title: { en: "Who Does the Work", zh: "律师委托服务" },
+    en: "The firm may assign any part of the work to another attorney at the firm, and may delegate parts of it to outside attorneys or service providers where that is appropriate. A lawyer at the firm remains responsible to you for the representation throughout. Any such assignment does not change what you owe under this Agreement.",
+    zh: "本事務所可以将向客户提供的一些法律服务委托给其他律师事务所或商业公司。任何此类授权都不会影响客户支付本协议规定的律师费和/或费用的义务。",
+  },
+
+  electronic_communications: {
+    title: { en: "Communicating Electronically", zh: "同意电子通讯" },
+    en: "To work efficiently we use email, mobile telephones, cloud storage, electronic document transfer and similar technology. Using them carries some risk to the confidentiality of what we exchange. We consider that risk small against the benefit, but it is yours to accept: by signing this Agreement you consent to our communicating with you this way. Tell us in writing at any time if you would rather we did not.",
+    zh: "为了最大限度地提高此事的效率，本事務所打算尽可能使用最先进的技术和通信设备（即互联网、电子邮件、智能手机、云计算、计算机文件传输和传真传输）。使用此类技术可能会使客户的信心和特权面临风险。然而，本事務所认为使用此类技术的有效性超过了意外披露的名义风险。通过签署本协议，客户承认其同意使用此类技术和设备。",
+  },
+
+  trust_account: {
+    title: { en: "The Client Trust Account", zh: null },
+    en: "Money you pay us that has not yet been earned, and money we hold for costs not yet incurred, is held in the firm's client trust (IOLTA) account, separate from the firm's own funds, and is withdrawn only as it is earned or as the cost is paid. Interest on the account is paid to the State Bar of California under its rules. We will account to you for those funds on request and at the end of the matter.",
+    zh: null,
+    because: "Rule 1.15(a) and (d): client funds held separately, accounted for on request. The Wecare letter made this discretionary; stated here as the rule requires.",
+  },
+
+  conflict_disclosure: {
+    title: { en: "Conflicts of Interest", zh: null },
+    en: "Before accepting this matter we searched the firm's records for the names involved, including the other side. Where the firm represents, or may later represent, more than one party connected to the same project or transaction, the foreseeable consequences include: that those parties may later fall into dispute with one another; that information one gives us may have to be disclosed to another; and that if a conflict develops which we cannot properly manage, we may have to withdraw from acting for one or more of you. You may consult independent counsel about this before signing. By signing, you give informed written consent to our acting in those circumstances. We will not take a position adverse to you in any matter.",
+    zh: null,
+    because: "Rules 1.7(b) and 1.8.2 require informed written consent for a concurrent conflict. From the Wecare letter, which is the firm's existing practice on EB-5 project work.",
+  },
+
+  records: {
+    title: { en: "Your File", zh: null },
+    en: "At the end of the matter we will return any original documents you gave us. We keep our file for at least five years, or longer if the law requires, after which we may destroy it without further notice. You may ask for a copy of the file, or the original, at any time; we will provide it, and may charge you what it costs us to retrieve, copy and deliver it.",
+    zh: null,
+    because: "Rule 1.16(e)(1): the client's file is released promptly on request. The retention period is the firm's own policy, from the Wecare letter.",
+  },
+
+  confidentiality: {
+    title: { en: "Confidentiality", zh: null },
+    en: "What you tell us is confidential and protected by the attorney-client privilege. We will not disclose it except as you authorise, as this Agreement provides, or as the law or the Rules of Professional Conduct require or permit. That duty continues after this matter ends.",
+    zh: null,
+    because: "Bus. & Prof. Code § 6068(e)(1) and rule 1.6. Stated so the client knows the duty exists and that it survives the engagement.",
+  },
+
+  costs_advanced: {
+    title: { en: "Government Fees and Costs We Pay for You", zh: null },
+    en: "Where we pay a filing fee, biometrics fee or similar government charge on your behalf, you will reimburse us. Government fees are set by the agency and can change without notice; any figure given in this Agreement is the fee current at its date and is an estimate only. Where a fee must be paid by a deadline we will tell you the amount and the date, and we need your payment in time to meet it.",
+    zh: null,
+    because: "§ 6148(a)(2): the nature of costs the client will be charged for. Separating government fees from the firm's fee is what stops a fee increase reading as the firm raising its price.",
+  },
+
+  governing_law: {
+    title: { en: "Governing Law", zh: "适用法律" },
+    en: "This Agreement, and the rights and duties of both of us under it, are governed by and interpreted under California law. Any litigation arising from it shall be brought in Los Angeles County, California.",
+    zh: "本协议及其任何条款或规定的有效性，以及双方在本协议项下的权利和义务，将根据加利福尼亚州法律进行解释。因本协议引起的任何诉讼应在加利福尼亚州洛杉矶县提起。",
+    because: "Venue is the firm's home county. Note that a prevailing-party fee clause is deliberately NOT included: it would cut against the client in a fee dispute the State Bar program is meant to resolve cheaply.",
+  },
+
+  effective_date: {
+    title: { en: "When This Agreement Takes Effect", zh: null },
+    en: "This Agreement takes effect when you sign and return it, or when we begin work on the matter, whichever happens first. Any date printed at the top is for reference only.",
+    zh: null,
+    because: "Immigration work frequently starts before signature — JJ, October 2026. The sentence covering that work is in the OPENING paragraph, not here, because it is conditional on a.work_already_begun: an agreement that states it covers earlier work when there was none is asserting something untrue. check-retainer caught exactly that.",
+  },
+
   // ── New clauses. Chinese deliberately absent. ──
   flat_fee_earning: {
     title: { en: "How a Flat Fee Is Earned", zh: null },
@@ -215,8 +311,40 @@ const CLAUSES = {
 // renders them in place, where the money is, and listing them again produced
 // a document that stated its own fee terms twice. A fee agreement that says
 // the same thing twice invites an argument about which one governs.
-function clausesFor({ structure } = {}) {
-  const keys = ["cooperation", "translation", "insurance", "fee_dispute", "termination"];
+function clausesFor({ structure, matter_type } = {}) {
+  // Ordered the way the firm's own agreements run: what we will do, what
+  // you must do, what is not covered, the money, how it ends, the legal
+  // boilerplate, then the acknowledgment last so it sits above the
+  // signature block it refers to.
+  const keys = [
+    "scope_limits",
+    "hourly_outside_scope",
+    "cooperation",
+    "client_duties",
+    "no_guarantee",
+    "delegation",
+    "translation",
+    "electronic_communications",
+    "trust_account",
+    "costs_advanced",
+    "records",
+    "confidentiality",
+    "insurance",
+    "fee_dispute",
+    "termination",
+    "governing_law",
+    "effective_date",
+  ];
+
+  // The conflict disclosure is for matters where the firm may act for more
+  // than one party to the same project — EB-5 and business work. On a
+  // single-client matter it describes a situation that does not exist, and
+  // a clause that does not apply is noise in a document the client has to
+  // read. The drafter can still add it.
+  if (["eb5", "business", "corporate", "real_estate"].includes(String(matter_type || ""))) {
+    keys.splice(keys.indexOf("trust_account"), 0, "conflict_disclosure");
+  }
+
   keys.push("acknowledgment");
   return keys;
 }
@@ -233,6 +361,13 @@ function feeClausesFor({ structure } = {}) {
 function allClausesFor(a = {}) {
   return [...feeClausesFor(a), ...clausesFor(a), ...(a.bilingual ? ["language"] : [])];
 }
+
+/** The hourly rates quoted for work outside the scope, by role. */
+const OUTSIDE_SCOPE_RATES = [
+  ["Managing partner", 650],
+  ["Associate attorney", 350],
+  ["Paralegal", 200],
+];
 
 /**
  * Everything that would stop this draft going to a client.
@@ -295,4 +430,5 @@ const money = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFract
 module.exports = {
   RATES, FEE_STRUCTURES, FLAT_MILESTONES, SCOPE_PRESETS, MATTER_LABELS,
   CLAUSES, clausesFor, feeClausesFor, allClausesFor, problemsWith, money,
+  OUTSIDE_SCOPE_RATES,
 };

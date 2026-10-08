@@ -27,8 +27,11 @@ const esc = (s) => String(s == null ? "" : s)
 const FIRM = {
   name: "TEZ Law Firm",
   entity: "Tez Law P.C.",
+  subtitle: "A Professional Corporation",
   phone: "626-678-8677",
+  fax: "626-808-4994",
   email: "jj@tezlawfirm.com",
+  web: "www.tezlawfirm.com",
   offices: [
     { city: "West Covina", lines: ["4141 S. Nogales St., Suite C102", "West Covina, CA 91792"] },
     { city: "City of Industry", lines: ["17800 Castleton St., Suite 234", "City of Industry, CA 91748"] },
@@ -40,6 +43,33 @@ const FIRM = {
 const longDate = (d) => new Date(d || Date.now()).toLocaleDateString("en-US", {
   timeZone: "America/Los_Angeles", year: "numeric", month: "long", day: "numeric",
 });
+
+/**
+ * The letterhead, as the firm's own engagement letters carry it.
+ *
+ * The Wecare agreement opens with the entity, the West Covina address,
+ * telephone and fax, email and web, then the date, who it is addressed to,
+ * an RE: line and a salutation. That is what a client recognises as a
+ * letter from the firm; a wordmark and a phone number is a web page.
+ */
+function letterhead(a) {
+  const wc = FIRM.offices[0];
+  return `
+    <header class="doc-head">
+      <div class="mark">TEZ&nbsp;LAW&nbsp;FIRM</div>
+      <div class="sub">${esc(FIRM.entity)} &nbsp;·&nbsp; ${esc(FIRM.subtitle)}</div>
+      <div class="sub">${esc(wc.lines.join(", "))}</div>
+      <div class="sub">Tel ${esc(FIRM.phone)} &nbsp;·&nbsp; Fax ${esc(FIRM.fax)}
+        &nbsp;·&nbsp; ${esc(FIRM.email)} &nbsp;·&nbsp; ${esc(FIRM.web)}</div>
+    </header>
+    <div class="letter">
+      <p class="date">${esc(longDate(a.agreement_date || a.date))}</p>
+      ${a.client_name ? `<p class="attn">Attn: ${esc(a.client_name)}</p>` : ""}
+      <p class="re"><strong>RE: Agreement for Legal Services${
+        a.matter_label ? " — " + esc(a.matter_label) : ""}</strong></p>
+      <p class="dear">Dear ${esc(a.client_name || "Client")},</p>
+    </div>`;
+}
 
 // ── The fee section, which is where the statutes bite ────────
 
@@ -168,13 +198,9 @@ function body(a, { forClient = true } = {}) {
 
   let n = 0;
   return `
-    <header class="doc-head">
-      <div class="mark">${esc(FIRM.name)}</div>
-      <div class="sub">${esc(FIRM.entity)} · ${esc(FIRM.phone)} · ${esc(FIRM.email)}</div>
-    </header>
+    ${letterhead(a)}
 
     <h1>Agreement for Legal Services${bilingual ? " · 法律服務協議" : ""}</h1>
-    <p class="meta">${esc(longDate(a.agreement_date))}</p>
 
     <p>This Agreement is between <strong>${esc(a.client_name)}</strong> ("you") and
       ${esc(FIRM.name)} ("we", "us" or "the firm"). It sets out what we will do for you, what it will cost,
@@ -244,16 +270,39 @@ function body(a, { forClient = true } = {}) {
 }
 
 const CSS = `
+  /* The brand faces, served by this app. The Google Fonts link in the head
+     stays as a fallback for a browser that cannot reach /brand-fonts, but
+     these come first so the document is on the firm's letterhead even
+     offline -- which is the case inside a print-to-PDF pipeline. */
+  @font-face { font-family:"Cormorant Garamond"; font-weight:600;
+    src:url("/brand-fonts/Brand-Cormorant-Bold.ttf") format("truetype"); font-display:swap; }
+  @font-face { font-family:"Brand Sans"; font-weight:400;
+    src:url("/brand-fonts/Brand-Montserrat-Regular.ttf") format("truetype"); font-display:swap; }
+  @font-face { font-family:"Brand Sans"; font-weight:600;
+    src:url("/brand-fonts/Brand-Montserrat-Bold.ttf") format("truetype"); font-display:swap; }
+  @font-face { font-family:"Noto Serif SC"; font-weight:400;
+    src:url("/brand-fonts/TezSerif-Regular.ttf") format("truetype"); font-display:swap; }
+  @font-face { font-family:"Noto Serif SC"; font-weight:600;
+    src:url("/brand-fonts/TezSerif-Bold.ttf") format("truetype"); font-display:swap; }
+
   @page { size: letter; margin: 1in 1in 0.9in; }
   :root { --ink:#1E1B1A; --charcoal:#2B2523; --ember:#A34C00; --stone:#5E5854; --travertine:#E8E3DC; }
   * { box-sizing: border-box; }
   body { margin:0; background:#FAF8F5; color:var(--ink);
-    font-family:Montserrat,"Helvetica Neue",Arial,sans-serif; font-size:11pt; line-height:1.55; }
+    font-family:"Brand Sans",Montserrat,"Helvetica Neue",Arial,sans-serif; font-size:11pt; line-height:1.55; }
   .sheet { max-width:7.5in; margin:0 auto; padding:0.5in 0; background:#FFFFFF; }
-  .doc-head { border-bottom:2px solid var(--ember); padding-bottom:10px; margin-bottom:26px; }
-  .mark { font-family:"Cormorant Garamond",Georgia,serif; font-size:22pt; letter-spacing:.14em;
-    text-transform:uppercase; color:var(--charcoal); }
-  .doc-head .sub { font-size:8.5pt; letter-spacing:.06em; color:var(--stone); margin-top:3px; }
+  .doc-head { border-bottom:2px solid var(--ember); padding-bottom:11px; margin-bottom:26px;
+    text-align:center; }
+  /* nowrap, because tracking this wide used to let "LAW" break across the
+     line and the wordmark came out as "L AW". */
+  .mark { font-family:"Cormorant Garamond",Georgia,serif; font-size:23pt; letter-spacing:.2em;
+    text-transform:uppercase; color:var(--charcoal); white-space:nowrap; font-weight:600; }
+  .doc-head .sub { font-size:8.5pt; letter-spacing:.04em; color:var(--stone); margin-top:3px; }
+  .letter { margin-bottom:22px; }
+  .letter p { margin:0 0 6px; }
+  .letter .date { color:var(--stone); }
+  .letter .re { margin-top:12px; }
+  .letter .dear { margin-top:12px; }
   h1 { font-family:"Cormorant Garamond",Georgia,serif; font-size:19pt; font-weight:600;
     color:var(--charcoal); margin:0 0 2px; }
   .meta { color:var(--stone); font-size:9.5pt; margin:0 0 22px; }
@@ -280,21 +329,64 @@ const CSS = `
   .sig { flex:1; }
   .sig .who { font-size:9.5pt; color:var(--stone); margin-top:5px; }
   .sig .when { font-size:9.5pt; color:var(--stone); margin-top:12px; }
+  /* Ran off the bottom of the last page and lost the New York office.
+     Kept together, and allowed its own page if that is what it takes. */
   .offices { margin-top:36px; padding-top:14px; border-top:1px solid var(--travertine);
-    font-size:8.5pt; color:var(--stone); display:flex; gap:22px; flex-wrap:wrap; }
+    font-size:8.5pt; color:var(--stone); display:flex; gap:22px; flex-wrap:wrap;
+    page-break-inside:avoid; break-inside:avoid; }
   .offices .t { width:100%; font-family:"Cormorant Garamond",Georgia,serif; font-size:11pt;
     letter-spacing:.12em; text-transform:uppercase; color:var(--charcoal); margin-bottom:6px; }
   .offices .o { min-width:1.6in; }
   .offices .n { font-style:italic; }
+  .actions { max-width:7.5in; margin:0 auto; padding:14px 0 0; display:flex; gap:10px;
+    align-items:center; flex-wrap:wrap; }
+  .actions form { margin:0; }
+  .btn { display:inline-block; background:#F3EFE9; color:var(--charcoal); border:1px solid var(--travertine);
+    padding:9px 16px; border-radius:6px; text-decoration:none; font-size:10pt; font-weight:600; cursor:pointer;
+    font-family:"Brand Sans",Montserrat,sans-serif; }
+  .btn.primary { background:var(--ember); color:#FFFFFF; border-color:var(--ember); }
+  .btn.dark { background:var(--charcoal); color:#FFFFFF; border-color:var(--charcoal); }
+  .btn.plain { background:transparent; border-color:transparent; color:var(--stone); font-weight:400; }
+  .actions .hint { font-size:9pt; color:var(--stone); font-style:italic; }
   @media print {
     body { background:#FFFFFF; }
     .sheet { padding:0; max-width:none; }
     .why { display:none; }
+    .no-print { display:none !important; }
   }
 `;
 
+/**
+ * The bar across the top of the print view.
+ *
+ * "after clicking open and print at the end, there is no button to send for
+ *  esign or print or export as word or pdf."
+ *
+ * It was a dead end: the buttons were all on the review page behind it.
+ * Four plain links and one form, screen-only.
+ *
+ * On PDF: this prints to one through the browser's own dialog, which is
+ * what the firm already does. The URL and timestamp across the top of the
+ * copy JJ sent back are the browser's "Headers and footers" setting, not
+ * something a stylesheet can turn off -- untick it in the print dialog and
+ * the page is clean.
+ */
+function actionBar(id) {
+  if (!id) return "";
+  return `
+    <div class="actions no-print">
+      <a class="btn primary" href="javascript:window.print()">Print &nbsp;/&nbsp; Save as PDF</a>
+      <a class="btn" href="/admin/retainer/${encodeURIComponent(id)}/word">Download Word</a>
+      <form method="POST" action="/admin/retainer/${encodeURIComponent(id)}/send">
+        <button type="submit" class="btn dark">Send for signature</button>
+      </form>
+      <a class="btn plain" href="/admin/retainer/${encodeURIComponent(id)}">Back to the draft</a>
+      <span class="hint">In the print dialog, untick <em>Headers and footers</em> to drop the URL and date.</span>
+    </div>`;
+}
+
 /** The whole document as its own page, ready to read or print. */
-function render(a, { forClient = true } = {}) {
+function render(a, { forClient = true, id = null } = {}) {
   return `<!DOCTYPE html>
 <html lang="${a.bilingual ? "en" : "en"}">
 <head>
@@ -305,8 +397,8 @@ function render(a, { forClient = true } = {}) {
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Montserrat:wght@400;600&family=Noto+Serif+SC:wght@400;600&display=swap" rel="stylesheet">
 <style>${CSS}</style>
 </head>
-<body><div class="sheet">${body(a, { forClient })}</div></body>
+<body>${actionBar(id)}<div class="sheet">${body(a, { forClient })}</div></body>
 </html>`;
 }
 
-module.exports = { render, body, feeSection, FIRM, CSS };
+module.exports = { render, body, feeSection, letterhead, actionBar, FIRM, CSS };

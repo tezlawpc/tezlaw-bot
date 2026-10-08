@@ -78,6 +78,15 @@ app.use(cookieParser());
 
 // Static assets (Britannia hero painting, tez shield, etc.) for admin panel theming.
 // Served with a long cache since these are content-hashed / rarely change.
+// The brand faces -- Cormorant Garamond, Montserrat, and Noto Serif SC for
+// Chinese -- have been in assets/fonts since September and nothing served
+// them. A fee agreement that falls back to Times because Google Fonts is
+// slow or blocked is not on the firm's letterhead. Cached hard: these
+// files never change.
+app.use("/brand-fonts", express.static(require("path").join(__dirname, "assets", "fonts"), {
+  maxAge: "365d", immutable: true,
+}));
+
 app.use("/static", express.static(require("path").join(__dirname, "public"), {
   maxAge: "7d",
   immutable: false,

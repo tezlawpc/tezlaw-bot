@@ -331,6 +331,7 @@ function renderReview({ user, draft }) {
 
     <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:22px;">
       <a href="${PAGE}/${draft.id}/print" target="_blank" style="background:#A34C00; color:#FFFFFF; padding:10px 18px; border-radius:6px; text-decoration:none; font-size:14px; font-weight:600;">Open to read or print</a>
+      <a href="${PAGE}/${draft.id}/word" style="background:#F3EFE9; color:#2B2523; border:1px solid #E8E3DC; padding:10px 18px; border-radius:6px; text-decoration:none; font-size:14px; font-weight:600;">Download Word</a>
       ${problems.length ? "" : `
         <form method="POST" action="${PAGE}/${draft.id}/send" style="margin:0;">
           <button type="submit" style="background:#2B2523; color:#FFFFFF; border:0; padding:10px 18px; border-radius:6px; font-size:14px; font-weight:600; cursor:pointer;">Send for signature</button>
@@ -442,10 +443,30 @@ function mount(app, auth) {
     try {
       const d = await getDraft(req.user, req.params.id);
       if (!d) return res.status(404).send("Not found");
-      res.send(DOC.render(d.terms || {}, { forClient: true }));
+      res.send(DOC.render(d.terms || {}, { forClient: true, id: d.id }));
     } catch (err) {
       console.error("[retainer print]:", err.message);
       res.status(500).send("Could not render the agreement");
+    }
+  });
+
+  // The agreement as a Word file. Built by converting the markup the print
+  // view already renders, so the two cannot disagree about the fee.
+  app.get(PAGE + "/:id/word", async (req, res) => {
+    try {
+      const d = await getDraft(req.user, req.params.id);
+      if (!d) return res.status(404).send("Not found");
+      const DOCX = require("./retainer-docx");
+      const terms = d.terms || {};
+      const buf = DOCX.build(terms, DOC);
+      res.setHeader("Content-Type",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition",
+        `attachment; filename*=UTF-8''${encodeURIComponent(DOCX.fileName(terms))}`);
+      res.send(buf);
+    } catch (err) {
+      console.error("[retainer word]:", err.message);
+      res.status(500).send("Could not build the Word file");
     }
   });
 

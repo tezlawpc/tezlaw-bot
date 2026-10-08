@@ -324,4 +324,175 @@ check("its permission admits everyone the page admits", () => {
     "the sidebar shows the link to a different set of people than the page lets in");
 });
 
+// ── "the agreement is generated not in accordance with our TEZ brand
+//     and letter head" ───────────────────────────────────────
+
+const sample = {
+  client_name: "O'Brien & Sons, LLC", matter_type: "estate",
+  matter_label: "Revocable living trust", structure: "flat", total_fee: 5000,
+  agreement_date: "2026-10-07", scope: ["Prepare a revocable living trust."],
+  milestones: [{ pct: 40, work: "Assessment" }, { pct: 60, work: "Drafting and execution" }],
+  operating_account_consent: true,
+};
+
+check("the letterhead carries what the firm's own letters carry", () => {
+  const html = DOC.render(sample, { forClient: true, id: 7 });
+  for (const bit of ["4141 S. Nogales", "626-678-8677", "626-808-4994",
+                     "www.tezlawfirm.com", "A Professional Corporation"]) {
+    assert.ok(html.includes(bit), `the letterhead is missing ${bit}`);
+  }
+  assert.ok(/RE: Agreement for Legal Services — Revocable living trust/.test(html),
+    "no RE line");
+  assert.ok(html.includes("Dear O&#39;Brien"), "no salutation, or it is unescaped");
+  assert.strictEqual((html.match(/<header class="doc-head">/g) || []).length, 1,
+    "two headers — the old one was left behind");
+});
+
+check("all four offices are on it, and they stay on one page", () => {
+  const html = DOC.render(sample, { forClient: true, id: 7 });
+  for (const city of ["West Covina", "City of Industry", "Newport Beach", "Flushing"]) {
+    assert.ok(html.includes(city), `${city} is missing from the footer`);
+  }
+  // The print JJ sent back ran New York off the bottom of the last page.
+  const offices = DOC.CSS.slice(DOC.CSS.indexOf(".offices {"));
+  assert.ok(/page-break-inside:\s*avoid/.test(offices.slice(0, 400)),
+    "the office block can still be split across a page break");
+});
+
+check("the brand faces are served by this app, not only by Google", () => {
+  for (const f of ["Brand-Cormorant-Bold", "Brand-Montserrat-Regular", "TezSerif-Regular"]) {
+    assert.ok(DOC.CSS.includes(`/brand-fonts/${f}.ttf`), `${f} is not served locally`);
+  }
+  const server = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
+  assert.ok(/express\.static\(require\("path"\)\.join\(__dirname, "assets", "fonts"\)/.test(server),
+    "nothing serves assets/fonts");
+});
+
+// ── "there is no button to send for esign or print or export as
+//     word or pdf" ───────────────────────────────────────────
+
+check("the print view is not a dead end", () => {
+  const html = DOC.render(sample, { forClient: true, id: 7 });
+  for (const label of ["Save as PDF", "Download Word", "Send for signature", "Back to the draft"]) {
+    assert.ok(html.includes(label), `no ${label} control`);
+  }
+  assert.ok(/action="\/admin\/retainer\/7\/send"/.test(html), "send posts nowhere");
+  assert.ok(html.includes("/admin/retainer/7/word"), "the Word link does not carry the draft");
+  // And none of it prints.
+  assert.ok(/\.no-print \{ display:none !important; \}/.test(DOC.CSS.replace(/\s+/g, " ")),
+    "the button bar would print on the agreement");
+});
+
+check("a draft with no id gets no buttons rather than broken ones", () => {
+  const html = DOC.render(sample, { forClient: true });
+  assert.ok(!html.includes("Download Word"), "a link to /undefined/word");
+});
+
+check("the Word file is a real .docx, and it is built FROM the page", () => {
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  const buf = DOCX.build(sample, DOC);
+  assert.ok(Buffer.isBuffer(buf) && buf.length > 3000, "nothing came out");
+  assert.strictEqual(buf.slice(0, 2).toString("latin1"), "PK", "not a zip, so not a .docx");
+  // Converted, not restated: the builder reads retainer-doc's own markup.
+  const src = fs.readFileSync(path.join(ROOT, "retainer-docx.js"), "utf8");
+  assert.ok(/doc\.body\(a, \{ forClient: true \}\)/.test(src),
+    "the Word exporter reasons about the agreement a second time instead of converting it");
+  assert.ok(!/§ 614[78]|contingen/i.test(src.replace(/^\s*(\/\/|\*).*$/gm, "")),
+    "fee logic has been duplicated into the Word exporter");
+});
+
+check("the drafter's notes never reach the Word file", () => {
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  const withNotes = DOC.body(sample, { forClient: false });
+  assert.ok(/class="why"/.test(withNotes), "the fixture no longer has notes to strip");
+  assert.ok(!/Why this is here/.test(DOCX.fromHtml(withNotes)),
+    "a 'why this clause is here' note would go out to the client");
+});
+
+check("an apostrophe in a client name survives into Word as itself", () => {
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  const xml = DOCX.fromHtml(`<p>Agreement with <strong>O&#39;Brien &amp; Sons</strong>.</p>`);
+  assert.ok(xml.includes("O&apos;Brien &amp; Sons"), "the name was mangled: " + xml.slice(0, 200));
+  assert.ok(/<w:b\/>/.test(xml), "bold was dropped");
+});
+
+check("the fee table becomes a Word table, not a run-on paragraph", () => {
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  const html = DOC.body(sample, { forClient: true });
+  const xml = DOCX.fromHtml(html);
+  assert.ok(/<w:tbl>/.test(xml), "the milestone table flattened");
+  assert.ok((xml.match(/<w:tr>/g) || []).length >= 3, "the table lost its rows");
+});
+
+check("the filename names the client and the date", () => {
+  const DOCX = require(path.join(ROOT, "retainer-docx.js"));
+  const n = DOCX.fileName(sample);
+  assert.ok(n.endsWith(".docx") && n.includes("2026-10-07"), n);
+  assert.ok(!/[\\/:*?"<>|]/.test(n), "the filename carries a character a filesystem will refuse: " + n);
+});
+
+// ── The clause set, grown from the firm's own agreements ──
+
+check("the agreement now says what the firm's robust ones say", () => {
+  const keys = R.clausesFor({ structure: "flat", matter_type: "estate" });
+  for (const k of ["scope_limits", "hourly_outside_scope", "client_duties", "no_guarantee",
+                   "delegation", "trust_account", "records", "confidentiality",
+                   "governing_law", "effective_date"]) {
+    assert.ok(keys.includes(k), `${k} is not in the agreement`);
+  }
+  assert.ok(keys.indexOf("acknowledgment") === keys.length - 1,
+    "the acknowledgment should sit last, above the signatures it refers to");
+});
+
+check("the conflict waiver appears where the firm acts for more than one party", () => {
+  assert.ok(R.clausesFor({ matter_type: "eb5" }).includes("conflict_disclosure"));
+  assert.ok(!R.clausesFor({ matter_type: "estate" }).includes("conflict_disclosure"),
+    "a single-client matter should not carry a waiver describing a conflict that cannot arise");
+});
+
+check("the rate card is the firm's current one, by role", () => {
+  const c = R.CLAUSES.hourly_outside_scope.en;
+  assert.ok(/\$650 for the managing partner/.test(c), "the managing partner rate is wrong");
+  assert.ok(/\$350 for an associate/.test(c) && /\$200 for a paralegal/.test(c));
+  // The Wecare engagement's card was that engagement's, not the firm's.
+  assert.ok(!/795|\$500 /.test(c), "the Wecare rates were carried over");
+});
+
+check("earned-on-signing did not come back in with the new clauses", () => {
+  // The I-526E template says the full fee is earned once work commences.
+  // Rule 1.5(d) and Formal Opinion 2026-210 say otherwise, and 25-O-27445
+  // is open. Every clause is checked, not just the fee ones.
+  for (const [k, c] of Object.entries(R.CLAUSES)) {
+    // The compliant clauses say these phrases in order to DENY them --
+    // "it is not non-refundable", "not earned merely because this Agreement
+    // has been signed". Drop the denials before looking, or the clause that
+    // exists to satisfy the rule is the one that trips the check.
+    const t = `${c.en} ${c.zh || ""}`
+      .replace(/\bis not\b[^.]*/gi, "")
+      .replace(/\bnot earned\b[^.]*/gi, "")
+      .replace(/\bnever\b[^.]*/gi, "");
+    assert.ok(!/non-?refundable/i.test(t), `${k} calls a fee non-refundable`);
+    assert.ok(!/earned (up)?on (receipt|signing|execution)/i.test(t), `${k} denominates a fee earned on receipt`);
+    assert.ok(!/deemed earned/i.test(t), `${k} deems a fee earned`);
+  }
+  // And the rule still bites: a clause that really did say it would fail.
+  assert.throws(() => {
+    const t = "The full fee shall be deemed earned upon execution and is non-refundable.";
+    assert.ok(!/deemed earned/i.test(t));
+  }, /deemed earned|AssertionError/);
+});
+
+check("five clauses took their Chinese from the firm's own template", () => {
+  for (const k of ["client_duties", "no_guarantee", "delegation",
+                   "electronic_communications", "governing_law"]) {
+    assert.ok(R.CLAUSES[k].zh, `${k} lost the Chinese it was given`);
+  }
+});
+
+check("a clause with no Chinese still cannot go out bilingual", () => {
+  const problems = R.problemsWith({ ...sample, bilingual: true });
+  assert.ok(problems.some((p) => /中文|Chinese/i.test(p)),
+    "the § 1632 guard stopped noticing the untranslated clauses");
+});
+
 console.log(`\n${passed} checks passed\n`);
