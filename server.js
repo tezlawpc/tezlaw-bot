@@ -11414,6 +11414,39 @@ app.get("/admin/clients/:key/court-mail", async (req, res) => {
 
 // The PAGE behind a notice on the calendar. The JSON route below is what
 // the app reads; sending a browser there printed the raw response.
+// ── Combo filings ─────────────────────────────────────────
+//
+// "There are certain combo filings. Make sure they are available as an
+// option." (JJ, 2026-10-08). A catalogue, not a decision: see the header
+// of uscis-packages.js. The page hands off to the G-28 with item 1.b
+// already written.
+app.get("/admin/clients/:key/filing-package", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const K = require("./uscis-packages");
+    const page = require("./uscis-packages-page");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).send("<h1>Client not found</h1>");
+
+    const chrome = (title, body) =>
+      require("./hearing-notes").renderAdminChrome({ title, body, activeItem: "clients" });
+
+    const id = (req.query.package || "").trim();
+    if (!id) return res.send(chrome("Filing package", page.renderPicker(client)));
+
+    const pkg = K.get(id);
+    if (!pkg) return res.send(chrome("Filing package", page.renderPicker(client)));
+
+    const include = [].concat(req.query.include || []).filter(Boolean);
+    const derivatives = Math.max(0, Math.min(12, parseInt(req.query.derivatives, 10) || 0));
+    const plan = K.planFor(id, { include, derivatives });
+    res.send(chrome(pkg.name, page.renderPackagePage(client, plan, { derivatives, include })));
+  } catch (err) {
+    console.error("[filing package]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
 // ── Form G-28, filled from the client record ──────────────
 //
 // "Automatic prefill from clients info and onto any forms from USCIS"
@@ -11425,15 +11458,22 @@ async function g28Context(req) {
   const client = await cp.getClientByKey(req.params.key);
   if (!client) return null;
   const src = req.method === "POST" ? req.body : req.query;
+  // A package fills item 1.b and suggests the capacity, but anything typed
+  // on the page wins: the package says what the combo usually covers, the
+  // person says what is actually going in the envelope.
+  const K = require("./uscis-packages");
+  const packageId = (src.package || "").trim();
+  const pkg = packageId ? K.get(packageId) : null;
   const matter = {
-    form_numbers: (src.form_numbers || "").trim(),
+    form_numbers: (src.form_numbers || "").trim() || (pkg ? K.formNumbersFor(pkg.id) : ""),
     receipt_number: (src.receipt_number || "").trim(),
-    capacity: (src.capacity || "").trim(),
+    capacity: (src.capacity || "").trim() || (pkg && pkg.capacity ? pkg.capacity : ""),
     case_type: (client.case_types || [])[0] || "",
+    package: pkg ? pkg.id : "",
   };
   const attorneyKey = (src.attorney || "").trim() || null;
   const proposal = require("./uscis-g28").proposeG28({ client, attorney: attorneyKey, matter });
-  return { client, matter, attorneyKey, proposal };
+  return { client, matter, attorneyKey, proposal, pkg };
 }
 
 app.get("/admin/clients/:key/g28", async (req, res) => {
@@ -11441,7 +11481,7 @@ app.get("/admin/clients/:key/g28", async (req, res) => {
     const ctx = await g28Context(req);
     if (!ctx) return res.status(404).send("<h1>Client not found</h1>");
     const body = require("./uscis-g28-page").renderG28Page(ctx.client, ctx.proposal, {
-      attorneyKey: ctx.attorneyKey, matter: ctx.matter,
+      attorneyKey: ctx.attorneyKey, matter: ctx.matter, pkg: ctx.pkg,
     });
     res.send(require("./hearing-notes").renderAdminChrome({ title: "Form G-28", body, activeItem: "clients" }));
   } catch (err) {

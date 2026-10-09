@@ -1,0 +1,43 @@
+Most filings are several forms, so offer them that way
+
+"There are certain combo filings. Make sure they are available as an
+option." Twelve of them: the family adjustment packages, employment,
+EB-5, affirmative asylum, removal of conditions, naturalization, the
+fiancee petition, both waivers, the green card replacement, and the fee
+waiver that rides along with another filing.
+
+Each one names its forms, says who signs each, and says what has to be
+TRUE before it is the right package. It does not decide whether it is.
+The conditions sit above the form list on the page, because a list of
+forms read first is a list assembled first.
+
+Three things this deliberately refuses to do.
+
+It will not multiply a package by the size of a family in a category
+that has no derivatives. THE IMMEDIATE RELATIVE CATEGORY HAS NONE: a
+citizen's spouse's children do not ride along on the spouse's I-130, they
+need petitions of their own. Printing three I-485s for a family of three
+would produce a package that cannot be filed, and the person assembling
+it has no reason to doubt it. Asked for derivatives there, the page says
+in the warning colour that they were not counted, and why.
+
+It will not put the asylum work permit in the envelope with the I-589.
+The I-765 cannot be filed until 150 days after a complete application is
+received, and one filed early is rejected. It is listed as a later
+filing, with the wait and the consequence.
+
+It carries no fee amounts at all. USCIS changes them, uscis-watch.js
+already reports a fee notice the day it publishes, and a stale number in
+a checklist is worse than no number.
+
+A package hands the G-28 its item 1.b already written, and the form
+numbers list only what is actually going in the envelope. Anything typed
+on the G-28 page wins over the package, and the package is carried on the
+form so pressing "Update this page" does not silently drop it.
+
+22 checks. Every package is checked against uscis-forms.js, so the
+edition tracker and the Federal Register watch cover every form in every
+package, and a capacity no G-28 box offers fails the build.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015tF6kxxSv9dUZdpdhCpvcX

@@ -113,7 +113,7 @@ function valueRows(proposal, prefix) {
  * `proposal` is what uscis-g28.proposeG28 returned. The form at the bottom
  * posts back to the same URL; the PDF is produced only by that POST.
  */
-function renderG28Page(client, proposal, { attorneyKey = null, matter = {} } = {}) {
+function renderG28Page(client, proposal, { attorneyKey = null, matter = {}, pkg = null } = {}) {
   const blank = G.blankInfo();
   const notes = proposal.notes.map((n) => `
     <div style="${NOTE_STYLE[n.level] || NOTE_STYLE.note} padding:11px 14px; border-radius:4px; margin-bottom:8px; font-size:13px; line-height:1.5;">
@@ -129,6 +129,18 @@ function renderG28Page(client, proposal, { attorneyKey = null, matter = {} } = {
       c && c === proposal.suggested_capacity ? "  (looks like this one)" : ""}</option>`).join("");
 
   const input = "width:100%; padding:8px 10px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px; box-sizing:border-box;";
+
+  // When the G-28 was opened from a filing package, say which one and keep
+  // it on the form, so a re-render does not silently drop item 1.b back to
+  // whatever the client record suggested.
+  const packageBanner = pkg ? `
+    <div style="background:#F3EFE9; border-left:4px solid #A34C00; padding:11px 14px; border-radius:4px;
+                margin-bottom:12px; font-size:13px; color:#2B2523; line-height:1.55;">
+      For the <b>${esc(pkg.name)}</b> package.
+      <a href="/admin/clients/${encodeURIComponent(client.key)}/filing-package?package=${encodeURIComponent(pkg.id)}"
+         style="color:#A34C00;">Back to the package</a>
+    </div>` : "";
+  const packageField = pkg ? `<input type="hidden" name="package" value="${esc(pkg.id)}">` : "";
 
   return `
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
@@ -146,9 +158,11 @@ function renderG28Page(client, proposal, { attorneyKey = null, matter = {} } = {
     bottom, and nothing here is signed.
   </div>
 
+  ${packageBanner}
   ${notes}
 
   <form method="POST" action="/admin/clients/${encodeURIComponent(client.key)}/g28">
+    ${packageField}
     <div style="${CARD}">
       <p style="${LABEL}">Who is appearing, and in what</p>
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px;">

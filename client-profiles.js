@@ -980,6 +980,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
   const createLinks = `
       <a href="/admin/hearing/notes?${createQuery}" style="${createBtn}">+ New Master Hearing</a>
       <a href="/admin/hearing/individual?${createQuery}" style="${createBtn}">+ New Individual Hearing</a>
+      <a href="/admin/clients/${encodeURIComponent(client.key)}/filing-package" style="background:#2B2523; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">Filing package</a>
       <a href="/admin/clients/${encodeURIComponent(client.key)}/g28" style="background:#2B2523; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">Form G-28</a>`;
 
   const body = `
