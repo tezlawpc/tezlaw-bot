@@ -255,6 +255,36 @@ check("the client profile has a way in", () => {
   assert.ok(/app\.get\("\/admin\/clients\/:key\/filing-package"/.test(read("server.js")), "no route");
 });
 
+check("the USCIS work is reachable from the sidebar, not only from a client", () => {
+  // "i don't see the UCSIS form in the web." All of it was behind a client
+  // profile: no nav entry, so from the front of the app it did not exist.
+  const nav = read("hearing-notes.js");
+  assert.ok(/href="\/admin\/uscis"/.test(nav), "there is no USCIS entry in the sidebar");
+  assert.ok(/isActive\('uscis'\)/.test(nav), "the entry never highlights");
+  assert.ok(/app\.get\("\/admin\/uscis"/.test(read("server.js")), "the page has no route");
+
+  const html = require(path.join(ROOT, "uscis-page.js")).renderUscisPage();
+  // Every tracked form is on it, and every package.
+  for (const f of F.FORMS) {
+    assert.ok(html.includes(f.id.toUpperCase()), `${f.id} is not on the USCIS page`);
+  }
+  for (const p of K.list({ includeAddons: false })) {
+    assert.ok(html.includes(p.name), `${p.id} is not on the USCIS page`);
+  }
+  // It sends people to a client to fill anything, because a G-28 is about
+  // a person.
+  assert.ok(/\/admin\/clients/.test(html), "nothing says where to start a filing");
+  assert.ok(!/onclick|onchange=|<script/i.test(html), "the page carries inline script");
+});
+
+check("the USCIS page says when the editions were last read", () => {
+  // A page of edition numbers with no date on it is a page that will be
+  // trusted long after it stops being true.
+  const html = require(path.join(ROOT, "uscis-page.js")).renderUscisPage();
+  assert.ok(/last read from USCIS on \d{4}-\d{2}-\d{2}|have not been read yet/.test(html),
+    "the page does not say when the editions were read");
+});
+
 check("the check is registered the way every check here is", () => {
   const pkg = JSON.parse(read("package.json"));
   assert.ok(pkg.scripts["check:uscis-packages"], "no npm script");

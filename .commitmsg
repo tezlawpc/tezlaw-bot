@@ -1,28 +1,24 @@
-The firm profile leaves the agreement, and keeps its own page
+The USCIS work gets a place in the sidebar
 
-"let's just delete the firm's profile" was answered too literally: the
-page, its copy and its styles all went. "i only meant to delete it from
-the retainer agreement." (JJ, 2026-10-09) Nothing had been committed, so
-all of it is back.
+"i don't see the UCSIS form in the web." (JJ, 2026-10-09) It was all
+there -- the G-28, the twelve combo packages, the edition tracker, the
+Federal Register watch -- and all of it was reachable only from inside a
+client profile. There was no nav entry, so from the front of the app none
+of it existed. A feature nobody can find is a feature nobody has.
 
-What stays changed is the part that was asked for. The profile is no
-longer bound into a fee agreement, in either the Word file or the browser
-copy. A contract is not a brochure, and marketing copy inside one is a
-second place to keep in step with Rules 7.1-7.3 every time the deck
-changes, which is worth avoiding with a State Bar matter open.
+/admin/uscis lists the twenty tracked forms by practice area with the
+edition read off each PDF, every combo package with its one-line shape,
+and, in red at the top, anything to look at before filing: today that is
+the G-28, whose OMB control number lapsed on 05/31/2021 on the copy USCIS
+serves at its own address.
 
-What comes back is the page itself, at /admin/retainer/firm-profile, in
-English or with the Chinese, with a print button. It is still the
-approved deck's own wording cut to one page: something a person chooses
-to attach, not something every client signs. Registered BEFORE "/:id",
-because Express matches in order and a literal path after a parameter
-route is never reached -- /admin/retainer/firm-profile would have
-arrived at the draft handler as id="firm-profile" and answered Not found.
+It does not pretend a form can be filled from nowhere. A G-28 is about a
+particular person, so the page sends you to the client list and the
+filling happens from their file, where the prefill has something to read.
 
-The agreement now names one office, West Covina, on the letterhead. It
-used to carry all four twice: once in a footer and once in the profile.
-check-retainer.js asserts the firm is still findable from the paper a
-client signed -- an address and a telephone number, printed once.
+The page says when the editions were last read. A page of edition numbers
+with no date on it is one that gets trusted long after it stops being
+true, so check-uscis-packages.js asserts the date is on it.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_015tF6kxxSv9dUZdpdhCpvcX

@@ -11414,6 +11414,21 @@ app.get("/admin/clients/:key/court-mail", async (req, res) => {
 
 // The PAGE behind a notice on the calendar. The JSON route below is what
 // the app reads; sending a browser there printed the raw response.
+// ── USCIS, in the sidebar ─────────────────────────────────
+//
+// "i don't see the UCSIS form in the web." (JJ, 2026-10-09) All of it was
+// reachable only from inside a client profile, so from the front of the
+// app it did not exist.
+app.get("/admin/uscis", async (req, res) => {
+  try {
+    const body = require("./uscis-page").renderUscisPage();
+    res.send(require("./hearing-notes").renderAdminChrome({ title: "USCIS", body, activeItem: "uscis" }));
+  } catch (err) {
+    console.error("[uscis page]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
 // ── Combo filings ─────────────────────────────────────────
 //
 // "There are certain combo filings. Make sure they are available as an

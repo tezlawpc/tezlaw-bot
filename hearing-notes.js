@@ -1580,6 +1580,9 @@ function renderAdminChrome({ title, body, activeItem = null }) {
       <a href="/admin/hearing/notices/duplicates" class="nav-link ${isActive('notice-duplicates')}" data-perm="notes.master">
         <span class="nav-icon">◫</span><span class="nav-label">Duplicate Hearings</span>
       </a>
+      <a href="/admin/uscis" class="nav-link ${isActive('uscis')}" data-perm="clients.read">
+        <span class="nav-icon">◰</span><span class="nav-label">USCIS Forms</span>
+      </a>
     </div>
 
     <!-- ── Civil Litigation section ── -->
