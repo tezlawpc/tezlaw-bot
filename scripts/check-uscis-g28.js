@@ -346,6 +346,110 @@ async function run() {
     }
   });
 
+  // ── editing what the record proposed ────────────────────
+
+  await check("every mapped field is an editable box on the page", () => {
+    // "there are no places to edit information after it pulls data." (JJ,
+    // 2026-10-09) The page showed 46 values and let four of them be
+    // changed, which is a review screen pretending to be a form.
+    const P = require(path.join(ROOT, "uscis-g28-page.js"));
+    const c = { ...client(), key: "a-a123456789" };
+    const p = G.proposeG28({ client: c, attorney: "jj", matter: matter() });
+    const html = P.renderG28Page(c, p, { attorneyKey: "jj", matter: matter() });
+
+    const capacityKeys = new Set(Object.values(G.CAPACITIES));
+    const expect = [...new Set(G.MAP.map((e) => e.key))].filter((k) => !capacityKeys.has(k));
+    for (const key of expect) {
+      assert.ok(html.includes(`name="f:${key}"`), `${key} has no box to type into`);
+    }
+    // Item 5 is the picker at the top; two controls for one answer is how
+    // a form ends up with two boxes ticked.
+    for (const k of capacityKeys) {
+      assert.ok(!html.includes(`name="f:${k}"`), `${k} is offered twice`);
+    }
+  });
+
+  await check("the page posts which fields it showed", () => {
+    // A checkbox posts nothing when it is off, so without this the server
+    // cannot tell an unticked box from a field the page never offered,
+    // and clearing a box would silently restore the client record's value.
+    const P = require(path.join(ROOT, "uscis-g28-page.js"));
+    const c = { ...client(), key: "a-a123456789" };
+    const html = P.renderG28Page(c, G.proposeG28({ client: c, attorney: "jj", matter: matter() }),
+      { attorneyKey: "jj", matter: matter() });
+    const roster = (html.match(/name="__shown" value="([^"]*)"/) || [])[1] || "";
+    const keys = roster.split(",").filter(Boolean);
+    assert.ok(keys.length > 30, `only ${keys.length} fields are in the roster`);
+    for (const k of keys) assert.ok(html.includes(`name="f:${k}"`), `${k} is in the roster but has no box`);
+  });
+
+  await check("what a person types beats what the record proposed", () => {
+    const c = { ...client(), client_address: "somewhere in Shanghai" };
+    let p = G.proposeG28({ client: c, attorney: "jj", matter: matter() });
+    assert.ok(!p.values["client.street"], "the unparseable address was parsed after all");
+    p = G.applyEdits(p, {
+      __shown: "client.street,client.city,client.state,client.zip,client.family_name",
+      "f:client.street": "1234 Garvey Ave", "f:client.city": "West Covina",
+      "f:client.state": "CA", "f:client.zip": "91790", "f:client.family_name": "Chen",
+    });
+    assert.strictEqual(p.values["client.street"], "1234 Garvey Ave");
+    assert.strictEqual(p.sources["client.street"], "you typed it",
+      "a typed value is still credited to the client file");
+    assert.strictEqual(p.sources["client.family_name"], "client file",
+      "an unchanged value lost the source it came from");
+  });
+
+  await check("a box a person clears stays cleared", () => {
+    // Otherwise deleting a wrong value brings it straight back from the
+    // client record on the next render, which reads as the page ignoring
+    // you.
+    let p = G.proposeG28({ client: client(), attorney: "jj", matter: matter() });
+    assert.ok(p.values["client.email"], "the fixture has no email to clear");
+    p = G.applyEdits(p, { __shown: "client.email", "f:client.email": "" });
+    assert.ok(!("client.email" in p.values), "the cleared value came back");
+    assert.ok(!("client.email" in p.sources), "the cleared value kept a source");
+  });
+
+  await check("a post with no roster changes nothing", () => {
+    // A form submitted from somewhere that is not this page must not be
+    // read as "the person cleared all 41 fields".
+    const before = G.proposeG28({ client: client(), attorney: "jj", matter: matter() });
+    const after = G.applyEdits(before, {});
+    assert.deepStrictEqual(after.values, before.values, "an empty post emptied the form");
+  });
+
+  await check("item 5 still ends up with one box ticked after an edit", () => {
+    let p = G.proposeG28({ client: client(), attorney: "jj", matter: { ...matter(), capacity: "applicant" } });
+    // Someone posts two, which a hand-built request can do.
+    p = G.applyEdits(p, {
+      __shown: "matter.as_applicant,matter.as_respondent", capacity: "respondent",
+      "f:matter.as_applicant": "on", "f:matter.as_respondent": "on",
+    });
+    const on = Object.entries(G.CAPACITIES).filter(([, k]) => p.values[k]).map(([c]) => c);
+    assert.deepStrictEqual(on, ["respondent"], "item 5 came out with " + on.join(" and "));
+    assert.strictEqual(p.capacity, "respondent", "the proposal disagrees with the form");
+  });
+
+  await check("an edited value reaches the paper", async () => {
+    const c = { ...client(), client_address: "somewhere in Shanghai" };
+    let p = G.proposeG28({ client: c, attorney: "jj", matter: matter() });
+    p = G.applyEdits(p, { __shown: "client.street", "f:client.street": "1234 Garvey Ave" });
+    const out = await G.fillG28(p);
+    const { PDFDocument } = require("pdf-lib");
+    const doc = await PDFDocument.load(out.bytes, { ignoreEncryption: true, updateMetadata: false });
+    const field = G.MAP.find((e) => e.key === "client.street").field;
+    assert.strictEqual(doc.getForm().getTextField(field).getText(), "1234 Garvey Ave",
+      "the typed address did not reach the form");
+  });
+
+  await check("the server applies the edits before it fills anything", () => {
+    const src = read("server.js");
+    const i = src.indexOf("async function g28Context");
+    const block = src.slice(i, i + 1800);
+    assert.ok(/applyEdits\(proposal, req\.body/.test(block), "the POST ignores what was typed");
+    assert.ok(/req\.method === "POST"/.test(block), "a GET is treated as an edit");
+  });
+
   // ── the page, and the two routes ────────────────────────
 
   await check("nothing is produced by looking at the page", () => {

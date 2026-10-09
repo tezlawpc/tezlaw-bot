@@ -1,19 +1,35 @@
-The payment page stops asking the client to ring before paying
+The G-28 becomes a form you can type into
 
-"don't need to telephone the office before sending." (JJ, 2026-10-09)
-The warning opened by telling the client to telephone the office and
-confirm the details with someone they had already spoken to, before
-sending any money. That instruction is gone.
+"there are no places to edit information after it pulls data." (JJ,
+2026-10-09) Right: the page showed all 46 values with where each came
+from, and let four of them be changed. A client whose address the file
+could not parse, or whose name came across the wrong way round, had
+nowhere to be corrected. That is a review screen pretending to be a form.
 
-What stays is the sentence that actually defeats the attack: the firm
-never emails changed payment instructions, so an email that does is a
-fake, whoever it appears to come from. A number to ring is still printed
-for the client who receives one. The warning still comes before the
-account details on the page, and is still a border rather than a
-background, so it survives a print with Background graphics unticked.
+Every mapped field is now a real input, laid out under the part it prints
+in and labelled with its printed item number: 41 of them, the five
+capacity boxes excepted because item 5 has its own picker and the form
+says select only one. Text boxes are text boxes, the two state fields are
+dropdowns of the form's own options, and the checkboxes are checkboxes.
 
-The new opening line went in with an em dash and check-retainer.js
-rejected it, which is the firm's own convention doing its job.
+Where a value came from still shows beside it, and flips to "you typed
+it" the moment it changes, so the page never credits the client file with
+something a person wrote.
+
+Two things that look like detail and are not:
+
+A box someone CLEARS stays cleared. Falling back to the client record for
+an empty field would bring a wrong value straight back on the next
+render, which reads as the page ignoring you.
+
+The form posts a roster of the fields it showed. A checkbox posts nothing
+when it is off, so without the roster the server cannot tell an unticked
+box from a field the page never offered -- and a post from anywhere else
+would be read as "this person just cleared all 41 fields". An empty
+roster changes nothing.
+
+9 new checks, including the round trip: type an address the file could
+not parse, produce the form, read the value back off the paper.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_015tF6kxxSv9dUZdpdhCpvcX

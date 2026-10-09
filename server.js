@@ -11489,7 +11489,11 @@ async function g28Context(req) {
     package: pkg ? pkg.id : "",
   };
   const attorneyKey = (src.attorney || "").trim() || null;
-  const proposal = require("./uscis-g28").proposeG28({ client, attorney: attorneyKey, matter });
+  // The record proposes; the person decides. Anything typed on the page
+  // wins, including a box they cleared -- see applyEdits in uscis-g28.js.
+  const U = require("./uscis-g28");
+  let proposal = U.proposeG28({ client, attorney: attorneyKey, matter });
+  if (req.method === "POST") proposal = U.applyEdits(proposal, req.body || {});
   return { client, matter, attorneyKey, proposal, pkg };
 }
 

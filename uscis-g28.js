@@ -397,6 +397,67 @@ function proposeG28({ client = {}, attorney: attorneyKey = null, matter = {} } =
   };
 }
 
+/**
+ * What a person typed, over what the record proposed.
+ *
+ * "there are no places to edit information after it pulls data." (JJ,
+ * 2026-10-09) The first version of the review page showed every value and
+ * let four of them be changed, which is a review screen pretending to be
+ * a form: an address that did not parse, or a name that came across
+ * backwards, had nowhere to be corrected.
+ *
+ * `body` is the posted form, with one entry per mapped key under the "f:"
+ * prefix. Every key present is taken from the person, including the ones
+ * they cleared: an empty box means "leave this blank on the form", not
+ * "fall back to the client record", or a value they deleted would come
+ * straight back.
+ *
+ * A checkbox posts nothing when it is off, so the form also carries a
+ * hidden list of which boxes were on the page. Without it, an unticked box
+ * is indistinguishable from a field the page never showed.
+ */
+function applyEdits(proposal, body = {}) {
+  const shown = String(body.__shown || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!shown.length) return proposal;
+
+  const values = { ...proposal.values };
+  const sources = { ...proposal.sources };
+
+  for (const key of shown) {
+    const raw = body["f:" + key];
+    const was = proposal.values[key];
+    const now = raw == null ? "" : String(raw).trim();
+
+    if (!now) {
+      delete values[key];
+      delete sources[key];
+      // Only say a person cleared it if there was something to clear.
+      if (was) sources[key] = undefined;
+      continue;
+    }
+    values[key] = now;
+    sources[key] = now === was ? (proposal.sources[key] || null) : "you typed it";
+  }
+  for (const k of Object.keys(sources)) if (sources[k] === undefined) delete sources[k];
+
+  // One box only in item 5. A person who ticks a second capacity gets the
+  // one they just chose, not both, because the form says "select only one".
+  const caps = Object.values(CAPACITIES).filter((k) => values[k]);
+  if (caps.length > 1) {
+    const chosen = String(body.capacity || "").toLowerCase();
+    const keep = CAPACITIES[chosen] || caps[caps.length - 1];
+    for (const k of caps) if (k !== keep) { delete values[k]; delete sources[k]; }
+  }
+
+  const capKey = Object.entries(CAPACITIES).find(([, k]) => values[k]);
+  return {
+    ...proposal,
+    values, sources,
+    capacity: capKey ? capKey[0] : null,
+    edited: true,
+  };
+}
+
 // ── filling the PDF ─────────────────────────────────────────
 
 /** What the vendored blank says about itself. */
@@ -467,6 +528,6 @@ async function fillG28(proposal, { flatten = false } = {}) {
 
 module.exports = {
   FORM_ID, EDITION, BLANK, DUMP, MAP, NEVER_FILL, CAPACITIES,
-  proposeG28, fillG28, blankInfo,
+  proposeG28, applyEdits, fillG28, blankInfo,
   phone, aNumber, splitName, splitAddress, suggestCapacity,
 };

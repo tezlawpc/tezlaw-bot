@@ -27,6 +27,7 @@ function esc(s) {
 
 const CARD = "background:#FFFFFF; border:1px solid #E8E3DC; border-radius:8px; padding:18px 20px; margin-bottom:14px;";
 const LABEL = "font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#A34C00; font-weight:700; margin:0 0 10px;";
+const INPUT = "padding:8px 10px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px; box-sizing:border-box;";
 
 const NOTE_STYLE = {
   stop:  "background:#FBEDEA; border-left:4px solid #9C2B1E; color:#2B2523;",
@@ -91,20 +92,68 @@ const PRINTED = {
   "client.zip": "Pt 3, 13.e  Client ZIP",
 };
 
-function valueRows(proposal, prefix) {
-  const rows = Object.keys(proposal.values)
-    .filter((k) => k.startsWith(prefix))
-    .map((k) => {
-      const v = proposal.values[k];
-      const shown = v === "on" ? "ticked" : v;
+/**
+ * One editable box per mapped field.
+ *
+ * Every field on the map gets a real input, prefilled with what the record
+ * proposed and labelled with the item number it prints as. Where a value
+ * came from is shown beside it, and switches to "you typed it" the moment
+ * it is changed, so the page never claims the client file said something a
+ * person wrote.
+ *
+ * `shown` collects the keys rendered. It rides along in a hidden field,
+ * because a checkbox posts nothing when it is off and the server would
+ * otherwise have no way to tell an unticked box from a field this page
+ * never offered.
+ */
+function fieldInputs(proposal, prefix, { skip = [], blank = null, shown }) {
+  const G2 = require("./uscis-g28");
+  const info = G2.blankInfo();
+  const byName = new Map((blank || info.fields).map((f) => [f.name, f]));
+  const seen = new Set();
+
+  const rows = G2.MAP.filter((e) => e.key.startsWith(prefix) && !skip.includes(e.key))
+    .filter((e) => (seen.has(e.key) ? false : seen.add(e.key)))
+    .map((e) => {
+      const f = byName.get(e.field) || {};
+      const v = proposal.values[e.key] || "";
+      const src = proposal.sources[e.key];
+      shown.push(e.key);
+      const name = `f:${esc(e.key)}`;
+      const label = esc(PRINTED[e.key] || e.key);
+      const from = src
+        ? `<span style="font-size:10px; color:${src === "you typed it" ? "#A34C00" : "#5E5854"};">${esc(src)}</span>`
+        : "";
+
+      if (e.checkbox) {
+        return `
+      <label style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:13px; color:#2B2523;">
+        <input type="checkbox" name="${name}" value="on" ${v ? "checked" : ""}>
+        <span>${label}</span> ${from}
+      </label>`;
+      }
+      if (e.dropdown) {
+        const opts = (f.options || []).map((o) =>
+          `<option value="${esc(o)}" ${o === v ? "selected" : ""}>${esc(o.trim() || "—")}</option>`).join("");
+        return `
+      <div>
+        <label style="font-size:11px; color:#5E5854; display:block; margin-bottom:3px;">${label} ${from}</label>
+        <select name="${name}" style="${INPUT} width:100%;"><option value=""></option>${opts}</select>
+      </div>`;
+      }
       return `
-      <tr>
-        <td style="padding:5px 12px 5px 0; color:#5E5854; font-size:12px; white-space:nowrap;">${esc(PRINTED[k] || k)}</td>
-        <td style="padding:5px 12px 5px 0; font-size:13px; color:#2B2523; font-weight:600;">${esc(shown)}</td>
-        <td style="padding:5px 0; font-size:11px; color:#5E5854;">${esc(proposal.sources[k] || "")}</td>
-      </tr>`;
-    }).join("");
-  return rows || `<tr><td colspan="3" style="padding:6px 0; color:#5E5854; font-size:12px;">Nothing on file.</td></tr>`;
+      <div>
+        <label style="font-size:11px; color:#5E5854; display:block; margin-bottom:3px;">${label} ${from}</label>
+        <input type="text" name="${name}" value="${esc(v)}" style="${INPUT} width:100%;">
+      </div>`;
+    });
+
+  const boxes = rows.filter((r) => r.includes('type="checkbox"')).join("");
+  const fields = rows.filter((r) => !r.includes('type="checkbox"')).join("");
+
+  return `
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:12px 18px;">${fields}</div>
+    ${boxes ? `<div style="margin-top:12px; border-top:1px solid #F3EFE9; padding-top:10px;">${boxes}</div>` : ""}`;
 }
 
 /**
@@ -128,7 +177,10 @@ function renderG28Page(client, proposal, { attorneyKey = null, matter = {}, pkg 
       c ? esc(c[0].toUpperCase() + c.slice(1)) : "— choose —"}${
       c && c === proposal.suggested_capacity ? "  (looks like this one)" : ""}</option>`).join("");
 
-  const input = "width:100%; padding:8px 10px; border:1px solid #CFC8BE; border-radius:4px; font-size:14px; box-sizing:border-box;";
+  const input = INPUT + " width:100%;";
+  // Collected as the inputs are built, then posted, so the server can tell
+  // an unticked checkbox from a field this page never offered.
+  const shown = [];
 
   // When the G-28 was opened from a filing package, say which one and keep
   // it on the form, so a re-render does not silently drop item 1.b back to
@@ -191,12 +243,27 @@ function renderG28Page(client, proposal, { attorneyKey = null, matter = {}, pkg 
 
     <div style="${CARD}">
       <p style="${LABEL}">Parts 1 and 2 — the attorney</p>
-      <table style="width:100%; border-collapse:collapse;">${valueRows(proposal, "attorney.")}</table>
+      <div style="font-size:12px; color:#5E5854; margin:-4px 0 12px;">
+        From the attorney record. A change here applies to this form only.
+      </div>
+      ${fieldInputs(proposal, "attorney.", { shown })}
     </div>
 
     <div style="${CARD}">
-      <p style="${LABEL}">Part 3 — the client and the matter</p>
-      <table style="width:100%; border-collapse:collapse;">${valueRows(proposal, "client.")}${valueRows(proposal, "matter.")}</table>
+      <p style="${LABEL}">Part 3 — the client</p>
+      <div style="font-size:12px; color:#5E5854; margin:-4px 0 12px;">
+        Pulled from the client file where it could be read, and all of it editable: an address the
+        file could not parse, or a name that came across the wrong way round, is typed in here.
+      </div>
+      ${fieldInputs(proposal, "client.", { shown })}
+    </div>
+
+    <div style="${CARD}">
+      <p style="${LABEL}">Part 3 — the matter</p>
+      ${fieldInputs(proposal, "matter.", { shown, skip: Object.values(G.CAPACITIES) })}
+      <div style="font-size:12px; color:#5E5854; margin-top:10px;">
+        Item 5, the capacity, is the picker at the top of this page: the form says select only one.
+      </div>
     </div>
 
     <div style="${CARD} border-color:#CFC8BE;">
@@ -210,6 +277,8 @@ function renderG28Page(client, proposal, { attorneyKey = null, matter = {}, pkg 
         An appearance before an Immigration Judge or the BIA is Form EOIR-28, not this one.
       </div>
     </div>
+
+    <input type="hidden" name="__shown" value="${esc(shown.join(","))}">
 
     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:28px;">
       <button type="submit" name="action" value="download" style="background:#A34C00; color:#FFFFFF; border:none;
