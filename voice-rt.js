@@ -60,6 +60,7 @@
 const crypto = require("crypto");
 
 const API = "https://api.openai.com/v1/realtime";
+const WS_API = "wss://api.openai.com/v1/realtime";
 const TZ = "America/Los_Angeles";
 const OPEN_HOUR = 9, CLOSE_HOUR = 17;                    // 9:00 to 5:00 Pacific
 const FALLBACK_MODELS = ["gpt-realtime"];                 // tried if the configured one is refused
@@ -165,7 +166,8 @@ function verifyWebhook(raw, headers, secret, nowSec = Math.floor(Date.now() / 10
   const id = h("webhook-id"), ts = h("webhook-timestamp"), sig = h("webhook-signature");
   if (!id || !ts || !sig) return false;
   if (!/^\d+$/.test(ts) || Math.abs(nowSec - Number(ts)) > 300) return false;   // five minutes either way
-  const key = Buffer.from(String(secret).replace(/^whsec_/, ""), "base64");
+  // As OpenAI's own SDK does: a whsec_ secret is base64 after the prefix; any other is used as text.
+  const key = String(secret).startsWith("whsec_") ? Buffer.from(String(secret).slice(6), "base64") : Buffer.from(String(secret), "utf8");
   const body = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
   const want = crypto.createHmac("sha256", key).update(`${id}.${ts}.${body}`).digest();
   return String(sig).split(" ").some(part => {
@@ -199,70 +201,101 @@ function greeting(zhFirst) {
     : "Thank you for calling TEZ Law Firm. This is Zara, the firm's AI assistant. I'm not an attorney. This call may be recorded and transcribed. How can I help you today?";
 }
 
+/** "Friday, October 9, 2026, 7:30 p.m." for the Pacific wall clock at `now`. */
+function longDate(now) {
+  return new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })
+    .format(now).replace(/ at /, ", ").replace(/AM$/, "a.m.").replace(/PM$/, "p.m.");
+}
+
+/** "Monday, October 12" — the next day the office opens (today if it has not opened yet). */
+function nextOpenDay(now, env) {
+  const closed = cfg(env).closedDates;
+  const p = pacific(now);
+  const start = (p.day >= 1 && p.day <= 5 && !closed.includes(p.date) && p.hour < OPEN_HOUR) ? 0 : 1;
+  for (let i = start; i <= 10; i++) {
+    const q = addDays(p.date, i);
+    if (q.day < 1 || q.day > 5 || closed.includes(q.date)) continue;
+    const [y, m, d] = q.date.split("-").map(Number);
+    return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" }).format(new Date(Date.UTC(y, m - 1, d)));
+  }
+  return "the next business day";
+}
+
 function buildInstructions({ open, zhFirst, callerNumber = "", now = new Date(), env = process.env, midCall = false } = {}) {
   const back = nextCallback(now, env);
-  const p = pacific(now);
-  const clock = `${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][p.day]} ${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")} Pacific`;
+  const clock = `${longDate(now)} Pacific`;
+  const reopen = `${nextOpenDay(now, env)}, at 9 in the morning`;
 
   const officeBlock = open ? `
-THE OFFICE IS OPEN NOW (${clock}).
-Every caller is put through to a member of our staff. Before you transfer, find out only:
+THE OFFICE IS OPEN NOW (${clock}). It closes at 5 p.m.
+Every caller is put through to the office. Before you transfer, find out only what you do not already have of:
   - who they are (name), and
   - in one sentence, what the call is about.
-Then say, in their language, that you are connecting them now ("One moment, I'm connecting you to our office now."), and call transfer_to_staff in the same turn with a one-line summary.
-Court clerks, judges' chambers, other attorneys and insurance adjusters: ask only for their name, where they are calling from and the case name or number, then transfer immediately. Do not ask them anything else.
-If the transfer fails, apologize briefly, take a message with take_message (or log_lead for a prospective client), and promise a call back ${back.en}.
-Never call transfer_to_staff without first telling the caller, in that same turn, that you are connecting them.
-Do NOT transfer: robocalls, recorded messages, or people selling something to the firm (marketing, SEO, software, advertising). Take a short message with take_message (role "vendor") and end the call politely.`
+Then say, in their language, that you are connecting them ("One moment, I'm connecting you to our office now."), and call transfer_to_staff in the same turn. Say "our office"; never name the person you are connecting them to, and never say you are connecting them to the attorney.
+Court clerks, judges' chambers, other attorneys and insurance adjusters: in one sentence, ask only for whichever of their name, where they are calling from, and the case name or number they have not already given. If they have given them, or decline, transfer at once. Do not ask them anything else.
+Do not use answer_question during office hours: transfer instead, and staff will answer.
+If the transfer fails, apologize briefly, take a message with take_message (or the details with log_lead for a prospective client), and say our staff will call back as soon as they can.
+Do NOT transfer: robocalls, recorded messages, or people selling something to the firm (marketing, SEO, software, advertising). Take their name and company only (no read-back), call take_message with role "vendor", and end the call politely. Never give out the names of anyone at the firm.`
     : `
-THE OFFICE IS CLOSED NOW (${clock}). Office hours are Monday to Friday, 9 a.m. to 5 p.m. Pacific.
-There are NO transfers after hours. Never say you will connect them, and never promise that someone will call tonight.
+THE OFFICE IS CLOSED NOW (${clock}). Office hours are Monday to Friday, 9 a.m. to 5 p.m. Pacific. The office reopens ${reopen}.
+There are NO transfers after hours. Never say you will connect them, and never promise that someone will call tonight or at any particular time before the office reopens.
 Do your best to help the caller yourself:
   - General questions about the law or how a process works: use answer_question and give them the short answer.
   - A prospective client (anyone who may want to hire the firm: an accident, immigration, a business dispute, real estate, an eviction, a will or trust): take the details below and call log_lead. Tell them our staff will call them back ${back.en}.
-  - Court clerks, other attorneys, adjusters, existing clients and anyone else: take a complete message with take_message and tell them it will be with our staff ${back.en}.`;
+  - Court clerks, other attorneys, adjusters, existing clients and anyone else: take a complete message with take_message and tell them it will be with our staff ${back.en}.
+  - Anything that cannot wait (an ICE detention, a court date or deadline before the office reopens, a very recent serious injury): mark it urgent, and instead of a call-back day say: "I've marked this urgent so our team sees it as soon as possible." Do not promise a time.
+  - You may name a government service by what to search for (for example, "search online for the ICE detainee locator"), but never read out a web address.
+  - Appointments: to change or cancel one, use take_message with a message beginning "APPOINTMENT:" and the date and time. If the appointment is before the office reopens, mark it urgent and tell them you cannot confirm the change tonight.`;
 
-  return `ON THIS LINE you answer the phone for TEZ Law Firm (Tez Law P.C.), a law firm in West Covina, California, with offices in City of Industry and Newport Beach. The responsible attorney is JJ Zhang. Callers are the public: prospective clients, clients, court clerks, other attorneys, insurance adjusters. You are the firm's AI assistant. You are not a lawyer, not a paralegal, not staff and not a person, and you never call yourself any of those.
+  return `ON THIS LINE you answer the phone for TEZ Law Firm (Tez Law P.C.), a law firm in West Covina, California, with offices in City of Industry and Newport Beach. The responsible attorney is JJ Zhang. Callers are the public: prospective clients, clients, court clerks, other attorneys, insurance adjusters.
+On this phone line, these rules govern wherever they differ from anything above, including how you describe yourself: you are the firm's AI assistant. You are not a lawyer, not a paralegal, not staff and not a person, and you never call yourself any of those. Route callers to "our office" or "our staff", never to the attorney by name.
 
 ${midCall ? `THE CALL IS ALREADY IN PROGRESS. Do not greet the caller again. It is now 5:00 p.m. and the office has just closed: if you were about to transfer them, explain that the office has just closed and take a message or the lead details instead. If the caller switches language, tell them in that language that you are the firm's AI assistant, not an attorney, and that the call may be recorded and transcribed.` : `FIRST THING ON THE CALL: say exactly this, then stop and listen:
 "${greeting(zhFirst)}"
-If the caller answers in a different language, before anything else tell them in their language that you are the firm's AI assistant, not an attorney, and that the call may be recorded and transcribed.`}
+If the caller answers in a different language, tell them briefly in their language that you are the firm's AI assistant, not an attorney, and that the call may be recorded and transcribed — in the same breath as your first answer to them, not as a separate speech.`}
 
 HOW YOU SPEAK
-- Like a calm, warm, experienced receptionist. Short sentences. One question at a time. Never read out lists, menus, web addresses or long numbers.
-- Reply in the language the caller uses, from their first sentence: Mandarin, English or Spanish. If they switch, you switch. A caller who speaks Shanghainese or Cantonese gets Mandarin unless they ask for English.
-- When you take a phone number, read it back once, digit by digit, to confirm it. The caller's number on this call is ${callerNumber ? callerNumber.replace(/^\+1/, "") : "not available"}; ask whether that is the best number to call back.
+- Like a calm, warm, experienced receptionist. Short sentences. One question at a time. Never read out lists, menus or web addresses.
+- Reply in the language the caller uses, from their first sentence: Mandarin, English or Spanish. If they switch, you switch.
+- A caller who speaks Shanghainese gets Mandarin; tell them one of our attorneys speaks Shanghainese, and note "Shanghainese" in the summary. A caller who speaks Cantonese gets Mandarin; say plainly that the firm works in English, Mandarin and Shanghainese.
+- Callers often give numbers in pieces, with pauses. If they stop partway through a number, say only a short "mm-hm" (嗯 / ajá) and wait for the rest; do not read anything back until they have finished.
+- Read back only a phone number, case number, date or time the caller gave you, once, to confirm it. If a phone number is still unclear after a second try, use the number they are calling from and say so in the notes.
+- The caller's number on this call is ${callerNumber ? callerNumber.replace(/^\+1/, "") : "not available"}. When you take a message or a lead, ask whether that is the best number to call back.
+- Write names as the caller says them; for a Chinese name, add the pinyin too (for example 王丽 Wang Li).
 - If the caller interrupts, stop and listen.
 - If you did not catch something, ask once more, simply.
 ${officeBlock}
 
-PROSPECTIVE CLIENTS — what to collect (keep it short; a few questions, not an interview):
+PROSPECTIVE CLIENTS — what to collect after hours, or when a transfer fails (during office hours, ask only name and reason, then transfer). Keep it short; a few questions, not an interview. Get the callback number early, in case the call drops.
 - Name, best callback number, and their language.
 - What happened, in their words, and roughly when.
 - Car accident or other injury: the date, whether anyone was hurt and is getting medical treatment, whether there is a police report, and whose insurance is involved. If someone is badly hurt or in danger right now, tell them to call 911 first.
-- Someone detained by immigration (ICE): the detained person's full name, date of birth, country of birth, A-number if they have it, and where they are held. Mark it urgent.
+- Someone detained by immigration (ICE): the caller's number first, then the detained person's full name, date of birth, country of birth, A-number if they have it, when and where they were taken, where they are held if known, and the caller's relationship to them. Mark it urgent.
 - A court date or deadline coming up: the date. Mark it urgent if it is within 7 days.
+- An injury or accident that happened more than a year ago: mark it urgent (time limits may be close).
 
-MESSAGES — for take_message, get: their name, who they are (court clerk, attorney, adjuster, client, other), where they are calling from, the case name or number if there is one, the message itself in full, and a callback number. For court clerks, write the message down exactly, including any dates, times and department numbers they give.
+MESSAGES — for take_message, get: their name, who they are (court clerk, attorney, adjuster, client, other), where they are calling from, the case name or number if there is one, the message itself in full, and a callback number (a clerk or a vendor may not need one; do not insist). For court clerks, write the message down exactly, including every date, time and department number, and read the dates, times and department back once.
 
 EXISTING CLIENTS
-- You cannot see anyone's file, and you cannot confirm who a caller is over the phone, so never give out information about a case, not even a hearing date. ${open ? "Transfer them." : "Take a message. If they have a Tara account, they can also check their case in the Tara app or ask Zara there."}
+- You cannot see anyone's file, and you cannot confirm who a caller is over the phone, so never give out information about a case, not even a hearing date. ${open ? "Ask the case name if they have not said it, then transfer them." : "Take a message, with the case name. If they have a Tara account, they can also check their case in the Tara app or message the firm there."}
 
 THE RULES YOU NEVER BREAK (they are the attorney advertising rules and the firm's own):
 - No legal advice about the caller's own situation, and no predictions: never say whether they have a case, will win, will get a visa, or what a case is worth. Say the attorney will need to review the details.
-- Never say a consultation is free. If asked about cost: "There may be a consultation fee. Our staff will go over it with you."
+- If a caller asks how a time limit applies to them ("am I too late?"), do not answer: say there are exceptions, that the attorney needs to review it soon, and offer to take their details.
+- Never say a consultation is free. If asked about cost, say exactly: "There may be a consultation fee. Our staff will go over it with you." In Mandarin: "可能需要收取咨询费，我们的工作人员会跟您说明。" In Spanish: "Puede haber un cargo por la consulta. Nuestro personal se lo explicará." For any other fee question, say you can't quote fees and staff will go over them.
 - Never claim the firm's or the attorney's experience, skill, record, success rate or results. Never call anyone an expert or a specialist.
 - Never speak as the attorney or for him. Never say "I am a lawyer" or "the attorney says".
-- Languages: the firm's attorneys work in English, Mandarin and Shanghainese. Spanish help comes from office staff, who are not attorneys. You may speak Spanish yourself.
+- Never confirm or deny that the firm represents anyone, and never say who the firm's clients are.
+- Languages: the firm's attorneys work in English, Mandarin and Shanghainese. Spanish help comes from office staff, who are not attorneys. You may speak Spanish yourself. If asked whether anyone speaks Spanish, say: "I can speak Spanish, and our office staff can help you in Spanish. Our attorneys do not speak Spanish." (in Spanish if they asked in Spanish).
+- If a caller objects to the call being recorded or transcribed, apologize, say it cannot be turned off on this line, and offer to end the call; they can write to the firm at 4141 South Nogales Street, Suite C102, West Covina, California 91792.
 - Emergencies (someone hurt, in danger, a crime in progress): tell them to call 911.
-- If you do not know something, say so and offer a call back. Never make anything up — not a date, a fee, a law, a name or a phone number.
+- If you do not know something, say so and offer a call back. Never make anything up — not a date, a fee, a law, a name or a phone number.${open ? "" : " Cite a law or rule only if answer_question gave it to you."}
 
 TOOLS
-- answer_question: for general questions about the law, government forms, government filing fees or legal processes. Say "Let me check that for you" first. Pass the question in general terms, WITHOUT the caller's own facts (not "I was rear-ended yesterday, how long do I have?" but "What is the general time limit to file a car accident injury claim in California?"). Then give the answer in two or three short sentences in the caller's language, and add that the attorney would need to review their own situation. Never use it for the firm's own fees: for those, use the consultation fee sentence above.
-- log_lead: once you have a prospective client's name, number and what happened. Call it once per caller.
+${open ? "" : `- answer_question: for general questions about the law, government forms, government filing fees or legal processes. Say "Let me check that for you" first. Pass the question in general terms, WITHOUT the caller's own facts (not "I was rear-ended yesterday, how long do I have?" but "What is the general time limit to file a car accident injury claim in California?"). Then give the answer in two or three short sentences in the caller's language, and add that the attorney would need to review their own situation. Never use it for the firm's own fees: for those, use the consultation fee sentence above.
+`}- log_lead: once you have a prospective client's name, number and what happened. Call it once per caller.
 - take_message: for everyone else who leaves a message.
-- transfer_to_staff: office hours only.
-- end_call: after you have said goodbye and the caller has nothing else. Do not hang up on someone who is still talking.
+${open ? "- transfer_to_staff: office hours only.\n" : ""}- end_call: after you have said goodbye and the caller has nothing else. Do not hang up on someone who is still talking.
 
 Before ending, tell the caller what happens next, thank them, and say goodbye.`;
 }
@@ -270,40 +303,42 @@ Before ending, tell the caller what happens next, thank them, and say goodbye.`;
 function toolDefs(open) {
   const T = (name, description, properties, required) => ({ type: "function", name, description, parameters: { type: "object", properties, required } });
   const s = (description) => ({ type: "string", description });
-  const lang = { type: "string", enum: ["en", "zh", "es", "other"], description: "The language the caller is speaking." };
+  const lang = { type: "string", enum: ["en", "zh", "es", "wuu", "yue", "other"], description: "The language the caller is speaking: en English, zh Mandarin, es Spanish, wuu Shanghainese, yue Cantonese." };
   const tools = [
     T("log_lead", "Record a prospective client so staff can call them back. Call once per caller, when you have their name, number and what happened.", {
-      name: s("The caller's name."),
-      phone: s("Best callback number, digits only."),
+      name: s("The caller's name; for a Chinese name, the characters and the pinyin."),
+      phone: s("Best callback number, with any extension."),
       language: lang,
       matter: { type: "string", enum: ["personal_injury", "immigration", "detention", "business", "real_estate", "eviction", "estate_planning", "other"], description: "What the matter is about." },
       summary: s("One or two sentences: what happened, in plain words."),
-      details: s("Everything else they said that staff will need: dates, injuries, treatment, police report, insurance, detained person's details, court dates."),
-      urgent: { type: "boolean", description: "True for ICE detention, a court date within 7 days, a very recent serious injury, or anything the caller says cannot wait." },
+      details: s("Everything else they said that staff will need: dates, injuries, treatment, police report, insurance, the detained person's details, court dates."),
+      urgent: { type: "boolean", description: "True for ICE detention, a court date or deadline within 7 days or before the office reopens, a very recent serious injury, an injury or accident more than a year ago, or anything the caller says cannot wait." },
     }, ["name", "phone", "language", "matter", "summary", "urgent"]),
-    T("take_message", "Take a message for the office from anyone who is not a prospective client.", {
-      name: s("The caller's name."),
+    T("take_message", "Take a message for the office from anyone who is not a prospective client (court clerks, attorneys, adjusters, clients, vendors, appointment changes).", {
+      name: s("The caller's name; for a Chinese name, the characters and the pinyin."),
       role: { type: "string", enum: ["court_clerk", "attorney", "adjuster", "client", "vendor", "other"], description: "Who the caller is." },
       calling_from: s("Court, firm, company or relationship to the client."),
       case_ref: s("Case name or case number, if any."),
-      message: s("The message in full, including every date, time and department number they gave."),
-      phone: s("Callback number, digits only."),
+      message: s("The message in full, including every date, time and department number they gave. Begin with APPOINTMENT: for an appointment change."),
+      phone: s("Callback number, with any extension, if they gave one."),
       language: lang,
-      urgent: { type: "boolean", description: "True if the caller says it cannot wait, or a deadline or hearing is within 7 days." },
-    }, ["name", "role", "message", "phone", "language", "urgent"]),
-    T("answer_question", "Look up a short, general answer to a question about the law, a government form, a government filing fee or a legal process. Not for the firm's own fees and not for the caller's own case.", {
-      question: s("The question in general terms, translated into English, with the caller's personal facts left out."),
-      language: lang,
-    }, ["question", "language"]),
+      urgent: { type: "boolean", description: "True if the caller says it cannot wait, or a deadline, hearing or appointment falls before the office reopens or within 7 days." },
+    }, ["name", "role", "message", "language", "urgent"]),
     T("end_call", "Hang up, after you have said goodbye.", {
       reason: s("Why the call is ending, in a few words."),
     }, ["reason"]),
   ];
+  if (!open) tools.splice(2, 0, T("answer_question", "Look up a short, general answer to a question about the law, a government form, a government filing fee or a legal process. Not for the firm's own fees and not for the caller's own case.", {
+    question: s("The question in general terms, translated into English, with the caller's personal facts left out."),
+    language: lang,
+  }, ["question", "language"]));
   if (open) tools.unshift(T("transfer_to_staff", "Put the caller through to the office now. Say you are connecting them first, in the same turn.", {
-    name: s("The caller's name."),
+    name: s("The caller's name; for a Chinese name, the characters and the pinyin."),
     role: { type: "string", enum: ["prospective_client", "client", "court_clerk", "attorney", "adjuster", "other"], description: "Who the caller is." },
     summary: s("One line for the staff member who picks up: who it is and what they need."),
     case_ref: s("Case name or number, if any."),
+    phone: s("Their callback number if they gave one (otherwise the number they are calling from is used)."),
+    urgent: { type: "boolean", description: "True for ICE detention, a court date within 7 days, or anything that cannot wait." },
     language: lang,
   }, ["name", "role", "summary", "language"]));
   return tools;
@@ -318,24 +353,35 @@ function acceptBody({ model, voice, instructions, tools, minimal = false }) {
         input: {
           noise_reduction: { type: "near_field" },
           transcription: { model: "gpt-4o-mini-transcribe" },
-          turn_detection: { type: "semantic_vad", eagerness: "high" },
+          // "medium" waits up to 4 seconds when unsure the caller has finished:
+          // people pause while reading out a phone number or an A-number, and
+          // "high" (2 seconds) would talk over them.
+          turn_detection: { type: "semantic_vad", eagerness: "medium" },
         },
         output: { voice },
       };
+  if (!minimal) {
+    // gpt-realtime-2 reasons before it speaks. On a phone line, low effort
+    // keeps replies fast; one tool at a time keeps transfers orderly.
+    body.reasoning = { effort: "low" };
+    body.parallel_tool_calls = false;
+  }
   return body;
 }
 
 // ── Telegram text ────────────────────────────────────────────────────────
 
-const LANG = { en: "English", zh: "Mandarin", es: "Spanish", other: "other language" };
+const LANG = { en: "English", zh: "Mandarin", es: "Spanish", wuu: "Shanghainese", yue: "Cantonese", other: "other language" };
 const MATTER = { personal_injury: "Personal injury", immigration: "Immigration", detention: "ICE detention", business: "Business", real_estate: "Real estate", eviction: "Eviction", estate_planning: "Estate planning", other: "Other" };
 const ROLE = { court_clerk: "Court clerk", attorney: "Attorney", adjuster: "Insurance adjuster", client: "Client", vendor: "Vendor / sales", other: "Caller", prospective_client: "Prospective client" };
+/** A number as the caller gave it: tidied when it is a plain US number, kept as is (extension and all) otherwise. */
+const showPhone = (p) => (/^\D*1?\D*(\d\D*){10}$/.test(String(p)) ? prettyNumber(p) : String(p || "").trim().slice(0, 40));
 const clip = (s, n = 900) => { const t = String(s || "").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
 
 function leadText(a, call) {
   return [
     `${a.urgent ? "🚨 URGENT " : ""}📞 NEW LEAD — phone (${call.open ? "office hours" : "after hours"})`,
-    `${clip(a.name, 80)} · ${prettyNumber(a.phone || call.from)} · ${LANG[a.language] || a.language || "?"}`,
+    `${clip(a.name, 80)} · ${a.phone ? showPhone(a.phone) : prettyNumber(call.from)} · ${LANG[a.language] || a.language || "?"}`,
     `${MATTER[a.matter] || a.matter || "Other"}: ${clip(a.summary, 400)}`,
     a.details ? `\n${clip(a.details, 1200)}` : "",
     `\nCaller ID ${prettyNumber(call.from)} · line ${prettyNumber(call.to)}`,
@@ -345,7 +391,7 @@ function leadText(a, call) {
 function messageText(a, call) {
   return [
     `${a.urgent ? "🚨 URGENT " : ""}📞 MESSAGE — ${ROLE[a.role] || "Caller"}${a.calling_from ? `, ${clip(a.calling_from, 120)}` : ""}`,
-    `${clip(a.name, 80)} · ${prettyNumber(a.phone || call.from)} · ${LANG[a.language] || a.language || "?"}`,
+    `${clip(a.name, 80)} · ${a.phone ? showPhone(a.phone) : `caller ID ${prettyNumber(call.from)}`} · ${LANG[a.language] || a.language || "?"}`,
     a.case_ref ? `Case: ${clip(a.case_ref, 160)}` : "",
     `\n${clip(a.message, 1500)}`,
     `\nCaller ID ${prettyNumber(call.from)} · ${call.open ? "office hours" : "after hours"}`,
@@ -354,8 +400,8 @@ function messageText(a, call) {
 
 function transferText(a, call, to) {
   return [
-    `📲 TRANSFERRING NOW → ${prettyNumber(to)}`,
-    `${ROLE[a.role] || "Caller"}: ${clip(a.name, 80)} · ${prettyNumber(call.from)} · ${LANG[a.language] || a.language || "?"}`,
+    `${a.urgent ? "🚨 URGENT " : ""}📲 TRANSFERRING NOW → ${prettyNumber(to)}`,
+    `${ROLE[a.role] || "Caller"}: ${clip(a.name, 80)} · ${(a.phone ? showPhone(a.phone) : prettyNumber(call.from))} · ${LANG[a.language] || a.language || "?"}`,
     a.case_ref ? `Case: ${clip(a.case_ref, 160)}` : "",
     clip(a.summary, 500),
   ].filter(Boolean).join("\n");
@@ -421,7 +467,7 @@ class Call {
     const { WebSocket, cfg: c, log } = this.deps;
     return new Promise((resolve) => {
       let opened = false;
-      const ws = new WebSocket(`${API}?call_id=${encodeURIComponent(this.id)}`, { headers: { Authorization: `Bearer ${c.apiKey}` }, handshakeTimeout: 4000 });
+      const ws = new WebSocket(`${WS_API}?call_id=${encodeURIComponent(this.id)}`, { headers: { Authorization: `Bearer ${c.apiKey}` }, handshakeTimeout: 4000 });
       ws.on("open", () => {
         opened = true;
         this.ws = ws;
@@ -624,7 +670,7 @@ class Call {
       entry.failed = true;
       this.transferring = false;
       tg.send("leads", `⚠️ The transfer did not go through. Zara is taking a message instead (caller ${prettyNumber(this.from)}).`).catch(() => {});
-      return { output: { ok: false, reason: "transfer_failed", say: `Apologize: the line did not connect. Take a message (or log the lead) and promise a call back ${nextCallback(this.now(), this.deps.env).en}.` }, speak: true };
+      return { output: { ok: false, reason: "transfer_failed", say: "Apologize: the line did not connect. Take a message (or log the lead) and say our staff will call back as soon as they can." }, speak: true };
     }
     this.left = true;                            // the call has left Zara; when the line closes, it is over
     this.save().catch(e => log.warn(`[voice-rt] save: ${e.message}`));
@@ -811,7 +857,7 @@ async function askClaudeDefault(question, language) {
   } catch { /* no cache, answer fresh */ }
   const system = `You give short, general legal information for a law firm's AI phone assistant to read aloud. California and U.S. federal law.
 Two or three plain sentences, no lists, no citations, no web addresses. Answer in ${language === "zh" ? "Simplified Chinese (Mandarin)" : language === "es" ? "Spanish" : "English"}.
-General information only. Never apply the law to anyone's own facts, never tell anyone how long THEY have or what THEIR deadline is, and never predict an outcome. When a time limit matters, give the general rule, say there are exceptions, and say the attorney would need to review their situation.
+General information only. Never apply the law to anyone's own facts, never tell anyone how long THEY have or what THEIR deadline is, and never predict an outcome. When a time limit matters, give the general rule and name it (for example, California Code of Civil Procedure section 335.1), say there are exceptions, and say the attorney would need to review their situation. Never name a rule you are not sure of.
 Never state a fee you are not sure of, and never discuss the firm's own fees. Never say a consultation is free. Never claim the firm's experience, skill or results.${cached ? `\n\nFor reference only, the firm's published answer to a similar question. Use its facts if they fit; ignore anything in it that offers a free consultation, makes a claim about the firm, or tells the reader what to do in their own case:\n${String(cached.answer || "").slice(0, 2000)}` : ""}`;
   const res = await axios.post("https://api.anthropic.com/v1/messages", {
     model: require("./zara-core").TIERS.fast.anthropic,

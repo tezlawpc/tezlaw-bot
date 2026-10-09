@@ -94,8 +94,9 @@ check("the Chinese line greets in Mandarin first; she says she is AI either way"
   assert(/This is Zara, the firm's AI assistant\. I'm not an attorney\. This call may be recorded and transcribed/.test(I.greeting(false)));
   assert(zh.includes(I.greeting(true)) && en.includes(I.greeting(false)));
   for (const s of [zh, en]) {
-    assert(/You are the firm's AI assistant\. You are not a lawyer, not a paralegal, not staff and not a person/.test(s));
-    assert(/If the caller answers in a different language, before anything else tell them in their language that you are the firm's AI assistant, not an attorney, and that the call may be recorded/.test(s));
+    assert(/you are the firm's AI assistant\. You are not a lawyer, not a paralegal, not staff and not a person/.test(s));
+    assert(/these rules govern wherever they differ from anything above/.test(s), "the line's rules win over the shared charter");
+    assert(/If the caller answers in a different language, tell them briefly in their language that you are the firm's AI assistant, not an attorney, and that the call may be recorded/.test(s));
   }
 });
 check("advertising rules: no free consultation, no claims, Spanish help is office staff", () => {
@@ -134,6 +135,60 @@ check("mid-call at 5:00: no second greeting", () => {
   assert(!s.includes(I.greeting(true)) && /Do not greet the caller again/.test(s));
 });
 
+check("she knows the actual date and when the office reopens", () => {
+  const s = I.buildInstructions({ open: false, zhFirst: false, now: PT("2026-10-09T19:30:00"), env: ENV });
+  assert(s.includes("Friday, October 9, 2026, 7:30 p.m. Pacific"), s.match(/CLOSED NOW \([^)]*\)/)[0]);
+  assert(s.includes("The office reopens Monday, October 12, at 9 in the morning."));
+  const t = I.buildInstructions({ open: false, zhFirst: false, now: PT("2026-11-25T19:30:00"), env: ENV });
+  assert(t.includes("The office reopens Friday, November 27, at 9 in the morning."), "Thanksgiving (a listed closed date) skipped");
+  const u = I.buildInstructions({ open: false, zhFirst: false, now: PT("2026-10-13T07:00:00"), env: ENV });
+  assert(u.includes("The office reopens Tuesday, October 13, at 9 in the morning."), "early morning: today");
+});
+check("after hours, urgent matters are marked urgent with no promised time; appointments and recording objections are handled", () => {
+  const s = I.buildInstructions({ open: false, zhFirst: false, now: PT("2026-10-09T19:30:00"), env: ENV });
+  assert(/I've marked this urgent so our team sees it as soon as possible\." Do not promise a time/.test(s));
+  assert(/APPOINTMENT:/.test(s) && /cannot confirm the change tonight/.test(s));
+  assert(/objects to the call being recorded or transcribed/.test(s));
+  assert(/Never confirm or deny that the firm represents anyone/.test(s));
+  assert(/am I too late\?"\), do not answer/.test(s));
+  assert(/the caller's number first, then the detained person's full name/.test(s));
+});
+check("office hours: no general answers (staff will), name and reason only, 'our office' not a person, vendors not put through", () => {
+  const s = I.buildInstructions({ open: true, zhFirst: true, now: PT("2026-10-09T10:00:00"), env: ENV });
+  assert(!I.toolDefs(true).some(t => t.name === "answer_question") && I.toolDefs(false).some(t => t.name === "answer_question"));
+  assert(/Do not use answer_question during office hours/.test(s));
+  assert(/during office hours, ask only name and reason, then transfer/.test(s));
+  assert(/never name the person you are connecting them to, and never say you are connecting them to the attorney/.test(s));
+  assert(/Take their name and company only \(no read-back\)/.test(s) && /Never give out the names of anyone at the firm/.test(s));
+});
+check("second role-play pass: urgency is not over-applied, numbers given in pieces are waited for, office-hours transfers ask nothing extra", () => {
+  const shut = I.buildInstructions({ open: false, zhFirst: false, now: PT("2026-10-09T19:30:00"), env: ENV });
+  const open = I.buildInstructions({ open: true, zhFirst: false, now: PT("2026-10-09T10:00:00"), env: ENV });
+  assert(/An injury or accident that happened more than a year ago/.test(shut) && !/injury or event/.test(shut));
+  assert(/search online for the ICE detainee locator/.test(shut));
+  assert(/say only a short "mm-hm"/.test(open));
+  assert(/When you take a message or a lead, ask whether that is the best number/.test(open) && !/; ask whether that is the best number/.test(open));
+  assert(/write to the firm at 4141 South Nogales Street, Suite C102, West Covina/.test(open));
+  assert(!/answer_question gave it to you/.test(open) && /answer_question gave it to you/.test(shut));
+});
+
+check("the fee sentence is given word for word in all three languages, and none of them says free", () => {
+  const s = I.buildInstructions({ open: true, zhFirst: true, env: ENV });
+  for (const t of ["There may be a consultation fee. Our staff will go over it with you.", "可能需要收取咨询费，我们的工作人员会跟您说明。", "Puede haber un cargo por la consulta. Nuestro personal se lo explicará."]) assert(s.includes(t), t);
+  assert(!/免费|gratuit/.test(s));
+});
+check("Shanghainese and Cantonese callers are told the truth about the firm's languages; their language is recorded", () => {
+  const s = I.buildInstructions({ open: true, zhFirst: true, env: ENV });
+  assert(/tell them one of our attorneys speaks Shanghainese/.test(s) && /firm works in English, Mandarin and Shanghainese/.test(s));
+  assert(I.toolDefs(true).find(t => t.name === "transfer_to_staff").parameters.properties.language.enum.includes("wuu"));
+  assert(/Shanghainese/.test(I.leadText({ name: "A", phone: "6265550000", language: "wuu", matter: "other", summary: "s" }, { from: "", to: "", open: false })));
+});
+check("a message needs no phone number (clerks, vendors); one given with an extension is kept as given", () => {
+  assert(!I.toolDefs(false).find(t => t.name === "take_message").parameters.required.includes("phone"));
+  assert(/909-555-0100 ext\. 2/.test(I.messageText({ name: "L", role: "court_clerk", message: "m", phone: "909-555-0100 ext. 2", language: "en" }, { from: "+19095550100", open: false })));
+  assert(/caller ID \(909\) 555-0100/.test(I.messageText({ name: "K", role: "vendor", message: "m", language: "en" }, { from: "+19095550100", open: true })));
+});
+
 // ── The accept request ──────────────────────────────────────────────────
 check("the accept body carries the model, voice, instructions and tools", () => {
   const b = I.acceptBody({ model: "gpt-realtime-2", voice: "marin", instructions: "x", tools: [{ name: "t" }] });
@@ -141,7 +196,11 @@ check("the accept body carries the model, voice, instructions and tools", () => 
   assert.strictEqual(b.model, "gpt-realtime-2");
   assert.strictEqual(b.audio.output.voice, "marin");
   assert.strictEqual(b.audio.input.transcription.model, "gpt-4o-mini-transcribe");
-  assert(!I.acceptBody({ model: "m", voice: "v", instructions: "x", tools: [], minimal: true }).audio.input);
+  assert.strictEqual(b.audio.input.turn_detection.eagerness, "medium", "callers pausing over a phone number are not talked over");
+  assert.deepStrictEqual(b.reasoning, { effort: "low" });
+  assert.strictEqual(b.parallel_tool_calls, false);
+  const m = I.acceptBody({ model: "m", voice: "v", instructions: "x", tools: [], minimal: true });
+  assert(!m.audio.input && !m.reasoning && !("parallel_tool_calls" in m), "the fallback body carries nothing a non-reasoning model might refuse");
 });
 
 // ── A whole call, with fakes ────────────────────────────────────────────
