@@ -141,6 +141,11 @@ jobs:
       - name: Advertising rules
         run: node scripts/check-ad-rules.js
 
+      # Zara on the phone: office-hours transfers, after-hours leads and
+      # messages, the webhook signature, and what she is told to say.
+      - name: Phone receptionist
+        run: node scripts/check-voice-rt.js
+
       # A document uploaded for signature: the fields a signer fills must land
       # where staff placed them, on rotated and cropped pages too, and nobody
       # outside the client's team may open the packet.
