@@ -3077,6 +3077,31 @@ function registerAppApi(app) {
     }
   });
 
+  // ── What a new hearing note already knows about this client ──
+  //
+  // The app composes the create-note body itself, so without this it had no
+  // way to open a new hearing on a known client with the client's own
+  // details already in it — the same retyping the web buttons used to force.
+  // Same module as the web forms, so the two surfaces fill the same fields
+  // and leave the same ones empty.
+  //
+  // `filled` carries where each case field came from, by hearing date, so
+  // the app can show it the way the web banner does. The hearing's own date,
+  // time and type are not in here: those come from the notice.
+  app.get("/api/staff/clients/:key/hearing-prefill", requireBearer, requireFirmUser, async (req, res) => {
+    try {
+      const key = String(req.params.key || "").trim();
+      if (!key) return res.status(400).json({ ok: false, error: "client key required" });
+      const form = req.query.form === "master" ? "master" : "individual";
+      const client = await require("./client-profiles").getClientByKey(key);
+      if (!client) return res.status(404).json({ ok: false, error: "no such client" });
+      const pf = require("./hearing-prefill").prefillFromClient(client, { form });
+      res.json({ ok: true, form, prev: pf.prev, filled: pf.filled, source: pf.source });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ── Read a retainer / fee agreement and PROPOSE client fields ──
   // Returns a proposal only; nothing is saved. Identity fields may prefill the
   // create-client form, fee terms must be confirmed by a person first - each

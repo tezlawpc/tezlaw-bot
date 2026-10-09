@@ -1182,7 +1182,7 @@ function parseFormSubmission(body) {
 
 // ── HTML Form ────────────────────────────────────────────
 
-function renderForm({ noteId = null, prev = {}, error = null, saved = false, siblings = [] } = {}) {
+function renderForm({ noteId = null, prev = {}, error = null, saved = false, siblings = [], prefillBanner = "" } = {}) {
   const isEdit = !!noteId;
 
   const langOptions = [
@@ -1435,6 +1435,7 @@ function renderForm({ noteId = null, prev = {}, error = null, saved = false, sib
     ${errorSection}
     ${savedSection}
     ${continuationBanner}
+    ${prefillBanner}
 
     <!-- Same offline protection as the master note form; wires itself by id. -->
     ${require("./client-script").clientScriptTag("offline-notes.js")}

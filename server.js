@@ -10292,7 +10292,11 @@ app.get("/admin/hearing/notes", gateByPerm("notes.master"), async (req, res) => 
   try {
     const hn = require("./hearing-notes");
     await hn.initHearingNotesTables();
-    res.send(hn.renderNoteForm({}));
+    // ?client=<key> (or the older ?prefill_a / ?prefill_name) — opened from
+    // a client profile, so the client's own details are already known and
+    // nobody retypes them. The hearing's own facts are not prefilled.
+    const pf = await require("./hearing-prefill").forRequest(req.query, { form: "master" });
+    res.send(hn.renderNoteForm({ prev: pf.prev, prefillBanner: pf.banner }));
   } catch (err) {
     console.error("[/admin/hearing/notes GET]:", err.message);
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
@@ -11045,7 +11049,13 @@ app.get("/admin/hearing/individual", gateByPerm("notes.individual"), async (req,
     // ?copy_from=<id> — pre-fill client info from an existing hearing to create
     // a continuation. We copy client/court/judge info but NOT exhibits, exams,
     // or closing (those are specific to each hearing session).
-    let prev = {};
+    // ?client=<key> (or the older ?prefill_a / ?prefill_name) — opened from
+    // a client profile. copy_from, below, wins: it names one specific
+    // hearing to continue, which is a narrower instruction than "this
+    // client".
+    const pf = await require("./hearing-prefill").forRequest(req.query, { form: "individual" });
+    let prev = { ...pf.prev };
+    let prefillBanner = pf.banner;
     if (req.query.copy_from) {
       const src = await ih.getIndividualNote(parseInt(req.query.copy_from));
       if (src) {
@@ -11062,9 +11072,10 @@ app.get("/admin/hearing/individual", gateByPerm("notes.individual"), async (req,
           court_address: src.court_address,
           dhs_attorney: src.dhs_attorney,
         };
+        prefillBanner = "";   // the continuation banner says where this came from
       }
     }
-    res.send(ih.renderForm({ prev }));
+    res.send(ih.renderForm({ prev, prefillBanner }));
   } catch (err) {
     console.error("[/admin/hearing/individual GET]:", err.message);
     res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
@@ -11403,6 +11414,76 @@ app.get("/admin/clients/:key/court-mail", async (req, res) => {
 
 // The PAGE behind a notice on the calendar. The JSON route below is what
 // the app reads; sending a browser there printed the raw response.
+// ── Form G-28, filled from the client record ──────────────
+//
+// "Automatic prefill from clients info and onto any forms from USCIS"
+// (JJ, 2026-10-08). Fill-and-review: the GET shows every value and its
+// source and nothing is produced; the POST is the only thing that makes a
+// PDF. See the header of uscis-g28.js for what it refuses to fill.
+async function g28Context(req) {
+  const cp = require("./client-profiles");
+  const client = await cp.getClientByKey(req.params.key);
+  if (!client) return null;
+  const src = req.method === "POST" ? req.body : req.query;
+  const matter = {
+    form_numbers: (src.form_numbers || "").trim(),
+    receipt_number: (src.receipt_number || "").trim(),
+    capacity: (src.capacity || "").trim(),
+    case_type: (client.case_types || [])[0] || "",
+  };
+  const attorneyKey = (src.attorney || "").trim() || null;
+  const proposal = require("./uscis-g28").proposeG28({ client, attorney: attorneyKey, matter });
+  return { client, matter, attorneyKey, proposal };
+}
+
+app.get("/admin/clients/:key/g28", async (req, res) => {
+  try {
+    const ctx = await g28Context(req);
+    if (!ctx) return res.status(404).send("<h1>Client not found</h1>");
+    const body = require("./uscis-g28-page").renderG28Page(ctx.client, ctx.proposal, {
+      attorneyKey: ctx.attorneyKey, matter: ctx.matter,
+    });
+    res.send(require("./hearing-notes").renderAdminChrome({ title: "Form G-28", body, activeItem: "clients" }));
+  } catch (err) {
+    console.error("[g28 page]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/clients/:key/g28", async (req, res) => {
+  try {
+    const ctx = await g28Context(req);
+    if (!ctx) return res.status(404).send("<h1>Client not found</h1>");
+
+    // "Update this page" re-reads the proposal with the new answers and
+    // shows it again. It never produces a form.
+    if ((req.body.action || "") !== "download" && (req.body.action || "") !== "download_flat") {
+      const body = require("./uscis-g28-page").renderG28Page(ctx.client, ctx.proposal, {
+        attorneyKey: ctx.attorneyKey, matter: ctx.matter,
+      });
+      return res.send(require("./hearing-notes").renderAdminChrome({ title: "Form G-28", body, activeItem: "clients" }));
+    }
+
+    const out = await require("./uscis-g28").fillG28(ctx.proposal, {
+      flatten: req.body.action === "download_flat",
+    });
+    const who = (ctx.client.client_name || ctx.client.key).replace(/[^\w\u4e00-\u9fff -]/g, "").trim() || "client";
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: "FORM_FILLED", target_type: "g28", target_id: ctx.client.key, target_label: who,
+        changes: { edition: out.edition, boxes: out.filled.length, attorney: ctx.attorneyKey || "jj" },
+      });
+    } catch { /* an audit failure must not withhold the form */ }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="G-28 ${who}.pdf"`);
+    res.send(out.bytes);
+  } catch (err) {
+    console.error("[g28 fill]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p><p><a href="/admin/clients/${encodeURIComponent(req.params.key)}/g28">Back</a></p>`);
+  }
+});
+
 app.get("/admin/clients/:key/hearings", async (req, res) => {
   try {
     const cp = require("./client-profiles");

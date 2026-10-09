@@ -292,6 +292,20 @@ jobs:
       - name: USCIS form editions, and the matcher that spots a change
         run: node scripts/check-uscis-forms.js
 
+      # The two "+ New Hearing" buttons on a client profile carried
+      # prefill_a and prefill_name for months and neither route read them.
+      # Half of this check is the other half of the job: a new hearing note
+      # takes the client's details and none of the hearing's own facts.
+      - name: A new hearing note pulls the client, not the hearing
+        run: node scripts/check-hearing-prefill.js
+
+      # The G-28 goes on every USCIS filing and its field names do not match
+      # the printed page: two of them are backwards, so the box named
+      # Line6_EMail is the mobile telephone box. The map is pinned to each
+      # field's printed label, and this is what re-checks it.
+      - name: The G-28 field map still matches the printed form
+        run: node scripts/check-uscis-g28.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

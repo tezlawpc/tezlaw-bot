@@ -2198,7 +2198,7 @@ const APPLICATION_OPTIONS = [
   "Other",
 ];
 
-function renderNoteForm({ noteId = null, generated = null, saved = false, sent = null, error = null, prev = {}, merged = false, revisions = [] } = {}) {
+function renderNoteForm({ noteId = null, generated = null, saved = false, sent = null, error = null, prev = {}, merged = false, revisions = [], prefillBanner = "" } = {}) {
   const isEdit = !!noteId;
   // When editing, auto-show saved summaries (like individual hearing form does)
   if (isEdit && !generated && (prev.paralegal_summary || prev.client_summary)) {
@@ -2404,6 +2404,7 @@ function renderNoteForm({ noteId = null, generated = null, saved = false, sent =
   </div>
 
   ${errorSection}
+  ${prefillBanner}
   ${previewSection}
 
   <!-- Keeps this form safe when the courthouse has no signal: fields are

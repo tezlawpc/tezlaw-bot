@@ -43,7 +43,8 @@ async function aggregateClients() {
       SELECT id, client_name, a_number, client_language, client_email, client_phone,
              client_address, case_type, hearing_date,
              next_hearing_date, next_hearing_type,
-             judge_name, court_location, disposition, sent_to_paralegal_at, created_at
+             judge_name, court_location, court_address, disposition,
+             sent_to_paralegal_at, created_at
       FROM individual_hearing_notes
       ORDER BY COALESCE(hearing_date, created_at) DESC
     `),
@@ -85,7 +86,9 @@ async function aggregateClients() {
       type_label: kind === "master" ? (row.hearing_type || "master") : "individual",
       hearing_date: row.hearing_date,
       judge_name: row.judge_name,
+      case_type: row.case_type || null,
       court_location: row.court_location || null,
+      court_address: row.court_address || null,
       disposition: row.disposition,
       sent: !!row.sent_to_paralegal_at,
       created_at: row.created_at,
@@ -961,14 +964,23 @@ function renderClientDetail(client, { documents = [] } = {}) {
       </ul>
     </div>` : "";
 
-  // Quick-create new hearing links (pre-filled)
-  const createLinks = client.a_number
-    ? `
-      <a href="/admin/hearing/notes?prefill_a=${encodeURIComponent(client.a_number)}&prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#A34C00; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Master Hearing</a>
-      <a href="/admin/hearing/individual?prefill_a=${encodeURIComponent(client.a_number)}&prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#A34C00; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Individual Hearing</a>`
-    : `
-      <a href="/admin/hearing/notes?prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#A34C00; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Master Hearing</a>
-      <a href="/admin/hearing/individual?prefill_name=${encodeURIComponent(client.client_name || "")}" style="background:#A34C00; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">+ New Individual Hearing</a>`;
+  // Quick-create new hearing links.
+  //
+  // `client` is the key the form routes resolve back into this same
+  // aggregate, so the new note opens knowing the name, the A-Number, the
+  // contact details, the language, the case type and the judge. See
+  // hearing-prefill.js for what is carried and what is deliberately not.
+  //
+  // prefill_a / prefill_name stay on the link for anything that bookmarked
+  // the old shape; the routes accept either.
+  const createQuery = `client=${encodeURIComponent(client.key)}` +
+    (client.a_number ? `&prefill_a=${encodeURIComponent(client.a_number)}` : "") +
+    `&prefill_name=${encodeURIComponent(client.client_name || "")}`;
+  const createBtn = "background:#A34C00; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;";
+  const createLinks = `
+      <a href="/admin/hearing/notes?${createQuery}" style="${createBtn}">+ New Master Hearing</a>
+      <a href="/admin/hearing/individual?${createQuery}" style="${createBtn}">+ New Individual Hearing</a>
+      <a href="/admin/clients/${encodeURIComponent(client.key)}/g28" style="background:#2B2523; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">Form G-28</a>`;
 
   const body = `
     <div class="page-header">
