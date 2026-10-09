@@ -424,7 +424,7 @@ function paymentPage(a) {
       `}
 
       <p>We also take ${d.zelle ? `Zelle to ${esc(d.zelle)}, ` : ""}a check payable to Tez Law P.C.
-        at any of the offices listed at the end of this Agreement, and a card in the office or by a
+        at any of the offices in the firm profile at the end of this Agreement, and a card in the office or by a
         payment link we send you. We do not take payment in cryptocurrency, by gift card, or in cash
         above $5,000.</p>
       ${zh ? `<p class="zh">本事務所亦接受${d.zelle ? `Zelle（${esc(d.zelle)}）、` : ""}支票（抬頭請寫 Tez Law P.C.，
@@ -530,14 +530,14 @@ function body(a, { forClient = true, withLetterhead = true } = {}) {
 
     ${paymentPage(a)}
 
-    ${withLetterhead ? firmProfilePage(a) : ""}
-
-    <footer class="offices">
-      <div class="t">${esc(FIRM.name)}</div>
-      <div>${FIRM.offices.map((o) => `<span class="o"><b>${esc(o.city)}</b> ${
-        esc(o.lines.join(", "))}${o.note ? ` <span class="n">(${esc(o.note)})</span>` : ""}</span>`).join("")}</div>
-      <div>${esc(FIRM.phone)} &nbsp;·&nbsp; ${esc(FIRM.fax)} &nbsp;·&nbsp; ${esc(FIRM.email)} &nbsp;·&nbsp; ${esc(FIRM.web)}</div>
-    </footer>`;
+    ${withLetterhead ? firmProfilePage(a) : ""}`;
+    // "office locations and phone numbers should just be in the firm's
+    // profile. does not have to be a separate information." (JJ,
+    // 2026-10-09) The footer that used to sit here repeated all four
+    // offices and the phone, fax, email and web a third time: they are on
+    // the letterhead at the head of the letter, and again in the profile
+    // page at the back. Three copies of an address is three places to
+    // correct when one of them moves.
 }
 
 const CSS = `
@@ -585,7 +585,7 @@ const CSS = `
   /* Justified, the way a contract is set. Hyphenation on, or justifying
      an 11pt serif in a 7in column opens rivers between the words. */
   p, li { text-align:justify; hyphens:auto; -webkit-hyphens:auto; }
-  .fp-point p, .pay-warn p, .offices, .cv-value, .siglet { text-align:left; hyphens:manual; }
+  .fp-point p, .pay-warn p, .cv-value, .siglet { text-align:left; hyphens:manual; }
 
   .sheet { width:8.5in; margin:0 auto; background:#FFFFFF; position:relative;
     padding:var(--pad-t) var(--pad-x) var(--pad-b); }
@@ -699,16 +699,6 @@ const CSS = `
      Kept together, and allowed its own page if that is what it takes. */
   /* A footer, not a section. Four stacked columns of addresses were as
      loud as the agreement; this is one quiet line under a hairline. */
-  .offices { margin-top:26px; padding-top:9px; border-top:0.5pt solid var(--travertine);
-    font-size:8pt; line-height:1.5; color:var(--stone);
-    page-break-inside:avoid; break-inside:avoid; }
-  .offices .t { font-weight:bold; letter-spacing:.08em; text-transform:uppercase;
-    color:var(--stone); margin-bottom:3px; }
-  .offices .o { display:inline; }
-  .offices .o::after { content:"  ·  "; }
-  .offices .o:last-child::after { content:""; }
-  .offices .o b { font-weight:bold; }
-  .offices .n { font-style:italic; }
 
   /* ── Screen only ────────────────────────────────────────────  */
   .actions { width:8.5in; margin:0 auto; padding:14px 0 10px; display:flex; gap:10px;
@@ -749,12 +739,18 @@ const CSS = `
  * copy JJ sent back are the browser's "Headers and footers" setting, not
  * something a stylesheet can turn off -- untick it in the print dialog and
  * the page is clean.
+ *
+ * THE PRINT BUTTON IS A BUTTON, NOT A javascript: LINK. It was
+ * href="javascript:window.print()", which Safari treats as a navigation:
+ * it starts replacing the document, and the dialog prints the
+ * replacement. The copy JJ sent on 2026-10-09 was one blank page, 901
+ * bytes, Creator "Safari". public/print-view.js wires the button instead.
  */
 function actionBar(id) {
   if (!id) return "";
   return `
     <div class="actions no-print">
-      <a class="btn primary" href="javascript:window.print()">Print &nbsp;/&nbsp; Save as PDF</a>
+      <button type="button" id="print-this" class="btn primary">Print &nbsp;/&nbsp; Save as PDF</button>
       <a class="btn" href="/admin/retainer/${encodeURIComponent(id)}/word">Download Word</a>
       <form method="POST" action="/admin/retainer/${encodeURIComponent(id)}/send">
         <button type="submit" class="btn dark">Send for signature</button>
@@ -778,7 +774,8 @@ function render(a, { forClient = true, id = null } = {}) {
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Montserrat:wght@400;600&family=Noto+Serif+SC:wght@400;600&display=swap" rel="stylesheet">
 <style>${CSS}</style>
 </head>
-<body>${actionBar(id)}<div class="sheet">${body(a, { forClient })}</div></body>
+<body>${actionBar(id)}<div class="sheet">${body(a, { forClient })}</div>${
+  id ? require("./client-script").clientScriptTag("print-view.js") : ""}</body>
 </html>`;
 }
 

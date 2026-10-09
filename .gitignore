@@ -27,3 +27,7 @@ app.json
 # here is in the history for good. firm-payment.js reads this file,
 # or the same values as TEZ_PAY_* environment variables.
 firm-payment.local.json
+
+# The commit message I write to a file and hand to `git commit -F`. It got
+# committed once, in 8cedc64, by a `git add -A` that ran while it existed.
+.commitmsg

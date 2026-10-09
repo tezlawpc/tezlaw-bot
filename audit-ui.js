@@ -282,7 +282,7 @@ function chrome({ title, body, user, active, wide = false }) {
   from that release date under AS 1215.14. Deadline calculations shown here are computed from the rules cited
   and are a working calendar, not legal advice; securities counsel owns the filing calendar.
 </footer>
-</body></html>`;
+<script src="/print-view.js"></script></body></html>`;
 }
 
 // ── Auth pages ──────────────────────────────────────────────
@@ -2865,7 +2865,7 @@ function transmittalDetailPage({ data, myReceipt }, user) {
   }</div>
   </div><div class="row noprint">
     ${pill(rollup.label, rollup.color)}
-    <a class="btn sm ghost" href="javascript:window.print()">Print receipt</a>
+    <button type="button" id="print-this" class="btn sm ghost">Print receipt</button>
     <a class="btn sm ghost" href="${BASE}/transmittals">All deliveries</a>
   </div></div>
 
@@ -3215,7 +3215,7 @@ function delaysPage({ report, engagementId, engagements }, user) {
       report.generatedAt
     )}</div>
   </div><div class="row noprint">
-    <a class="btn sm ghost" href="javascript:window.print()">Print</a>
+    <button type="button" id="print-this" class="btn sm ghost">Print</button>
     <a class="btn sm ghost" href="${BASE}/transmittals">Deliveries</a>
   </div></div>
 

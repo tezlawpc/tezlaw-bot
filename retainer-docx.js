@@ -62,6 +62,20 @@ function run(text, { bold, italic, size = 22, color, font = BODY_FONT, spacing }
   return `<w:r><w:rPr>${rpr}</w:rPr><w:t xml:space="preserve">${xmlEsc(text)}</w:t></w:r>`;
 }
 
+/**
+ * Body text is justified, the way a contract is set.
+ *
+ * "alignment to the body should be Justify. not to the left. i believe it
+ *  kind of shifted when exporting the word doc." (JJ, 2026-10-09) -- and it
+ * had: the stylesheet sets `p, li { text-align:justify }`, this builder set
+ * no w:jc at all, and Word's default is left. The exported file came back
+ * with 0 justified paragraphs out of 164.
+ *
+ * Headings, the meta lines and the signature block keep their own
+ * alignment; only running text takes this.
+ */
+const BODY_ALIGN = "both";   // Word's name for justified
+
 function para(runs, { align, before = 0, after = 140, indent, border, shade, keepNext } = {}) {
   const body = [].concat(runs).filter(Boolean).join("");
   const ppr =
@@ -218,17 +232,17 @@ function fromHtml(html) {
       out.push(para(runsFrom(inner, { size: 22, bold: true, font: HEAD_FONT }),
         { before: 240, after: 60, keepNext: true }));
     } else if (tag === "li") {
-      out.push(para([run("•  ", { size: 22 }), ...runsFrom(inner)], { indent: 360, after: 90 }));
+      out.push(para([run("•  ", { size: 22 }), ...runsFrom(inner)], { indent: 360, after: 90, align: BODY_ALIGN }));
     } else if (/\bzh\b/.test(cls) && /\bmissing\b/.test(cls)) {
       out.push(para(runsFrom(inner, { size: 18, italic: true, color: EMBER })));
     } else if (/\bzh\b/.test(cls)) {
-      out.push(para(runsFrom(inner, { size: 21, font: ZH_FONT })));
+      out.push(para(runsFrom(inner, { size: 21, font: ZH_FONT }), { align: BODY_ALIGN }));
     } else if (/\bconsent\b/.test(cls)) {
-      out.push(para(runsFrom(inner), { shade: "FFF4E8", before: 80, after: 80 }));
+      out.push(para(runsFrom(inner), { shade: "FFF4E8", before: 80, after: 80, align: BODY_ALIGN }));
     } else if (/\b(meta|siglet)\b/.test(cls)) {
       out.push(para(runsFrom(inner, { size: 19, color: STONE })));
     } else {
-      out.push(para(runsFrom(inner)));
+      out.push(para(runsFrom(inner), { align: BODY_ALIGN }));
     }
   }
   return out.join("");
@@ -470,11 +484,25 @@ function wrap(bodyXml, { bilingual = false } = {}) {  // eslint-disable-line no-
 function build(a = {}, doc) {
   // Without the cover and the letter's head: this builder makes its own.
   const html = doc.body(a, { forClient: true, withLetterhead: false });
-  // The offices are on the letterhead sheet itself now, so they are not
-  // printed a second time at the end.
+  // ORDER. "the tez profile is still in the front. But it should be after
+  // the signature page." (JJ, 2026-10-09)
+  //
+  // The HTML already had it last; this builder did not, because it adds
+  // the profile itself rather than taking it from the body -- body() is
+  // asked for the agreement WITHOUT the letterhead, and the profile rides
+  // with the letterhead. So it went in right after the cover, which put
+  // the firm's sales page between the cover and the client's own letter.
+  //
+  // Now: cover, letter, agreement, signatures, payment, then the profile
+  // on a page of its own at the back, where a reader who wants it will
+  // find it and a reader who does not has already signed.
+  //
+  // The offices are on the letterhead sheet and in the profile, so they
+  // are not printed a third time at the end.
   return wrap(
-    coverPage(doc.FIRM, a, doc) + fromHtml(doc.firmProfilePage(a)) + pageBreak() +
-    letterhead(doc.FIRM, a, doc) + fromHtml(html),
+    coverPage(doc.FIRM, a, doc) + pageBreak() +
+    letterhead(doc.FIRM, a, doc) + fromHtml(html) +
+    pageBreak() + fromHtml(doc.firmProfilePage(a)),
     { bilingual: !!a.bilingual });
 }
 

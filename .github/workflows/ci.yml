@@ -313,6 +313,12 @@ jobs:
       - name: Combo filings list the right forms for the right people
         run: node scripts/check-uscis-packages.js
 
+      # The Word file and the browser copy disagreed about where the firm
+      # profile goes and whether the body is justified, and a print button
+      # that was a javascript: URL gave Safari a blank page.
+      - name: The Word file and the print view agree with each other
+        run: node scripts/check-agreement-export.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

@@ -332,12 +332,52 @@ function renderReview({ user, draft }) {
   const terms = draft.terms || {};
   const problems = R.problemsWith(terms);
 
+  // "wire instruction still does not show wire instruction. just
+  // disclosures." (JJ, 2026-10-09)
+  //
+  // The payment page is not broken: it prints the account details
+  // whenever they are configured, and falls back to "telephone the
+  // office" when they are not. The failure is that it falls back
+  // SILENTLY, so an agreement goes out with no wire instructions and the
+  // person who generated it has no way to know. On the M1 the details are
+  // configured and the page prints them; on Render the Secret File has
+  // never been uploaded, which is why the deployed copy shows only the
+  // fraud warning.
+  //
+  // So: say it here, where the agreement is made, and name the variables.
+  // No values in the page and none in the log -- the names only.
+  let payWarning = "";
+  try {
+    const PAY = require("./firm-payment");
+    const d = PAY.paymentDetails({ fresh: true });
+    if (!PAY.isConfigured(d)) {
+      const missing = PAY.missingFields(d);
+      payWarning = `
+        <div style="margin:0 0 20px; padding:14px 18px; background:#FBEDEA; border-left:4px solid #9C2B1E;">
+          <strong style="color:#9C2B1E;">This agreement will go out with no wire instructions.</strong>
+          <div style="font-size:14px; margin-top:6px; line-height:1.6;">
+            The payment page prints the fraud warning and then tells the client to telephone the
+            office, because the firm's account details are not configured on this server. Set them
+            in Render under <b>Settings &rarr; Environment</b>, or upload
+            <b>firm-payment.local.json</b> under <b>Settings &rarr; Secret Files</b>.
+            Still to set: <b>${esc(missing.join(", "))}</b>.
+          </div>
+        </div>`;
+    }
+  } catch (err) {
+    // A failure to read the configuration must not stop an agreement
+    // being reviewed; it only means this warning cannot be shown.
+    console.warn("[retainer] payment config:", err.message);
+  }
+
   const body = `
     <div class="page-header"><h1>${esc(draft.client_name)}</h1></div>
     <p style="font-size:13px; color:#5E5854;">
       Drafted ${esc(when(draft.created_at))} by ${esc(draft.created_by || "—")} · ${esc(draft.status)}
       &nbsp;·&nbsp;<a href="${PAGE}" style="color:#A34C00;">all agreements</a>
     </p>
+
+    ${payWarning}
 
     ${problems.length ? `
       <div style="margin:0 0 20px; padding:14px 18px; background:#FFF4E8; border-left:4px solid #FF7B00;">

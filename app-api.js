@@ -7971,7 +7971,7 @@ function registerAppApi(app) {
   @media print { body { padding: 0; } .print-btn { display: none; } }
   .print-btn { position: fixed; top: 20px; right: 20px; background: #FF7B00; color: #1E1B1A; padding: 12px 20px; border-radius: 6px; text-decoration: none; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
 </style></head><body>
-<a href="javascript:window.print()" class="print-btn">Print / Save as PDF</a>
+<button type="button" id="print-this" class="print-btn">Print / Save as PDF</button>
 <h1>Tez Law P.C. — Receivables Report</h1>
 <div class="subtitle">Grouped by ${groupLabel}${fromStr ? ` · From ${fromStr}` : ''}${toStr ? ` · To ${toStr}` : ''} · Generated ${new Date().toLocaleString()}</div>
 <div class="summary">
@@ -7997,7 +7997,7 @@ ${groups.map(g => `
   </table>
 `).join('')}
 <div class="footer">Tez Law P.C. · 626-678-8677 · jj@tezlawfirm.com · This report is confidential and privileged.</div>
-</body></html>`;
+<script src="/print-view.js"></script></body></html>`;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.send(html);
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
