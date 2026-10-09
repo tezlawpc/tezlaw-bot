@@ -251,7 +251,7 @@ check("the payment page prints the account details when they are configured", ()
     assert.ok(!/telephone the office on .* for the account details/.test(html),
       "it fell back to the telephone wording with details on file");
     // The fraud warning comes first, always.
-    assert.ok(html.indexOf("Before you send money") < html.indexOf("Routing number"),
+    assert.ok(html.indexOf("only payment details we will ever send you") < html.indexOf("Routing number"),
       "the account details are printed above the fraud warning");
   } finally {
     PAY.paymentDetails = real;

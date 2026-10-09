@@ -1,24 +1,19 @@
-The USCIS work gets a place in the sidebar
+The payment page stops asking the client to ring before paying
 
-"i don't see the UCSIS form in the web." (JJ, 2026-10-09) It was all
-there -- the G-28, the twelve combo packages, the edition tracker, the
-Federal Register watch -- and all of it was reachable only from inside a
-client profile. There was no nav entry, so from the front of the app none
-of it existed. A feature nobody can find is a feature nobody has.
+"don't need to telephone the office before sending." (JJ, 2026-10-09)
+The warning opened by telling the client to telephone the office and
+confirm the details with someone they had already spoken to, before
+sending any money. That instruction is gone.
 
-/admin/uscis lists the twenty tracked forms by practice area with the
-edition read off each PDF, every combo package with its one-line shape,
-and, in red at the top, anything to look at before filing: today that is
-the G-28, whose OMB control number lapsed on 05/31/2021 on the copy USCIS
-serves at its own address.
+What stays is the sentence that actually defeats the attack: the firm
+never emails changed payment instructions, so an email that does is a
+fake, whoever it appears to come from. A number to ring is still printed
+for the client who receives one. The warning still comes before the
+account details on the page, and is still a border rather than a
+background, so it survives a print with Background graphics unticked.
 
-It does not pretend a form can be filled from nowhere. A G-28 is about a
-particular person, so the page sends you to the client list and the
-filling happens from their file, where the prefill has something to read.
-
-The page says when the editions were last read. A page of edition numbers
-with no date on it is one that gets trusted long after it stops being
-true, so check-uscis-packages.js asserts the date is on it.
+The new opening line went in with an em dash and check-retainer.js
+rejected it, which is the firm's own convention doing its job.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_015tF6kxxSv9dUZdpdhCpvcX

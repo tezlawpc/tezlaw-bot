@@ -580,7 +580,14 @@ check("the payment page warns before it tells", () => {
   const t = plain(html);
   assert.ok(t.includes("Paying the firm"), "the payment page is missing");
   // The warning is the page's reason for existing, so it comes first.
-  const warn = t.indexOf("telephone us on 626-678-8677");
+  //
+  // It no longer asks the client to telephone before sending -- "don't
+  // need to telephone the office before sending" (JJ, 2026-10-09). What
+  // stays is the sentence that actually defeats the attack: the firm
+  // never emails changed instructions, so an email that does is a fake.
+  // A number to ring is still given, for the client who receives one.
+  const warn = t.indexOf("only payment details we will ever send you");
+  assert.ok(!/Before you send money/.test(t), "the call-first instruction is back");
   // "We also take a check" became "We also take Zelle to ..., a check ..."
   // once the real instruction sheet was wired in.
   const methods = t.indexOf("We also take");

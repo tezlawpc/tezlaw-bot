@@ -382,17 +382,15 @@ function paymentPage(a) {
       <h2 class="pay-h">Paying the firm${zh ? " · 付款方式" : ""}</h2>
 
       <div class="pay-warn">
-        <div class="pay-warn-t">Before you send money, telephone us on 626-678-8677 and confirm
-          these details with someone you have already spoken to.</div>
+        <div class="pay-warn-t">These are the only payment details we will ever send you.</div>
         <p>Wire fraud is common in legal matters. Someone who is reading email may send you a
           revised set of instructions from an address that is one character different from ours.
           <strong>We will never email you changed payment instructions.</strong> If you receive any,
-          do not act on them, and telephone us at the number above, which is on our letterhead and
+          do not act on them, and telephone us on 626-678-8677, the number on our letterhead and
           on our website.</p>
-        ${zh ? `<p class="zh">在匯款之前，請先致電 626-678-8677，向您已經聯繫過的本所人員核對以下資料。
-          法律事務中的電匯詐騙十分常見：他人可能以與本所僅差一字的電郵地址，向您發送所謂「更新後」的付款指示。
-          <strong>本事務所絕不會以電郵方式通知您變更付款資料。</strong>如收到此類訊息，請勿依其辦理，
-          並請撥打上述號碼與本所聯繫；該號碼印於本所信箋並載於本所網站。</p>` : ""}
+        ${zh ? `<p class="zh">法律事務中的電匯詐騙十分常見：他人可能以與本所僅差一字的電郵地址，
+          向您發送所謂「更新後」的付款指示。<strong>本事務所絕不會以電郵方式通知您變更付款資料。</strong>
+          如收到此類訊息，請勿依其辦理，並請撥打 626-678-8677 與本所聯繫；該號碼印於本所信箋並載於本所網站。</p>` : ""}
       </div>
 
       ${ready ? `
