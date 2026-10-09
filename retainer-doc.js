@@ -166,6 +166,18 @@ function letterhead(a) {
     </div>`;
 }
 
+// The firm profile page is NOT part of the fee agreement.
+//
+// "i only meant to delete it from the retainer agreement." (JJ,
+// 2026-10-09) It used to print at the back of every agreement. A fee
+// agreement is a contract, and marketing copy bound into one is a second
+// place to keep in step with Rules 7.1-7.3 every time the deck changes.
+//
+// The page itself is kept and is still the approved deck's own wording.
+// It renders on its own at /admin/retainer/firm-profile, to print or
+// attach when the firm wants it, so it stays something a person chooses
+// to send rather than something every client signs.
+
 /**
  * The firm profile page, from the firm's own deck.
  *
@@ -424,11 +436,11 @@ function paymentPage(a) {
       `}
 
       <p>We also take ${d.zelle ? `Zelle to ${esc(d.zelle)}, ` : ""}a check payable to Tez Law P.C.
-        at any of the offices in the firm profile at the end of this Agreement, and a card in the office or by a
+        at any of the firm's offices, which are on the letterhead, and a card in the office or by a
         payment link we send you. We do not take payment in cryptocurrency, by gift card, or in cash
         above $5,000.</p>
       ${zh ? `<p class="zh">本事務所亦接受${d.zelle ? `Zelle（${esc(d.zelle)}）、` : ""}支票（抬頭請寫 Tez Law P.C.，
-        可送交本協議末頁所列任一辦公室），以及於辦公室刷卡或使用本所提供之付款連結。
+        可送交本所任一辦公室（地址見本所信箋）），以及於辦公室刷卡或使用本所提供之付款連結。
         本事務所不接受加密貨幣、禮品卡，亦不接受超過 5,000 美元之現金。</p>` : ""}
     </section>`;
 }
@@ -530,7 +542,7 @@ function body(a, { forClient = true, withLetterhead = true } = {}) {
 
     ${paymentPage(a)}
 
-    ${withLetterhead ? firmProfilePage(a) : ""}`;
+`;
     // "office locations and phone numbers should just be in the firm's
     // profile. does not have to be a separate information." (JJ,
     // 2026-10-09) The footer that used to sit here repeated all four
@@ -585,7 +597,6 @@ const CSS = `
   /* Justified, the way a contract is set. Hyphenation on, or justifying
      an 11pt serif in a 7in column opens rivers between the words. */
   p, li { text-align:justify; hyphens:auto; -webkit-hyphens:auto; }
-  .fp-point p, .pay-warn p, .cv-value, .siglet { text-align:left; hyphens:manual; }
 
   .sheet { width:8.5in; margin:0 auto; background:#FFFFFF; position:relative;
     padding:var(--pad-t) var(--pad-x) var(--pad-b); }
@@ -632,7 +643,10 @@ const CSS = `
   .cv-foot-right { text-align:right; }
 
   /* ── The firm profile, from the firm's own deck ─────────────  */
+
   .firm-profile { page-break-before:always; break-before:page; }
+  .firm-profile .zh { margin-bottom:8px; }
+  .fp-point p, .fp-point p, .pay-warn p, .cv-value, .siglet { text-align:left; hyphens:manual; }
   .fp-h { font-size:11pt; font-weight:bold; letter-spacing:.06em; text-transform:uppercase;
     text-align:center; margin:0 0 16px; }
   .fp-lead { font-weight:bold; margin:0 0 10px; }
@@ -640,7 +654,6 @@ const CSS = `
   .fp-points { display:grid; grid-template-columns:1fr 1fr; gap:10px 26px; }
   .fp-point p { margin:0 0 4px; }
   .fp-point-t { font-weight:bold; }
-  .firm-profile .zh { margin-bottom:8px; }
 
   /* ── Paying the firm ────────────────────────────────────────
      The warning is bordered rather than shaded: a background does not

@@ -484,25 +484,18 @@ function wrap(bodyXml, { bilingual = false } = {}) {  // eslint-disable-line no-
 function build(a = {}, doc) {
   // Without the cover and the letter's head: this builder makes its own.
   const html = doc.body(a, { forClient: true, withLetterhead: false });
-  // ORDER. "the tez profile is still in the front. But it should be after
-  // the signature page." (JJ, 2026-10-09)
+  // Cover, letter, agreement, signatures, payment. Nothing after.
   //
-  // The HTML already had it last; this builder did not, because it adds
-  // the profile itself rather than taking it from the body -- body() is
-  // asked for the agreement WITHOUT the letterhead, and the profile rides
-  // with the letterhead. So it went in right after the cover, which put
-  // the firm's sales page between the cover and the client's own letter.
+  // The firm profile used to go in here, and this builder added its own
+  // copy, which is how it ended up between the cover and the client's
+  // letter while the browser copy had it at the back. It is deleted
+  // rather than moved -- "let's just delete the firm's profile" (JJ,
+  // 2026-10-09) -- so the two cannot disagree about it again.
   //
-  // Now: cover, letter, agreement, signatures, payment, then the profile
-  // on a page of its own at the back, where a reader who wants it will
-  // find it and a reader who does not has already signed.
-  //
-  // The offices are on the letterhead sheet and in the profile, so they
-  // are not printed a third time at the end.
+  // The offices are on the letterhead sheet, once.
   return wrap(
     coverPage(doc.FIRM, a, doc) + pageBreak() +
-    letterhead(doc.FIRM, a, doc) + fromHtml(html) +
-    pageBreak() + fromHtml(doc.firmProfilePage(a)),
+    letterhead(doc.FIRM, a, doc) + fromHtml(html),
     { bilingual: !!a.bilingual });
 }
 

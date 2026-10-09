@@ -66,29 +66,46 @@ console.log("\nThe agreement as it leaves the office\n");
 
 // ── order ───────────────────────────────────────────────────
 
-check("the firm profile is at the back of the Word file, after the signatures", () => {
-  // "the tez profile is still in the front. But it should be after the
-  // signature page." It printed between the cover and the client's own
-  // letter, because this builder adds the profile itself and added it
-  // early.
+check("the agreement runs cover, letter, terms, signatures, payment", () => {
   const { paras } = docxParas(terms());
   const at = (frag) => paras.findIndex((p) => p.text.includes(frag));
   const letter = at("Re:");
   const signed = at("Agreed");
-  const profile = at("About the firm");
+  const paying = at("Paying the firm");
   assert.ok(letter > 0, "the letter is not in the file");
   assert.ok(signed > letter, "the signature block is not after the letter");
-  assert.ok(profile > signed,
-    `the firm profile is at paragraph ${profile}, before the signatures at ${signed}`);
-  assert.ok(profile > paras.length * 0.7,
-    "the profile is not near the back of the document");
+  assert.ok(paying > signed, "the payment page is not after the signatures");
 });
 
-check("the browser and the Word file put the profile in the same place", () => {
-  // The two disagreed for a month because each decided for itself.
+check("the firm profile is in neither copy of the agreement", () => {
+  // "i only meant to delete it from the retainer agreement." (JJ,
+  // 2026-10-09) Out of the contract, both in Word and in the browser --
+  // and the two used to disagree about where it went, because each
+  // builder decided for itself.
+  const { paras } = docxParas(terms());
+  assert.ok(!paras.some((p) => /About the firm/i.test(p.text)),
+    "the Word file still carries the firm profile");
   const html = DOC.body(terms(), { forClient: true, withLetterhead: true });
-  assert.ok(html.indexOf("About the firm") > html.indexOf("Agreed"),
-    "the browser copy has the profile before the signatures");
+  assert.ok(!/About the firm/i.test(html), "the browser copy still carries the firm profile");
+});
+
+check("the firm profile still exists, and has a page of its own", () => {
+  // Deleting it from the agreement is not deleting it. It is the approved
+  // deck's own wording cut to a page, and it stays reachable to print or
+  // attach -- just not bound into something a client signs.
+  assert.strictEqual(typeof DOC.firmProfilePage, "function", "the profile page is gone entirely");
+  const page = DOC.firmProfilePage({ bilingual: true });
+  assert.ok(/About the firm/.test(page), "the profile renders nothing");
+  assert.ok(/\u5173\u4e8e\u672c\u6240/.test(page), "the Chinese profile is gone");
+  assert.ok(/fp-points/.test(DOC.CSS), "the profile's styles were not kept");
+
+  const src = read("retainer-page.js");
+  assert.ok(/PAGE \+ "\/firm-profile"/.test(src), "there is no page to reach it on");
+  // Express matches in order: a literal path after a parameter route is
+  // never reached, and /admin/retainer/firm-profile would arrive at the
+  // draft handler as id="firm-profile".
+  assert.ok(src.indexOf('PAGE + "/firm-profile"') < src.indexOf('PAGE + "/:id"'),
+    "the firm-profile route is registered after /:id, so /:id swallows it");
 });
 
 // ── alignment ───────────────────────────────────────────────
@@ -119,16 +136,20 @@ check("a heading is not justified, which would track its words apart", () => {
 
 // ── said once ───────────────────────────────────────────────
 
-check("an office address is printed once, not three times", () => {
-  // "office locations and phone numbers should just be in the firm's
-  // profile." They were on the letterhead, in the profile and in a footer
-  // of their own: three places to correct when an office moves.
+check("an office address is printed once, on the letterhead", () => {
+  // It was on the letterhead, in the profile and in a footer of its own:
+  // three places to correct when an office moves. The profile and the
+  // footer are both gone; the letterhead keeps it.
   const { paras } = docxParas(terms());
   const hits = paras.filter((p) => p.text.includes("4141 S. Nogales")).length;
   assert.strictEqual(hits, 1, `the West Covina address appears ${hits} times`);
   assert.ok(!/<footer class="offices">/.test(read("retainer-doc.js")),
     "the offices footer is back");
   assert.ok(!/\.offices \{/.test(DOC.CSS), "the footer's styles outlived the footer");
+  // And nothing may point a client at a list that is no longer printed.
+  const html = DOC.body(terms(), { forClient: true, withLetterhead: true });
+  assert.ok(!/offices listed at the end|offices in the firm profile/.test(html),
+    "the agreement sends the client to an office list it no longer contains");
 });
 
 // ── the print button ────────────────────────────────────────

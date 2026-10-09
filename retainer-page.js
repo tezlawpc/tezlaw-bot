@@ -522,6 +522,36 @@ function mount(app, auth) {
     }
   });
 
+  // REGISTERED BEFORE "/:id". Express matches in the order routes are
+  // added, so a literal path that sits after a parameter route is never
+  // reached: /admin/retainer/firm-profile would arrive at the draft
+  // handler as id="firm-profile" and answer Not found.
+  // The firm profile, on its own sheet.
+  //
+  // It used to print at the back of every fee agreement. It does not any
+  // more -- a contract is not a brochure -- but it is the approved deck's
+  // own wording cut to one page, and that is worth keeping somewhere a
+  // person can reach. Print it or attach it when the firm wants to; no
+  // client signs it.
+  app.get(PAGE + "/firm-profile", (req, res) => {
+    const zh = req.query.zh === "1" || req.query.bilingual === "1";
+    res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TEZ Law Firm \u00b7 Firm profile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Montserrat:wght@400;600&family=Noto+Serif+SC:wght@400;600&display=swap" rel="stylesheet">
+<style>${DOC.CSS}</style></head>
+<body><div class="actions no-print">
+  <button type="button" id="print-this" class="btn primary">Print &nbsp;/&nbsp; Save as PDF</button>
+  <a class="btn" href="${PAGE}/firm-profile?zh=${zh ? "0" : "1"}">${zh ? "English only" : "Add the Chinese"}</a>
+  <a class="btn plain" href="${PAGE}">All agreements</a>
+  <span class="hint">Not part of any fee agreement. Print it or attach it when you want to send it.</span>
+</div><div class="sheet">${
+      DOC.firmProfilePage({ bilingual: zh })}</div>${
+      require("./client-script").clientScriptTag("print-view.js")}</body></html>`);
+  });
+
   app.get(PAGE + "/:id", async (req, res) => {
     try {
       const d = await getDraft(req.user, req.params.id);

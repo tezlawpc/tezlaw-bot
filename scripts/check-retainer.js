@@ -345,12 +345,20 @@ check("the agreement carries no internal notes, in either view", () => {
   assert.ok(R.CLAUSES.scope_limits.because, "the clause lost the reason it is there");
 });
 
-check("the firm signs first, and the offices are on it", () => {
+check("the firm signs first, and its address of record is on the agreement", () => {
   const t = plain(DOC.render(flat));
   assert.ok(/The firm signs first/.test(t), "JJ: 'ok firm signs first'");
-  for (const city of ["West Covina", "City of Industry", "Newport Beach", "Flushing"]) {
-    assert.ok(t.includes(city), `${city} is missing from the footer`);
-  }
+  // All four offices used to be here, in a footer, and again in the firm
+  // profile page. Both are gone -- "office locations and phone numbers
+  // should just be in the firm's profile", then "let's just delete the
+  // firm's profile" (JJ, 2026-10-09) -- so what remains is the letterhead,
+  // which carries the office of record. A client must still be able to
+  // find the firm from the paper they signed.
+  assert.ok(t.includes("West Covina"), "the agreement does not name the firm's office at all");
+  assert.ok(t.includes("626-678-8677"), "the agreement does not carry the firm's telephone number");
+  assert.ok(/4141 S\. Nogales/.test(t), "the agreement does not carry a street address");
+  const addresses = (t.match(/4141 S\. Nogales/g) || []).length;
+  assert.strictEqual(addresses, 1, `the address is printed ${addresses} times`);
 });
 
 check("work done before signing is covered when it was", () => {
@@ -541,27 +549,30 @@ check("the date stored for a new draft is the firm's calendar date", () => {
     "the draft date is not taken in the firm's own zone");
 });
 
-check("the firm profile is the firm's own copy, not mine", () => {
-  // Advertising copy: Rules 7.1 to 7.3 and B&P 6157.2, with an open State
-  // Bar matter. Every sentence here is lifted from the approved deck, so
-  // the guard is that the page says what the deck says and claims nothing.
-  // Scoped to the profile page, not the whole document: "guarantee"
-  // appears in the NO-guarantee clause, which is the opposite of a claim.
-  // Same error as the earned-on-receipt scan -- matching the word rather
-  // than the meaning.
-  assert.ok(plain(DOC.render(sample)).includes("About the firm"), "the profile page is missing");
-  const t = plain(DOC.firmProfilePage(sample));
-  assert.ok(t.includes("Tez Law P.C. protects people's rights and businesses"),
-    "the firm paragraph is not the deck's");
-  assert.ok(t.includes("Fifth and Ninth Circuits"), "the courts line is missing");
-  // Nothing that reads as a claim about results.
+check("no advertising copy is bound into the agreement", () => {
+  // There used to be a firm profile page at the back, lifted from the
+  // approved deck, and this check made sure every sentence of it was the
+  // deck's own. It is deleted -- "let's just delete the firm's profile"
+  // (JJ, 2026-10-09). A fee agreement is a contract; marketing copy inside
+  // one is a second place to keep in step with Rules 7.1-7.3 every time
+  // the deck changes, and an open State Bar matter is a reason to have
+  // fewer of those, not more.
+  //
+  // So the guard flips: the agreement must contain no such copy at all.
+  const t = plain(DOC.render({ ...sample, bilingual: true }));
+  assert.ok(!t.includes("About the firm"), "the firm profile is back in the agreement");
+  assert.ok(!t.includes("\u5173\u4e8e\u672c\u6240"), "the Chinese profile is back in the agreement");
+  // The page itself is kept -- it is just not part of the contract.
+  assert.strictEqual(typeof DOC.firmProfilePage, "function",
+    "the profile page was deleted; only its place in the agreement should have gone");
   for (const banned of [/\bbest\b/i, /\bleading\b/i, /\btop[- ]rated\b/i, /success rate/i,
-                        /\bguarantee/i, /\bwon\b/i, /\bno\.? ?1\b/i, /\bexpert\b/i]) {
-    assert.ok(!banned.test(t), "the profile page makes a claim the rules do not allow: " + banned);
+                        /\bwon\b/i, /\bno\.? ?1\b/i, /\bexpert\b/i]) {
+    assert.ok(!banned.test(t), "the agreement makes a claim the rules do not allow: " + banned);
   }
-  // And it is bilingual when the agreement is.
-  const zh = plain(DOC.firmProfilePage({ ...sample, bilingual: true }));
-  assert.ok(zh.includes("关于本所"), "the Chinese profile is missing from a bilingual packet");
+  // "guarantee" stays legal here: it appears in the NO-guarantee clause,
+  // which is the opposite of a claim. Matching the word rather than the
+  // meaning is the error this comment exists to stop being repeated.
+  assert.ok(/cannot and do not guarantee/.test(t), "the no-guarantee clause went with it");
 });
 
 check("the payment page warns before it tells", () => {

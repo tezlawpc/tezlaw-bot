@@ -1,46 +1,28 @@
-The Word file and the browser copy stop disagreeing
+The firm profile leaves the agreement, and keeps its own page
 
-Five of the six things that came back from the Kevin Truong agreement.
-Four of them were the same fault: the DOCX builder and the stylesheet
-each deciding for themselves, and quietly differing.
+"let's just delete the firm's profile" was answered too literally: the
+page, its copy and its styles all went. "i only meant to delete it from
+the retainer agreement." (JJ, 2026-10-09) Nothing had been committed, so
+all of it is back.
 
-The firm profile printed between the cover and the client's own letter in
-Word, and at the back in the browser. body() is asked for the agreement
-without the letterhead, and the profile rides with the letterhead, so
-this builder added its own copy and added it early. It now goes where the
-browser already put it: after the signatures and the payment page.
+What stays changed is the part that was asked for. The profile is no
+longer bound into a fee agreement, in either the Word file or the browser
+copy. A contract is not a brochure, and marketing copy inside one is a
+second place to keep in step with Rules 7.1-7.3 every time the deck
+changes, which is worth avoiding with a State Bar matter open.
 
-The body was justified in the browser and left-aligned in Word, because
-the stylesheet says `text-align:justify` and the builder emitted no w:jc
-at all. The file JJ sent back had 0 justified paragraphs out of 164; it
-now has 88 out of 167, with the headings left alone.
+What comes back is the page itself, at /admin/retainer/firm-profile, in
+English or with the Chinese, with a print button. It is still the
+approved deck's own wording cut to one page: something a person chooses
+to attach, not something every client signs. Registered BEFORE "/:id",
+because Express matches in order and a literal path after a parameter
+route is never reached -- /admin/retainer/firm-profile would have
+arrived at the draft handler as id="firm-profile" and answered Not found.
 
-The offices were printed three times: on the letterhead, in the profile,
-and in a footer of their own. Three places to correct when an office
-moves. The footer is gone and its styles with it.
-
-The print button was href="javascript:window.print()". Chrome does not
-mind. Safari treats following one as a navigation, begins replacing the
-document, and prints the replacement: the copy JJ sent was a single blank
-letter page, 901 bytes, Creator "Safari". It is a button now, wired by
-public/print-view.js, and the same pattern is fixed in app-api.js and in
-audit-ui.js's two receipts.
-
-The payment page was not broken. It prints the account details whenever
-they are configured -- it does so on the M1, where the local file exists
--- and falls back to "telephone the office" when they are not. The fault
-is that it fell back SILENTLY, so an agreement went out with no wire
-instructions and nobody knew. The review page now says so in red before
-the agreement is sent, and names the TEZ_PAY_* variables still to set. No
-values in the page and none in the log.
-
-Still open, and needing a decision rather than a fix: sending for
-signature asks for an upload because createDraft() wants a PDF buffer and
-the server cannot make one -- no headless browser on Render, no CJK font
-in the repo, and pdf-lib's built-in fonts are Latin-1 only.
-
-13 checks. Also removes .commitmsg, which a `git add -A` committed in
-8cedc64, and gitignores it.
+The agreement now names one office, West Covina, on the letterhead. It
+used to carry all four twice: once in a footer and once in the profile.
+check-retainer.js asserts the firm is still findable from the paper a
+client signed -- an address and a telephone number, printed once.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_015tF6kxxSv9dUZdpdhCpvcX
