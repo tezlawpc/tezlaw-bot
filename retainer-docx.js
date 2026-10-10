@@ -361,8 +361,13 @@ function coverPage(FIRM, a, doc) {
     para(run(`${FIRM.phone} · ${FIRM.email}`, { size: 17, color: STONE }), { after: 20 }),
     para(run("Please read the full agreement before signing. Keep a copy for your records.",
       { size: 17, color: STONE, italic: true }), { before: 160 }),
-    // Everything after this starts on the letterhead.
-    `<w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:br w:type="page"/></w:r></w:p>`,
+    // NO PAGE BREAK HERE.
+    //
+    // build() puts one between the cover and the letter. This function
+    // used to end with one of its own as well, and two hard breaks in a
+    // row is an empty page: "there is currently a blank page after the
+    // cover sheet" (JJ, 2026-10-09). Whoever ends the cover and whoever
+    // starts the next page has to be one decision, and build() makes it.
   ].join("");
 }
 
@@ -388,9 +393,19 @@ function letterhead(FIRM, a, doc) {
   // No drawn header any more: the sheet underneath IS the letterhead. This
   // is only what a letter opens with on top of it.
   void wc;
+  // The date and the addressee are NOT repeated here.
+  //
+  // "delete dates, client's name before agreement for legal services"
+  // (JJ, 2026-10-09). The cover, one page earlier, already carries
+  // CLIENT, MATTER, RESPONSIBLE ATTORNEY and DATE as its four fields.
+  // Printing the date and the name again directly underneath it said the
+  // same thing twice, and gave a reader two places to check a date
+  // against. The cover is the one that governs.
+  //
+  // The salutation stays. It addresses the client rather than restating
+  // a cover field, and an agreement that opens with "Re:" and no "Dear"
+  // reads as a file note instead of a letter to a person.
   return [
-    text(dateFor(a).long, { size: 20, after: 180 }),
-    a.client_name ? text(a.client_name, { size: 22, after: 40 }) : "",
     text(`Re:  Agreement for Legal Services${matter ? ` (${matter})` : ""}`,
       { bold: true, size: 22, after: 160 }),
     text(`Dear ${a.client_name || "Client"}:`, { size: 22, after: 180 }),

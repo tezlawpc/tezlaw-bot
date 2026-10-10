@@ -324,6 +324,9 @@ jobs:
       - name: The Word file and the print view agree with each other
         run: node scripts/check-agreement-export.js
 
+      - name: Hearing notices state the date on the notice
+        run: node scripts/check-notice-when.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

@@ -371,6 +371,10 @@ function paymentPage(a) {
   const d = PAY.paymentDetails();
   const ready = PAY.isConfigured(d);
   const acct = PAY.accountFor(a, d);
+  // Only if the Zelle address pays into the account this client should be
+  // paying into. Offering it regardless was telling a trust-bound client
+  // to deposit into operating. See firm-payment.js zelleFor().
+  const zelle = PAY.zelleFor(a, d);
   const zh = !!a.bilingual;
 
   const row = (label, value, labelZh) => value ? `
@@ -433,11 +437,11 @@ function paymentPage(a) {
       ${zh ? `<p class="zh">請致電本所 626-678-8677 索取帳戶資料。該資料以電話提供，不印於本文件。</p>` : ""}
       `}
 
-      <p>We also take ${d.zelle ? `Zelle to ${esc(d.zelle)}, ` : ""}a check payable to Tez Law P.C.
+      <p>We also take ${zelle ? `Zelle to ${esc(zelle)}, ` : ""}a check payable to Tez Law P.C.
         at any of the firm's offices, which are on the letterhead, and a card in the office or by a
         payment link we send you. We do not take payment in cryptocurrency, by gift card, or in cash
         above $5,000.</p>
-      ${zh ? `<p class="zh">本事務所亦接受${d.zelle ? `Zelle（${esc(d.zelle)}）、` : ""}支票（抬頭請寫 Tez Law P.C.，
+      ${zh ? `<p class="zh">本事務所亦接受${zelle ? `Zelle（${esc(zelle)}）、` : ""}支票（抬頭請寫 Tez Law P.C.，
         可送交本所任一辦公室（地址見本所信箋）），以及於辦公室刷卡或使用本所提供之付款連結。
         本事務所不接受加密貨幣、禮品卡，亦不接受超過 5,000 美元之現金。</p>` : ""}
     </section>`;

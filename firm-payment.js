@@ -68,6 +68,9 @@ const FIELDS = {
   bank_address_usd: "TEZ_PAY_BANK_ADDRESS_USD",
   bank_address_fx: "TEZ_PAY_BANK_ADDRESS_FX",
   zelle: "TEZ_PAY_ZELLE",
+  // WHICH account the Zelle address pays into: "operating" or "trust".
+  // Not cosmetic. See zelleFor() below.
+  zelle_account: "TEZ_PAY_ZELLE_ACCOUNT",
   reference: "TEZ_PAY_REFERENCE",
 };
 
@@ -135,10 +138,38 @@ function isConfigured(d = paymentDetails()) {
 
 /** Which of them are missing, for the drafting screen to say so. */
 function missingFields(d = paymentDetails()) {
-  const optional = new Set(["swift_fx", "bank_address_fx", "zelle", "reference"]);
+  const optional = new Set(["swift_fx", "bank_address_fx", "zelle", "zelle_account", "reference"]);
   return Object.entries(FIELDS)
     .filter(([key]) => !d[key] && !optional.has(key))
     .map(([, env]) => env);
+}
+
+/**
+ * The Zelle address to print for THIS agreement, or nothing.
+ *
+ * A Zelle address belongs to one deposit account. On the firm's own
+ * payment instruction the Zelle address sits under the OPERATING
+ * account. So telling a client whose money must go to trust to pay by
+ * Zelle is an instruction to deposit unearned fees into operating --
+ * Rule 1.15(a) in reverse, caused by a payment method printed next to
+ * the wrong account number.
+ *
+ * It had been printed to every client regardless of which account
+ * accountFor() resolved to, because the sentence listing the methods sat
+ * outside the branch that chooses the account.
+ *
+ * So: offered only when the address is on file AND the account it pays
+ * into is the account this client should be paying into. An unset
+ * zelle_account is read as "operating", which is the cautious way round
+ * -- it withholds Zelle from trust payments rather than inviting one.
+ * To offer Zelle on a trust payment the firm needs a Zelle address
+ * registered to the trust account, and then TEZ_PAY_ZELLE_ACCOUNT=trust.
+ */
+function zelleFor(a = {}, d = paymentDetails()) {
+  if (!d.zelle) return "";
+  const pays = (d.zelle_account || "operating").toLowerCase() === "trust"
+    ? "trust" : "operating";
+  return accountFor(a, d).kind === pays ? d.zelle : "";
 }
 
 /** The reference line, with the matter and client filled in. */
@@ -154,5 +185,5 @@ function referenceFor(a = {}, d = paymentDetails()) {
 
 module.exports = {
   FIELDS, LOCAL_FILES, paymentDetails, reload, accountFor,
-  isConfigured, missingFields, referenceFor,
+  isConfigured, missingFields, referenceFor, zelleFor,
 };

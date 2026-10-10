@@ -258,6 +258,84 @@ check("the payment page prints the account details when they are configured", ()
   }
 });
 
+check("there is no blank page between the cover and the letter", () => {
+  // Two hard page breaks in a row is an empty page, and that is what the
+  // file had: coverPage() ended with a break and build() added another.
+  // "there is currently a blank page after the cover sheet" (JJ,
+  // 2026-10-09).
+  //
+  // Counted on the XML rather than on the rendered page, because nothing
+  // here can open Word. Two breaks with no text between them is the
+  // blank page, whichever of the two put it there.
+  const { xml } = docxParas(terms());
+  const marks = [];
+  const re = /<w:br w:type="page"\/>|<w:t[^>]*>[\s\S]*?<\/w:t>/g;
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    marks.push(m[0].startsWith("<w:br") ? "BREAK" : "TEXT");
+  }
+  for (let i = 1; i < marks.length; i++) {
+    assert.ok(!(marks[i] === "BREAK" && marks[i - 1] === "BREAK"),
+      "two page breaks in a row, which prints a blank page");
+  }
+  // And a break does still separate them, or the letter would run onto
+  // the cover.
+  assert.ok(marks.includes("BREAK"), "the cover and the letter are not separated at all");
+});
+
+check("the date and the client's name are not repeated above the Re line", () => {
+  // "delete dates, client's name before agreement for legal services"
+  // (JJ, 2026-10-09). The cover's four fields already carry both, and the
+  // letter printed them again immediately under it.
+  //
+  // Asserted on what sits directly before the "Re:", not by counting the
+  // date in the file -- the cover is supposed to carry it, so a count
+  // cannot tell the two apart.
+  const { paras } = docxParas(terms());
+  const re = paras.findIndex((x) => x.text.startsWith("Re:"));
+  assert.ok(re > 0, "the Re line is not in the file");
+  const before = paras[re - 1].text;
+  assert.ok(/Please read the full agreement before signing/.test(before),
+    `something is back between the cover and the Re line: ${JSON.stringify(before)}`);
+});
+
+check("Zelle is offered only for the account it actually pays into", () => {
+  // The firm's Zelle address is registered to the OPERATING account. It
+  // was printed to every client, including one whose fee must sit in
+  // trust until it is earned -- an instruction to deposit unearned money
+  // into operating, which is Rule 1.15(a) backwards.
+  const PAY = require(path.join(ROOT, "firm-payment.js"));
+  const real = PAY.paymentDetails;
+  const base = {
+    bank: "Bank of America", trust_name: "Tez Law P.C. Client Trust",
+    trust_account: "000111222", operating_name: "Tez Law P.C.",
+    operating_account: "999888777", routing_wire: "026009593",
+    routing_ach: "121000358", swift_usd: "", bank_address_usd: "",
+    swift_fx: "", bank_address_fx: "", zelle: "pay@example.com", reference: "",
+  };
+  try {
+    // Unset zelle_account is read as "operating", the cautious way round.
+    PAY.paymentDetails = () => ({ ...base, zelle_account: "" });
+    const trust = DOC.paymentPage({ ...terms(), operating_account_consent: false });
+    assert.ok(!/pay@example\.com/.test(trust),
+      "a client paying into trust is told to Zelle into the operating account");
+    const operating = DOC.paymentPage({ ...terms(), operating_account_consent: true });
+    assert.ok(/pay@example\.com/.test(operating),
+      "a client who agreed to the operating account is not offered Zelle");
+
+    // And it follows the setting rather than the default.
+    PAY.paymentDetails = () => ({ ...base, zelle_account: "trust" });
+    const onTrust = DOC.paymentPage({ ...terms(), operating_account_consent: false });
+    assert.ok(/pay@example\.com/.test(onTrust),
+      "a Zelle address registered to the trust account is still withheld");
+    const notOperating = DOC.paymentPage({ ...terms(), operating_account_consent: true });
+    assert.ok(!/pay@example\.com/.test(notOperating),
+      "a trust Zelle address is offered for an operating payment");
+  } finally {
+    PAY.paymentDetails = real;
+  }
+});
+
 check("the check is registered the way every check here is", () => {
   const pkg = JSON.parse(read("package.json"));
   assert.ok(pkg.scripts["check:agreement-export"], "no npm script");

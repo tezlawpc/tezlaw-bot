@@ -14,6 +14,43 @@
 const db = require("./db");
 const hearingNotes = require("./hearing-notes");
 
+// ── Stating a stored hearing date ────────────────────────
+//
+// court-calendar.js's contract: a hearing date is the date and time
+// printed on the notice, stored with no zone, read back in UTC and never
+// converted. Every other reader honours it -- storedDay() there,
+// hearing-when.js, client-record.js.
+//
+// This file did not. It formatted hearing dates with a bare
+// toLocaleDateString(), which reads them in whatever zone the process
+// happens to be in. That is right on Render, which runs UTC, and a day
+// early on a laptop in Los Angeles -- so the bug was invisible in
+// production and would have appeared the first time anyone looked at a
+// client's profile from a local server.
+//
+// Naming the zone makes it the same answer everywhere.
+const STORED_DAY = { year: "numeric", month: "short", day: "numeric" };
+
+function storedDayText(v) {
+  if (!v) return "-";
+  const d = new Date(v);
+  return isNaN(d) ? "-" : d.toLocaleDateString("en-US", { timeZone: "UTC", ...STORED_DAY });
+}
+
+// The date, plus the time printed on the notice when there is one.
+// Midnight is how "no time was given" is stored, so it is not a hearing at
+// twelve at night.
+function storedWhenText(v) {
+  if (!v) return "-";
+  const d = new Date(v);
+  if (isNaN(d)) return "-";
+  const day = d.toLocaleDateString("en-US", { timeZone: "UTC", ...STORED_DAY });
+  if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) return day;
+  const h = d.getUTCHours();
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${day} at ${h % 12 || 12}:${mm} ${h < 12 ? "AM" : "PM"}`;
+}
+
 // ── Aggregation ──────────────────────────────────────────
 
 // Turn a client identity key into a URL-safe form
@@ -314,7 +351,7 @@ function languageLabel(code) {
 function renderClientList(clients) {
   const rows = clients.length ? clients.map(c => {
     const nextUp = c.upcoming[0]
-      ? `<span style="background:#A34C00; color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Next: ${escapeHtml(c.upcoming[0].type)} ${new Date(c.upcoming[0].date).toLocaleDateString()}</span>`
+      ? `<span style="background:#A34C00; color:white; padding:2px 8px; border-radius:10px; font-size:11px;">Next: ${escapeHtml(c.upcoming[0].type)} ${storedDayText(c.upcoming[0].date)}</span>`
       : "";
     const sourceTag = c.dropbox_only
       ? `<span style="background:#2B2523; color:white; padding:2px 6px; border-radius:8px; font-size:10px; margin-left:4px;" title="Imported from Dropbox — no hearings recorded yet">📦 Dropbox</span>`
@@ -337,7 +374,7 @@ function renderClientList(clients) {
       <td>${escapeHtml(c.a_number || "")}</td>
       <td>${escapeHtml(c.case_types.slice(0, 2).join(", ") || "-")}${c.case_types.length > 2 ? " +" + (c.case_types.length - 2) : ""}</td>
       <td>${c.hearing_count}</td>
-      <td>${c.most_recent_date ? new Date(c.most_recent_date).toLocaleDateString() : "-"}</td>
+      <td>${storedDayText(c.most_recent_date)}</td>
       <td>${languageLabel(c.client_language)}</td>
       <td>${nextUp}</td>
       <td>${brokerCell}</td>
@@ -947,7 +984,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
       <tr>
         <td>${kindBadge}</td>
         <td>${escapeHtml(h.type_label || "-")}</td>
-        <td>${h.hearing_date ? new Date(h.hearing_date).toLocaleString() : "-"}</td>
+        <td>${storedWhenText(h.hearing_date)}</td>
         <td>${escapeHtml(h.judge_name || "-")}</td>
         <td>${escapeHtml(h.disposition || "-")}</td>
         <td>${h.sent ? "✅" : "—"}</td>
@@ -960,7 +997,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
     <div style="background:#FAF8F5; border-left:4px solid #FF7B00; padding:15px; border-radius:4px; margin:15px 0;">
       <h3 style="margin:0 0 8px 0; color:#2B2523;">🗓️ Upcoming Hearings</h3>
       <ul style="margin:0; padding-left:20px;">
-        ${client.upcoming.map(u => `<li><strong>${escapeHtml(u.type)}</strong> — ${new Date(u.date).toLocaleString()} <span style="color:#5E5854; font-size:12px;">(from ${u.from_kind} note #${u.from_id})</span></li>`).join("")}
+        ${client.upcoming.map(u => `<li><strong>${escapeHtml(u.type)}</strong> — ${storedWhenText(u.date)} <span style="color:#5E5854; font-size:12px;">(from ${u.from_kind} note #${u.from_id})</span></li>`).join("")}
       </ul>
     </div>` : "";
 
@@ -1020,7 +1057,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
             <div><strong>Case type(s):</strong> ${client.case_types.length ? client.case_types.map(escapeHtml).join(", ") : "-"}</div>
             <div><strong>Judge(s):</strong> ${client.judges.length ? client.judges.map(escapeHtml).join(", ") : "-"}</div>
             <div><strong>Total hearings:</strong> ${client.hearing_count}</div>
-            <div><strong>Last activity:</strong> ${client.most_recent_date ? new Date(client.most_recent_date).toLocaleDateString() : "-"}</div>
+            <div><strong>Last activity:</strong> ${storedDayText(client.most_recent_date)}</div>
             <div><strong>Most recent disposition:</strong> ${escapeHtml(client.most_recent_disposition || "-")}</div>
           </div>
         </div>
@@ -1384,6 +1421,82 @@ function renderClientDetail(client, { documents = [] } = {}) {
           renderNotices(data.notices || []);
         } catch (e) { /* silent */ }
       }
+      // A notice's date and time, stated the way the rest of the firm's
+      // code states them.
+      //
+      // THE BUG THIS REPLACES. This panel called
+      // toLocaleString(undefined, ...) with hour and minute. Two faults in
+      // one line:
+      //
+      //   1. It rendered in the VIEWER'S zone. A notice's hearing_date is
+      //      stored as the date and time printed on the notice with no
+      //      zone, and every other reader -- court-calendar.js storedDay(),
+      //      hearing-when.js, client-record.js -- reads it back in UTC and
+      //      never converts it. Converting it to Pacific moved every
+      //      hearing seven hours earlier: Pan, Ping's 10:00 AM individual
+      //      hearing showed as "3:00 AM", and a notice with no time at all
+      //      (stored at midnight) showed on the day BEFORE the hearing.
+      //
+      //   2. It computed the time from the timestamp instead of quoting
+      //      hearing_time_text, which holds the notice's own words. That is
+      //      the rule hearing-when.js exists to enforce: never compute a
+      //      hearing time, quote it, because an invented time sends a
+      //      client to court on the wrong morning.
+      //
+      // So: date in UTC, time quoted. This is the browser copy of
+      // court-calendar.js's storedDay/storedTime, and it has to stay in
+      // step with them.
+      function noticeDay(v) {
+        const d = v ? new Date(v) : null;
+        if (!d || isNaN(d)) return "";
+        return d.toLocaleDateString("en-US", {
+          timeZone: "UTC", weekday: "short", year: "numeric",
+          month: "short", day: "numeric",
+        });
+      }
+      // The notice's own time text, in the wording the notices use.
+      // "10:00" and "08:30" are unambiguously 24-hour and convert. A
+      // one-digit "9:00" does NOT: it is 9 AM or 9 PM depending on the
+      // notice, and picking one is exactly the guess that once told a
+      // client noon for a 9:00 AM custody hearing. It is refused, and the
+      // timestamp is used instead.
+      function noticeTime(n) {
+        const s = String(n.hearing_time_text || "").trim();
+        // DOUBLED BACKSLASHES ON PURPOSE. This whole script is inside a
+        // template literal in client-profiles.js, and a template literal
+        // eats an unrecognised escape: a single \d reaches the browser as
+        // a bare "d", so /^(\d{1,2})/ arrives as /^(d{1,2})/ and matches
+        // nothing. check-notice-when.js pulls these functions out of the
+        // SERVED page for exactly this reason.
+        let m = s.match(/^(\\d{1,2})(?::(\\d{2}))?\\s*([ap])\\.?m\\.?$/i);
+        if (m) {
+          const h = parseInt(m[1], 10), mi = m[2] ? parseInt(m[2], 10) : 0;
+          if (h >= 1 && h <= 12 && mi <= 59) {
+            return h + ":" + String(mi).padStart(2, "0") + " " +
+              (m[3].toLowerCase() === "a" ? "AM" : "PM");
+          }
+        }
+        m = s.match(/^([01]\\d|2[0-3]):([0-5]\\d)$/);
+        if (m) {
+          const H = parseInt(m[1], 10);
+          return (H % 12 || 12) + ":" + m[2] + " " + (H < 12 ? "AM" : "PM");
+        }
+        // No usable text. Fall back to the stored instant, read in UTC the
+        // way it was written. Midnight means no time was on the notice.
+        const d = n.hearing_date ? new Date(n.hearing_date) : null;
+        if (!d || isNaN(d)) return null;
+        if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) return null;
+        const h = d.getUTCHours();
+        return (h % 12 || 12) + ":" + String(d.getUTCMinutes()).padStart(2, "0") +
+          " " + (h < 12 ? "AM" : "PM");
+      }
+      function noticeWhen(n) {
+        const day = noticeDay(n.hearing_date);
+        if (!day) return "(date not confirmed)";
+        const t = noticeTime(n);
+        return t ? day + " at " + t : day + " \u2014 time not confirmed";
+      }
+
       function renderNotices(notices) {
         const list = document.getElementById("hn-list");
         const count = document.getElementById("hn-count");
@@ -1395,8 +1508,7 @@ function renderClientDetail(client, { documents = [] } = {}) {
         }
         status.style.display = "none";
         list.innerHTML = notices.map(n => {
-          const dt = n.hearing_date ? new Date(n.hearing_date) : null;
-          const dateStr = dt && !isNaN(dt) ? dt.toLocaleString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "(date not confirmed)";
+          const dateStr = noticeWhen(n);
           const noticeTypeBadge = n.notice_type
             ? '<span style="background:#FAF8F5; color:#A34C00; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600;">' + dbxEscape(n.notice_type) + '</span>'
             : "";
