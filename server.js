@@ -11464,6 +11464,146 @@ app.get("/admin/clients/:key/filing-package", async (req, res) => {
   }
 });
 
+// ── One form at a time, as a questionnaire ────────────────
+//
+// "in each client profile, it should be able to pick forms to file, not
+// just filing combo" / "each client portal should be able to pick its own
+// forms individually, not just combo" / "when filling out the form, it
+// should be questionaire format with explanation on the side" (JJ,
+// 2026-10-09).
+//
+// A package is a catalogue of what goes in one envelope. This is the other
+// half: a single form, started on its own, answered a question at a time,
+// and saved as each answer is given. uscis-drafts.js holds the answers;
+// uscis-questions.js turns a form into questions; uscis-form-page.js draws
+// them.
+
+// Pick a form.
+app.get("/admin/clients/:key/forms", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).send("<h1>Client not found</h1>");
+    const drafts = await require("./uscis-drafts").listFor(client.key);
+    const body = require("./uscis-form-page").renderPicker(client, drafts);
+    res.send(require("./hearing-notes").renderAdminChrome({
+      title: "Forms", body, activeItem: "clients" }));
+  } catch (err) {
+    console.error("[client forms]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// Start one, PREFILLED from the client record.
+//
+// "If it is pulled or created from client's profile directly. pull all
+// necessary data from them and fill in as much as possible, but user
+// should be able to edit them as well." (JJ, 2026-10-09)
+//
+// So the draft is seeded at creation rather than prefilled on each render.
+// Seeding on render would mean a box the client deliberately cleared came
+// back the next time they opened the page, and a form filed with an
+// address the client had already corrected.
+app.post("/admin/clients/:key/forms", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const D = require("./uscis-drafts");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).send("<h1>Client not found</h1>");
+
+    const formId = String((req.body && req.body.form_id) || "").toLowerCase().trim();
+    if (!require("./uscis-form-page").fillable(formId)) {
+      return res.status(400).send(
+        `<h1>That form cannot be filled here yet</h1><p>Its blank PDF is not on file.</p>` +
+        `<p><a href="/admin/clients/${encodeURIComponent(client.key)}/forms">Back</a></p>`);
+    }
+
+    const draft = await D.start({
+      clientKey: client.key, clientName: client.client_name, formId,
+      by: (req.user && req.user.u) || null,
+    });
+
+    // Seed it. Only the G-28 has a proposer today; a form added later with
+    // no proposer simply starts empty rather than failing to start.
+    if (formId === "g-28") {
+      const proposal = require("./uscis-g28").proposeG28({
+        client, attorney: null,
+        matter: { case_type: (client.case_types || [])[0] || "" },
+      });
+      if (proposal && proposal.values && Object.keys(proposal.values).length) {
+        await D.saveAnswers(draft.id, proposal.values, { by: (req.user && req.user.u) || null });
+      }
+    }
+    res.redirect(`/admin/clients/${encodeURIComponent(client.key)}/forms/${draft.id}`);
+  } catch (err) {
+    console.error("[client form start]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// Answer it.
+app.get("/admin/clients/:key/forms/:id", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const D = require("./uscis-drafts");
+    const Q = require("./uscis-questions");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).send("<h1>Client not found</h1>");
+    const draft = await D.get(req.params.id);
+    // A draft id from another client's file is not shown. The key in the
+    // URL is not proof of anything on its own.
+    if (!draft || draft.client_key !== client.key) {
+      return res.status(404).send("<h1>No such form on this client's file</h1>");
+    }
+    const model = Q.questionsFor(draft.form_id);
+    if (!model) return res.status(500).send("<h1>That form has no question set</h1>");
+    const body = require("./uscis-form-page").renderQuestionnaire(client, draft, model, {
+      section: String(req.query.section || "") || null,
+    });
+    res.send(require("./hearing-notes").renderAdminChrome({
+      title: draft.form_id.toUpperCase(), body, activeItem: "clients" }));
+  } catch (err) {
+    console.error("[client form page]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// ONE answer. This is what the autosave calls, once per field.
+//
+// It answers JSON and never a page: the page is still open and the person
+// is still typing in it. A redirect here would throw away the field they
+// are in the middle of, which is the thing this endpoint exists to save.
+app.post("/admin/clients/:key/forms/:id/answer", async (req, res) => {
+  try {
+    const cp = require("./client-profiles");
+    const D = require("./uscis-drafts");
+    const Q = require("./uscis-questions");
+    const client = await cp.getClientByKey(req.params.key);
+    if (!client) return res.status(404).json({ ok: false, error: "client not found" });
+    const draft = await D.get(req.params.id);
+    if (!draft || draft.client_key !== client.key) {
+      return res.status(404).json({ ok: false, error: "no such form on this client's file" });
+    }
+    const model = Q.questionsFor(draft.form_id);
+    const questions = Q.flatten(model);
+    const key = String((req.body && req.body.key) || "");
+    const q = questions.find((x) => x.key === key);
+    // Only a key this form actually asks about. Otherwise a stale page, or
+    // anything else posting here, could write arbitrary keys into the
+    // answers and they would ride along into the filled PDF.
+    if (!q) return res.status(400).json({ ok: false, error: `not a question on this form: ${key}` });
+
+    await D.saveAnswer(draft.id, key, (req.body && req.body.value) || "", {
+      by: (req.user && req.user.u) || null,
+    });
+    const fresh = await D.get(draft.id);
+    res.json({ ok: true, key, progress: D.progress(fresh, questions) });
+  } catch (err) {
+    console.error("[client form answer]:", err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Form G-28, filled from the client record ──────────────
 //
 // "Automatic prefill from clients info and onto any forms from USCIS"
@@ -11493,8 +11633,33 @@ async function g28Context(req) {
   // wins, including a box they cleared -- see applyEdits in uscis-g28.js.
   const U = require("./uscis-g28");
   let proposal = U.proposeG28({ client, attorney: attorneyKey, matter });
+
+  // A questionnaire the client filled in beats the record it was seeded
+  // from. Its answers are laid over the proposal through applyEdits -- the
+  // same path a typed box takes -- so a cleared answer stays cleared and
+  // only one capacity box survives, rather than this route growing its own
+  // copy of those two rules.
+  const draftId = (src.draft || "").toString().trim();
+  let draft = null;
+  if (draftId) {
+    draft = await require("./uscis-drafts").get(draftId);
+    if (draft && draft.client_key === client.key && draft.answers) {
+      const keys = Object.keys(draft.answers);
+      if (keys.length) {
+        const body = { __shown: keys.join(",") };
+        for (const k of keys) body["f:" + k] = draft.answers[k];
+        const CAP = U.CAPACITIES || {};
+        const ticked = Object.entries(CAP).find(([, k]) => draft.answers[k]);
+        if (ticked) body.capacity = ticked[0];
+        proposal = U.applyEdits(proposal, body);
+      }
+    } else {
+      draft = null;   // not this client's draft: ignored, not borrowed
+    }
+  }
+
   if (req.method === "POST") proposal = U.applyEdits(proposal, req.body || {});
-  return { client, matter, attorneyKey, proposal, pkg };
+  return { client, matter, attorneyKey, proposal, pkg, draft };
 }
 
 app.get("/admin/clients/:key/g28", async (req, res) => {

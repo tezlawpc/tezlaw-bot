@@ -330,6 +330,9 @@ jobs:
       - name: A client profile can correct what it shows
         run: node scripts/check-client-edit.js
 
+      - name: A single USCIS form is answered as questions
+        run: node scripts/check-uscis-questionnaire.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

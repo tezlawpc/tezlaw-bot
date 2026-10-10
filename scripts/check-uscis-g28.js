@@ -445,9 +445,28 @@ async function run() {
   await check("the server applies the edits before it fills anything", () => {
     const src = read("server.js");
     const i = src.indexOf("async function g28Context");
-    const block = src.slice(i, i + 1800);
+    assert.ok(i > -1, "g28Context is gone");
+    // The WHOLE function, not a fixed number of characters after its name.
+    //
+    // This read src.slice(i, i + 1800) and went green for as long as the
+    // function stayed under 1800 characters. Adding the saved-questionnaire
+    // lookup to it pushed the applyEdits line past that window and the
+    // check failed with "the POST ignores what was typed" while the POST
+    // was applying the edits perfectly well. A window measured in bytes is
+    // not a claim about the code.
+    const end = src.indexOf("\n}\n", i);
+    assert.ok(end > i, "g28Context has no closing brace at the top level");
+    const block = src.slice(i, end);
     assert.ok(/applyEdits\(proposal, req\.body/.test(block), "the POST ignores what was typed");
     assert.ok(/req\.method === "POST"/.test(block), "a GET is treated as an edit");
+    // And a saved questionnaire is laid over the proposal before that, so a
+    // box typed on this page still wins over the stored answer.
+    const draftAt = block.indexOf("uscis-drafts");
+    const bodyAt = block.indexOf("applyEdits(proposal, req.body");
+    if (draftAt > -1) {
+      assert.ok(draftAt < bodyAt,
+        "the saved answers are applied after the typed ones, so typing has no effect");
+    }
   });
 
   // ── the page, and the two routes ────────────────────────
@@ -488,8 +507,32 @@ async function run() {
   });
 
   await check("the client profile has a way in", () => {
-    const src = read("client-profiles.js");
-    assert.ok(/\/g28"/.test(src), "there is no link to the G-28 from a client file");
+    // The G-28 used to have a button of its own on the profile. It is now
+    // reached through the Forms picker, like every other form -- "each
+    // client portal should be able to pick its own forms individually, not
+    // just combo" (JJ, 2026-10-09). So the way in is one hop longer, and
+    // this walks the whole hop rather than grepping one file for "/g28".
+    const CP = require(path.join(ROOT, "client-profiles.js"));
+    const FP = require(path.join(ROOT, "uscis-form-page.js"));
+    const c = client();
+    const profile = CP.renderClientDetail({
+      ...c, key: "a-201555444", case_types: [], judges: [], hearings: [],
+      upcoming: [], deadlines: [], sent_count: 0, hearing_count: 0,
+      most_recent_date: null, most_recent_disposition: null,
+    }, { documents: [] });
+    assert.ok(/\/forms"/.test(profile), "a client profile has no way to pick a form");
+
+    const picker = FP.renderPicker({ key: "a-201555444", client_name: c.client_name }, []);
+    assert.ok(/name="form_id" value="g-28"/.test(picker),
+      "the picker does not offer to start a G-28");
+
+    const Q = require(path.join(ROOT, "uscis-questions.js"));
+    const page = FP.renderQuestionnaire(
+      { key: "a-201555444", client_name: c.client_name },
+      { id: 1, client_key: "a-201555444", form_id: "g-28", status: "draft", answers: {} },
+      Q.questionsFor("g-28"), {});
+    assert.ok(/\/g28\?draft=1/.test(page),
+      "a filled questionnaire has no way through to the G-28 review page");
   });
 
   await check("the check is registered the way every check here is", () => {

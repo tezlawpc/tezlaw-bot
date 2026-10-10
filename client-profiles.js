@@ -1030,11 +1030,21 @@ function renderClientDetail(client, { documents = [] } = {}) {
     (client.a_number ? `&prefill_a=${encodeURIComponent(client.a_number)}` : "") +
     `&prefill_name=${encodeURIComponent(client.client_name || "")}`;
   const createBtn = "background:#A34C00; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;";
+  const formsBtn = "background:#2B2523; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;";
+  // "Forms" replaces the single "Form G-28" button.
+  //
+  // "its very weird how each form is being created with each client. So
+  // each client portal should be able to pick its own forms individually,
+  // not just combo." (JJ, 2026-10-09) One hardcoded form and one package
+  // picker was the whole of it: a client needing an I-765 on its own had
+  // nowhere to start from. Forms lists every tracked form, shows the ones
+  // already started on this file, and the G-28 is reached through it like
+  // any other rather than having a button of its own.
   const createLinks = `
       <a href="/admin/hearing/notes?${createQuery}" style="${createBtn}">+ New Master Hearing</a>
       <a href="/admin/hearing/individual?${createQuery}" style="${createBtn}">+ New Individual Hearing</a>
-      <a href="/admin/clients/${encodeURIComponent(client.key)}/filing-package" style="background:#2B2523; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">Filing package</a>
-      <a href="/admin/clients/${encodeURIComponent(client.key)}/g28" style="background:#2B2523; color:white; padding:8px 14px; border-radius:4px; text-decoration:none; font-size:13px;">Form G-28</a>`;
+      <a href="/admin/clients/${encodeURIComponent(client.key)}/forms" style="${formsBtn}">Forms</a>
+      <a href="/admin/clients/${encodeURIComponent(client.key)}/filing-package" style="${formsBtn}">Filing package</a>`;
 
   const body = `
     <div class="page-header">
