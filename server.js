@@ -12450,10 +12450,32 @@ app.post("/admin/clients/:key/contact", async (req, res) => {
   try {
     const key = String(req.params.key || "").slice(0, 200);
     const b = req.body || {};
-    await require("./client-contacts").set(key, {
-      phone: b.phone,
-      address: b.address,
-    }, { source: "manual", by: (req.user && req.user.u) || null });
+    const CC = require("./client-contacts");
+    // Every field the profile offers, not just the two it used to.
+    //
+    // set() tells an empty string ("clear it") apart from undefined ("leave
+    // it alone"), so a field has to be passed only when the form actually
+    // posted it. Passing b.email unconditionally from a form that has no
+    // email box would silently wipe a stored email.
+    const fields = {};
+    for (const key of CC.WRITABLE) {
+      if (Object.prototype.hasOwnProperty.call(b, key)) fields[key] = b[key];
+    }
+    // A language the app does not speak is not stored. It would reach a
+    // message builder, miss every branch, and fall back silently.
+    if (fields.language !== undefined) {
+      const l = String(fields.language || "").trim().toLowerCase();
+      fields.language = ["en", "zh", "es", "hi", "pa"].includes(l) ? l : "";
+    }
+    await CC.set(key, fields, { source: "manual", by: (req.user && req.user.u) || null });
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: audit.ACTIONS.CLIENT_CONTACT_SAVED || "client_contact_saved",
+        target_type: "client", target_id: key, target_label: key,
+        changes: Object.keys(fields).reduce((o, k) => (o[k] = fields[k] ? "set" : "cleared", o), {}),
+      });
+    } catch { /* an audit miss must not lose the correction */ }
     res.redirect("/admin/clients/" + encodeURIComponent(key));
   } catch (err) {
     console.error("[client contact save]:", err.message);

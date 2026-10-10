@@ -37,6 +37,7 @@ async function initTable() {
         phone          TEXT,
         address        TEXT,
         email          TEXT,
+        language       TEXT,          -- 'en' | 'zh' | 'es' | 'hi' | 'pa'
         source         TEXT,          -- 'manual' | 'i589' | ...
         source_detail  TEXT,          -- the Dropbox path of the form, say
         source_date    DATE,          -- the date OF that source document
@@ -44,6 +45,9 @@ async function initTable() {
         updated_by     TEXT
       )
     `);
+    // Added after the table shipped, so existing deployments get it here
+    // rather than only on a fresh database.
+    await db().query(`ALTER TABLE client_contacts ADD COLUMN IF NOT EXISTS language TEXT`);
     await db().query(
       `CREATE INDEX IF NOT EXISTS client_contacts_updated ON client_contacts (updated_at DESC)`);
   })().catch(e => { ready = null; throw e; });
@@ -78,13 +82,26 @@ async function all() {
  * field; passing undefined leaves it alone. That distinction is the whole
  * reason this takes an object rather than positional arguments.
  */
+// What a person is allowed to correct from the client's profile.
+//
+// NOT the name and NOT the A-number. Those two ARE the client's identity
+// here: clientKey() in client-profiles.js builds the key the whole profile
+// is addressed by out of the A-number, or out of the name when there is no
+// A-number. Writing a new one into this table would leave the page showing
+// one identity and the aggregation still grouping the hearing notes under
+// the old one, which is worse than not being able to edit it. Correcting
+// either needs a re-key, and a re-key needs to decide what happens to the
+// notes, the documents, the Dropbox folder and any notice already sent --
+// so it is its own job, not a text box.
+const WRITABLE = ["phone", "address", "email", "language"];
+
 async function set(clientKey, fields = {}, { source = "manual", sourceDetail = null, sourceDate = null, by = null } = {}) {
   await initTable();
   if (!clientKey) throw new Error("client_contacts: a client key is required");
 
   const cols = [], vals = [], sets = [];
   let i = 2;
-  for (const key of ["phone", "address", "email"]) {
+  for (const key of WRITABLE) {
     if (fields[key] === undefined) continue;
     const v = String(fields[key] == null ? "" : fields[key]).trim() || null;
     cols.push(key); vals.push(v);
@@ -124,7 +141,8 @@ function apply(client, row) {
   if (row.phone) client.client_phone = row.phone;
   if (row.address) client.client_address = row.address;
   if (row.email) client.client_email = row.email;
-  if (row.phone || row.address || row.email) {
+  if (row.language) client.client_language = row.language;
+  if (row.phone || row.address || row.email || row.language) {
     client.contact_source = row.source || "manual";
     client.contact_source_detail = row.source_detail || null;
     client.contact_updated_at = row.updated_at || null;
@@ -132,4 +150,4 @@ function apply(client, row) {
   return client;
 }
 
-module.exports = { initTable, get, all, set, clear, apply };
+module.exports = { initTable, get, all, set, clear, apply, WRITABLE };

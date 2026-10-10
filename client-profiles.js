@@ -37,6 +37,22 @@ function storedDayText(v) {
   return isNaN(d) ? "-" : d.toLocaleDateString("en-US", { timeZone: "UTC", ...STORED_DAY });
 }
 
+// A real instant -- when something HAPPENED, like a correction being saved
+// -- shown in the office's own day.
+//
+// The opposite of storedDayText, and the distinction matters: a stored
+// hearing date is read in UTC because it was written with no zone, and a
+// true instant is read in Pacific because that is where the office is.
+// Using one where the other belongs is how this page came to show a 10:00
+// AM hearing as 3:00 AM.
+function instantDayText(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  return isNaN(d) ? "" : d.toLocaleDateString("en-US", {
+    timeZone: "America/Los_Angeles", ...STORED_DAY,
+  });
+}
+
 // The date, plus the time printed on the notice when there is one.
 // Midnight is how "no time was given" is stored, so it is not a hearing at
 // twelve at night.
@@ -1041,14 +1057,50 @@ function renderClientDetail(client, { documents = [] } = {}) {
             <div style="font-size:11px; color:#5E5854; font-style:italic;">
               Phone and address read from ${escapeHtml(client.contact_source === "i589" ? "the client's I-589" : client.contact_source)}${client.contact_source_detail ? ` (${escapeHtml(String(client.contact_source_detail).split("/").pop())})` : ""} — not yet confirmed with the client.
             </div>` : ""}
-            <form method="POST" action="/admin/clients/${escapeAttr(client.key)}/contact" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
-              <input type="tel" name="phone" value="${escapeAttr(client.client_phone || "")}" placeholder="Phone"
-                     style="width:150px; padding:5px 7px; border:1px solid #E8E3DC; border-radius:4px; font-size:12px;">
-              <input type="text" name="address" value="${escapeAttr(client.client_address || "")}" placeholder="Street, City, State ZIP"
-                     style="flex:1; min-width:220px; padding:5px 7px; border:1px solid #E8E3DC; border-radius:4px; font-size:12px;">
-              <button type="submit" style="padding:5px 12px; background:#FF7B00;color:#1E1B1A; border:1px solid #9C2B1E; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600;">Save</button>
-            </form>
             <div><strong>Language:</strong> ${languageLabel(client.client_language)}</div>
+
+            <!-- Correcting the client's details.
+                 Phone and address were the only two editable fields. Email
+                 and language were shown and not editable, although
+                 client_contacts could already store the email -- so a wrong
+                 address could be fixed and a wrong email could not. All
+                 four are editable now.
+                 Name and A-Number stay read-only on purpose:
+                 client-contacts.js WRITABLE explains why. -->
+            <details style="margin-top:10px;" ${client.client_phone && client.client_address && client.client_email ? "" : "open"}>
+              <summary style="cursor:pointer; font-size:12px; color:#A34C00; font-weight:600;">Edit these details</summary>
+              <form method="POST" action="/admin/clients/${escapeAttr(client.key)}/contact"
+                    style="margin-top:10px; display:grid; grid-template-columns:auto 1fr; gap:8px 10px; align-items:center; max-width:460px;">
+                <label for="cc-phone" style="font-size:12px; color:#5E5854;">Phone</label>
+                <input id="cc-phone" type="tel" name="phone" value="${escapeAttr(client.client_phone || "")}" placeholder="626-678-8677"
+                       style="padding:6px 8px; border:1px solid #E8E3DC; border-radius:4px; font-size:13px;">
+
+                <label for="cc-email" style="font-size:12px; color:#5E5854;">Email</label>
+                <input id="cc-email" type="email" name="email" value="${escapeAttr(client.client_email || "")}" placeholder="name@example.com"
+                       style="padding:6px 8px; border:1px solid #E8E3DC; border-radius:4px; font-size:13px;">
+
+                <label for="cc-address" style="font-size:12px; color:#5E5854;">Address</label>
+                <input id="cc-address" type="text" name="address" value="${escapeAttr(client.client_address || "")}" placeholder="Street, City, State ZIP"
+                       style="padding:6px 8px; border:1px solid #E8E3DC; border-radius:4px; font-size:13px;">
+
+                <label for="cc-language" style="font-size:12px; color:#5E5854;">Language</label>
+                <select id="cc-language" name="language"
+                        style="padding:6px 8px; border:1px solid #E8E3DC; border-radius:4px; font-size:13px;">
+                  <option value="">(as recorded on the hearing notes)</option>
+                  ${["en", "zh", "es", "hi", "pa"].map(c => `<option value="${c}"${client.client_language === c ? " selected" : ""}>${escapeHtml(languageLabel(c))}</option>`).join("")}
+                </select>
+
+                <span></span>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                  <button type="submit" style="padding:6px 14px; background:#FF7B00; color:#1E1B1A; border:1px solid #9C2B1E; border-radius:4px; cursor:pointer; font-size:13px; font-weight:600;">Save</button>
+                  <span style="font-size:11px; color:#5E5854;">Leave a box empty to clear it.</span>
+                </div>
+              </form>
+              <div style="margin-top:8px; font-size:11px; color:#5E5854; line-height:1.5; max-width:460px;">
+                The name and the A-Number are what this file is filed under, so they
+                are not edited here. ${client.contact_updated_at ? `Last corrected ${escapeHtml(instantDayText(client.contact_updated_at))}.` : ""}
+              </div>
+            </details>
           </div>
         </div>
         <div style="flex:1; min-width:280px;">
