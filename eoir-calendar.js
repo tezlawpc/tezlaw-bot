@@ -19,6 +19,14 @@ const db = require("./db");
 const brand = { gold: "#A34C00", navy: "#2B2523" };
 
 // Colors for different event types
+// THE TIMES ON THIS PAGE ARE READ IN UTC.
+//
+// An event_date from any of these sources carries the date and time
+// printed on the paper, stored with no zone -- court-calendar.js's
+// contract. toLocaleTimeString with no timeZone reads it in whatever zone
+// the process is in: correct on Render, which runs UTC, and seven hours
+// out on a laptop in Los Angeles. A client profile was showing a 10:00 AM
+// hearing as "3:00 AM" for exactly this reason (2026-10-09).
 const EVENT_COLORS = {
   hearing:            "#0061FF",   // blue - hearings
   hearing_past:       "#8ea6c9",   // muted blue - past hearings
@@ -27,6 +35,7 @@ const EVENT_COLORS = {
   deadline:           "#B45309",   // amber - deadlines (dark enough to carry white text)
   deadline_overdue:   "#c62828",   // red - overdue deadlines
   outlook_event:      "#0078d4",   // Microsoft blue - Outlook events
+  firm_event:         "#FF7B00",   // Seal Orange - entered by hand, owned by us
 };
 
 const SOURCE_LABELS = {
@@ -34,6 +43,7 @@ const SOURCE_LABELS = {
   hearing_note_past:     "Past hearing",
   hearing_notice:        "EOIR Notice",
   individual_hearing:    "Merits hearing",
+  firm_event:            "Entered by hand",
   individual_upcoming:   "Next action",
   deadline:              "Deadline",
   outlook_event:         "From Outlook",
@@ -199,6 +209,24 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
     )}
   `;
 
+  // ──────────────────────────────────────────────
+  // Query 7: firm_events — the ones a person typed in
+  //
+  // Every other source here is DERIVED: a hearing note, a notice read
+  // out of Dropbox, a matter deadline, an event pulled from Outlook. A
+  // consultation or a signing appointment had nowhere to live, which is
+  // why there was nothing on this page to add or delete -- "i am stil
+  // unable to add or delete calenders and sync" (JJ, 2026-10-09).
+  //
+  // The SQL comes from firm-events.js so the date conversion lives with
+  // the table that needs it. See its header: a hand-entered event is a
+  // DATE plus a typed time, and `AT TIME ZONE 'UTC'` is the one place
+  // the two become the timestamptz this page expects.
+  const q7 = require("./firm-events").calendarSql([
+    dateRange("event_day"),
+    clientFilter("COALESCE(NULLIF(client_name, ''), title)", "a_number"),
+  ]);
+
   // Combine all with UNION ALL. If any source table is missing, catch error.
   const results = [];
   const queries = [
@@ -209,6 +237,7 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
     ["individual_hearing upcoming", q4b],
     ["deadlines", q5],
     ["outlook events", q6],
+    ["firm events", q7],
   ];
 
   for (const [label, sql] of queries) {
@@ -275,6 +304,9 @@ async function getUnifiedEvents({ from_date, to_date, client_search, event_types
 // The merged event prefers notice-sourced info (court_name/address usually
 // from EOIR paperwork) and the earliest known time.
 function dedupeEvents(events) {
+  // 'firm_event' is deliberately NOT in here. A person typed that event
+  // in; merging it into a hearing that happens to fall on the same day
+  // would make their own entry disappear from the page they put it on.
   const HEARING_SOURCES = new Set([
     "hearing_note_upcoming", "hearing_note_past",
     "hearing_notice", "individual_hearing", "individual_upcoming",
@@ -438,9 +470,10 @@ function renderCalendarPage({ events, stats, filters, view, monthYear, feeds }) 
   <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
       <h1 style="margin:0;">EOIR Calendar</h1>
-      <div style="font-size:12px; color:#5E5854; margin-top:4px;">Unified view of hearings, notices, individual/merits, and deadlines.</div>
+      <div style="font-size:12px; color:#5E5854; margin-top:4px;">Hearings, notices, individual/merits, deadlines, synced calendars, and entries added here.</div>
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      ${require("./firm-events-page").addButton()}
       <a href="/admin/calendars" style="background:#0078d4; color:white; border:none; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:600;">🗓 Calendars</a>
       <button onclick="scanAllNotices()" id="scan-notices-btn" style="background:${brand.gold}; color:white; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600;">🔄 Update from Dropbox</button>
       <div style="background:#F3EFE9; border-radius:6px; padding:2px; display:inline-flex;">
@@ -838,8 +871,8 @@ function renderListView(groups) {
     const isPast = g.date < today;
     const dateLabel = isToday ? "Today"
                     : isTomorrow ? "Tomorrow"
-                    : dt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-    const relLabel = isToday || isTomorrow ? `<span style="color:#5E5854; font-weight:normal;"> · ${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>` : "";
+                    : dt.toLocaleDateString("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    const relLabel = isToday || isTomorrow ? `<span style="color:#5E5854; font-weight:normal;"> · ${dt.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })}</span>` : "";
 
     return `
     <div style="margin-bottom:24px;">
@@ -879,6 +912,10 @@ function eventHref(event) {
         : null;
     case "deadline":
       return "/admin/deadlines";
+    case "firm_event":
+      // The only source on this page whose record a person owns and can
+      // change. Everything else is derived from a note, a notice or a feed.
+      return ref.id ? `/admin/calendar/event/${encodeURIComponent(ref.id)}` : null;
     case "outlook_event":
       // A synced event has no record of its own here, and the sync settings page
       // is not this event. Better to show it as text than to mislead.
@@ -903,7 +940,7 @@ function eventColor(event) {
 function renderEventCard(event, isPast) {
   const color = eventColor(event);
   const dt = new Date(event.event_date);
-  const timeStr = dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  const timeStr = dt.toLocaleTimeString("en-US", { timeZone: "UTC", hour: "numeric", minute: "2-digit", hour12: true });
   const opacity = isPast ? 0.7 : 1;
 
   const sourceLabels = event.sources
@@ -964,6 +1001,13 @@ function renderMonthView(events, monthYear) {
   const daysInMonth = lastDay.getDate();
   const startWeekday = firstDay.getDay(); // 0=Sun
 
+  // LOCAL ON PURPOSE, unlike every other date on this page.
+  //
+  // firstDay is a Date this function just built from the year and month in
+  // the URL -- it is not a value out of the database, so there is no stored
+  // wall-clock reading to preserve. Forcing UTC here would be formatting a
+  // local Date in another zone, which is the same mistake pointing the
+  // other way. check-firm-events.js allows this one by name.
   const monthName = firstDay.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
   // Weekday headers
@@ -990,7 +1034,7 @@ function renderMonthView(events, monthYear) {
     const eventsHtml = dayEvents.slice(0, 4).map(e => {
       const color = eventColor(e);
       const dt = new Date(e.event_date);
-      const timeStr = dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+      const timeStr = dt.toLocaleTimeString("en-US", { timeZone: "UTC", hour: "numeric", minute: "2-digit", hour12: true });
       const label = e.client_name ? e.client_name.split(",")[0].substring(0, 12) : "?";
       // A chip is the only handle on an event in this view, so it has to be the
       // link. These were plain divs with a tooltip: nothing in the month grid

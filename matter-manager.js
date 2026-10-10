@@ -3580,6 +3580,62 @@ async function handleCalendarFeed(req, res) {
       lines.push("END:VEVENT");
     }
 
+    // ── Entries typed into the Calendar page ───────────────
+    //
+    // "should be able to add or edit calender in tara and sync back to
+    // the calender" (JJ, 2026-10-09). This feed is the sync-out: an entry
+    // added in the app lands in whatever calendar is subscribed to this
+    // URL. Without this it stayed inside the app and the office never saw
+    // it in the calendar they actually watch.
+    //
+    // A deleted entry is published as CANCELLED rather than dropped. A
+    // subscriber that has already seen the appointment needs to be told
+    // it is off; silence leaves it on their calendar for good.
+    //
+    // Timed entries are written as floating local times -- DTSTART with
+    // no Z and no TZID -- because that is what they are: a 9:30
+    // appointment is at 9:30 where the office is. Stamping them UTC would
+    // move every one of them by seven hours in the subscriber's calendar,
+    // which is the bug this codebase has fixed three times already.
+    try {
+      const FE = require("./firm-events");
+      const from = new Date();
+      from.setUTCDate(from.getUTCDate() - 30);
+      const to = new Date();
+      to.setUTCDate(to.getUTCDate() + 365);
+      const events = await FE.listBetween(
+        from.toISOString().slice(0, 10), to.toISOString().slice(0, 10),
+        { includeDeleted: true });
+
+      for (const ev of FE.icsRows(events)) {
+        const day = ev.day.replace(/-/g, "");
+        lines.push("BEGIN:VEVENT");
+        lines.push(`UID:${ev.uid}`);
+        lines.push(`DTSTAMP:${now}`);
+        if (ev.start) {
+          const [sh, sm] = ev.start.split(":");
+          lines.push(`DTSTART:${day}T${sh}${sm}00`);
+          if (ev.end) {
+            const [eh, em] = ev.end.split(":");
+            lines.push(`DTEND:${day}T${eh}${em}00`);
+          }
+        } else {
+          lines.push(`DTSTART;VALUE=DATE:${day}`);
+          lines.push(`DTEND;VALUE=DATE:${addDays(ev.day, 1)}`);
+        }
+        lines.push(`SUMMARY:${icsEscape(ev.summary)}`);
+        if (ev.location) lines.push(`LOCATION:${icsEscape(ev.location)}`);
+        if (ev.description) lines.push(`DESCRIPTION:${icsEscape(ev.description)}`);
+        lines.push(`STATUS:${ev.cancelled ? "CANCELLED" : "CONFIRMED"}`);
+        lines.push("TRANSP:OPAQUE");
+        lines.push("END:VEVENT");
+      }
+    } catch (e) {
+      // A missing table or a bad row must not take the whole feed down:
+      // the deadlines above are what the office relies on most.
+      console.warn("[calendar feed] firm events unavailable:", e.message);
+    }
+
     lines.push("END:VCALENDAR");
 
     // RFC 5545 requires CRLF line endings

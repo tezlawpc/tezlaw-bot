@@ -79,6 +79,9 @@ const SAMPLES = {
   hearing_notice:        { source: "hearing_notice",        source_id: "3", client_key: "chen, mei" },
   deadline:              { source: "deadline",              source_id: "9"  },
   outlook_event:         { source: "outlook_event",         source_id: "x"  },
+  // The one source whose record a person owns and can change, rather than
+  // one derived from a note, a notice, a deadline or a synced feed.
+  firm_event:            { source: "firm_event",            source_id: "12" },
 };
 
 // Sources with no record page of their own. A null here is correct; a link
@@ -107,6 +110,9 @@ check("the specific routes that were wrong are right", () => {
   assert.strictEqual(cal.eventHref(SAMPLES.hearing_notice),
     "/admin/clients/chen%2C%20mei/hearings#notice-3");
   assert.strictEqual(cal.eventHref(SAMPLES.outlook_event), null);
+  // A hand-entered entry opens its own edit page, which is the only one on
+  // this calendar that can also be changed and deleted.
+  assert.strictEqual(cal.eventHref(SAMPLES.firm_event), "/admin/calendar/event/12");
 });
 
 check("the routes that were never routes stay gone", () => {
@@ -120,6 +126,7 @@ check("the routes that were never routes stay gone", () => {
 
 check("a missing id does not produce a link to nowhere", () => {
   assert.strictEqual(cal.eventHref({ source: "hearing_note_upcoming" }), null);
+  assert.strictEqual(cal.eventHref({ source: "firm_event", source_id: "" }), null);
   assert.strictEqual(cal.eventHref({ source: "individual_hearing", source_id: "" }), null);
   // A notice whose client key never got extracted has no page to open.
   assert.strictEqual(cal.eventHref({ source: "hearing_notice", source_id: "3" }), null);

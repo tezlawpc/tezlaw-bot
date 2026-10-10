@@ -333,6 +333,9 @@ jobs:
       - name: A single USCIS form is answered as questions
         run: node scripts/check-uscis-questionnaire.js
 
+      - name: Calendar entries can be added, changed and deleted
+        run: node scripts/check-firm-events.js
+
       # An empty trust ledger satisfies bank-minus-clients exactly, so the
       # dashboard reported "IOLTA TRUST $0.00 ✓ Reconciled" for an account
       # it had never seen a transaction for. RRC 1.15 is the rule the State Bar

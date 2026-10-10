@@ -7085,6 +7085,169 @@ app.get("/admin/calendar", async (req, res) => {
   }
 });
 
+// ── Calendar entries a person types in ────────────────────
+//
+// "should be able to add or edit calender in tara and sync back to the
+// calender, if that is possible." (JJ, 2026-10-09) / "i am stil unable
+// to add or delete calenders and sync." (2026-10-10)
+//
+// Everything else on the Calendar page is derived from a note, a notice,
+// a deadline or a synced feed, so there was nothing on it a person could
+// add or delete. firm-events.js is the one source they own: it shows on
+// the Calendar page, on the client's file, and it goes out on the .ics
+// feed so it lands in the calendar app the office actually watches.
+//
+// Deleting is soft. See the header of firm-events.js.
+
+const firmEventChrome = (title, body) =>
+  require("./hearing-notes").renderAdminChrome({ title, body, activeItem: "calendar" });
+
+// A short client list for the name box. Never fatal: the box is a plain
+// text field with a suggestion list, so no suggestions still works.
+async function firmEventClients() {
+  try {
+    const all = await require("./client-profiles").aggregateClients();
+    return all.map((c) => ({ client_name: c.client_name, key: c.key }));
+  } catch (e) {
+    console.warn("[firm event] client list unavailable:", e.message);
+    return [];
+  }
+}
+
+app.get("/admin/calendar/event", async (req, res) => {
+  try {
+    const page = require("./firm-events-page");
+    // A date clicked on the month grid arrives as ?day=YYYY-MM-DD.
+    const seed = { event_day: require("./firm-events").cleanDay(req.query.day) || "" };
+    res.send(firmEventChrome("Add a calendar entry",
+      page.renderEventForm(seed, { clients: await firmEventClients() })));
+  } catch (err) {
+    console.error("[firm event new]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/calendar/event", async (req, res) => {
+  const page = require("./firm-events-page");
+  try {
+    const ev = await require("./firm-events").create(req.body || {}, {
+      by: (req.user && req.user.u) || null,
+    });
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: "CALENDAR_EVENT_ADDED", target_type: "firm_event",
+        target_id: String(ev.id), target_label: ev.title,
+        changes: { day: ev.event_day, start: ev.start_time, client: ev.client_name || null },
+      });
+    } catch { /* an audit miss must not lose the entry */ }
+    res.redirect(`/admin/calendar/event/${ev.id}`);
+  } catch (err) {
+    // The form comes back holding what was typed, with the reason. A
+    // rejected entry that clears the boxes is a worse outcome than the
+    // typo it is complaining about.
+    res.status(400).send(firmEventChrome("Add a calendar entry",
+      page.renderEventForm(req.body || {}, {
+        error: err.message, clients: await firmEventClients(),
+      })));
+  }
+});
+
+app.get("/admin/calendar/event/:id(\\d+)", async (req, res) => {
+  try {
+    const ev = await require("./firm-events").get(req.params.id);
+    if (!ev) return res.status(404).send("<h1>No such calendar entry</h1>");
+    res.send(firmEventChrome("Edit a calendar entry",
+      require("./firm-events-page").renderEventForm(ev, { clients: await firmEventClients() })));
+  } catch (err) {
+    console.error("[firm event page]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/calendar/event/:id(\\d+)", async (req, res) => {
+  const page = require("./firm-events-page");
+  try {
+    const ev = await require("./firm-events").update(req.params.id, req.body || {}, {
+      by: (req.user && req.user.u) || null,
+    });
+    if (!ev) return res.status(404).send("<h1>No such calendar entry</h1>");
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: "CALENDAR_EVENT_EDITED", target_type: "firm_event",
+        target_id: String(ev.id), target_label: ev.title,
+        changes: { day: ev.event_day, start: ev.start_time },
+      });
+    } catch { /* silent */ }
+    res.redirect(`/admin/calendar/event/${ev.id}`);
+  } catch (err) {
+    res.status(400).send(firmEventChrome("Edit a calendar entry",
+      page.renderEventForm({ ...(req.body || {}), id: req.params.id }, {
+        error: err.message, clients: await firmEventClients(),
+      })));
+  }
+});
+
+app.post("/admin/calendar/event/:id(\\d+)/delete", async (req, res) => {
+  try {
+    const ev = await require("./firm-events").remove(req.params.id, {
+      by: (req.user && req.user.u) || null,
+    });
+    if (!ev) return res.status(404).send("<h1>No such calendar entry</h1>");
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: "CALENDAR_EVENT_DELETED", target_type: "firm_event",
+        target_id: String(ev.id), target_label: ev.title, changes: { day: ev.event_day },
+      });
+    } catch { /* silent */ }
+    res.redirect("/admin/calendar");
+  } catch (err) {
+    console.error("[firm event delete]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+app.post("/admin/calendar/event/:id(\\d+)/restore", async (req, res) => {
+  try {
+    const ev = await require("./firm-events").restore(req.params.id, {
+      by: (req.user && req.user.u) || null,
+    });
+    if (!ev) return res.status(404).send("<h1>No such calendar entry</h1>");
+    res.redirect(`/admin/calendar/event/${ev.id}`);
+  } catch (err) {
+    console.error("[firm event restore]:", err.message);
+    res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+  }
+});
+
+// Bill the entry against its matter. One time entry per event, ever:
+// firm-events.js remembers the id it created.
+app.post("/admin/calendar/event/:id(\\d+)/bill", async (req, res) => {
+  const page = require("./firm-events-page");
+  try {
+    const out = await require("./firm-events").bill(req.params.id, {
+      staffId: (req.user && req.user.uid) || null,
+    });
+    try {
+      const audit = require("./audit-log");
+      await audit.log({
+        req, action: "CALENDAR_EVENT_BILLED", target_type: "firm_event",
+        target_id: String(req.params.id), target_label: `time entry ${out.time_entry_id}`,
+        changes: { minutes: out.minutes || null, already: !!out.already },
+      });
+    } catch { /* silent */ }
+    res.redirect(`/admin/calendar/event/${req.params.id}`);
+  } catch (err) {
+    const ev = await require("./firm-events").get(req.params.id);
+    res.status(400).send(firmEventChrome("Edit a calendar entry",
+      page.renderEventForm(ev || { id: req.params.id }, {
+        error: err.message, clients: await firmEventClients(),
+      })));
+  }
+});
+
 // Manual trigger for daily alerts (testing/debugging)
 app.post("/admin/deadlines/run-alerts", auth.requireRole("admin"), async (req, res) => {
   try {
